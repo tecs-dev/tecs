@@ -31,7 +31,10 @@
 ---            components and share one archetype, so there is no second run
 ---            for a reservation to leave alone, and a spawn marks the columns
 ---            the whole field lives in either way. `spawner` is the regime
----            that can answer it.
+---            that can answer it. `BENCH_PARTIAL` is the setting that reaches
+---            this one: it writes the rows the spawns and swap-pops wrote
+---            rather than the run they landed in, and the two compose, so the
+---            pair to compare here is reserved against reserved.
 ---   spawner  a still field spread over many archetypes, and a wave of
 ---            sprites rising and falling in an archetype of its own. Every
 ---            frame the wave moves by `BENCH_SPAWN` rows in one direction or
@@ -155,6 +158,18 @@ local GPU <const> = switch("BENCH_GPU_ANIM", animation.usesGPU())
 --- reserved, a run grows into its own slack and the runs around it stay where
 --- they are. `capacity` below is what decides whether the reservation is real.
 local RESERVE <const> = switch("BENCH_RESERVE", false)
+
+--- Rewrite the rows a spawn or a despawn wrote rather than the archetype's run.
+---
+--- Off is the engine's default, so unset measures what a game gets. The regime
+--- this changes is `churn`, and it is the other half of what `BENCH_RESERVE`
+--- cannot reach: reserving stops a spawn moving the runs around it, and this
+--- stops it rewriting the run it landed in, which in this bench is the whole
+--- field. `static` should not move at all, and `dense` and `sparse` should not
+--- either: a Sprite column a value write dirtied still rewrites its run, and
+--- any movement there is the split between value dirt and structural dirt
+--- being wrong in the permissive direction.
+local PARTIAL <const> = switch("BENCH_PARTIAL", false)
 
 --- Sprites spawned per frame in `churn`, each despawned `BENCH_LIFETIME`
 --- frames later, so the population is level while the identities turn over.
@@ -377,6 +392,7 @@ return tecs.newApplication(
         ambientLight = {1.0, 1.0, 1.0},
         capacity = TOTAL + HEADROOM,
         reserveRuns = RESERVE,
+        partialRewrites = PARTIAL,
         -- The default ceiling is a million slots, so a scale run has to raise it
         -- rather than discovering the limit as a spawn failure.
         maxEntities = TOTAL + 1024,
@@ -544,8 +560,11 @@ return tecs.newApplication(
                         -- Said again at the end, so a pasted report carries what it
                         -- was measuring rather than only what came out.
                         print(
-                            ("sprites: mode %s, playback on the %s, runs %s"):format(
-                                MODE, GPU and "GPU" or "host", RESERVE and "reserved" or "packed"
+                            ("sprites: mode %s, playback on the %s, runs %s, rewrites %s"):format(
+                                MODE,
+                                GPU and "GPU" or "host",
+                                RESERVE and "reserved" or "packed",
+                                PARTIAL and "partial" or "whole-run"
                             )
                         )
                         -- The first number is the extent the cull is dispatched
@@ -580,12 +599,13 @@ return tecs.newApplication(
             print(
                 (
                     "sprites: mode %s, playback on the %s, runs %s in %d slots, "
-                    .. "viewport %dx%d, measuring %d frames after %d warmup"
+                    .. "rewrites %s, viewport %dx%d, measuring %d frames after %d warmup"
                 ):format(
                     MODE,
                     GPU and "GPU" or "host",
                     RESERVE and "reserved" or "packed",
                     TOTAL + HEADROOM,
+                    PARTIAL and "partial" or "whole-run",
                     WIDTH,
                     HEIGHT,
                     FRAMES,

@@ -311,6 +311,7 @@ function ArchetypeIndex:destroy(archetype: Archetype)
     t.batchSpawnQueue = nil
     t.batchSpawnAtQueue = nil
     t._componentDirty = nil
+    t._touchedRows = nil
     t.entities = nil
     archetype.id = 0
 end

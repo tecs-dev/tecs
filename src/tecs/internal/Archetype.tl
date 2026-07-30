@@ -27,6 +27,12 @@ local type ArchetypeInternal = internal.ArchetypeInternal
 -- The auto-incrementing ID for archetypes.
 local AUTO_ID = 0
 
+-- Swap-pop rows one residue window records before it gives up describing
+-- them. Matched to `gpu.dirtyranges.MAX`, because a consumer that turns
+-- these into upload ranges collapses its list at the same count and the
+-- covering span it falls back to is what a whole-run rewrite already marks.
+local TOUCHED_MAX <const> = 64
+
 local record Archetype is ArchetypeInternal
     onDespawnComponents: {Component}
     onDespawnCount: integer
@@ -38,13 +44,40 @@ local record Archetype is ArchetypeInternal
 
     -- Per-archetype, per-component dirty bitset, keyed by 1-based
     -- column index (matches `columnIndexByComponent`). A bit is set
-    -- by `getMut`, `set`, structural changes (spawn/move-in/swap-pop),
-    -- or explicit `markComponentDirty`. Cleared by `world:update` at
-    -- end of frame via `clearDirtyComponents`.
+    -- by `getMut`, `set`, or explicit `markComponentDirty`, which are
+    -- the value writes. Cleared by `world:update` at end of frame via
+    -- `clearDirtyComponents`.
     _componentDirty: Bitset
-    -- True once markAllComponentsDirty ran this frame; cleared with the
-    -- dirty bits so repeat calls short-circuit.
+    -- True once a structural change (spawn, move-in, swap-pop, pop-last)
+    -- landed this frame. Composed into every dirty reader rather than
+    -- looped into the bitset, so the mark costs a boolean store on a
+    -- path that runs per structural operation. Cleared with the bits.
     _allDirty: boolean
+
+    -- Structural residue: which rows the structural changes since
+    -- `_residueFrom` actually wrote. Whole columns are what a structural
+    -- change dirties, but the rows it wrote are a contiguous suffix plus
+    -- a bounded set of swap-pop destinations, and a consumer that can
+    -- write only those rows asks for them here.
+    --
+    -- Monotonic count of structural changes. Two reads answering the
+    -- same number mean no row of this archetype moved between them.
+    _structCount: integer
+    -- `_structCount` when the current residue window opened, so a reader
+    -- holding an older count knows the residue no longer describes
+    -- everything it missed.
+    _residueFrom: integer
+    -- Lowest 1-based row appended within the window, or 0 for none.
+    -- Rows are always appended as a suffix, so this plus the run length
+    -- is the whole of what a placement wrote.
+    _addedFrom: integer
+    -- 1-based rows a swap-pop overwrote within the window.
+    _touchedRows: {integer}
+    _touchedCount: integer
+    -- Set once the window holds more swap-pop rows than TOUCHED_MAX, so
+    -- the residue stops describing them and a reader falls back to the
+    -- whole run.
+    _touchedAll: boolean
     -- Dense relationship instance components keyed by container; nil when
     -- the archetype carries none. Built once at construction.
     _relInstancesByContainer: {Component: {Component}}
@@ -331,6 +364,26 @@ function Archetype:addEntityObserver(observer: ArchetypeEntityObserver)
     end
 end
 
+-- Records that a structural change landed, without saying which rows it wrote:
+-- the two callers that know their rows record them beside this call.
+--
+-- Runs per swap-pop and per move-in, so it is a boolean store and a counter
+-- rather than a walk of the dirty bitset. The readers compose the flag in, and
+-- the count is what tells a consumer holding an older one that a row moved.
+local function markStructural(self: Archetype)
+    if self._fixedTracking then
+        fixedtracking.markAll(self)
+    end
+    self._structCount = self._structCount + 1
+    if self._allDirty then
+        return
+    end
+    self._allDirty = true
+    if self.columnsCount > 0 then
+        self._dirtySet[self] = true
+    end
+end
+
 local function notifyMove(self: Archetype, entity: integer, fromRow: integer, toRow: integer)
     local observers = self._observers
     for i = 1, self.observerCount do
@@ -372,7 +425,15 @@ function Archetype:onRowsAdded(rowStart: integer, count: integer, sourceArchetyp
     -- this archetype, so consumers gated on per-component dirty
     -- (shadow buffers, incremental serialization, reactive systems) need to
     -- see every column as dirty.
-    self:markAllComponentsDirty()
+    markStructural(self)
+    -- Every caller passes the row count the archetype held before the
+    -- placement, so the rows written are the suffix `[rowStart + 1, ..]`
+    -- and the lowest of them is the whole of what the residue has to hold.
+    local first <const> = rowStart + 1
+    local addedFrom <const> = self._addedFrom
+    if addedFrom == 0 or first < addedFrom then
+        self._addedFrom = first
+    end
     if self.observerCount > 0 then
         self:notifyAdded(rowStart, count, sourceArchetype)
     end
@@ -507,8 +568,10 @@ function Archetype:removeEntity(row: integer, destArchetype?: Archetype): intege
         -- No swap-pop rewrite happened, but the live row range shrank;
         -- consumers gated on component dirty (shadow uploads, cached
         -- shadow masks, incremental serialization) must observe
-        -- removals just like moves.
-        self:markAllComponentsDirty()
+        -- removals just like moves. No row of this archetype changed, so
+        -- the residue records nothing: what a consumer owes a vacated row
+        -- is to stop drawing it, which the shorter run already says.
+        markStructural(self)
 
         if self.observerCount > 0 and lastIndex == 1 then
             notifyDeactivated(self)
@@ -529,7 +592,16 @@ function Archetype:removeEntity(row: integer, destArchetype?: Archetype): intege
         -- entity's column data. Mark every component dirty so
         -- consumers (shadow buffers, incremental serialization) see the
         -- mutation. Observer notification remains gated below.
-        self:markAllComponentsDirty()
+        markStructural(self)
+        -- That one row is the exact extent of what changed, and it is
+        -- recorded until the residue is either read or overrun.
+        local touched <const> = self._touchedCount
+        if touched < TOUCHED_MAX then
+            self._touchedCount = touched + 1
+            self._touchedRows[touched + 1] = luaRow
+        else
+            self._touchedAll = true
+        end
 
         if self.hasMoveObservers > 0 then
             notifyMove(self, movedEntityId, lastIndex - 1, row)
@@ -553,7 +625,11 @@ function Archetype:clearEntities()
         local storage = comp.storage as {string: any}
         (storage.clear as function(any, any))(storage, col)
     end
-    self._componentDirty:clearAll()
+    -- Through the frame-end clear rather than the bitset alone, because
+    -- the structural flag is half of what a reader composes: leaving it set
+    -- here made the next placement's `markAllComponentsDirty` short-circuit
+    -- and mark nothing at all.
+    self:clearDirtyComponents()
     if hadEntities and hasObservers then
         notifyDeactivated(self)
     end
@@ -684,6 +760,12 @@ end
 -- `getMut`), and cleared by `world:update` at end of frame. The
 -- archetype is registered in `_dirtySet` whenever any component bit
 -- is set so the world's clear loop visits it.
+--
+-- Structural change is held as one flag rather than as every bit, and the
+-- readers below compose the two. That is observably the same answer, and
+-- it is what lets a consumer that can write single rows tell the two
+-- apart: a value write says nothing about which rows moved, while a
+-- structural change carries its rows in the residue above.
 -------------------------------------------------------------------------------
 
 function Archetype:isComponentDirty(component: Component): boolean
@@ -691,11 +773,71 @@ function Archetype:isComponentDirty(component: Component): boolean
     if not idx then
         return false
     end
+    return self._allDirty or self._componentDirty:get(idx)
+end
+
+--- Whether a value write dirtied this component, ignoring structural change.
+function Archetype:isComponentValueDirty(component: Component): boolean
+    local idx = self.columnIndexByComponent[component]
+    if not idx then
+        return false
+    end
     return self._componentDirty:get(idx)
 end
 
+--- Whether a structural change landed on this archetype this frame.
+function Archetype:isStructurallyDirty(): boolean
+    return self._allDirty
+end
+
 function Archetype:anyComponentDirty(): boolean
+    -- The column count guards the flag because an archetype with no
+    -- columns has nothing to report dirty, which is the answer the bitset
+    -- loop this replaced gave.
+    if self._allDirty and self.columnsCount > 0 then
+        return true
+    end
     return not self._componentDirty:isEmpty()
+end
+
+--- Structural changes this archetype has seen, counted and never reset.
+---
+--- A consumer records the answer when it last brought its own copy of the
+--- archetype's rows up to date, and the same answer later means no row moved.
+function Archetype:structuralCount(): integer
+    return self._structCount
+end
+
+--- Whether the residue still names the rows every structural change since
+--- `count` wrote.
+---
+--- False when `count` predates the current window, or when more swap-pops
+--- landed in it than the window holds. Either way the caller owes the whole
+--- run rather than the rows the residue names.
+--- @param count A `structuralCount` the caller took earlier.
+--- @return True when `structuralAdded` and `structuralTouched` together cover
+---     every row written since `count`.
+function Archetype:structuralDescribed(count: integer): boolean
+    return not self._touchedAll and count >= self._residueFrom
+end
+
+--- Lowest 1-based row a placement appended within the residue window, or 0.
+---
+--- Rows are appended as a suffix, so this row through the run's last is the
+--- whole of what placements wrote.
+function Archetype:structuralAdded(): integer
+    return self._addedFrom
+end
+
+--- Rows a swap-pop overwrote within the residue window, and how many are in
+--- use.
+---
+--- The table is the archetype's own and is valid until the next mutation:
+--- read it, do not keep it. Entries past the count are whatever an earlier
+--- window left there. A row may name a slot the run has since given up, so a
+--- caller clamps against the run's current length.
+function Archetype:structuralTouched(): {integer}, integer
+    return self._touchedRows, self._touchedCount
 end
 
 function Archetype:markComponentDirty(component: Component)
@@ -713,31 +855,26 @@ function Archetype:markComponentDirty(component: Component)
 end
 
 function Archetype:markAllComponentsDirty()
-    if self._fixedTracking then
-        fixedtracking.markAll(self)
-    end
-    -- Runs per swap-pop and per move-in; after the first call in a frame
-    -- every later call is a guaranteed no-op, so short-circuit on a flag
-    -- instead of re-walking the bitset per entity.
-    if self._allDirty then
-        return
-    end
-    self._allDirty = true
-    local bits = self._componentDirty
-    local n = self.columnsCount
-    for i = 1, n do
-        if not bits:get(i) then
-            bits:set(i)
-        end
-    end
-    if n > 0 then
-        self._dirtySet[self] = true
-    end
+    markStructural(self)
+    -- A caller reaching for this has said every column changed and has not
+    -- said where, so the residue gives up rather than answering with the rows
+    -- the placements and swap-pops before it happened to write. Without this
+    -- a raw write to every row of every column, announced the only way the
+    -- surface allows, would be read as no row having moved at all.
+    self._touchedAll = true
 end
 
 function Archetype:clearDirtyComponents()
     self._allDirty = false
     self._componentDirty:clearAll()
+    -- The residue closes with the frame's dirty bits, and the window it
+    -- opens starts where this one ended: a consumer holding a count from
+    -- before that boundary is told so by `structuralDescribed` rather than
+    -- being handed a residue that is missing what it never saw.
+    self._residueFrom = self._structCount
+    self._addedFrom = 0
+    self._touchedCount = 0
+    self._touchedAll = false
 end
 
 function Archetype:dirtyComponents(): function(): Component
@@ -746,10 +883,11 @@ function Archetype:dirtyComponents(): function(): Component
     local i = 1
     local n = self.columnsCount
     return function(): Component
+        local all = self._allDirty
         while i <= n do
             local idx = i
             i = i + 1
-            if bits:get(idx) then
+            if all or bits:get(idx) then
                 return componentList[idx]
             end
         end
@@ -918,6 +1056,14 @@ function Archetype.new(
         batchSpawnAtQueueCount = 0,
         _observers = {},
         _allDirty = false,
+        _structCount = 0,
+        _residueFrom = 0,
+        _addedFrom = 0,
+        -- Sized once here rather than grown a row at a time, so a frame of
+        -- removals reallocates nothing.
+        _touchedRows = table_new(TOUCHED_MAX, 0) as {integer},
+        _touchedCount = 0,
+        _touchedAll = false,
         _relInstancesByContainer = relInstancesByContainer,
         _componentDirty = Bitset.new(columnsCount + 1),
         _dirtySet = dirtySet as {Archetype: boolean},

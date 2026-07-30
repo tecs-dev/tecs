@@ -97,6 +97,18 @@ local record internal
         addEntityObserver: function(self, observer: types.ArchetypeEntityObserver)
         clearDirtyComponents: function(self)
 
+        -- Structural dirt told apart from value dirt, and the rows a
+        -- structural change wrote. `isComponentDirty` on the public surface
+        -- answers for both together; a consumer that can rewrite single rows
+        -- rather than whole columns needs them separated, and these are that
+        -- separation. See `tecs.internal.Archetype` for the contract on each.
+        isComponentValueDirty: function(self, component: types.components.Component): boolean
+        isStructurallyDirty: function(self): boolean
+        structuralCount: function(self): integer
+        structuralDescribed: function(self, count: integer): boolean
+        structuralAdded: function(self): integer
+        structuralTouched: function(self): {integer}, integer
+
         -- Transaction / drain staging state
         isEphemeral: boolean
         pendingWrites: integer

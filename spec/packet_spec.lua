@@ -499,6 +499,256 @@ describe("reserved instance runs", function()
     end)
 end)
 
+-- Rewriting the rows a structural change wrote rather than the archetype's run.
+--
+-- A row moving into an archetype has every column newly written at that row, so
+-- the ECS dirties every column and the extractor resyncs the whole run. These
+-- assert the other reading of the same fact: which rows moved is recorded, the
+-- rest of the run did not change, and a spawn can cost what it wrote. The last
+-- test is the guard the rest of them are not -- it compares the bytes both paths
+-- leave behind, because a rewrite that is narrower than the truth produces a
+-- stale instance and no error anywhere.
+describe("partial structural rewrites", function()
+    local CAPACITY = 1024
+
+    local function newExtraction(partial, reserveRuns)
+        local world = tecs.ecs.newWorld()
+        local extractor = Extractor.create({
+            capacity = CAPACITY,
+            reserveRuns = reserveRuns ~= false,
+            partialRewrites = partial,
+            whiteU0 = 0.0,
+            whiteV0 = 0.0,
+            whiteU1 = 1 / 512,
+            whiteV1 = 1 / 512,
+        })
+        local packet = FramePacket.create()
+        local instances = loader.newArray("float[?]", CAPACITY * INSTANCE_FLOATS)
+        local bounds = loader.newArray("float[?]", CAPACITY * 4)
+        extractor:setStaging(0, instances, bounds)
+        extractor:install(world, packet)
+        return {
+            world = world,
+            packet = packet,
+            instances = instances,
+            bounds = bounds,
+            live = {},
+        }
+    end
+
+    -- One archetype throughout, which is the case reserving cannot help with
+    -- and the one this whole block exists for.
+    local function spawn(side)
+        local id = side.world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+        side.live[#side.live + 1] = id
+        return id
+    end
+
+    it("charges one spawn into a large archetype the row it wrote", function()
+        local side = newExtraction(true)
+        for _ = 1, 200 do
+            spawn(side)
+        end
+        side.world:update(1 / 60)
+        side.world:update(1 / 60)
+        assert.are.equal(0, side.packet.rewritten, "a still frame writes nothing")
+
+        spawn(side)
+        side.world:update(1 / 60)
+        assert.are.equal(1, side.packet.rewritten, "the row the placement wrote, not the archetype's population")
+        assert.are.equal(1, side.packet.instanceRanges.count, "and one span names it")
+        local offset, size = side.packet.instanceRanges:at(0)
+        assert.are.equal(200 * INSTANCE_BYTES, offset, "at the row it landed on")
+        assert.are.equal(INSTANCE_BYTES, size)
+    end)
+
+    it("charges the same spawn the whole run without it", function()
+        -- The measurement above is a difference rather than a number only if
+        -- this is what it is a difference from.
+        local side = newExtraction(false)
+        for _ = 1, 200 do
+            spawn(side)
+        end
+        side.world:update(1 / 60)
+        side.world:update(1 / 60)
+
+        spawn(side)
+        side.world:update(1 / 60)
+        assert.are.equal(201, side.packet.rewritten, "one spawn rewrites the archetype it spawned into")
+    end)
+
+    it("charges churn the rows it moved and the rows it appended", function()
+        local side = newExtraction(true)
+        for _ = 1, 200 do
+            spawn(side)
+        end
+        side.world:update(1 / 60)
+        side.world:update(1 / 60)
+
+        -- The two lowest rows, so each removal swaps the run's last row down
+        -- rather than popping from the end, and the two placements then land as
+        -- a suffix where the removals left room.
+        side.world:despawn(side.live[1])
+        side.world:despawn(side.live[2])
+        spawn(side)
+        spawn(side)
+        side.world:update(1 / 60)
+
+        assert.are.equal(4, side.packet.rewritten, "two swap-pop rows and two appended rows")
+    end)
+
+    it("still rewrites the run for a value write", function()
+        -- A value write names a column and says nothing about which rows it
+        -- touched, so there is nothing narrower to do than the run.
+        local side = newExtraction(true)
+        for _ = 1, 200 do
+            spawn(side)
+        end
+        side.world:update(1 / 60)
+        side.world:update(1 / 60)
+
+        side.world:set(side.live[5], Transform(9, 9, 0, 1, 0, 4, 4))
+        side.world:update(1 / 60)
+        assert.are.equal(200, side.packet.rewritten)
+    end)
+
+    it("still rewrites the run for markAllComponentsDirty", function()
+        -- The one way a game can say it wrote raw cdata across every row of
+        -- every column, so it has to defeat the narrower path outright: the
+        -- rows it wrote are exactly what it did not say.
+        local side = newExtraction(true)
+        for _ = 1, 200 do
+            spawn(side)
+        end
+        side.world:update(1 / 60)
+        side.world:update(1 / 60)
+
+        local marked = false
+        side.world:forEachArchetype(function(archetype)
+            if not marked and archetype.entities[0] == 200 then
+                archetype:markAllComponentsDirty()
+                marked = true
+            end
+        end)
+        assert.is_true(marked, "the run's archetype was found")
+
+        side.world:update(1 / 60)
+        assert.are.equal(200, side.packet.rewritten)
+    end)
+
+    it("hides the rows a despawn gave back", function()
+        local side = newExtraction(true)
+        for _ = 1, 8 do
+            spawn(side)
+        end
+        side.world:update(1 / 60)
+
+        side.world:despawn(side.live[8])
+        side.world:despawn(side.live[7])
+        side.world:update(1 / 60)
+
+        assert.is_true(side.bounds[6 * 4] > 1e29, "a slot the run gave back stops drawing")
+        assert.is_true(side.bounds[7 * 4] > 1e29)
+    end)
+
+    -- One seeded op stream, generated once and applied to two worlds, so the
+    -- pair differs in nothing but which rows each sync decided to write. Every
+    -- float of both buffers is compared after every frame: a row the partial
+    -- path skipped and should not have is a difference here and nothing
+    -- anywhere else.
+    --
+    -- One renderable archetype, which is the case reserving cannot help with
+    -- and the one this exists for. It is also what makes the comparison sound:
+    -- a reserved layout hands out offsets while walking a table keyed by
+    -- archetype, so two worlds holding two archetypes apiece can lay their runs
+    -- out in either order and the buffers would differ over that rather than
+    -- over anything either path decided.
+    local function differential(reserveRuns)
+        local seed = 20260729
+        local function nextInt(bound)
+            seed = (seed * 1103515245 + 12345) % 2147483648
+            return math.floor(seed / 65536) % bound + 1
+        end
+
+        local ops = {}
+        local population = 0
+        for frame = 1, 80 do
+            for _ = 1, nextInt(8) - 1 do
+                if population > 0 then
+                    ops[#ops + 1] = { "despawn", nextInt(population) }
+                    population = population - 1
+                end
+            end
+            for _ = 1, nextInt(8) - 1 do
+                ops[#ops + 1] = { "spawn" }
+                population = population + 1
+            end
+            if population > 0 and nextInt(4) == 1 then
+                ops[#ops + 1] = { "move", nextInt(population), nextInt(64), nextInt(64) }
+            end
+            ops[#ops + 1] = { "frame", frame }
+        end
+
+        local full = newExtraction(false, reserveRuns)
+        local part = newExtraction(true, reserveRuns)
+
+        local function apply(side, op)
+            if op[1] == "spawn" then
+                spawn(side)
+            elseif op[1] == "despawn" then
+                local index = op[2]
+                local live = side.live
+                side.world:despawn(live[index])
+                live[index] = live[#live]
+                live[#live] = nil
+            elseif op[1] == "move" then
+                side.world:set(side.live[op[2]], Transform(op[3], op[4], 0, 1, 0, 4, 4))
+            else
+                side.world:update(1 / 60)
+            end
+        end
+
+        local savings = 0
+        for _, op in ipairs(ops) do
+            apply(full, op)
+            apply(part, op)
+            if op[1] == "frame" then
+                assert.are.equal(full.packet.count, part.packet.count, "frame " .. op[2] .. ": the same extent")
+                for index = 0, full.packet.count * INSTANCE_FLOATS - 1 do
+                    if full.instances[index] ~= part.instances[index] then
+                        assert.are.equal(
+                            full.instances[index],
+                            part.instances[index],
+                            ("frame %d: instance float %d"):format(op[2], index)
+                        )
+                    end
+                end
+                for index = 0, full.packet.count * 4 - 1 do
+                    if full.bounds[index] ~= part.bounds[index] then
+                        assert.are.equal(
+                            full.bounds[index],
+                            part.bounds[index],
+                            ("frame %d: bounds float %d"):format(op[2], index)
+                        )
+                    end
+                end
+                savings = savings + (full.packet.rewritten - part.packet.rewritten)
+            end
+        end
+        return savings
+    end
+
+    it("writes the same bytes as a whole-run rewrite, reserved", function()
+        assert.is_true(differential(true) > 0, "and wrote fewer rows somewhere, or this proves nothing")
+    end)
+
+    it("writes the same bytes as a whole-run rewrite, packed", function()
+        -- Packed, a length that moved relays the scene out and the partial path
+        -- almost never runs. What this covers is that it never runs wrongly.
+        assert.is_true(differential(false) >= 0)
+    end)
+end)
+
 describe("render backend", function()
     local window, device, screen
 

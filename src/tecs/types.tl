@@ -365,6 +365,12 @@ local record types
 
         --- True if the given component's column on this archetype is
         --- currently marked dirty.
+        ---
+        --- @param component False for a component this archetype does not
+        ---     carry, so a consumer may name one without testing membership.
+        --- @return True for a value write to this column, and true for any
+        ---     structural change to the archetype: a row moving in has every
+        ---     column newly written at that row.
         isComponentDirty: function(self, component: components.Component): boolean
 
         --- True if any component on this archetype is currently dirty.
@@ -376,6 +382,10 @@ local record types
         markComponentDirty: function(self, component: components.Component)
 
         --- Mark every component on this archetype dirty.
+        ---
+        --- Says that every column changed and says nothing about where, so a
+        --- consumer that can resync single rows resyncs the whole archetype
+        --- after it. Prefer `markComponentDirty` for a column you can name.
         markAllComponentsDirty: function(self)
 
         --- Iterate components currently marked dirty on this archetype.

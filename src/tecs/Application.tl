@@ -247,6 +247,27 @@ local record Application
         --- on a mixed-archetype spawner scene. A name with `debug` in it would
         --- warn off exactly the shipped games that should turn it on.
         reserveRuns: boolean
+        --- Caller-writable. Rewrites the rows a spawn or a despawn wrote rather than the
+        --- archetype's whole run. Defaults to false, which rewrites the run.
+        ---
+        --- A row moving into an archetype has every column newly written at
+        --- that row, so a structural change dirties every column of the
+        --- archetype it lands on and the run is resynced whole. The rest of
+        --- the run did not change, and the ECS records which rows did, so this
+        --- makes one spawn cost the rows it wrote rather than the archetype's
+        --- population. It composes with `reserveRuns` above rather than
+        --- replacing it: reserving keeps a spawn from moving the archetypes
+        --- around it, and this keeps it from rewriting the one it landed in.
+        ---
+        --- Two things are deliberately left out of it. A value write through
+        --- `archetype:getMut` names a column and not a
+        --- row, so it still rewrites the run; that includes a
+        --- `batchSpawn` fill callback, which declares intent on the whole
+        --- column it writes new rows into. And an archetype carrying
+        --- [`PreviousTransform`](tealdoc:tecs.components.PreviousTransform) is
+        --- interpolated, so its drawn positions move on every frame that falls
+        --- at a new point in the fixed step whatever the world did.
+        partialRewrites: boolean
         --- Caller-writable. Fits many images into each layer of the renderer's image array
         --- rather than one. Defaults to false, where the ceiling on distinct
         --- images is the array's layer count and a small image costs a whole
@@ -684,6 +705,7 @@ function Application:_init(): boolean
             ambient = config.ambientLight,
             capacity = config.capacity,
             reserveRuns = config.reserveRuns,
+            partialRewrites = config.partialRewrites,
             packImages = config.packImages,
             shadows = config.shadows,
         }

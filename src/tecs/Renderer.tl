@@ -71,6 +71,17 @@ local record RendererOptions
     --- archetype grow into its own slack and keep the rest of the scene
     --- resident. Culling also covers that slack.
     reserveRuns: boolean
+    --- Caller-writable. The caller sets `partialRewrites` before creation. It
+    --- defaults to false, which rewrites an archetype's whole run whenever a
+    --- spawn or a despawn touched it.
+    ---
+    --- A row moving into an archetype has every column newly written at that
+    --- row, so a structural change dirties every column of the archetype it
+    --- lands on. The rest of the run did not change, and the ECS records which
+    --- rows did, so this makes one spawn cost the rows it wrote rather than the
+    --- archetype's population. A value write is unaffected and still rewrites
+    --- the run, because it declares a column rather than a row.
+    partialRewrites: boolean
     --- Caller-writable. The caller sets `packImages` before creation to fit
     --- many images into each array layer. It defaults to false.
     packImages: boolean
@@ -189,6 +200,7 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
         {
             capacity = self.capacity,
             reserveRuns = options.reserveRuns,
+            partialRewrites = options.partialRewrites,
             whiteU0 = backend.whiteU0,
             whiteV0 = backend.whiteV0,
             whiteU1 = backend.whiteU1,

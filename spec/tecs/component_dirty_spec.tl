@@ -360,6 +360,192 @@ describe(
         )
 
         describe(
+            "structural residue",
+            function()
+                -- `isComponentDirty` answers for a structural change and a
+                -- value write together, which is what every consumer reads.
+                -- These are the other half: the rows a structural change wrote,
+                -- so a consumer that can rewrite one row does not have to
+                -- rewrite the column.
+                local function inner(arch: tecs.ecs.Archetype): internal.ArchetypeInternal
+                    return arch as internal.ArchetypeInternal
+                end
+
+                it(
+                    "counts a structural change and not a value write",
+                    function()
+                        local world = tecs.ecs.newWorld()
+                        local e = world:spawn(Pos(1, 2))
+                        local arch = inner(findArchetype(world, {Pos}))
+                        local afterSpawn = arch:structuralCount()
+                        assert.is_true(afterSpawn > 0, "a placement is a structural change")
+
+                        world:update(0)
+                        world:set(e, Pos(3, 4))
+                        assert.are.equal(
+                            afterSpawn, arch:structuralCount(), "a value write moves no row, so it counts nothing"
+                        )
+
+                        world:update(0)
+                        world:spawn(Pos(5, 6))
+                        assert.is_true(arch:structuralCount() > afterSpawn, "and the next placement counts again")
+                    end
+                )
+
+                it(
+                    "names the appended rows as a suffix",
+                    function()
+                        local world = tecs.ecs.newWorld()
+                        world:spawn(Pos(1, 1))
+                        world:spawn(Pos(2, 2))
+                        world:update(0)
+
+                        local arch = inner(findArchetype(world, {Pos}))
+                        local before = arch:structuralCount()
+                        assert.are.equal(0, arch:structuralAdded(), "the frame-end clear closed the last window")
+
+                        world:spawn(Pos(3, 3))
+                        world:spawn(Pos(4, 4))
+
+                        assert.is_true(arch:structuralDescribed(before))
+                        assert.are.equal(3, arch:structuralAdded(), "the lowest row the two placements wrote")
+                        local _, touched = arch:structuralTouched()
+                        assert.are.equal(0, touched, "and no row already in the run moved")
+                    end
+                )
+
+                it(
+                    "names the row a swap-pop overwrote",
+                    function()
+                        local world = tecs.ecs.newWorld()
+                        local a = world:spawn(Pos(1, 1))
+                        world:spawn(Pos(2, 2))
+                        world:spawn(Pos(3, 3))
+                        world:update(0)
+
+                        local arch = inner(findArchetype(world, {Pos}))
+                        local before = arch:structuralCount()
+                        world:despawn(a)
+
+                        assert.is_true(arch:structuralDescribed(before))
+                        assert.are.equal(0, arch:structuralAdded(), "nothing was appended")
+                        local rows, touched = arch:structuralTouched()
+                        assert.are.equal(1, touched)
+                        assert.are.equal(1, rows[1], "the last row was moved down into row one")
+                    end
+                )
+
+                it(
+                    "names nothing for a pop from the end",
+                    function()
+                        -- The bytes at no row changed. What a consumer owes the
+                        -- slot it gave up is to stop drawing it, which the
+                        -- shorter run says on its own.
+                        local world = tecs.ecs.newWorld()
+                        world:spawn(Pos(1, 1))
+                        local last = world:spawn(Pos(2, 2))
+                        world:update(0)
+
+                        local arch = inner(findArchetype(world, {Pos}))
+                        local before = arch:structuralCount()
+                        world:despawn(last)
+
+                        assert.is_true(arch:structuralCount() > before, "the run still shortened")
+                        assert.is_true(arch:structuralDescribed(before))
+                        assert.are.equal(0, arch:structuralAdded())
+                        local _, touched = arch:structuralTouched()
+                        assert.are.equal(0, touched)
+                    end
+                )
+
+                it(
+                    "stops describing a window it overran",
+                    function()
+                        local world = tecs.ecs.newWorld()
+                        local ids: {integer} = {}
+                        for index = 1, 400 do
+                            ids[index] = world:spawn(Pos(index, index))
+                        end
+                        world:update(0)
+
+                        local arch = inner(findArchetype(world, {Pos}))
+                        local before = arch:structuralCount()
+                        -- The lowest rows, so each removal swaps the run's last
+                        -- row down rather than popping from the end.
+                        for index = 1, 200 do
+                            world:despawn(ids[index])
+                        end
+
+                        assert.is_false(
+                            arch:structuralDescribed(before), "past the window's ceiling the rows stop being named"
+                        )
+                        assert.is_true(
+                            arch:isComponentDirty(Pos), "and the column is still dirty, which is what consumers read"
+                        )
+                    end
+                )
+
+                it(
+                    "stops describing a count from before the window opened",
+                    function()
+                        local world = tecs.ecs.newWorld()
+                        world:spawn(Pos(1, 1))
+                        world:update(0)
+
+                        local arch = inner(findArchetype(world, {Pos}))
+                        local stale = arch:structuralCount()
+
+                        -- A structural change the frame-end clear then closes
+                        -- the window over: a reader holding `stale` never saw
+                        -- the rows it wrote and must not be told the residue
+                        -- covers them.
+                        world:spawn(Pos(2, 2))
+                        world:update(0)
+
+                        assert.is_false(arch:structuralDescribed(stale))
+                        assert.is_true(arch:structuralDescribed(arch:structuralCount()))
+                    end
+                )
+
+                it(
+                    "stops describing a window markAllComponentsDirty was called in",
+                    function()
+                        -- The only way the surface lets a caller announce a raw
+                        -- write to every row of every column, so it must not
+                        -- read as the rows the placements before it wrote.
+                        local world = tecs.ecs.newWorld()
+                        world:spawn(Pos(1, 1))
+                        world:update(0)
+
+                        local arch = findArchetype(world, {Pos})
+                        local before = inner(arch):structuralCount()
+                        arch:markAllComponentsDirty()
+
+                        assert.is_true(arch:isComponentDirty(Pos))
+                        assert.is_false(inner(arch):structuralDescribed(before))
+                    end
+                )
+
+                it(
+                    "marks the placement after clearEntities",
+                    function()
+                        -- The structural flag is what a reader composes, so
+                        -- leaving it set through a clear made the next
+                        -- placement's mark short-circuit and say nothing.
+                        local world = tecs.ecs.newWorld()
+                        world:spawn(Pos(1, 1))
+                        world:clearEntities()
+
+                        world:spawn(Pos(2, 2))
+                        local arch = findArchetype(world, {Pos})
+                        assert.is_true(arch:isComponentDirty(Pos), "a placement after a clear is still a placement")
+                        assert.are.equal(1, inner(arch):structuralAdded())
+                    end
+                )
+            end
+        )
+
+        describe(
             "dirtyComponents iterator",
             function()
                 it(
