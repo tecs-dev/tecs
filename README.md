@@ -709,8 +709,18 @@ the voices that play it read the file for themselves.
 The application owns the pump. `assets.update` runs once per iteration and
 `assets.shutdown` runs at teardown, so a game that loads an image and does
 nothing else still sees its load settle and the decoding thread still stops.
-Subsystems that load assets of their own drain the same queue when they look at
-their own waiting lists, and that is an optimization rather than the mechanism.
+One subsystem drains the same queue itself, and it is `Audio:update`, which is
+not a world system because reaping voices has to continue through a world pause;
+an `Audio` outside an application would otherwise never see its clips arrive.
+
+Nothing else does, and the text plugin is why that sentence is worth writing
+down. It used to drain the queue from inside its layout system, because it kept a
+residency record per font that only moved when something looked at it, and the
+pass that looked was the pass that needed the answer. Registering the atlas is
+now the load's own transform, so it happens from the drain the application
+already turns, and a subsystem with no state machine of its own has nothing to
+nudge. A pass that pumps the loader is reporting that its work is arranged the
+wrong way round, which is the useful reading of the smell.
 
 A load is not a cache. Two image loads of one path that overlap share the decode
 and the surface, because decoding the same file twice at once produces nothing
