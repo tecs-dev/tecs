@@ -57,15 +57,15 @@ local function connected(address, server, port)
     return future.value, accepted
 end
 
-local function readExactly(stream, length, chunk)
+local function readExactly(connection, length, chunk)
     local pieces = {}
     local total = 0
     local deadline = C.SDL_GetTicks() + 2000
     while total < length and C.SDL_GetTicks() < deadline do
-        local ready, reason = stream:wait(50)
+        local ready, reason = connection:wait(50)
         assert.is_nil(reason)
         if ready then
-            local bytes, readReason = stream:read(chunk)
+            local bytes, readReason = connection:read(chunk)
             assert.is_nil(readReason)
             if bytes then
                 pieces[#pieces + 1] = bytes
@@ -87,6 +87,11 @@ describe("tecs.io", function()
         local ok, reason = tecsIO.quit()
         assert.is_true(ok, reason)
         C.SDL_Quit()
+    end)
+
+    it("names connected TCP resources Connection", function()
+        assert.is_table(tecsIO.Connection)
+        assert.is_nil(rawget(tecsIO, "Stream"))
     end)
 
     it("resolves numeric loopback asynchronously", function()
@@ -179,7 +184,7 @@ describe("tecs.io", function()
         address:close()
     end)
 
-    it("reports no stream input without blocking", function()
+    it("reports no connection input without blocking", function()
         local address = resolved()
         local server, port = listen()
         local client, peer = connected(address, server, port)
@@ -192,7 +197,7 @@ describe("tecs.io", function()
 
         client:close()
         assert.is_true(client:isClosed())
-        assert.are.same({ false, "stream is closed" }, { client:write("late") })
+        assert.are.same({ false, "connection is closed" }, { client:write("late") })
         client:close()
         peer:close()
         server:close()

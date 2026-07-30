@@ -31,7 +31,7 @@ end
 Use a future's bounded `wait` outside a frame. Listening, accepting, reading,
 writing, and receiving are nonblocking.
 
-Every address, TCP stream, server, and datagram socket owns a resource. Close
+Every address, TCP connection, server, and datagram socket owns a resource. Close
 it explicitly. Closing is idempotent; using a closed value returns a failure.
 
 Naming `tecs.io` loads none of its children. Reading `files`, `http`, `mcp`, or
@@ -121,23 +121,23 @@ local record binaryIO
         close: function(self: Address)
     end
 
-    --- A `Stream` owns one connected TCP byte stream.
-    record Stream
+    --- A `Connection` owns one connected TCP byte stream.
+    record Connection
         _handle: loader.CPtr
         _buffer: loader.CArray
         _closed: boolean
 
-        --- Returns whether `close` has released this stream.
+        --- Returns whether `close` has released this connection.
         ---
         --- @return Returns true after `close`.
-        isClosed: function(self: Stream): boolean
+        isClosed: function(self: Connection): boolean
         --- Returns a newly owned address for the remote peer.
         ---
         --- The caller closes the returned address.
-        --- @return Returns a caller-owned address that outlives the stream, or
+        --- @return Returns a caller-owned address that outlives the connection, or
         ---     nil on failure.
         --- @return Returns the reason when the first return is nil.
-        peer: function(self: Stream): Address, string
+        peer: function(self: Connection): Address, string
         --- Reads up to `maxBytes` without waiting.
         ---
         --- Returns nil with no error when no bytes are ready. Returns nil with
@@ -149,22 +149,22 @@ local record binaryIO
         ---     bytes arrived or the read failed.
         --- @return Returns the reason only when reading fails or the peer
         ---     disconnects.
-        read: function(self: Stream, maxBytes?: integer): string, string
+        read: function(self: Connection, maxBytes?: integer): string, string
         --- Queues one chunk for reliable ordered delivery.
         ---
         --- This accepting the bytes does not mean the peer has received them;
         --- use `pendingWrites` or `drain` when that distinction matters.
         --- @param bytes The caller supplies at most 16777216 bytes. Larger
         ---     values raise; an empty string succeeds without queuing data.
-        --- @return Returns true only when the stream accepts the whole chunk.
+        --- @return Returns true only when the connection accepts the whole chunk.
         --- @return Returns the reason when the first return is false.
-        write: function(self: Stream, bytes: string): boolean, string
+        write: function(self: Connection, bytes: string): boolean, string
         --- Returns bytes accepted but not yet sent.
         ---
         --- @return Returns the queued byte count, zero after sending, or nil on
         ---     failure.
         --- @return Returns the reason when the first return is nil.
-        pendingWrites: function(self: Stream): integer, string
+        pendingWrites: function(self: Connection): integer, string
         --- Waits up to `timeoutMs` for queued writes to be sent.
         ---
         --- Returns false without an error on timeout.
@@ -174,7 +174,7 @@ local record binaryIO
         ---     timeout.
         --- @return Returns the reason on failure. Timeout returns false without
         ---     a reason.
-        drain: function(self: Stream, timeoutMs?: integer): boolean, string
+        drain: function(self: Connection, timeoutMs?: integer): boolean, string
         --- Waits up to `timeoutMs` for input or disconnection.
         ---
         --- Returns false without an error on timeout. This does not consume
@@ -184,10 +184,10 @@ local record binaryIO
         --- @return Returns true when input arrives or the peer disconnects.
         --- @return Returns the reason on failure. Timeout returns false without
         ---     a reason.
-        wait: function(self: Stream, timeoutMs?: integer): boolean, string
-        --- Releases the stream. `close` may discard queued writes, so call
+        wait: function(self: Connection, timeoutMs?: integer): boolean, string
+        --- Releases the connection. `close` may discard queued writes, so call
         --- `drain` first when delivery matters. Repeated calls remain safe.
-        close: function(self: Stream)
+        close: function(self: Connection)
     end
 
     --- A `Server` listens for TCP clients.
@@ -209,7 +209,7 @@ local record binaryIO
         --- @return Returns one caller-owned client, or nil when none waits or
         ---     acceptance fails.
         --- @return Returns the reason only when acceptance fails.
-        accept: function(self: Server): Stream, string
+        accept: function(self: Server): Connection, string
         --- Waits up to `timeoutMs` for a client to become ready to accept.
         ---
         --- Returns false without an error on timeout. This does not accept the
@@ -307,9 +307,9 @@ local record binaryIO
     --- @param address The caller supplies an address from this module. A closed
     ---     address returns an already-failed future.
     --- @param port The caller supplies a remote port from 1 to 65535.
-    --- @return Returns a future over a caller-owned stream. `binaryIO.poll` or
+    --- @return Returns a future over a caller-owned connection. `binaryIO.poll` or
     ---     `Future:wait` settles it.
-    connect: function(address: Address, port: integer): FutureType<Stream>
+    connect: function(address: Address, port: integer): FutureType<Connection>
     --- Binds a TCP listener. A nil address listens on all local interfaces.
     --- @param port The caller supplies a local port from 0 to 65535. Zero lets
     ---     the platform choose one but leaves `Server.port` at zero.
@@ -338,7 +338,7 @@ local record binaryIO
 end
 
 local AddressMT <const>: metatable<binaryIO.Address> = {__index = binaryIO.Address}
-local StreamMT <const>: metatable<binaryIO.Stream> = {__index = binaryIO.Stream}
+local ConnectionMT <const>: metatable<binaryIO.Connection> = {__index = binaryIO.Connection}
 local ServerMT <const>: metatable<binaryIO.Server> = {__index = binaryIO.Server}
 local PacketMT <const>: metatable<binaryIO.Packet> = {__index = binaryIO.Packet}
 local DatagramSocketMT <const>: metatable<binaryIO.DatagramSocket> = {__index = binaryIO.DatagramSocket}
@@ -400,7 +400,7 @@ local function validAddress(address: binaryIO.Address, optional: boolean, level:
         error("tecs: an address is required", level)
     end
     if getmetatable(address) ~= AddressMT then
-        error("tecs: expected an address returned by tecs.io.resolve or Stream:peer", level)
+        error("tecs: expected an address returned by tecs.io.resolve or Connection:peer", level)
     end
     if address._closed then
         return false, "address is closed"
@@ -454,22 +454,22 @@ function binaryIO.Address:close()
     closed()
 end
 
-local function streamFrom(handle: loader.CPtr): binaryIO.Stream
-    local stream = setmetatable({} as binaryIO.Stream, StreamMT)
-    stream._handle = handle
-    stream._buffer = loader.newArray("uint8_t[?]", MAX_READ_BYTES)
-    stream._closed = false
+local function connectionFrom(handle: loader.CPtr): binaryIO.Connection
+    local connection = setmetatable({} as binaryIO.Connection, ConnectionMT)
+    connection._handle = handle
+    connection._buffer = loader.newArray("uint8_t[?]", MAX_READ_BYTES)
+    connection._closed = false
     opened()
-    return stream
+    return connection
 end
 
-function binaryIO.Stream:isClosed(): boolean
+function binaryIO.Connection:isClosed(): boolean
     return self._closed
 end
 
-function binaryIO.Stream:peer(): binaryIO.Address, string
+function binaryIO.Connection:peer(): binaryIO.Address, string
     if self._closed then
-        return nil, "stream is closed"
+        return nil, "connection is closed"
     end
     local handle = C.tecsNetStreamPeer(self._handle)
     if handle == nil then
@@ -481,9 +481,9 @@ function binaryIO.Stream:peer(): binaryIO.Address, string
     return addressFrom(handle, host)
 end
 
-function binaryIO.Stream:read(maxBytes?: integer): string, string
+function binaryIO.Connection:read(maxBytes?: integer): string, string
     if self._closed then
-        return nil, "stream is closed"
+        return nil, "connection is closed"
     end
     local count <const> = maxBytes or DEFAULT_READ_BYTES
     if type(count) ~= "number" or count ~= math.floor(count) or count < 1 or count > MAX_READ_BYTES then
@@ -499,11 +499,11 @@ function binaryIO.Stream:read(maxBytes?: integer): string, string
     return loader.toBytes(self._buffer as loader.CValue, read)
 end
 
-function binaryIO.Stream:write(bytes: string): boolean, string
+function binaryIO.Connection:write(bytes: string): boolean, string
     if self._closed then
-        return false, "stream is closed"
+        return false, "connection is closed"
     end
-    validBytes(bytes, MAX_WRITE_BYTES, "Stream:write", 2)
+    validBytes(bytes, MAX_WRITE_BYTES, "Connection:write", 2)
     if #bytes == 0 then
         return true
     end
@@ -513,9 +513,9 @@ function binaryIO.Stream:write(bytes: string): boolean, string
     return true
 end
 
-function binaryIO.Stream:pendingWrites(): integer, string
+function binaryIO.Connection:pendingWrites(): integer, string
     if self._closed then
-        return nil, "stream is closed"
+        return nil, "connection is closed"
     end
     local pending <const> = tonumber(C.tecsNetStreamPendingWrites(self._handle)) as integer
     if pending < 0 then
@@ -524,9 +524,9 @@ function binaryIO.Stream:pendingWrites(): integer, string
     return pending
 end
 
-function binaryIO.Stream:drain(timeoutMs?: integer): boolean, string
+function binaryIO.Connection:drain(timeoutMs?: integer): boolean, string
     if self._closed then
-        return false, "stream is closed"
+        return false, "connection is closed"
     end
     local timeout <const> = validTimeout(timeoutMs or DEFAULT_WAIT_MS, 2)
     local status <const> = tonumber(C.tecsNetStreamDrain(self._handle, timeout)) as integer
@@ -536,9 +536,9 @@ function binaryIO.Stream:drain(timeoutMs?: integer): boolean, string
     return status > 0
 end
 
-function binaryIO.Stream:wait(timeoutMs?: integer): boolean, string
+function binaryIO.Connection:wait(timeoutMs?: integer): boolean, string
     if self._closed then
-        return false, "stream is closed"
+        return false, "connection is closed"
     end
     local status <const> = tonumber(C.tecsNetStreamWait(self._handle, validTimeout(timeoutMs or 0, 2))) as integer
     if status < 0 then
@@ -547,7 +547,7 @@ function binaryIO.Stream:wait(timeoutMs?: integer): boolean, string
     return status > 0
 end
 
-function binaryIO.Stream:close()
+function binaryIO.Connection:close()
     if self._closed then
         return
     end
@@ -561,7 +561,7 @@ function binaryIO.Server:isClosed(): boolean
     return self._closed
 end
 
-function binaryIO.Server:accept(): binaryIO.Stream, string
+function binaryIO.Server:accept(): binaryIO.Connection, string
     if self._closed then
         return nil, "server is closed"
     end
@@ -569,7 +569,7 @@ function binaryIO.Server:accept(): binaryIO.Stream, string
     if handle == nil then
         return nil
     end
-    return streamFrom(handle)
+    return connectionFrom(handle)
 end
 
 function binaryIO.Server:wait(timeoutMs?: integer): boolean, string
@@ -704,7 +704,7 @@ local function finish(operation: Operation, waitMs: integer): integer
         operation.future:complete(addressFrom(handle, operation.host))
     else
         local handle <const> = C.tecsNetOperationTakeStream(operation.handle)
-        operation.future:complete(streamFrom(handle))
+        operation.future:complete(connectionFrom(handle))
     end
     C.tecsNetOperationDestroy(operation.handle)
     operation.handle = nil
@@ -768,21 +768,21 @@ function binaryIO.resolve(host: string): FutureType<binaryIO.Address>
     return operation("resolve", host, handle).future as FutureType<binaryIO.Address>
 end
 
-function binaryIO.connect(address: binaryIO.Address, port: integer): FutureType<binaryIO.Stream>
+function binaryIO.connect(address: binaryIO.Address, port: integer): FutureType<binaryIO.Connection>
     validPort(port, false, 2)
     local valid, addressReason <const> = validAddress(address, false, 2)
     if not valid then
-        return Future.failed(addressReason) as FutureType<binaryIO.Stream>
+        return Future.failed(addressReason) as FutureType<binaryIO.Connection>
     end
     local ok, reason <const> = ensure()
     if not ok then
-        return Future.failed(reason) as FutureType<binaryIO.Stream>
+        return Future.failed(reason) as FutureType<binaryIO.Connection>
     end
     local handle = C.tecsNetConnect(address._handle, port)
     if handle == nil then
-        return Future.failed(loader.toString(C.tecsRustError())) as FutureType<binaryIO.Stream>
+        return Future.failed(loader.toString(C.tecsRustError())) as FutureType<binaryIO.Connection>
     end
-    return operation("connect", address.host, handle).future as FutureType<binaryIO.Stream>
+    return operation("connect", address.host, handle).future as FutureType<binaryIO.Connection>
 end
 
 function binaryIO.listen(port: integer, address?: binaryIO.Address): binaryIO.Server, string

@@ -1840,7 +1840,9 @@ another.
 Resolution and client connection are `Future` sources because both settle once,
 can fail before producing a usable object. Rust workers perform those two
 operations and the SDL thread polls ordinary results through the checked native
-boundary. Servers, streams, addresses
+boundary. The owned TCP object is a `Connection`: `connect` and `accept`
+produce a connection, while byte stream describes TCP's ordering rather than
+the resource's identity. Servers, connections, addresses
 and datagram sockets are not futures: they remain useful across many frames and
 own a native lifetime, so each is closed explicitly. A received packet refs its
 source address before Rust's packet is destroyed, which makes the ownership
