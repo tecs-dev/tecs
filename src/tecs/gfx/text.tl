@@ -182,12 +182,12 @@ local record Atlas
     --- which the material
     --- reads from its parameter.
     param: number
-    --- Engine-owned. Tracks the atlas decode until upload completes. Ordinary
-    --- game code should ignore this field.
-    pending: Future<assets.Image>
-    --- Engine-owned. Records whether the atlas failed, so a broken path is reported once
-    --- rather than every frame.
-    failed: boolean
+    --- Engine-owned. Holds the decode and the upload that consumes it, and it is
+    --- nil only for an atlas the renderer already had. The fields above are
+    --- meaningless until it reports `"ready"`, and it stays `"failed"` for a page
+    --- that would not decode, which is what reports a broken path once rather
+    --- than every frame. Ordinary game code should ignore this field.
+    pending: Future<components.Sprite>
 end
 
 --- Lays a string out into glyph instances.
@@ -554,75 +554,6 @@ local function fontAt(path: string): Font
         end
     end
     return nil
-end
-
---- The font's atlas on this renderer, or nil while it is still decoding.
-local function residency(known: {Font: Atlas}, font: Font, renderer: Renderer): Atlas
-    local atlas = known[font]
-    if atlas == nil then
-        -- Already on the renderer answers without the worker. Re-reading a
-        -- font's metrics gives up this record and its derived fields, but the
-        -- atlas itself is untouched and still holds its layer, so decoding the
-        -- file again would end at `registerImage` handing back the region it
-        -- already had and releasing the fresh pixels undrawn. The text would
-        -- blank for the frames that took.
-        local resident <const> = renderer:regionOf(font.atlas)
-        if resident ~= nil then
-            local sprite <const> = renderer:sprite(font.atlas)
-            atlas = {
-                image = sprite.image,
-                slot = sprite.slot,
-                u = resident.u1,
-                v = resident.v1,
-                param = font.distanceRange * resident.u1 / font.atlasWidth,
-                pending = nil,
-                failed = false,
-            }
-            known[font] = atlas
-            return atlas
-        end
-
-        -- The worker is what decodes the atlas, and a game that only ever
-        -- draws text has no other reason to have started it.
-        if not assets.installed() then
-            assets.install()
-        end
-        atlas = {
-            image = 0, slot = 0, u = 1.0, v = 1.0, param = 0.0, pending = assets.loadImage(font.atlas), failed = false
-        }
-        known[font] = atlas
-    end
-
-    local decoding = atlas.pending
-    if decoding == nil then
-        if atlas.failed then
-            return nil
-        end
-        return atlas
-    end
-    if decoding.status == "pending" then
-        return nil
-    end
-
-    if decoding.status ~= "ready" then
-        logger:error("cannot load the font atlas '%s': %s", font.atlas, decoding.error or decoding.status)
-        atlas.pending = nil
-        atlas.failed = true
-        return nil
-    end
-
-    local sprite, region = renderer:registerImage(decoding.value)
-    atlas.pending = nil
-    atlas.image = sprite.image
-    atlas.slot = sprite.slot
-    atlas.u = region.u1
-    atlas.v = region.v1
-    -- The material scales the field by how many screen pixels its range
-    -- covers, and it measures that in cell fractions, so the range has to
-    -- arrive as one. An atlas smaller than a cell covers less of it, which is
-    -- what the region reports.
-    atlas.param = font.distanceRange * region.u1 / font.atlasWidth
-    return atlas
 end
 
 -------------------------------------------------------------------------------
@@ -1150,7 +1081,9 @@ local record Install
     --- renderer's answer and not the font's.
     known: {Font: Atlas}
     --- Set when the next layout has to look at every archetype rather than only
-    --- the dirty ones: a font that has not arrived yet, or one just re-read.
+    --- the dirty ones: an atlas that has just settled, or a font just re-read.
+    --- A text whose font had not arrived was left unbuilt with its archetype
+    --- clean, so nothing else says to look at it again.
     waiting: boolean
     --- Fonts re-read since the last layout, or nil when there are none. A
     --- re-read keeps the font's table, so nothing a text holds differs
@@ -1164,6 +1097,98 @@ local installs <const>: {World: Install} = setmetatable(
 )
 
 -------------------------------------------------------------------------------
+-- Resolving an atlas
+-------------------------------------------------------------------------------
+
+--- Starts the decode of `font`'s atlas and answers the load that fills `atlas`.
+---
+--- The upload is the load's transform rather than something the layout pass
+--- does when it next looks. Two things follow. An atlas reaches the shelf
+--- packer from the loader's own drain, in the order the worker answered, and
+--- one atlas is one link carrying one transform, so nothing reorders the
+--- coordinates a `Sprite` ends up holding. And the layout pass has no reason to
+--- pump the loader, because it no longer has a state machine of its own to
+--- nudge: `Application` polls once a frame, ahead of the world's update, so an
+--- atlas that arrives is registered before the pass that draws it runs.
+---
+--- The listener is the layout's wake, and one settlement is one call however
+--- many texts name the font, so a page that will not decode is reported once
+--- rather than every frame.
+local function startAtlas(install: Install, atlas: Atlas, font: Font, renderer: Renderer): Future<components.Sprite>
+    return assets.loadImage(font.atlas):map(
+        function(image: assets.Image): components.Sprite
+            local sprite <const>, region <const> = renderer:registerImage(image)
+            atlas.image = sprite.image
+            atlas.slot = sprite.slot
+            atlas.u = region.u1
+            atlas.v = region.v1
+            -- The material scales the field by how many screen pixels its
+            -- range covers, and it measures that in cell fractions, so the
+            -- range has to arrive as one. An atlas smaller than a cell
+            -- covers less of it, which is what the region reports.
+            atlas.param = font.distanceRange * region.u1 / font.atlasWidth
+            return sprite
+        end
+    ):onSettle(
+        function(settled: Future<components.Sprite>)
+            -- Reached for a raise inside the upload as well as for a page
+            -- the worker could not read, because `map` turns one into the
+            -- other rather than letting it escape into the frame.
+            if settled.status == "failed" then
+                logger:error("cannot load the font atlas '%s': %s", font.atlas, settled.error)
+            end
+            install.waiting = true
+        end
+    )
+end
+
+--- The font's atlas on this renderer, or nil while it decodes and after it fails.
+local function residency(install: Install, font: Font, renderer: Renderer): Atlas
+    local known <const> = install.known
+    local atlas = known[font]
+    if atlas == nil then
+        -- Already on the renderer answers without the worker. Re-reading a
+        -- font's metrics gives up this record and its derived fields, but the
+        -- atlas itself is untouched and still holds its layer, so decoding the
+        -- file again would end at `registerImage` handing back the region it
+        -- already had and releasing the fresh pixels undrawn. The text would
+        -- blank for the frames that took.
+        local resident <const> = renderer:regionOf(font.atlas)
+        if resident ~= nil then
+            local sprite <const> = renderer:sprite(font.atlas)
+            atlas = {
+                image = sprite.image,
+                slot = sprite.slot,
+                u = resident.u1,
+                v = resident.v1,
+                param = font.distanceRange * resident.u1 / font.atlasWidth,
+                pending = nil,
+            }
+            known[font] = atlas
+            return atlas
+        end
+
+        -- The worker is what decodes the atlas, and a game that only ever
+        -- draws text has no other reason to have started it.
+        if not assets.installed() then
+            assets.install()
+        end
+        -- Recorded before the load starts, and the load is what fills it. The
+        -- record is what makes this lazy resolve happen once: every later text
+        -- naming the font finds it here rather than starting a second decode.
+        atlas = {image = 0, slot = 0, u = 1.0, v = 1.0, param = 0.0, pending = nil}
+        known[font] = atlas
+        atlas.pending = startAtlas(install, atlas, font, renderer)
+    end
+
+    local decoding <const> = atlas.pending
+    if decoding == nil or decoding.status == "ready" then
+        return atlas
+    end
+    return nil
+end
+
+-------------------------------------------------------------------------------
 -- Re-reading a font
 -------------------------------------------------------------------------------
 
@@ -1172,27 +1197,23 @@ local installs <const>: {World: Install} = setmetatable(
 ---
 --- Everything in an `Atlas` is an answer to the metrics. The field's range
 --- arrives as a fraction of a cell, computed from `distanceRange` and the atlas
---- size, and a page that would not decode is remembered so a broken path is
---- reported once rather than every frame. A re-read is exactly the event that
---- makes both of those questions worth asking again, and the second is the more
---- interesting one: a font regenerated over a page that was missing has to be
---- able to come back.
+--- size, and the load that filled it remembers a page that would not decode. A
+--- re-read is exactly the event that makes both of those questions worth asking
+--- again, and the second is the more interesting one: a font regenerated over a
+--- page that was missing has to be able to come back.
 local function evict(install: Install, font: Font)
     local atlas = install.known[font]
     if atlas == nil then
         return
     end
-    -- A decode reached through this record and through nothing else, so it has
-    -- to be given back before the record goes. Which half of a load that is
-    -- falls on the status line: before it lands the decode is canceled, and
-    -- after it lands the pixels nobody uploaded are what has to be released.
+    -- A load reached through this record and through nothing else, so this
+    -- install's interest in it goes before the record does. One call covers both
+    -- halves: before the decode lands this gives it up, and the last install to
+    -- do so abandons it, while a load that already landed released its pixels
+    -- into the upload and cancel on it does nothing.
     local decoding = atlas.pending
     if decoding ~= nil then
-        if decoding.status == "ready" then
-            decoding.value:release()
-        else
-            decoding:cancel()
-        end
+        decoding:cancel()
     end
     install.known[font] = nil
 end
@@ -1291,25 +1312,28 @@ local function glyphMaterial(): integer
     return materialId
 end
 
---- Rewrites one text's glyph instances. False when its font has not arrived.
+--- Rewrites one text's glyph instances, or empties them until its font arrives.
+---
+--- A text left empty here keeps a stale build record, so the next pass that
+--- looks at it builds it again. What says to look is the atlas's own settlement,
+--- and a text with no font at all is never looked at again until something
+--- writes one.
 local function build(
     renderer: Renderer,
-    known: {Font: Atlas},
+    install: Install,
     glyphs: Glyphs,
     item: Text,
     transform: TransformInstance,
     tint: TintInstance,
     clip: integer
-): boolean
+)
     local font = item.font
-    local atlas = font ~= nil and residency(known, font, renderer) or nil
+    local atlas = font ~= nil and residency(install, font, renderer) or nil
     if atlas == nil then
         reserve(glyphs, item, 0)
         item.width = 0.0
         item.height = 0.0
-        -- A font that is absent or broken is settled; one still decoding is
-        -- not, and has to be looked at again.
-        return font == nil or known[font].failed
+        return
     end
 
     local r, g, b, a = 1.0, 1.0, 1.0, 1.0
@@ -1440,7 +1464,6 @@ local function build(
     item._builtRotation = rotation
     item._builtScaleX, item._builtScaleY = blockX, blockY
     item._builtClip = clip
-    return true
 end
 
 --- Whether `item` differs from what its glyphs were built from.
@@ -1502,7 +1525,6 @@ function text.textPlugin(options: TextOptions): function(World)
             waiting = false,
             reloaded = nil,
         }
-        local known <const> = install.known
         local glyphs <const> = install.glyphs
 
         installs[world] = install
@@ -1515,14 +1537,12 @@ function text.textPlugin(options: TextOptions): function(World)
                 after = {"RelativeTransform"},
                 run = function()
                     -- A font that has not arrived leaves its texts unbuilt and
-                    -- their archetypes clean, so the gate is held open until it
-                    -- does, and the decode is pumped meanwhile. A font just re-read
-                    -- holds it open for the same reason: its atlas was given up and
-                    -- has to be resolved again.
+                    -- their archetypes clean, so something other than a dirty
+                    -- column has to say to look at them. The atlas's own
+                    -- settlement is what says it, from the drain the application
+                    -- already pumps; a font just re-read says it too, because its
+                    -- atlas was given up and has to be resolved again.
                     local all = install.waiting
-                    if all then
-                        assets.update()
-                    end
                     install.waiting = false
                     -- Read once and dropped, because clearing what it marks is the
                     -- text's own build record and that survives until a build
@@ -1568,9 +1588,7 @@ function text.textPlugin(options: TextOptions): function(World)
                                 end
                                 if stale(item, transform, tint, clip) then
                                     built = built + 1
-                                    if not build(renderer, known, glyphs, item, transform, tint, clip) then
-                                        install.waiting = true
-                                    end
+                                    build(renderer, install, glyphs, item, transform, tint, clip)
                                     own(glyphs, entities[row] as integer, item)
                                 end
                             end
