@@ -71,7 +71,7 @@ local function binarySnapshot(component)
     world.pipeline.fixedAccumulator = nil
     world.pipeline.phaseStates = nil
 
-    local snapshot = assert(world:saveSnapshot({format = "table"}).snapshot)
+    local snapshot = assert(world:saveSnapshot({ format = "table" }).snapshot)
     assert(#snapshot.componentTable == 1)
     assert(#snapshot.archetypes == 1)
     assert(#snapshot.archetypes[1].columnIndices == 1)
@@ -149,7 +149,7 @@ writeSnapshot(
     "response-string-datastream.bin",
     http.plugin.Response({
         status = 201,
-        headers = {["content-type"] = "text/plain"},
+        headers = { ["content-type"] = "text/plain" },
         body = http.newStringStream("legacy response body", "text/plain"),
         url = "https://example.test/response",
     }),
