@@ -137,18 +137,6 @@ local function fraction(name: string, byDefault: number): number
     return parsed
 end
 
---- Resolve playback on the GPU rather than on the host.
----
---- The regime this changes is `dense` and `sparse`, and what it should change
---- is `rewritten`: a frame advancing stops being a write to the Sprite column,
---- so it stops rewriting every instance in the archetype. `churn` is untouched
---- either way, because what drives that one is the layout moving.
----
---- Unset follows the engine, which is what a game gets and is what this should
---- measure by default; the answer comes from `animation.usesGPU` rather than
---- from a copy of it here, so the two cannot drift apart again.
-local GPU <const> = switch("BENCH_GPU_ANIM", animation.usesGPU())
-
 --- Lay each archetype out in a run with room to grow rather than packing the
 --- runs end to end.
 ---
@@ -434,7 +422,6 @@ return tecs.newApplication(
                 }
             ):bind(resident)
 
-            animation.useGPU(GPU)
             if MODE ~= "static" then
                 animation.plugin(world)
             end
@@ -560,11 +547,8 @@ return tecs.newApplication(
                         -- Said again at the end, so a pasted report carries what it
                         -- was measuring rather than only what came out.
                         print(
-                            ("sprites: mode %s, playback on the %s, runs %s, rewrites %s"):format(
-                                MODE,
-                                GPU and "GPU" or "host",
-                                RESERVE and "reserved" or "packed",
-                                PARTIAL and "partial" or "whole-run"
+                            ("sprites: mode %s, runs %s, rewrites %s"):format(
+                                MODE, RESERVE and "reserved" or "packed", PARTIAL and "partial" or "whole-run"
                             )
                         )
                         -- The first number is the extent the cull is dispatched
@@ -598,11 +582,10 @@ return tecs.newApplication(
 
             print(
                 (
-                    "sprites: mode %s, playback on the %s, runs %s in %d slots, "
+                    "sprites: mode %s, runs %s in %d slots, "
                     .. "rewrites %s, viewport %dx%d, measuring %d frames after %d warmup"
                 ):format(
                     MODE,
-                    GPU and "GPU" or "host",
                     RESERVE and "reserved" or "packed",
                     TOTAL + HEADROOM,
                     PARTIAL and "partial" or "whole-run",

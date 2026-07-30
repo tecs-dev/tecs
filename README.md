@@ -2336,46 +2336,19 @@ That second fraction is the renderer's answer, so `sheet:bind` takes what
 Before it, a frame's region is its plain fraction of the image, which is what a
 sheet can say without a renderer and what makes one testable headless.
 
-There are two paths from an `Animation` to a picture and `animation.useGPU`
-chooses between them. The rest of this section is the host one, which walks every
-playing animation on every fixed step and writes the frame's region into the
-entity's `Sprite`; the section after it is the one that defaults on, which writes
-what is playing and lets the shader work the frame out. They agree on the frame
-and differ on what they write to reach it.
+Playback is quantized to the fixed step and never to frame time, because
+animation is simulation: two machines fed the same recording have to show the
+same frame, and anything driven by frame time shows a different one on the
+machine that drew more frames. So the clock playback reads is the world's count
+of completed fixed steps rather than a sum of seconds, and every frame drawn
+inside one step shows the same animation frame.
 
-Playback advances in `FixedPostUpdate`, not per frame, because animation is
-simulation: two machines fed the same recording have to show the same frame,
-and a system driven by frame time shows a different one on the machine that
-drew more frames. The system is handed the fixed step and never reads a clock.
-`FixedPostUpdate` is late enough that gameplay logic in `FixedUpdate` has
-already chosen what should be playing.
-
-`Animation.frame` is the frame the `Sprite` was last written from, which is
-what turns the write into a gate: a step that leaves an entity on the frame it
-was already showing writes nothing, and an archetype where no frame changed
-leaves its `Sprite` column clean for the sync to skip. So the column is taken
-with `getMut` the first time a row is actually written and not before, and
-`Animation` and `Sprite` are gated separately: time moves every step, regions
-do not. Zero means nothing has been written yet, which is how a fresh or
-restored animation gets its region on the first step rather than drawing
-whatever its `Sprite` held.
-
-That same field is what keeps a still sprite cheap. A row whose time did not
-move shows the frame it already showed, so the step asks the sheet nothing:
-only time advancing, a row that has never had a frame, and a sheet bound to
-another image since the row was written send it down the long path, and all
-three are comparisons where the long path is a scan of the tag's cycle and a
-handful of writes. Without it a world where a hundredth of the sprites animate
-costs nearly what one where all of them do costs. The gate above it is still per
-archetype per component, so one playing animation marks the column every still
-sprite beside it lives in: this cuts the walk, not the rewrite.
-
-A frame is a region of an image, not a region on its own, so a step that
-writes one writes the layer with it. Which layer is compared rather than
-assumed to follow the frame index: a sheet swapped under an entity can land on
-the index the last one left behind, and the quad would go on sampling the old
-image with the new rect. A sheet with no image bound writes the region alone
-and leaves the `Sprite` whatever it carried.
+A frame is a region of an image and not a region on its own, so the layer it
+lives on belongs to the frame as much as the rect does. Both are the frame
+table's rather than the entity's, which is what makes a sheet rebound to another
+image cost one table and no instances at all: an entity carrying a resolved
+region would go on sampling the layer the image left with the rect it landed on.
+A sheet with no image bound says so, and the quad keeps whatever layer it had.
 
 A tag that does not loop parks on its last frame, stops, and emits
 `animation.Completed`; a looping one wraps and emits `animation.Looped`. Both
@@ -2390,25 +2363,26 @@ it, emitting `Completed` each time. `animation.restart` is the explicit form
 and also rewinds one that has not finished; `animation.play` is for pointing an
 entity at a different sheet or tag.
 
-## Playback on the GPU
+## Playback resolves in the shader
 
-The gate above cuts the walk and not the rewrite, and the rewrite is what
-decides whether a large animated scene is affordable. One animating sprite marks
-the `Sprite` column of the archetype it lives in, and a dirty column has its
-whole run rewritten and uploaded, so two thousand animating sprites in a field
-of two hundred thousand cost two hundred thousand instances written. That is
-measured rather than argued: `cargo xtask bench sprites` reports it as `rewritten`, and
-the sparse regime exists to show it.
+The arrangement this one is measured against is a system that walks every playing
+animation on every fixed step and writes the frame's region into the entity's
+`Sprite`. It cannot reach a large animated scene, and the reason is the dirty
+gate rather than the walk: one animating sprite marks the `Sprite` column of the
+archetype it lives in, a dirty column has its whole run rewritten and uploaded,
+and two thousand animating sprites in a field of two hundred thousand therefore
+cost two hundred thousand instances written. That is measured rather than argued:
+`cargo xtask bench sprites` reports it as `rewritten`, and the sparse regime
+exists to show it.
 
-Playback therefore resolves in the shader, which is what `animation.useGPU`
-selects and what it defaults to. The instance's region fields stop carrying a
-region and start carrying enough to compute one: which animation is playing, the
-fixed step it began on, and how many ticks of clip time it advances per step. A
-frame changing then writes nothing at all, and what a step costs is what actually
-changed rather than what is shaped like it. At two hundred thousand sprites all
-animating, `rewritten` goes from a mean of eighty-five thousand per frame to
-zero, and the frame time lands on what a scene of the same size that never
-animates costs.
+Playback therefore resolves in the shader. The instance's region fields stop
+carrying a region and start carrying enough to compute one: which animation is
+playing, the fixed step it began on, and how many ticks of clip time it advances
+per step. A frame changing then writes nothing at all, and what a step costs is
+what actually changed rather than what is shaped like it. At two hundred thousand
+sprites all animating, `rewritten` is zero against a mean of eighty-five thousand
+a frame for writing the regions on the host, and the frame time lands on what a
+scene of the same size that never animates costs.
 
 What makes it fit in the instance is that it needs no room. A region is four
 floats and a playback is four floats, and no region is ever negative, so the
@@ -2427,12 +2401,11 @@ directory read, one tick read, one region read, and no loop. A scan of
 cumulative durations would cost the length of the tag, in the vertex shader,
 once per vertex, for every pass that draws the sprite.
 
-The clock is the world's count of fixed steps, from `world:fixedStepCount`,
-carried in the frame packet and pushed in the spare component of the layer
-uniform. Steps rather than seconds is what keeps playback on the simulation's
-clock: two machines fed the same steps show the same frame however many frames
-either drew, which is the property the host path has and the reason it runs in
-`FixedPostUpdate`. It also costs no binding and no second push, because that
+The clock is a count of fixed steps, carried in the frame packet and pushed in
+the spare component of the layer uniform. Steps rather than seconds is what keeps
+playback on the simulation's clock: two machines fed the same steps show the same
+frame however many frames either drew, and every frame drawn inside one step
+resolves the same one. It also costs no binding and no second push, because that
 block is already sent every frame.
 
 Resolution lives in `assets/shaders/include/playback.glsl` rather than in the
@@ -2492,6 +2465,42 @@ an entity to another archetype and a move marks every component on the
 destination dirty, so the freeze and the thaw both arrive at the encoder without
 anything having to notice them.
 
+### The clock comes round
+
+Both quantities the shader multiplies have a ceiling, because both are floats. A
+float32 names every integer up to 2^24, which is 77 hours of steps at sixty
+hertz, so a clock that only ever grew would eventually stop naming every step.
+And the ticks a row is into its cycle are the difference between the clock and
+the row's start step times a rate, which a float32 resolves to a whole
+millisecond only while the product stays under the same 2^24, about four and a
+half hours of one animation playing. Past that a boundary lands a tick late, then
+two, then a whole step. A game left running all day drifts and then stutters.
+
+So `tecs.RebaseAnimation` moves the clock's origin up to the step the world has
+reached, every `frametable.REBASE_STEPS`, and rewrites every animated row's start
+step against the new origin. That is two and a half hours of uptime at sixty
+hertz, one rewrite of the animated rows on the update it happens, and nothing on
+any update either side of it.
+
+Subtracting a constant from the clock and from every start step is the version
+that suggests itself, and it moves the growth rather than removing it: the start
+steps go as far below zero as the clock was above it and lose exactly the
+resolution the rebase was for. What makes it work is that a cycle repeats. The
+rebase folds each row's phase into its own cycle before re-anchoring it, which is
+invisible because whole cycles are what the shader's own wrap takes off anyway,
+and the elapse a row carries is then bounded by the period instead of by the
+world's age. That is also what sets the period: `REBASE_STEPS` times a rate has
+to stay inside the exact range, which holds to about twice the authored speed at
+sixty hertz and quantises in proportion to the rate above that rather than in
+proportion to how long the game has been on.
+
+The origin lives with the encoding, in `frametable`, because a start step and the
+clock it is subtracted from have to share one, and it is per world since a start
+step is written into a row of one world. Extraction publishes `frametable.clockOf`
+rather than `world:fixedStepCount`, so the world's own count stays what it claims
+to be, a number of steps that only increases, and the only clock that comes round
+is the one playback measures against.
+
 ### The pivot that follows a moving slice
 
 A pivot bound to a slice moves as the frame does, and the host cannot fold it
@@ -2538,20 +2547,15 @@ on the archetypes a game cares most about.
 same tick tables the shader reads, through the `Sheet:frameAt` that already
 exists. No walk, no column and no readback. A few hundred calls a step is free;
 it stops being free somewhere in the tens of thousands, which is a game asking a
-question this is the wrong shape for. Both answer from wherever the path they are
-on keeps the answer, so a case that asks which frame is showing reads the same on
-either side of the flag.
+question this is the wrong shape for.
 
-The two paths anchor a fresh entity's cycle to the same step and agree frame for
-frame, except within a millisecond of a boundary: one reaches the boundary by
-accumulating a step at a time and the other by multiplying a step count, and
-which side of it they land on is then a last-place difference. That is a display
-difference of well under a fixed step and it cannot reach simulation, because
-gameplay reads `frameOf` rather than the GPU's answer.
+That these two answer the same thing is the one agreement worth a spec, and one
+walks every tick of every tag holding the tick table to `Sheet:frameAt`. Two GPUs
+can still disagree by a last place on the multiply that turns a step count into
+ticks, which moves a boundary by at most a tick and only for an entity sitting on
+one. That is a display difference of well under a fixed step and it cannot reach
+simulation, because gameplay reads `frameOf` rather than the shader's answer.
 
-`animation.useGPU(false)` puts playback back on the host, for a world that wants
-events and frame queries without opting in or recomputing and is small enough to
-pay a walk of every animation on every step.
 `../tecs-plans/gpu-animation.md` is the design.
 
 ## Buffer writes

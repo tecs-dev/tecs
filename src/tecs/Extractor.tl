@@ -38,6 +38,7 @@ local FramePacket <const> = require("tecs.FramePacket")
 local components <const> = require("tecs.components")
 local layers <const> = require("tecs.gfx.layers")
 local sheet <const> = require("tecs.gfx.sheet")
+local frametable <const> = require("tecs.gfx.frametable")
 local timing <const> = require("tecs.timing")
 local instancelayout <const> = require("tecs.gpu.instancelayout")
 
@@ -1476,8 +1477,10 @@ function Extractor:extract(packet: FramePacket)
 
     -- Read once and carried, so every pass drawing this frame resolves an
     -- animation against the same step. Whole steps rather than seconds, which
-    -- is what keeps playback on the simulation's clock rather than the frame's.
-    packet.stepClock = self._world:fixedStepCount()
+    -- is what keeps playback on the simulation's clock rather than the frame's,
+    -- and steps since the clock's origin rather than since the world was made,
+    -- because that is the origin the start step in an instance is measured from.
+    packet.stepClock = frametable.clockOf(self._world)
 
     syncInstances(self, packet)
     syncLights(self, packet)
