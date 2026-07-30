@@ -2801,8 +2801,51 @@ how tall a shape is drawn and nothing about how far it stands out of the plane.
 A shape is taken to swell with itself, which makes the scale drop out.
 
 No attachment was added for this. The normal target already existed and was
-already being written, with a constant; four color attachments is what a
-render pass allows and the G-buffer is using two of them.
+already being written, with a constant.
+
+### Emission is a third attachment, and a material's answer
+
+A surface that gives off light is not a surface a light reaches, so emission
+needed somewhere to live that lighting reads rather than writes. Nothing was
+spare: the albedo's alpha is carried through to the composite and the normal's
+alpha is the lit flag, so both existing attachments are spent. It went into a
+third color target of its own, which is three of the four a render pass allows
+and leaves exactly one for the surface properties a physically based term wants.
+The cost is one more full frame-sized RGBA8 target, about 8 MB at 1080p, four
+more bytes written per covered fragment and one more texture fetch per pixel in
+the resolve.
+
+An attachment rather than a scalar packed into the spare bits of the normal's
+alpha, because a glow's color is not its albedo. A lamp's glass is grey and
+glows warm, and reconstructing emission from the albedo would make every
+emissive surface glow in its own diffuse color.
+
+The attachment holds a color and a strength rather than one premultiplied
+color, and that is not the redundancy it looks like at eight bits a channel:
+premultiplying a dim warm glow quantises its hue away, while a color plus a
+strength keeps eight bits of each.
+
+Emission is added to the resolved pixel rather than multiplied into it, past
+the ambient, past every light and past the drop shadow, on both sides of the
+unlit branch. That is what separates it from a material asking not to be lit,
+which replaces the lighting with the albedo instead of adding to it. A lamp can
+therefore be lit and glowing at once, and a glowing sign is as bright in the
+dark as under a light, which is the whole of what makes it a sign.
+
+What says a thing emits is its material, not a component. That is what the
+previous engine did, and it costs nothing here: the instance record is four
+vec4s with no spare lane, and a component would have widened it for every
+entity in the world to carry something almost none of them have anything to say
+about. A material reads `frag.param` and `frag.color` for per-entity strength
+and color, and `materials.addRoot` and `materials.define` are how a game brings
+its own. Per-texel emission is a sidecar image, which is the same piece of work
+a normal map is.
+
+The forward blended lane adds its own emission to its own color and writes no
+attachment. It cannot write one: it runs after the G-buffer has been resolved,
+which is the price of the lane. So a translucent emitter glows, scaled by its
+alpha along with everything else, and it will not reach a later pass that reads
+the attachment.
 
 ### Lights are binned into tiles
 
