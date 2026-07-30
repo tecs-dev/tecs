@@ -410,8 +410,11 @@ function coroutines.parkOn(world: World, awaited: any, timeoutMs: number)
     if state.timedOut then
         state.timedOut = false
         error(
-            "tecs: coroutine system '" .. state.name .. "' timed out after "
-                .. tostring(timeoutMs) .. "ms waiting here",
+            "tecs: coroutine system '"
+                .. state.name
+                .. "' timed out after "
+                .. tostring(timeoutMs)
+                .. "ms waiting here",
             3
         )
     end

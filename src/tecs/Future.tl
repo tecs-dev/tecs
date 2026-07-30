@@ -855,8 +855,12 @@ function Future:yield(world: World, timeoutMs?: number): T
     -- the same sentence.
     local name <const> = coroutines.runningName()
     error(
-        "tecs: coroutine system '" .. (name or "?") .. "' yielded on a future that " .. status
-            .. ": " .. (self.error or status),
+        "tecs: coroutine system '"
+            .. (name or "?")
+            .. "' yielded on a future that "
+            .. status
+            .. ": "
+            .. (self.error or status),
         2
     )
 end

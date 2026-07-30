@@ -32,11 +32,9 @@ describe(
                     "refuses a system with neither run nor coroutine",
                     function()
                         local world <const> = tecs.ecs.newWorld()
-                        luassert.has_error(
-                            function()
-                                world:addSystem({name = "empty", phase = tecs.ecs.phases.Update})
-                            end
-                        )
+                        luassert.has_error(function()
+                            world:addSystem({name = "empty", phase = tecs.ecs.phases.Update})
+                        end)
                     end
                 )
 
@@ -44,16 +42,14 @@ describe(
                     "refuses a system with both run and coroutine",
                     function()
                         local world <const> = tecs.ecs.newWorld()
-                        luassert.has_error(
-                            function()
-                                world:addSystem({
-                                    name = "both",
-                                    phase = tecs.ecs.phases.Update,
-                                    run = function() end,
-                                    coroutine = function() end,
-                                })
-                            end
-                        )
+                        luassert.has_error(function()
+                            world:addSystem({
+                                name = "both",
+                                phase = tecs.ecs.phases.Update,
+                                run = function() end,
+                                coroutine = function() end,
+                            })
+                        end)
                     end
                 )
 
@@ -78,19 +74,16 @@ describe(
                             local world <const> = tecs.ecs.newWorld()
                             local phase <const> = denied[i][1] as tecs.Phase
                             local name <const> = denied[i][2] as string
-                            local ok <const>, err <const> = pcall(
-                                function()
-                                    world:addSystem({
-                                        name = "parked",
-                                        phase = phase,
-                                        coroutine = function(w: World) w:yield() end,
-                                    })
-                                end
-                            )
+                            local ok <const>, err <const> = pcall(function()
+                                world:addSystem({
+                                    name = "parked",
+                                    phase = phase,
+                                    coroutine = function(w: World) w:yield() end,
+                                })
+                            end)
                             luassert.is_false(ok, name .. " should refuse a coroutine system")
                             luassert.is_truthy(
-                                (tostring(err)):find(name, 1, true),
-                                name .. " should be named in its own rejection"
+                                (tostring(err)):find(name, 1, true), name .. " should be named in its own rejection"
                             )
                         end
                     end
@@ -122,15 +115,13 @@ describe(
                     "leaves the name free after refusing a denied phase",
                     function()
                         local world <const> = tecs.ecs.newWorld()
-                        pcall(
-                            function()
-                                world:addSystem({
-                                    name = "taken",
-                                    phase = tecs.ecs.phases.Render,
-                                    coroutine = function(w: World) w:yield() end,
-                                })
-                            end
-                        )
+                        pcall(function()
+                            world:addSystem({
+                                name = "taken",
+                                phase = tecs.ecs.phases.Render,
+                                coroutine = function(w: World) w:yield() end,
+                            })
+                        end)
                         world:addSystem({
                             name = "taken",
                             phase = tecs.ecs.phases.Update,
@@ -175,11 +166,7 @@ describe(
                         world:addSystem({
                             name = "timing",
                             phase = tecs.ecs.phases.Update,
-                            coroutine = function(w: World)
-                                while true do
-                                    seen[#seen + 1] = w:yield()
-                                end
-                            end,
+                            coroutine = function(w: World) while true do seen[#seen + 1] = w:yield() end end,
                         })
 
                         world:update(0.25)
@@ -197,12 +184,7 @@ describe(
                         world:addSystem({
                             name = "sleeping",
                             phase = tecs.ecs.phases.Update,
-                            coroutine = function(w: World)
-                                while true do
-                                    ticks = ticks + 1
-                                    w:yield(0.5)
-                                end
-                            end,
+                            coroutine = function(w: World) while true do ticks = ticks + 1; w:yield(0.5) end end,
                         })
 
                         frames(world, 1, 0.1)
@@ -224,12 +206,7 @@ describe(
                             name = "gated",
                             phase = tecs.ecs.phases.Update,
                             runIf = function(): boolean return gate end,
-                            coroutine = function(w: World)
-                                while true do
-                                    ticks = ticks + 1
-                                    w:yield(0.5)
-                                end
-                            end,
+                            coroutine = function(w: World) while true do ticks = ticks + 1; w:yield(0.5) end end,
                         })
 
                         frames(world, 10, 0.1)
@@ -260,10 +237,7 @@ describe(
                         world:addSystem({
                             name = "awaiting",
                             phase = tecs.ecs.phases.Update,
-                            coroutine = function(w: World)
-                                got = future:yield(w)
-                                finished = true
-                            end,
+                            coroutine = function(w: World) got = future:yield(w); finished = true end,
                         })
 
                         frames(world, 3)
@@ -288,9 +262,7 @@ describe(
                             name = "recovering",
                             phase = tecs.ecs.phases.Update,
                             coroutine = function(w: World)
-                                local ok <const>, err <const> = pcall(function(): string
-                                    return future:yield(w)
-                                end)
+                                local ok <const>, err <const> = pcall(function(): string return future:yield(w) end)
                                 if not ok then
                                     caught = tostring(err)
                                 end
@@ -319,9 +291,7 @@ describe(
                             name = "abandoned",
                             phase = tecs.ecs.phases.Update,
                             coroutine = function(w: World)
-                                local ok <const>, err <const> = pcall(function(): string
-                                    return future:yield(w)
-                                end)
+                                local ok <const>, err <const> = pcall(function(): string return future:yield(w) end)
                                 if not ok then
                                     caught = tostring(err)
                                 end
@@ -392,10 +362,7 @@ describe(
                         world:addSystem({
                             name = "timings",
                             phase = tecs.ecs.phases.Update,
-                            coroutine = function(w: World)
-                                plain = w:yield()
-                                slept = w:yield(0.05)
-                            end,
+                            coroutine = function(w: World) plain = w:yield(); slept = w:yield(0.05) end,
                         })
 
                         frames(world, 1)
@@ -486,10 +453,7 @@ describe(
                         world:addSystem({
                             name = "patient",
                             phase = tecs.ecs.phases.Update,
-                            coroutine = function(w: World)
-                                future:yield(w, 10000)
-                                ok = true
-                            end,
+                            coroutine = function(w: World) future:yield(w, 10000); ok = true end,
                         })
 
                         frames(world, 5)
@@ -513,12 +477,7 @@ describe(
                         world:addSystem({
                             name = "task",
                             phase = tecs.ecs.phases.Update,
-                            coroutine = function(w: World)
-                                for _ = 1, 3 do
-                                    steps = steps + 1
-                                    w:yield()
-                                end
-                            end,
+                            coroutine = function(w: World) for _ = 1, 3 do steps = steps + 1; w:yield() end end,
                         })
 
                         frames(world, 10)
@@ -555,10 +514,7 @@ describe(
                         world:addSystem({
                             name = "raising",
                             phase = tecs.ecs.phases.Update,
-                            coroutine = function(w: World)
-                                w:yield()
-                                error("deliberate")
-                            end,
+                            coroutine = function(w: World) w:yield(); error("deliberate") end,
                         })
 
                         frames(world, 1)
@@ -583,10 +539,7 @@ describe(
                         world:addSystem({
                             name = "raising",
                             phase = tecs.ecs.phases.Update,
-                            coroutine = function(w: World)
-                                w:yield()
-                                error("deliberate")
-                            end,
+                            coroutine = function(w: World) w:yield(); error("deliberate") end,
                         })
                         world:addSystem({
                             name = "following",
@@ -598,9 +551,7 @@ describe(
                         frames(world, 1)
                         pcall(function() world:update(FRAME) end)
                         luassert.has_error(
-                            function() world:removeSystem("raising") end,
-                            nil,
-                            "the failed body is already gone"
+                            function() world:removeSystem("raising") end, nil, "the failed body is already gone"
                         )
 
                         after = 0
@@ -618,12 +569,7 @@ describe(
                         world:addSystem({
                             name = "doomed",
                             phase = tecs.ecs.phases.Update,
-                            coroutine = function(w: World)
-                                while true do
-                                    ticks = ticks + 1
-                                    w:yield()
-                                end
-                            end,
+                            coroutine = function(w: World) while true do ticks = ticks + 1; w:yield() end end,
                         })
 
                         frames(world, 2)
@@ -762,9 +708,7 @@ describe(
                             name = "worldless",
                             phase = tecs.ecs.phases.Update,
                             coroutine = function(_w: World)
-                                local ok <const>, err <const> = pcall(function()
-                                    return future:yield(nil)
-                                end)
+                                local ok <const>, err <const> = pcall(function() return future:yield(nil) end)
                                 if not ok then
                                     caught = tostring(err)
                                 end
