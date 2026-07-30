@@ -30,6 +30,7 @@ loader.declare("http")
 local copy <const> = ffi.copy
 local floor <const> = math.floor
 local max <const> = math.max
+local protect <const> = pcall
 local removeAt <const> = table.remove
 
 local H <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "http")
@@ -416,17 +417,27 @@ local function completeTransfer(
     response.status = status
     response.headers = parseHeaders(rawHeaders)
     response.url = effectiveUrl ~= "" and effectiveUrl or transfer.url
-    if transfer.sink ~= nil then
-        response.body = stream.withMetadata(
-            transfer.sink, response.headers["content-type"], transfer.transferred
-        ) as Stream
-    else
+    local prepared <const>, body = protect(function(): Stream
+        if transfer.sink ~= nil then
+            return stream.withMetadata(transfer.sink, response.headers["content-type"], transfer.transferred) as Stream
+        end
         if transfer.responseBuffer == nil then
             transfer.responseBuffer = stream.newBuffer()
         end
-        response.body = stream.newBufferStream(transfer.responseBuffer, response.headers["content-type"]) as Stream
+        local buffered <const> = stream.newBufferStream(
+            transfer.responseBuffer, response.headers["content-type"]
+        ) as Stream
         transfer.responseBuffer = nil
+        return buffered
+    end) as (boolean, any)
+    if not prepared then
+        releaseResponseBuffers(transfer)
+        transfer.future:fail(
+            ("tecs: %s: response body could not be finalized: %s"):format(transfer.url, tostring(body))
+        )
+        return
     end
+    response.body = body as Stream
     if transfer.responseScratch ~= nil then
         transfer.responseScratch:release()
         transfer.responseScratch = nil
@@ -743,7 +754,7 @@ function Client:send(request: Request): Future<Response>
     local method <const> = (request.method or "GET"):upper()
     local carries <const> = method == "POST" or method == "PUT" or method == "PATCH"
     local bodyKind = BODY_NONE
-    local bodyLength = -1
+    local bodyLength = 0
     if bodyText ~= nil then
         bodyKind = BODY_INLINE
         bodyLength = #bodyText
@@ -872,6 +883,8 @@ function Client:close()
     if self._pumping then
         error("tecs: cannot close an http client from inside its own pump", 2)
     end
+    local handle <const> = self._handle
+    self._handle = nil
     clients.remove(self as clients.Pumpable)
 
     local live: {Transfer} = {}
@@ -880,7 +893,7 @@ function Client:close()
     end
     for index = 1, #live do
         local transfer <const> = live[index]
-        H.tecsHttpClientCancel(self._handle, transfer.id)
+        H.tecsHttpClientCancel(handle, transfer.id)
         release(self, transfer)
         closeSource(transfer)
         finishWriter(transfer, false)
@@ -888,8 +901,7 @@ function Client:close()
         transfer.future:abandon("the http client was closed")
     end
 
-    H.tecsHttpClientDestroy(self._handle)
-    self._handle = nil
+    H.tecsHttpClientDestroy(handle)
     self._uploadOrder = {}
     self._uploadCursor = 1
     self._pending = 0

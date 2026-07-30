@@ -554,6 +554,17 @@ describe("http.newClient", function()
         owned:release()
     end)
 
+    it("rejects nonzero Content-Length when the request has no body", function()
+        local pending = client:send({
+            url = url("/missing-body"),
+            headers = { ["Content-Length"] = "5" },
+        })
+
+        assert.are.equal("failed", pending.status)
+        assert.is_truthy(pending.error:find("but the request body contains 0 bytes", 1, true))
+        assert.are.equal(0, client:pending())
+    end)
+
     it("rejects malformed Content-Length before opening an upload", function()
         local source = chunkSource(BODY, 5)
         local opened = 0
@@ -734,6 +745,38 @@ describe("http.newClient", function()
         assert.are.equal("failed", closeFuture.status)
         assert.is_truthy(closeFuture.error:find("writer close boom", 1, true))
         closingBuffer:release()
+    end)
+
+    it("fails when destination metadata raises only after completion", function()
+        local sink, received = partialSink(3)
+        local completed = false
+        local newWriter = sink.newWriter
+        function sink:newWriter()
+            local writer = newWriter(self)
+            local close = writer.close
+            function writer:close()
+                local ok, reason = close(self)
+                completed = true
+                return ok, reason
+            end
+            return writer
+        end
+        function sink:contentType()
+            if completed then
+                error("destination metadata boom")
+            end
+            return nil
+        end
+
+        local pending = client:send({ url = url("/destination-metadata-boom"), into = sink })
+        drive(pending, function()
+            server:respond(200, "OK", BODY, "application/octet-stream")
+        end)
+
+        assert.are.equal("failed", pending.status)
+        assert.are.equal(0, client:pending())
+        assert.is_truthy(pending.error:find("destination metadata boom", 1, true))
+        received:release()
     end)
 
     it("preserves the primary transfer failure when Writer cleanup raises", function()
@@ -997,6 +1040,27 @@ describe("http.newClient", function()
         assert.has_error(function()
             client:send({ url = url("/after-close") })
         end)
+    end)
+
+    it("rejects a transfer started by a listener during close", function()
+        local pending = client:send({ url = silentUrl("/close-listener") })
+        local sent
+        pending:onSettle(function()
+            sent = {
+                pcall(function()
+                    return client:send({ url = silentUrl("/reentrant-close-send") })
+                end),
+            }
+        end)
+
+        client:close()
+
+        assert.are.equal("canceled", pending.status)
+        assert.is_false(sent[1])
+        assert.is_truthy(tostring(sent[2]):find("client is closed", 1, true))
+        assert.are.equal(0, client:pending())
+        assert.is_nil(next(client._byId))
+        assert.is_nil(next(client._byFuture))
     end)
 
     it("refuses to be pumped from inside its own pump", function()
