@@ -78,6 +78,10 @@ local record ecs
     type ScalarComponent<T> = types.components.ScalarComponent<T>
     --- `ComponentOptions` configures a table component.
     type ComponentOptions<C is Component> = types.components.ComponentOptions<C>
+    --- `ContainerComponentOptions` supplies an existing component container
+    --- to a component factory.
+    type ContainerComponentOptions<C is Component> =
+        types.components.ContainerComponentOptions<C>
     --- `FFIComponentOptions` configures an FFI component.
     type FFIComponentOptions<C is Component> = types.components.FFIComponentOptions<C>
     --- `ScalarComponentOptions` configures a scalar
