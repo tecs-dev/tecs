@@ -9,7 +9,7 @@
 -- each with the license behind it, and this holds the builder to the
 -- declaration.
 --
--- Five checks, in increasing order of what they are good for:
+-- Eight checks, in increasing order of what they are good for:
 --
 --  * Every option in the declaration is set in the Cargo builder to the value the
 --    declaration requires. Flipping one fails here.
@@ -27,6 +27,18 @@
 --    the one compliance failure this engine is capable of committing.
 --  * Every package pinned in Cargo.lock is named there too. Cargo is a second
 --    dependency graph, not an exception to the notice rule.
+--  * Every dependency the notices are written for is still pinned. The four
+--    above all read the source of truth and ask the notices about it, so a
+--    notice outlives the pin it describes and nothing notices: the entry costs
+--    nothing to keep and reads as current for as long as it survives.
+--  * Every crate the notices name is still in the lockfile, which is the same
+--    question asked of Cargo.
+--  * Every exception is still true. This is the one worth having, because a
+--    wrong exception is worse than a missing notice: `TOOLING_ONLY` and
+--    `BUILD_ONLY_CRATES` each turn a check off, so an entry that has stopped
+--    being true suppresses the check it was written to skip. The Cargo half
+--    walks the lockfile out from `tecs-native` and fails on an excluded package
+--    a product reaches.
 --
 -- What this cannot catch, stated plainly, because a guard that overstates
 -- itself is worse than none:
@@ -46,6 +58,12 @@
 --    packaged build is held to this.
 --  * It is about what gets linked. An LGPL asset, or a tool invoked as a
 --    separate process, is outside everything here.
+--  * The reverse checks read the notices at the granularity a pin has: a
+--    section under "Linked by a build" and a crate name in the Cargo inventory.
+--    Everything the notices name inside a pinned project, HIDAPI inside SDL3
+--    and glslang's six licenses inside glslang, is prose a person wrote from
+--    that project's own files, and a revision bump that drops one leaves the
+--    paragraph standing.
 
 local function readFile(path)
     local handle = assert(io.open(path, "r"), "cannot read " .. path)
@@ -140,8 +158,12 @@ local NOTICE_NAMES = {
 -- These are Cargo build dependencies, not code linked into a product. The
 -- lockfile is workspace-wide, so the runtime-only check has to name the
 -- packages that enter through build-support and xtask.
+--
+-- Every entry here is an assertion that the package ships nothing, and the
+-- reverse check below holds it to that by walking the lockfile out from
+-- `tecs-native`. An entry the walk reaches is the failure this table can cause:
+-- a shipped dependency whose notice nothing asks for.
 local BUILD_ONLY_CRATES = {
-    ["aho-corasick"] = true,
     anyhow = true,
     ["block-buffer"] = true,
     ["crypto-common"] = true,
@@ -150,22 +172,40 @@ local BUILD_ONLY_CRATES = {
     fastrand = true,
     ["generic-array"] = true,
     ["linux-raw-sys"] = true,
-    regex = true,
-    ["regex-automata"] = true,
-    ["regex-syntax"] = true,
     rustix = true,
     serde_spanned = true,
     sha2 = true,
     tempfile = true,
-    tinyvec = true,
-    tinyvec_macros = true,
     toml = true,
     toml_datetime = true,
     toml_parser = true,
     toml_writer = true,
-    ["unicode-normalization"] = true,
     version_check = true,
     winnow = true,
+}
+
+-- The sections of `THIRD_PARTY_NOTICES.md` under "Linked by a build" that
+-- describe more than one pinned revision, so a heading of their own answers to
+-- no single one. Every other heading there names something the build pins, and
+-- the reverse check holds it to that.
+--
+-- This covers only that part of the file. The notices also name material
+-- vendored inside a pinned project, HIDAPI inside SDL3 and dr_mp3 inside
+-- SDL3_mixer, and material checked into this repository, and neither is a pin
+-- for anything here to look for.
+local AGGREGATE_SECTIONS = {
+    ["SDL"] = true,
+    ["Rust native build foundation"] = true,
+    ["What SDL3_mixer decodes"] = true,
+}
+
+-- The workspace's own crates, which no notice covers. `tecs-native` is the one
+-- a product links, so it is also the root the lockfile is walked from.
+local RUNTIME_CRATE = "tecs-native"
+local WORKSPACE_CRATES = {
+    [RUNTIME_CRATE] = true,
+    ["tecs-build-support"] = true,
+    ["tecs-xtask"] = true,
 }
 
 describe("the license position", function()
@@ -177,6 +217,64 @@ describe("the license position", function()
     local settings = {}
     for option, value in product:gmatch('"%s*-D([%w_]+)=([%w_]+)"') do
         settings[option] = value
+    end
+
+    -- Every native dependency the builder pins, under the name its constant
+    -- carries. Both directions read this, so it is parsed once.
+    local pins = {}
+    for tag in product:gmatch("pub const ([%w_]+)_REVISION") do
+        pins[tag] = true
+    end
+
+    -- Every package the lockfile resolves, and the dependency edges between
+    -- them, so a package can be asked whether a product reaches it at all.
+    local packages = {}
+    local edges = {}
+    do
+        local current = nil
+        local readingDependencies = false
+        for line in cargoLock:gmatch("[^\n]+") do
+            local name = line:match('^name = "([^"]+)"')
+            if line == "[[package]]" then
+                current = nil
+                readingDependencies = false
+            elseif name then
+                packages[name] = true
+                current = {}
+                edges[name] = current
+            elseif line == "dependencies = [" then
+                readingDependencies = true
+            elseif readingDependencies then
+                if line == "]" then
+                    readingDependencies = false
+                elseif current then
+                    -- An entry is `"name"` or `"name version"` when the name
+                    -- alone is ambiguous.
+                    local dependency = line:match('^%s*"([^" ]+)')
+                    if dependency then
+                        table.insert(current, dependency)
+                    end
+                end
+            end
+        end
+    end
+
+    -- What a product's own crate reaches through the lockfile. The edges are
+    -- recorded whatever target or feature selects them, so this is every
+    -- package a release of some target compiles, which is what the notices
+    -- have to cover.
+    local reachable = {}
+    do
+        local frontier = { RUNTIME_CRATE }
+        while #frontier > 0 do
+            local name = table.remove(frontier)
+            if not reachable[name] then
+                reachable[name] = true
+                for _, dependency in ipairs(edges[name] or {}) do
+                    table.insert(frontier, dependency)
+                end
+            end
+        end
     end
 
     it("sets every option a license hangs on, to the value it has to hold", function()
@@ -220,7 +318,7 @@ describe("the license position", function()
 
     it("names every pinned dependency in the notices", function()
         local missing = {}
-        for tag in product:gmatch("pub const ([%w_]+)_REVISION") do
+        for tag in pairs(pins) do
             if not TOOLING_ONLY[tag] then
                 local name = NOTICE_NAMES[tag]
                 assert.is_true(
@@ -233,6 +331,7 @@ describe("the license position", function()
                 end
             end
         end
+        table.sort(missing)
         assert.is_true(
             #missing == 0,
             "THIRD_PARTY_NOTICES.md does not name "
@@ -243,22 +342,107 @@ describe("the license position", function()
 
     it("names every pinned Rust dependency in the notices", function()
         local missing = {}
-        for name in cargoLock:gmatch('%[%[package%]%]%s+name = "([^"]+)"') do
+        for name in pairs(packages) do
             if
-                name ~= "tecs-native"
-                and name ~= "tecs-build-support"
-                and name ~= "tecs-xtask"
+                not WORKSPACE_CRATES[name]
                 and not BUILD_ONLY_CRATES[name]
                 and not notices:find("`" .. name .. "`", 1, true)
             then
                 table.insert(missing, name)
             end
         end
+        table.sort(missing)
         assert.is_true(
             #missing == 0,
             "THIRD_PARTY_NOTICES.md does not name "
                 .. table.concat(missing, ", ")
                 .. ". A Rust dependency whose notice is not written is a package that ships code without it."
         )
+    end)
+
+    it("writes a notice only for something the build still pins", function()
+        for tag, name in pairs(NOTICE_NAMES) do
+            assert.is_true(
+                pins[tag] ~= nil,
+                ("NOTICE_NAMES calls %s_REVISION %s, and the Cargo builder no longer pins it. "):format(tag, name)
+                    .. "Drop the entry and the notice with it: a notice for a dependency this engine "
+                    .. "does not build describes something a package cannot contain."
+            )
+        end
+
+        local pinned = {}
+        for tag in pairs(pins) do
+            local name = NOTICE_NAMES[tag]
+            if name then
+                pinned[name] = true
+            end
+        end
+
+        local linked = notices:match("\n## Linked by a build\n(.-)\n## ")
+        assert.is_true(
+            linked ~= nil,
+            "THIRD_PARTY_NOTICES.md has no 'Linked by a build' section, so this check reads nothing. "
+                .. "Either the heading moved, in which case fix the pattern, or the section went, "
+                .. "in which case the notices no longer describe what a package links."
+        )
+        for heading in linked:gmatch("\n### ([^\n]+)") do
+            assert.is_true(
+                pinned[heading] ~= nil or AGGREGATE_SECTIONS[heading] ~= nil,
+                ("THIRD_PARTY_NOTICES.md carries a '%s' section under 'Linked by a build', "):format(heading)
+                    .. "and nothing pinned answers to that name. Drop the section, or add it to "
+                    .. "AGGREGATE_SECTIONS if it describes several pins at once."
+            )
+        end
+    end)
+
+    it("names no Rust package the lockfile has dropped", function()
+        local rust = notices:match("\n### Rust native build foundation\n(.-)\n### ")
+        assert.is_true(
+            rust ~= nil,
+            "THIRD_PARTY_NOTICES.md has no 'Rust native build foundation' section, "
+                .. "so the Cargo inventory this checks is not where it was."
+        )
+        local stale = {}
+        for name in rust:gmatch("`([^`]+)`") do
+            -- A crate name is lowercase with dashes or underscores, which is
+            -- what separates one from the paths and macro names around it.
+            if name:match("^[%l%d][%l%d_%-]*$") and not packages[name] then
+                table.insert(stale, name)
+            end
+        end
+        table.sort(stale)
+        assert.is_true(
+            #stale == 0,
+            "THIRD_PARTY_NOTICES.md names "
+                .. table.concat(stale, ", ")
+                .. ", which Cargo.lock no longer resolves. An inventory that outlives the lockfile "
+                .. "tells a distributor to reproduce a license for code it does not carry."
+        )
+    end)
+
+    it("keeps every exception it declares true", function()
+        for tag in pairs(TOOLING_ONLY) do
+            assert.is_true(
+                pins[tag] ~= nil,
+                ("TOOLING_ONLY skips %s_REVISION, which the Cargo builder no longer pins. "):format(tag)
+                    .. "Drop the entry: an exception for a dependency that is gone is one that will "
+                    .. "silently cover the next dependency pinned under that name."
+            )
+        end
+
+        for name in pairs(BUILD_ONLY_CRATES) do
+            assert.is_true(
+                packages[name] ~= nil,
+                ("BUILD_ONLY_CRATES excuses %s, which Cargo.lock no longer resolves. "):format(name)
+                    .. "Drop the entry, for the same reason: it excuses whatever arrives under that name next."
+            )
+            assert.is_true(
+                reachable[name] == nil,
+                ("BUILD_ONLY_CRATES calls %s a build dependency, and %s reaches it through the lockfile. "):format(
+                    name,
+                    RUNTIME_CRATE
+                ) .. "It ships, so drop the entry and name it in the notices."
+            )
+        end
     end)
 end)
