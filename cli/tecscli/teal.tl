@@ -27,8 +27,9 @@ end
 ---
 --- Last wins, so the project's own sources come last: a game that names a
 --- module the engine also has means its own. The declarations directory
---- carries LuaJIT's `ffi`, `jit`, `bit` and `buffer`, which the engine's
---- sources reference and which no compiler knows about on its own.
+--- carries LuaJIT's `ffi`, `jit`, `bit`, `string.buffer`, `table.new` and
+--- `table.clear`, which the engine's sources reference and which no compiler
+--- knows about on its own.
 local function includes(paths: layout, projectSource?: string): {string}
     local argv <const>: {string} = {
         "-I",

@@ -3889,6 +3889,18 @@ machine and not another. `TECS_ALLOW_VERSION_DRIFT=1` permits a deliberate
 dependency update. SPIRV-Cross and zlib are unchecked because neither exposes
 the release identity needed for that comparison.
 
+`cargo xtask deps` runs that check itself, at the end, on the machine it just
+installed to. It has to, because it is the one command here capable of breaking
+the gate: Homebrew carries one version of a formula and it is the current one, so
+four of the packages `deps` installs are pinned by this tree and unpinnable
+through `brew`, and installing them is a way out of the pin. The alternative
+would be for `deps` to skip them, which trades a command that reports what it did
+for a command that cannot set a machine up at all. So it installs and then says
+so, where whoever ran it is still reading the output, rather than leaving the
+next build to fail on a version nobody chose. This is not hypothetical: it
+happened, and it took a `TECS_ALLOW_VERSION_DRIFT=1` prefix on every command
+until the pin was raised.
+
 A development build takes SDL_mixer from the system, and a system build is
 whatever the packager configured: Homebrew's loads its optional decoders by
 name at `MIX_Init`, so a developer's machine may well have the LGPL ones

@@ -23,12 +23,33 @@ pub const TEALDOC_REVISION: &str = "dcb4a95c9d53011b7047f0c32d14e4fe0bac7119";
 // language that is not Teal; Teal keeps the compiler's own lexer.
 pub const SCINTILLUA_REVISION: &str = "b9986ecad77b1ea73d75bf1e82e6e0fd3b4958b1";
 pub const BUSTED_VERSION: &str = "2.2.0-1";
+// Teal type definitions for the modules this tree requires from outside itself.
+// They are declarations a checker reads and nothing links, so they ship nothing
+// and no notice covers them, which is why they are versions rather than
+// revisions like the projects the packaged build compiles.
+//
+// LuaJIT's are not optional: `ffi`, `bit`, `jit`, `string.buffer`, `table.new`
+// and `table.clear` are what `src` reaches for, so without this rock
+// `cargo xtask check` fails with `module not found: 'ffi'` in every file that
+// touches the FFI. Busted's and Luassert's type the Teal specs under
+// `spec/tecs`.
+pub const LUAJIT_TYPES_VERSION: &str = "0.0.2-1";
+pub const BUSTED_TYPES_VERSION: &str = "0.0.1-1";
+pub const LUASSERT_TYPES_VERSION: &str = "0.0.1-1";
 pub const SDL3_VERSION: &str = "3.4.12";
 pub const SDL3_REVISION: &str = "f87239e71e42da91ca317a12eefb82cfbf3393eb";
 pub const SDL3_MIXER_VERSION: &str = "3.2.4";
 pub const SDL3_MIXER_REVISION: &str = "72a81869b45e249e8e67102db4e98dd2441f05a1";
-pub const LUAJIT_REVISION: &str = "871db2c84ecefd70a850e03a6c340214a81739f0";
-pub const LUAJIT_ROLLING: &str = "2.1.1753364724";
+// LuaJIT has no releases, so the two constants below are one fact written
+// twice: `LUAJIT_ROLLING` is `2.1.` and the Unix timestamp of the commit
+// `LUAJIT_REVISION` names, which is what LuaJIT's own build stamps into
+// `luajit -v` and into `luajit.pc`. Raising one means raising the other to the
+// same commit, or a packaged build and the system version check disagree about
+// what the tree pins. Homebrew tracks the tip of `v2.1` and states the
+// revision behind each of its versions, so `brew cat luajit` is where the pair
+// comes from.
+pub const LUAJIT_REVISION: &str = "faaf663340347a78b22ed94c63c24fe090bd9784";
+pub const LUAJIT_ROLLING: &str = "2.1.1785192264";
 pub const SHADERC_VERSION: &str = "2026.3";
 pub const SHADERC_REVISION: &str = "2c8cae778eec0283b44acbe7ed1a386865d78799";
 pub const GLSLANG_REVISION: &str = "168d452a4f460d24b588fed08477a81c44ee27a1";
@@ -1396,6 +1417,20 @@ fn system_packages(preset: Preset) -> Result<BTreeMap<&'static str, Package>> {
     Ok(packages)
 }
 
+/// Holds the machine's dependencies to the revisions this tree pins, without
+/// building anything.
+///
+/// This is the same gate a development build runs, exposed so that the command
+/// which installs those dependencies can run it too. A preset that builds its
+/// dependencies from pinned sources has nothing on the machine to check, so it
+/// answers Ok.
+pub fn check_system_dependencies(preset: Preset) -> Result<()> {
+    if matches!(preset.dependencies, DependencyMode::System) {
+        check_system_versions(preset)?;
+    }
+    Ok(())
+}
+
 fn check_system_versions(preset: Preset) -> Result<()> {
     let mut requirements = vec![
         ("SDL3", "sdl3", SDL3_VERSION, false),
@@ -1560,6 +1595,7 @@ fn stage_content(
     )?;
     staging::tools(
         &root.join("vendor/share/lua/5.1"),
+        &root.join("src"),
         &root.join("vendor/licenses"),
         &paths.lua.join("tecstools"),
     )?;

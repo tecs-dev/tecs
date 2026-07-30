@@ -22,6 +22,14 @@
 local lua = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 local lib = os.getenv("TECS_LIB") or "out/macos-arm64-dev/lib"
 
+-- `luajit` below is the machine's, and unlike a spec reaching for `tl` that is
+-- correct rather than an oversight. A development preset links the system
+-- LuaJIT, held to `LUAJIT_ROLLING` by the version gate in `product.rs`, so the
+-- interpreter on `PATH` is the tree's interpreter. The tree stages no other one:
+-- only a packaged preset builds LuaJIT, and a package ships no `bin/luajit`
+-- because "a plain interpreter finds the Lua tree" is the property this spec
+-- exists to check.
+
 --- Runs a chunk in a fresh interpreter with only the compiled tree on its
 --- path, and returns its combined output. `libraries` decides whether the
 --- process can find the native libraries at all.

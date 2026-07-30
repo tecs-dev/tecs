@@ -15,6 +15,19 @@
 
 local tecs = require("tecs")
 
+-- The compiler this tree stages, at the revision it pins, rather than `tl` from
+-- `PATH`. A spec that shells out to whatever the machine has installed reports
+-- on that machine and not on this tree, and the two are different programs:
+-- `cargo xtask check` compiles every source here with this binary, so this is
+-- the only compiler whose answer about the declaration means anything. It is
+-- also what keeps an unrelated interpreter or toolchain upgrade from turning
+-- these two tests red while the tree itself is fine, which is what a stale
+-- system copy did once already.
+--
+-- Relative, because Busted starts at the repository root and the rest of this
+-- helper already depends on that.
+local TEAL_COMPILER = "./vendor/bin/tl"
+
 --- Type-checks `source` as a Teal file, optionally naming the declaration to
 --- the checker, and returns its combined output. Run from the repository root,
 --- which is where Busted starts.
@@ -25,7 +38,7 @@ local function checkTeal(source, declared)
     file:close()
 
     local command = table.concat({
-        "tl",
+        TEAL_COMPILER,
         declared and "--global-env-def tecs.global" or "",
         "-I src check",
         path,
