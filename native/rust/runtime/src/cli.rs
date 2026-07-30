@@ -7,20 +7,25 @@ use std::ffi::{c_char, CStr, OsString};
 use std::path::PathBuf;
 use std::slice;
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::aot::{generate, Shell};
 
 use super::TecsBytes;
+
+const CLI_ABOUT: &str = "A typed entity component system and the engine around it";
+const CLI_AFTER_HELP: &str = "\
+A project is a directory holding tecs.lua. Project commands search upward for\n\
+it, so they work from anywhere inside one. New, docs, info, mcp, and completions\n\
+do not require a project.";
 
 #[derive(Debug, Parser)]
 #[command(
     name = "tecs",
     version,
-    about = "A typed entity component system and the engine around it",
+    about = CLI_ABOUT,
     subcommand_required = true,
     disable_help_subcommand = false,
-    after_help = "A project is a directory holding tecs.lua. Project commands search upward for\n\
-                  it, so they work from anywhere inside one. New, docs, info, and mcp do not\n\
-                  require a project."
+    after_help = CLI_AFTER_HELP
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -86,6 +91,13 @@ pub enum Command {
     /// Connect an MCP client on stdio to a running game.
     Mcp,
 
+    /// Print a shell completion script.
+    Completions {
+        /// Shell whose completion script to print.
+        #[arg(value_enum)]
+        shell: CompletionShell,
+    },
+
     /// Print the version and exit.
     #[command(hide = true)]
     Version,
@@ -98,8 +110,50 @@ pub enum Command {
     },
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+}
+
 pub fn help() -> Vec<u8> {
     Cli::command().render_long_help().to_string().into_bytes()
+}
+
+fn completions(shell: CompletionShell) -> Vec<u8> {
+    let generator = match shell {
+        CompletionShell::Bash => Shell::Bash,
+        CompletionShell::Zsh => Shell::Zsh,
+        CompletionShell::Fish => Shell::Fish,
+    };
+    let schema = Cli::command();
+    // clap_complete includes hidden subcommands. Rebuild only the root around
+    // the visible derived subcommands so `version` and `__teal` do not become
+    // a second, accidental command surface in generated scripts.
+    let mut command = clap::Command::new("tecs")
+        .version(env!("CARGO_PKG_VERSION"))
+        .about(CLI_ABOUT)
+        .subcommand_required(true)
+        .disable_help_subcommand(false)
+        .after_help(CLI_AFTER_HELP)
+        .subcommands(
+            schema
+                .get_subcommands()
+                .filter(|subcommand| !subcommand.is_hide_set())
+                .cloned(),
+        );
+    let mut output = Vec::new();
+    generate(generator, &mut command, "tecs", &mut output);
+    if matches!(shell, CompletionShell::Fish) {
+        // The Fish generator does not support positional arguments. Preserve
+        // the shell choices in the script rather than stopping at the command.
+        output.extend_from_slice(
+            b"complete -c tecs -n \"__fish_tecs_using_subcommand completions\" \
+-f -a \"bash zsh fish\"\n",
+        );
+    }
+    output
 }
 
 fn push_field(result: &mut Vec<u8>, field: &[u8]) {
@@ -185,6 +239,9 @@ fn run_result(command: Command) -> Vec<u8> {
             }
         }
         Command::Mcp => push_field(&mut result, b"mcp"),
+        Command::Completions { shell } => {
+            return exit_result(0, false, &completions(shell));
+        }
         Command::Version => {
             return exit_result(
                 0,
@@ -354,12 +411,79 @@ mod tests {
     fn public_help_lists_public_commands_but_not_the_internal_one() {
         let help = String::from_utf8(help()).unwrap();
         for command in [
-            "new", "check", "format", "test", "build", "run", "clean", "info", "docs", "mcp",
+            "new",
+            "check",
+            "format",
+            "test",
+            "build",
+            "run",
+            "clean",
+            "info",
+            "docs",
+            "mcp",
+            "completions",
         ] {
             assert!(help.contains(command), "help does not name {command}");
         }
         assert!(help.contains("--version"));
         assert!(!help.contains("__teal"));
+    }
+
+    #[test]
+    fn prints_completion_scripts_for_supported_shells() {
+        for (shell, marker) in [
+            ("bash", "_tecs"),
+            ("zsh", "#compdef tecs"),
+            ("fish", "complete -c tecs"),
+        ] {
+            let parsed = parse(
+                ["completions", shell]
+                    .into_iter()
+                    .map(OsString::from)
+                    .collect(),
+            );
+            let output_fields = fields(&parsed);
+            assert_eq!(
+                &output_fields[..3],
+                [&b"exit"[..], &b"0"[..], &b"stdout"[..]]
+            );
+            let script = String::from_utf8_lossy(output_fields[3]);
+            assert!(script.contains(marker), "{shell} script has no {marker}");
+            assert!(
+                script.contains("completions"),
+                "{shell} script does not complete the completions command"
+            );
+            for choice in ["bash", "zsh", "fish"] {
+                assert!(
+                    script.contains(choice),
+                    "{shell} script does not complete the {choice} choice"
+                );
+            }
+            assert!(
+                !script.contains("__teal"),
+                "{shell} script exposes the internal command"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_an_unsupported_completion_shell() {
+        let parsed = parse(
+            ["completions", "tcsh"]
+                .into_iter()
+                .map(OsString::from)
+                .collect(),
+        );
+        let output_fields = fields(&parsed);
+        assert_eq!(
+            &output_fields[..3],
+            [&b"exit"[..], &b"2"[..], &b"stderr"[..]]
+        );
+        let message = String::from_utf8_lossy(output_fields[3]);
+        assert!(message.contains("invalid value 'tcsh'"));
+        for shell in ["bash", "zsh", "fish"] {
+            assert!(message.contains(shell), "error does not name {shell}");
+        }
     }
 
     #[test]

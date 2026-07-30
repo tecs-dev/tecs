@@ -22,6 +22,7 @@ without LuaRocks or a compiler on the player's machine.
 | `tecs info`                     | Print versions, pinned revisions, project details and package targets |
 | `tecs docs [query]`             | Browse or search the offline reference carried with the tool          |
 | `tecs mcp`                      | Connect an MCP client on stdio to a running game's HTTP endpoint      |
+| `tecs completions <shell>`      | Print a Bash, Zsh, or Fish completion script                          |
 
 Run `tecs help`, `tecs --help`, or `<command> --help` for the complete command reference. `tecs --version` prints
 the CLI version.
@@ -45,6 +46,22 @@ The build type-checks and compiles a Teal entry. A Lua entry runs after the proj
 global, can require compiled project modules, and must return `tecs.newApplication(...)`.
 
 Only operands after `--` become game arguments. The application receives them in `arg[1]` through `arg[#arg]`.
+
+## Shell completion
+
+`tecs completions bash|zsh|fish` prints a completion script generated from the command's own parser. Install it
+for the shell that runs `tecs`:
+
+```sh
+# Bash: add this to ~/.bashrc.
+eval "$(tecs completions bash)"
+
+# Zsh: write _tecs into a directory on fpath.
+tecs completions zsh > "${fpath[1]}/_tecs"
+
+# Fish
+tecs completions fish > ~/.config/fish/completions/tecs.fish
+```
 
 ## Offline reference
 

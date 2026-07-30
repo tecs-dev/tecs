@@ -136,13 +136,14 @@ Vulkan headers (Apache-2.0).
 
 ### Rust native build foundation
 
-The static native archive includes `clap` for CLI parsing, `image` for PNG and
-JPEG decoding and PNG encoding, `reqwest` with Rustls for HTTP, `rmcp` for the
-official MCP protocol and Streamable HTTP server, `rapier2d` for physics, and
-`regex` for compiled regular expressions. It also owns the host lifecycle,
-worker channels, logging, dialogs, Lua module registration, LuaJIT's
-machine-code arena, and the single-file payload loader. SDL still owns the
-application loop and LuaJIT still owns game execution.
+The static native archive includes `clap` for CLI parsing and `clap_complete`
+for shell completion generation, `image` for PNG and JPEG decoding and PNG
+encoding, `reqwest` with Rustls for HTTP, `rmcp` for the official MCP protocol
+and Streamable HTTP server, `rapier2d` for physics, and `regex` for compiled
+regular expressions. It also owns the host lifecycle, worker channels, logging,
+dialogs, Lua module registration, LuaJIT's machine-code arena, and the
+single-file payload loader. SDL still owns the application loop and LuaJIT
+still owns game execution.
 
 The exact versions and declared SPDX expressions are pinned in
 the root `Cargo.lock` and Cargo metadata. The graph is permissive: MIT,
@@ -160,7 +161,7 @@ release for that target compiles them:
 `adler2`, `aho-corasick`, `allocator-api2`, `anstyle`, `approx`, `arrayvec`,
 `async-compression`, `atomic-waker`, `autocfg`, `base64`, `bincode`,
 `bitflags`, `bumpalo`, `bytemuck`, `byteorder-lite`, `bytes`, `cc`, `cfg-if`,
-`clap`, `clap_builder`, `clap_derive`, `clap_lex`, `combine`,
+`clap`, `clap_builder`, `clap_complete`, `clap_derive`, `clap_lex`, `combine`,
 `compression-codecs`, `compression-core`, `core-foundation`,
 `core-foundation-sys`, `crc32fast`, `crossbeam-deque`, `crossbeam-epoch`,
 `crossbeam-utils`, `displaydoc`, `downcast-rs`, `either`, `ena`, `equivalent`,

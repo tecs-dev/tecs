@@ -18,11 +18,13 @@
 ---  clean    Removes build/
 ---  info     Versions, pins, project status, packaging targets
 ---  docs     Searches the offline reference carried with the command
+---  completions
+---           Prints a Bash, Zsh, or Fish completion script
 --- ```
 ---
 --- A command that acts on a project finds it by searching upward for
 --- `tecs.lua`, so it works from any directory inside it. `new`, `docs`,
---- `info`, and `mcp` need no project.
+--- `info`, `mcp`, and `completions` need no project.
 
 local tecs <const> = require("tecs")
 local arguments <const> = require("tecscli.arguments")
