@@ -9,6 +9,7 @@ local adapter = require("tecs.platform.adapter")
 
 local ioModule = tecs.io
 local paths = {}
+local min = math.min
 
 local function temporary()
     local path = os.tmpname()
@@ -166,6 +167,9 @@ describe("tecs.io stream endpoints", function()
         }
         local reader = assert(tecs.io.files.openRead(path))
         assert.are.equal(1, reader:readInto(proxy, 10, 4))
+        assert.are.equal(5, proxy:length())
+        assert.are.equal("ab\0\0x", proxy:getString())
+        assert.are.equal(0, reader:readInto(proxy, 10, 9))
         assert.are.equal(5, proxy:length())
         assert.are.equal("ab\0\0x", proxy:getString())
         reader:close()
@@ -559,7 +563,7 @@ describe("tecs.io transfers", function()
                         return true
                     end,
                     writeFrom = function(_, buffer, offset, count)
-                        local taking = math.min(3, count)
+                        local taking = min(3, count)
                         pieces[#pieces + 1] = buffer:getString(offset, taking)
                         return taking
                     end,

@@ -42,6 +42,10 @@ local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
 local type types = require("tecs.io.types")
 
+local floor <const> = math.floor
+local max <const> = math.max
+local min <const> = math.min
+
 local record files
     --- Caller-writable. The caller sets `organization` before
     --- `preferencePath` resolves the writable directory.
@@ -401,23 +405,23 @@ local function slicingReader(bytes: string): Reader
         if at > #bytes then
             return ""
         end
-        local last <const> = math.min(#bytes, at + math.max(1, count) - 1)
+        local last <const> = min(#bytes, at + max(1, count) - 1)
         local piece <const> = bytes:sub(at, last)
         at = last + 1
         return piece
     end
     reader.readInto = function(_self: Reader, destination: IOBuffer, count: integer, offset?: integer): integer, string
-        if type(count) ~= "number" or count ~= math.floor(count) or count < 0 then
+        if type(count) ~= "number" or count ~= floor(count) or count < 0 then
             error("tecs: Reader:readInto count must be a non-negative integer", 2)
         end
         offset = offset or 0
-        if type(offset) ~= "number" or offset ~= math.floor(offset) or offset < 0 then
+        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 then
             error("tecs: Reader:readInto offset must be a non-negative integer", 2)
         end
         if count == 0 or at > #bytes then
             return 0
         end
-        local taking <const> = math.min(count, #bytes - at + 1)
+        local taking <const> = min(count, #bytes - at + 1)
         local output <const>, previousLength = buffer.prepareWrite(destination, offset, taking)
         ffi.copy(output as ffi.CData, (pointer + (at - 1)) as ffi.CData, taking)
         buffer.commitWrite(destination, offset, taking, previousLength)
