@@ -317,18 +317,6 @@ local SIDEBAR = {
         text = "Introduction",
         items = {
             { text = "Getting started", path = "getting-started" },
-            { text = "Modules", path = "modules" },
-        },
-    },
-    -- The CLI is a group rather than a row under the introduction, because it
-    -- is a tool with a surface of its own rather than one more thing to read
-    -- once.
-    {
-        text = "CLI",
-        items = {
-            { text = "Overview", path = "cli" },
-            { text = "Projects", path = "cli/projects" },
-            { text = "Scope", path = "cli/scope" },
         },
     },
     {
@@ -434,6 +422,17 @@ local SIDEBAR = {
             { text = "tecs.time", path = "modules/time" },
             { text = "tecs.window", path = "modules/window" },
             { text = "tecs.workers", path = "modules/workers" },
+        },
+    },
+    -- The CLI is a group rather than a row under the introduction, because it
+    -- is a tool with a surface of its own rather than one more thing to read
+    -- once.
+    {
+        text = "CLI",
+        items = {
+            { text = "Overview", path = "cli" },
+            { text = "Projects", path = "cli/projects" },
+            { text = "Scope", path = "cli/scope" },
         },
     },
 }
@@ -815,6 +814,13 @@ return {
             favicon = "/images/logo.svg",
             github = "https://github.com/tecs-dev/tecs",
             public = "docs/public",
+            -- The generated declarations go through Cerulean, so a signature
+            -- on a page is formatted the way the same code would be in the
+            -- tree. It loads from the runtime's own `package.path`, which the
+            -- `vendor/bin/tealdoc` wrapper already points at this tree, so the
+            -- formatter here is the one `product.rs` pins. Authored fences are
+            -- left as written.
+            format_generated_code = true,
             custom_css = "docs/site.css",
             -- Scintillua's lexers, installed by `cargo xtask dev-tools` at
             -- the revision `product.rs` pins. They cover every language on
