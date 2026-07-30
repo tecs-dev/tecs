@@ -383,21 +383,21 @@ local function snapshotStream(source: Stream, what: string): {string: any}
 end
 
 local function restoredMetadata<T is Stream>(source: T, saved: {string: any}): T
-    local lengthValue = saved.streamVersion ~= nil and saved.contentLength as integer or nil
-    local replayableValue = saved.streamVersion ~= nil and saved.isReplayable as boolean or nil
-    return withMetadata(source, saved.contentType as string, lengthValue, replayableValue)
+    return withMetadata(
+        source, saved.contentType as string, saved.contentLength as integer, saved.isReplayable as boolean
+    )
 end
 
 local function restoreStream(saved: {string: any}, what: string): Stream
     if type(saved) ~= "table" then
         error(("tecs: cannot restore %s: stream data is not a table"):format(what), 0)
     end
+    if saved.streamVersion ~= 1 then
+        error(("tecs: cannot restore %s: unsupported stream version"):format(what), 0)
+    end
     local kind <const> = saved.kind as string
     if kind == "string" then
-        local text = saved.text as string
-        if saved.streamVersion == nil then
-            text = saved._text as string
-        end
+        local text <const> = saved.text as string
         if type(text) ~= "string" then
             error(("tecs: cannot restore %s: string stream has no bytes"):format(what), 0)
         end
@@ -413,13 +413,7 @@ local function restoreStream(saved: {string: any}, what: string): Stream
         if type(path) ~= "string" or path == "" then
             error(("tecs: cannot restore %s: file stream has no path"):format(what), 0)
         end
-        -- Legacy `length` was an observation made when the old descriptor was
-        -- constructed. Do not turn it into a permanent metadata override.
         return restoredMetadata(newFileStream(path, saved.contentType as string), saved)
-    elseif kind == "bytes" then
-        error(("tecs: cannot restore %s: a persisted borrowed pointer is invalid"):format(what), 0)
-    elseif kind == "handle" then
-        error(("tecs: cannot restore %s: io.newHandleStream is runtime-only"):format(what), 0)
     end
     error(("tecs: cannot restore %s: unknown stream kind '%s'"):format(what, tostring(kind)), 0)
 end
