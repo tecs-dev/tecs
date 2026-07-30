@@ -31,8 +31,7 @@ function storekeys.newKey<T>(name?: string, _forType?: T): Store.Key<T>
     -- compatibility surface and remains `tecs.context`.
     local log <const> = require("tecs.log")
     log.get("tecs.context"):warn(
-        "Store key #%d created without a name; pass a name to newKey so tools can find it",
-        KEY_COUNTER
+        "Store key #%d created without a name; pass a name to newKey so tools can find it", KEY_COUNTER
     )
     -- The number is a phantom type token. Lua sees an integer while Teal
     -- remembers the value type associated with this key.
