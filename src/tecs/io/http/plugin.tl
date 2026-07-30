@@ -6,7 +6,7 @@ screen and the wrong one for a game that wants the request to be a thing in
 the world: something the debug server can list, something a system can
 react to, something that dies when the entity that asked for it does.
 
-    world:addPlugin(tecs.net.http.plugin.install)
+    world:addPlugin(tecs.io.http.plugin.install)
 
     world:spawn(http.plugin.Request, {url = "https://example.com/scores"})
 
@@ -27,7 +27,7 @@ One per world, built with the options given to `plugin.install` or with
 defaults, and kept in the world's resources so a game can reach it:
 `plugin.clientOf(world)`. A game that wants two clients, one for a chatty
 API and one for downloads, builds the second itself; nothing about this
-plugin is in the way of `tecs.net.http.newClient` beside it.
+plugin is in the way of `tecs.io.http.newClient` beside it.
 
 Despawning the world does not close the client. `plugin.close(world)` does,
 and a program that ends is a process that ends, which is the same answer
@@ -54,8 +54,8 @@ is work for no one.
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
 local Future <const> = require("tecs.Future")
-local client <const> = require("tecs.net.http.client")
-local DataStream <const> = require("tecs.net.http.DataStream")
+local client <const> = require("tecs.io.http.client")
+local DataStream <const> = require("tecs.io.http.DataStream")
 
 local type World = types.World
 local type Component = ecs.Component
@@ -118,7 +118,7 @@ local record plugin
     record Pending is Component
     end
 
-    --- Installs the plugin: `world:addPlugin(tecs.net.http.plugin.install)`.
+    --- Installs the plugin: `world:addPlugin(tecs.io.http.plugin.install)`.
     ---
     --- Takes options because the plugin builds the world's client, and a game
     --- that wants a `userAgent` on it has nowhere else to say so:
@@ -153,7 +153,7 @@ end
 
 -- The three names below, the resource key under them and the system names
 -- further down are all spelled `tecs.http.*` and stay that way now that the
--- module is `tecs.net.http`. A snapshot names a component by string and an
+-- module is `tecs.io.http`. A snapshot names a component by string and an
 -- agent selects a system by one, so they are a save format and a tooling
 -- surface rather than module paths. See `AGENTS.md` on externally typed
 -- strings.

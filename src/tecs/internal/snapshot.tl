@@ -1306,7 +1306,7 @@ function snapshot.loadSnapshot(world: World, source: any): SnapshotPrelude
     end
 
     -- Accept a Lua string, since a caller usually has one:
-    --   world:loadSnapshot(filesystem.read("save.bin"))
+    --   world:loadSnapshot(tecs.io.files.read("save.bin"))
     -- The string is copied once into a fresh internal buffer.
     local buf: any
     if type(source) == "string" then

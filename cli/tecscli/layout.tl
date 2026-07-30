@@ -62,7 +62,7 @@ end
 function layout.self(): string
     local argv = (_G as {string: {integer: string}})["arg"]
     local invoked = argv ~= nil and argv[0] or "tecs"
-    local base = tecs.io.filesystem.basePath()
+    local base = tecs.io.files.basePath()
     if base == nil or base == "" then
         return invoked
     end

@@ -81,7 +81,7 @@ what that rule buys. A future holds listeners and the source that settles them,
 so the binary encoder walks a cyclic graph of runtime state rather than refusing
 the component: the save fails with `too deep to serialize` and names nothing.
 Keep the future in a table beside the world and give the entity a transient
-marker, which is what [`tecs.net.http`](/modules/net/http) does with `Pending`.
+marker, which is what [`tecs.io.http`](/modules/io/http) does with `Pending`.
 
 A sequence cursor waiting on a future saves the provider name, entity, and key.
 Load restores the cursor without restoring the future. `isPending` then returns
@@ -177,7 +177,7 @@ local replayBuffer = buffer.new()
 
 local result = world:saveSnapshot({
     buffer = replayBuffer,
-    path = tecs.io.filesystem.writablePath("checkpoint.bin"),
+    path = tecs.io.files.writablePath("checkpoint.bin"),
     filterQuery = {include = {Persist}},
     layers = {2, 3},
     customData = {
@@ -297,20 +297,20 @@ Engine plugins register their own snapshot behavior:
 `path` provides the shortest binary save:
 
 ```teal
-local path = tecs.io.filesystem.writablePath("save.bin")
+local path = tecs.io.files.writablePath("save.bin")
 world:saveSnapshot({path = path})
-world:loadSnapshot(tecs.io.filesystem.read(path))
+world:loadSnapshot(tecs.io.files.read(path))
 ```
 
 To transform the bytes first, write the returned buffer:
 
 ```teal
-local path = tecs.io.filesystem.writablePath("save.bin")
+local path = tecs.io.files.writablePath("save.bin")
 local bytes = tostring(world:saveSnapshot().buffer)
-tecs.io.filesystem.write(path, bytes)
+tecs.io.files.write(path, bytes)
 ```
 
-`tecs.io.filesystem.writablePath` resolves a path inside the application's
+`tecs.io.files.writablePath` resolves a path inside the application's
 writable directory and works on targets where stdio cannot reach platform
 storage.
 

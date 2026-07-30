@@ -355,7 +355,7 @@ fn check_rendered_hierarchy(site: &Path) -> Result<()> {
 /// reads the file-leading long comment, the projected public view retains it,
 /// and the site places it ahead of the symbol summary.
 fn check_module_intro(root: &Path, site: &Path) -> Result<()> {
-    let source_path = root.join("src/tecs/io/filesystem/init.tl");
+    let source_path = root.join("src/tecs/io/files/init.tl");
     let source = fs::read_to_string(&source_path)?;
     let equals = source
         .strip_prefix("--[")
@@ -384,7 +384,7 @@ fn check_module_intro(root: &Path, site: &Path) -> Result<()> {
         .map(str::trim)
         .context("the filesystem module doc comment has no prose")?;
 
-    let output_path = site.join("modules/io/filesystem.md");
+    let output_path = site.join("modules/io/files.md");
     let output = fs::read_to_string(&output_path)?;
     let introduction = output.find(first_line).with_context(|| {
         format!(

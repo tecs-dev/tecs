@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: Live inspection
-    details: Inspect, freeze, and edit a running game through the <a href="/modules/net/mcp">built-in MCP server</a>.
+    details: Inspect, freeze, and edit a running game through the <a href="/modules/io/mcp">built-in MCP server</a>.
     icon: 🤖
   - title: ECS built for LuaJIT
     details: >-
@@ -233,10 +233,9 @@ The host loads `tecs` before the entry file. A game can use these names without 
 - [`tecs.events`](/modules/events) - typed platform events routed through the world
 - [`tecs.gfx`](/modules/gfx/) - the camera, the components, the renderer, text, and the vocabularies below
 - [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
-- [`tecs.io`](/modules/io/) - directional interfaces for streaming binary strings
+- [`tecs.io`](/modules/io/) - binary I/O, nonblocking sockets, HTTP, and external tools
 - [`tecs.log`](/modules/log) - named, leveled platform logging
 - [`tecs.math`](/modules/math) - allocation-free 2D vector and angle math
-- [`tecs.net`](/modules/net/) - nonblocking TCP streams and UDP datagrams
 - [`tecs.os`](/modules/os) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.physics`](/modules/physics) - Rapier 2D, solved across a shared thread pool
 - [`tecs.regex`](/modules/regex) - compiled regular expressions over Lua byte strings
@@ -252,10 +251,10 @@ Inside one of those, one level and no deeper:
 - [`tecs.gfx.layers`](/modules/gfx/layers) - z-ordering and per-layer behavior
 - [`tecs.gfx.materials`](/modules/gfx/materials) - one fragment shader, compiled from the material set
 - [`tecs.gfx.particles`](/modules/gfx/particles) - emitters
-- [`tecs.io.filesystem`](/modules/io/filesystem) - where a game may read and write, and what to do with a path
+- [`tecs.io.files`](/modules/io/files) - where a game may read and write, and what to do with a path
+- [`tecs.io.http`](/modules/io/http) - fetching over HTTP without stopping the frame
+- [`tecs.io.mcp`](/modules/io/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.io.watcher`](/modules/io/watcher) - watching files for change
-- [`tecs.net.http`](/modules/net/http) - fetching over HTTP without stopping the frame
-- [`tecs.net.mcp`](/modules/net/mcp) - the debug server agents and humans drive a running game through
 
 On `tecs` itself, because no one module owns them:
 

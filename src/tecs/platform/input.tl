@@ -1194,7 +1194,7 @@ input.Gamepad = Gamepad
 
 -- The standalone sensors, under this module's public names. `sensors.tl` is
 -- the seam and reaches only SDL; `tecs.input` is the surface, the way
--- `tecs.io.filesystem` publishes what `platform/content.tl` holds.
+-- `tecs.io.files` publishes what `platform/content.tl` holds.
 input.sensors = sensors.sensors
 input.openSensor = sensors.openSensor
 

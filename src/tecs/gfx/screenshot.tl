@@ -11,7 +11,7 @@ into Lua before Rust releases it. The resulting bytes go through
 local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local Texture <const> = require("tecs.gpu.Texture")
-local filesystem <const> = require("tecs.io.filesystem")
+local files <const> = require("tecs.io.files")
 
 local RUST <const> = rust.C
 
@@ -51,7 +51,7 @@ function screenshot.save(texture: Texture, path: string): boolean, string
     if bytes == nil then
         return false, reason
     end
-    return filesystem.write(path, bytes)
+    return files.write(path, bytes)
 end
 
 return screenshot

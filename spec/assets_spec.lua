@@ -19,7 +19,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
-local filesystem = require("tecs.io.filesystem")
+local files = require("tecs.io.files")
 local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
 local assets = require("tecs.assets")
@@ -384,7 +384,7 @@ describe("assets", function()
         -- A PNG rather than a text file on purpose: the result has to carry
         -- its own length, or every binary sidecar read through here would be
         -- cut at the first NUL and only the parser would find out.
-        local bytes = filesystem.read(FIXTURE)
+        local bytes = files.read(FIXTURE)
         assert.is_string(bytes)
         assert.are.equal("PNG", bytes:sub(2, 4))
         assert.is_truthy(bytes:find("\0", 1, true), "the fixture has NULs in it")
@@ -397,7 +397,7 @@ describe("assets", function()
     end)
 
     it("answers nil for a path with no file", function()
-        assert.is_nil(filesystem.read("spec/fixtures/does-not-exist.json"))
+        assert.is_nil(files.read("spec/fixtures/does-not-exist.json"))
     end)
 
     it("reports nothing to do when idle", function()
@@ -472,11 +472,11 @@ describe("assets", function()
         local loading = assets.loadImage(FIXTURE)
         assets.waitAll()
         loading.value:release()
-        filesystem.read(FIXTURE)
+        files.read(FIXTURE)
 
         -- The kind is the one it was first asked for under, so reading an
         -- image's bytes afterwards does not turn it into a document.
-        local loaded = filesystem.loaded()
+        local loaded = files.loaded()
         assert.are.equal("image", loaded[FIXTURE])
         assert.are.equal("document", loaded["spec/fixtures/test_material.glsl"] or "document")
         assert.is_nil(loaded["spec/fixtures/does-not-exist.json"], "a path with no file was not read")

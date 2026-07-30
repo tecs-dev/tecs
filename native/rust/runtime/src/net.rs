@@ -1,6 +1,6 @@
 //! Provides nonblocking TCP, UDP, and asynchronous address resolution.
 //!
-//! `tecs.net` calls the opaque operations, sockets, and packets through the
+//! `tecs.io` calls the opaque operations, sockets, and packets through the
 //! generated Rust FFI table and exposes them as Teal objects and futures.
 
 use std::ffi::c_int;

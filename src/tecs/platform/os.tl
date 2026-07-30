@@ -178,7 +178,7 @@ local record Capabilities
     cores: integer
 
     --- Read-only. Reports true because every target has somewhere to write, and
-    --- `filesystem.preferencePath` is where: the field exists so a caller can
+    --- `tecs.io.files.preferencePath` is where: the field exists so a caller can
     --- ask rather than assume, not because a target answers no.
     writableStorage: boolean
 end

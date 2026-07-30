@@ -7,7 +7,7 @@ Each load returns a [`Future`](tealdoc:tecs.Future) immediately:
 return tecs.newApplication({
     plugin = function(world: tecs.World, app: tecs.Application)
         tecs.assets.loadImage(
-            tecs.io.filesystem.assetPath("sprites/hero.png")
+            tecs.io.files.assetPath("sprites/hero.png")
         )
             :map(function(image: tecs.assets.Image): tecs.gfx.Sprite
                 return app.renderer:registerImage(image)
@@ -58,7 +58,7 @@ local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
 local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local workers <const> = require("tecs.workers")
-local filesystem <const> = require("tecs.io.filesystem")
+local files <const> = require("tecs.io.files")
 local Future <const> = require("tecs.Future")
 
 local MIX <const> = sdl3mixer.C
@@ -70,7 +70,7 @@ local ffi = require("ffi")
 local mixer = require("tecs.ffi.sdl3mixer")
 local rust = require("tecs.ffi.rust")
 local loader = require("tecs.ffi.loader")
-local filesystem = require("tecs.io.filesystem")
+local files = require("tecs.io.files")
 local workers = require("tecs.workers")
 
 local MIX = mixer.C
@@ -79,7 +79,7 @@ local RUST = rust.C
 local self = workers.current()
 
 local function decodeImage(task)
-    local bytes = filesystem.read(task.path, "image")
+    local bytes = files.read(task.path, "image")
     if bytes == nil then
         return { id = task.id, error = "cannot decode " .. task.path }
     end
@@ -107,7 +107,7 @@ local function decodeImage(task)
 end
 
 local function readBytes(task)
-    local bytes = filesystem.read(task.path)
+    local bytes = files.read(task.path)
     if bytes == nil then
         return {id = task.id, error = "cannot read " .. task.path}
     end
@@ -646,7 +646,7 @@ end
 ---     is a future that fails once the worker has looked. Canceling it gives up this
 ---     caller's interest in the decode, and the last caller to do so abandons it.
 function assets.loadImage(path: string): Future<Image>
-    filesystem.note(path, "image")
+    files.note(path, "image")
     local shared = imagesInFlight[path]
     if shared == nil then
         local root, id = queue("image", path)
@@ -669,13 +669,13 @@ end
 --- reads the file again.
 ---
 --- @param path The caller supplies an absolute path or one from
----     [`assetPath`](/modules/io/filesystem/#tecs.io.filesystem.assetPath).
+---     [`assetPath`](/modules/io/files/#tecs.io.files.assetPath).
 --- @param kind The caller supplies the content kind used by file watching, or
 ---     omits it to record a document.
 --- @return Returns a pending [`Future`](tealdoc:tecs.Future). A missing or
 ---     unreadable file settles it as failed.
 function assets.loadBytes(path: string, kind?: string): Future<string>
-    filesystem.note(path, kind or "document")
+    files.note(path, kind or "document")
     local shared = bytesInFlight[path]
     if shared == nil then
         local root, id = queue("bytes", path)
@@ -710,7 +710,7 @@ end
 --- @return A pending future, or a failed future when mixer initialization
 ---     fails. This is the only failure reported without waiting for the worker.
 function assets.loadSound(path: string, mode: string, streamMs: integer): Future<Sound>
-    filesystem.note(path, "sound")
+    files.note(path, "sound")
     if not sdl3mixer.init() then
         return Future.failed("cannot load " .. path)
     end

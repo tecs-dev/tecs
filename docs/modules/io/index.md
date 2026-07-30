@@ -1,5 +1,5 @@
 ---
-description: "Binary stream contracts, filesystem access, and file watching"
+description: "Binary I/O, nonblocking sockets, HTTP, files, and external tools"
 ---
 
 # tecs.io

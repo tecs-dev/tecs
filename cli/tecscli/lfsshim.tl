@@ -6,15 +6,15 @@
 --- license entry and another thing to build per platform, for three functions.
 ---
 --- SDL already answers all three, and the engine already reaches SDL through
---- `tecs.io.filesystem`. So this is the shim, installed under the name the tools
+--- `tecs.io.files`. So this is the shim, installed under the name the tools
 --- ask for, and it is exactly as large as what they call:
 ---
 --- ```
 ---  LuaFileSystem            Reached through          Called by
 ---  ───────────────────────  ───────────────────────  ──────────────────────
----  attributes(path, mode)   filesystem.info          Cerulean's discovery
----  dir(path)                filesystem.list          Cerulean's discovery
----  mkdir(path)              filesystem.create...     Teal's generator
+---  attributes(path, mode)   tecs.io.files.info       Cerulean's discovery
+---  dir(path)                tecs.io.files.list       Cerulean's discovery
+---  mkdir(path)              tecs.io.files.create...  Teal's generator
 --- ```
 ---
 --- Anything else raises rather than answering nil, because a tool reaching for
@@ -38,7 +38,7 @@ local KIND <const>: {string: string} = {
 --- Only `mode` is answered, since it is the only one asked for. A caller
 --- naming another attribute gets nil rather than a wrong number.
 function lfsshim.attributes(path: string, request?: string): any, string
-    local info = tecs.io.filesystem.info(path)
+    local info = tecs.io.files.info(path)
     if info == nil then
         return nil, ("cannot stat %s"):format(path)
     end
@@ -61,7 +61,7 @@ end
 --- and every caller filters them out; a shim that omitted them would be right
 --- about the filesystem and wrong about the interface.
 function lfsshim.dir(path: string): function(): string
-    local entries = tecs.io.filesystem.list(path)
+    local entries = tecs.io.files.list(path)
     if entries == nil then
         error(("cannot list %s"):format(path), 2)
     end
@@ -75,7 +75,7 @@ end
 
 --- Creates one directory.
 function lfsshim.mkdir(path: string): boolean, string
-    return tecs.io.filesystem.createDirectory(path)
+    return tecs.io.files.createDirectory(path)
 end
 
 --- Installs this under the name the tools require.

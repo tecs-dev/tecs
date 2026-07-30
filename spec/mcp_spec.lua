@@ -11,9 +11,9 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local cjson = require("cjson")
 local sdl = require("tecs.ffi.sdl3")
-local net = require("tecs.net")
-local mcp = require("tecs.net.mcp")
-local sandbox = require("tecs.net.mcp.sandbox")
+local tecsIO = require("tecs.io")
+local mcp = require("tecs.io.mcp")
+local sandbox = require("tecs.io.mcp.sandbox")
 
 local C = sdl.C
 local PORT = 7411
@@ -246,7 +246,7 @@ describe("mcp over a socket", function()
 
     setup(function()
         assert(C.SDL_Init(0))
-        assert(net.init())
+        assert(tecsIO.init())
         server = mcp.listen(PORT)
     end)
 
@@ -254,15 +254,15 @@ describe("mcp over a socket", function()
         if server then
             server:destroy()
         end
-        assert(net.quit())
+        assert(tecsIO.quit())
         C.SDL_Quit()
     end)
 
     local function connect()
-        local resolved = net.resolve("127.0.0.1"):wait(2000)
+        local resolved = tecsIO.resolve("127.0.0.1"):wait(2000)
         assert.are.equal("ready", resolved.status, resolved.error)
         local address = resolved.value
-        local connected = net.connect(address, PORT):wait(2000)
+        local connected = tecsIO.connect(address, PORT):wait(2000)
         address:close()
         assert.are.equal("ready", connected.status, connected.error)
         return connected.value

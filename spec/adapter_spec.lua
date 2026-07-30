@@ -24,7 +24,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local adapter = require("tecs.platform.adapter")
-local filesystem = require("tecs.io.filesystem")
+local files = require("tecs.io.files")
 local events = require("tecs.platform.events")
 local newInput = require("tecs.platform.input").newInput
 local platformOS = require("tecs.platform.os")
@@ -79,7 +79,7 @@ local function fakeAudio()
     return backend
 end
 
--- Content for a platform whose content is not a filesystem. Nothing it answers
+-- Content for a platform whose content is not a files. Nothing it answers
 -- exists on this machine, so a call that fell back to SDL answers nil where
 -- this answers bytes, and the difference is the assertion.
 local function fakeStorage()
@@ -173,12 +173,12 @@ describe("platform contract", function()
 
     before_each(function()
         adapter.reset()
-        filesystem.resetPaths()
+        files.resetPaths()
     end)
 
     teardown(function()
         adapter.reset()
-        filesystem.resetPaths()
+        files.resetPaths()
         shadercompiler.usePack(nil)
         C.SDL_Quit()
     end)
@@ -222,29 +222,29 @@ describe("platform contract", function()
 
     it("resolves content and state through the installed platform", function()
         adapter.install(fakePlatform())
-        filesystem.resetPaths()
+        files.resetPaths()
 
-        assert.are.equal("/dev/content/", filesystem.basePath())
-        assert.are.equal("/dev/save/tecs/tecs/", filesystem.preferencePath())
-        assert.are.equal("/dev/save/tecs/tecs/save.json", filesystem.writablePath("save.json"))
+        assert.are.equal("/dev/content/", files.basePath())
+        assert.are.equal("/dev/save/tecs/tecs/", files.preferencePath())
+        assert.are.equal("/dev/save/tecs/tecs/save.json", files.writablePath("save.json"))
 
         -- A development run has TECS_ASSETS set and it outranks everything,
         -- so content is checked against the platform only where nothing has
         -- overridden it.
-        filesystem.setAssetRoot(filesystem.basePath())
-        assert.are.equal("/dev/content/art/hero.png", filesystem.assetPath("art/hero.png"))
+        files.setAssetRoot(files.basePath())
+        assert.are.equal("/dev/content/art/hero.png", files.assetPath("art/hero.png"))
     end)
 
     it("lets the environment still override the asset root", function()
         -- A development run reads out of a build tree whatever the platform is,
         -- because the platform's answer is where a shipped build put content.
         adapter.install(fakePlatform())
-        filesystem.resetPaths()
-        filesystem.setAssetRoot("/tmp/staging")
-        assert.are.equal("/tmp/staging/", filesystem.assetRoot())
+        files.resetPaths()
+        files.setAssetRoot("/tmp/staging")
+        assert.are.equal("/tmp/staging/", files.assetRoot())
         assert.are.equal(
             "/dev/save/tecs/tecs/",
-            filesystem.preferencePath(),
+            files.preferencePath(),
             "the writable root is the platform's and is not overridable"
         )
     end)
@@ -257,30 +257,30 @@ describe("platform contract", function()
         local platform = fakePlatform()
         platform.storage = fakeStorage()
         adapter.install(platform)
-        filesystem.resetPaths()
+        files.resetPaths()
         -- A development run has TECS_ASSETS set and it outranks the platform,
         -- so content is pointed back at the platform's own base here.
-        filesystem.setAssetRoot(filesystem.basePath())
+        files.setAssetRoot(files.basePath())
 
-        local level = filesystem.assetPath("levels/1.json")
+        local level = files.assetPath("levels/1.json")
         assert.are.equal("/dev/content/levels/1.json", level)
-        assert.are.equal('{"room":"hold"}', filesystem.read(level))
+        assert.are.equal('{"room":"hold"}', files.read(level))
 
-        local save = filesystem.writablePath("slot1.json")
-        assert.is_true(filesystem.write(save, '{"score":41}'))
-        assert.are.equal('{"score":41}', filesystem.read(save))
+        local save = files.writablePath("slot1.json")
+        assert.is_true(files.write(save, '{"score":41}'))
+        assert.are.equal('{"score":41}', files.read(save))
 
-        assert.are.equal(15, filesystem.info(level).size)
-        assert.is_true(filesystem.exists(level))
-        assert.is_true(filesystem.isFile(level))
-        assert.is_false(filesystem.isDirectory(level))
-        assert.is_false(filesystem.exists("/dev/content/absent"))
+        assert.are.equal(15, files.info(level).size)
+        assert.is_true(files.exists(level))
+        assert.is_true(files.isFile(level))
+        assert.is_false(files.isDirectory(level))
+        assert.is_false(files.exists("/dev/content/absent"))
 
-        assert.are.same({ "levels", "levels/1.json" }, filesystem.list(filesystem.basePath()))
-        assert.is_true(filesystem.createDirectory("/dev/save/tecs/tecs/shots"))
-        assert.is_true(filesystem.copy(level, "/dev/content/levels/2.json"))
-        assert.is_true(filesystem.rename("/dev/content/levels/2.json", "/dev/content/levels/3.json"))
-        assert.is_true(filesystem.remove("/dev/content/levels/3.json"))
+        assert.are.same({ "levels", "levels/1.json" }, files.list(files.basePath()))
+        assert.is_true(files.createDirectory("/dev/save/tecs/tecs/shots"))
+        assert.is_true(files.copy(level, "/dev/content/levels/2.json"))
+        assert.is_true(files.rename("/dev/content/levels/2.json", "/dev/content/levels/3.json"))
+        assert.is_true(files.remove("/dev/content/levels/3.json"))
 
         -- Named, in order, so that an operation quietly answered by something
         -- other than this backend is a shorter list rather than a passing
@@ -308,7 +308,7 @@ describe("platform contract", function()
         adapter.install(platform)
 
         local path = "/dev/content/levels/1.json"
-        local reader = assert(filesystem.openRead(path))
+        local reader = assert(files.openRead(path))
         assert.are.equal("{", reader:read(0))
         assert.are.equal('"', reader:read(-8))
         assert.are.equal("room", reader:read(4))
@@ -324,14 +324,14 @@ describe("platform contract", function()
         local platform = fakePlatform()
         platform.storage = fakeStorage()
         adapter.install(platform)
-        filesystem.resetPaths()
-        filesystem.setAssetRoot(filesystem.basePath())
+        files.resetPaths()
+        files.setAssetRoot(files.basePath())
 
-        filesystem.read(filesystem.assetPath("levels/1.json"), "level")
-        assert.are.equal("level", filesystem.loaded()["/dev/content/levels/1.json"])
-        assert.is_nil(filesystem.loaded()["/dev/content/absent"])
-        assert.is_nil(filesystem.read("/dev/content/absent"))
-        assert.is_nil(filesystem.loaded()["/dev/content/absent"], "a read that found nothing records nothing")
+        files.read(files.assetPath("levels/1.json"), "level")
+        assert.are.equal("level", files.loaded()["/dev/content/levels/1.json"])
+        assert.is_nil(files.loaded()["/dev/content/absent"])
+        assert.is_nil(files.read("/dev/content/absent"))
+        assert.is_nil(files.loaded()["/dev/content/absent"], "a read that found nothing records nothing")
     end)
 
     it("answers nil for what a platform says it does not have", function()
@@ -343,19 +343,19 @@ describe("platform contract", function()
         platform.storage = fakeStorage()
         adapter.install(platform)
 
-        local cwd, why = filesystem.currentDirectory()
+        local cwd, why = files.currentDirectory()
         assert.is_nil(cwd)
         assert.is_true(#why > 0)
 
-        local folder, reason = filesystem.userFolder("pictures")
+        local folder, reason = files.userFolder("pictures")
         assert.is_nil(folder)
         assert.is_true(#reason > 0)
 
         -- Still a name check and not a passthrough: a typo is the caller's
         -- defect on every platform.
         assert.has_error(function()
-            filesystem.userFolder("picturez")
-        end, "tecs: io.filesystem.userFolder does not know 'picturez'")
+            files.userFolder("picturez")
+        end, "tecs: io.files.userFolder does not know 'picturez'")
     end)
 
     it("keeps SDL's storage for a platform that only answers where", function()
@@ -367,14 +367,14 @@ describe("platform contract", function()
             return os.getenv("TMPDIR") or "/tmp/"
         end
         adapter.install(platform)
-        filesystem.resetPaths()
+        files.resetPaths()
 
         assert.are.equal("sdl", adapter.storage().name)
-        local save = filesystem.writablePath("tecs-adapter-spec.txt")
-        assert.is_true(filesystem.write(save, "on the host"))
-        assert.are.equal("on the host", filesystem.read(save))
-        assert.is_string(filesystem.currentDirectory())
-        assert.is_true(filesystem.remove(save))
+        local save = files.writablePath("tecs-adapter-spec.txt")
+        assert.is_true(files.write(save, "on the host"))
+        assert.are.equal("on the host", files.read(save))
+        assert.is_string(files.currentDirectory())
+        assert.is_true(files.remove(save))
     end)
 
     it("takes the platform's shader format for the device to claim", function()
@@ -460,10 +460,10 @@ describe("platform contract", function()
     it("returns to SDL when a platform is removed", function()
         adapter.install(fakePlatform({ { kind = "quit" } }))
         adapter.reset()
-        filesystem.resetPaths()
+        files.resetPaths()
 
         assert.are.equal("sdl", adapter.current().name)
         assert.is_nil(events.source, "the event hook must be cleared with the platform")
-        assert.are_not.equal("/dev/content/", filesystem.basePath())
+        assert.are_not.equal("/dev/content/", files.basePath())
     end)
 end)

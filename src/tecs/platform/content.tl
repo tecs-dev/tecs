@@ -1,7 +1,7 @@
 --[=[
 Where content is, reading it, and remembering what was read.
 
-The content state shared below `tecs.io.filesystem`, `tecs.io.watcher`, and the
+The content state shared below `tecs.io.files`, `tecs.io.watcher`, and the
 rest of the engine.
 
 The filesystem resolves roots and records every path it reads. The watcher

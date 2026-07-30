@@ -19,9 +19,9 @@ local ecs = require("tecs.ecs")
 local passscope = require("tecs.gpu.passscope")
 local ComputePass = require("tecs.gpu.ComputePass")
 local time = require("tecs.platform.time")
-local filesystem = require("tecs.io.filesystem")
+local files = require("tecs.io.files")
 local log = require("tecs.log")
-local mcp = require("tecs.net.mcp")
+local mcp = require("tecs.io.mcp")
 
 local FIXTURE = "spec/fixtures/split.png"
 
@@ -738,9 +738,9 @@ describe("Application", function()
     -- what the methods do, which is reachable in process.
     describe("the platform lifecycle", function()
         local function removeCheckpoint()
-            local path = filesystem.writablePath(CHECKPOINT)
-            filesystem.remove(path)
-            filesystem.remove(path .. ".new")
+            local path = files.writablePath(CHECKPOINT)
+            files.remove(path)
+            files.remove(path .. ".new")
         end
 
         before_each(removeCheckpoint)
@@ -852,9 +852,9 @@ describe("Application", function()
     -- part into exactly the callback that cannot afford it.
     describe("the checkpoint", function()
         local function removeCheckpoint()
-            local path = filesystem.writablePath(CHECKPOINT)
-            filesystem.remove(path)
-            filesystem.remove(path .. ".new")
+            local path = files.writablePath(CHECKPOINT)
+            files.remove(path)
+            files.remove(path .. ".new")
         end
 
         before_each(removeCheckpoint)
@@ -869,7 +869,7 @@ describe("Application", function()
 
             -- Nothing is written until the platform asks, because the frame
             -- that prepared it is not the moment there is a deadline.
-            assert.is_false(filesystem.exists(filesystem.writablePath(CHECKPOINT)))
+            assert.is_false(files.exists(files.writablePath(CHECKPOINT)))
 
             app:_willEnterBackground()
             assert.are.equal("level=3;hp=41", app:readCheckpoint())
@@ -903,7 +903,7 @@ describe("Application", function()
 
             assert.are.equal(4096, #app:readCheckpoint())
             assert.is_false(
-                filesystem.exists(filesystem.writablePath(CHECKPOINT) .. ".new"),
+                files.exists(files.writablePath(CHECKPOINT) .. ".new"),
                 "the file the write goes through was left on disk"
             )
             app:_shutdown()
@@ -918,7 +918,7 @@ describe("Application", function()
 
             app:stageCheckpoint("first")
             app:_willEnterBackground()
-            filesystem.remove(filesystem.writablePath(CHECKPOINT))
+            files.remove(files.writablePath(CHECKPOINT))
 
             app:_willEnterBackground()
             assert.is_nil(app:readCheckpoint(), "a backgrounding with nothing staged wrote again")
@@ -989,7 +989,7 @@ describe("Application", function()
             assert.is_true(app:_init())
             assert.is_truthy(log.filePath():find("spec-named.jsonl", 1, true))
             app:_shutdown()
-            filesystem.remove(filesystem.writablePath("spec-named.jsonl"))
+            files.remove(files.writablePath("spec-named.jsonl"))
         end)
 
         it("sets the log level before anything has had a chance to speak", function()

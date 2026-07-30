@@ -357,38 +357,40 @@ describe("the public surface", function()
         end)
 
         it("hangs both names below it on the parent, once", function()
-            assert.is_true(rawequal(tecs.io.filesystem, require("tecs.io.filesystem")))
+            assert.is_true(rawequal(tecs.io.files, require("tecs.io.files")))
             assert.is_true(rawequal(tecs.io.watcher, require("tecs.io.watcher")))
             -- Written onto the module after the first read, which a namespace
             -- cannot do: there the table has to stay empty so `__index` keeps
             -- firing. A module owns every name it answers, so there is nothing
             -- to route and nothing to keep consulting.
-            assert.is_true(rawequal(rawget(tecs.io, "filesystem"), require("tecs.io.filesystem")))
+            assert.is_true(rawequal(rawget(tecs.io, "files"), require("tecs.io.files")))
             assert.is_true(rawequal(rawget(tecs.io, "watcher"), require("tecs.io.watcher")))
         end)
 
-        it("hangs MCP below networking and nowhere deeper", function()
-            assert.is_true(rawequal(tecs.net.mcp, require("tecs.net.mcp")))
-            assert.is_true(rawequal(rawget(tecs.net, "mcp"), require("tecs.net.mcp")))
-            assert.are.equal("function", type(tecs.net.mcp.tools))
-            assert.is_false(rawequal(tecs.net.mcp.tools, require("tecs.net.mcp.tools")))
-            assert.is_nil(tecs.net.mcp.transport)
-            assert.is_nil(tecs.net.mcp.sandbox)
-            assert.is_nil(tecs.net.mcp.world)
+        it("hangs MCP below io and nowhere deeper", function()
+            assert.is_true(rawequal(tecs.io.mcp, require("tecs.io.mcp")))
+            assert.is_true(rawequal(rawget(tecs.io, "mcp"), require("tecs.io.mcp")))
+            assert.are.equal("function", type(tecs.io.mcp.tools))
+            assert.is_false(rawequal(tecs.io.mcp.tools, require("tecs.io.mcp.tools")))
+            assert.is_nil(tecs.io.mcp.transport)
+            assert.is_nil(tecs.io.mcp.sandbox)
+            assert.is_nil(tecs.io.mcp.world)
         end)
 
         it("takes a write on the module that reads it back", function()
-            local filesystem = require("tecs.io.filesystem")
-            local previous = filesystem.organization
-            tecs.io.filesystem.organization = "Ex Nihilo"
-            assert.are.equal("Ex Nihilo", filesystem.organization)
-            tecs.io.filesystem.organization = previous
+            local files = require("tecs.io.files")
+            local previous = files.organization
+            tecs.io.files.organization = "Ex Nihilo"
+            assert.are.equal("Ex Nihilo", files.organization)
+            tecs.io.files.organization = previous
         end)
 
         it("answers nil for a name neither it nor the names below it carry", function()
             assert.is_nil(tecs.io.nosuchthing)
-            assert.is_nil(tecs.io.filesystem.watch)
+            assert.is_nil(tecs.io.files.watch)
             assert.is_nil(tecs.filesystem)
+            assert.is_nil(tecs.io.filesystem)
+            assert.is_nil(tecs.net)
         end)
     end)
 end)

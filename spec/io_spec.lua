@@ -12,7 +12,7 @@ local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
 
 local C = sdl.C
-local net = tecs.net
+local tecsIO = tecs.io
 
 local nextPort = 27140
 
@@ -20,7 +20,7 @@ local function listen()
     for _ = 1, 100 do
         local port = nextPort
         nextPort = nextPort + 1
-        local server = net.listen(port)
+        local server = tecsIO.listen(port)
         if server then
             return server, port
         end
@@ -32,7 +32,7 @@ local function bind()
     for _ = 1, 100 do
         local port = nextPort
         nextPort = nextPort + 1
-        local socket = net.bind(port)
+        local socket = tecsIO.bind(port)
         if socket then
             return socket, port
         end
@@ -41,14 +41,14 @@ local function bind()
 end
 
 local function resolved()
-    local future = net.resolve("127.0.0.1")
+    local future = tecsIO.resolve("127.0.0.1")
     future:wait(2000)
     assert.are.equal("ready", future.status, future.error)
     return future.value
 end
 
 local function connected(address, server, port)
-    local future = net.connect(address, port)
+    local future = tecsIO.connect(address, port)
     future:wait(2000)
     assert.are.equal("ready", future.status, future.error)
     assert.is_true(server:wait(2000))
@@ -77,53 +77,53 @@ local function readExactly(stream, length, chunk)
     return table.concat(pieces), pieces
 end
 
-describe("tecs.net", function()
+describe("tecs.io", function()
     setup(function()
         assert(C.SDL_Init(0))
-        assert.is_true(net.init())
+        assert.is_true(tecsIO.init())
     end)
 
     teardown(function()
-        local ok, reason = net.quit()
+        local ok, reason = tecsIO.quit()
         assert.is_true(ok, reason)
         C.SDL_Quit()
     end)
 
     it("resolves numeric loopback asynchronously", function()
-        local future = net.resolve("127.0.0.1")
+        local future = tecsIO.resolve("127.0.0.1")
         assert.are.equal("pending", future.status)
-        assert.are.equal(1, net.pending())
+        assert.are.equal(1, tecsIO.pending())
 
         local deadline = C.SDL_GetTicks() + 2000
         while future.status == "pending" and C.SDL_GetTicks() < deadline do
-            net.poll()
+            tecsIO.poll()
         end
 
         assert.are.equal("ready", future.status, future.error)
         assert.are.equal("127.0.0.1", future.value.host)
         assert.is_string(future.value.text)
-        assert.are.equal(0, net.pending())
+        assert.are.equal(0, tecsIO.pending())
         future.value:close()
         assert.is_true(future.value:isClosed())
         future.value:close()
     end)
 
     it("cancels resolution without leaving work pending", function()
-        local future = net.resolve("127.0.0.1")
+        local future = tecsIO.resolve("127.0.0.1")
         future:cancel()
 
         assert.are.equal("canceled", future.status)
-        assert.are.equal(0, net.pending())
+        assert.are.equal(0, tecsIO.pending())
     end)
 
     it("cancels a pending client connection", function()
         local address = resolved()
         local server, port = listen()
-        local future = net.connect(address, port)
+        local future = tecsIO.connect(address, port)
 
         future:cancel()
         assert.are.equal("canceled", future.status)
-        assert.are.equal(0, net.pending())
+        assert.are.equal(0, tecsIO.pending())
 
         server:close()
         address:close()
@@ -132,10 +132,10 @@ describe("tecs.net", function()
     it("advances a client connection through the frame poll", function()
         local address = resolved()
         local server, port = listen()
-        local future = net.connect(address, port)
+        local future = tecsIO.connect(address, port)
         local deadline = C.SDL_GetTicks() + 2000
         while future.status == "pending" and C.SDL_GetTicks() < deadline do
-            net.poll()
+            tecsIO.poll()
         end
 
         assert.are.equal("ready", future.status, future.error)
@@ -216,7 +216,7 @@ describe("tecs.net", function()
     it("sends and receives whole datagrams in both directions", function()
         local address = resolved()
         local receiver, port = bind()
-        local sender, senderPort = net.bind(0)
+        local sender, senderPort = tecsIO.bind(0)
         assert.is_not_nil(sender, senderPort)
 
         assert.is_true(sender:send(address, port, "first packet"))
@@ -242,7 +242,7 @@ describe("tecs.net", function()
     it("keeps a packet source address alive after receiving", function()
         local address = resolved()
         local receiver, port = bind()
-        local sender = assert(net.bind(0))
+        local sender = assert(tecsIO.bind(0))
 
         assert.is_true(sender:send(address, port, "address lifetime"))
         assert.is_true(receiver:wait(2000))
@@ -259,21 +259,21 @@ describe("tecs.net", function()
 
     it("refuses shutdown while an owned object is open", function()
         local address = resolved()
-        local ok, reason = net.quit()
+        local ok, reason = tecsIO.quit()
         assert.is_false(ok)
         assert.is_truthy(reason:find("still open", 1, true))
 
         address:close()
-        assert.is_true(net.quit())
-        assert.is_true(net.init())
+        assert.is_true(tecsIO.quit())
+        assert.is_true(tecsIO.init())
     end)
 
     it("validates ports, bounds and timeouts before native calls", function()
         local address = resolved()
-        local socket = assert(net.bind(0))
+        local socket = assert(tecsIO.bind(0))
 
         assert.has_error(function()
-            net.connect(address, 0)
+            tecsIO.connect(address, 0)
         end)
         assert.has_error(function()
             socket:send(address, 99999, "")

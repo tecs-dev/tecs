@@ -2,8 +2,9 @@
 Declares the directional binary interfaces published by `tecs.io`.
 
 This module is the cycle-safe home of `Reader` and `Writer`. It is not a
-second public namespace: `tecs.io` re-exports both contracts, while filesystem
-and network modules require them without requiring their public parent.
+second public namespace: `tecs.io` re-exports both contracts, while resource
+modules such as `files` and HTTP require them without requiring their public
+parent.
 ]=]
 
 --- A caller-owned source of binary strings.

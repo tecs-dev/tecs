@@ -210,7 +210,7 @@ local PAGES = {
             {
                 title = "Live inspection",
                 details = "Inspect, freeze, and edit a running game through the"
-                    .. " [built-in MCP server](/modules/net/mcp).",
+                    .. " [built-in MCP server](/modules/io/mcp).",
                 icon = "🤖",
             },
             {
@@ -403,20 +403,14 @@ local SIDEBAR = {
                 text = "tecs.io",
                 path = "modules/io",
                 items = {
-                    { text = "tecs.io.filesystem", path = "modules/io/filesystem" },
+                    { text = "tecs.io.files", path = "modules/io/files" },
+                    { text = "tecs.io.http", path = "modules/io/http" },
+                    { text = "tecs.io.mcp", path = "modules/io/mcp" },
                     { text = "tecs.io.watcher", path = "modules/io/watcher" },
                 },
             },
             { text = "tecs.log", path = "modules/log" },
             { text = "tecs.math", path = "modules/math" },
-            {
-                text = "tecs.net",
-                path = "modules/net",
-                items = {
-                    { text = "tecs.net.http", path = "modules/net/http" },
-                    { text = "tecs.net.mcp", path = "modules/net/mcp" },
-                },
-            },
             { text = "tecs.os", path = "modules/os" },
             { text = "tecs.physics", path = "modules/physics" },
             { text = "tecs.regex", path = "modules/regex" },

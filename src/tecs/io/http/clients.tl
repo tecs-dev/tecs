@@ -12,7 +12,7 @@ Building one registers it here, closing one takes it off, and
 ## Process-wide client registry
 
 The loop has to reach the list without starting the HTTP runtime.
-`tecs.net.http` resolves the native boundary when it is required, so an
+`tecs.io.http` resolves the native boundary when it is required, so an
 `Application` that required it would make every game start HTTP machinery,
 including ones that never make a request. This module names no library and
 costs a table.

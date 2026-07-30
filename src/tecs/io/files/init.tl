@@ -6,19 +6,20 @@ Set `organization` and `application` before resolving the first writable
 path:
 
 ```teal
-tecs.io.filesystem.organization = "Ex Nihilo"
-tecs.io.filesystem.application = "Starfarer"
+local files <const> = tecs.io.files
+files.organization = "Ex Nihilo"
+files.application = "Starfarer"
 
-local directory <const> = tecs.io.filesystem.writablePath("saves")
-local ok, reason = tecs.io.filesystem.createDirectory(directory)
+local directory <const> = files.writablePath("saves")
+local ok, reason = files.createDirectory(directory)
 if not ok then
     error(reason)
 end
 
 local path <const> =
-    tecs.io.filesystem.writablePath("saves/slot1.json")
+    files.writablePath("saves/slot1.json")
 local bytes <const> = tecs.data.encodeJSON({ level = 3, hp = 100 })
-ok, reason = tecs.io.filesystem.write(path, bytes)
+ok, reason = files.write(path, bytes)
 if not ok then
     error(reason)
 end
@@ -38,7 +39,7 @@ local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
 local type iotypes = require("tecs.io.types")
 
-local record filesystem
+local record files
     --- Caller-writable. The caller sets `organization` before
     --- `preferencePath` resolves the writable directory.
     organization: string
@@ -69,11 +70,11 @@ local record filesystem
     type Reader = iotypes.Reader
 end
 
-local type Info = filesystem.Info
-local type UserFolder = filesystem.UserFolder
-local type GlobOptions = filesystem.GlobOptions
-local type Writer = filesystem.Writer
-local type Reader = filesystem.Reader
+local type Info = files.Info
+local type UserFolder = files.UserFolder
+local type GlobOptions = files.GlobOptions
+local type Writer = files.Writer
+local type Reader = files.Reader
 
 --- Raises when a required string argument is missing.
 ---
@@ -85,12 +86,12 @@ local type Reader = filesystem.Reader
 --- it in ten functions.
 local function required(value: string, what: string)
     if value == nil then
-        error(("tecs: io.filesystem.%s needs a path"):format(what), 3)
+        error(("tecs: io.files.%s needs a path"):format(what), 3)
     end
 end
 
-filesystem.organization = "tecs"
-filesystem.application = "tecs"
+files.organization = "tecs"
+files.application = "tecs"
 
 --- Returns the directory that contains the executable.
 ---
@@ -98,7 +99,7 @@ filesystem.application = "tecs"
 ---     string rather than nil when the platform declines to
 ---     say, which is the case on some targets and is not an error: a caller
 ---     falls back to a relative path.
-function filesystem.basePath(): string
+function files.basePath(): string
     return content.basePath()
 end
 
@@ -110,15 +111,15 @@ end
 ---     and `application`. The only place a build may write: everything else is
 ---     read-only on at least one target, and finding that out at run time on a
 ---     device is expensive.
-function filesystem.preferencePath(): string
-    return content.prefPath(filesystem.organization, filesystem.application)
+function files.preferencePath(): string
+    return content.prefPath(files.organization, files.application)
 end
 
 --- Returns the root from which the engine reads content.
 ---
 --- @return Returns `TECS_ASSETS` when set, otherwise the host-configured root
 ---     or `basePath`. The value stays cached until the platform changes.
-function filesystem.assetRoot(): string
+function files.assetRoot(): string
     return content.assetRoot()
 end
 
@@ -127,7 +128,7 @@ end
 --- @param relative The caller supplies a path under the content root with `/`
 ---     separators. The function joins it without checking existence.
 --- @return Returns the absolute path.
-function filesystem.assetPath(relative: string): string
+function files.assetPath(relative: string): string
     return content.assetPath(relative)
 end
 
@@ -135,15 +136,15 @@ end
 ---
 --- @param relative The caller supplies a path under the preference directory.
 --- @return Returns the absolute path.
-function filesystem.writablePath(relative: string): string
-    return filesystem.preferencePath() .. relative
+function files.writablePath(relative: string): string
+    return files.preferencePath() .. relative
 end
 
 --- Overrides the asset root, for a test or a tool.
 ---
 --- @param root The caller supplies the new content directory. The function
 ---     adds a trailing separator only when needed.
-function filesystem.setAssetRoot(root: string)
+function files.setAssetRoot(root: string)
     content.setAssetRoot(root)
 end
 
@@ -151,7 +152,7 @@ end
 ---
 --- Platform changes refresh roots automatically. Tests call this after moving
 --- process state.
-function filesystem.resetPaths()
+function files.resetPaths()
     content.reset()
 end
 
@@ -163,7 +164,7 @@ end
 --- @param path The caller supplies an absolute or platform-resolvable path.
 --- @return Returns the path information, or nil when unavailable.
 --- @return Returns the platform reason when the first return is nil.
-function filesystem.info(path: string): Info, string
+function files.info(path: string): Info, string
     required(path, "info")
     return adapter.storage().info(path)
 end
@@ -172,7 +173,7 @@ end
 ---
 --- @param path The caller supplies an absolute or platform-resolvable path.
 --- @return Returns true when the platform finds any object.
-function filesystem.exists(path: string): boolean
+function files.exists(path: string): boolean
     required(path, "exists")
     return adapter.storage().info(path) ~= nil
 end
@@ -181,7 +182,7 @@ end
 ---
 --- @param path The caller supplies an absolute or platform-resolvable path.
 --- @return Returns true when the resolved object is a regular file.
-function filesystem.isFile(path: string): boolean
+function files.isFile(path: string): boolean
     required(path, "isFile")
     local info <const> = adapter.storage().info(path)
     return info ~= nil and info.kind == "file"
@@ -191,7 +192,7 @@ end
 ---
 --- @param path The caller supplies an absolute or platform-resolvable path.
 --- @return Returns true when the resolved object is a directory.
-function filesystem.isDirectory(path: string): boolean
+function files.isDirectory(path: string): boolean
     required(path, "isDirectory")
     local info <const> = adapter.storage().info(path)
     return info ~= nil and info.kind == "directory"
@@ -216,7 +217,7 @@ end
 ---     fails.
 --- @return Returns the platform reason when the first return is nil.
 ---     An empty list means an empty directory, which nil does not.
-function filesystem.glob(path: string, pattern?: string, options?: GlobOptions): {string}, string
+function files.glob(path: string, pattern?: string, options?: GlobOptions): {string}, string
     required(path, "glob")
     return adapter.storage().glob(path, pattern, options)
 end
@@ -228,9 +229,9 @@ end
 --- @param path The caller supplies the directory to enumerate.
 --- @return Returns immediate child names, or nil when enumeration fails.
 --- @return Returns the platform reason when the first return is nil.
-function filesystem.list(path: string): {string}, string
+function files.list(path: string): {string}, string
     required(path, "list")
-    return filesystem.glob(path, "*")
+    return files.glob(path, "*")
 end
 
 --- Creates `path`, and any parents it needs.
@@ -240,7 +241,7 @@ end
 --- @param path The caller supplies the directory to create.
 --- @return Returns whether the platform created or found the directory.
 --- @return Returns the platform reason when the first return is false.
-function filesystem.createDirectory(path: string): boolean, string
+function files.createDirectory(path: string): boolean, string
     required(path, "createDirectory")
     return adapter.storage().createDirectory(path)
 end
@@ -253,17 +254,17 @@ end
 ---
 --- Emptying a tree requires a glob and a deepest-first loop:
 ---
----     local entries = filesystem.glob(root)
+---     local entries = files.glob(root)
 ---     table.sort(entries, function(a, b) return #a > #b end)
 ---     for _, entry in ipairs(entries) do
----         filesystem.remove(root .. "/" .. entry)
+---         files.remove(root .. "/" .. entry)
 ---     end
----     filesystem.remove(root)
+---     files.remove(root)
 ---
 --- @param path The caller supplies the file or empty directory to remove.
 --- @return Returns true when nothing remains at `path`.
 --- @return Returns the platform reason when the first return is false.
-function filesystem.remove(path: string): boolean, string
+function files.remove(path: string): boolean, string
     required(path, "remove")
     return adapter.storage().remove(path)
 end
@@ -278,7 +279,7 @@ end
 --- @param to The caller supplies the destination path to replace.
 --- @return Returns whether the platform moved the path.
 --- @return Returns the platform reason when the first return is false.
-function filesystem.rename(from: string, to: string): boolean, string
+function files.rename(from: string, to: string): boolean, string
     required(from, "rename")
     required(to, "rename")
     return adapter.storage().rename(from, to)
@@ -293,7 +294,7 @@ end
 --- @param to The caller supplies the destination file to replace.
 --- @return Returns whether the platform copied the file.
 --- @return Returns the platform reason when the first return is false.
-function filesystem.copy(from: string, to: string): boolean, string
+function files.copy(from: string, to: string): boolean, string
     required(from, "copy")
     required(to, "copy")
     return adapter.storage().copy(from, to)
@@ -309,7 +310,7 @@ end
 ---
 --- @param path The caller supplies the path that content loading attempted.
 --- @param kind The caller supplies the content kind that owns the path.
-function filesystem.note(path: string, kind: string)
+function files.note(path: string, kind: string)
     content.note(path, kind)
 end
 
@@ -323,7 +324,7 @@ end
 --- @param kind The caller supplies the content kind for watching, or omits it
 ---     to record a document.
 --- @return Returns the file bytes, or nil when the platform cannot read them.
-function filesystem.read(path: string, kind?: string): string
+function files.read(path: string, kind?: string): string
     required(path, "read")
     return content.read(path, kind)
 end
@@ -336,7 +337,7 @@ end
 --- A path that failed to load is here too. Whatever asked for it named it, and
 --- a file that would not decode is exactly the one worth noticing a change to.
 --- @return Returns a live read-only table shared with the content system.
-function filesystem.loaded(): {string: string}
+function files.loaded(): {string: string}
     return content.loaded()
 end
 
@@ -398,10 +399,10 @@ end
 --- @param bytes The caller supplies the complete binary contents.
 --- @return Returns whether the platform wrote the complete file.
 --- @return Returns the platform reason when the first return is false.
-function filesystem.write(path: string, bytes: string): boolean, string
+function files.write(path: string, bytes: string): boolean, string
     required(path, "write")
     if bytes == nil then
-        error("tecs: io.filesystem.write needs bytes to write", 2)
+        error("tecs: io.files.write needs bytes to write", 2)
     end
     return adapter.storage().write(path, bytes)
 end
@@ -414,7 +415,7 @@ end
 --- and this call reports a full disk.
 ---
 --- ```teal
---- local writer <const> = assert(tecs.io.filesystem.openWrite(path))
+--- local writer <const> = assert(tecs.io.files.openWrite(path))
 --- writer:write(chunk)
 --- assert(writer:close())
 --- ```
@@ -422,7 +423,7 @@ end
 --- @param path The caller supplies the destination file.
 --- @return Returns a caller-owned writer, or nil when it cannot open.
 --- @return Returns the platform reason when the first return is nil.
-function filesystem.openWrite(path: string): Writer, string
+function files.openWrite(path: string): Writer, string
     required(path, "openWrite")
     local backend <const> = adapter.storage()
     if backend.openWrite ~= nil then
@@ -440,7 +441,7 @@ end
 --- @param path The caller supplies the source file.
 --- @return Returns a caller-owned reader, or nil when it cannot open.
 --- @return Returns the platform reason when the first return is nil.
-function filesystem.openRead(path: string): Reader, string
+function files.openRead(path: string): Reader, string
     required(path, "openRead")
     local backend <const> = adapter.storage()
     if backend.openRead ~= nil then
@@ -463,7 +464,7 @@ end
 --- @return Returns the directory with a trailing separator, or nil when the
 ---     platform has no working directory.
 --- @return Returns the platform reason when the first return is nil.
-function filesystem.currentDirectory(): string, string
+function files.currentDirectory(): string, string
     local storage <const> = adapter.storage()
     if storage.currentDirectory == nil then
         return nil, "this platform has no working directory"
@@ -483,9 +484,9 @@ end
 --- @return Returns the folder with a trailing separator, or nil when the
 ---     platform has no matching folder.
 --- @return Returns the platform reason when the first return is nil.
-function filesystem.userFolder(which: UserFolder): string, string
+function files.userFolder(which: UserFolder): string, string
     if not storagebackend.folders[which] then
-        error(("tecs: io.filesystem.userFolder does not know '%s'"):format(tostring(which)), 2)
+        error(("tecs: io.files.userFolder does not know '%s'"):format(tostring(which)), 2)
     end
     local storage <const> = adapter.storage()
     if storage.userFolder == nil then
@@ -494,4 +495,4 @@ function filesystem.userFolder(which: UserFolder): string, string
     return storage.userFolder(which)
 end
 
-return filesystem
+return files

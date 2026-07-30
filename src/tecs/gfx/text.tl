@@ -52,7 +52,7 @@ unlit.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
-local filesystem <const> = require("tecs.io.filesystem")
+local files <const> = require("tecs.io.files")
 local loader <const> = require("tecs.ffi.loader")
 local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
@@ -410,7 +410,7 @@ local function resolve(path: string): string
     if path:sub(1, 1) == "/" then
         return path
     end
-    return filesystem.assetPath(path)
+    return files.assetPath(path)
 end
 
 --- Everything up to and including the final separator, or the empty string.

@@ -9,11 +9,11 @@ become: it knows where its bytes are, it reports a length when it can know
 one, and a response destination receives pieces without first becoming one
 large Lua string.
 
-    tecs.net.http.newClient():send({
+    tecs.io.http.newClient():send({
         url = "https://example.com/upload",
         method = "PUT",
-        body = tecs.net.http.DataStream.ofFile("save.bin"),
-        into = tecs.net.http.DataStream.ofFile("reply.bin"),
+        body = tecs.io.http.DataStream.ofFile("save.bin"),
+        into = tecs.io.http.DataStream.ofFile("reply.bin"),
     })
 
 ## One value, two directions
@@ -44,7 +44,7 @@ transport receives the materialized request string and sends its actual size.
 
 ## Files go through the storage seam and handles do not
 
-`ofFile` reads and writes through `tecs.io.filesystem`, so a port that
+`ofFile` reads and writes through `tecs.io.files`, so a port that
 replaced storage gets it. A response destination uses `openWrite`, while a
 request source uses the whole-file `read` operation described above.
 `ofHandle` is the other case on purpose: a caller that opened its own file is
@@ -52,7 +52,7 @@ already outside the storage abstraction and has said so.
 ]=]
 
 local loader <const> = require("tecs.ffi.loader")
-local filesystem <const> = require("tecs.io.filesystem")
+local files <const> = require("tecs.io.files")
 
 --- Bytes asked for in one directional read when nothing says otherwise.
 local CHUNK <const> = 64 * 1024
@@ -64,7 +64,7 @@ local record DataStream
         "string"
         --- An FFI buffer and a length, borrowed for as long as the send takes.
         "bytes"
-        --- A path, read and written through `tecs.io.filesystem`.
+        --- A path, read and written through `tecs.io.files`.
         "file"
         --- A handle the caller opened and still owns.
         "handle"
@@ -90,8 +90,8 @@ local record DataStream
     _at: integer
     --- The reader or the writer a "file" is being streamed through, held only
     --- between the calls below that open and close it.
-    _reader: filesystem.Reader
-    _writer: filesystem.Writer
+    _reader: files.Reader
+    _writer: files.Writer
 
     --- A stream over a string already in memory.
     ---
@@ -115,7 +115,7 @@ local record DataStream
     --- @return A source only.
     ofBytes: function(pointer: loader.CValue, length: integer, contentType?: string): DataStream
 
-    --- A stream over a path, read and written through `tecs.io.filesystem`.
+    --- A stream over a path, read and written through `tecs.io.files`.
     ---
     --- The file is not opened here. A source is opened when the transfer
     --- starts and a destination when the first byte arrives, so naming one
@@ -138,7 +138,7 @@ local record DataStream
     --- which is the whole difference between this and `ofFile`. Give `length`
     --- when callers need the metadata; it does not control HTTP framing.
     ---
-    --- A `tecs.net.http.plugin.Request` cannot snapshot this stream. The live
+    --- A `tecs.io.http.plugin.Request` cannot snapshot this stream. The live
     --- handle has no stable ownership or position to restore, so both snapshot
     --- formats raise. Use `ofFile` for a request that must survive a save.
     ---
@@ -243,7 +243,7 @@ function DataStream.ofFile(path: string, contentType?: string): DataStream
     self.path = path
     -- Asked for rather than assumed: a path that is not there yet is a
     -- destination, and a destination has no length until it has been written.
-    local info <const> = filesystem.info(path)
+    local info <const> = files.info(path)
     if info ~= nil and info.kind == "file" then
         self.length = info.size
     end
@@ -277,7 +277,7 @@ function DataStream:text(): string, string
         return loader.toBytes(self._pointer, self.length)
     end
     if kind == "file" then
-        local bytes <const> = filesystem.read(self.path)
+        local bytes <const> = files.read(self.path)
         if bytes == nil then
             return nil, ("tecs: cannot read %s"):format(self.path)
         end
@@ -299,7 +299,7 @@ function DataStream:_beginRead(): boolean, string
     if self.kind ~= "file" then
         return true
     end
-    local reader <const>, failure = filesystem.openRead(self.path)
+    local reader <const>, failure = files.openRead(self.path)
     if reader == nil then
         return false, ("tecs: cannot read %s: %s"):format(self.path, failure or "unknown")
     end
@@ -357,7 +357,7 @@ function DataStream:_beginWrite(): boolean, string
     if self.kind ~= "file" then
         return false, ("tecs: a %s stream cannot be written into"):format(self.kind)
     end
-    local writer <const>, failure = filesystem.openWrite(self.path)
+    local writer <const>, failure = files.openWrite(self.path)
     if writer == nil then
         return false, ("tecs: cannot write %s: %s"):format(self.path, failure or "unknown")
     end

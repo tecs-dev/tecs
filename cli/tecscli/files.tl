@@ -1,6 +1,6 @@
 --- Walking, copying and removing trees.
 ---
---- Everything here is `tecs.io.filesystem` plus recursion. SDL answers about one
+--- Everything here is `tecs.io.files` plus recursion. SDL answers about one
 --- path at a time on purpose, so a tree operation is a walk somebody writes;
 --- this is that walk, written once, rather than once per command.
 ---
@@ -33,7 +33,7 @@ function files.walk(root: string, keep?: function(string): boolean): {string}
     local found: {string} = {}
 
     local function descend(prefix: string)
-        local entries = tecs.io.filesystem.list(root .. (prefix == "" and "" or "/" .. prefix))
+        local entries = tecs.io.files.list(root .. (prefix == "" and "" or "/" .. prefix))
         if entries == nil then
             return
         end
@@ -41,7 +41,7 @@ function files.walk(root: string, keep?: function(string): boolean): {string}
         for _, entry in ipairs(entries) do
             if not SKIP[entry] then
                 local relative = prefix == "" and entry or prefix .. "/" .. entry
-                local info = tecs.io.filesystem.info(root .. "/" .. relative)
+                local info = tecs.io.files.info(root .. "/" .. relative)
                 if info ~= nil and info.kind == "directory" then
                     descend(relative)
                 elseif info ~= nil and info.kind == "file" then
@@ -59,7 +59,7 @@ end
 
 --- Creates `path` and every parent it needs.
 function files.ensure(path: string): boolean, string
-    return tecs.io.filesystem.createDirectory(path)
+    return tecs.io.files.createDirectory(path)
 end
 
 --- Creates the directory a file will be written into.
@@ -77,7 +77,7 @@ function files.copyTree(from: string, to: string): integer
     for _, relative in ipairs(files.walk(from)) do
         local target = to .. "/" .. relative
         files.ensureParent(target)
-        if tecs.io.filesystem.copy(from .. "/" .. relative, target) then
+        if tecs.io.files.copy(from .. "/" .. relative, target) then
             copied = copied + 1
         end
     end
@@ -91,34 +91,34 @@ end
 --- `tecs clean` calls, and cleaning a tree that was already clean is not a
 --- failure anyone wants reported.
 function files.removeTree(path: string): boolean
-    local info = tecs.io.filesystem.info(path)
+    local info = tecs.io.files.info(path)
     if info == nil then
         return true
     end
     if info.kind == "directory" then
-        local entries = tecs.io.filesystem.list(path)
+        local entries = tecs.io.files.list(path)
         if entries ~= nil then
             for _, entry in ipairs(entries) do
                 files.removeTree(path .. "/" .. entry)
             end
         end
     end
-    local removed = tecs.io.filesystem.remove(path)
+    local removed = tecs.io.files.remove(path)
     return removed
 end
 
 --- Reads a whole file, or nil when there is nothing there.
 function files.read(path: string): string
-    if not tecs.io.filesystem.isFile(path) then
+    if not tecs.io.files.isFile(path) then
         return nil
     end
-    return tecs.io.filesystem.read(path)
+    return tecs.io.files.read(path)
 end
 
 --- Writes `bytes` to `path`, creating the directory it goes in.
 function files.write(path: string, bytes: string): boolean, string
     files.ensureParent(path)
-    return tecs.io.filesystem.write(path, bytes)
+    return tecs.io.files.write(path, bytes)
 end
 
 --- Whether `path` ends with `suffix`.

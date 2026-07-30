@@ -32,7 +32,6 @@ local type window = require("tecs.platform.window")
 local type input = require("tecs.platform.input")
 local type time = require("tecs.platform.time")
 local type events = require("tecs.platform.events")
-local type net = require("tecs.net")
 local type binaryIO = require("tecs.io")
 local type layers = require("tecs.gfx.layers")
 local type sequence = require("tecs.sequence")
@@ -60,9 +59,10 @@ local type loader = require("tecs.ffi.loader")
 -- A public name that one module answers needs none of this, and has none. It
 -- resolves to that module, is typed by the record the module declares, and
 -- carries the names one level down as fields of its own: `tecs.io` is
--- `src/tecs/io.tl`, `filesystem` and `watcher` included. That is the shape to
--- reach for, because a record here restates every signature and every docblock
--- the module already carries and nothing checks the two against each other.
+-- `src/tecs/io.tl`, `files`, `http`, `mcp`, and `watcher` included. That is
+-- the shape to reach for, because a record here restates every signature and
+-- every docblock the module already carries and nothing checks the two against
+-- each other.
 --
 -- A class is a record nested inside the module named for it, so `tecs.audio` is
 -- `src/tecs/audio.tl` and `tecs.audio.Audio` is the class it declares. One name
@@ -71,7 +71,7 @@ local type loader = require("tecs.ffi.loader")
 -- going through `Window` first.
 --
 -- A module may also sit inside another module, one level and no deeper:
--- `tecs.gfx.layers`, `tecs.io.filesystem`. `SURFACE` is what declares that,
+-- `tecs.gfx.layers`, `tecs.io.files`. `SURFACE` is what declares that,
 -- through `within`, and a lowercase field of a record here is one of them only
 -- where the parent has no module of its own.
 
@@ -357,7 +357,6 @@ local record tecs
     io: binaryIO
     log: log
     math: vectorMath
-    net: net
     regex: regex
     sequence: sequence
     os: platformOS
@@ -447,19 +446,14 @@ local SURFACE <const>: {string: Namespace} = {
     io = {
         module = "tecs.io",
         within = {
-            filesystem = {module = "tecs.io.filesystem"},
+            files = {module = "tecs.io.files"},
+            http = {module = "tecs.io.http"},
+            mcp = {module = "tecs.io.mcp"},
             watcher = {module = "tecs.io.watcher"},
         },
     },
     log = {module = "tecs.log"},
     math = {module = "tecs.math"},
-    net = {
-        module = "tecs.net",
-        within = {
-            http = {module = "tecs.net.http"},
-            mcp = {module = "tecs.net.mcp"},
-        },
-    },
     regex = {module = "tecs.regex"},
     sequence = {module = "tecs.sequence"},
     os = {module = "tecs.platform.os"},
@@ -583,7 +577,7 @@ end
 --- table a write could belong on and nothing to route.
 ---
 --- @param module The table `require` answered with, which is edited in place:
----     `require("tecs.io").filesystem` is the same name reached the
+---     `require("tecs.io").files` is the same name reached the
 ---     other way, and one table means one answer.
 --- @param within The names below it, each a descriptor like any other.
 local function hang(module: {string: any}, within: {string: Namespace})

@@ -118,12 +118,12 @@ describe("tecs headless", function()
                 require("tecs")
                 local engine = {
                     "tecs.Application", "tecs.Renderer", "tecs.workers",
-                    "tecs.assets", "tecs.physics", "tecs.net.mcp",
+                    "tecs.assets", "tecs.physics", "tecs.io.mcp",
                     "tecs.gpu.Device", "tecs.ffi.sdl3",
                     "tecs.data", "tecs.math", "tecs.regex",
                     "tecs.platform.os",
-                    "tecs.io.filesystem", "tecs.io.watcher",
-                    "tecs.net", "tecs.net.http", "tecs.net.http.client",
+                    "tecs.io.files", "tecs.io.watcher",
+                    "tecs.io", "tecs.io.http", "tecs.io.http.client",
                 }
                 local loaded = {}
                 for _, name in ipairs(engine) do
@@ -179,69 +179,6 @@ describe("tecs headless", function()
             assert.are.equal("table false true none\n", output)
         end)
 
-        -- And the same property where the parent is a module rather than a
-        -- table built for the name. Naming `tecs.io` loads neither child, and
-        -- reading one child does not load its sibling.
-        it("hangs sibling modules under a module without loading them", function()
-            local output = run(
-                [[
-                local tecs = require("tecs")
-                local binaryIO = tecs.io
-                local parentLoadedFilesystem =
-                    package.loaded["tecs.io.filesystem"] ~= nil
-                local parentLoadedWatcher =
-                    package.loaded["tecs.io.watcher"] ~= nil
-                local filesystem = tecs.io.filesystem
-                local siblingLoaded = package.loaded["tecs.io.watcher"] ~= nil
-                local watcher = tecs.io.watcher
-
-                -- The same shape one protocol down: naming the transport must
-                -- not initialize the HTTP runtime.
-                local net = tecs.net
-                local http = package.loaded["tecs.net.http"] ~= nil
-
-                print(("%s %s %s %s %s %s %s %s %s"):format(
-                    tostring(rawequal(binaryIO, require("tecs.io"))),
-                    tostring(parentLoadedFilesystem),
-                    tostring(parentLoadedWatcher),
-                    tostring(rawequal(filesystem, require("tecs.io.filesystem"))),
-                    tostring(siblingLoaded),
-                    tostring(rawequal(watcher, require("tecs.io.watcher"))),
-                    tostring(tecs.filesystem),
-                    tostring(rawequal(net, require("tecs.net"))),
-                    tostring(http)))
-            ]],
-                false
-            )
-            assert.are.equal("true false false true false true nil true false\n", output)
-        end)
-
-        it("loads one network protocol without its sibling", function()
-            local httpOutput = run(
-                [[
-                local tecs = require("tecs")
-                local http = tecs.net.http
-                print(("%s %s"):format(
-                    tostring(rawequal(http, require("tecs.net.http"))),
-                    tostring(package.loaded["tecs.net.mcp"] == nil)))
-            ]],
-                false
-            )
-            assert.are.equal("true true\n", httpOutput)
-
-            local mcpOutput = run(
-                [[
-                local tecs = require("tecs")
-                local mcp = tecs.net.mcp
-                print(("%s %s"):format(
-                    tostring(rawequal(mcp, require("tecs.net.mcp"))),
-                    tostring(package.loaded["tecs.net.http"] == nil)))
-            ]],
-                false
-            )
-            assert.are.equal("true true\n", mcpOutput)
-        end)
-
         it("reports a mistyped engine name as nil", function()
             -- The names are listed rather than derived from a module path, so a
             -- typo answers nil here instead of raising out of `require` about a
@@ -259,6 +196,65 @@ describe("tecs headless", function()
     end)
 
     describe("with the native libraries, and still no window", function()
+        -- `tecs.io` now owns the socket transport, so naming the parent reaches
+        -- the Rust FFI. Its four children remain independent and lazy.
+        it("hangs io children on their parent without loading siblings", function()
+            local output = run(
+                [[
+                local tecs = require("tecs")
+                local tecsIO = tecs.io
+                local parentLoadedFiles = package.loaded["tecs.io.files"] ~= nil
+                local parentLoadedHTTP = package.loaded["tecs.io.http"] ~= nil
+                local parentLoadedMCP = package.loaded["tecs.io.mcp"] ~= nil
+                local parentLoadedWatcher = package.loaded["tecs.io.watcher"] ~= nil
+                local files = tecsIO.files
+                local filesLoadedWatcher = package.loaded["tecs.io.watcher"] ~= nil
+                local watcher = tecsIO.watcher
+
+                print(("%s %s %s %s %s %s %s %s %s %s %s"):format(
+                    tostring(rawequal(tecsIO, require("tecs.io"))),
+                    tostring(parentLoadedFiles),
+                    tostring(parentLoadedHTTP),
+                    tostring(parentLoadedMCP),
+                    tostring(parentLoadedWatcher),
+                    tostring(rawequal(files, require("tecs.io.files"))),
+                    tostring(filesLoadedWatcher),
+                    tostring(rawequal(watcher, require("tecs.io.watcher"))),
+                    tostring(package.loaded["tecs.io.http"] == nil),
+                    tostring(tecs.io.filesystem),
+                    tostring(tecs.net)))
+            ]],
+                true
+            )
+            assert.are.equal("true false false false false true false true true nil nil\n", output)
+        end)
+
+        it("loads one io protocol without its sibling", function()
+            local httpOutput = run(
+                [[
+                local tecs = require("tecs")
+                local http = tecs.io.http
+                print(("%s %s"):format(
+                    tostring(rawequal(http, require("tecs.io.http"))),
+                    tostring(package.loaded["tecs.io.mcp"] == nil)))
+            ]],
+                true
+            )
+            assert.are.equal("true true\n", httpOutput)
+
+            local mcpOutput = run(
+                [[
+                local tecs = require("tecs")
+                local mcp = tecs.io.mcp
+                print(("%s %s"):format(
+                    tostring(rawequal(mcp, require("tecs.io.mcp"))),
+                    tostring(package.loaded["tecs.io.http"] == nil)))
+            ]],
+                true
+            )
+            assert.are.equal("true true\n", mcpOutput)
+        end)
+
         it("simulates physics across its thread pool", function()
             -- No device, no window, and the solver's threads running: a
             -- headless simulation is a supported thing to build.

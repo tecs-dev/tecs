@@ -19,7 +19,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local platformOS = require("tecs.platform.os")
-local filesystem = require("tecs.io.filesystem")
+local files = require("tecs.io.files")
 
 -- Absolute, because every child below is given a working directory of its own
 -- and a relative path would then resolve against the scaffolded project rather
@@ -27,7 +27,7 @@ local filesystem = require("tecs.io.filesystem")
 -- starts and a result with no output in it, which reads as a program that ran
 -- and printed nothing.
 if root:sub(1, 1) ~= "/" then
-    root = (filesystem.currentDirectory():gsub("/$", "")) .. "/" .. root
+    root = (files.currentDirectory():gsub("/$", "")) .. "/" .. root
 end
 
 --- The directory holding `bin/tecs`, found by walking up from the content root.
@@ -212,7 +212,7 @@ return tecs.newApplication({
     end)
 
     it("runs Lua with only the arguments after the separator", function()
-        assert(filesystem.createDirectory(project .. "/tools"))
+        assert(files.createDirectory(project .. "/tools"))
         write(
             project .. "/tools/alternate.lua",
             [[

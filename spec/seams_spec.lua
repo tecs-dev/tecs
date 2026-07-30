@@ -31,7 +31,7 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local filesystem = require("tecs.io.filesystem")
+local files = require("tecs.io.files")
 
 -- The generated bindings. `tecs.ffi.loader` is deliberately not one: it finds
 -- and types libraries rather than being one, and the engine's own native code
@@ -197,8 +197,8 @@ local REACH = {
         modules = {
             "tecs/physics/TaskPool.lua",
             "tecs/physics/World.lua",
-            "tecs/net/mcp/transport.lua",
-            "tecs/net.lua",
+            "tecs/io/mcp/transport.lua",
+            "tecs/io.lua",
             "tecs/regex.lua",
         },
     },
@@ -211,13 +211,13 @@ local REACH = {
             "tecs/audio.lua",
             "tecs/assets.lua",
             "tecs/gfx/screenshot.lua",
-            "tecs/net/mcp/tools.lua",
+            "tecs/io/mcp/tools.lua",
         },
     },
     {
         bucket = "bypass",
         reason = "Enumerates the material and shader roots with "
-            .. "SDL_GlobDirectory rather than filesystem.glob, so content "
+            .. "SDL_GlobDirectory rather than files.glob, so content "
             .. "discovery goes around the storage seam even though the read "
             .. "beside it does not. Owned by the render tree.",
         modules = {
@@ -268,7 +268,7 @@ local STORAGE = {
         bucket = "bypass",
         symbols = { "SDL_GlobDirectory" },
         reason = "Finds every *.glsl under the material roots. Reads each one "
-            .. "through filesystem.read, so only the enumeration is outside "
+            .. "through files.read, so only the enumeration is outside "
             .. "the seam. Owned by the render tree.",
     },
     ["tecs/gpu/shaders.lua"] = {
@@ -293,7 +293,7 @@ local STDIO = {
         bucket = "tool",
         reason = "Writes the pack a target without a compiler consumes. Runs "
             .. "from `cargo xtask shaders` on a build machine; the loading half of "
-            .. "the same module reads through filesystem.",
+            .. "the same module reads through files.",
     },
     ["tecs/gpu/shaderbuild.lua"] = {
         bucket = "tool",
@@ -304,7 +304,7 @@ local STDIO = {
         reason = "Dumps a profile where whoever was profiling asked for it. "
             .. "Nothing calls it on a target and a release does not profile.",
     },
-    ["tecs/net/mcp/tools.lua"] = {
+    ["tecs/io/mcp/tools.lua"] = {
         bucket = "bypass",
         reason = "The debug server pages the engine's own log file, seeking to "
             .. "the offset the agent left off at and asking how long the file "
@@ -325,12 +325,12 @@ local STDIO = {
 
 --- Every compiled module under `tecs/`, as paths relative to `root`.
 ---
---- Through `filesystem.glob`, which is the seam this file is about: a
+--- Through `files.glob`, which is the seam this file is about: a
 --- recursive glob answers every descendant, and the spec that checks nothing
 --- goes around the storage backend gets there through it.
 local function modules()
     local found = {}
-    for _, entry in ipairs(assert(filesystem.glob(root .. "/tecs"))) do
+    for _, entry in ipairs(assert(files.glob(root .. "/tecs"))) do
         if entry:sub(-4) == ".lua" and entry:sub(1, 4) ~= "ffi/" then
             found[#found + 1] = "tecs/" .. entry
         end
@@ -366,7 +366,7 @@ describe("the platform seams", function()
 
     setup(function()
         for _, name in ipairs(modules()) do
-            sources[name] = assert(filesystem.read(root .. "/" .. name), "cannot read " .. name)
+            sources[name] = assert(files.read(root .. "/" .. name), "cannot read " .. name)
         end
     end)
 
@@ -438,7 +438,7 @@ describe("the platform seams", function()
         -- The property closing this bypass bought, stated on its own so that
         -- putting an SDL call back into the module fails with the reason
         -- rather than as one line of a table diff.
-        local text = sources["tecs/io/filesystem/init.lua"]
+        local text = sources["tecs/io/files/init.lua"]
         assert.is_string(text, "the module is under tecs.io")
         for _, binding in ipairs(BINDINGS) do
             assert.is_nil(

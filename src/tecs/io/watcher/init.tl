@@ -16,8 +16,8 @@ end
 watcher.poll()
 ```
 
-The watcher scans only paths recorded by `tecs.io.filesystem.read`,
-`tecs.io.filesystem.note`, and the asset loaders. It waits for a changed file's
+The watcher scans only paths recorded by `tecs.io.files.read`,
+`tecs.io.files.note`, and the asset loaders. It waits for a changed file's
 size and modification time to settle before dispatching it. Empty, missing,
 and directory paths do not dispatch.
 

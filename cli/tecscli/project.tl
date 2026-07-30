@@ -107,7 +107,7 @@ end
 
 --- Whether `directory` is a project root.
 function project.marks(directory: string): boolean
-    return tecs.io.filesystem.isFile(directory .. "/" .. MANIFEST)
+    return tecs.io.files.isFile(directory .. "/" .. MANIFEST)
 end
 
 --- The project containing `from`, searched for upward.
@@ -119,7 +119,7 @@ end
 function project.find(from?: string): project, string
     local directory = from
     if directory == nil or directory == "" then
-        directory = tecs.io.filesystem.currentDirectory()
+        directory = tecs.io.files.currentDirectory()
     end
     if directory == nil then
         return nil, "cannot read the working directory"

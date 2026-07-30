@@ -2,9 +2,9 @@
 Asynchronous HTTP and HTTPS.
 
 ```teal
-tecs.net.http.newClient({userAgent = "mygame/1.0"})
+tecs.io.http.newClient({userAgent = "mygame/1.0"})
     :send({url = "https://example.com/manifest.json"})
-    :map(function(response: tecs.net.http.Response): string
+    :map(function(response: tecs.io.http.Response): string
         local body <const> = response.body:text()
         return body
     end)
@@ -27,10 +27,10 @@ frame.
 -- Reqwest owns connection pools and drives sockets on Tokio. Rustls provides
 -- TLS, and the application loop drains completed transfers into Lua futures.
 
-local client <const> = require("tecs.net.http.client")
-local clients <const> = require("tecs.net.http.clients")
-local plugin <const> = require("tecs.net.http.plugin")
-local DataStream <const> = require("tecs.net.http.DataStream")
+local client <const> = require("tecs.io.http.client")
+local clients <const> = require("tecs.io.http.clients")
+local plugin <const> = require("tecs.io.http.plugin")
+local DataStream <const> = require("tecs.io.http.DataStream")
 
 local type Options = client.Options
 
@@ -51,7 +51,7 @@ local record http
     --- settles to regardless of status code.
     type Response = client.Response
 
-    --- Read-only. [`DataStream`](/modules/net/http/#tecs.net.http.DataStream) names bytes
+    --- Read-only. [`DataStream`](/modules/io/http/#tecs.io.http.DataStream) names bytes
     --- stored in a string, borrowed buffer, path, or caller-opened handle.
     DataStream: DataStream
 

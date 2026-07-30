@@ -3,4 +3,4 @@ description: "Asynchronous HTTP requests, streaming bodies, connection pools, an
 outline: deep
 ---
 
-# tecs.net.http
+# tecs.io.http

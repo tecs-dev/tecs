@@ -3,7 +3,7 @@
 -- **No network.** A spec that reached a real host would fail on a machine
 -- without one and, worse, fail intermittently on a machine with a bad one. So
 -- the other end is a listener this process starts over the public Rust-backed
--- `tecs.net` TCP surface, so the request and the response both stay inside this
+-- `tecs.io` TCP surface, so the request and the response both stay inside this
 -- test. `file://` is not a shortcut: it bypasses Reqwest and
 -- cannot prove that work moved to Tokio while futures still settle only when
 -- the SDL thread pumps their event queue.
@@ -16,8 +16,8 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
-local http = require("tecs.net.http")
-local net = tecs.net
+local http = require("tecs.io.http")
+local tecsIO = tecs.io
 
 local BODY = "the rust worker drove this without blocking\n"
 local CHUNK = 16384
@@ -118,7 +118,7 @@ local nextPort = 47860
 local function listenSomewhere()
     local failures = {}
     for port = nextPort, nextPort + 20 do
-        local listener, reason = net.listen(port)
+        local listener, reason = tecsIO.listen(port)
         if listener ~= nil then
             nextPort = port + 1
             return setmetatable({ listener = listener, client = nil, pending = "" }, TestServer), port

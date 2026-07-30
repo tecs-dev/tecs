@@ -13,10 +13,10 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local cjson = require("cjson")
 local shaders = require("tecs.gpu.shaders")
-local filesystem = require("tecs.io.filesystem")
+local files = require("tecs.io.files")
 local materials = require("tecs.gpu.materials")
-local mcp = require("tecs.net.mcp")
-local tools = require("tecs.net.mcp.tools")
+local mcp = require("tecs.io.mcp")
+local tools = require("tecs.io.mcp.tools")
 local assets = require("tecs.assets")
 
 --- A material body naming itself, so the dispatch can be read back for it.
@@ -445,8 +445,8 @@ describe("mcp reload_font", function()
         -- file it stat'd, which is that resolved against the content root. Both
         -- spellings have to reach the one font or an edit picked up by the
         -- watcher is refused as a font nothing loaded.
-        local contentRoot = filesystem.assetRoot()
-        filesystem.setAssetRoot(dir)
+        local contentRoot = files.assetRoot()
+        files.setAssetRoot(dir)
         write(dir .. "relative.json", metrics(256, 30))
         local relative = text.loadFont({
             metrics = "relative.json",
@@ -456,7 +456,7 @@ describe("mcp reload_font", function()
 
         write(dir .. "relative.json", metrics(256, 51))
         local ok, _, message = callTool({ path = dir .. "relative.json" })
-        filesystem.setAssetRoot(contentRoot)
+        files.setAssetRoot(contentRoot)
 
         assert.is_true(ok, message)
         assert.are.equal(51, relative.glyphs[72].xAdvance)
@@ -490,13 +490,13 @@ describe("mcp watch", function()
     -- into every later spec.
     before_each(function()
         dir = tempDir()
-        contentRoot = filesystem.assetRoot()
-        filesystem.setAssetRoot(dir)
+        contentRoot = files.assetRoot()
+        files.setAssetRoot(dir)
         watcher.uninstall()
     end)
 
     after_each(function()
-        filesystem.setAssetRoot(contentRoot)
+        files.setAssetRoot(contentRoot)
         watcher.uninstall()
         watcher.on("shader", nil)
         os.execute("rm -rf '" .. dir .. "'")
@@ -511,7 +511,7 @@ describe("mcp watch", function()
 
     it("starts, steps and stops the watcher", function()
         write(dir .. "watched.frag.glsl", "#version 450\n// FIRST\n")
-        assert.is_string(filesystem.read(dir .. "watched.frag.glsl"))
+        assert.is_string(files.read(dir .. "watched.frag.glsl"))
 
         local reloaded = 0
         watcher.on("shader", function()

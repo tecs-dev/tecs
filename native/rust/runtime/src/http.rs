@@ -1,6 +1,6 @@
 //! Runs asynchronous HTTP transfers through Reqwest and a bounded event queue.
 //!
-//! `tecs.net.http` calls this through the generated `http` FFI table; its Teal
+//! `tecs.io.http` calls this through the generated `http` FFI table; its Teal
 //! client drains chunks and completions on the SDL thread.
 
 use std::cell::RefCell;

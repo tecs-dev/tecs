@@ -59,7 +59,7 @@ rather than one frame later.
 2. `tecs.assets.update` settles the loads the worker finished.
 3. `tecs.os.updateProcesses` and `tecs.os.updateDialogs` settle the
    children that exited and the dialogs the user answered.
-4. The application pumps every open `tecs.net.http` client, which settles the
+4. The application pumps every open `tecs.io.http` client, which settles the
    transfers that completed.
 5. `tecs.io.watcher` polls, which reloads content whose file changed.
 6. The debug server answers, `world:update(dt)` runs the phases, and the
@@ -127,12 +127,12 @@ local audio <const> = require("tecs.audio")
 local type Audio = audio.Audio
 local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
-local filesystem <const> = require("tecs.io.filesystem")
+local files <const> = require("tecs.io.files")
 local platformOS <const> = require("tecs.platform.os")
-local httpClients <const> = require("tecs.net.http.clients")
+local httpClients <const> = require("tecs.io.http.clients")
 local watcher <const> = require("tecs.io.watcher")
 local log <const> = require("tecs.log")
-local mcp <const> = require("tecs.net.mcp")
+local mcp <const> = require("tecs.io.mcp")
 local timing <const> = require("tecs.timing")
 
 local LOGGER <const> = log.get("tecs.app")
@@ -571,16 +571,16 @@ local function flushCheckpoint(self: Application, occasion: string): boolean
 
     local bytes <const> = self._checkpointBytes
     local pending <const> = path .. ".new"
-    local wrote, writeFailure = filesystem.write(pending, bytes)
+    local wrote, writeFailure = files.write(pending, bytes)
     if not wrote then
         LOGGER:error("the checkpoint could not be written to %s: %s", pending, tostring(writeFailure))
         return false
     end
 
-    local moved, moveFailure = filesystem.rename(pending, path)
+    local moved, moveFailure = files.rename(pending, path)
     if not moved then
         LOGGER:error("the checkpoint could not be moved into place at %s: %s", path, tostring(moveFailure))
-        filesystem.remove(pending)
+        files.remove(pending)
         return false
     end
 
@@ -640,7 +640,7 @@ function Application:readCheckpoint(): string
     if path == nil then
         return nil
     end
-    return filesystem.read(path, "checkpoint")
+    return files.read(path, "checkpoint")
 end
 
 --- Returns the checkpoint path, or nil when the config names none.
@@ -674,20 +674,20 @@ function Application:_init(): boolean
         logFile = "log.jsonl"
     end
     if logFile ~= nil then
-        log.openFile(filesystem.writablePath(logFile))
+        log.openFile(files.writablePath(logFile))
     end
 
     -- Resolved before the game's plugin runs, so a game can read what the last
     -- run left while it is building the world it is going to put back.
     if config.checkpoint ~= nil then
-        self._checkpointPath = filesystem.writablePath(config.checkpoint)
+        self._checkpointPath = files.writablePath(config.checkpoint)
     end
 
     -- Before the device, because the pack decides which shader format the
     -- device may claim, and that decides which backend SDL selects. The name
     -- is fixed rather than configurable: the build produces the pack and the
     -- engine finds it, and there is no version of that a game decides.
-    local packPath = filesystem.assetPath("shaders.tsp")
+    local packPath = files.assetPath("shaders.tsp")
     local pack = shaderpack.read(packPath)
     if pack ~= nil then
         shadercompiler.usePack(pack)
@@ -770,7 +770,7 @@ function Application:_init(): boolean
     -- watcher drive them, so they are bound when either is asked for rather
     -- than by the server alone.
     if config.mcpPort ~= nil or config.watch ~= nil then
-        local tools = require("tecs.net.mcp.tools")
+        local tools = require("tecs.io.mcp.tools")
         tools.bind(self.renderer, self.world)
 
         -- The device's half of a shader reload. The tool re-reads the sources
@@ -785,7 +785,7 @@ function Application:_init(): boolean
         -- Only the world. Which components exist is the ECS's registry to
         -- answer, and the tools read it there, so a game's own components are
         -- nameable without the game being told to say so.
-        local mcpWorld = require("tecs.net.mcp.world")
+        local mcpWorld = require("tecs.io.mcp.world")
         mcpWorld.bind(self.world)
         self.mcp = mcp.listen(config.mcpPort)
 
@@ -853,7 +853,7 @@ function Application:_init(): boolean
     -- call costs a nil check on the ordinary path. A handler that raised
     -- never reaches it: the reload refused, so nothing has changed.
     if config.watch ~= nil then
-        local tools = require("tecs.net.mcp.tools")
+        local tools = require("tecs.io.mcp.tools")
         watcher.on("shader", function() tools.reloadShaders(); self:clearCrash() end)
         watcher.on("image", function(change: watcher.Change) tools.reloadImage(change.path); self:clearCrash() end)
         watcher.on("sound", function(change: watcher.Change) tools.reloadSound(change.path); self:clearCrash() end)

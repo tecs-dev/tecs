@@ -198,9 +198,9 @@ local SCHEME_PREFIX <const> = "^(%a[%w+.-]*://)(.*)$"
 ---     across a symlink, which would merge two names that are two files.
 ---   - Letter case, because folding it merges two files that a case-sensitive
 ---     filesystem keeps apart.
----   - The asset root, because stripping `filesystem.assetRoot()` would make an
+---   - The asset root, because stripping `tecs.io.files.assetRoot()` would make an
 ---     identity depend on process state that `TECS_ASSETS` and
----     `filesystem.setAssetRoot` move, and one name would then intern as two indices
+---     `tecs.io.files.setAssetRoot` move, and one name would then intern as two indices
 ---     at two moments, which is the defect this exists to prevent.
 ---
 --- A leading run of separators is kept as it was written: one leads an

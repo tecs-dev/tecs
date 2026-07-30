@@ -9,14 +9,14 @@ knows anything else: is it alive, what is it, and what has it been saying.
 local data <const> = require("tecs.data")
 local sdl <const> = require("tecs.ffi.sdl3")
 local platformOS <const> = require("tecs.platform.os")
-local filesystem <const> = require("tecs.io.filesystem")
+local files <const> = require("tecs.io.files")
 local log <const> = require("tecs.log")
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
-local mcp <const> = require("tecs.net.mcp")
+local mcp <const> = require("tecs.io.mcp")
 local events <const> = require("tecs.platform.events")
 local watcher <const> = require("tecs.io.watcher")
-local sandbox <const> = require("tecs.net.mcp.sandbox")
+local sandbox <const> = require("tecs.io.mcp.sandbox")
 local shaders <const> = require("tecs.gpu.shaders")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local materials <const> = require("tecs.gpu.materials")
@@ -183,8 +183,8 @@ mcp.register({
             packagedShaders = caps.packagedShaders,
             shaderFormats = caps.shaderFormats,
             cores = caps.cores,
-            assets = filesystem.assetRoot(),
-            writable = filesystem.preferencePath(),
+            assets = files.assetRoot(),
+            writable = files.preferencePath(),
             logFile = log.filePath() or data.null,
             loggers = log.loggers(),
         }
@@ -284,7 +284,7 @@ mcp.register({
         local width, height = texture.width, texture.height
 
         local name = (args.name as string) or "screenshot.png"
-        local path = filesystem.writablePath(name)
+        local path = files.writablePath(name)
         local saved, reason = activeRenderer:saveScreenshot(path)
         if not saved then
             error(reason, 0)

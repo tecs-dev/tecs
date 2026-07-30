@@ -19,8 +19,8 @@ local ffi <const> = require("ffi")
 local loader <const> = require("tecs.ffi.loader")
 local log <const> = require("tecs.log")
 local Future <const> = require("tecs.Future")
-local DataStream <const> = require("tecs.net.http.DataStream")
-local clients <const> = require("tecs.net.http.clients")
+local DataStream <const> = require("tecs.io.http.DataStream")
+local clients <const> = require("tecs.io.http.clients")
 
 loader.declare("http")
 

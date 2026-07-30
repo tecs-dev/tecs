@@ -16,7 +16,7 @@
 --- A `package.loaders` entry over the payload would answer `require` without
 --- touching the disk, and would answer only half the question. The engine
 --- resolves an asset as a path and opens it through
---- `src/tecs/io/filesystem/init.tl`, so shaders, materials and fonts would still
+--- `src/tecs/io/files/init.tl`, so shaders, materials and fonts would still
 --- need a directory. Serving Lua from memory and assets from a directory is two
 --- mechanisms where the tree has one, so this writes both out and points the
 --- ordinary one at the result.
@@ -33,7 +33,7 @@
 --- Runs a shell command, answering whether it succeeded.
 ---
 --- The one place the CLI shells out for something the engine does better.
---- `tecs.io.filesystem.createDirectory` is the right call and it is not reachable
+--- `tecs.io.files.createDirectory` is the right call and it is not reachable
 --- yet: it is inside the payload this is in the middle of writing out.
 local function shellSucceeded(command: string): boolean
     local first = os.execute(command)

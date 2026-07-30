@@ -17,7 +17,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local assets = require("tecs.assets")
 local adapter = require("tecs.platform.adapter")
-local filesystem = require("tecs.io.filesystem")
+local files = require("tecs.io.files")
 local storagebackend = require("tecs.platform.storagebackend")
 local watcher = require("tecs.io.watcher")
 local platformOS = require("tecs.platform.os")
@@ -87,7 +87,7 @@ describe("the file watcher", function()
     it("watches what was loaded rather than what is in the tree", function()
         write(dir .. "opened.glsl", FIRST)
         write(dir .. "never.glsl", FIRST)
-        assert.is_string(filesystem.read(dir .. "opened.glsl"))
+        assert.is_string(files.read(dir .. "opened.glsl"))
 
         watcher.install({ root = dir })
 
@@ -97,12 +97,12 @@ describe("the file watcher", function()
     it("keeps a neighboring path out when the root has no trailing separator", function()
         local contentRoot = dir .. "content"
         local neighbor = dir .. "content-old"
-        assert.is_true(filesystem.createDirectory(contentRoot))
-        assert.is_true(filesystem.createDirectory(neighbor))
+        assert.is_true(files.createDirectory(contentRoot))
+        assert.is_true(files.createDirectory(neighbor))
         write(contentRoot .. "/inside.glsl", FIRST)
         write(neighbor .. "/outside.glsl", FIRST)
-        filesystem.read(contentRoot .. "/inside.glsl")
-        filesystem.read(neighbor .. "/outside.glsl")
+        files.read(contentRoot .. "/inside.glsl")
+        files.read(neighbor .. "/outside.glsl")
 
         watcher.install({ root = contentRoot })
 
@@ -132,7 +132,7 @@ describe("the file watcher", function()
             storage = storage,
         }, { __index = adapter.current() })
         adapter.install(platform)
-        filesystem.note(path, "shader")
+        files.note(path, "shader")
         local seen = 0
         watcher.on("shader", function()
             seen = seen + 1
@@ -149,7 +149,7 @@ describe("the file watcher", function()
 
     it("takes a loaded file as it reads and reports no change for it", function()
         write(dir .. "quiet.glsl", FIRST)
-        filesystem.read(dir .. "quiet.glsl")
+        files.read(dir .. "quiet.glsl")
 
         watcher.install({ root = dir })
         local seen, handler = recorder()
@@ -162,7 +162,7 @@ describe("the file watcher", function()
 
     it("hands an edited file to the reloader that owns its kind", function()
         write(dir .. "edited.glsl", FIRST)
-        filesystem.read(dir .. "edited.glsl")
+        files.read(dir .. "edited.glsl")
         watcher.install({ root = dir })
         local seen, handler = recorder()
         watcher.on("shader", handler)
@@ -183,7 +183,7 @@ describe("the file watcher", function()
 
     it("reloads an edited file once and not again", function()
         write(dir .. "once.glsl", FIRST)
-        filesystem.read(dir .. "once.glsl")
+        files.read(dir .. "once.glsl")
         watcher.install({ root = dir })
         local seen, handler = recorder()
         watcher.on("shader", handler)
@@ -202,7 +202,7 @@ describe("the file watcher", function()
     -- and neither the empty one nor the partial one may reach a reloader.
     it("never hands over a file that is being written", function()
         write(dir .. "saving.glsl", FIRST)
-        filesystem.read(dir .. "saving.glsl")
+        files.read(dir .. "saving.glsl")
         watcher.install({ root = dir })
         local seen, handler = recorder()
         watcher.on("shader", handler)
@@ -229,7 +229,7 @@ describe("the file watcher", function()
 
     it("keeps watching a file whose save it refused", function()
         write(dir .. "again.glsl", FIRST)
-        filesystem.read(dir .. "again.glsl")
+        files.read(dir .. "again.glsl")
         watcher.install({ root = dir })
         local seen, handler = recorder()
         watcher.on("shader", handler)
@@ -246,7 +246,7 @@ describe("the file watcher", function()
 
     it("stays up when a reloader raises", function()
         write(dir .. "broken.glsl", FIRST)
-        filesystem.read(dir .. "broken.glsl")
+        files.read(dir .. "broken.glsl")
         watcher.install({ root = dir })
         local calls = 0
         watcher.on("shader", function()
@@ -269,7 +269,7 @@ describe("the file watcher", function()
 
     it("does nothing for a kind nothing reloads", function()
         write(dir .. "level.json", "{}")
-        filesystem.read(dir .. "level.json")
+        files.read(dir .. "level.json")
         watcher.install({ root = dir })
 
         write(dir .. "level.json", '{"rooms":2}')
@@ -293,7 +293,7 @@ describe("the file watcher", function()
         -- it an image here.
         assets.loadImage(dir .. "art.png")
         assets.loadSound(dir .. "voice.wav", "auto", 10000)
-        filesystem.read(dir .. "level.json")
+        files.read(dir .. "level.json")
         assets.waitAll(500)
 
         watcher.install({ root = dir })
@@ -332,7 +332,7 @@ describe("the file watcher", function()
 
         write(dir .. "level.json", "{}")
         write(dir .. "specwatchfont.json", metrics)
-        filesystem.read(dir .. "level.json")
+        files.read(dir .. "level.json")
         text.loadFont({
             metrics = dir .. "specwatchfont.json",
             atlas = dir .. "specwatch.png",
@@ -357,7 +357,7 @@ describe("the file watcher", function()
 
     it("stops looking once it is uninstalled", function()
         write(dir .. "stopped.glsl", FIRST)
-        filesystem.read(dir .. "stopped.glsl")
+        files.read(dir .. "stopped.glsl")
         watcher.install({ root = dir })
         local seen, handler = recorder()
         watcher.on("shader", handler)
@@ -373,7 +373,7 @@ describe("the file watcher", function()
 
     it("dispatches the first sighting when settling is turned off", function()
         write(dir .. "eager.glsl", FIRST)
-        filesystem.read(dir .. "eager.glsl")
+        files.read(dir .. "eager.glsl")
         watcher.install({ root = dir, settle = 0 })
         local seen, handler = recorder()
         watcher.on("shader", handler)

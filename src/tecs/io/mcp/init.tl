@@ -15,7 +15,7 @@ it does.
 ```teal
 local placed <const> = world:query({include = {tecs.Transform}})
 
-tecs.net.mcp.register({
+tecs.io.mcp.register({
     name = "placed_count",
     description = "Count entities that carry a Transform",
     inputSchema = {["type"] = "object", properties = {}},
@@ -51,7 +51,7 @@ report the stored traceback instead.
 
 local data <const> = require("tecs.data")
 local log <const> = require("tecs.log")
-local transport <const> = require("tecs.net.mcp.transport")
+local transport <const> = require("tecs.io.mcp.transport")
 
 -- `tecs.mcp` is an externally typed logger name and remains unchanged when
 -- the Lua module moves.
@@ -171,7 +171,7 @@ end
 --- Returns every registered tool in registration order.
 ---
 --- @return A fresh list each call, so the caller may keep it. The
----     [`Tool`](tealdoc:tecs.net.mcp.Tool)
+---     [`Tool`](tealdoc:tecs.io.mcp.Tool)
 ---     values in it are the registered tables themselves rather than copies,
 ---     so writing to one writes to the registry.
 function mcp.tools(): {mcp.Tool}

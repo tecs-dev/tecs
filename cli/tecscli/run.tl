@@ -204,7 +204,7 @@ local function commandTest(paths: layout): integer
     end
 
     local specRoot = project.path(found, found.spec)
-    if not tecs.io.filesystem.isDirectory(specRoot) then
+    if not tecs.io.files.isDirectory(specRoot) then
         complain(("tecs test: no %s directory"):format(found.spec))
         return 1
     end

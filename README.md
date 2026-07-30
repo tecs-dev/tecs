@@ -220,7 +220,7 @@ guessable from what a game is doing.
 Two levels and no more. `tecs.gfx.layers.configure` is a namespace, a module
 and a function, read left to right, and there is nothing to work out about
 where one stops and the next begins. A third level would put that back:
-`tecs.net.http.client.Response` reads as four guesses.
+`tecs.io.http.client.Response` reads as four guesses.
 
 The constraint that shaped the mechanism is laziness, not depth. A plain
 `require("tecs")` must not demand a graphics stack, because that is what lets a
@@ -239,18 +239,18 @@ table. That is not a detail: `layers.maxY` and `layers.maxZ` are assigned by a
 game, and two tables would mean a write through one that nothing reads.
 
 **A namespace with one principal module is that module.** `tecs.io` is the
-table `require("tecs.io")` answers with, and `filesystem` and `watcher` are
-hung off it when each name is first read. The alternative was a table built
-for the name, standing in front of the module and filling a member at a time,
-and it cost two things. Teal has to type what a game writes, and no module
-types a table like that, so `init.tl` had to declare a record restating every
-member's signature and every member's docblock: `init.tl` reached twelve
+table `require("tecs.io")` answers with, and `files`, `http`, `mcp`, and
+`watcher` are hung off it when each name is first read. The alternative was a
+table built for the name, standing in front of the module and filling a member
+at a time, and it cost two things. Teal has to type what a game writes, and no
+module types a table like that, so `init.tl` had to declare a record restating
+every member's signature and every member's docblock: `init.tl` reached twelve
 hundred lines, two thirds of which were a second copy of documentation that
 already existed on the declaration it described, and nothing checked the
 copies against each other. And a write to a name on it had to be routed to
 whichever module below owned the name. Being the parent module removes that
-proxy, while `tecs.io.filesystem.organization` still lands directly on the
-filesystem module that `preferencePath` reads.
+proxy, while `tecs.io.files.organization` still lands directly on the files
+module that `preferencePath` reads.
 
 What that costs is a direction in the module graph. The parent has to name the
 type of every name below it, and Teal refuses a require cycle even when one
@@ -782,7 +782,7 @@ counted and the number of holders is exact rather than optimistic. And every
 caller holds a distinct object, so a future stays usable as a map key, which
 three subsystems here already rely on.
 
-Files a game interprets itself go through `filesystem.read` or
+Files a game interprets itself go through `files.read` or
 `assets.loadBytes`, which are the two sanctioned ways to get bytes out of the
 content root: on Android content lives inside the package and `io.open` does not
 reach it. Both answer bytes rather than text, so an image, an archive or a
@@ -792,7 +792,8 @@ whole-file read on the asset worker and answers a `Future<string>` when the main
 thread should not stop for it.
 
 ```lua
-local bytes = tecs.io.filesystem.read(tecs.io.filesystem.assetPath("levels/1.json"))
+local files = tecs.io.files
+local bytes = files.read(files.assetPath("levels/1.json"))
 local level = tecs.data.decodeJSON(bytes)
 ```
 
@@ -858,9 +859,9 @@ nothing in flight waits on nobody, and `destroy` gives up whatever the drain ran
 out of time on rather than freeing the mixer under it.
 
 All three entry points record what they touched, and they record it in one
-place: `filesystem.loaded` answers every path this process has read or decoded
+place: `files.loaded` answers every path this process has read or decoded
 and the kind it was read as, which is what the file watcher polls instead of
-walking the content tree. The two loads call `filesystem.note` rather than
+walking the content tree. The two loads call `files.note` rather than
 keeping a list of their own, because the decode they are recording happens on a
 worker and a second list is a second answer to the same question.
 
@@ -1455,7 +1456,7 @@ device from `tecs.audio.playbackDevices` and passes its id to
 `tecs.audio.newAudio`, and having to know which of two modules each half
 came from bought nothing. `src/tecs/platform/audio.tl` is still its own file
 and still reaches only SDL, and `tecs.audio` publishes what it holds under its
-own names, the way `tecs.io.filesystem` publishes `platform/content.tl`. The
+own names, the way `tecs.io.files` publishes `platform/content.tl`. The
 module is the seam and the public name is the surface.
 
 File and folder dialogs are the exception to "one SDL call and return". SDL
@@ -1475,21 +1476,28 @@ of making game code run at device-thread cadence.
 
 `tecs.io` owns the two interfaces for moving binary strings between modules:
 `Reader` supplies bytes and `Writer` accepts them. Direction is in the type
-rather than in optional methods on one `Stream`. A file opened for input cannot
-be written, an HTTP response destination need not be readable, and making both
-pretend otherwise would move the error from the type checker to a missing
-method at runtime.
+rather than in optional methods on one generic stream. A file opened for input
+cannot be written, an HTTP response destination need not be readable, and
+making both pretend otherwise would move the error from the type checker to a
+missing method at runtime.
 
-The module owns no resources and constructs nothing. The subsystem that opens a
-resource remains responsible for its lifetime and its policy: filesystem paths
-stay with `tecs.io.filesystem`, socket state stays with `tecs.net`, and HTTP
-content types stay with `tecs.net.http`. `tecs.io.filesystem.Reader` and
-`tecs.io.filesystem.Writer` remain aliases, so moving the contracts does not
-invalidate code that named them where they originated.
+The contract owns no resource. The subsystem that opens one remains responsible
+for its lifetime and policy: paths stay with `tecs.io.files`, TCP and UDP
+handles are constructed by `tecs.io`, and HTTP content types stay with
+`tecs.io.http`. `tecs.io.files.Reader` and `tecs.io.files.Writer` remain
+aliases, so code can name the directional type either on the parent or where
+the resource was opened.
+
+Networking once occupied a separate `tecs.net` root with HTTP and MCP below
+it. That root bought no distinction the operation did not already carry:
+sockets, files, protocol transfers, and external tool traffic are all I/O, and
+the extra root made a caller choose between two organizational names before it
+could choose an operation. Moving the transport and both protocols under
+`tecs.io` removes that choice without putting a third level below any module.
 
 ## Touching the filesystem
 
-`tecs.io.filesystem` answers both halves: where a path is, and what to do once
+`tecs.io.files` answers both halves: where a path is, and what to do once
 you have one. They are one module because they were never two questions. Every
 path a game touches is resolved and then acted on in the same breath, and a
 caller holding one half had to name the other module to do anything with it.
@@ -1662,7 +1670,7 @@ that completed has completed, and nothing else in a frame is obliged to ask.
 The reason it was not simply a third line in `Application` is that `assets` and
 `proc` are module singletons and a client is an object a game constructs, maybe
 several of. So the clients come to the loop: building one registers it on the
-list `tecs.net.http.pumpClients` turns, `close` takes it off, and the
+list `tecs.io.http.pumpClients` turns, `close` takes it off, and the
 application turns whatever is on the list. Native workers send bounded chunk,
 completion and error messages to a queue; the frame pump drains it without any
 Rust callback entering Lua. The list holds its clients strongly, so a request whose
@@ -1795,7 +1803,7 @@ reading to end of input is waiting for.
 
 ## Networking is a transport, and the loop drives it
 
-[`net.tl`](src/tecs/net.tl) exposes Rust's TCP and UDP transport shapes without
+[`io.tl`](src/tecs/io.tl) exposes Rust's TCP and UDP transport shapes without
 inventing a protocol above either. TCP is an ordered byte stream, so a write is
 not a message boundary and reads are allowed to be short. UDP preserves a
 packet boundary and promises neither delivery nor order. Length prefixes,
@@ -1812,7 +1820,7 @@ own a native lifetime, so each is closed explicitly. A received packet refs its
 source address before Rust's packet is destroyed, which makes the ownership
 visible rather than leaving a borrowed pointer in a Lua record.
 
-The application does not poll networking unconditionally. `net.poll` is one
+The application does not poll networking unconditionally. `tecs.io.poll` is one
 nonblocking call a game makes while resolutions or connections are pending,
 and `Future:wait` drives the same source when blocking outside a frame is the
 honest operation. That leaves a game with no network work off the path and lets
@@ -3564,7 +3572,7 @@ backend, and going native to avoid polling would mean inotify, FSEvents and
 `ReadDirectoryChangesW`, plus one more for every platform whose SDK is licensed,
 to save work measured below in microseconds.
 
-It polls what was loaded rather than the content tree. `filesystem` records
+It polls what was loaded rather than the content tree. `files` records
 every path this process has read or decoded, which is both a much smaller set
 and the only set where a change has anything to act on, since a file nothing
 opened has no reloader to route to. That is also why `SDL_EnumerateDirectory` is
@@ -3823,12 +3831,13 @@ src/tecs/FramePacket.tl   what crosses between the two
 src/tecs/audio.tl         clips, voices, groups, and the Sound component
 src/tecs/physics/         Rapier binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
-src/tecs/net/mcp/         the debug server: transport, tools, sandbox
+src/tecs/io/              files, HTTP, MCP, and loaded-file watching
+src/tecs/io/mcp/          the debug server: transport, tools, sandbox
 src/tecs/assets.tl        images and clips, decoded on a worker
 src/tecs/workers.tl       threads with serialized channels
 src/tecs/Future.tl        the value everything asynchronous settles into
-src/tecs/net.tl           nonblocking TCP and UDP transport
-src/tecs/net/http/        requests, and the clients the loop turns
+src/tecs/io.tl            binary contracts plus nonblocking TCP and UDP
+src/tecs/io/http/         requests, and the clients the loop turns
 src/tecs/random.tl        seeded streams and Perlin noise
 src/tecs/data.tl          JSON, zlib and raw DEFLATE, and three hashes
 src/tecs/regex.tl         compiled Rust regular expressions over byte strings

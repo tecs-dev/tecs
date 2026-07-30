@@ -10,7 +10,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local platformOS = require("tecs.platform.os")
-local filesystem = require("tecs.io.filesystem")
+local files = require("tecs.io.files")
 
 describe("platform.filesystem paths", function()
     setup(function()
@@ -21,7 +21,7 @@ describe("platform.filesystem paths", function()
     end)
 
     it("reports a writable directory the platform chose", function()
-        local writable = filesystem.preferencePath()
+        local writable = files.preferencePath()
         assert.is_string(writable)
         assert.are.equal("/", writable:sub(-1), "a root must end in a separator so joining is plain concatenation")
         -- Not the working directory, which is not writable on every target.
@@ -29,16 +29,16 @@ describe("platform.filesystem paths", function()
     end)
 
     it("resolves relative paths against each root", function()
-        filesystem.setAssetRoot("/tmp/content")
-        assert.are.equal("/tmp/content/art/hero.png", filesystem.assetPath("art/hero.png"))
-        assert.is_truthy(filesystem.writablePath("save.json"):find("save.json"))
+        files.setAssetRoot("/tmp/content")
+        assert.are.equal("/tmp/content/art/hero.png", files.assetPath("art/hero.png"))
+        assert.is_truthy(files.writablePath("save.json"):find("save.json"))
     end)
 
     it("takes an override, so a dev run reads from a source tree", function()
-        filesystem.setAssetRoot("/tmp/one")
-        assert.are.equal("/tmp/one/", filesystem.assetRoot())
-        filesystem.setAssetRoot("/tmp/two/")
-        assert.are.equal("/tmp/two/", filesystem.assetRoot(), "a trailing separator must not be doubled")
+        files.setAssetRoot("/tmp/one")
+        assert.are.equal("/tmp/one/", files.assetRoot())
+        files.setAssetRoot("/tmp/two/")
+        assert.are.equal("/tmp/two/", files.assetRoot(), "a trailing separator must not be doubled")
     end)
 end)
 

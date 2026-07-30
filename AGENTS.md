@@ -80,7 +80,8 @@ tecs/
 │   ├── platform/          # window, input, audio, events, time, files, the OS
 │   ├── physics/           # Rapier world integration
 │   ├── sequence/          # Sequencer, with the tween runtime inside it
-│   ├── net/               # HTTP clients and protocol modules
+│   ├── io.tl              # Binary contracts plus TCP and UDP transport
+│   ├── io/                # Files, HTTP, MCP, and loaded-file watching
 │   │   └── mcp/           # Debug server: transport, tools, sandbox
 │   ├── Application.tl     # The lifecycle the host drives
 │   ├── Renderer.tl        # World to GPU, owning the two halves below
@@ -300,6 +301,11 @@ whether ordinary game code should ignore it.
 Use active voice. Never use an em dash. Name sections for their subject, not as generic questions such as
 `What this means`, `How it works` or `Why this exists`. Prefer one complete example to several paragraphs
 that narrate the same calls.
+
+An example that calls a Tecs module inside a frame or other hot loop binds that
+module to a local outside the loop. Show `local tecsIO <const> = tecs.io` and
+call `tecsIO.poll()` in the loop instead of repeatedly resolving through
+`tecs.io`.
 
 A tag earns its place by saying what the signature cannot: units, the coordinate space, what nil
 means, what happens at a boundary, whether a returned table is the caller's to keep or a view

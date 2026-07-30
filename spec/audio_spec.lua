@@ -44,8 +44,8 @@ local tecs = require("tecs")
 local Audio = require("tecs.audio").Audio
 local newAudio = require("tecs.audio").newAudio
 local assets = require("tecs.assets")
-local mcp = require("tecs.net.mcp")
-local mcpTools = require("tecs.net.mcp.tools")
+local mcp = require("tecs.io.mcp")
+local mcpTools = require("tecs.io.mcp.tools")
 
 -- A tenth of a second of 16-bit mono at 48000 Hz, and the same tenth of a
 -- second encoded as Ogg Vorbis. Whole numbers, so a duration that is off by a

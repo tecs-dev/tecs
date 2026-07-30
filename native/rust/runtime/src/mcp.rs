@@ -3,7 +3,7 @@
 //! Tokio owns the listener, HTTP framing, MCP lifecycle, sessions, and
 //! JSON-RPC. A bounded channel is the only route into LuaJIT: the SDL thread
 //! drains calls and completes their one-shot response. Rust never calls Lua.
-//! `tecs.net.mcp` reaches the server through its Teal `transport` module and the
+//! `tecs.io.mcp` reaches the server through its Teal `transport` module and the
 //! generated Rust FFI table.
 
 use std::ptr;
