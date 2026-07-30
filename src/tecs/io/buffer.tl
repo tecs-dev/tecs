@@ -16,6 +16,9 @@ local loader <const> = require("tecs.ffi.loader")
 local type types = require("tecs.io.types")
 local type IOBuffer = types.Buffer
 
+local floor <const> = math.floor
+local max <const> = math.max
+
 local MIN_CAPACITY <const> = 64
 local MAX_INTEGER <const> = 9007199254740991
 
@@ -29,7 +32,7 @@ end
 local OwnedBufferMT <const>: metatable<OwnedBuffer> = {__index = OwnedBuffer}
 
 local function integer(value: integer, what: string, level: integer): integer
-    if type(value) ~= "number" or value ~= math.floor(value) or value < 0 or value > MAX_INTEGER then
+    if type(value) ~= "number" or value ~= floor(value) or value < 0 or value > MAX_INTEGER then
         error(("tecs: %s must be a non-negative integer"):format(what), level)
     end
     return value
@@ -44,7 +47,7 @@ end
 local function allocate(capacity: integer): loader.CArray
     -- LuaJIT permits a zero-length VLA, but retaining one real byte gives an
     -- empty live buffer a stable, non-null address for native zero-byte calls.
-    return loader.newArray("uint8_t[?]", math.max(1, capacity))
+    return loader.newArray("uint8_t[?]", max(1, capacity))
 end
 
 function OwnedBuffer:length(): integer
@@ -69,7 +72,7 @@ function OwnedBuffer:reserve(minimum: integer)
         return
     end
 
-    local capacity = math.max(MIN_CAPACITY, self._capacity)
+    local capacity = max(MIN_CAPACITY, self._capacity)
     while capacity < minimum do
         local doubled <const> = capacity * 2
         if doubled <= capacity or doubled > MAX_INTEGER then
@@ -126,7 +129,7 @@ local function commitWrite(self: OwnedBuffer, offset: integer, count: integer)
             (loader.bytePointer(self._bytes as loader.CValue) + self._length) as ffi.CData, offset - self._length, 0
         )
     end
-    self._length = math.max(self._length, finish)
+    self._length = max(self._length, finish)
 end
 
 local function range(self: OwnedBuffer, offset: integer, count: integer, level: integer): integer, integer
@@ -228,7 +231,7 @@ function buffer.prepareWrite(destination: IOBuffer, offset: integer, count: inte
     if (getmetatable(destination as any) as any) == (OwnedBufferMT as any) then
         return prepareWrite(destination as OwnedBuffer, offset, count), previousLength
     end
-    destination:resize(math.max(previousLength, finish))
+    destination:resize(max(previousLength, finish))
     return destination:getFFIPointer() + offset, previousLength
 end
 
@@ -242,7 +245,7 @@ function buffer.commitWrite(destination: IOBuffer, offset: integer, count: integ
         end
         return
     end
-    destination:resize(math.max(previousLength, offset + count))
+    destination:resize(max(previousLength, offset + count))
 end
 
 return buffer

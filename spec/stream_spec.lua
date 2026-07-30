@@ -9,6 +9,7 @@ local adapter = require("tecs.platform.adapter")
 
 local ioModule = tecs.io
 local paths = {}
+local min = math.min
 
 local function temporary()
     local path = os.tmpname()
@@ -559,7 +560,7 @@ describe("tecs.io transfers", function()
                         return true
                     end,
                     writeFrom = function(_, buffer, offset, count)
-                        local taking = math.min(3, count)
+                        local taking = min(3, count)
                         pieces[#pieces + 1] = buffer:getString(offset, taking)
                         return taking
                     end,

@@ -78,6 +78,7 @@ local type FutureType<T> = Future<T>
 local type Source = Future.Source
 
 local C <const> = binding.C
+local floor <const> = math.floor
 
 -- Enum values are ABI declarations rather than preprocessor constants, so the
 -- generated constants table does not carry them.
@@ -486,14 +487,14 @@ local operations: {Operation} = {}
 
 local function validPort(port: integer, allowZero: boolean, level: integer)
     local minimum <const> = allowZero and 0 or 1
-    if type(port) ~= "number" or port ~= math.floor(port) or port < minimum or port > 65535 then
+    if type(port) ~= "number" or port ~= floor(port) or port < minimum or port > 65535 then
         error(("tecs: port must be an integer from %d to 65535"):format(minimum), level)
     end
 end
 
 local function validTimeout(timeoutMs: integer, level: integer): integer
     local timeout <const> = timeoutMs or 0
-    if type(timeout) ~= "number" or timeout ~= math.floor(timeout) or timeout < 0 or timeout > MAX_TIMEOUT_MS then
+    if type(timeout) ~= "number" or timeout ~= floor(timeout) or timeout < 0 or timeout > MAX_TIMEOUT_MS then
         error(("tecs: timeout must be an integer from 0 to %d milliseconds"):format(MAX_TIMEOUT_MS), level)
     end
     return timeout
@@ -602,7 +603,7 @@ function binaryIO.Connection:read(maxBytes?: integer): string, string
         return nil, "connection is closed"
     end
     local count <const> = maxBytes or DEFAULT_READ_BYTES
-    if type(count) ~= "number" or count ~= math.floor(count) or count < 1 or count > MAX_READ_BYTES then
+    if type(count) ~= "number" or count ~= floor(count) or count < 1 or count > MAX_READ_BYTES then
         error(("tecs: stream reads from 1 to %d bytes at a time"):format(MAX_READ_BYTES), 2)
     end
     local read <const> = tonumber(C.tecsNetStreamRead(self._handle, self._buffer, count)) as integer
@@ -838,7 +839,7 @@ function Operation:advance(ms: number): integer
     if self.at == 0 then
         return 0
     end
-    return finish(self, math.floor(ms) as integer)
+    return finish(self, floor(ms) as integer)
 end
 
 function Operation:cancel(future: FutureType<any>)
