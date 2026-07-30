@@ -785,11 +785,6 @@ function Archetype:isComponentValueDirty(component: Component): boolean
     return self._componentDirty:get(idx)
 end
 
---- Whether a structural change landed on this archetype this frame.
-function Archetype:isStructurallyDirty(): boolean
-    return self._allDirty
-end
-
 function Archetype:anyComponentDirty(): boolean
     -- The column count guards the flag because an archetype with no
     -- columns has nothing to report dirty, which is the answer the bitset

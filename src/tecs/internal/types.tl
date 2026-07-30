@@ -103,7 +103,6 @@ local record internal
         -- rather than whole columns needs them separated, and these are that
         -- separation. See `tecs.internal.Archetype` for the contract on each.
         isComponentValueDirty: function(self, component: types.components.Component): boolean
-        isStructurallyDirty: function(self): boolean
         structuralCount: function(self): integer
         structuralDescribed: function(self, count: integer): boolean
         structuralAdded: function(self): integer
