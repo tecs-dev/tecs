@@ -12,7 +12,7 @@ Install a provider to replace measured frame deltas during replay:
 local recorded <const>: {number} = {1 / 60, 1 / 60, 1 / 30}
 local frame = 0
 
-tecs.time.provider = function(realDt: number): number
+tecs.platform.time.provider = function(realDt: number): number
     frame = frame + 1
     -- Nil keeps the measurement, so a run past the end of the recording is
     -- live again.
@@ -21,7 +21,7 @@ end
 ```
 
 Returning nil keeps the measured delta. Pair this provider with
-`tecs.events.source` to replay frame timing and platform events together.
+`tecs.platform.events.source` to replay frame timing and platform events together.
 `now` always reads the monotonic platform clock and ignores the replay
 provider.
 ]=]

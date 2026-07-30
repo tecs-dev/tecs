@@ -10,7 +10,7 @@
 -- caller can still end a child it cannot touch, and that teardown does not
 -- leave one behind.
 --
--- A run is a Future<tecs.os.ProcessResult>, so the four words for how it ended are the
+-- A run is a Future<tecs.platform.os.ProcessResult>, so the four words for how it ended are the
 -- ones every other asynchronous thing in the tree uses. The one worth reading
 -- twice is that an exit code is not a failure: a child that ran and exited 3
 -- settles "ready" carrying a result that says 3, because the code is the
@@ -374,13 +374,13 @@ describe("proc", function()
         file:write(([[
             package.path = %q .. "/?.lua;" .. %q .. "/?/init.lua;;"
             local tecs = require("tecs")
-            local run = tecs.os.runProcess({ args = { "/bin/echo", "headless" } })
+            local run = tecs.platform.os.runProcess({ args = { "/bin/echo", "headless" } })
             run:wait(20000)
             local sdl = require("tecs.ffi.sdl3")
             print(("%%d %%s %%s"):format(
                 tonumber(sdl.C.SDL_WasInit(0)), run.status,
                 (run.value.output:gsub("%%s+$", ""))))
-            tecs.os.shutdownProcesses()
+            tecs.platform.os.shutdownProcesses()
         ]]):format(root, root))
         file:close()
 

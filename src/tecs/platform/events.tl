@@ -5,13 +5,13 @@ Every platform delivers the same vocabulary through the world's event bus.
 Each kind has one ECS event type at address zero:
 
 ```teal
-world:observe(0, tecs.events.on.dropFile, function(event: tecs.events.Event)
+world:observe(0, tecs.platform.events.on.dropFile, function(event: tecs.platform.events.Event)
     loadFile(event.text)
 end)
 
-local pending <const>: {tecs.events.Event} = {}
-world:observe(0, tecs.events.on.keyDown, function(event: tecs.events.Event)
-    pending[#pending + 1] = tecs.events.copy(event)
+local pending <const>: {tecs.platform.events.Event} = {}
+world:observe(0, tecs.platform.events.on.keyDown, function(event: tecs.platform.events.Event)
+    pending[#pending + 1] = tecs.platform.events.copy(event)
 end)
 ```
 
@@ -21,13 +21,13 @@ it emits an event, so an observer sees the new state.
 
 ## Borrowed records
 
-The converter reuses one wide [`Event`](tealdoc:tecs.events.Event) record. `kind` determines which payload
+The converter reuses one wide [`Event`](tealdoc:tecs.platform.events.Event) record. `kind` determines which payload
 fields carry meaning. Read the record during the observer call, or retain an
 independent value through `events.copy`.
 
 Mouse and converted touch positions use logical window coordinates.
 `timestamp` uses the platform event clock. `arrival` uses the monotonic seconds
-returned by `tecs.time.now`, which makes it suitable for input-latency
+returned by `tecs.platform.time.now`, which makes it suitable for input-latency
 measurement.
 
 Unrecognized platform events arrive as `unknown` with their numeric type.
@@ -38,7 +38,7 @@ Finger and touch-device identities remain opaque strings.
 Tests can push an engine event through the host queue:
 
 ```teal
-tecs.events.push("mouseDown", {
+tecs.platform.events.push("mouseDown", {
     button = 1,
     x = 120,
     y = 64,
@@ -46,7 +46,7 @@ tecs.events.push("mouseDown", {
 ```
 
 Install `events.source` to replace the host queue during replay. Pair it with
-`tecs.time.provider` to replay event order and frame deltas together. Set the
+`tecs.platform.time.provider` to replay event order and frame deltas together. Set the
 source to nil to resume the host queue.
 ]=]
 
@@ -439,7 +439,7 @@ local record KindTypes
 end
 
 local record events
-    --- Read-only. Exposes the [`Event`](tealdoc:tecs.events.Event) type,
+    --- Read-only. Exposes the [`Event`](tealdoc:tecs.platform.events.Event) type,
     --- discriminated by `kind`. The converter reuses the record passed to a
     --- handler, so anything retaining one takes a copy
     --- through `events.copy`.
@@ -652,8 +652,8 @@ local INPUT <const>: {string: boolean} = {
     gamepadTouchpadMotion = true,
 }
 
---- Reports whether a kind carries player input rather than platform state.
-function events.isInput(kind: string): boolean
+-- Reports whether a kind carries player input rather than platform state.
+local function isInput(kind: string): boolean
     return INPUT[kind] == true
 end
 
@@ -683,9 +683,9 @@ local counterFrequency = 0.0
 local TOUCH_MOUSE <const> = sdl.K.SDL_TOUCH_MOUSEID
 local PEN_MOUSE <const> = sdl.K.SDL_PEN_MOUSEID
 
---- Tells the converter how large the window is, so touch positions arrive in
---- the same units as mouse positions as well as in the platform's own 0..1.
-function events.setTouchScale(width: number, height: number)
+-- Tells the converter how large the window is, so touch positions arrive in
+-- the same units as mouse positions as well as in the platform's own 0..1.
+local function setTouchScale(width: number, height: number)
     touchWidth = width
     touchHeight = height
 end
@@ -980,22 +980,8 @@ end
 -- Draining
 -------------------------------------------------------------------------------
 
---- Converts and dispatches a queue of SDL events, in arrival order.
----
---- The host owns the queue and clears it; this only reads. A replay driver
---- installs `source` instead. The drain passes it the same handler, which it calls
---- with recorded events.
----
---- `arrivals` is the host's parallel array of performance counter readings,
---- one per event, converted there from the stamp SDL put on each event as it
---- entered the queue. Given it, every converted event carries `arrival` in the
---- units `time.now` reports.
----
---- @param queue The host's contiguous SDL event array.
---- @param count The number of events in `queue`.
---- @param handler Receives each converted or replayed event.
---- @param arrivals The optional performance counter reading for each queued event.
-function events.drain(queue: loader.CValue, count: integer, handler: function(Event), arrivals?: loader.CValue)
+-- Converts and dispatches the host's SDL event queue in arrival order.
+local function drain(queue: loader.CValue, count: integer, handler: function(Event), arrivals?: loader.CValue)
     local replay = events.source
     if replay ~= nil then
         replay(handler)
@@ -1178,5 +1164,13 @@ function events.kinds(): {string}
     table.sort(out)
     return out
 end
+
+-- Application owns these three operations. They remain on the runtime table so
+-- the host and its focused implementation specs can share this converter, but
+-- the returned record deliberately does not declare them as supported
+-- `tecs.platform.events` names.
+rawset(events as {string: any}, "drain", drain)
+rawset(events as {string: any}, "isInput", isInput)
+rawset(events as {string: any}, "setTouchScale", setTouchScale)
 
 return events

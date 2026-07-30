@@ -69,7 +69,7 @@ return tecs.newApplication({
             phase = tecs.ecs.phases.Update,
             run = function(dt: number) print(dt) end,
         })
-        game:observe(0, tecs.events.on.keyDown, function(event: tecs.events.Event)
+        game:observe(0, tecs.platform.events.on.keyDown, function(event: tecs.platform.events.Event)
             print(event.scancode)
         end)
     end,

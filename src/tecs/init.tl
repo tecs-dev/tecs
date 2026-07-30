@@ -28,10 +28,11 @@ local type audio = require("tecs.audio")
 local type Renderer = require("tecs.Renderer")
 local type Camera = require("tecs.gfx.Camera")
 local type animation = require("tecs.gfx.animation")
-local type window = require("tecs.platform.window")
-local type input = require("tecs.platform.input")
-local type time = require("tecs.platform.time")
-local type events = require("tecs.platform.events")
+local type platformEvents = require("tecs.platform.events")
+local type platformInput = require("tecs.platform.input")
+local type platformOS = require("tecs.platform.os")
+local type platformTime = require("tecs.platform.time")
+local type platformWindow = require("tecs.platform.window")
 local type binaryIO = require("tecs.io")
 local type layers = require("tecs.gfx.layers")
 local type sequence = require("tecs.sequence")
@@ -48,13 +49,13 @@ local type log = require("tecs.log")
 local type angleMath = require("tecs.math")
 local type data = require("tecs.data")
 local type regex = require("tecs.regex")
-local type platformOS = require("tecs.platform.os")
 local type loader = require("tecs.ffi.loader")
 
--- The one record below is written for one reason: a public name that no single
--- module answers. `tecs.gfx` is nothing but the modules one level down and the
--- four things a scene reaches for directly, so no module's own record types it
--- and one is written here.
+-- The two records below are written for one reason: a public name that no
+-- single module answers. `tecs.gfx` is the modules one level down and the
+-- facilities a scene reaches for directly. `tecs.platform` is five independent
+-- host facilities with no principal module. No module's own record types either
+-- namespace, so their records live here.
 --
 -- A public name that one module answers needs none of this, and has none. It
 -- resolves to that module, is typed by the record the module declares, and
@@ -67,7 +68,7 @@ local type loader = require("tecs.ffi.loader")
 -- A class is a record nested inside the module named for it, so `tecs.audio` is
 -- `src/tecs/audio.tl` and `tecs.audio.Audio` is the class it declares. One name
 -- is the module and the other is the type, and the satellite records sit beside
--- the class on the same module, so a game reaches `tecs.window.Options` without
+-- the class on the same module, so a game reaches `tecs.platform.window.Options` without
 -- going through `Window` first.
 --
 -- A module may also sit inside another module, one level and no deeper:
@@ -269,6 +270,28 @@ local record gfx
     particles: particles
 end
 
+--- Facilities supplied by the host platform.
+---
+--- Naming the namespace loads nothing. Each child resolves independently, so
+--- a headless tool can use operating-system services or monotonic time without
+--- loading window, input, or event support.
+local record platform
+    --- Read-only. Exposes typed platform events routed through a world's
+    --- event bus.
+    events: platformEvents
+    --- Read-only. Exposes gameplay input, gamepads, and standalone sensors.
+    input: platformInput
+    --- Read-only. Exposes operating-system capabilities, clipboard access,
+    --- and child processes.
+    os: platformOS
+    --- Read-only. Exposes monotonic time and an override for deterministic
+    --- replay.
+    time: platformTime
+    --- Read-only. Exposes window creation, display information, and window
+    --- modes.
+    window: platformWindow
+end
+
 -- The four ECS types every subsystem's signatures name, and the only ECS
 -- vocabulary here. A plugin is handed a `World`, a system is a `System`, a
 -- plugin is a `Plugin`, and what either of them iterates is a `Query`, so
@@ -351,17 +374,13 @@ local record tecs
     audio: audio
     physics: physics
     data: data
-    events: events
     gfx: gfx
-    input: input
     io: binaryIO
     log: log
     math: angleMath
+    platform: platform
     regex: regex
     sequence: sequence
-    os: platformOS
-    time: time
-    window: window
     workers: workers
 
     --- Version of this build.
@@ -417,11 +436,11 @@ end
 --- Listed rather than discovered, so `tecs.anmation` is an error where it is
 --- written instead of a nil where it is called.
 ---
---- `gfx` is the one namespace reading more than one module at one level, and
---- it is the one name several substantial modules answer: no candidate could
---- be its principal without being loaded the moment the name is read, which
---- every one of them reaches SDL to do. Every other name here answers with one
---- module, which is what lets the module's own record type it.
+--- `gfx` and `platform` are the namespaces with no principal module. No
+--- candidate can answer for `gfx` without loading SDL when the name is read,
+--- and platform is only a grouping over five independent facilities. Every
+--- other name here answers with one module, which is what lets that module's
+--- own record type it.
 local SURFACE <const>: {string: Namespace} = {
     Application = {module = "tecs.Application"},
     Future = {module = "tecs.Future"},
@@ -430,7 +449,6 @@ local SURFACE <const>: {string: Namespace} = {
     audio = {module = "tecs.audio"},
     physics = {module = "tecs.physics"},
     data = {module = "tecs.data"},
-    events = {module = "tecs.platform.events"},
     gfx = {
         beside = {"tecs.components", "tecs.gfx.Camera", "tecs.Renderer", "tecs.gfx.text"},
         within = {
@@ -442,7 +460,6 @@ local SURFACE <const>: {string: Namespace} = {
             particles = {module = "tecs.gfx.particles"},
         },
     },
-    input = {module = "tecs.platform.input"},
     io = {
         module = "tecs.io",
         within = {
@@ -459,11 +476,17 @@ local SURFACE <const>: {string: Namespace} = {
             vec2 = {module = "tecs.math.vec2"},
         },
     },
+    platform = {
+        within = {
+            events = {module = "tecs.platform.events"},
+            input = {module = "tecs.platform.input"},
+            os = {module = "tecs.platform.os"},
+            time = {module = "tecs.platform.time"},
+            window = {module = "tecs.platform.window"},
+        },
+    },
     regex = {module = "tecs.regex"},
     sequence = {module = "tecs.sequence"},
-    os = {module = "tecs.platform.os"},
-    time = {module = "tecs.platform.time"},
-    window = {module = "tecs.platform.window"},
     workers = {module = "tecs.workers"},
 }
 

@@ -1,13 +1,13 @@
 --[[
 # Windows
 
-`tecs.window` creates OS windows and reads the displays around them.
+`tecs.platform.window` creates OS windows and reads the displays around them.
 [`Application`](tealdoc:tecs.Application) creates the usual game window as
 `app.window`. Tools and tests that call `newWindow` directly must call
 `destroy` when they finish.
 
 ```teal
-local window <const> = tecs.window.newWindow({
+local window <const> = tecs.platform.window.newWindow({
     title = "Starfarer",
     width = 1600,
     height = 900,
@@ -56,7 +56,7 @@ Exclusive fullscreen accepts only a mode that `fullscreenModes` or
 `closestFullscreenMode` returns.
 
 ```teal
-local mode <const> = tecs.window.Window.closestFullscreenMode(
+local mode <const> = tecs.platform.window.Window.closestFullscreenMode(
     savedWidth,
     savedHeight,
     savedRefreshRate,
@@ -76,9 +76,9 @@ coordinates. Use usable bounds to keep windows clear of a taskbar, dock or
 menu bar.
 
 ```teal
-for _, displayId in ipairs(tecs.window.Window.displays()) do
+for _, displayId in ipairs(tecs.platform.window.Window.displays()) do
     local x <const>, y <const>, width <const>, height <const> =
-        tecs.window.Window.usableBounds(displayId)
+        tecs.platform.window.Window.usableBounds(displayId)
 end
 ```
 
@@ -88,7 +88,7 @@ window event's `which` field.
 
 ## Pointer ownership
 
-The window API owns mouse and keyboard confinement. `tecs.input` owns relative
+The window API owns mouse and keyboard confinement. `tecs.platform.input` owns relative
 mouse mode, warping, capture and cursor visibility. The GPU device owns
 presentation pacing after it claims a window.
 ]]
@@ -196,7 +196,7 @@ local record window
         end
 
         --- Callers may set any
-        --- [`Options`](tealdoc:tecs.window.Window.Options) field before passing
+        --- [`Options`](tealdoc:tecs.platform.window.Window.Options) field before passing
         --- the record to `newWindow`. The function reads the values and does
         --- not retain the record.
         record Options
@@ -815,7 +815,7 @@ local record window
     ---
     --- It validates sizes and the icon before returning. Omitted fields take
     --- the defaults that
-    --- [`Options`](tealdoc:tecs.window.Window.Options) documents.
+    --- [`Options`](tealdoc:tecs.platform.window.Window.Options) documents.
     ---
     --- @param options The caller supplies the initial window configuration.
     --- @return Returns the caller-owned window. The caller releases it through

@@ -6,8 +6,8 @@ Assets, child processes, and HTTP requests return
 results without blocking a frame:
 
 ```teal no-format
-tecs.os.runProcess({args = {"git", "rev-parse", "HEAD"}})
-    :map(function(result: tecs.os.ProcessResult): string
+tecs.platform.os.runProcess({args = {"git", "rev-parse", "HEAD"}})
+    :map(function(result: tecs.platform.os.ProcessResult): string
         return result.output
     end)
     :recover(function(): string
@@ -48,7 +48,7 @@ that automatically. `wait` pumps in blocking slices for startup, tools, and
 tests:
 
 ```teal no-format
-local result <const> = tecs.os.runProcess({
+local result <const> = tecs.platform.os.runProcess({
     args = {"git", "status", "--porcelain"},
 })
     :wait(2000)

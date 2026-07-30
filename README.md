@@ -18,7 +18,7 @@ return tecs.newApplication({
             phase = tecs.ecs.phases.Update,
             run = function(dt) end,
         })
-        world:observe(0, tecs.events.on.appWillEnterBackground, function() end)
+        world:observe(0, tecs.platform.events.on.appWillEnterBackground, function() end)
     end,
 })
 ```
@@ -261,9 +261,11 @@ opened, and the shader and material loaders read content through the same
 roots the filesystem resolves, so those shared names live in
 `platform/content.tl`, below both sibling modules. A namespace assembled from
 several modules with no principal one keeps the table built for the name, and
-keeps the record with it: `tecs.gfx` is the one left.
+keeps the record with it. `tecs.gfx` and `tecs.platform` are the two left:
+graphics joins modules that answer one scene vocabulary, while platform groups
+five independent host facilities without choosing one as the parent.
 
-`tecs.audio`, `tecs.input` and `tecs.window` were three of those until the
+`tecs.audio`, `tecs.platform.input` and `tecs.platform.window` were three of those until the
 constructors moved. Each was a class file reached through a namespace named for
 it, and a class file cannot be a principal module because the path has to end
 in the public name and the case does not match. Once `Audio.create` became
@@ -276,8 +278,8 @@ gone.
 
 The `class` field in the descriptor went with them. It existed to make one
 member of a namespace answer with the namespace's own module, which is how
-`tecs.window.Window` used to resolve, and a class nested in the module it is
-named for needs nothing: `tecs.window` is the module and `Window` is a field on
+`tecs.platform.window.Window` used to resolve, and a class nested in the module it is
+named for needs nothing: `tecs.platform.window` is the module and `Window` is a field on
 it like any other.
 
 Nesting the class inside the module record rather than hanging it off as a
@@ -819,7 +821,7 @@ caller's own value beside it, and a blocking form for startup and tests. What it
 got wrong is that those are one type. Unbundled they are a listener, a counter
 and a wait, and each has a smaller home: the listener is `onSettle`, attached
 where the work starts rather than added to a list something else drains; the
-counter is three lines the subsystem keeps, which is what `tecs.os.pendingProcesses`
+counter is three lines the subsystem keeps, which is what `tecs.platform.os.pendingProcesses`
 already does; and the wait is a drain on the loader. The batch's own selling
 point was compacting in place so a frame with loads outstanding allocated
 nothing, and the unified path allocates strictly less, because a batch walked
@@ -1280,7 +1282,8 @@ so it can never be in the future.
 
 The six lifecycle events carry no stamp, because SDL hands them to its event
 watchers without queueing them and never fills one in. Those are dated where
-they were delivered, which nothing reads: `events.isInput` excludes them, since
+they were delivered, which nothing reads: the converter's input-kind set
+excludes them, since
 nobody is waiting on a backgrounding.
 
 ### The lifecycle events, and the moment they arrive
@@ -1391,7 +1394,7 @@ holding bytes that will never be written.
 ## The clipboard
 
 `clipboardUpdate` says the clipboard changed and lists the mime types now on
-offer. The clipboard half of `tecs.os` is the other half: what those bytes
+offer. The clipboard half of `tecs.platform.os` is the other half: what those bytes
 are, and how to put
 text there. Being told and having no way to look is the worse of the two
 halves to ship alone.
@@ -1446,7 +1449,7 @@ keeps its NULs.
 ## Native platform utilities
 
 The smaller operating-system services are one module rather than an
-`Application` grab bag, and rather than one name each. `tecs.os` holds what
+`Application` grab bag, and rather than one name each. `tecs.platform.os` holds what
 this build can do here, the clipboard, running another program, URLs, locale
 preference, power, the simple blocking message box and asynchronous file and
 folder selection. The `os` name distinguishes these host facilities from
@@ -1458,7 +1461,7 @@ to do one thing. Names are qualified by what they act on, because a bare `text`,
 `data`, `clear`, `run` or `update` means nothing on a module that does all of
 it.
 
-Standalone sensor handles sit under `tecs.input` instead, beside the pads and
+Standalone sensor handles sit under `tecs.platform.input` instead, beside the pads and
 the keyboard, because a game asking what a device can sense is asking one
 question. Standard cursor shapes stay on `Input`, because cursor choice is an
 outbound input command on the same seam as visibility and relative mode.
@@ -1478,7 +1481,7 @@ module is the seam and the public name is the surface.
 File and folder dialogs are the exception to "one SDL call and return". SDL
 retains a callback and may enter it from a thread the VM did not create, so
 the Rust dialog bridge owns that callback, copies its answer behind a mutex, and
-`tecs.os` polls it into a `Future` on the main thread. A Lua `ffi.cast`
+`tecs.platform.os` polls it into a `Future` on the main thread. A Lua `ffi.cast`
 callback would be shorter and would make the program undefined on exactly the
 platform path the dialog exists to use.
 
@@ -1595,7 +1598,7 @@ that pumped, and each of them had a different word for the same four states.
 ```lua
 local Future = require("tecs.Future")
 
-tecs.os.runProcess({ args = { "git", "rev-parse", "HEAD" } })
+tecs.platform.os.runProcess({ args = { "git", "rev-parse", "HEAD" } })
     :map(function(result) return result.output end)
     :recover(function() return "unknown" end)
     :onSettle(function(future) print(future.value) end)
@@ -1724,12 +1727,12 @@ is the one shape a frame-driven client cannot take.
 
 A command line tool, a resource pipeline or an asset build wants to run another
 program, and a game wants to do it between two frames rather than instead of
-them. `tecs.os` is that, and it is one of the few subsystems that is more
+them. `tecs.platform.os` is that, and it is one of the few subsystems that is more
 useful without a window than with one, so it initializes no SDL subsystem and
 works under a plain interpreter.
 
 ```lua
-local run = tecs.os.runProcess({ args = { "git", "rev-parse", "HEAD" } })
+local run = tecs.platform.os.runProcess({ args = { "git", "rev-parse", "HEAD" } })
 -- ... frames pass, the loop pumps ...
 if run.status == "ready" and run.value:succeeded() then
     print(run.value.output)
@@ -3970,9 +3973,11 @@ is rather than a page that quietly stops describing anything.
 
 A page's reference comes from a list of modules rather than one, because a
 public name is a namespace and a module is a file and the two do not have to
-agree. `tecs.gfx` is assembled from four files, `tecs.input` from three and
-`tecs.gfx.animation` from two. Every entry in that list goes away the day its
-namespace is one module, which is what `AGENTS.md` already asks for.
+agree. `tecs.gfx` is assembled from four files, `tecs.platform.input` from
+three and `tecs.gfx.animation` from two. `tecs.platform` itself has no
+principal module or combined reference; its children each keep their own page.
+Every entry in that list goes away the day its namespace is one module, which
+is what `AGENTS.md` already asks for.
 
 The cost is paid by the offline reference. `tecs docs` carries the pages, and
 the source pages no longer carry their signatures or module prose. Product

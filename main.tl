@@ -151,9 +151,9 @@ return tecs.newApplication({
             print("  shaders: compiled from source")
         end
 
-        local t0 = tecs.time.now()
+        local t0 = tecs.platform.time.now()
         spawnField(world, width, height)
-        local t1 = tecs.time.now()
+        local t1 = tecs.platform.time.now()
         spawnLights(world, width, height)
         print(("  spawn: %.0f ms for %d entities"):format((t1 - t0) * 1000, COUNT))
 
@@ -229,7 +229,9 @@ return tecs.newApplication({
         -- for `events.on.dropFile` beside this and be called for drops only,
         -- rather than for every event with a branch at the top.
         world:observe(
-            0, tecs.events.on.appWillEnterBackground, function() print("  backgrounded, simulation suspended") end
+            0,
+            tecs.platform.events.on.appWillEnterBackground,
+            function() print("  backgrounded, simulation suspended") end
         )
 
         -- Teardown is a phase like any other, so the summary is a system in it

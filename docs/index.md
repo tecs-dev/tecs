@@ -230,18 +230,14 @@ The host loads `tecs` before the entry file. A game can use these names without 
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
 - [`tecs.data`](/modules/data) - JSON, DEFLATE and hashes over byte strings
 - [`tecs.ecs`](/modules/ecs/) - worlds, components, queries, systems, events and resources
-- [`tecs.events`](/modules/events) - typed platform events routed through the world
 - [`tecs.gfx`](/modules/gfx/) - the camera, the components, the renderer, text, and the vocabularies below
-- [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
 - [`tecs.io`](/modules/io/) - binary I/O, nonblocking sockets, HTTP, and external tools
 - [`tecs.log`](/modules/log) - named, leveled platform logging
 - [`tecs.math`](/modules/math) - angle math and two-dimensional geometry
-- [`tecs.os`](/modules/os) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.physics`](/modules/physics) - Rapier 2D, solved across a shared thread pool
+- [`tecs.platform`](/modules/platform/) - platform events, input, operating-system services, time, and windows
 - [`tecs.regex`](/modules/regex) - compiled regular expressions over Lua byte strings
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
-- [`tecs.time`](/modules/time) - monotonic time
-- [`tecs.window`](/modules/window) - the window, its size, its display and its mode
 - [`tecs.workers`](/modules/workers) - typed background jobs
 
 Inside one of those, one level and no deeper:
@@ -256,6 +252,11 @@ Inside one of those, one level and no deeper:
 - [`tecs.io.mcp`](/modules/io/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.io.watcher`](/modules/io/watcher) - watching files for change
 - [`tecs.math.vec2`](/modules/math/vec2) - allocation-free two-dimensional vector and point math
+- [`tecs.platform.events`](/modules/platform/events) - typed platform events routed through the world
+- [`tecs.platform.input`](/modules/platform/input) - gameplay input, gamepads and standalone sensors
+- [`tecs.platform.os`](/modules/platform/os) - capabilities, the clipboard, child processes, and what the desktop offers
+- [`tecs.platform.time`](/modules/platform/time) - monotonic time
+- [`tecs.platform.window`](/modules/platform/window) - the window, its size, its display and its mode
 
 On `tecs` itself, because no one module owns them:
 
