@@ -47,6 +47,7 @@ preserve the complete Rapier state.
 -- while worlds step serially on the game thread.
 
 local ecs <const> = require("tecs.ecs")
+local events <const> = require("tecs.events")
 local type types = require("tecs.types")
 local loader <const> = require("tecs.ffi.loader")
 local World <const> = require("tecs.physics.World")
@@ -436,7 +437,7 @@ local record PendingShape
 end
 
 --- `ContactBegin` reports the start of contact between two bodies.
-local record ContactBegin is ecs.Event
+local record ContactBegin is events.Event
     --- Read-only. Physics sets `entityA` to one contact body before emitting
     --- the event.
     entityA: integer
@@ -444,7 +445,7 @@ local record ContactBegin is ecs.Event
     entityB: integer
 end
 --- `ContactEnd` reports the end of contact between two bodies.
-local record ContactEnd is ecs.Event
+local record ContactEnd is events.Event
     --- Read-only. Physics sets `entityA` to one former contact body before
     --- emitting the event.
     entityA: integer
@@ -452,7 +453,7 @@ local record ContactEnd is ecs.Event
     entityB: integer
 end
 --- `SensorBegin` reports a body entering a sensor.
-local record SensorBegin is ecs.Event
+local record SensorBegin is events.Event
     --- Read-only. Physics sets `sensor` to the sensor entity before emitting
     --- the event.
     sensor: integer
@@ -460,7 +461,7 @@ local record SensorBegin is ecs.Event
     visitor: integer
 end
 --- `SensorEnd` reports a body leaving a sensor.
-local record SensorEnd is ecs.Event
+local record SensorEnd is events.Event
     --- Read-only. Physics sets `sensor` to the sensor entity before emitting
     --- the event.
     sensor: integer
@@ -543,10 +544,10 @@ end
 SensorEnd.init = function(event: SensorEnd, sensor: integer, visitor: integer)
     event.sensor, event.visitor = sensor, visitor
 end
-ecs.newEvent(ContactBegin)
-ecs.newEvent(ContactEnd)
-ecs.newEvent(SensorBegin)
-ecs.newEvent(SensorEnd)
+events.newEvent(ContactBegin)
+events.newEvent(ContactEnd)
+events.newEvent(SensorBegin)
+events.newEvent(SensorEnd)
 
 -- Implementation details:
 -- The context key stores a world's simulation. Debug tools and snapshots use

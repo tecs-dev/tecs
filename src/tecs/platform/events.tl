@@ -60,14 +60,14 @@ source to nil to resume the host queue.
 -- Tecs event back into an SDL event before adding it to the queue.
 
 local ffi <const> = require("ffi")
-local ecs <const> = require("tecs.ecs")
+local genericEvents <const> = require("tecs.events")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 
 local C <const> = sdl.C
 
 --- Represents a borrowed platform event routed through the ECS event bus.
-local record Event is ecs.Event
+local record Event is genericEvents.Event
     --- Read-only. Reports what happened and determines which other fields
     --- carry meaning.
     kind: string
@@ -487,7 +487,7 @@ local TYPES <const>: {string: Event} = {}
 --- types cost a hundred integers and no per-event work.
 local function declare(kind: string): Event
     local eventType = {} as Event
-    ecs.newEvent(eventType)
+    genericEvents.newEvent(eventType)
     TYPES[kind] = eventType
     return eventType
 end

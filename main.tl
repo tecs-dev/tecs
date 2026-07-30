@@ -23,6 +23,7 @@ end
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
+local platformEvents <const> = require("tecs.platform.events")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local shaderpack <const> = require("tecs.gpu.shaderpack")
 local Transform <const> = tecs.Transform
@@ -229,7 +230,7 @@ return tecs.newApplication({
         -- for `events.on.dropFile` beside this and be called for drops only,
         -- rather than for every event with a branch at the top.
         world:observe(
-            0, tecs.events.on.appWillEnterBackground, function() print("  backgrounded, simulation suspended") end
+            0, platformEvents.on.appWillEnterBackground, function() print("  backgrounded, simulation suspended") end
         )
 
         -- Teardown is a phase like any other, so the summary is a system in it

@@ -55,6 +55,16 @@ end
 -- value (`tecs.ecs.newWorld`, `tecs.log`) and a type (`tecs.World`,
 -- `tecs.Application`).
 local USAGE = [[
+local record Tick is tecs.events.Event
+    count: integer
+    metamethod __call: function(self, count: integer): Tick
+end
+
+Tick.init = function(event: Tick, count: integer)
+    event.count = count
+end
+tecs.events.newEvent(Tick)
+
 local world = tecs.ecs.newWorld()
 world:update(1 / 60)
 
@@ -69,8 +79,8 @@ return tecs.newApplication({
             phase = tecs.ecs.phases.Update,
             run = function(dt: number) print(dt) end,
         })
-        game:observe(0, tecs.events.on.keyDown, function(event: tecs.events.Event)
-            print(event.scancode)
+        game:observe(0, Tick, function(event: Tick)
+            print(event.count)
         end)
     end,
 })

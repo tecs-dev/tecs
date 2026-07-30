@@ -190,7 +190,7 @@ world:despawn(parent)
 local world = tecs.ecs.newWorld()
 
 -- Define a custom event
-local record DamageEvent is tecs.ecs.Event
+local record DamageEvent is tecs.events.Event
     target: integer
     amount: number
     metamethod __call: function(self, target: integer, amount: number): DamageEvent
@@ -201,7 +201,7 @@ DamageEvent.init = function(e: DamageEvent, target: integer, amount: number)
     e.target = target
     e.amount = amount
 end
-tecs.ecs.newEvent(DamageEvent)
+tecs.events.newEvent(DamageEvent)
 
 -- Observe events anywhere in your game (0 = world-level)
 world:observe(0, DamageEvent, function(e: DamageEvent)
@@ -230,7 +230,7 @@ The host loads `tecs` before the entry file. A game can use these names without 
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
 - [`tecs.data`](/modules/data) - JSON, DEFLATE and hashes over byte strings
 - [`tecs.ecs`](/modules/ecs/) - worlds, components, queries, systems, events and resources
-- [`tecs.events`](/modules/events) - typed platform events routed through the world
+- [`tecs.events`](/modules/events) - typed events and address-based message buses
 - [`tecs.gfx`](/modules/gfx/) - the camera, the components, the renderer, text, and the vocabularies below
 - [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
 - [`tecs.io`](/modules/io/) - binary I/O, nonblocking sockets, HTTP, and external tools
