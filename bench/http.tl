@@ -11,7 +11,9 @@
 ---     cargo xtask bench http
 ---
 --- `BENCH_HTTP_BYTES`, `BENCH_HTTP_WARMUP`, and `BENCH_HTTP_SAMPLES` control
---- payload size and sample counts. No external service or network is used.
+--- payload size and sample counts. `BENCH_HTTP_FORCE_FAILURE=1` verifies that
+--- a guarded application error makes the benchmark process fail after cleanup.
+--- No external service or network is used.
 
 local floor <const> = math.floor
 local max <const> = math.max
@@ -19,9 +21,14 @@ local min <const> = math.min
 local concat <const> = table.concat
 local sort <const> = table.sort
 local sub <const> = string.sub
+local protect <const> = pcall
+local stringify <const> = tostring
+local exit <const> = os.exit
 local getenv <const> = os.getenv
 local remove <const> = os.remove
 local tmpname <const> = os.tmpname
+local stderr <const> = io.stderr
+local setMeta <const> = setmetatable as function(any, any): any
 
 local root = getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
 if sub(root, -1) == "/" then
@@ -44,7 +51,18 @@ local copy <const> = ffi.copy
 local BYTES <const> = floor(tonumber(getenv("BENCH_HTTP_BYTES")) or (4 * 1024 * 1024))
 local WARMUP <const> = floor(tonumber(getenv("BENCH_HTTP_WARMUP")) or 20)
 local SAMPLES <const> = floor(tonumber(getenv("BENCH_HTTP_SAMPLES")) or 100)
+local FORCE_FAILURE <const> = getenv("BENCH_HTTP_FORCE_FAILURE") == "1"
 local READ_CHUNK <const> = 64 * 1024
+
+if BYTES < 1 then
+    error("bench: BENCH_HTTP_BYTES must be positive", 0)
+end
+if WARMUP < 0 then
+    error("bench: BENCH_HTTP_WARMUP must be zero or more", 0)
+end
+if SAMPLES < 1 then
+    error("bench: BENCH_HTTP_SAMPLES must be positive", 0)
+end
 
 local type Buffer = iotypes.Buffer
 local type Reader = iotypes.Reader
@@ -65,6 +83,8 @@ local record ChunkReader is Reader
     at: integer
     closed: boolean
 end
+
+local ChunkReaderMT <const>: metatable<ChunkReader> = {__index = ChunkReader}
 
 function ChunkReader:read(count: integer): string, string
     if self.closed then
@@ -103,6 +123,8 @@ local record ChunkSource is ReadableStream
     closed: boolean
 end
 
+local ChunkSourceMT <const>: metatable<ChunkSource> = {__index = ChunkSource}
+
 function ChunkSource:contentLength(): integer | nil
     return self.buffer:length()
 end
@@ -134,7 +156,7 @@ function ChunkSource:newReader(): Reader, string
     if self.closed then
         return nil, "stream is closed"
     end
-    return {source = self.buffer, at = 0, closed = false} as ChunkReader
+    return setMeta({source = self.buffer, at = 0, closed = false} as ChunkReader, ChunkReaderMT) as ChunkReader
 end
 function ChunkSource:readAll(maxBytes?: integer): Future<string>
     return tecsIO.newBufferStream(self.buffer):readAll(maxBytes)
@@ -157,6 +179,8 @@ local record BufferWriter is Writer
     at: integer
     closed: boolean
 end
+
+local BufferWriterMT <const>: metatable<BufferWriter> = {__index = BufferWriter}
 
 function BufferWriter:write(bytes: string): boolean, string
     if self.closed then
@@ -191,6 +215,8 @@ local record BufferSink is WritableStream
     closed: boolean
 end
 
+local BufferSinkMT <const>: metatable<BufferSink> = {__index = BufferSink}
+
 function BufferSink:contentLength(): integer | nil
     return self.buffer:length()
 end
@@ -217,7 +243,7 @@ function BufferSink:close()
 end
 function BufferSink:newWriter(): Writer, string
     self.buffer:clear()
-    return {destination = self.buffer, at = 0, closed = false} as BufferWriter
+    return setMeta({destination = self.buffer, at = 0, closed = false} as BufferWriter, BufferWriterMT) as BufferWriter
 end
 function BufferSink:writeAll(bytes: string): Future<integer>
     return tecsIO.newBufferStream(self.buffer):writeAll(bytes)
@@ -332,6 +358,9 @@ local expectedServerHash = crc32("")
 local sink: BufferSink = nil
 
 local function begin()
+    if FORCE_FAILURE and mode == 1 and iteration == 0 then
+        error("forced benchmark failure", 0)
+    end
     local name <const> = MODES[mode]
     local request: tecs.io.http.Request = {
         url = ("http://127.0.0.1:%d/%s"):format(port, name),
@@ -347,10 +376,10 @@ local function begin()
         request.body = tecsIO.newFileStream(uploadPath)
         expectedServerHash = PAYLOAD_HASH
     elseif name == "upload-reader" then
-        request.body = {buffer = uploadBuffer, closed = false} as ChunkSource
+        request.body = setMeta({buffer = uploadBuffer, closed = false} as ChunkSource, ChunkSourceMT) as ChunkSource
         expectedServerHash = PAYLOAD_HASH
     elseif name == "download-writer" then
-        sink = {buffer = downloadBuffer, closed = false}
+        sink = setMeta({buffer = downloadBuffer, closed = false} as BufferSink, BufferSinkMT) as BufferSink
         request.into = sink
         expectedServerHash = crc32("")
     else
@@ -358,6 +387,15 @@ local function begin()
     end
     started = time.now()
     pending = client:send(request)
+end
+
+local benchmarkFailure: string = nil
+
+local function failBenchmark(app: tecs.Application, reason: any)
+    if benchmarkFailure == nil then
+        benchmarkFailure = stringify(reason)
+    end
+    app.quitRequested = true
 end
 
 local function percentile(samples: {number}, fraction: number): number
@@ -371,76 +409,109 @@ return tecs.newApplication({
     debugMaxFrames = 1000000,
     plugin = function(world: tecs.World, app: tecs.Application)
         results[1] = {name = MODES[1], samples = {}, bytes = BYTES}
-        begin()
+        local began <const>, beginFailure = protect(begin) as (boolean, any)
+        if not began then
+            failBenchmark(app, beginFailure)
+        end
         world:addSystem({
             name = "bench.Http",
             phase = tecs.ecs.phases.Update,
             run = function()
-                pollServer(server, MODES[mode]:match("^download") ~= nil and PAYLOAD_RESPONSE or EMPTY_RESPONSE)
-                if pending.status == "pending" then
-                    return
-                end
-                local elapsed <const> = (time.now() - started) * 1000.0
-                if pending.status ~= "ready" then
-                    error(pending.error, 0)
-                end
-                local name <const> = MODES[mode]
-                local serverHash <const> = validateRequest(server)
-                if serverHash ~= expectedServerHash then
-                    error(("tecs: %s upload hash mismatch"):format(name), 0)
-                end
-                if name == "download-buffer" then
-                    local body <const> = (pending.value.body as ReadableStream):readAll().value
-                    if crc32(body) ~= PAYLOAD_HASH then
-                        error("tecs: default Buffer download hash mismatch", 0)
+                local advanced <const>, advanceFailure = protect(function()
+                    pollServer(server, MODES[mode]:match("^download") ~= nil and PAYLOAD_RESPONSE or EMPTY_RESPONSE)
+                    if pending.status == "pending" then
+                        return
                     end
-                elseif name == "download-writer" and crc32(downloadBuffer:getString()) ~= PAYLOAD_HASH then
-                    error("tecs: custom Writer download hash mismatch", 0)
-                end
-                iteration = iteration + 1
-                if iteration > WARMUP then
-                    local samples <const> = results[mode].samples
-                    samples[#samples + 1] = elapsed
-                end
-                if iteration < WARMUP + SAMPLES then
+                    local elapsed <const> = (time.now() - started) * 1000.0
+                    if pending.status ~= "ready" then
+                        error(pending.error, 0)
+                    end
+                    local name <const> = MODES[mode]
+                    local serverHash <const> = validateRequest(server)
+                    if serverHash ~= expectedServerHash then
+                        error(("tecs: %s upload hash mismatch"):format(name), 0)
+                    end
+                    if name == "download-buffer" then
+                        local body <const> = (pending.value.body as ReadableStream):readAll().value
+                        if crc32(body) ~= PAYLOAD_HASH then
+                            error("tecs: default Buffer download hash mismatch", 0)
+                        end
+                    elseif name == "download-writer" and crc32(downloadBuffer:getString()) ~= PAYLOAD_HASH then
+                        error("tecs: custom Writer download hash mismatch", 0)
+                    end
+                    iteration = iteration + 1
+                    if iteration > WARMUP then
+                        local samples <const> = results[mode].samples
+                        samples[#samples + 1] = elapsed
+                    end
+                    if iteration < WARMUP + SAMPLES then
+                        begin()
+                        return
+                    end
+                    mode = mode + 1
+                    iteration = 0
+                    if mode > #MODES then
+                        app.quitRequested = true
+                        return
+                    end
+                    results[mode] = {name = MODES[mode], samples = {}, bytes = BYTES}
                     begin()
-                    return
+                end) as (boolean, any)
+                if not advanced then
+                    failBenchmark(app, advanceFailure)
                 end
-                mode = mode + 1
-                iteration = 0
-                if mode > #MODES then
-                    app.quitRequested = true
-                    return
-                end
-                results[mode] = {name = MODES[mode], samples = {}, bytes = BYTES}
-                begin()
             end,
         })
         world:addSystem({
             name = "bench.HttpReport",
             phase = tecs.ecs.phases.Shutdown,
             run = function()
-                print("mode                 p50 ms   p95 ms   MiB/s")
-                for index = 1, #results do
-                    local result <const> = results[index]
-                    local p50 <const> = percentile(result.samples, 0.50)
-                    local p95 <const> = percentile(result.samples, 0.95)
-                    local throughput <const> = (result.bytes / (1024 * 1024)) / (p50 / 1000.0)
-                    print(("%-20s %8.3f %8.3f %8.1f"):format(result.name, p50, p95, throughput))
+                if benchmarkFailure == nil then
+                    if #results ~= #MODES then
+                        benchmarkFailure = ("completed %d of %d modes"):format(#results, #MODES)
+                    else
+                        for index = 1, #results do
+                            if #results[index].samples ~= SAMPLES then
+                                benchmarkFailure = ("%s completed %d of %d samples"):format(
+                                    results[index].name, #results[index].samples, SAMPLES
+                                )
+                                break
+                            end
+                        end
+                    end
                 end
-                print(
-                    "boundedness: upload = 16 x 64 KiB = 1 MiB; "
-                        .. "download = 64 x 64 KiB = 4 MiB; every body hash validated"
-                )
-                client:close()
-                if server.connection ~= nil then
-                    server.connection:close()
+                if benchmarkFailure == nil then
+                    print("mode                 p50 ms   p95 ms   MiB/s")
+                    for index = 1, #results do
+                        local result <const> = results[index]
+                        local p50 <const> = percentile(result.samples, 0.50)
+                        local p95 <const> = percentile(result.samples, 0.95)
+                        local throughput <const> = (result.bytes / (1024 * 1024)) / (p50 / 1000.0)
+                        print(("%-20s %8.3f %8.3f %8.1f"):format(result.name, p50, p95, throughput))
+                    end
+                    print(
+                        "boundedness: upload = 16 x 64 KiB = 1 MiB; "
+                            .. "download = 64 x 64 KiB = 4 MiB; every body hash validated"
+                    )
                 end
-                server.listener:close()
-                server.pending:release()
-                uploadBuffer:release()
-                downloadBuffer:release()
-                remove(uploadPath)
+                local cleaned <const>, cleanupFailure = protect(function()
+                    client:close()
+                    if server.connection ~= nil then
+                        server.connection:close()
+                    end
+                    server.listener:close()
+                    server.pending:release()
+                    uploadBuffer:release()
+                    downloadBuffer:release()
+                    remove(uploadPath)
+                end) as (boolean, any)
+                if not cleaned and benchmarkFailure == nil then
+                    benchmarkFailure = "cleanup failed: " .. stringify(cleanupFailure)
+                end
+                if benchmarkFailure ~= nil then
+                    stderr:write("bench: HTTP benchmark failed: " .. benchmarkFailure .. "\n")
+                    exit(1)
+                end
             end,
         })
     end,
