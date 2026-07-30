@@ -51,6 +51,11 @@ describe("assets", function()
         C.SDL_Quit()
     end)
 
+    it("exposes string loads without a byte-load alias", function()
+        assert.is_function(rawget(assets, "loadString"))
+        assert.is_nil(rawget(assets, "loadBytes"))
+    end)
+
     it("returns a pending future immediately and settles it later", function()
         local loading = assets.loadImage(FIXTURE)
         assert.are.equal("pending", loading.status, "loading must not block the caller")
@@ -337,8 +342,8 @@ describe("assets", function()
     end)
 
     it("reads bytes in the background and isolates callers sharing the read", function()
-        local first = assets.loadBytes("spec/fixtures/test_material.glsl")
-        local canceled = assets.loadBytes("spec/fixtures/test_material.glsl")
+        local first = assets.loadString("spec/fixtures/test_material.glsl")
+        local canceled = assets.loadString("spec/fixtures/test_material.glsl")
 
         assert.are.equal("pending", first.status)
         assert.are_not.equal(first, canceled)
@@ -357,7 +362,7 @@ describe("assets", function()
 
     it("keeps byte reads separate from image decodes of the same path", function()
         local image = assets.loadImage(FIXTURE)
-        local bytes = assets.loadBytes(FIXTURE)
+        local bytes = assets.loadString(FIXTURE)
 
         assert.are.equal(2, assets.pending(), "the byte reader joined an image future")
         assets.waitAll()
@@ -370,7 +375,7 @@ describe("assets", function()
     end)
 
     it("reports a missing byte source through its future", function()
-        local loading = assets.loadBytes("spec/fixtures/does-not-exist.data")
+        local loading = assets.loadString("spec/fixtures/does-not-exist.data")
         assets.waitAll()
 
         assert.are.equal("failed", loading.status)

@@ -554,7 +554,7 @@ function text.loadFont(options: FontOptions): Future<Font>
     -- Named as a font, because the bytes are a document like any other and the
     -- only thing that knows they are a font's metrics is the call that asked
     -- for them. A watcher routes a change by that name.
-    loading = assets.loadBytes(metricsPath, "font"):map(function(document: string): Font
+    loading = assets.loadString(metricsPath, "font"):map(function(document: string): Font
         return loadDocument(requested, metricsPath, document)
     end)
     fontLoads[name] = loading
@@ -1285,7 +1285,7 @@ function text.reloadFont(path: string): Future<Font>
         assets.install()
     end
 
-    return assets.loadBytes(resolve(font.name), "font"):map(function(document: string): Font
+    return assets.loadString(resolve(font.name), "font"):map(function(document: string): Font
         -- Into a fresh table first. A malformed document raises part way
         -- through parsing, and the font every text is holding has to end up
         -- as the one it was or as the whole new one, never as half of each.

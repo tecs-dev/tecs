@@ -44,7 +44,8 @@ Overlapping image loads for one path share a decode. Each caller receives its
 own future and a hold on the same image. A later load after settlement decodes
 again. Sound loads never share.
 
-`loadBytes` reads a complete file without interpreting it. Image loads accept
+`loadString` reads a complete file into a binary-safe string without
+interpreting it. Image loads accept
 PNG and JPEG. `tecs.audio.decoders()` reports the sound formats linked into the
 current build. Sound mode `"resident"` decodes the complete clip, `"stream"`
 opens a source for each voice, and `"auto"` chooses from the duration threshold.
@@ -674,7 +675,7 @@ end
 ---     omits it to record a document.
 --- @return Returns a pending [`Future`](tealdoc:tecs.Future). A missing or
 ---     unreadable file settles it as failed.
-function assets.loadBytes(path: string, kind?: string): Future<string>
+function assets.loadString(path: string, kind?: string): Future<string>
     files.note(path, kind or "document")
     local shared = bytesInFlight[path]
     if shared == nil then

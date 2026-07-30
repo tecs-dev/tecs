@@ -317,7 +317,7 @@ end
 --- Reads a whole file and returns its bytes, or nil when there is none there.
 ---
 --- The binary string retains embedded NUL bytes. The synchronous call suits
---- small documents; use `tecs.assets.loadBytes` when a whole-file read should
+--- small documents; use `tecs.assets.loadString` when a whole-file read should
 --- run off the main thread, or its image and sound loaders for decoding.
 ---
 --- @param path The caller supplies an absolute path or one from `assetPath`.

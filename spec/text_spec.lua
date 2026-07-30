@@ -804,7 +804,7 @@ describe("gfx.text", function()
             )
             settle(world, renderer)
 
-            local originalLoadBytes = assets.loadBytes
+            local originalLoadString = assets.loadString
             local originalLoadImage = assets.loadImage
             local beforeAdvance = second.glyphs[string.byte("I")].xAdvance
             local imageLoads = 0
@@ -825,11 +825,11 @@ describe("gfx.text", function()
             local delayed = Future.pending(source)
 
             local ran, failure = xpcall(function()
-                assets.loadBytes = function()
+                assets.loadString = function()
                     return delayed
                 end
                 refused, refusal = pcall(tools.reloadFont, secondPath)
-                assets.loadBytes = originalLoadBytes
+                assets.loadString = originalLoadString
 
                 assets.loadImage = function(path)
                     imageLoads = imageLoads + 1
@@ -840,7 +840,7 @@ describe("gfx.text", function()
                 advance = second.glyphs[string.byte("I")].xAdvance
             end, debug.traceback)
 
-            assets.loadBytes = originalLoadBytes
+            assets.loadString = originalLoadString
             assets.loadImage = originalLoadImage
             renderer:destroy()
 
