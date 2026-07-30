@@ -64,12 +64,14 @@ delegates, so a port inherits it rather than repeating it.
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
-local type iotypes = require("tecs.io.types")
+local buffer <const> = require("tecs.io.buffer")
+local type types = require("tecs.io.types")
 
 local C <const> = sdl.C
 
-local type Reader = iotypes.Reader
-local type Writer = iotypes.Writer
+local type Reader = types.Reader
+local type Writer = types.Writer
+local type IOBuffer = types.Buffer
 
 --- What a path is. Symbolic links are followed where the platform has them, so
 --- a link never reports as one: "other" is a socket, a fifo or a device.
@@ -271,6 +273,41 @@ local function sdlWriter(path: string): Writer, string
         end
         return true
     end
+    writer.writeFrom = function(
+        _self: Writer, sourceBuffer: IOBuffer, offset?: integer, count?: integer
+    ): integer, string
+        if stream == nil then
+            return nil, "the writer is closed"
+        end
+        offset = offset or 0
+        local length <const> = sourceBuffer:length()
+        if type(offset) ~= "number" or offset ~= math.floor(offset) or offset < 0 or offset > length then
+            error("tecs: Writer:writeFrom offset is outside the buffer", 2)
+        end
+        if count == nil then
+            count = length - offset
+        elseif type(count) ~= "number" or count ~= math.floor(count) or count < 0 or count > length - offset then
+            error("tecs: Writer:writeFrom count is outside the buffer", 2)
+        end
+        if count == 0 then
+            return 0
+        end
+        local pointer <const> = sourceBuffer:getFFIPointer() + offset
+        local written <const> = tonumber(C.SDL_WriteIO(stream, pointer, count)) as integer
+        if written == 0 and tonumber(C.SDL_GetIOStatus(stream)) == tonumber(C.SDL_IO_STATUS_ERROR) then
+            return nil, sdl.error()
+        end
+        return written
+    end
+    writer.flush = function(_self: Writer): boolean, string
+        if stream == nil then
+            return false, "the writer is closed"
+        end
+        if not C.SDL_FlushIO(stream) then
+            return false, sdl.error()
+        end
+        return true
+    end
     writer.close = function(_self: Writer): boolean, string
         if stream == nil then
             return true
@@ -296,7 +333,7 @@ local function sdlReader(path: string): Reader, string
 
     -- Grown to the largest read asked for and kept, so a reader driven in
     -- equal chunks allocates once rather than once a chunk.
-    local buffer: loader.CArray = nil
+    local scratch: loader.CArray = nil
     local capacity = 0
 
     local reader <const>: Reader = {}
@@ -306,10 +343,10 @@ local function sdlReader(path: string): Reader, string
         end
         local wanted <const> = math.max(1, count)
         if wanted > capacity then
-            buffer = loader.newArray("char[?]", wanted)
+            scratch = loader.newArray("char[?]", wanted)
             capacity = wanted
         end
-        local got <const> = tonumber(C.SDL_ReadIO(stream, buffer, wanted)) as integer
+        local got <const> = tonumber(C.SDL_ReadIO(stream, scratch, wanted)) as integer
         if got <= 0 then
             -- Zero is the end of the file or a failure, and only the status
             -- tells them apart.
@@ -318,7 +355,34 @@ local function sdlReader(path: string): Reader, string
             end
             return ""
         end
-        return loader.toBytes(buffer as loader.CValue, got)
+        return loader.toBytes(scratch as loader.CValue, got)
+    end
+    reader.readInto = function(_self: Reader, destination: IOBuffer, count: integer, offset?: integer): integer, string
+        if stream == nil then
+            return nil, "the reader is closed"
+        end
+        offset = offset or 0
+        if type(offset) ~= "number" or offset ~= math.floor(offset) or offset < 0 then
+            error("tecs: Reader:readInto offset must be a non-negative integer", 2)
+        end
+        if type(count) ~= "number" or count ~= math.floor(count) or count < 0 then
+            error("tecs: Reader:readInto count must be a non-negative integer", 2)
+        end
+        if count == 0 then
+            return 0
+        end
+
+        local output <const>, previousLength = buffer.prepareWrite(destination, offset, count)
+        local got <const> = tonumber(C.SDL_ReadIO(stream, output, count)) as integer
+        if got <= 0 then
+            buffer.commitWrite(destination, offset, 0, previousLength)
+            if tonumber(C.SDL_GetIOStatus(stream)) == tonumber(C.SDL_IO_STATUS_ERROR) then
+                return nil, sdl.error()
+            end
+            return 0
+        end
+        buffer.commitWrite(destination, offset, got, previousLength)
+        return got
     end
     reader.close = function(_self: Reader)
         if stream == nil then

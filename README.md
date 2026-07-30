@@ -1500,19 +1500,42 @@ of making game code run at device-thread cadence.
 
 ## Moving binary data
 
-`tecs.io` owns the two interfaces for moving binary strings between modules:
-`Reader` supplies bytes and `Writer` accepts them. Direction is in the type
-rather than in optional methods on one generic stream. A file opened for input
-cannot be written, an HTTP response destination need not be readable, and
-making both pretend otherwise would move the error from the type checker to a
-missing method at runtime.
+`tecs.io.Stream` describes where bytes live without retaining a cursor.
+Strings, owned buffers, borrowed FFI memory, paths and handles all use that
+one storage vocabulary. Direction remains in the type:
+`ReadableStream:newReader` and `WritableStream:newWriter` create caller-owned
+endpoints, while source-only strings and borrowed bytes do not pretend to have
+a writer. Cursor state belongs to each endpoint, so two readers over replayable
+memory or a path do not move one another. A borrowed handle reports that it is
+not replayable and lets only its first endpoint claim the handle's cursor.
 
-The contract owns no resource. The subsystem that opens one remains responsible
-for its lifetime and policy: paths stay with `tecs.io.files`, TCP and UDP
-handles are constructed by `tecs.io`, and HTTP content types stay with
-`tecs.io.http`. `tecs.io.files.Reader` and `tecs.io.files.Writer` remain
-aliases, so code can name the directional type either on the parent or where
-the resource was opened.
+`Buffer` is the reusable native-memory boundary beneath those interfaces. It
+separates logical length from capacity, grows geometrically, and exposes a
+borrowed FFI pointer whose lifetime ends at growth or release. `Reader:readInto`
+and `Writer:writeFrom` let SDL fill and drain that allocation directly. A
+generic `write(any)` lost both the cdata length and the right to check a range,
+so the explicit buffer and offset contract won.
+
+Whole-source operations return `Future` values. On streaming backends, such as
+the direct SDL filesystem backend, one application poll shares sixteen 64 KiB
+read or write steps round-robin across every pending transfer. That caps
+aggregate streaming I/O work at about one MiB; a generic read-and-write copy
+advances about 512 KiB of payload when it is the only transfer. A platform
+backend without `openWrite` uses the whole-file fallback instead: it
+accumulates chunks, then `close` concatenates and writes the complete payload
+in one operation. That compatibility path is not covered by the per-poll byte
+bound. A blocking wait drains streaming transfers against its actual time
+budget. Stable buffer sources bypass the scratch copy, strings retain their
+immutable Lua storage, and `hasBuffer` says exactly when `readBuffer` returns
+the retained object instead of materializing a new one.
+
+The descriptor owns no cursor and does not take policy away from its backing:
+paths still open through `tecs.io.files`, TCP and UDP handles are constructed
+by `tecs.io`, and media type and length are lazy metadata methods.
+`withMetadata` wraps those methods without eagerly opening or reading the
+source. `tecs.io.files.Reader` and `tecs.io.files.Writer` remain aliases, so
+code can name a directional endpoint either on the parent or where the file was
+opened.
 
 Networking once occupied a separate `tecs.net` root with HTTP and MCP below
 it. That root bought no distinction the operation did not already carry:
