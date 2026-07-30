@@ -340,5 +340,58 @@ describe(
                 luassert.equals(1005, w:get(child, Transform).x)
             end
         )
+
+        it(
+            "carries hierarchy writes from Last into the next update",
+            function()
+                local w = tecs.ecs.newWorld()
+                local parent1 = w:spawn(Transform(100, 0, 0))
+                local parent2 = w:spawn(Transform(1000, 0, 0))
+                local transformChild = w:spawn(
+                    Transform(0, 0, 0), RelativeTransform(5, 0, 0), ChildOf(parent1) as tecs.ecs.Component
+                )
+                local relativeChild = w:spawn(
+                    Transform(0, 0, 0), RelativeTransform(6, 0, 0), ChildOf(parent1) as tecs.ecs.Component
+                )
+                local relationshipChild = w:spawn(
+                    Transform(0, 0, 0), RelativeTransform(7, 0, 0), ChildOf(parent1) as tecs.ecs.Component
+                )
+                w:commit()
+
+                w:update(1 / 60)
+                luassert.equals(105, w:get(transformChild, Transform).x)
+                luassert.equals(106, w:get(relativeChild, Transform).x)
+                luassert.equals(107, w:get(relationshipChild, Transform).x)
+                w:update(1 / 60)
+
+                local wrote = false
+                w:addSystem(
+                    {
+                        name = "LastHierarchyWriter",
+                        phase = tecs.ecs.phases.Last,
+                        run = function()
+                            if not wrote then
+                                wrote = true
+                                w:set(parent1, Transform(500, 0, 0))
+                                w:set(relativeChild, RelativeTransform(60, 0, 0))
+                                w:set(relationshipChild, ChildOf(parent2) as tecs.ecs.Component)
+                            end
+                        end,
+                    }
+                )
+
+                -- The hierarchy system has already run when Last writes.
+                w:update(1 / 60)
+                luassert.equals(105, w:get(transformChild, Transform).x)
+                luassert.equals(106, w:get(relativeChild, Transform).x)
+                luassert.equals(107, w:get(relationshipChild, Transform).x)
+
+                -- End-of-update dirty carry must reopen the hierarchy gate.
+                w:update(1 / 60)
+                luassert.equals(505, w:get(transformChild, Transform).x)
+                luassert.equals(560, w:get(relativeChild, Transform).x)
+                luassert.equals(1007, w:get(relationshipChild, Transform).x)
+            end
+        )
     end
 )

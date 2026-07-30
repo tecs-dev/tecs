@@ -360,6 +360,9 @@ local record internal
         archetypeIndex: ArchetypeIndexInternal
         _bundles: {string: Bundle}
         _dirtyArchetypes: {ArchetypeInternal: boolean}
+        -- Builtin hierarchy sampler, run after every system and before dirty
+        -- bits clear so writes later than PostUpdate survive into its gate.
+        _sampleHierarchyDirty: function()
         _stateStack: {string}
         _stateComponents: {string: Component}
         _statePolicies: {string: StatePolicy}

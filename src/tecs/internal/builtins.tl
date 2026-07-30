@@ -578,19 +578,24 @@ function builtins.plugin(w: types.World)
             return false
         end
 
-        -- Dirty bits clear at the end of each update, but this system
-        -- runs in PostUpdate; direct writes made after it (render-phase
-        -- systems, MCP run_lua) would be wiped before the gate sees
-        -- them. Sample at frame end and carry the result into the next
-        -- frame's gate.
+        -- Dirty bits clear at the end of each update, but this system runs in
+        -- PostUpdate. The RenderLast sampler carries render-phase writes. The
+        -- hook resamples before the clear only when that sampler found nothing,
+        -- which is when a later Last-phase write could otherwise be lost.
         local pendingHierarchyDirty = false
         w:addSystem(
             {
+                -- Compatibility surface: debug tools select this system by name.
                 name = "RelativeTransformDirtySampler",
                 phase = phases.RenderLast,
                 run = function() pendingHierarchyDirty = hierarchyStateDirty() end,
             }
         )
+        wImpl._sampleHierarchyDirty = function()
+            if not pendingHierarchyDirty then
+                pendingHierarchyDirty = hierarchyStateDirty()
+            end
+        end
 
         w:addSystem(
             {

@@ -112,6 +112,7 @@ function WorldImpl.new(config?: types.World.Config): World
             relationshipStores = nil as {Component: RelationshipStore},
             _bundles = {},
             _dirtyArchetypes = dirtyArchetypes,
+            _sampleHierarchyDirty = nil,
             _stateStack = {},
             _stateComponents = {},
             _statePolicies = {},
@@ -1305,6 +1306,11 @@ function WorldImpl:update(dt: number)
         GLOBAL_FFI_EVENTS:clearSlice(self._ffiSliceId)
     end
     self.pipeline:update(dt, self)
+
+    local sampleHierarchyDirty = self._sampleHierarchyDirty
+    if sampleHierarchyDirty then
+        sampleHierarchyDirty()
+    end
 
     -- Clear component-dirty bits after the pipeline finishes; systems
     -- drained their own scopes, and the next update's leading commit
