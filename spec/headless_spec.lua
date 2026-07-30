@@ -120,7 +120,7 @@ describe("tecs headless", function()
                     "tecs.Application", "tecs.Renderer", "tecs.workers",
                     "tecs.assets", "tecs.physics", "tecs.io.mcp",
                     "tecs.gpu.Device", "tecs.ffi.sdl3",
-                    "tecs.data", "tecs.math", "tecs.regex",
+                    "tecs.data", "tecs.math", "tecs.math.vec2", "tecs.regex",
                     "tecs.platform.os",
                     "tecs.io.files", "tecs.io.watcher",
                     "tecs.io", "tecs.io.http", "tecs.io.http.client",
@@ -177,6 +177,25 @@ describe("tecs headless", function()
             -- that member and answers with the module itself, and no sibling
             -- came with it.
             assert.are.equal("table false true none\n", output)
+        end)
+
+        it("loads vector math only when its child is read", function()
+            local output = run(
+                [[
+                local tecs = require("tecs")
+                local angleMath = tecs.math
+                local childLoaded = package.loaded["tecs.math.vec2"] ~= nil
+                local vec2 = angleMath.vec2
+
+                print(("%s %s %s %s"):format(
+                    tostring(rawequal(angleMath, require("tecs.math"))),
+                    tostring(childLoaded),
+                    tostring(rawequal(vec2, require("tecs.math.vec2"))),
+                    tostring(angleMath.add)))
+            ]],
+                false
+            )
+            assert.are.equal("true false true nil\n", output)
         end)
 
         it("reports a mistyped engine name as nil", function()

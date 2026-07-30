@@ -235,7 +235,7 @@ The host loads `tecs` before the entry file. A game can use these names without 
 - [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
 - [`tecs.io`](/modules/io/) - binary I/O, nonblocking sockets, HTTP, and external tools
 - [`tecs.log`](/modules/log) - named, leveled platform logging
-- [`tecs.math`](/modules/math) - allocation-free 2D vector and angle math
+- [`tecs.math`](/modules/math) - angle math and two-dimensional geometry
 - [`tecs.os`](/modules/os) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.physics`](/modules/physics) - Rapier 2D, solved across a shared thread pool
 - [`tecs.regex`](/modules/regex) - compiled regular expressions over Lua byte strings
@@ -255,6 +255,7 @@ Inside one of those, one level and no deeper:
 - [`tecs.io.http`](/modules/io/http) - fetching over HTTP without stopping the frame
 - [`tecs.io.mcp`](/modules/io/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.io.watcher`](/modules/io/watcher) - watching files for change
+- [`tecs.math.vec2`](/modules/math/vec2) - allocation-free two-dimensional vector and point math
 
 On `tecs` itself, because no one module owns them:
 

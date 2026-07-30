@@ -30,7 +30,7 @@ A module may contain one level of subordinate modules, such as
 | [`tecs.input`](/modules/input)       | gameplay input, gamepads, and sensors                       |
 | [`tecs.io`](/modules/io/)            | binary I/O, sockets, HTTP, and external tools               |
 | [`tecs.log`](/modules/log)           | named, leveled platform logging                             |
-| [`tecs.math`](/modules/math)         | allocation-free 2D vector and angle math                    |
+| [`tecs.math`](/modules/math)         | angle math and two-dimensional geometry                     |
 | [`tecs.os`](/modules/os)             | capabilities, clipboard access, and child processes         |
 | [`tecs.physics`](/modules/physics)   | Rapier 2D rigid-body simulation                             |
 | [`tecs.regex`](/modules/regex)       | compiled regular expressions over Lua byte strings          |
@@ -54,6 +54,7 @@ Each subordinate module has its own page.
 | [`tecs.io.http`](/modules/io/http)             | fetching over HTTP without stopping the frame   |
 | [`tecs.io.mcp`](/modules/io/mcp)               | the debug server, tools, and sandbox            |
 | [`tecs.io.watcher`](/modules/io/watcher)       | watching files for change                       |
+| [`tecs.math.vec2`](/modules/math/vec2)         | two-dimensional vector and point operations     |
 
 ## Root types and functions
 

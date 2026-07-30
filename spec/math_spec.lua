@@ -3,7 +3,8 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local vector = require("tecs").math
+local mathModule = require("tecs").math
+local vector = mathModule.vec2
 
 local function near(actual, expected)
     assert.is_true(math.abs(actual - expected) <= 1e-12, ("expected %.17g, got %.17g"):format(expected, actual))
@@ -14,7 +15,15 @@ local function nearPair(expectedX, expectedY, actualX, actualY)
     near(actualY, expectedY)
 end
 
-describe("tecs.math", function()
+describe("tecs.math.vec2", function()
+    it("leaves only angle-to-angle operations on its parent", function()
+        assert.are.equal("function", type(mathModule.wrapAngle))
+        assert.are.equal("function", type(mathModule.deltaAngle))
+        assert.is_nil(mathModule.add)
+        assert.is_nil(mathModule.normalize)
+        assert.is_nil(mathModule.reflect)
+    end)
+
     it("uses separate coordinates and multiple returns", function()
         nearPair(6, 5, vector.add(2, -3, 4, 8))
         nearPair(-2, -11, vector.subtract(2, -3, 4, 8))
@@ -69,12 +78,12 @@ describe("tecs.math", function()
     end)
 
     it("wraps angles and computes the shortest turn", function()
-        near(vector.wrapAngle(0), 0)
-        near(vector.wrapAngle(math.pi), -math.pi)
-        near(vector.wrapAngle(-3 * math.pi), -math.pi)
-        near(vector.deltaAngle(math.rad(350), math.rad(10)), math.rad(20))
-        near(vector.deltaAngle(math.rad(10), math.rad(350)), math.rad(-20))
-        near(vector.deltaAngle(0, math.pi), -math.pi)
+        near(mathModule.wrapAngle(0), 0)
+        near(mathModule.wrapAngle(math.pi), -math.pi)
+        near(mathModule.wrapAngle(-3 * math.pi), -math.pi)
+        near(mathModule.deltaAngle(math.rad(350), math.rad(10)), math.rad(20))
+        near(mathModule.deltaAngle(math.rad(10), math.rad(350)), math.rad(-20))
+        near(mathModule.deltaAngle(0, math.pi), -math.pi)
     end)
 
     it("projects onto non-unit axes and defines a zero axis", function()

@@ -45,7 +45,7 @@ local type physics = require("tecs.physics")
 local type log = require("tecs.log")
 -- `math` is the standard library global, and shadowing it makes a clean
 -- project type-check warn. The public name and required module are still math.
-local type vectorMath = require("tecs.math")
+local type angleMath = require("tecs.math")
 local type data = require("tecs.data")
 local type regex = require("tecs.regex")
 local type platformOS = require("tecs.platform.os")
@@ -356,7 +356,7 @@ local record tecs
     input: input
     io: binaryIO
     log: log
-    math: vectorMath
+    math: angleMath
     regex: regex
     sequence: sequence
     os: platformOS
@@ -453,7 +453,12 @@ local SURFACE <const>: {string: Namespace} = {
         },
     },
     log = {module = "tecs.log"},
-    math = {module = "tecs.math"},
+    math = {
+        module = "tecs.math",
+        within = {
+            vec2 = {module = "tecs.math.vec2"},
+        },
+    },
     regex = {module = "tecs.regex"},
     sequence = {module = "tecs.sequence"},
     os = {module = "tecs.platform.os"},

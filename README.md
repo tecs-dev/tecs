@@ -867,12 +867,28 @@ worker and a second list is a second answer to the same question.
 
 ## Vector math stays in Lua
 
-`tecs.math` takes vectors as separate numbers and returns them as multiple
+`tecs.math.vec2` takes vectors as separate numbers and returns them as multiple
 values. A table or cdata vector would make every temporary choose an owner and
 an allocation strategy even though the engine's components already store x and
 y as separate fields. With numbers, a result can go straight into locals or an
 archetype column, and LuaJIT can compile the helper's arithmetic into the
-caller's trace.
+caller's trace:
+
+```teal
+local directionX, directionY =
+    tecs.math.vec2.normalize(targetX - x, targetY - y)
+x, y = tecs.math.vec2.moveTowards(x, y, targetX, targetY, speed * dt)
+rotation = tecs.math.wrapAngle(rotation + turn * dt)
+```
+
+The vector and point operations sit under `vec2`; `wrapAngle` and `deltaAngle`
+stay directly on `tecs.math` because neither takes a vector. Keeping all twenty
+functions flat made an angle-to-angle operation look like part of the vector
+vocabulary and left no place for another geometric subject without adding more
+unqualified names. The subordinate module pays one segment only where a caller
+is actually doing two-dimensional geometry. There are no aliases at the old
+flat spellings, so the surface has one answer rather than a compatibility layer
+that would make both layouts permanent.
 
 That is also why these operations are Teal rather than Rust. A dot product,
 normalization or rotation does too little work to repay an FFI call, and the

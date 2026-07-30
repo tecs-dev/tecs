@@ -410,7 +410,13 @@ local SIDEBAR = {
                 },
             },
             { text = "tecs.log", path = "modules/log" },
-            { text = "tecs.math", path = "modules/math" },
+            {
+                text = "tecs.math",
+                path = "modules/math",
+                items = {
+                    { text = "tecs.math.vec2", path = "modules/math/vec2" },
+                },
+            },
             { text = "tecs.os", path = "modules/os" },
             { text = "tecs.physics", path = "modules/physics" },
             { text = "tecs.regex", path = "modules/regex" },
@@ -452,7 +458,7 @@ local DIRECT_PUBLIC_MODULES = {
 --- A field is a module when it is luacase and declared as the type of its own
 --- name, which is what tells `assets: assets` from `version: string`. The
 --- alias usually matches the public name and may differ to avoid shadowing a
---- standard-library global, so `math: vectorMath` is a module too. The nesting
+--- standard-library global, so `math: angleMath` is a module too. The nesting
 --- comes out of `SURFACE`, where it is declared.
 local function publicNames()
     local source = readTree("src/tecs/init.tl")
