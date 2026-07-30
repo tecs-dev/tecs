@@ -30,6 +30,7 @@ loader.declare("http")
 local copy <const> = ffi.copy
 local floor <const> = math.floor
 local max <const> = math.max
+local removeAt <const> = table.remove
 
 local H <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "http")
 -- Externally configured logger name; it remains stable if this module moves.
@@ -41,6 +42,7 @@ local DEFAULT_CONNECT_TIMEOUT_MS <const> = 10000
 local DEFAULT_MAX_REDIRECTS <const> = 5
 local DEFAULT_MAX_CONNECTIONS <const> = 16
 local DEFAULT_MAX_CONNECTIONS_PER_HOST <const> = 6
+local MAX_EXACT_INTEGER <const> = 9007199254740991
 
 local EVENT_CHUNK <const> = 1
 local EVENT_COMPLETE <const> = 2
@@ -107,6 +109,8 @@ local record client
         --- Caller-writable. Sets the method. Defaults to GET.
         method: string
         --- Caller-writable. Sets headers merged over the client's defaults.
+        --- A `Content-Length` must contain decimal digits and must match a
+        --- body whose length is known.
         headers: {string: string}
         --- Caller-writable. Sets bytes to send. A stream opens one reader when
         --- this request begins and feeds it through a bounded upload queue.
@@ -166,6 +170,8 @@ local record client
         _insecure: {string: boolean}
         _byFuture: {Future<Response>: Transfer}
         _byId: {integer: Transfer}
+        _uploadOrder: {Transfer}
+        _uploadCursor: integer
         _pending: integer
         _pumping: boolean
         _eventSize: loader.CArray
@@ -303,10 +309,26 @@ local function parseHeaders(raw: string): {string: string}
     return headers
 end
 
+local function removeUpload(self: Client, transfer: Transfer)
+    for index = 1, #self._uploadOrder do
+        if self._uploadOrder[index] == transfer then
+            removeAt(self._uploadOrder, index)
+            if index < self._uploadCursor then
+                self._uploadCursor = self._uploadCursor - 1
+            end
+            if self._uploadCursor > #self._uploadOrder then
+                self._uploadCursor = 1
+            end
+            return
+        end
+    end
+end
+
 local function release(self: Client, transfer: Transfer)
     if self._byId[transfer.id] == nil then
         return
     end
+    removeUpload(self, transfer)
     self._byId[transfer.id] = nil
     self._byFuture[transfer.future] = nil
     self._pending = self._pending - 1
@@ -329,18 +351,30 @@ local function finishWriter(transfer: Transfer, openEmpty: boolean): boolean, st
         return true
     end
     if transfer.writer == nil and openEmpty then
-        local reason: string
-        transfer.writer, reason = transfer.sink:newWriter()
-        if transfer.writer == nil then
-            return false, reason
+        local opened <const>, writer, reason = pcall(
+            transfer.sink.newWriter, transfer.sink
+        ) as (boolean, iotypes.Writer, string)
+        if not opened then
+            return false, tostring(writer)
         end
+        if writer == nil then
+            return false, reason or "cannot open response destination"
+        end
+        transfer.writer = writer
     end
     if transfer.writer == nil then
         return true
     end
     local writer <const> = transfer.writer
     transfer.writer = nil
-    return writer:close()
+    local closed <const>, ok, reason = pcall(writer.close, writer) as (boolean, boolean, string)
+    if not closed then
+        return false, tostring(ok)
+    end
+    if not ok then
+        return false, reason or "cannot close response destination"
+    end
+    return true
 end
 
 local function releaseResponseBuffers(transfer: Transfer)
@@ -431,12 +465,13 @@ local function writeChunk(self: Client, transfer: Transfer, pointer: loader.CPtr
         buffer.commitWrite(transfer.responseScratch, 0, length, previousLength)
         local offset = 0
         while offset < length do
+            local remaining <const> = length - offset
             local wrote <const>, reason = transfer.writer:writeFrom(transfer.responseScratch, offset, length - offset)
             if wrote == nil then
                 return reason or "cannot write response"
             end
-            if wrote <= 0 then
-                return "response writer made no progress"
+            if type(wrote) ~= "number" or wrote ~= floor(wrote) or wrote < 1 or wrote > remaining then
+                return ("response writer returned %s for a %d-byte write"):format(tostring(wrote), remaining)
             end
             offset = offset + wrote
         end
@@ -503,6 +538,24 @@ local function serviceUpload(self: Client, transfer: Transfer): boolean, boolean
             failTransfer(self, transfer, ("tecs: %s: %s"):format(transfer.url, reason or "cannot read request body"))
             return true, true
         end
+        if type(count) ~= "number" or count ~= floor(count) or count < 0 or count > CHUNK then
+            failTransfer(
+                self,
+                transfer,
+                ("tecs: %s: request reader returned invalid byte count %s"):format(transfer.url, tostring(count))
+            )
+            return true, true
+        end
+        if count > transfer.sourceScratch:length() then
+            failTransfer(
+                self,
+                transfer,
+                ("tecs: %s: request reader returned %d bytes but initialized only %d"):format(
+                    transfer.url, count, transfer.sourceScratch:length()
+                )
+            )
+            return true, true
+        end
         if count == 0 then
             local uploaded <const> = floor(
                 tonumber(H.tecsHttpClientUpload(self._handle, transfer.id, nil, 0, 1)) or UPLOAD_CLOSED
@@ -535,20 +588,18 @@ end
 local function serviceUploads(self: Client): integer
     local settled = 0
     local steps = 0
-    for _, transfer in pairs(self._byId) do
-        while transfer.sourceReader ~= nil and steps < UPLOAD_STEPS do
-            local didSettle <const>, progressed <const> = serviceUpload(self, transfer)
-            if didSettle then
-                settled = settled + 1
-                break
-            end
-            if not progressed then
-                break
-            end
-            steps = steps + 1
+    while #self._uploadOrder > 0 and steps < UPLOAD_STEPS do
+        if self._uploadCursor > #self._uploadOrder then
+            self._uploadCursor = 1
         end
-        if steps >= UPLOAD_STEPS then
-            break
+        local transfer <const> = self._uploadOrder[self._uploadCursor]
+        local didSettle <const> = serviceUpload(self, transfer)
+        settled = settled + (didSettle and 1 or 0)
+        steps = steps + 1
+        if self._byId[transfer.id] == transfer and transfer.sourceReader ~= nil then
+            self._uploadCursor = self._uploadCursor + 1
+        elseif self._byId[transfer.id] == transfer then
+            removeUpload(self, transfer)
         end
     end
     return settled
@@ -620,6 +671,39 @@ local function mergedHeaders(self: Client, request: Request, source: ReadableStr
     return merged
 end
 
+local function declaredContentLength(headers: {string: string}): integer, string
+    local value <const> = headers["content-length"]
+    if value == nil then
+        return nil
+    end
+    if type(value) ~= "string" or value:match("^%d+$") == nil then
+        return nil, "tecs: Content-Length must contain only decimal digits"
+    end
+    local length <const> = tonumber(value)
+    if length == nil or length > MAX_EXACT_INTEGER then
+        return nil, "tecs: Content-Length exceeds the largest exact byte count"
+    end
+    return floor(length) as integer
+end
+
+local function streamContentLength(source: ReadableStream): integer, string
+    local read <const>, value = pcall(source.contentLength, source) as (boolean, any)
+    if not read then
+        return nil, ("tecs: the request body Content-Length could not be read: %s"):format(tostring(value))
+    end
+    if value == nil then
+        return -1
+    end
+    if type(value) ~= "number" then
+        return nil, "tecs: the request body Content-Length must be a non-negative exact integer or nil"
+    end
+    local length <const> = value as number
+    if length < 0 or length > MAX_EXACT_INTEGER or length ~= floor(length) then
+        return nil, "tecs: the request body Content-Length must be a non-negative exact integer or nil"
+    end
+    return length as integer
+end
+
 function Client:send(request: Request): Future<Response>
     if self._handle == nil then
         error("tecs: this http client is closed", 2)
@@ -667,14 +751,13 @@ function Client:send(request: Request): Future<Response>
         bodyKind = BODY_INLINE
         bodyLength = borrowed.length
     elseif source ~= nil then
-        local reader <const>, reason = source:newReader()
-        if reader == nil then
-            return Future.failed(reason or "tecs: the request body could not be opened") as Future<Response>
-        end
-        transfer.sourceReader = reader
-        transfer.sourceScratch = stream.newBuffer()
         bodyKind = BODY_UPLOAD
-        bodyLength = source:contentLength() or -1
+        local bodyLengthFailure: string
+        bodyLength, bodyLengthFailure = streamContentLength(source)
+        if bodyLengthFailure ~= nil then
+            future:fail(bodyLengthFailure)
+            return future
+        end
     elseif carries then
         bodyKind = BODY_INLINE
         bodyLength = 0
@@ -682,6 +765,22 @@ function Client:send(request: Request): Future<Response>
     end
 
     local merged <const> = mergedHeaders(self, request, source)
+    local contentLength <const>, contentLengthFailure <const> = declaredContentLength(merged)
+    if contentLengthFailure ~= nil then
+        future:fail(contentLengthFailure)
+        return future
+    end
+    if contentLength ~= nil then
+        if bodyLength >= 0 and bodyLength ~= contentLength then
+            future:fail(
+                ("tecs: Content-Length is %d, but the request body contains %d bytes"):format(contentLength, bodyLength)
+            )
+            return future
+        end
+        if bodyKind == BODY_UPLOAD then
+            bodyLength = contentLength
+        end
+    end
     local headerCount = 0
     for _ in pairs(merged) do
         headerCount = headerCount + 1
@@ -721,8 +820,30 @@ function Client:send(request: Request): Future<Response>
     native.insecure = host ~= nil and self._insecure[host] and 1 or 0
 
     if (tonumber(H.tecsHttpClientSend(self._handle, nativeArray)) or 0) == 0 then
-        closeSource(transfer)
-        return Future.failed(("tecs: cannot start %s: %s"):format(url, nativeError())) as Future<Response>
+        future:fail(("tecs: cannot start %s: %s"):format(url, nativeError()))
+        return future
+    end
+
+    if bodyKind == BODY_UPLOAD then
+        local opened <const>, reader, reason = pcall(source.newReader, source) as (boolean, iotypes.Reader, string)
+        if not opened or reader == nil then
+            H.tecsHttpClientCancel(self._handle, id)
+            future:fail(
+                opened and (reason or "tecs: the request body could not be opened")
+                    or ("tecs: the request body could not be opened: %s"):format(tostring(reader))
+            )
+            return future
+        end
+        transfer.sourceReader = reader
+        local allocated <const>, scratch = pcall(stream.newBuffer) as (boolean, iotypes.Buffer)
+        if not allocated then
+            H.tecsHttpClientCancel(self._handle, id)
+            closeSource(transfer)
+            future:fail(("tecs: the request body buffer could not be allocated: %s"):format(tostring(scratch)))
+            return future
+        end
+        transfer.sourceScratch = scratch
+        self._uploadOrder[#self._uploadOrder + 1] = transfer
     end
 
     self._byFuture[future] = transfer
@@ -769,6 +890,8 @@ function Client:close()
 
     H.tecsHttpClientDestroy(self._handle)
     self._handle = nil
+    self._uploadOrder = {}
+    self._uploadCursor = 1
     self._pending = 0
 end
 
@@ -854,6 +977,8 @@ function client.newClient(options?: Options): Client
     self._insecure = insecure
     self._byFuture = {}
     self._byId = {}
+    self._uploadOrder = {}
+    self._uploadCursor = 1
     self._pending = 0
     self._pumping = false
     self._eventSize = loader.newArray("size_t[1]")

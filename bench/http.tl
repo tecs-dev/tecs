@@ -13,28 +13,33 @@
 --- `BENCH_HTTP_BYTES`, `BENCH_HTTP_WARMUP`, and `BENCH_HTTP_SAMPLES` control
 --- payload size and sample counts. No external service or network is used.
 
-local root = os.getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
-if root:sub(-1) == "/" then
-    root = root:sub(1, -2)
-end
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
-
-local tecs <const> = require("tecs")
-local time <const> = require("tecs.platform.time")
-local type Future = require("tecs.Future")
-local type iotypes = require("tecs.io.types")
-
-local tecsIO <const> = tecs.io
-local http <const> = tecs.io.http
 local floor <const> = math.floor
 local max <const> = math.max
 local min <const> = math.min
+local concat <const> = table.concat
 local sort <const> = table.sort
 local sub <const> = string.sub
 local getenv <const> = os.getenv
 local remove <const> = os.remove
 local tmpname <const> = os.tmpname
+
+local root = getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
+if sub(root, -1) == "/" then
+    root = sub(root, 1, -2)
+end
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
+
+local tecs <const> = require("tecs")
+local ffi <const> = require("ffi")
+local time <const> = require("tecs.platform.time")
+local buffer <const> = require("tecs.io.buffer")
+local type Future = require("tecs.Future")
+local type iotypes = require("tecs.io.types")
+
+local tecsIO <const> = tecs.io
+local http <const> = tecs.io.http
 local crc32 <const> = tecs.data.crc32
+local copy <const> = ffi.copy
 
 local BYTES <const> = floor(tonumber(getenv("BENCH_HTTP_BYTES")) or (4 * 1024 * 1024))
 local WARMUP <const> = floor(tonumber(getenv("BENCH_HTTP_WARMUP")) or 20)
@@ -50,9 +55,13 @@ local type WritableStream = iotypes.WritableStream
 local payload <const> = ("0123456789abcdef"):rep(floor((BYTES + 15) / 16)):sub(1, BYTES)
 
 local PAYLOAD_HASH <const> = crc32(payload)
+local EMPTY_RESPONSE <const> = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n"
+local PAYLOAD_RESPONSE <const> = ("HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: keep-alive\r\n\r\n%s"):format(
+    #payload, payload
+)
 
 local record ChunkReader is Reader
-    bytes: string
+    source: Buffer
     at: integer
     closed: boolean
 end
@@ -61,11 +70,11 @@ function ChunkReader:read(count: integer): string, string
     if self.closed then
         return nil, "reader is closed"
     end
-    if self.at >= #self.bytes then
+    if self.at >= self.source:length() then
         return ""
     end
-    local finish <const> = min(#self.bytes, self.at + max(1, count))
-    local result <const> = sub(self.bytes, self.at + 1, finish)
+    local finish <const> = min(self.source:length(), self.at + max(1, count))
+    local result <const> = self.source:getString(self.at, finish - self.at)
     self.at = finish
     return result
 end
@@ -74,11 +83,13 @@ function ChunkReader:readInto(destination: Buffer, count: integer, offset?: inte
     if self.closed then
         return nil, "reader is closed"
     end
-    if self.at >= #self.bytes or count == 0 then
+    if self.at >= self.source:length() or count == 0 then
         return 0
     end
-    local taking <const> = min(count, #self.bytes - self.at)
-    destination:setString(sub(self.bytes, self.at + 1, self.at + taking), offset or 0)
+    local taking <const> = min(count, self.source:length() - self.at)
+    local output <const>, previousLength <const> = buffer.prepareWrite(destination, offset or 0, taking)
+    copy(output as ffi.CData, (self.source:getFFIPointer() + self.at) as ffi.CData, taking)
+    buffer.commitWrite(destination, offset or 0, taking, previousLength)
     self.at = self.at + taking
     return taking
 end
@@ -88,12 +99,12 @@ function ChunkReader:close()
 end
 
 local record ChunkSource is ReadableStream
-    bytes: string
+    buffer: Buffer
     closed: boolean
 end
 
 function ChunkSource:contentLength(): integer | nil
-    return #self.bytes
+    return self.buffer:length()
 end
 function ChunkSource:contentType(): string | nil
     return "application/octet-stream"
@@ -123,22 +134,22 @@ function ChunkSource:newReader(): Reader, string
     if self.closed then
         return nil, "stream is closed"
     end
-    return {bytes = self.bytes, at = 0, closed = false} as ChunkReader
+    return {source = self.buffer, at = 0, closed = false} as ChunkReader
 end
 function ChunkSource:readAll(maxBytes?: integer): Future<string>
-    return tecsIO.newStringStream(self.bytes):readAll(maxBytes)
+    return tecsIO.newBufferStream(self.buffer):readAll(maxBytes)
 end
 function ChunkSource:readBuffer(maxBytes?: integer): Future<Buffer>
-    return tecsIO.newStringStream(self.bytes):readBuffer(maxBytes)
+    return tecsIO.newBufferStream(self.buffer):readBuffer(maxBytes)
 end
 function ChunkSource:transferTo(destination: WritableStream): Future<integer>
-    return tecsIO.newStringStream(self.bytes):transferTo(destination)
+    return tecsIO.newBufferStream(self.buffer):transferTo(destination)
 end
 function ChunkSource:transferToFile(path: string): Future<integer>
-    return tecsIO.newStringStream(self.bytes):transferToFile(path)
+    return tecsIO.newBufferStream(self.buffer):transferToFile(path)
 end
 function ChunkSource:discard(): Future<integer>
-    return tecsIO.newStringStream(self.bytes):discard()
+    return tecsIO.newBufferStream(self.buffer):discard()
 end
 
 local record BufferWriter is Writer
@@ -161,7 +172,9 @@ function BufferWriter:writeFrom(source: Buffer, offset?: integer, count?: intege
     end
     offset = offset or 0
     count = count or (source:length() - offset)
-    self.destination:setString(source:getString(offset, count), self.at)
+    local output <const>, previousLength <const> = buffer.prepareWrite(self.destination, self.at, count)
+    copy(output as ffi.CData, (source:getFFIPointer() + offset) as ffi.CData, count)
+    buffer.commitWrite(self.destination, self.at, count, previousLength)
     self.at = self.at + count
     return count
 end
@@ -216,7 +229,10 @@ end
 local record Server
     listener: tecs.io.Server
     connection: tecs.io.Connection
-    pending: string
+    pending: Buffer
+    bodyOffset: integer
+    bodyLength: integer
+    responded: boolean
 end
 
 local function listen(): Server, integer
@@ -224,57 +240,63 @@ local function listen(): Server, integer
     for port = 47980, 48080 do
         local listener <const>, reason = tecsIO.listen(port)
         if listener ~= nil then
-            return {listener = listener, pending = ""}, port
+            return {
+                listener = listener,
+                pending = tecsIO.newBuffer(),
+                responded = false,
+            }, port
         end
         failures[#failures + 1] = reason or "unavailable"
     end
-    error("tecs: HTTP benchmark could not bind a loopback port: " .. table.concat(failures, ", "), 0)
+    error("tecs: HTTP benchmark could not bind a loopback port: " .. concat(failures, ", "), 0)
 end
 
-local function requestBody(raw: string): string
-    local boundary <const> = raw:find("\r\n\r\n", 1, true)
-    if boundary == nil then
-        return nil
+local function pollServer(server: Server, response: string): boolean
+    if server.responded then
+        return false
     end
-    local length <const> = floor(tonumber(raw:sub(1, boundary - 1):lower():match("content%-length:%s*(%d+)")) or 0)
-    local start <const> = boundary + 4
-    if #raw - start + 1 < length then
-        return nil
-    end
-    return raw:sub(start, start + length - 1)
-end
-
-local function pollServer(server: Server, responseBytes: string): integer
     if server.connection == nil then
         server.connection = server.listener:accept()
         if server.connection == nil then
-            return nil
+            return false
         end
     end
-    local bytes <const>, reason = server.connection:read(READ_CHUNK)
+    local read <const>, reason = server.connection:readInto(server.pending, READ_CHUNK, server.pending:length())
     if reason ~= nil then
         error(reason, 0)
     end
-    if bytes ~= nil then
-        server.pending = server.pending .. bytes
+    if server.bodyOffset == nil and read ~= nil then
+        local request <const> = server.pending:getString()
+        local boundary <const> = request:find("\r\n\r\n", 1, true)
+        if boundary ~= nil then
+            server.bodyLength = floor(
+                tonumber(request:sub(1, boundary - 1):lower():match("content%-length:%s*(%d+)")) or 0
+            )
+            server.bodyOffset = boundary + 3
+        end
     end
-    local body <const> = requestBody(server.pending)
-    if body == nil then
-        return nil
+    if server.bodyOffset == nil or server.pending:length() < server.bodyOffset + server.bodyLength then
+        return false
     end
-    local bodyHash <const> = crc32(body)
-    local response <const> = ("HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"):format(
-        #responseBytes, responseBytes
-    )
     local ok <const>, writeReason = server.connection:write(response)
     if not ok then
         error(writeReason, 0)
     end
     server.connection:drain(1000)
-    server.connection:close()
-    server.connection = nil
-    server.pending = ""
-    return bodyHash
+    server.responded = true
+    return true
+end
+
+local function validateRequest(server: Server): integer
+    if not server.responded then
+        error("tecs: HTTP benchmark validated a request before responding", 0)
+    end
+    local hash <const> = crc32(server.pending:getString(server.bodyOffset, server.bodyLength))
+    server.pending:clear()
+    server.bodyOffset = nil
+    server.bodyLength = nil
+    server.responded = false
+    return hash
 end
 
 local record Result
@@ -325,7 +347,7 @@ local function begin()
         request.body = tecsIO.newFileStream(uploadPath)
         expectedServerHash = PAYLOAD_HASH
     elseif name == "upload-reader" then
-        request.body = {bytes = payload, closed = false} as ChunkSource
+        request.body = {buffer = uploadBuffer, closed = false} as ChunkSource
         expectedServerHash = PAYLOAD_HASH
     elseif name == "download-writer" then
         sink = {buffer = downloadBuffer, closed = false}
@@ -354,17 +376,19 @@ return tecs.newApplication({
             name = "bench.Http",
             phase = tecs.ecs.phases.Update,
             run = function()
-                local serverHash <const> = pollServer(server, MODES[mode]:match("^download") ~= nil and payload or "")
-                if serverHash ~= nil and serverHash ~= expectedServerHash then
-                    error(("tecs: %s upload hash mismatch"):format(MODES[mode]), 0)
-                end
+                pollServer(server, MODES[mode]:match("^download") ~= nil and PAYLOAD_RESPONSE or EMPTY_RESPONSE)
                 if pending.status == "pending" then
                     return
                 end
+                local elapsed <const> = (time.now() - started) * 1000.0
                 if pending.status ~= "ready" then
                     error(pending.error, 0)
                 end
                 local name <const> = MODES[mode]
+                local serverHash <const> = validateRequest(server)
+                if serverHash ~= expectedServerHash then
+                    error(("tecs: %s upload hash mismatch"):format(name), 0)
+                end
                 if name == "download-buffer" then
                     local body <const> = (pending.value.body as ReadableStream):readAll().value
                     if crc32(body) ~= PAYLOAD_HASH then
@@ -376,7 +400,7 @@ return tecs.newApplication({
                 iteration = iteration + 1
                 if iteration > WARMUP then
                     local samples <const> = results[mode].samples
-                    samples[#samples + 1] = (time.now() - started) * 1000.0
+                    samples[#samples + 1] = elapsed
                 end
                 if iteration < WARMUP + SAMPLES then
                     begin()
@@ -409,7 +433,11 @@ return tecs.newApplication({
                         .. "download = 64 x 64 KiB = 4 MiB; every body hash validated"
                 )
                 client:close()
+                if server.connection ~= nil then
+                    server.connection:close()
+                end
                 server.listener:close()
+                server.pending:release()
                 uploadBuffer:release()
                 downloadBuffer:release()
                 remove(uploadPath)
