@@ -12,6 +12,7 @@ layout(location = 6) flat in int vClip;
 layout(location = 7) flat in vec4 vNormalBasis;
 layout(location = 0) out vec4 albedo;
 layout(location = 1) out vec4 normal;
+layout(location = 2) out vec4 emission;
 
 layout(set = 2, binding = 0) uniform sampler2DArray images;
 
@@ -80,4 +81,16 @@ void main() {
     // the layer have a say: the product is nonzero only where the two agree,
     // so either one asking to be left out is enough.
     normal = vec4(faced * 0.5 + 0.5, shaded.lit * vLit);
+
+    // What the surface gives off, kept out of the albedo so the resolve can add
+    // it after the lighting rather than multiply it by it, and so a later pass
+    // can blur this alone instead of picking a glow back out of a finished
+    // image. Unclamped writes are clamped by the attachment, which is what
+    // bounds a material that asks for more than the format holds.
+    //
+    // The layer's lit flag is deliberately not applied. A layer says whether
+    // its contents take light, and a thing that emits emits either way: a HUD
+    // on an unlit layer with a glowing readout is exactly the case, and folding
+    // the flag in here would silence it.
+    emission = shaded.emission;
 }

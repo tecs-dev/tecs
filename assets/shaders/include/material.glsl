@@ -43,10 +43,21 @@ struct MaterialOutput {
     // which is a sidecar image and a different piece of work.
     vec3 normal;
     // Zero leaves the fragment out of the lighting pass entirely, so it draws
-    // at its own color. Whether a thing emits is what it is rather than where
-    // it is, so the material answers here; the layer it sits on answers too,
-    // and a fragment is lit only where both say it should be.
+    // at its own color. Whether a thing takes light is what it is rather than
+    // where it is, so the material answers here; the layer it sits on answers
+    // too, and a fragment is lit only where both say it should be.
     float lit;
+    // Light the surface gives off rather than receives: rgb its color, alpha
+    // how much of it. The resolve adds the product on top of whatever lighting
+    // produced, so it survives darkness and an occluder's shadow both, and a
+    // lamp in a lit room is lit and glowing at once.
+    //
+    // A color and a strength rather than one premultiplied color, because the
+    // attachment is eight bits a channel: premultiplying a dim warm glow
+    // quantises its hue away, while these keep eight bits of each. Zero is the
+    // default and every built-in material takes it, so a scene emits only where
+    // something says it does.
+    vec4 emission;
     // At or below zero the fragment is discarded. Coverage rather than alpha
     // because the G-buffer pass writes with replace rather than blend, so a
     // partly covered fragment would overwrite what is behind it instead of
@@ -59,13 +70,14 @@ struct MaterialOutput {
 // Every material begins here rather than declaring a bare `MaterialOutput`,
 // which is what lets the contract grow a field without every material in every
 // root having to learn about it on the same day. The albedo and the coverage
-// are placeholders a material is expected to overwrite; the normal and the lit
-// flag are answers in their own right.
+// are placeholders a material is expected to overwrite; the normal, the lit flag
+// and the emission are answers in their own right.
 MaterialOutput materialDefaults() {
     MaterialOutput result;
     result.albedo = vec4(1.0);
     result.normal = vec3(0.0, 0.0, 1.0);
     result.lit = 1.0;
+    result.emission = vec4(0.0);
     result.coverage = 1.0;
     return result;
 }

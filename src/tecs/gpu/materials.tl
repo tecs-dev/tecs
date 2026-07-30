@@ -57,13 +57,46 @@ MaterialOutput material(MaterialInput frag) {
 `frag.local` runs from -0.5 to 0.5 inside the quad. `frag.uv`, `frag.color`,
 and `frag.param` carry the image coordinates, tint, and instance parameter.
 `frag.blended` says whether the fragment reaches a pass that blends it. Start
-from `materialDefaults`, then set `albedo`, `normal`, `lit`, and `coverage`.
+from `materialDefaults`, then set `albedo`, `normal`, `lit`, `emission`, and
+`coverage`.
 
 Coverage above zero keeps a fragment; zero or below discards it. The deferred
 lane does not blend partial coverage. A tint alpha below one routes the
 instance to the blended lane instead, and so does a particle effect whose
 `render.blend` asks for it. A material that resolves an edge by discarding should
 put the edge in alpha where `frag.blended` is set, which is what `textured` does.
+
+## Emission
+
+`emission` is light the surface gives off: `rgb` its color and `a` how much of
+it. The renderer adds `rgb * a` to the resolved pixel after the lighting, so an
+emissive surface is as bright in total darkness as under a lamp and an occluder's
+shadow does not dim it. This differs from `lit = 0.0`, which replaces the
+lighting with the albedo; a surface may take light and emit at the same time,
+which is what a lit lamp with a glowing filament is.
+
+```glsl
+MaterialOutput material(MaterialInput frag) {
+    MaterialOutput result = materialDefaults();
+    result.albedo = texture(images, frag.uv) * frag.color;
+    result.coverage = 1.0;
+    // A warm glow at the strength the instance asked for.
+    result.emission = vec4(1.0, 0.6, 0.2, frag.param);
+    return result;
+}
+```
+
+Every built-in material emits nothing, so a scene glows only where a material
+says it does. Per-entity strength and color come from `frag.param` and
+`frag.color`, which a material reads as it chooses.
+
+The emission attachment is eight bits a channel, so a value above one is clamped
+to one. Keep the color in range and vary the strength.
+
+An entity in the blended lane adds its own emission to its own color and reaches
+the emission attachment not at all, because the forward pass runs after the
+G-buffer has been resolved. It therefore glows, and it does not reach a later
+pass that reads the attachment.
 
 ## Reloads
 

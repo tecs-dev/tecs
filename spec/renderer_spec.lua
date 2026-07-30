@@ -1716,7 +1716,7 @@ describe("ecs.Renderer", function()
             "spec.halfplane",
             [[
             MaterialOutput material(MaterialInput frag) {
-                MaterialOutput result;
+                MaterialOutput result = materialDefaults();
                 result.albedo = vec4(0.0, 0.0, 1.0, 1.0);
                 // Keeps the left half of the quad only.
                 result.coverage = -frag.local.x;
@@ -1785,7 +1785,7 @@ describe("ecs.Renderer", function()
             "spec.lit",
             [[
             MaterialOutput material(MaterialInput frag) {
-                MaterialOutput result;
+                MaterialOutput result = materialDefaults();
                 result.albedo = vec4(1.0, 1.0, 1.0, 1.0);
                 result.coverage = 1.0;
                 result.lit = 1.0;
@@ -1797,7 +1797,7 @@ describe("ecs.Renderer", function()
             "spec.unlit",
             [[
             MaterialOutput material(MaterialInput frag) {
-                MaterialOutput result;
+                MaterialOutput result = materialDefaults();
                 result.albedo = vec4(1.0, 1.0, 1.0, 1.0);
                 result.coverage = 1.0;
                 result.lit = 0.0;
@@ -1822,6 +1822,133 @@ describe("ecs.Renderer", function()
         assert.are.equal(255, draw("spec.unlit").r, "an unlit material keeps its own color")
         assert.is_true(draw("spec.lit").r < 128, "a lit one is darkened by the dim ambient")
         materials.reset()
+    end)
+
+    describe("emission", function()
+        -- Three materials over one dark quad. The dull one is the control and is
+        -- what says the scene really has no light in it; the other two differ
+        -- from it only in what they emit, so a pixel that brightens brightened
+        -- for that reason and no other.
+        local function defineEmitters()
+            materials.reset()
+            local body = [[
+                MaterialOutput material(MaterialInput frag) {
+                    MaterialOutput result = materialDefaults();
+                    // Dark red, so the albedo cannot be mistaken for the glow:
+                    // the emission below is green and neither channel is both.
+                    result.albedo = vec4(0.4, 0.0, 0.0, frag.color.a);
+                    result.coverage = 1.0;
+                    result.emission = vec4(%s);
+                    return result;
+                }
+            ]]
+            materials.define("spec.dull", body:format("0.0"))
+            materials.define("spec.glow", body:format("0.0, 1.0, 0.0, 1.0"))
+            materials.define("spec.dimglow", body:format("0.0, 1.0, 0.0, 0.5"))
+        end
+
+        local function draw(ambient, material, alpha)
+            local world, renderer = newScene(ambient)
+            world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+                Tint(1.0, 1.0, 1.0, alpha),
+                components.Material(materials.id(material), 0),
+                Renderable()
+            )
+            local pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
+            renderer:destroy()
+            return pixel
+        end
+
+        it("reaches the screen from a material with no light in the scene", function()
+            defineEmitters()
+            local dark = { 0.0, 0.0, 0.0 }
+
+            local dull = draw(dark, "spec.dull", 1.0)
+            assert.are.equal(0, dull.r, "a lit surface with no light and no ambient must be black")
+            assert.are.equal(0, dull.g)
+
+            local glow = draw(dark, "spec.glow", 1.0)
+            assert.are.equal(255, glow.g, "emission is the surface's own light and needs none of the scene's")
+            assert.are.equal(0, glow.r, "and it carries its own color rather than the albedo's")
+
+            materials.reset()
+        end)
+
+        it("takes its strength from the emission alpha", function()
+            -- The alpha is how much of the color, not how much of the fragment.
+            -- A resolve that ignored it would put both of these at 255, and one
+            -- that read it as coverage would leave the dim one's albedo showing
+            -- through at some other red.
+            defineEmitters()
+            local dark = { 0.0, 0.0, 0.0 }
+
+            assert.are.equal(255, draw(dark, "spec.glow", 1.0).g)
+            local dim = draw(dark, "spec.dimglow", 1.0)
+            assert.is_true(
+                math.abs(dim.g - 128) <= 3,
+                ("half strength should arrive at about half, got %d"):format(dim.g)
+            )
+            assert.are.equal(0, dim.r, "the strength scales the glow and not the albedo")
+
+            materials.reset()
+        end)
+
+        it("adds to the light a surface takes rather than replacing it", function()
+            -- This is what separates emission from a material asking not to be
+            -- lit: the ambient still reaches the albedo, and the glow arrives on
+            -- top of it. Both channels have to be present at once, which is a
+            -- claim neither an unlit surface nor a black one can satisfy.
+            defineEmitters()
+            local ambient = { 0.5, 0.5, 0.5 }
+
+            local dull = draw(ambient, "spec.dull", 1.0)
+            local glow = draw(ambient, "spec.glow", 1.0)
+
+            assert.is_true(dull.r > 40, ("the ambient must reach the albedo, got %d"):format(dull.r))
+            assert.are.equal(dull.r, glow.r, "emitting must not change what the lighting did to the albedo")
+            assert.are.equal(0, dull.g, "and the control must not be green")
+            assert.are.equal(255, glow.g, "while the emitter is lit and glowing at once")
+
+            materials.reset()
+        end)
+
+        it("leaves every built-in material emitting nothing", function()
+            -- The unchanged half, and the reason the tests above mean anything: a
+            -- built-in in the dark is still dark, so the attachment changed
+            -- nothing that was already drawing correctly. `glyph` is excluded
+            -- because it asks not to be lit, so darkness is not what it answers.
+            materials.reset()
+            for _, name in ipairs(materials.names()) do
+                if name ~= "glyph" then
+                    local pixel = draw({ 0.0, 0.0, 0.0 }, name, 1.0)
+                    assert.are.equal(0, pixel.r, ("%s must stay dark"):format(name))
+                    assert.are.equal(0, pixel.g, ("%s must not emit"):format(name))
+                    assert.are.equal(0, pixel.b, ("%s must not emit"):format(name))
+                end
+            end
+        end)
+
+        it("carries a blended entity's emission through the forward pass", function()
+            -- The forward lane writes no G-buffer, so nothing downstream can add
+            -- its emission for it and it adds its own. The alpha then scales the
+            -- glow along with everything else, which is what a translucent
+            -- emitter should do, and the opaque run beside it is what proves the
+            -- number came from the blend rather than from the material.
+            defineEmitters()
+            local dark = { 0.0, 0.0, 0.0 }
+
+            local opaque = draw(dark, "spec.glow", 1.0)
+            assert.are.equal(255, opaque.g, "the deferred lane at full strength")
+
+            local blended = draw(dark, "spec.glow", 0.5)
+            assert.is_true(
+                math.abs(blended.g - 128) <= 3,
+                ("a half-opaque emitter should land at about half, got %d"):format(blended.g)
+            )
+
+            materials.reset()
+        end)
     end)
 
     -- The camera is the one place the world-to-clip transform lives, including

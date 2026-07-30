@@ -31,11 +31,32 @@ local GRADIENT_GEOMETRY = [[
 #version 450
 layout(location = 0) out vec4 albedo;
 layout(location = 1) out vec4 normal;
+layout(location = 2) out vec4 emission;
 layout(set = 3, binding = 0) uniform Size { vec4 target; } size;
 void main() {
     vec2 uv = gl_FragCoord.xy / size.target.xy;
     albedo = vec4(uv.x, uv.y, 0.25, 1.0);
     normal = vec4(0.5, 0.5, 1.0, 1.0);
+    // Written rather than left out. A shader that names fewer outputs than its
+    // pipeline has attachments leaves the rest undefined, not cleared, so a
+    // transport test that skipped this would compare a gradient against noise.
+    emission = vec4(0.0);
+}
+]]
+
+-- White albedo facing the viewer, emitting whatever the caller pushes. The
+-- emission arrives through the same uniform the size does, so one shader serves
+-- the scenes that emit and the scenes that do not.
+local EMISSIVE_GEOMETRY = [[
+#version 450
+layout(location = 0) out vec4 albedo;
+layout(location = 1) out vec4 normal;
+layout(location = 2) out vec4 emission;
+layout(set = 3, binding = 0) uniform Emission { vec4 value; } emit;
+void main() {
+    albedo = vec4(1.0, 1.0, 1.0, 1.0);
+    normal = vec4(0.5, 0.5, 1.0, 1.0);
+    emission = emit.value;
 }
 ]]
 
@@ -298,13 +319,13 @@ describe("deferred pipeline", function()
             end,
         })
 
-        local albedoFormat, normalFormat = pipeline:geometryFormats()
+        local albedoFormat, normalFormat, emissionFormat = pipeline:geometryFormats()
         local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", { name = "gbuffer.vert" })
         local fragment = Shader.fromGLSL(device.handle, GRADIENT_GEOMETRY, "fragment", { name = "gbuffer.frag" })
         geometryPipeline = GraphicsPipeline.create(device.handle, {
             vertexShader = vertex,
             fragmentShader = fragment,
-            colorFormats = { albedoFormat, normalFormat },
+            colorFormats = { albedoFormat, normalFormat, emissionFormat },
             depth = pipeline:geometryDepth(),
         })
         vertex:destroy()
@@ -343,7 +364,7 @@ describe("deferred pipeline", function()
             end,
         })
 
-        local albedoFormat, normalFormat = pipeline:geometryFormats()
+        local albedoFormat, normalFormat, emissionFormat = pipeline:geometryFormats()
         local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", {})
         local fragment = Shader.fromGLSL(
             device.handle,
@@ -351,9 +372,11 @@ describe("deferred pipeline", function()
 #version 450
 layout(location = 0) out vec4 albedo;
 layout(location = 1) out vec4 normal;
+layout(location = 2) out vec4 emission;
 void main() {
     albedo = vec4(1.0, 1.0, 1.0, 1.0);
     normal = vec4(0.5, 0.5, 1.0, 1.0);
+    emission = vec4(0.0);
 }
 ]],
             "fragment",
@@ -362,7 +385,7 @@ void main() {
         geometryPipeline = GraphicsPipeline.create(device.handle, {
             vertexShader = vertex,
             fragmentShader = fragment,
-            colorFormats = { albedoFormat, normalFormat },
+            colorFormats = { albedoFormat, normalFormat, emissionFormat },
             depth = pipeline:geometryDepth(),
         })
         vertex:destroy()
@@ -383,6 +406,62 @@ void main() {
 
         assert.is_true(center.r > 180, ("lit center should be bright, got %d"):format(center.r))
         assert.is_true(corner.r < 40, ("beyond the radius should stay dark, got %d"):format(corner.r))
+
+        geometryPipeline:destroy()
+        pipeline:destroy()
+    end)
+
+    it("adds the emission attachment on top of the lighting", function()
+        -- The claim is that emission is not lighting: the scene has no ambient
+        -- and no light at all, so anything the pixel holds got there without one.
+        -- The same shader draws both halves of the test, which is what makes the
+        -- dark half evidence rather than a second scene that happens to be dark.
+        local emission = require("tecs.ffi.loader").newArray("float[4]")
+
+        local geometryPipeline
+        local pipeline = Deferred.create(device.handle, FORMAT, {
+            ambient = { 0.0, 0.0, 0.0 },
+            geometry = function(context)
+                context.pass:bindPipeline(geometryPipeline.handle)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, emission, 16)
+                context.pass:draw(3)
+            end,
+        })
+
+        assert.is_not_nil(pipeline.graph:formatOf("emission"), "the graph must own a target named emission")
+
+        local albedoFormat, normalFormat, emissionFormat = pipeline:geometryFormats()
+        local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", {})
+        local fragment = Shader.fromGLSL(device.handle, EMISSIVE_GEOMETRY, "fragment", {})
+        geometryPipeline = GraphicsPipeline.create(device.handle, {
+            vertexShader = vertex,
+            fragmentShader = fragment,
+            colorFormats = { albedoFormat, normalFormat, emissionFormat },
+            depth = pipeline:geometryDepth(),
+        })
+        vertex:destroy()
+        fragment:destroy()
+
+        emission[0], emission[1], emission[2], emission[3] = 0.0, 0.0, 0.0, 0.0
+        local unlit = screen:getPixel(render(pipeline), SIZE / 2, SIZE / 2)
+        assert.are.equal(0, unlit.r, "white albedo emitting nothing, with no light, must be black")
+        assert.are.equal(0, unlit.g)
+
+        -- Green at full strength. The color has to survive as a color rather
+        -- than as brightness, so red and blue are asserted to stay out of it.
+        emission[0], emission[1], emission[2], emission[3] = 0.0, 1.0, 0.0, 1.0
+        local glowing = screen:getPixel(render(pipeline), SIZE / 2, SIZE / 2)
+        assert.are.equal(255, glowing.g, "emission must reach the screen with no light in the scene")
+        assert.are.equal(0, glowing.r, "and carry its own color rather than the albedo's")
+
+        -- The alpha is a strength and not a coverage, so halving it halves what
+        -- arrives. Anything that ignored it would land at 255 again.
+        emission[0], emission[1], emission[2], emission[3] = 0.0, 1.0, 0.0, 0.5
+        local half = screen:getPixel(render(pipeline), SIZE / 2, SIZE / 2)
+        assert.is_true(
+            math.abs(half.g - 128) <= 3,
+            ("half strength should arrive at about half, got %d"):format(half.g)
+        )
 
         geometryPipeline:destroy()
         pipeline:destroy()
@@ -428,13 +507,13 @@ void main() {
             end,
         })
 
-        local albedoFormat, normalFormat = pipeline:geometryFormats()
+        local albedoFormat, normalFormat, emissionFormat = pipeline:geometryFormats()
         local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", {})
         local fragment = Shader.fromGLSL(device.handle, GRADIENT_GEOMETRY, "fragment", {})
         geometryPipeline = GraphicsPipeline.create(device.handle, {
             vertexShader = vertex,
             fragmentShader = fragment,
-            colorFormats = { albedoFormat, normalFormat },
+            colorFormats = { albedoFormat, normalFormat, emissionFormat },
             depth = pipeline:geometryDepth(),
         })
         vertex:destroy()

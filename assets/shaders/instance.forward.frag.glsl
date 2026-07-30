@@ -15,8 +15,12 @@
 //
 // What the fragment does not do is write the G-buffer, so blended content is
 // invisible to anything that reads it: it casts no shadow a later pass could
-// build from its normal, and it contributes no emission. That follows from
-// running after the resolve and is the price of the pass.
+// build from its normal, and its emission reaches no pass that reads the
+// emission attachment. That follows from running after the resolve and is the
+// price of the pass. What it does do is add its own emission to its own color,
+// because a translucent thing that glows is an ordinary effect and the material
+// has already answered: the term is a multiply-add here and the alternative
+// would be a glow that vanishes the moment a fade takes an entity below one.
 
 layout(location = 0) in vec4 vColor;
 layout(location = 1) in vec3 vUV;
@@ -154,6 +158,10 @@ void main() {
         color *= accumulated;
     }
 
+    // On top of the lighting rather than inside it, exactly as the resolve adds
+    // it, so the two lanes agree about what a glow is.
+    color += shaded.emission.rgb * shaded.emission.a;
+
     // Premultiplied, because that is what makes one pipeline serve two modes.
     // The pipeline takes the color as it is and the target scaled by one minus
     // this alpha, so scaling the color here is what alpha blending needs, and
@@ -161,6 +169,10 @@ void main() {
     // untouched and adds to it instead. Alpha over and additive therefore differ
     // in one component of one write, and both interleave correctly in the one
     // sorted list rather than one of them being a second pass over all of it.
+    //
+    // The emission above is inside that scale, which is right: a fifth-opaque
+    // pane lets a fifth of what is behind it through and gives off a fifth of
+    // the light a solid one would.
     float alpha = clamp(shaded.albedo.a, 0.0, 1.0);
     outColor = vec4(color * alpha, vBlend == BLEND_ADDITIVE ? 0.0 : alpha);
 }

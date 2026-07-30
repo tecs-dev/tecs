@@ -8,6 +8,13 @@
 // shadow march below is a world-space march. So the view arrives here and the
 // fragment is taken back out to the world instead.
 //
+// Emission is added rather than lit. A surface that gives off light is not a
+// surface a light reaches, so the term lands on top of the accumulated result:
+// past the ambient, past every light, past the drop shadow, and on both sides of
+// the unlit branch. That is what makes it a different thing from a material
+// asking not to be lit, which replaces the lighting with the albedo instead of
+// adding to it, and it is why a lamp can be lit and glowing at once.
+//
 // Two variants. Without shadows the pass reads the G-buffer and the lights;
 // with them it reads two more targets, and the storage buffers move up two
 // bindings to make room, because SDL numbers a fragment stage's sampled
@@ -21,17 +28,21 @@ layout(location = 0) out vec4 outColor;
 
 layout(set = 2, binding = 0) uniform sampler2D gAlbedo;
 layout(set = 2, binding = 1) uniform sampler2D gNormal;
+// What each surface gives off: rgb its color, alpha how much of it. Cleared to
+// zero, so a pixel nothing drew over and a surface that emits nothing read the
+// same and the term below costs them a multiply.
+layout(set = 2, binding = 2) uniform sampler2D gEmission;
 
 #ifdef SHADOWS
 // Height in red, and green marking a pixel an occluder really covers rather
 // than one the blur spread a halo over.
-layout(set = 2, binding = 2) uniform sampler2D occluderMask;
+layout(set = 2, binding = 3) uniform sampler2D occluderMask;
 // One channel, half resolution: how much of all lighting reaches the ground
 // here, after every drop shadow thrown across it.
-layout(set = 2, binding = 3) uniform sampler2D dropShadowMask;
-#define LIGHT_BINDING 4
+layout(set = 2, binding = 4) uniform sampler2D dropShadowMask;
+#define LIGHT_BINDING 5
 #else
-#define LIGHT_BINDING 2
+#define LIGHT_BINDING 3
 #endif
 
 struct Light {
@@ -163,13 +174,16 @@ float marchShadow(vec2 world, vec2 lightAt, float lightHeight, float attenuation
 void main() {
     vec4 albedo = texture(gAlbedo, vUV);
     vec4 encoded = texture(gNormal, vUV);
+    vec4 emitted = texture(gEmission, vUV);
+    vec3 emission = emitted.rgb * emitted.a;
 
-    // A material that asked not to be lit passes through at its own color.
-    // The G-buffer clears this to zero, so anything nothing drew over also
-    // takes this path and stays the clear color rather than picking up
-    // ambient.
+    // A material that asked not to be lit passes through at its own color,
+    // plus whatever it emits: the flag says the lighting does not reach the
+    // surface, and emission is the surface's own and is not lighting reaching
+    // it. The G-buffer clears both attachments to zero, so anything nothing drew
+    // over also takes this path and stays the clear color.
     if (encoded.a < 0.5) {
-        outColor = albedo;
+        outColor = vec4(albedo.rgb + emission, albedo.a);
         return;
     }
 
@@ -223,5 +237,9 @@ void main() {
     accumulated *= texture(dropShadowMask, vUV).r;
 #endif
 
-    outColor = vec4(albedo.rgb * accumulated, albedo.a);
+    // Added after the multiply, so no light and no shadow scales it. A glowing
+    // sign is as bright in the dark as under a lamp, which is the whole of what
+    // makes it a sign, and the drop shadow above darkens the ground the sign
+    // stands on without dimming the sign.
+    outColor = vec4(albedo.rgb * accumulated + emission, albedo.a);
 }
