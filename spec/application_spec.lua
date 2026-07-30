@@ -467,6 +467,9 @@ describe("Application", function()
                         takeDirty = function()
                             return explode and { 1, 4 } or {}
                         end,
+                        blended = function()
+                            return 0
+                        end,
                         write = function()
                             error("producer boom")
                         end,

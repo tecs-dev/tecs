@@ -2124,6 +2124,28 @@ the guard on it is a differential spec rather than a set of expected numbers:
 one seeded churn stream is applied to two extractors, one partial and one not,
 and every float of both buffers is compared after every frame.
 
+One thing a frame derives from the rows it wrote is not bytes, and it does not
+compose with a partial write for free: the count of instances routed to the
+forward pass. A whole-run rewrite counts a run's blended rows as it writes them,
+which is the run's own total. A partial rewrite sees a subset, and the count it
+takes from that subset is smaller than the run's. Storing it under-reports, and
+the backend skips the entire forward lane at zero, so under-reporting is every
+blended instance in the scene going missing. It is the one direction that cannot
+be tolerated, so the count is either exact or wrong the other way.
+
+It is exact, and free in the case that matters. The partial path only runs while
+every value column is clean, so a row it did not write carries the tint it
+carried before and cannot have changed lane. A run whose last write found nothing
+blended therefore has the residue's own count as its whole answer, which is what
+an opaque scene is and what this option exists for. A run that did hold a blended
+row is recounted, one float per row, because a swap-pop may have written over
+that row or the run may have given it up off its end and neither is anything the
+residue names. That is a row walk on structural-change frames for archetypes that
+blend, against the twenty floats per row the rewrite it replaced wrote, and
+nothing at all for the archetypes the option was built for. The differential
+compares the count beside the bytes, and a third of the churn stream's spawns are
+translucent so that there is a count to disagree about.
+
 What is drawn is decided on the GPU. A compute pass tests each instance against
 the view, compacts the survivors into an index list, and writes the draw
 arguments, so the draw touches only what is visible and the CPU never learns
