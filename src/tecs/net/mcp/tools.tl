@@ -660,7 +660,8 @@ end
 --- owns the mixer's: identity, the refusal on an atlas whose size moved, and
 --- laying out again exactly the texts that draw this font. What is here is
 --- turning a path into a refusal an agent can read and reporting what came
---- back.
+--- back. A timed-out wait cancels this reload before refusing, so the metrics
+--- cannot land after the agent or watcher was told they did not.
 ---
 --- @param path Path to the metrics file, which must be one a font is already
 ---     loaded from. Nil, empty, or a path nothing was loaded from raises, as
@@ -677,7 +678,11 @@ function tools.reloadFont(path: string): string, integer
     local loading = text.reloadFont(path)
     loading:wait()
     if loading.status ~= "ready" then
-        error(loading.error or "the font reload did not finish", 0)
+        local reason = loading.error
+        if loading.status == "pending" then
+            loading:cancel()
+        end
+        error(reason or "the font reload did not finish", 0)
     end
     local font = loading.value
     local glyphs = 0
@@ -772,7 +777,8 @@ mcp.register(
         whenCrashed = true,
         description = "Re-reads a font's metrics over the font already loaded "
             .. "from that path, and lays out every text drawing it again. Refuses "
-            .. "metrics that name an atlas of a different size.",
+            .. "metrics that name an atlas of a different size. A timed-out read "
+            .. "is abandoned before the refusal is reported.",
         destructive = true,
         inputSchema = {
             type = "object",

@@ -420,6 +420,26 @@ describe("mcp reload_font", function()
         assert.is_truthy(message:find("path is required", 1, true), "unexpected refusal: " .. message)
     end)
 
+    it("preserves failed and canceled reload reasons", function()
+        local Future = require("tecs.Future")
+        local original = text.reloadFont
+        local outcome = Future.failed("font read failed")
+        text.reloadFont = function()
+            return outcome
+        end
+
+        local failed, failedReason = pcall(tools.reloadFont, path)
+        outcome = Future.pending()
+        outcome:abandon("font read canceled")
+        local canceled, canceledReason = pcall(tools.reloadFont, path)
+        text.reloadFont = original
+
+        assert.is_false(failed)
+        assert.is_truthy(tostring(failedReason):find("font read failed", 1, true))
+        assert.is_false(canceled)
+        assert.is_truthy(tostring(canceledReason):find("font read canceled", 1, true))
+    end)
+
     it("finds the font by the file the watcher looked at", function()
         -- A game names a font the way it asked for it and a watcher names the
         -- file it stat'd, which is that resolved against the content root. Both

@@ -792,6 +792,67 @@ describe("gfx.text", function()
             assert.are.equal(2, renderer.count)
             renderer:destroy()
         end)
+
+        it("abandons a timed-out tool reload before it can land later", function()
+            local Future = require("tecs.Future")
+            local tools = require("tecs.net.mcp.tools")
+            local world, renderer = newScene()
+            world:spawn(
+                Transform(20, 30, 0, 1),
+                Tint(0.0, 1.0, 0.0, 1.0),
+                text.Text.new({ text = "II", font = second, size = 32 })
+            )
+            settle(world, renderer)
+
+            local originalLoadBytes = assets.loadBytes
+            local originalLoadImage = assets.loadImage
+            local beforeAdvance = second.glyphs[string.byte("I")].xAdvance
+            local imageLoads = 0
+            local refused, refusal
+            local advance
+
+            local source = {
+                defaultWaitMs = 0,
+                sliceMs = 1,
+                poll = function()
+                    return 0
+                end,
+                advance = function()
+                    return 0
+                end,
+                cancel = function() end,
+            }
+            local delayed = Future.pending(source)
+
+            local ran, failure = xpcall(function()
+                assets.loadBytes = function()
+                    return delayed
+                end
+                refused, refusal = pcall(tools.reloadFont, secondPath)
+                assets.loadBytes = originalLoadBytes
+
+                assets.loadImage = function(path)
+                    imageLoads = imageLoads + 1
+                    return originalLoadImage(path)
+                end
+                delayed:complete(shipped(2))
+                frame(world, renderer)
+                advance = second.glyphs[string.byte("I")].xAdvance
+            end, debug.traceback)
+
+            assets.loadBytes = originalLoadBytes
+            assets.loadImage = originalLoadImage
+            renderer:destroy()
+
+            assert.is_true(ran, failure)
+            assert.is_false(refused)
+            assert.is_truthy(
+                tostring(refusal):find("the font reload did not finish", 1, true),
+                "unexpected refusal: " .. tostring(refusal)
+            )
+            assert.are.equal(beforeAdvance, advance, "the timed-out metrics mutated the Font after refusal")
+            assert.are.equal(0, imageLoads, "the timed-out reload evicted the renderer's resident atlas")
+        end)
     end)
 
     it("refuses an alignment it does not have", function()
