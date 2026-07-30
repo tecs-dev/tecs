@@ -237,10 +237,10 @@ The host loads `tecs` before the entry file. A game can use these names without 
 - [`tecs.log`](/modules/log) - named, leveled platform logging
 - [`tecs.math`](/modules/math) - allocation-free 2D vector and angle math
 - [`tecs.net`](/modules/net/) - nonblocking TCP streams and UDP datagrams
+- [`tecs.os`](/modules/os) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.physics`](/modules/physics) - Rapier 2D, solved across a shared thread pool
 - [`tecs.regex`](/modules/regex) - compiled regular expressions over Lua byte strings
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
-- [`tecs.system`](/modules/system) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.time`](/modules/time) - monotonic time
 - [`tecs.window`](/modules/window) - the window, its size, its display and its mode
 - [`tecs.workers`](/modules/workers) - typed background jobs

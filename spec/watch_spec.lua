@@ -20,7 +20,7 @@ local adapter = require("tecs.platform.adapter")
 local filesystem = require("tecs.io.filesystem")
 local storagebackend = require("tecs.platform.storagebackend")
 local watcher = require("tecs.io.watcher")
-local system = require("tecs.platform.system")
+local platformOS = require("tecs.platform.os")
 
 local FIRST = "#version 450\n// FIRST\n"
 local SECOND = "#version 450\n// SECOND, and longer than the first\n"
@@ -384,14 +384,14 @@ describe("the file watcher", function()
     end)
 
     it("refuses a build with no hot-reload capability", function()
-        local real = system.capabilities
-        system.capabilities = function()
+        local real = platformOS.capabilities
+        platformOS.capabilities = function()
             local answered = real()
             return setmetatable({ hotReload = false }, { __index = answered })
         end
 
         local ok, failure = pcall(watcher.install, { root = dir })
-        system.capabilities = real
+        platformOS.capabilities = real
 
         assert.is_false(ok)
         assert.is_truthy(

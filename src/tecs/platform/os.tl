@@ -24,14 +24,14 @@ reads may return only the value this process wrote.
 `updateProcesses` once per frame until the future settles:
 
 ```teal
-local run <const> = tecs.system.runProcess({
+local run <const> = tecs.os.runProcess({
     args = {"git", "rev-parse", "HEAD"},
     timeoutMs = 2000,
 })
 
-tecs.system.updateProcesses()
+tecs.os.updateProcesses()
 if run.status == "ready" and run.value:succeeded() then
-    tecs.system.setClipboardText(run.value.output)
+    tecs.os.setClipboardText(run.value.output)
 elseif run.status == "failed" then
     print(run.error)
 end
@@ -183,7 +183,7 @@ local record Capabilities
     writableStorage: boolean
 end
 
-local record system
+local record platformOS
     --- Describes what this build can do on this target.
     type Capabilities = Capabilities
 
@@ -234,7 +234,7 @@ local record system
     ---
     --- Everything here is meaningless before the child ends, which is why none
     --- of it is on the future: a run in flight is a
-    --- [`Future`](tealdoc:tecs.Future)`<`[`ProcessResult`](tealdoc:tecs.system.ProcessResult)`>` reading
+    --- [`Future`](tealdoc:tecs.Future)`<`[`ProcessResult`](tealdoc:tecs.os.ProcessResult)`>` reading
     --- "pending" and a run that ended is the same future carrying one of
     --- these. The one thing worth knowing in between is the child's process id,
     --- and `processResult` answers that from the runner's own bookkeeping.
@@ -601,7 +601,7 @@ local MESSAGE_FLAGS <const>: {string: integer} = {
 }
 
 --- Opens a URL with the operating system's preferred handler.
-function system.openURL(url: string): boolean, string
+function platformOS.openURL(url: string): boolean, string
     if url == nil or url == "" then
         return false, "a URL is required"
     end
@@ -612,7 +612,7 @@ function system.openURL(url: string): boolean, string
 end
 
 --- Returns the user's preferred locales in priority order.
-function system.preferredLocales(): {Locale}
+function platformOS.preferredLocales(): {Locale}
     local out: {Locale} = {}
     local locales = C.SDL_GetPreferredLocales(countOut)
     if locales == nil then
@@ -633,7 +633,7 @@ function system.preferredLocales(): {Locale}
 end
 
 --- Returns the current battery or external-power state.
-function system.power(): Power
+function platformOS.power(): Power
     secondsOut[0], percentOut[0] = -1, -1
     local state = tonumber(C.SDL_GetPowerInfo(secondsOut, percentOut)) as integer
     return {
@@ -644,7 +644,7 @@ function system.power(): Power
 end
 
 --- Shows a native informational, warning or error dialog.
-function system.messageBox(kind: string, title: string, message: string, window?: Window): boolean, string
+function platformOS.messageBox(kind: string, title: string, message: string, window?: Window): boolean, string
     local flags = MESSAGE_FLAGS[kind]
     if flags == nil then
         return false, ("unknown message-box kind %q"):format(tostring(kind))
@@ -765,7 +765,7 @@ local function trackDialog(handle: loader.CPtr): Future<DialogResult>
 end
 
 --- Opens a native file picker.
-function system.openFile(options?: DialogOptions): Future<DialogResult>
+function platformOS.openFile(options?: DialogOptions): Future<DialogResult>
     local given = options or {} as DialogOptions
     local names, patterns, count = filterArrays(given)
     local window = given.window ~= nil and given.window.handle or nil
@@ -775,7 +775,7 @@ function system.openFile(options?: DialogOptions): Future<DialogResult>
 end
 
 --- Opens a native save-file picker. Returns at most one path.
-function system.saveFile(options?: DialogOptions): Future<DialogResult>
+function platformOS.saveFile(options?: DialogOptions): Future<DialogResult>
     local given = options or {} as DialogOptions
     local names, patterns, count = filterArrays(given)
     local window = given.window ~= nil and given.window.handle or nil
@@ -783,7 +783,7 @@ function system.saveFile(options?: DialogOptions): Future<DialogResult>
 end
 
 --- Opens a native folder picker.
-function system.openFolder(options?: DialogOptions): Future<DialogResult>
+function platformOS.openFolder(options?: DialogOptions): Future<DialogResult>
     local given = options or {} as DialogOptions
     local window = given.window ~= nil and given.window.handle or nil
     return trackDialog(D.tecsDialogOpenFolder(window, given.defaultLocation, given.multiple == true))
@@ -793,7 +793,7 @@ end
 ---
 --- [`Application`](tealdoc:tecs.Application) calls this every frame. It is public for a headless tool that
 --- creates dialogs without an application.
-function system.updateDialogs(): integer
+function platformOS.updateDialogs(): integer
     return dialogSource:poll()
 end
 
@@ -830,7 +830,7 @@ local function jitEnabled(): boolean
 end
 
 --- Forgets the cached answer. Capability lookup notices a platform change without this.
-function system.resetCapabilities()
+function platformOS.resetCapabilities()
     resolved = nil
 end
 
@@ -842,7 +842,7 @@ end
 --- anybody calling `resetCapabilities`.
 --- @return The same table on every call until the platform changes. Shared,
 ---     so a caller that means to keep it does not also mean to edit it.
-function system.capabilities(): Capabilities
+function platformOS.capabilities(): Capabilities
     local generation = adapter.generation()
     if generation ~= cachedGeneration then
         cachedGeneration = generation
@@ -917,7 +917,7 @@ end
 --- outcome nobody meant.
 local function required(value: string, what: string)
     if value == nil then
-        error(("tecs: system.%s needs a string"):format(what), 3)
+        error(("tecs: os.%s needs a string"):format(what), 3)
     end
 end
 
@@ -926,7 +926,7 @@ end
 --- False in a process that never brought up video, where every other function
 --- here answers empty or false. Distinguishes that from a clipboard that is
 --- simply empty, which no other return value can.
-function system.clipboardAvailable(): boolean
+function platformOS.clipboardAvailable(): boolean
     return tonumber(C.SDL_WasInit(VIDEO)) ~= 0
 end
 
@@ -935,8 +935,8 @@ end
 --- Empty is also the answer when the clipboard holds something that is not
 --- text, and when there is no video. Ask `hasClipboardText` to tell those from text
 --- that is genuinely empty.
-function system.clipboardText(): string
-    if not system.clipboardAvailable() then
+function platformOS.clipboardText(): string
+    if not platformOS.clipboardAvailable() then
         return ""
     end
     return take(C.SDL_GetClipboardText())
@@ -946,9 +946,9 @@ end
 ---
 --- The platform copies the string before this call returns. Returns false
 --- when the platform refused, which includes having no video.
-function system.setClipboardText(text: string): boolean
+function platformOS.setClipboardText(text: string): boolean
     required(text, "setClipboardText")
-    if not system.clipboardAvailable() then
+    if not platformOS.clipboardAvailable() then
         return false
     end
     return C.SDL_SetClipboardText(text) as boolean
@@ -959,8 +959,8 @@ end
 --- Cheaper than reading it: no allocation crosses the boundary, and on a
 --- platform where a read negotiates with the owning application, no
 --- negotiation happens.
-function system.hasClipboardText(): boolean
-    if not system.clipboardAvailable() then
+function platformOS.hasClipboardText(): boolean
+    if not platformOS.clipboardAvailable() then
         return false
     end
     return C.SDL_HasClipboardText() as boolean
@@ -970,8 +970,8 @@ end
 ---
 --- The clipboard is left empty rather than restored to what preceded the
 --- write, because nothing anywhere remembers what that was.
-function system.clearClipboard(): boolean
-    if not system.clipboardAvailable() then
+function platformOS.clearClipboard(): boolean
+    if not platformOS.clipboardAvailable() then
         return false
     end
     return C.SDL_ClearClipboardData() as boolean
@@ -981,9 +981,9 @@ end
 ---
 --- The same list `clipboardUpdate` carries, for a caller that wants to ask
 --- rather than wait to be told. Empty when the clipboard is empty.
-function system.clipboardMimeTypes(): {string}
+function platformOS.clipboardMimeTypes(): {string}
     local found: {string} = {}
-    if not system.clipboardAvailable() then
+    if not platformOS.clipboardAvailable() then
         return found
     end
 
@@ -1003,9 +1003,9 @@ function system.clipboardMimeTypes(): {string}
 end
 
 --- Reports whether the clipboard offers `mimeType`.
-function system.hasClipboardData(mimeType: string): boolean
+function platformOS.hasClipboardData(mimeType: string): boolean
     required(mimeType, "hasClipboardData")
-    if not system.clipboardAvailable() then
+    if not platformOS.clipboardAvailable() then
         return false
     end
     return C.SDL_HasClipboardData(mimeType) as boolean
@@ -1015,9 +1015,9 @@ end
 ---
 --- Returns nil rather than an empty string because the clipboard can offer a
 --- MIME type with no bytes, which differs from not offering that type.
-function system.clipboardData(mimeType: string): string
+function platformOS.clipboardData(mimeType: string): string
     required(mimeType, "clipboardData")
-    if not system.clipboardAvailable() then
+    if not platformOS.clipboardAvailable() then
         return nil
     end
 
@@ -1031,8 +1031,8 @@ function system.clipboardData(mimeType: string): string
 end
 
 --- Returns the primary selection text, or an empty string when it holds none.
-function system.primarySelection(): string
-    if not system.clipboardAvailable() then
+function platformOS.primarySelection(): string
+    if not platformOS.clipboardAvailable() then
         return ""
     end
     return take(C.SDL_GetPrimarySelectionText())
@@ -1042,24 +1042,24 @@ end
 ---
 --- Succeeds on a platform that has no shared primary selection, where the
 --- value remains visible only to this process.
-function system.setPrimarySelection(text: string): boolean
+function platformOS.setPrimarySelection(text: string): boolean
     required(text, "setPrimarySelection")
-    if not system.clipboardAvailable() then
+    if not platformOS.clipboardAvailable() then
         return false
     end
     return C.SDL_SetPrimarySelectionText(text) as boolean
 end
 
 --- Reports whether the primary selection holds text.
-function system.hasPrimarySelection(): boolean
-    if not system.clipboardAvailable() then
+function platformOS.hasPrimarySelection(): boolean
+    if not platformOS.clipboardAvailable() then
         return false
     end
     return C.SDL_HasPrimarySelectionText() as boolean
 end
 
-local type Result = system.ProcessResult
-local type Options = system.ProcessOptions
+local type Result = platformOS.ProcessResult
+local type Options = platformOS.ProcessOptions
 
 local ResultMT <const>: metatable<Result> = {__index = Result}
 
@@ -1103,7 +1103,7 @@ local pendingCount = 0
 local nextId = 1
 local worker: workers.Worker = nil
 
-function system.installProcessRunner(luaPath?: string)
+function platformOS.installProcessRunner(luaPath?: string)
     if worker ~= nil then
         return
     end
@@ -1115,7 +1115,7 @@ function system.installProcessRunner(luaPath?: string)
     )
 end
 
-function system.processRunnerInstalled(): boolean
+function platformOS.processRunnerInstalled(): boolean
     return worker ~= nil
 end
 
@@ -1224,7 +1224,7 @@ end
 --- output has just gone, so there is nothing left to be gentle on behalf of,
 --- and a refusable signal would leave the child running with no future left to
 --- observe it. A caller who does want to ask rather than insist has
---- `system.killProcess(run, false)`, which is that question spelled out.
+--- `tecs.os.killProcess(run, false)`, which is that question spelled out.
 function Runner:cancel(future: Future<any>)
     local entry = byFuture[future as Future<Result>]
     if entry == nil or worker == nil then
@@ -1249,17 +1249,17 @@ local source <const> = runner as Future.Source
 -- Running
 -------------------------------------------------------------------------------
 
-function system.runProcess(options: Options): Future<Result>
+function platformOS.runProcess(options: Options): Future<Result>
     if options == nil or options.args == nil or #options.args == 0 then
-        error("tecs: system.runProcess needs args, starting with the program", 2)
+        error("tecs: os.runProcess needs args, starting with the program", 2)
     end
     for index = 1, #options.args do
         if type(options.args[index]) ~= "string" then
-            error(("tecs: system.runProcess args[%d] is not a string"):format(index), 2)
+            error(("tecs: os.runProcess args[%d] is not a string"):format(index), 2)
         end
     end
 
-    system.installProcessRunner()
+    platformOS.installProcessRunner()
 
     local id = nextId
     nextId = nextId + 1
@@ -1299,14 +1299,14 @@ function system.runProcess(options: Options): Future<Result>
     return future
 end
 
-function system.processResult(run: Future<Result>): Result
+function platformOS.processResult(run: Future<Result>): Result
     if run == nil then
         return nil
     end
     return results[run]
 end
 
-function system.killProcess(run: Future<Result>, force?: boolean)
+function platformOS.killProcess(run: Future<Result>, force?: boolean)
     if worker == nil or run == nil then
         return
     end
@@ -1317,11 +1317,11 @@ function system.killProcess(run: Future<Result>, force?: boolean)
     worker:send({kind = "kill", id = entry.id, force = force == true})
 end
 
-function system.updateProcesses(): integer
+function platformOS.updateProcesses(): integer
     return runner:poll()
 end
 
-function system.pendingProcesses(): integer
+function platformOS.pendingProcesses(): integer
     return pendingCount
 end
 
@@ -1345,7 +1345,7 @@ local function drainFor(ms: number)
     end
 end
 
-function system.shutdownProcesses(graceMs?: number)
+function platformOS.shutdownProcesses(graceMs?: number)
     if worker == nil then
         return
     end
@@ -1381,4 +1381,4 @@ function system.shutdownProcesses(graceMs?: number)
     pendingCount = 0
 end
 
-return system
+return platformOS

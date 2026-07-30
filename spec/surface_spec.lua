@@ -154,6 +154,10 @@ local DIRECT = { ecs = true, version = true, Transform = true }
 local PRIMITIVE = { string = "string", number = "number", integer = "number", boolean = "boolean" }
 
 describe("the public surface", function()
+    it("does not retain the removed tecs.system name", function()
+        assert.is_nil(tecs.system)
+    end)
+
     it("was read out of init.tl", function()
         -- Everything below is generated from this, so a parse that found
         -- nothing would pass every test by having none to run.

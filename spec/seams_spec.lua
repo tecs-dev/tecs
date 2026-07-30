@@ -175,7 +175,7 @@ local REACH = {
         modules = {
             "tecs/platform/audio.lua",
             "tecs/platform/sensors.lua",
-            "tecs/platform/system.lua",
+            "tecs/platform/os.lua",
         },
     },
     {

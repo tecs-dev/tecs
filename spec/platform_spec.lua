@@ -9,7 +9,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
-local system = require("tecs.platform.system")
+local platformOS = require("tecs.platform.os")
 local filesystem = require("tecs.io.filesystem")
 
 describe("platform.filesystem paths", function()
@@ -51,14 +51,14 @@ describe("platform.capabilities", function()
     end)
 
     it("reports the target rather than inferring it", function()
-        local caps = system.capabilities()
+        local caps = platformOS.capabilities()
         assert.is_string(caps.target)
         assert.is_string(caps.architecture)
         assert.is_true(caps.cores >= 1)
     end)
 
     it("requires the FFI and treats the JIT as separate", function()
-        local caps = system.capabilities()
+        local caps = platformOS.capabilities()
         -- The engine has no path that avoids the FFI, so a build without it
         -- does not run rather than running degraded. Machine-code generation
         -- is a different question and is allowed to be absent.
@@ -70,7 +70,7 @@ describe("platform.capabilities", function()
         -- A release links no compiler and consumes packaged artifacts, so this
         -- cannot be derived from the platform. The two are independent: a
         -- development build has a compiler and may also have a pack.
-        local caps = system.capabilities()
+        local caps = platformOS.capabilities()
         assert.is_boolean(caps.hotReload)
         assert.is_boolean(caps.runtimeShaders)
         assert.is_boolean(caps.packagedShaders)
@@ -80,11 +80,11 @@ describe("platform.capabilities", function()
     it("reports touch by asking the platform", function()
         -- Not inferred from the OS: a desktop with a touchscreen has one and a
         -- simulator may not, so neither answer follows from the platform name.
-        assert.is_boolean(system.capabilities().touch)
+        assert.is_boolean(platformOS.capabilities().touch)
     end)
 
     it("reports dynamic loading as the inverse of a linked registry", function()
-        local caps = system.capabilities()
+        local caps = platformOS.capabilities()
         local loader = require("tecs.ffi.loader")
         assert.are.equal(not loader.isStatic("sdl3"), caps.dynamicLibraries)
     end)

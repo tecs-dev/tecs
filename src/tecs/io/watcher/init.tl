@@ -42,7 +42,7 @@ and do not poll.
 
 local adapter <const> = require("tecs.platform.adapter")
 local content <const> = require("tecs.platform.content")
-local system <const> = require("tecs.platform.system")
+local platformOS <const> = require("tecs.platform.os")
 local time <const> = require("tecs.platform.time")
 local log <const> = require("tecs.log")
 
@@ -160,7 +160,7 @@ end
 ---
 --- @return Returns true when this build can install the watcher.
 function watcher.available(): boolean
-    return system.capabilities().hotReload
+    return platformOS.capabilities().hotReload
 end
 
 --- Starts watching loaded content.

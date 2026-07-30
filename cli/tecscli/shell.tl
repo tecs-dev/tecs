@@ -10,7 +10,7 @@
 --- `shell.become` does not start anything. It replaces this process with the
 --- program named, so a game launched by `tecs run` is not a child of the CLI
 --- at all: one process id, one exit status, and a Control-C that reaches the
---- game rather than the tool that started it. `tecs.system` is deliberately not
+--- game rather than the tool that started it. `tecs.os` is deliberately not
 --- used here for the same reason; it exists to run a child without stalling a
 --- frame, and a command line tool has no frame to stall.
 

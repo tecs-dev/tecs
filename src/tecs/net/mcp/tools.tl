@@ -8,7 +8,7 @@ knows anything else: is it alive, what is it, and what has it been saying.
 
 local data <const> = require("tecs.data")
 local sdl <const> = require("tecs.ffi.sdl3")
-local system <const> = require("tecs.platform.system")
+local platformOS <const> = require("tecs.platform.os")
 local filesystem <const> = require("tecs.io.filesystem")
 local log <const> = require("tecs.log")
 local ecs <const> = require("tecs.ecs")
@@ -174,7 +174,7 @@ mcp.register(
         whenCrashed = true,
         inputSchema = {type = "object", properties = data.empty_array},
         handler = function(_: {string: any}): {string: any}
-            local caps = system.capabilities()
+            local caps = platformOS.capabilities()
             return {
                 world = worldContext() or data.null,
                 target = caps.target,

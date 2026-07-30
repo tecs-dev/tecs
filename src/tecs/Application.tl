@@ -57,7 +57,7 @@ rather than one frame later.
    delivered since the previous iteration. A quit request ends the iteration
    here.
 2. `tecs.assets.update` settles the loads the worker finished.
-3. `tecs.system.updateProcesses` and `tecs.system.updateDialogs` settle the
+3. `tecs.os.updateProcesses` and `tecs.os.updateDialogs` settle the
    children that exited and the dialogs the user answered.
 4. The application pumps every open `tecs.net.http` client, which settles the
    transfers that completed.
@@ -128,7 +128,7 @@ local type Audio = audio.Audio
 local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
 local filesystem <const> = require("tecs.io.filesystem")
-local system <const> = require("tecs.platform.system")
+local platformOS <const> = require("tecs.platform.os")
 local httpClients <const> = require("tecs.net.http.clients")
 local watcher <const> = require("tecs.io.watcher")
 local log <const> = require("tecs.log")
@@ -987,8 +987,8 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
     -- exited, and a game that shelled out and did nothing else would otherwise
     -- hold a future that never settles. Costs a nil check on a
     -- process that has never started a child.
-    system.updateProcesses()
-    system.updateDialogs()
+    platformOS.updateProcesses()
+    platformOS.updateDialogs()
 
     -- And again for every open HTTP client. A transfer that completed while
     -- the game was backgrounded has completed, so this is outside the
@@ -1280,7 +1280,7 @@ function Application:_shutdown(): boolean
     -- A child outlives the process that started it unless something ends it,
     -- and the worker waiting on one would be a thread inside a library about
     -- to be unmapped. So teardown kills: gently, then forcibly, then joins.
-    system.shutdownProcesses()
+    platformOS.shutdownProcesses()
     log.closeFile()
 
     if self.device ~= nil then

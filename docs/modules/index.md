@@ -32,10 +32,10 @@ A module may contain one level of subordinate modules, such as
 | [`tecs.log`](/modules/log)           | named, leveled platform logging                             |
 | [`tecs.math`](/modules/math)         | allocation-free 2D vector and angle math                    |
 | [`tecs.net`](/modules/net/)          | nonblocking TCP streams and UDP datagrams                   |
+| [`tecs.os`](/modules/os)             | capabilities, clipboard access, and child processes         |
 | [`tecs.physics`](/modules/physics)   | Rapier 2D rigid-body simulation                             |
 | [`tecs.regex`](/modules/regex)       | compiled regular expressions over Lua byte strings          |
 | [`tecs.sequence`](/modules/sequence) | sequencing and tweening                                     |
-| [`tecs.system`](/modules/system)     | capabilities, clipboard access, and child processes         |
 | [`tecs.time`](/modules/time)         | monotonic time                                              |
 | [`tecs.window`](/modules/window)     | window size, display, and mode                              |
 | [`tecs.workers`](/modules/workers)   | typed background jobs                                       |

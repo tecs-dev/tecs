@@ -49,7 +49,7 @@ local type log = require("tecs.log")
 local type vectorMath = require("tecs.math")
 local type data = require("tecs.data")
 local type regex = require("tecs.regex")
-local type system = require("tecs.platform.system")
+local type platformOS = require("tecs.platform.os")
 local type loader = require("tecs.ffi.loader")
 
 -- The one record below is written for one reason: a public name that no single
@@ -360,7 +360,7 @@ local record tecs
     net: net
     regex: regex
     sequence: sequence
-    system: system
+    os: platformOS
     time: time
     window: window
     workers: workers
@@ -462,7 +462,7 @@ local SURFACE <const>: {string: Namespace} = {
     },
     regex = {module = "tecs.regex"},
     sequence = {module = "tecs.sequence"},
-    system = {module = "tecs.platform.system"},
+    os = {module = "tecs.platform.os"},
     time = {module = "tecs.platform.time"},
     window = {module = "tecs.platform.window"},
     workers = {module = "tecs.workers"},

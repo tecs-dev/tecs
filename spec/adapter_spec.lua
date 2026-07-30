@@ -27,7 +27,7 @@ local adapter = require("tecs.platform.adapter")
 local filesystem = require("tecs.io.filesystem")
 local events = require("tecs.platform.events")
 local newInput = require("tecs.platform.input").newInput
-local system = require("tecs.platform.system")
+local platformOS = require("tecs.platform.os")
 local shadercompiler = require("tecs.gpu.shadercompiler")
 local shaderpack = require("tecs.gpu.shaderpack")
 local Audio = require("tecs.audio").Audio
@@ -427,7 +427,7 @@ describe("platform contract", function()
         -- cannot load a library by name and has its own bytecode format has to
         -- show up as itself and not as the host that happens to be running.
         adapter.install(fakePlatform())
-        local caps = system.capabilities()
+        local caps = platformOS.capabilities()
 
         assert.are.equal("spec.console", caps.target)
         assert.is_false(caps.dynamicLibraries)
@@ -436,7 +436,7 @@ describe("platform contract", function()
         adapter.reset()
         assert.are_not.equal(
             "spec.console",
-            system.capabilities().target,
+            platformOS.capabilities().target,
             "removing the platform must be reflected too"
         )
     end)

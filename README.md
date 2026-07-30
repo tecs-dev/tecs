@@ -818,7 +818,7 @@ caller's own value beside it, and a blocking form for startup and tests. What it
 got wrong is that those are one type. Unbundled they are a listener, a counter
 and a wait, and each has a smaller home: the listener is `onSettle`, attached
 where the work starts rather than added to a list something else drains; the
-counter is three lines the subsystem keeps, which is what `system.pendingProcesses`
+counter is three lines the subsystem keeps, which is what `tecs.os.pendingProcesses`
 already does; and the wait is a drain on the loader. The batch's own selling
 point was compacting in place so a frame with loads outstanding allocated
 nothing, and the unified path allocates strictly less, because a batch walked
@@ -1374,7 +1374,7 @@ holding bytes that will never be written.
 ## The clipboard
 
 `clipboardUpdate` says the clipboard changed and lists the mime types now on
-offer. The clipboard half of `tecs.system` is the other half: what those bytes
+offer. The clipboard half of `tecs.os` is the other half: what those bytes
 are, and how to put
 text there. Being told and having no way to look is the worse of the two
 halves to ship alone.
@@ -1386,7 +1386,7 @@ only invalidation there is.
 Every read hands back an allocation the caller frees, and a failed read hands
 back an empty string rather than nothing, so the free is owed on that case too.
 `loader.toString` copies and does not free, which makes it the right converter
-and half the job; the pairing lives in one place in `platform/system.tl`
+and half the job; the pairing lives in one place in `platform/os.tl`
 rather than at each call site, because a read that forgot would leak once per
 paste and nothing about a process that grows while a text field is pasted into
 points back at the clipboard.
@@ -1429,11 +1429,13 @@ keeps its NULs.
 ## Native platform utilities
 
 The smaller operating-system services are one module rather than an
-`Application` grab bag, and rather than one name each. `tecs.system` holds what
+`Application` grab bag, and rather than one name each. `tecs.os` holds what
 this build can do here, the clipboard, running another program, URLs, locale
 preference, power, the simple blocking message box and asynchronous file and
-folder selection. None of them is a subsystem a game builds on: each is a
-handful of calls made when a player asks for something, and four names for that
+folder selection. The `os` name distinguishes these host facilities from
+`tecs.System`, which remains the ECS system type. None of them is a subsystem a
+game builds on. Each is a handful of calls made when a player asks for
+something, and four names for that
 meant a game copying a path and then opening its folder reached three modules
 to do one thing. Names are qualified by what they act on, because a bare `text`,
 `data`, `clear`, `run` or `update` means nothing on a module that does all of
@@ -1459,7 +1461,7 @@ module is the seam and the public name is the surface.
 File and folder dialogs are the exception to "one SDL call and return". SDL
 retains a callback and may enter it from a thread the VM did not create, so
 the Rust dialog bridge owns that callback, copies its answer behind a mutex, and
-`tecs.system` polls it into a `Future` on the main thread. A Lua `ffi.cast`
+`tecs.os` polls it into a `Future` on the main thread. A Lua `ffi.cast`
 callback would be shorter and would make the program undefined on exactly the
 platform path the dialog exists to use.
 
@@ -1569,7 +1571,7 @@ that pumped, and each of them had a different word for the same four states.
 ```lua
 local Future = require("tecs.Future")
 
-tecs.system.runProcess({ args = { "git", "rev-parse", "HEAD" } })
+tecs.os.runProcess({ args = { "git", "rev-parse", "HEAD" } })
     :map(function(result) return result.output end)
     :recover(function() return "unknown" end)
     :onSettle(function(future) print(future.value) end)
@@ -1698,12 +1700,12 @@ is the one shape a frame-driven client cannot take.
 
 A command line tool, a resource pipeline or an asset build wants to run another
 program, and a game wants to do it between two frames rather than instead of
-them. `tecs.system` is that, and it is one of the few subsystems that is more
+them. `tecs.os` is that, and it is one of the few subsystems that is more
 useful without a window than with one, so it initializes no SDL subsystem and
 works under a plain interpreter.
 
 ```lua
-local run = tecs.system.runProcess({ args = { "git", "rev-parse", "HEAD" } })
+local run = tecs.os.runProcess({ args = { "git", "rev-parse", "HEAD" } })
 -- ... frames pass, the loop pumps ...
 if run.status == "ready" and run.value:succeeded() then
     print(run.value.output)
