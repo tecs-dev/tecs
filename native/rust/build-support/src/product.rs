@@ -27,8 +27,16 @@ pub const SDL3_VERSION: &str = "3.4.12";
 pub const SDL3_REVISION: &str = "f87239e71e42da91ca317a12eefb82cfbf3393eb";
 pub const SDL3_MIXER_VERSION: &str = "3.2.4";
 pub const SDL3_MIXER_REVISION: &str = "72a81869b45e249e8e67102db4e98dd2441f05a1";
-pub const LUAJIT_REVISION: &str = "871db2c84ecefd70a850e03a6c340214a81739f0";
-pub const LUAJIT_ROLLING: &str = "2.1.1753364724";
+// LuaJIT has no releases, so the two constants below are one fact written
+// twice: `LUAJIT_ROLLING` is `2.1.` and the Unix timestamp of the commit
+// `LUAJIT_REVISION` names, which is what LuaJIT's own build stamps into
+// `luajit -v` and into `luajit.pc`. Raising one means raising the other to the
+// same commit, or a packaged build and the system version check disagree about
+// what the tree pins. Homebrew tracks the tip of `v2.1` and states the
+// revision behind each of its versions, so `brew cat luajit` is where the pair
+// comes from.
+pub const LUAJIT_REVISION: &str = "faaf663340347a78b22ed94c63c24fe090bd9784";
+pub const LUAJIT_ROLLING: &str = "2.1.1785192264";
 pub const SHADERC_VERSION: &str = "2026.3";
 pub const SHADERC_REVISION: &str = "2c8cae778eec0283b44acbe7ed1a386865d78799";
 pub const GLSLANG_REVISION: &str = "168d452a4f460d24b588fed08477a81c44ee27a1";
