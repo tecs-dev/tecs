@@ -30,6 +30,5 @@ return {
         indent_width = 4,
         max_line_width = 120,
         sort_requires = false,
-        hug_single_argument = true,
     },
 }

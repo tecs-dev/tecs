@@ -798,7 +798,6 @@ return {
         indent_width = 4,
         max_line_width = 120,
         sort_requires = false,
-        hug_first_argument = true,
     },
     tealdoc = {
         -- AGENTS.md puts a name's documentation on its declaration, which is
