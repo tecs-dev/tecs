@@ -1682,6 +1682,96 @@ tracked, `isPending` answers false, and the parked cursor resumes on the next
 fixed step; a game that wants the wait to mean something re-issues the work and
 re-tracks it under the same key.
 
+## One coroutine hook, and where it may run
+
+A system returns every frame, so anything it wants to remember has to leave the
+stack: the stage a load reached, the row a chunked spawn stopped at, the value
+it is waiting for. Those are a program counter and a loop variable, written out
+by hand into a table because the frame boundary evicted them. `SystemConfig.coroutine`
+is the one place in the engine that lets them stay where they were.
+
+**It is a system kind, not a scheduler.** A coroutine body is turned into an ordinary
+`run` closure once, at registration, so `runGroup` is still a flat array of
+calls and a world with no coroutine system in it pays nothing. Measured on LuaJIT
+2.1, a resume costs about 32ns against a direct call, and a hot loop inside a
+coroutine runs at the speed of the same loop outside one; yielding out of a loop
+stitches rather than aborting the trace. So this buys no throughput and costs
+none, and the argument for it is entirely that the code reads as what it does.
+
+**Exactly one of `run` and `coroutine`, and neither by default is an error.** The
+alternative was a `run` that the pipeline inspects for a coroutine, which makes
+the kind of a system something you learn by reading its body.
+
+**A body that parks needs a slot every frame, so it is legal only in the phases
+that run exactly once per frame.** Startup and shutdown run once, so a parked
+body there never gets a second slot. Render phases build the frame packet, so a
+suspended body is a wrong frame rather than a late one. The fixed group is the
+one that looks legal and is not: it runs between zero and `fixedMaxSteps` times
+per frame, so a body chunking work through it does _more_ catch-up on frames
+that are already late, which is the death spiral `fixedOverload` exists to
+bound; and a wait on anything settling would resume on whichever step wall time
+put it on, inside the part of the loop that snapshots and replay need to be
+reproducible. Rejecting the whole group is cheaper than making one argument to
+`yield` conditionally illegal by phase.
+
+**Yielding during query iteration raises.** Iteration holds a world-wide scope,
+and a body suspended inside one leaves every later system's mutations staged
+rather than applied for the rest of the frame, silently. That trap already
+exists for a `run` system that returns early from `iter`; the difference is that
+parking mid-loop is the whole appeal here, so it would be the common case rather
+than a mistake. The check is a compare against `_scopeDepth` at the yield and it
+names the system, which turns the one unfixable hazard into a loud failure.
+
+**Waits are counted in the phase's own delta, not a monotonic clock.** A wait of
+half a second is half a second of the time the game is running, it stops when
+the game stops, a `runIf` that gates the system off freezes it, and the ECS
+needs no platform clock to implement it.
+
+**A parked body is reported, not just left.** Waiting on something that never
+arrives makes a system stop with no other symptom, so a park past five seconds
+logs to `tecs.coroutines` and doubles from there, on the same reasoning as the
+dropped-step report. An explicit `timeoutMs` raises at the yield instead, which
+beats returning a status because a status can be ignored and a traceback points
+at the line that waited.
+
+**Waiting for a moment is on the world; waiting for a value is on the value.**
+`world:yield()` and `world:yield(seconds)` answer with the delta time of the
+frame they resumed on. `future:yield(world)` answers with that future's own
+value, and this is why the world is the argument rather than the receiver: as a
+method on the future, the return type is the future's `T` and no call site
+casts. It cannot be a method on the world, because `tecs.types` declares `World`
+and sits below `tecs.Future`, so it cannot name a future without a require
+cycle. That layering rule is what chose the shape, and a `world:yield(future)`
+returning `any` was the alternative, rejected because making every caller write
+`as string` to recover a type the compiler already had is a tax on the common
+case.
+
+The split also removes an argument: a timeout means nothing on a sleep, so only
+`Future.yield` takes one. And `Future` now has two waits with a rule between
+them. `wait` blocks the thread and is for startup, tools and tests; `yield`
+gives up the system's slot and is the only one a frame may call.
+
+**A wait for a value raises when there was none.** Failed, canceled and timed
+out all raise at the waiting line rather than returning something to inspect, on
+the same reasoning as the stall report: the line after a wait then holds the
+value and never has to ask whether it does, and a body that wants the other
+outcome writes `pcall`, which Lua already spells.
+
+**Returning from the body unregisters the system**, so a boot sequence with
+dependent asynchronous steps is a body that runs top to bottom and stops, rather
+than a `flatMap` chain or a stage enum. Raising unregisters it too, and then
+raises onward with the coroutine's own traceback attached, because catching it
+here would have been the silent failure the stall report exists to prevent, and
+a body that raised inside query iteration needs the crash guard to unwind the
+scope it left open. Neither outcome is restarted: re-running a body whose
+effects already happened is worse than stopping.
+
+**A parked body is not in a snapshot,** and that is the line against the
+sequencer rather than an omission. `tecs.sequence` is the persistent one and pays
+for it by being a data program that cannot call a Lua function; this kind is the
+non-persistent one and buys ordinary control flow with that. A wait that has to
+survive a save belongs in a sequence, parked on `Future.track`.
+
 ## Asking the network for something
 
 Every HTTP request is a future, which is the easy half. The two questions worth
