@@ -182,7 +182,7 @@ local record sequence
     type TrackSource = tweeneval.TrackSource
 
     --- Represents one authored timeline operation.
-    type TimelineNode = {any}
+    type TimelineNode = tweeneval.TimelineNode
 
     --- Lists timeline operations in execution order.
     ---
