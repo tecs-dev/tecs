@@ -722,5 +722,96 @@ describe("http.newClient", function()
             assert.are.equal(0, response.status)
             assert.is_string(response.error)
         end)
+
+        -- What a save does with a request that has not answered yet. The future
+        -- behind one is listeners and a source, so it is not a component field
+        -- and `Pending` is a transient marker: a save carries the `Request` and
+        -- not the marker, which is what makes the load coherent.
+        describe("and a snapshot", function()
+            -- Spawns a request the silent listener accepts and never answers,
+            -- so the transfer is still open when the snapshot is taken.
+            local function unanswered()
+                local entity = world:spawn(http.plugin.Request({ url = silentUrl("/never-answered") }))
+                world:update(1 / 60)
+                assert.is_not_nil(world:get(entity, http.plugin.Pending))
+                assert.are.equal(1, http.plugin.clientOf(world):pending())
+                return entity
+            end
+
+            it("saves a world with a request in flight", function()
+                world = tecs.ecs.newWorld()
+                world:addPlugin(http.plugin.install)
+                unanswered()
+
+                -- The binary format is what a save file is, and it is where a
+                -- future reached through a component field fails: the encoder
+                -- walks the listener graph rather than refusing the component.
+                local ok, saved = pcall(world.saveSnapshot, world)
+                assert.is_true(ok, tostring(saved))
+
+                local named = {}
+                for _, entry in ipairs(world:saveSnapshot({ format = "table" }).snapshot.componentTable) do
+                    named[entry.name] = true
+                end
+                assert.is_true(named["tecs.http.Request"])
+                assert.is_nil(named["tecs.http.Pending"])
+            end)
+
+            it("sends a saved request again after a load", function()
+                world = tecs.ecs.newWorld()
+                world:addPlugin(http.plugin.install)
+
+                -- The answering listener, but nothing polls it yet, so the
+                -- transfer is open when the snapshot is taken and the world the
+                -- snapshot loads into can still be given a response.
+                local entity = world:spawn(http.plugin.Request({ url = url("/scores") }))
+                world:update(1 / 60)
+                assert.is_not_nil(world:get(entity, http.plugin.Pending))
+                local saved = world:saveSnapshot()
+
+                http.plugin.close(world)
+                world = tecs.ecs.newWorld()
+                world:addPlugin(http.plugin.install)
+                world:loadSnapshot(saved)
+
+                -- The request came back and the marker did not, so the entity
+                -- that asked is in front of the plugin again rather than waiting
+                -- on a transfer that ended with the world that started it.
+                assert.is_not_nil(world:get(entity, http.plugin.Request))
+                assert.is_nil(world:get(entity, http.plugin.Pending))
+
+                local response = turn(entity, http.plugin.Response)
+                assert.is_not_nil(response)
+                assert.are.equal(200, response.status)
+                assert.are.equal(BODY, response.body:text())
+            end)
+
+            it("stops a transfer the load left nothing to receive", function()
+                world = tecs.ecs.newWorld()
+                world:addPlugin(http.plugin.install)
+
+                local empty = world:saveSnapshot()
+                unanswered()
+
+                -- A load replaces the world in place and despawns nothing, so
+                -- the entity that asked is gone without the despawn observer
+                -- hearing about it and no marker is left to drive the future to
+                -- a `Response`. The transfer stops rather than running for
+                -- nobody.
+                world:loadSnapshot(empty)
+                assert.are.equal(0, http.plugin.clientOf(world):pending())
+            end)
+
+            it("stops a transfer whose requester was despawned", function()
+                world = tecs.ecs.newWorld()
+                world:addPlugin(http.plugin.install)
+
+                local entity = unanswered()
+                world:despawn(entity)
+                world:commit()
+
+                assert.are.equal(0, http.plugin.clientOf(world):pending())
+            end)
+        end)
     end)
 end)

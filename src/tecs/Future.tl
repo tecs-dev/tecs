@@ -62,6 +62,11 @@ A snapshot never stores a future because it contains runtime listeners and
 source state. A saved sequence cursor retains only its provider, entity, and
 key. Reissue and track the work under the same key after load when the wait
 must continue.
+
+So a future is not a component field. Keep it in a table beside the world,
+keyed by the entity waiting on it, and give that entity a transient marker
+instead. A snapshot writer that reaches a future walks its listener graph
+rather than refusing the component, so the save fails without naming either.
 ]=]
 
 -- Implementation details: Worker-backed sources copy serialized results
