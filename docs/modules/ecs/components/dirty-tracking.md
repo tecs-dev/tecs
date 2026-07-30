@@ -66,8 +66,16 @@ These paths maintain dirty state:
 - movement into another archetype
 - swap-pop after removal
 
-Spawn and structural movement mark every affected component because the
-column layout changed.
+Spawn and structural movement mark every component on the archetype, because a
+row moving in has every column newly written at that row.
+
+Tecs records those marks as one archetype-wide structural flag rather than as
+every column's bit, and every reader above composes the flag in. `getMut`,
+`markComponentDirty` and `set` still set the bit for the one column they name.
+The distinction is not observable through these readers, and it is what lets the
+renderer's `partialRewrites` option rewrite the rows a spawn wrote instead of
+the archetype's whole run: a value write names a column and says nothing about
+which rows changed, while a structural change carries its rows.
 
 `world:update` clears marks after the pipeline runs. A consumer can iterate
 dirty archetypes, test one component, test any component, or iterate dirty

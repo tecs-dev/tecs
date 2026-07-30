@@ -42,6 +42,10 @@ local timing <const> = require("tecs.timing")
 local instancelayout <const> = require("tecs.gpu.instancelayout")
 
 local type TextureArray = require("tecs.gpu.TextureArray")
+-- Type-only, and the one thing extraction reaches inside the ECS for: which
+-- rows a structural change wrote is not part of the supported archetype
+-- surface, because nothing outside this file has asked the question.
+local type internal = require("tecs.internal.types")
 
 --- Extraction: the world-facing half of the frame.
 local EXTRACT <const> = timing.stage("extract")
@@ -91,6 +95,17 @@ local MIN_SLACK <const> = 16
 --- paid for by the spawns and despawns that made it necessary.
 local RECLAIM_RATIO <const> = 0.5
 local MIN_RECLAIM <const> = 512
+
+--- Spans the frame's range lists may hold before a partial rewrite gives up
+--- naming its rows one by one and names the run's covering span instead.
+---
+--- Half of `dirtyranges.MAX`, so the lists still have room for the runs and
+--- producers that come after this one. Past their ceiling a list collapses to
+--- one span covering every entry in it, including the gaps between runs, which
+--- is worse than the covering span of a single run: the fallback here is
+--- exactly what a whole-run rewrite marks, so a partial rewrite can never mark
+--- more bytes than the rewrite it replaced.
+local MARK_BUDGET <const> = 32
 
 --- Reservations, widest first, as a compaction tries them against what the
 --- buffer has room for.
@@ -157,6 +172,10 @@ local record Run
     --- Set once the archetype has outgrown a reservation, which is what earns
     --- it the room to grow again.
     grown: boolean
+    --- The archetype's structural count when this sync last brought the run's
+    --- bytes up to date, so the rows every structural change since has written
+    --- are what the next sync owes.
+    structAt: integer
 end
 
 local record ExtractorOptions
@@ -172,6 +191,17 @@ local record ExtractorOptions
     --- costs is that the cull is dispatched over the slack as well as over the
     --- rows.
     reserveRuns: boolean
+    --- Rewrite the rows a spawn or a despawn wrote rather than the archetype's
+    --- whole run. Defaults to false, which rewrites the run.
+    ---
+    --- A structural change dirties every column of the archetype it lands on,
+    --- because a row moving in genuinely has every column newly written at
+    --- that row. What it does not change is the rest of the run, and the ECS
+    --- records which rows those were, so one spawn into a large archetype can
+    --- cost the rows it wrote rather than the archetype's population. A value
+    --- write is unaffected: it says nothing about which rows it touched and
+    --- still rewrites the run.
+    partialRewrites: boolean
     --- UV extent of the white pixel within its cell, as the backend uploaded
     --- it. An image smaller than a cell does not reach the cell's edge, so
     --- sampling 0..1 would read the undefined remainder rather than the image.
@@ -214,6 +244,8 @@ local record Extractor
     _seen: {ecs.Archetype: integer}
     --- Reserve room in each run rather than packing them end to end.
     _reserve: boolean
+    --- Write the rows a structural change wrote rather than the whole run.
+    _partial: boolean
     --- Slots the reserved runs cover, live and slack together. This is what
     --- the cull is dispatched over, and it is where the next run is allocated.
     _high: integer
@@ -258,6 +290,7 @@ function Extractor.create(options: ExtractorOptions): Extractor
     self._runs = {}
     self._seen = {}
     self._reserve = options.reserveRuns == true
+    self._partial = options.partialRewrites == true
     self._high = 0
     self._slot = 0
     self._whiteU0 = options.whiteU0
@@ -363,13 +396,17 @@ function Extractor:addProducer(producer: InstanceProducer)
     self._producers[#self._producers + 1] = producer
 end
 
---- Writes one archetype's rows into its run.
+--- Writes rows `first` through `last` of one archetype into its run.
+---
+--- Marks nothing: which bytes the frame names is the caller's, because a
+--- caller writing scattered rows may want one span covering them rather than
+--- one per row. See `markRun`.
 ---
 --- Columns are read, not mutated, so `get` is correct here. Taking `getMut`
 --- would mark these components dirty on every archetype every frame, which
 --- would make the gate below always true and defeat its own purpose.
-local function writeRun(
-    self: Extractor, packet: FramePacket, archetype: ecs.Archetype, length: integer, offset: integer
+local function writeRows(
+    self: Extractor, packet: FramePacket, archetype: ecs.Archetype, first: integer, last: integer, offset: integer
 )
     local floats = self._instances
     local bounds = self._bounds
@@ -422,7 +459,7 @@ local function writeRun(
     local bandSort = 0
     local bandCulled = true
 
-    for row = 1, length do
+    for row = first, last do
         local transform = transforms[row]
         local tint = tints[row]
 
@@ -661,8 +698,6 @@ local function writeRun(
     end
 
     packet.blendCount = packet.blendCount + blended
-    packet.instanceRanges:mark(offset * INSTANCE_BYTES, length * INSTANCE_BYTES)
-    packet.boundsRanges:mark(offset * BOUND_BYTES, length * BOUND_BYTES)
 end
 
 --- Marks the bytes a run of instances occupies, in both range lists.
@@ -672,6 +707,14 @@ local function markRun(packet: FramePacket, offset: integer, count: integer)
     end
     packet.instanceRanges:mark(offset * INSTANCE_BYTES, count * INSTANCE_BYTES)
     packet.boundsRanges:mark(offset * BOUND_BYTES, count * BOUND_BYTES)
+end
+
+--- Writes an archetype's whole run and marks it.
+local function writeRun(
+    self: Extractor, packet: FramePacket, archetype: ecs.Archetype, length: integer, offset: integer
+)
+    writeRows(self, packet, archetype, 1, length, offset)
+    markRun(packet, offset, length)
 end
 
 --- Puts `count` slots from `offset` where no view can see them.
@@ -728,6 +771,7 @@ local function newRun(): Run
         pending = 0,
         moved = false,
         grown = false,
+        structAt = 0,
     }
 end
 
@@ -1007,6 +1051,100 @@ local function layoutReserved(self: Extractor, packet: FramePacket): integer, in
     return self._high, dropped, false
 end
 
+--- Whether a value write dirtied any column a row's instance is written from.
+---
+--- Structural change is deliberately not asked about: it dirties every one of
+--- these columns and says nothing here, because what it wrote is a set of rows
+--- rather than a set of columns and `structuralAdded` and `structuralTouched`
+--- are where that is answered.
+---
+--- The two casting components are last because the chain short circuits: on an
+--- archetype something else already moved they are never asked, and a run being
+--- rewritten anyway carries the new height with it.
+local function valueColumnsDirty(archetype: internal.ArchetypeInternal): boolean
+    return archetype:isComponentValueDirty(Transform)
+        or archetype:isComponentValueDirty(components.Tint)
+        or archetype:isComponentValueDirty(components.Sprite)
+        or archetype:isComponentValueDirty(components.Material)
+        or archetype:isComponentValueDirty(components.Clip)
+        or archetype:isComponentValueDirty(Pivot)
+        or archetype:isComponentValueDirty(components.Occluder)
+        or archetype:isComponentValueDirty(components.DropShadow)
+end
+
+--- Writes the rows a structural change wrote, and marks them.
+---
+--- Placements land as the suffix from `addedFrom`, and a swap-pop lands on one
+--- row apiece; a row the run has since given up is dropped here rather than
+--- written past the column, and the slots it vacated are hidden by the caller.
+---
+--- Marking is the coarser half on purpose. Writing is what the CPU pays for and
+--- it is exact; a mark is GPU copy bandwidth and one command, so naming spans
+--- individually is worth it only while the frame's lists have room, and the
+--- covering span it falls back to is what a whole-run rewrite already names.
+---
+--- @return The rows written.
+local function writeResidue(
+    self: Extractor,
+    packet: FramePacket,
+    archetype: internal.ArchetypeInternal,
+    run: Run,
+    pending: integer,
+    addedFrom: integer
+): integer
+    local touched, touchedCount = archetype:structuralTouched()
+    local offset <const> = run.offset
+    local spans = (addedFrom > 0 and addedFrom <= pending) and 1 or 0
+    for index = 1, touchedCount do
+        local row <const> = touched[index]
+        if row <= pending and (addedFrom == 0 or row < addedFrom) then
+            spans = spans + 1
+        end
+    end
+    if spans == 0 then
+        return 0
+    end
+
+    local fine <const> = packet.instanceRanges.count + spans <= MARK_BUDGET
+    local low = pending + 1
+    local high = 0
+    local written = 0
+
+    if addedFrom > 0 and addedFrom <= pending then
+        writeRows(self, packet, archetype as ecs.Archetype, addedFrom, pending, offset)
+        written = pending - addedFrom + 1
+        if fine then
+            markRun(packet, offset + addedFrom - 1, written)
+        else
+            low = addedFrom
+            high = pending
+        end
+    end
+
+    for index = 1, touchedCount do
+        local row <const> = touched[index]
+        if row <= pending and (addedFrom == 0 or row < addedFrom) then
+            writeRows(self, packet, archetype as ecs.Archetype, row, row, offset)
+            written = written + 1
+            if fine then
+                markRun(packet, offset + row - 1, 1)
+            else
+                if row < low then
+                    low = row
+                end
+                if row > high then
+                    high = row
+                end
+            end
+        end
+    end
+
+    if not fine then
+        markRun(packet, offset + low - 1, high - low + 1)
+    end
+    return written
+end
+
 --- Rewrites only what changed.
 ---
 --- Which runs can be left alone is the layout's answer: packed, a length that
@@ -1021,6 +1159,7 @@ local function syncInstances(self: Extractor, packet: FramePacket)
     end
 
     local reserve <const> = self._reserve
+    local partial <const> = self._partial
     local total, dropped, relayout: integer, integer, boolean
     if reserve then
         total, dropped, relayout = layoutReserved(self, packet)
@@ -1086,25 +1225,44 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         end
         -- Every component a row's instance is written from, so a change to any
         -- of them rewrites the run and one to nothing else leaves it standing.
-        -- The two casting components are last because the chain short circuits:
-        -- on an archetype something else already moved they are never asked,
-        -- and a run being rewritten anyway carries the new height with it.
+        local inner <const> = archetype as internal.ArchetypeInternal
+        local structAt <const> = inner:structuralCount()
         local dirty = relayout
             or run.moved
-            or run.length ~= pending
-            or archetype:isComponentDirty(Transform)
-            or archetype:isComponentDirty(components.Tint)
-            or archetype:isComponentDirty(components.Sprite)
-            or archetype:isComponentDirty(components.Material)
-            or archetype:isComponentDirty(components.Clip)
-            or archetype:isComponentDirty(Pivot)
-            or archetype:isComponentDirty(components.Occluder)
-            or archetype:isComponentDirty(components.DropShadow)
+            or valueColumnsDirty(inner)
             or (interpolating and archetype:get(components.PreviousTransform) ~= nil)
+
+        local residue = false
+        local addedFrom = 0
+        if not dirty then
+            if partial then
+                -- A structural change since this run was last written is the
+                -- one case with an answer finer than the run: the rows it
+                -- wrote, when the residue still names all of them. A length
+                -- that moved needs nothing of its own, because every row a
+                -- placement added is in the residue and a removal wrote no row
+                -- at all: what it owes the slots it gave up is the hide below.
+                if structAt ~= run.structAt then
+                    if inner:structuralDescribed(run.structAt) then
+                        addedFrom = inner:structuralAdded()
+                        residue = true
+                    else
+                        dirty = true
+                    end
+                end
+            else
+                -- Structural change dirties every column, which is what the
+                -- archetype answers `isComponentDirty` with and what a length
+                -- that moved is the other half of.
+                dirty = inner:isStructurallyDirty() or run.length ~= pending
+            end
+        end
 
         if dirty then
             writeRun(self, packet, archetype, pending, run.offset)
             rewritten = rewritten + pending
+        elseif residue then
+            rewritten = rewritten + writeResidue(self, packet, inner, run, pending, addedFrom)
         end
 
         if reserve then
@@ -1120,6 +1278,7 @@ local function syncInstances(self: Extractor, packet: FramePacket)
 
         run.length = pending
         run.moved = false
+        run.structAt = structAt
     end
 
     -- A Sprite naming an image nothing registered is still an error: every

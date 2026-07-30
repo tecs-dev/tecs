@@ -2015,11 +2015,62 @@ one. Slack is only ever what is left over after the rows: a compaction lays out
 with the widest reservation the capacity affords and packs exactly when it
 affords none, so `dropped` trips at the same population it trips at packed.
 
-What still bounds it is the ECS, not the layout. Moving a row into an
-archetype marks every one of that archetype's columns dirty, so a spawn
-rewrites the destination archetype's whole run whatever the runs are laid out
-like. Where a scene keeps everything in one archetype, that is the whole scene
-again and reserving buys nothing.
+### Structural dirt is a set of rows, not a set of columns
+
+Reserving stops a spawn moving the archetypes around it and does nothing about
+the one it landed in. Moving a row into an archetype marks every one of that
+archetype's columns dirty, so a spawn rewrote the destination's whole run
+whatever the runs were laid out like, and a scene holding everything in one
+archetype got nothing from either the dirty gate or the reservation.
+
+The mark is not gratuitous, and stating why decides the shape of the fix. A
+placement's row is storage no consumer has seen: capacity grows without
+initializing and a removal shrinks the run by decrementing a count, so the slot
+at `length + 1` holds whatever its last tenant left there. And a swap-pop
+genuinely moves a row: the surviving row at the removed index now belongs to a
+different entity, in every column. So the **component set** the mark names is
+exact. What is an over-approximation is the **row set**, and the rows are a
+contiguous suffix plus a bounded set of swap-pop destinations, which is what the
+structural path already receives as arguments and used to throw away.
+
+`partialRewrites` keeps them. `markAllComponentsDirty` sets one flag rather than
+every bit, and `isComponentDirty` composes the flag in, so every consumer reads
+the same answer it always read; alongside it the archetype records a monotonic
+count of structural changes and, per frame, the lowest row appended and up to 64
+swap-pop rows. Extraction records the count each run was last written at and
+writes the rows the residue names. One spawn into a 200,000-row archetype then
+costs one row.
+
+This is not the row-dirty bitmap that was removed. That put a row signal on the
+**value-write** path, where every write site was a place to get it wrong, and
+`getMut` declaring intent at the access site is what replaced it. Nothing on the
+value-write path changes here: a column a value write dirtied still rewrites the
+whole run, because naming a column says nothing about which rows moved. The
+residue reads a signal the structural path already computes.
+
+Writing and marking are separated, and only writing has to be exact. A byte
+range list tracks 64 spans and then collapses to one covering everything in it,
+gaps between runs included, so a frame of scattered rows marked one span apiece
+would upload more than the whole-run rewrite it replaced. Extraction therefore
+names spans individually while the frame's lists are under half their ceiling
+and names the run's covering span past it, which is exactly what a whole-run
+rewrite marks. So the upload is provably never worse than before, and better
+whenever the changed rows are few or clustered.
+
+Two regimes get nothing from it, both because something wider is genuinely
+dirty. An archetype carrying `PreviousTransform` is interpolated, so its drawn
+positions move on every frame landing at a new point in the fixed step. And a
+`batchSpawn` fill callback takes `getMut` on the columns it initializes, which
+declares the whole column: correct, and the reason a bulk load resyncs whole.
+
+The hazard worth naming is what this stops masking. A spawn anywhere in an
+archetype rewriting its whole run accidentally repaired any row whose cdata was
+written through `world:get` without the `world:markComponentDirty` that goes
+with it. That repair is gone, so a defect of that class becomes a visible stale
+instance rather than a latent one. It is why the option defaults to off, and why
+the guard on it is a differential spec rather than a set of expected numbers:
+one seeded churn stream is applied to two extractors, one partial and one not,
+and every float of both buffers is compared after every frame.
 
 What is drawn is decided on the GPU. A compute pass tests each instance against
 the view, compacts the survivors into an index list, and writes the draw
