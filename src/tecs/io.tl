@@ -13,23 +13,23 @@ duplicate, or reorder it. HTTP and HTTPS live under `tecs.io.http`; the MCP
 debug server lives under `tecs.io.mcp`.
 
 Resolution and client connection return asynchronous
-[`Future`](tealdoc:tecs.Future) values. A frame imports the module once and
-polls it once per iteration while either operation is pending:
+[`Future`](tealdoc:tecs.Future) values. An
+[`Application`](tealdoc:tecs.Application) polls this module once per
+iteration, so a game waits on status without driving I/O itself:
 
 ```teal
-local tecsIO <const> = tecs.io
-local address <const> = tecsIO.resolve("game.example")
+local address <const> = tecs.io.resolve("game.example")
 
 local function update()
-    tecsIO.poll()
     if address.status == "ready" then
         print(address.value.text)
     end
 end
 ```
 
-Use a future's bounded `wait` outside a frame. Listening, accepting, reading,
-writing, and receiving are nonblocking.
+A headless program without an application calls `poll` once per loop, or uses
+a future's bounded `wait` when blocking is the honest operation. Listening,
+accepting, reading, writing, and receiving are nonblocking.
 
 Every address, TCP connection, server, and datagram socket owns a resource. Close
 it explicitly. Closing is idempotent; using a closed value returns a failure.

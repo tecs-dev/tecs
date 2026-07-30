@@ -1848,12 +1848,14 @@ own a native lifetime, so each is closed explicitly. A received packet refs its
 source address before Rust's packet is destroyed, which makes the ownership
 visible rather than leaving a borrowed pointer in a Lua record.
 
-The application does not poll networking unconditionally. `tecs.io.poll` is one
-nonblocking call a game makes while resolutions or connections are pending,
-and `Future:wait` drives the same source when blocking outside a frame is the
-honest operation. That leaves a game with no network work off the path and lets
-a headless server using the ECS drive exactly the same module without an
-`Application`.
+The application polls `tecs.io` once per iteration, beside the other services
+whose finite asynchronous work has to settle without a system remembering to
+drive it. The empty path is one list-length check. Keeping that check out of a
+game with no pending work was not worth the failure mode where a resolution,
+connection or transfer stays pending forever because the game forgot a pump.
+The poll remains public because a headless server using the ECS drives the same
+module without an `Application`, and `Future:wait` drives the same source when
+blocking outside a frame is the honest operation.
 
 ## The window
 

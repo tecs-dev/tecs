@@ -49,7 +49,7 @@ owns the scheduled lifecycle:
 | Frame | The phases driven by `world:update(dt)` |
 | Shutdown | `PreShutdown`, `Shutdown`, and `PostShutdown` |
 
-Every iteration runs the same seven steps in the same order, and the order is
+Every iteration runs the same eight steps in the same order, and the order is
 the contract: a system reads what the steps above it settled during this frame
 rather than one frame later.
 
@@ -59,18 +59,20 @@ rather than one frame later.
 2. `tecs.assets.update` settles the loads the worker finished.
 3. `tecs.platform.os.updateProcesses` and `tecs.platform.os.updateDialogs` settle the
    children that exited and the dialogs the user answered.
-4. The application pumps every open `tecs.io.http` client, which settles the
+4. `tecs.io.poll` advances asynchronous I/O sources, including address
+   resolution and client connection.
+5. The application pumps every open `tecs.io.http` client, which settles the
    transfers that completed.
-5. `tecs.io.watcher` polls, which reloads content whose file changed.
-6. The debug server answers, `world:update(dt)` runs the phases, and the
+6. `tecs.io.watcher` polls, which reloads content whose file changed.
+7. The debug server answers, `world:update(dt)` runs the phases, and the
    renderer records and submits one frame.
-7. The audio mixer updates, which reaps the voices it has finished with.
+8. The audio mixer updates, which reaps the voices it has finished with.
 
-Steps 2 through 5 and step 7 run whatever else is true of the process. A decode
+Steps 2 through 6 and step 8 run whatever else is true of the process. A decode
 that finished, a child that exited, a transfer that completed and a file that
 changed have all already happened, and a voice the mixer is done with has to be
 reaped either way, so a suspended run and a crashed one keep settling them.
-Step 6 is the one the guards hold back. A suspended application skips all of
+Step 7 is the one the guards hold back. A suspended application skips all of
 it, and a crashed one skips the world update and the rendering while still
 answering the debug server, so an agent that was watching gets the traceback.
 
@@ -127,6 +129,7 @@ local audio <const> = require("tecs.audio")
 local type Audio = audio.Audio
 local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
+local tecsIO <const> = require("tecs.io")
 local files <const> = require("tecs.io.files")
 local platformOS <const> = require("tecs.platform.os")
 
@@ -992,6 +995,17 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
     -- process that has never started a child.
     platformOS.updateProcesses()
     platformOS.updateDialogs()
+
+    -- Address resolution, connection attempts and generic stream transfers
+    -- are finite asynchronous work just like the services above. A game with
+    -- an Application gets one nonblocking poll every iteration, including
+    -- while suspended or crashed, so its futures cannot stall because no
+    -- system happened to ask the I/O module for progress.
+    --
+    -- This precedes the protocol-specific HTTP pump. Generic sources settle
+    -- first, then transports with their own client lifecycle, then the file
+    -- watcher. Costs one empty-list check when no source is pending.
+    tecsIO.poll()
 
     -- And again for every open HTTP client. A transfer that completed while
     -- the game was backgrounded has completed, so this is outside the

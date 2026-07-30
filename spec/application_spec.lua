@@ -20,6 +20,7 @@ local passscope = require("tecs.gpu.passscope")
 local ComputePass = require("tecs.gpu.ComputePass")
 local time = require("tecs.platform.time")
 local files = require("tecs.io.files")
+local tecsIO = require("tecs.io")
 local log = require("tecs.log")
 local mcp = require("tecs.io.mcp")
 
@@ -90,6 +91,28 @@ describe("Application", function()
         assert.are.equal("ready", loading.status, "the loop never drained the loading worker")
         assert.is_not_nil(loading.value.pixels)
         loading.value:release()
+
+        app:_shutdown()
+    end)
+
+    it("settles I/O sources without the game polling them", function()
+        local app = build({})
+        assert.is_true(app:_init())
+
+        local address = tecsIO.resolve("127.0.0.1")
+        assert.are.equal("pending", address.status)
+        assert.are.equal(1, tecsIO.pending())
+
+        local deadline = time.now() + 2
+        while address.status == "pending" and time.now() < deadline do
+            app:_iterate(nil, 0, nil)
+        end
+
+        assert.are.equal("ready", address.status, address.error)
+        assert.are.equal(0, tecsIO.pending())
+        address.value:close()
+        local stopped, reason = tecsIO.quit()
+        assert.is_true(stopped, reason)
 
         app:_shutdown()
     end)
