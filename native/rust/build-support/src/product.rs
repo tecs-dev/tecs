@@ -17,7 +17,7 @@ use crate::{staging, tooling};
 
 pub const TEAL_REVISION: &str = "1326d829790b92e23defe69fcf40460103b60d1d";
 pub const CERULEAN_REVISION: &str = "fdcb7701e69612b15197720147ab9aba350d173b";
-pub const TEALDOC_REVISION: &str = "1b58ddbdf489aaa06fd906b8dd97a83dcc035419";
+pub const TEALDOC_REVISION: &str = "dcb4a95c9d53011b7047f0c32d14e4fe0bac7119";
 // Scintillua is not on LuaRocks and is pure Lua, so it is pinned and copied
 // rather than depended on. The lexers give the documentation site every
 // language that is not Teal; Teal keeps the compiler's own lexer.
