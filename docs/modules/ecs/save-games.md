@@ -76,10 +76,22 @@ Snapshots omit:
 - futures and native work in flight
 - Lua locals, closures, and entity-address observers
 
+A [`Future`](/modules/Future) is never a component field, and the omission above is
+what that rule buys. A future holds listeners and the source that settles them,
+so the binary encoder walks a cyclic graph of runtime state rather than refusing
+the component: the save fails with `too deep to serialize` and names nothing.
+Keep the future in a table beside the world and give the entity a transient
+marker, which is what [`tecs.net.http`](/modules/net/http) does with `Pending`.
+
 A sequence cursor waiting on a future saves the provider name, entity, and key.
 Load restores the cursor without restoring the future. `isPending` then returns
 false, and the cursor resumes on the next fixed step. Reissue and retrack the
 work when the wait must continue.
+
+Load replaces the world in place and despawns nothing, so a subsystem holding
+work for an entity never hears that the entity is gone. Cancel or reissue from
+[`FinishSnapshotLoad`](/modules/ecs/builtins#snapshot-events) rather than from
+`OnDespawn`.
 
 Keep durable input in components. Recreate process-local objects from that
 input after load.
@@ -272,6 +284,9 @@ Engine plugins register their own snapshot behavior:
   limits during setup.
 - The sequence plugin stores its runtime under `"tecs.sequence"`.
 - The text plugin discards cached glyph runs after load and derives them again.
+- The HTTP plugin saves the `Request` and not the transient `Pending` marker, so
+  a request that was in flight is sent again after load. It stops the transfers
+  the load replaced, because the entities waiting on them are gone.
 - Physics stores Rapier's complete state under `"tecs.physics"` and reconnects
   transient handles. `physics.hasBody` reports whether an entity has a live
   body after reconnection.
