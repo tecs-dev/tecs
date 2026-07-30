@@ -236,7 +236,17 @@ local PAGES = {
         },
     },
     { route = "getting-started", title = "Getting started" },
-    { route = "modules/", title = "Modules" },
+    {
+        route = "modules/",
+        title = "tecs",
+        public = "tecs",
+        api = {
+            {
+                module = "tecs.init",
+                include = { "newApplication", "version" },
+            },
+        },
+    },
 
     { route = "cli/", title = "Tecs CLI" },
     { route = "cli/projects", title = "Projects" },
@@ -622,10 +632,10 @@ end
 --- publishing one that has quietly lost a page.
 ---
 --- Four things: every public name has a page, no page outlives the module it
---- documents, both listings of the modules agree with `src/tecs/init.tl` and
---- with each other, and the sidebar has one row per page. A fifth, that a
---- page's committed reference matches a fresh render, went with the thing it
---- checked: the render happens here now, so there is no second copy to drift.
+--- documents, the homepage listing agrees with `src/tecs/init.tl`, and the
+--- sidebar has one row per page. A fifth, that a page's committed reference
+--- matches a fresh render, went with the thing it checked: the render happens
+--- here now, so there is no second copy to drift.
 local function checkPages(context)
     local top, sub, root = publicNames()
 
@@ -667,6 +677,7 @@ local function checkPages(context)
             known["tecs." .. name] = true
         end
     end
+    known["tecs"] = true
     for name in pairs(DIRECT_PUBLIC_MODULES) do
         known[name] = true
     end
@@ -693,19 +704,16 @@ local function checkPages(context)
         end
     end
     expected = table.concat(expected, "\n")
-    for _, listing in ipairs({ "docs/modules/index.md", "docs/index.md" }) do
-        local names = table.concat(listed(readTree(listing)), "\n")
-        if names ~= expected then
-            error(
-                listing
-                    .. " does not list the modules in the expected order.\n"
-                    .. "One alphabetical list, ignoring case, in both places. Expected:\n"
-                    .. expected
-                    .. "\n\nFound:\n"
-                    .. names,
-                0
-            )
-        end
+    local names = table.concat(listed(readTree("docs/index.md")), "\n")
+    if names ~= expected then
+        error(
+            "docs/index.md does not list the modules in the expected order.\n"
+                .. "List every public name alphabetically, ignoring case. Expected:\n"
+                .. expected
+                .. "\n\nFound:\n"
+                .. names,
+            0
+        )
     end
 
     local navigable = {}
@@ -809,6 +817,7 @@ return {
             -- formatter here is the one `product.rs` pins. Authored fences are
             -- left as written.
             format_generated_code = true,
+            constructor_pattern = "^new",
             custom_css = "docs/site.css",
             -- Scintillua's lexers, installed by `cargo xtask dev-tools` at
             -- the revision `product.rs` pins. They cover every language on
