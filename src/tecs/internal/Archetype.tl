@@ -53,6 +53,12 @@ local record Archetype is ArchetypeInternal
     -- looped into the bitset, so the mark costs a boolean store on a
     -- path that runs per structural operation. Cleared with the bits.
     _allDirty: boolean
+    -- Monotonic count of value writes to columns whose component asked to
+    -- be counted, and never reset. The bitset above answers the same
+    -- question for one frame; this answers it for a consumer whose read is
+    -- not scoped to one, so a write it never got to see is still a
+    -- difference here afterwards. See `valueCount`.
+    _valueCount: integer
 
     -- Structural residue: which rows the structural changes since
     -- `_residueFrom` actually wrote. Whole columns are what a structural
@@ -184,6 +190,11 @@ end
 
 -- The first mutable access sets the dirty bit; repeated calls are O(1)
 -- no-ops after the membership check.
+--
+-- The count is bumped per call rather than with the bit, because the bit's
+-- window is the frame and the count's reader is not: a second write in the
+-- same frame finds the bit already set, and deduplicating against it would
+-- lose exactly the write a reader that has already run this frame is owed.
 function Archetype:getMut<T is Component>(component: T): {T}
     local column = rawget(self.columns, component)
     if column then
@@ -194,6 +205,9 @@ function Archetype:getMut<T is Component>(component: T): {T}
         if idx and not self._componentDirty:get(idx) then
             self._componentDirty:set(idx)
             self._dirtySet[self] = true
+        end
+        if (component as ComponentInternal).valueCounted then
+            self._valueCount = self._valueCount + 1
         end
     end
     local proxy = rawget(self as table, component)
@@ -776,15 +790,6 @@ function Archetype:isComponentDirty(component: Component): boolean
     return self._allDirty or self._componentDirty:get(idx)
 end
 
---- Whether a value write dirtied this component, ignoring structural change.
-function Archetype:isComponentValueDirty(component: Component): boolean
-    local idx = self.columnIndexByComponent[component]
-    if not idx then
-        return false
-    end
-    return self._componentDirty:get(idx)
-end
-
 function Archetype:anyComponentDirty(): boolean
     -- The column count guards the flag because an archetype with no
     -- columns has nothing to report dirty, which is the answer the bitset
@@ -801,6 +806,24 @@ end
 --- archetype's rows up to date, and the same answer later means no row moved.
 function Archetype:structuralCount(): integer
     return self._structCount
+end
+
+--- Value writes to counted columns, counted and never reset.
+---
+--- The value analogue of `structuralCount`, and it exists for the same reason:
+--- a consumer records the answer when it last brought its own copy of the
+--- archetype's values up to date, and the same answer later means no counted
+--- column has been written since. The dirty bits cannot answer that, because
+--- they clear at the end of every update and a write made after the consumer
+--- ran is wiped before it looks again.
+---
+--- Which columns count is the component's own opt-in, through
+--- `ComponentInternal.valueCounted`, so a column nothing reads this way costs
+--- nothing. `markAllComponentsDirty` is not counted here: it says every column
+--- of every row was written and says nothing about which, which is a
+--- structural answer, and `structuralCount` is where it lands.
+function Archetype:valueCount(): integer
+    return self._valueCount
 end
 
 --- Whether the residue still names the rows every structural change since
@@ -846,6 +869,10 @@ function Archetype:markComponentDirty(component: Component)
     if not self._componentDirty:get(idx) then
         self._componentDirty:set(idx)
         self._dirtySet[self] = true
+    end
+    -- Per call, for the reason `getMut` gives.
+    if (component as ComponentInternal).valueCounted then
+        self._valueCount = self._valueCount + 1
     end
 end
 
@@ -1052,6 +1079,7 @@ function Archetype.new(
         _observers = {},
         _allDirty = false,
         _structCount = 0,
+        _valueCount = 0,
         _residueFrom = 0,
         _addedFrom = 0,
         -- Sized once here rather than grown a row at a time, so a frame of

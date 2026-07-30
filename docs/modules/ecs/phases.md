@@ -72,6 +72,13 @@ Extraction runs in `RenderFirst`. A system that changes what the current frame
 draws must run before extraction. `PostUpdate` provides the last general phase
 for that work.
 
+A change made after extraction draws one frame late rather than never. Spawning,
+despawning, and writing a component the renderer draws from all reach the
+instance buffer on the next frame's extraction, even though the frame's dirty
+marks are cleared in between. Latency is the whole of the cost, so a system that
+has to run in `Render`, `PostRender`, `RenderLast`, or `Last` is free to write;
+one that needs the current frame to show its change still belongs earlier.
+
 GPU submission does not run as a system. After `world:update` returns,
 `Application` acquires a frame, calls `Renderer:render`, and submits it.
 `Render`, `PostRender`, and `RenderLast` remain available to game systems even

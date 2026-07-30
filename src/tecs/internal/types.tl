@@ -101,8 +101,11 @@ local record internal
         -- structural change wrote. `isComponentDirty` on the public surface
         -- answers for both together; a consumer that can rewrite single rows
         -- rather than whole columns needs them separated, and these are that
-        -- separation. See `tecs.internal.Archetype` for the contract on each.
-        isComponentValueDirty: function(self, component: types.components.Component): boolean
+        -- separation. They are counts rather than flags for the other reason
+        -- such a consumer exists: a flag clears with the frame, and one whose
+        -- work runs before the frame's later phases would never see what they
+        -- changed. See `tecs.internal.Archetype` for the contract on each.
+        valueCount: function(self): integer
         structuralCount: function(self): integer
         structuralDescribed: function(self, count: integer): boolean
         structuralAdded: function(self): integer
@@ -304,6 +307,18 @@ local record internal
         --- True iff this component is runtime-only and should not be written
         --- to snapshots.
         transient: boolean
+
+        --- True iff value writes to this component's columns are counted on
+        --- `ArchetypeInternal.valueCount`. Nil until a consumer sets it, which
+        --- reads as off.
+        ---
+        --- A consumer sets it for the columns it reads and no others: the count
+        --- is one number per archetype, so a column counted for nobody's
+        --- benefit reports a change to everybody. It lives on the component
+        --- rather than in a per-archetype cache so it takes effect on
+        --- archetypes that already exist, which is the ordering a consumer
+        --- loaded lazily cannot otherwise guarantee.
+        valueCounted: boolean
 
         --- Fast-path flag: true iff `requires` is non-empty. Set at
         --- registration so dispatch can short-circuit the closure walk.
