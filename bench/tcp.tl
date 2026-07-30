@@ -181,7 +181,10 @@ local function listen(): binaryIO.Server, integer
             return server, port
         end
     end
-    error(format("bench: no loopback TCP port is available from %d through %d", FIRST_PORT, FIRST_PORT + PORT_COUNT - 1), 0)
+    error(
+        format("bench: no loopback TCP port is available from %d through %d", FIRST_PORT, FIRST_PORT + PORT_COUNT - 1),
+        0
+    )
 end
 
 local function resolved(): binaryIO.Address
@@ -193,9 +196,7 @@ local function resolved(): binaryIO.Address
     return future.value
 end
 
-local function connected(
-    address: binaryIO.Address, server: binaryIO.Server, port: integer
-): Connection, Connection
+local function connected(address: binaryIO.Address, server: binaryIO.Server, port: integer): Connection, Connection
     local future <const> = ioModule.connect(address, port)
     future:wait(TIMEOUT_MS)
     if future.status ~= "ready" then
@@ -426,13 +427,7 @@ local function run()
         if VALIDATE then
             print(format("tcp: correctness only, %d chunks of %d bytes", CHUNKS, CHUNK))
         else
-            print(format(
-                "tcp: %d samples after %d warmup, %d chunks of %d bytes",
-                SAMPLES,
-                WARMUP,
-                CHUNKS,
-                CHUNK
-            ))
+            print(format("tcp: %d samples after %d warmup, %d chunks of %d bytes", SAMPLES, WARMUP, CHUNKS, CHUNK))
             print(
                 format(
                     "%-8s %9s %6s %8s %9s %9s %10s %10s %10s %10s %10s %11s",
@@ -462,13 +457,7 @@ local function run()
                     local count <const> = case.operation()
                     if count ~= BYTES_PER_OPERATION then
                         error(
-                            format(
-                                "bench: tcp %s processed %d of %d bytes",
-                                case.label,
-                                count,
-                                BYTES_PER_OPERATION
-                            ),
-                            0
+                            format("bench: tcp %s processed %d of %d bytes", case.label, count, BYTES_PER_OPERATION), 0
                         )
                     end
                 else
@@ -477,12 +466,14 @@ local function run()
             end
         end
         if VALIDATE then
-            print(format(
-                "validated %d bytes across %d TCP paths with CRC-32 %s",
-                BYTES_PER_OPERATION,
-                selectedCount,
-                expectedHash
-            ))
+            print(
+                format(
+                    "validated %d bytes across %d TCP paths with CRC-32 %s",
+                    BYTES_PER_OPERATION,
+                    selectedCount,
+                    expectedHash
+                )
+            )
         end
     end) as (boolean, any)
 

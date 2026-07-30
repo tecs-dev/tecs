@@ -14,9 +14,7 @@ local loader <const> = require("tecs.ffi.loader")
 loader.declare("sdl3")
 loader.declare("sdl3ttf")
 
-local namespace <const>, libraryPath <const> = loader.library(
-    "SDL3_ttf", "sdl3_ttf", "TECS_SDL3TTF_PATH", "sdl3ttf"
-)
+local namespace <const>, libraryPath <const> = loader.library("SDL3_ttf", "sdl3_ttf", "TECS_SDL3TTF_PATH", "sdl3ttf")
 
 --- The SDL3_ttf library, reached through the generated cdef.
 local record sdl3ttf
