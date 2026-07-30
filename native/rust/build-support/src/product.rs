@@ -23,6 +23,19 @@ pub const TEALDOC_REVISION: &str = "dcb4a95c9d53011b7047f0c32d14e4fe0bac7119";
 // language that is not Teal; Teal keeps the compiler's own lexer.
 pub const SCINTILLUA_REVISION: &str = "b9986ecad77b1ea73d75bf1e82e6e0fd3b4958b1";
 pub const BUSTED_VERSION: &str = "2.2.0-1";
+// Teal type definitions for the modules this tree requires from outside itself.
+// They are declarations a checker reads and nothing links, so they ship nothing
+// and no notice covers them, which is why they are versions rather than
+// revisions like the projects the packaged build compiles.
+//
+// LuaJIT's are not optional: `ffi`, `bit`, `jit`, `string.buffer`, `table.new`
+// and `table.clear` are what `src` reaches for, so without this rock
+// `cargo xtask check` fails with `module not found: 'ffi'` in every file that
+// touches the FFI. Busted's and Luassert's type the Teal specs under
+// `spec/tecs`.
+pub const LUAJIT_TYPES_VERSION: &str = "0.0.2-1";
+pub const BUSTED_TYPES_VERSION: &str = "0.0.1-1";
+pub const LUASSERT_TYPES_VERSION: &str = "0.0.1-1";
 pub const SDL3_VERSION: &str = "3.4.12";
 pub const SDL3_REVISION: &str = "f87239e71e42da91ca317a12eefb82cfbf3393eb";
 pub const SDL3_MIXER_VERSION: &str = "3.2.4";
@@ -1568,6 +1581,7 @@ fn stage_content(
     )?;
     staging::tools(
         &root.join("vendor/share/lua/5.1"),
+        &root.join("src"),
         &root.join("vendor/licenses"),
         &paths.lua.join("tecstools"),
     )?;

@@ -2,11 +2,14 @@
 
 set -eu
 
-: "${TL_REF:?Run this through make dev-tools}"
-: "${CERULEAN_REF:?Run this through make dev-tools}"
-: "${TEALDOC_REF:?Run this through make dev-tools}"
+: "${TL_REF:?Run this through cargo xtask dev-tools}"
+: "${CERULEAN_REF:?Run this through cargo xtask dev-tools}"
+: "${TEALDOC_REF:?Run this through cargo xtask dev-tools}"
 : "${BUSTED_VERSION:?Run this through cargo xtask dev-tools}"
-: "${SCINTILLUA_REF:?Run this through make dev-tools}"
+: "${LUAJIT_TYPES_VERSION:?Run this through cargo xtask dev-tools}"
+: "${BUSTED_TYPES_VERSION:?Run this through cargo xtask dev-tools}"
+: "${LUASSERT_TYPES_VERSION:?Run this through cargo xtask dev-tools}"
+: "${SCINTILLUA_REF:?Run this through cargo xtask dev-tools}"
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 vendor="$repo/vendor"
@@ -54,6 +57,22 @@ luarocks install \
     --lua-version=5.1 \
     busted \
     "$BUSTED_VERSION"
+
+# Teal type definitions for the modules this tree requires from outside itself.
+# The compiler reads them out of `vendor/share/lua/5.1`, which is what
+# `cargo xtask check` and every `tl gen` here pass as an include directory, so a
+# checkout without them fails to type-check in every file that touches the FFI
+# rather than failing to find a tool. They were absent from this script for long
+# enough that only checkouts with an earlier manual install could be checked at
+# all, so nothing here is allowed to depend on them arriving another way.
+for rock in \
+    "luajit-tl-type $LUAJIT_TYPES_VERSION" \
+    "busted-tl-type $BUSTED_TYPES_VERSION" \
+    "luassert-tl-type $LUASSERT_TYPES_VERSION"; do
+    # Word splitting is what pairs the name with its version here.
+    # shellcheck disable=SC2086
+    luarocks install --tree="$vendor" --lua-version=5.1 $rock
+done
 
 # The documentation site's lexers for every language that is not Teal. Pure
 # Lua, so this is a checkout and a copy rather than a build: tealdoc reads them

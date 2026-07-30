@@ -167,6 +167,10 @@ enum Generator {
     Tools {
         #[arg(long)]
         vendor: PathBuf,
+        /// The repository's own Teal sources, which carry the declarations no
+        /// rock provides.
+        #[arg(long)]
+        source: PathBuf,
         #[arg(long)]
         licenses: PathBuf,
         #[arg(long)]
@@ -342,10 +346,11 @@ fn main() -> Result<()> {
             }
             Generator::Tools {
                 vendor,
+                source,
                 licenses,
                 out,
             } => {
-                staging::tools(&vendor, &licenses, &out)?;
+                staging::tools(&vendor, &source, &licenses, &out)?;
             }
             Generator::Tooling {
                 teal,
@@ -381,6 +386,9 @@ fn install_dev_tools(root: &std::path::Path) -> Result<()> {
         .env("CERULEAN_REF", product::CERULEAN_REVISION)
         .env("TEALDOC_REF", product::TEALDOC_REVISION)
         .env("BUSTED_VERSION", product::BUSTED_VERSION)
+        .env("LUAJIT_TYPES_VERSION", product::LUAJIT_TYPES_VERSION)
+        .env("BUSTED_TYPES_VERSION", product::BUSTED_TYPES_VERSION)
+        .env("LUASSERT_TYPES_VERSION", product::LUASSERT_TYPES_VERSION)
         .env("SCINTILLUA_REF", product::SCINTILLUA_REVISION)
         .current_dir(root)
         .status()?;
