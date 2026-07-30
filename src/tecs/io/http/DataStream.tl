@@ -149,7 +149,7 @@ local record datastream
     end
 
     newStringStream: function(text: string, contentType?: string): DataStream
-    newBytesStream: function(pointer: loader.CValue, length: integer, contentType?: string): DataStream
+    newByteStream: function(pointer: loader.CValue, length: integer, contentType?: string): DataStream
     newFileStream: function(path: string, contentType?: string): DataStream
     newHandleStream: function(handle: FILE, length?: integer, contentType?: string): DataStream
 end
@@ -176,12 +176,12 @@ function datastream.newStringStream(text: string, contentType?: string): DataStr
     return self
 end
 
-function datastream.newBytesStream(pointer: loader.CValue, length: integer, contentType?: string): DataStream
+function datastream.newByteStream(pointer: loader.CValue, length: integer, contentType?: string): DataStream
     if pointer == nil then
-        error("tecs: io.http.newBytesStream needs a buffer", 2)
+        error("tecs: io.http.newByteStream needs a buffer", 2)
     end
     if length == nil or length < 0 then
-        error("tecs: io.http.newBytesStream needs a length", 2)
+        error("tecs: io.http.newByteStream needs a length", 2)
     end
     local self <const> = newStream("bytes", contentType)
     self._pointer = pointer

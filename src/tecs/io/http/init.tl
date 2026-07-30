@@ -77,7 +77,7 @@ local record http
     --- @param contentType Nil sends no `Content-Type` rather than guessing
     ---     one.
     --- @return A source-only stream.
-    newBytesStream: function(pointer: loader.CValue, length: integer, contentType?: string): DataStream
+    newByteStream: function(pointer: loader.CValue, length: integer, contentType?: string): DataStream
 
     --- Creates a stream over a path read and written through `tecs.io.files`.
     ---
@@ -134,7 +134,7 @@ end
 http.DataStream = datastream.DataStream
 http.plugin = plugin
 http.newStringStream = datastream.newStringStream
-http.newBytesStream = datastream.newBytesStream
+http.newByteStream = datastream.newByteStream
 http.newFileStream = datastream.newFileStream
 http.newHandleStream = datastream.newHandleStream
 http.newClient = client.newClient
