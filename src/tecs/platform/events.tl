@@ -255,94 +255,183 @@ end
 --- the one this module states everywhere: read it, or copy it with
 --- `events.copy`, but do not keep it.
 local record KindTypes
+    --- Read-only. Exposes the `"quit"` event type.
     quit: Event
+    --- Read-only. Exposes the `"terminating"` event type.
     terminating: Event
+    --- Read-only. Exposes the `"lowMemory"` event type.
     lowMemory: Event
+    --- Read-only. Exposes the `"appWillEnterBackground"` event type.
     appWillEnterBackground: Event
+    --- Read-only. Exposes the `"appDidEnterBackground"` event type.
     appDidEnterBackground: Event
+    --- Read-only. Exposes the `"appWillEnterForeground"` event type.
     appWillEnterForeground: Event
+    --- Read-only. Exposes the `"appDidEnterForeground"` event type.
     appDidEnterForeground: Event
+    --- Read-only. Exposes the `"localeChanged"` event type.
     localeChanged: Event
+    --- Read-only. Exposes the `"themeChanged"` event type.
     themeChanged: Event
+    --- Read-only. Exposes the `"displayOrientation"` event type.
     displayOrientation: Event
+    --- Read-only. Exposes the `"displayAdded"` event type.
     displayAdded: Event
+    --- Read-only. Exposes the `"displayRemoved"` event type.
     displayRemoved: Event
+    --- Read-only. Exposes the `"displayMoved"` event type.
     displayMoved: Event
+    --- Read-only. Exposes the `"displayScaleChanged"` event type.
     displayScaleChanged: Event
+    --- Read-only. Exposes the `"displayDesktopModeChanged"` event type.
     displayDesktopModeChanged: Event
+    --- Read-only. Exposes the `"displayCurrentModeChanged"` event type.
     displayCurrentModeChanged: Event
+    --- Read-only. Exposes the `"displayUsableBoundsChanged"` event type.
     displayUsableBoundsChanged: Event
+    --- Read-only. Exposes the `"windowShown"` event type.
     windowShown: Event
+    --- Read-only. Exposes the `"windowHidden"` event type.
     windowHidden: Event
+    --- Read-only. Exposes the `"windowExposed"` event type.
     windowExposed: Event
+    --- Read-only. Exposes the `"windowMoved"` event type.
     windowMoved: Event
+    --- Read-only. Exposes the `"windowResized"` event type.
     windowResized: Event
+    --- Read-only. Exposes the `"windowPixelSizeChanged"` event type.
     windowPixelSizeChanged: Event
+    --- Read-only. Exposes the `"windowMinimized"` event type.
     windowMinimized: Event
+    --- Read-only. Exposes the `"windowMaximized"` event type.
     windowMaximized: Event
+    --- Read-only. Exposes the `"windowRestored"` event type.
     windowRestored: Event
+    --- Read-only. Exposes the `"windowMouseEnter"` event type.
     windowMouseEnter: Event
+    --- Read-only. Exposes the `"windowMouseLeave"` event type.
     windowMouseLeave: Event
+    --- Read-only. Exposes the `"windowFocusGained"` event type.
     windowFocusGained: Event
+    --- Read-only. Exposes the `"windowFocusLost"` event type.
     windowFocusLost: Event
+    --- Read-only. Exposes the `"windowCloseRequested"` event type.
     windowCloseRequested: Event
+    --- Read-only. Exposes the `"windowDisplayChanged"` event type.
     windowDisplayChanged: Event
+    --- Read-only. Exposes the `"windowDisplayScaleChanged"` event type.
     windowDisplayScaleChanged: Event
+    --- Read-only. Exposes the `"windowSafeAreaChanged"` event type.
     windowSafeAreaChanged: Event
+    --- Read-only. Exposes the `"windowOccluded"` event type.
     windowOccluded: Event
+    --- Read-only. Exposes the `"windowEnterFullscreen"` event type.
     windowEnterFullscreen: Event
+    --- Read-only. Exposes the `"windowLeaveFullscreen"` event type.
     windowLeaveFullscreen: Event
+    --- Read-only. Exposes the `"keyDown"` event type.
     keyDown: Event
+    --- Read-only. Exposes the `"keyUp"` event type.
     keyUp: Event
+    --- Read-only. Exposes the `"textEditing"` event type.
     textEditing: Event
+    --- Read-only. Exposes the `"textCandidates"` event type.
     textCandidates: Event
+    --- Read-only. Exposes the `"textInput"` event type.
     textInput: Event
+    --- Read-only. Exposes the `"keymapChanged"` event type.
     keymapChanged: Event
+    --- Read-only. Exposes the `"keyboardAdded"` event type.
     keyboardAdded: Event
+    --- Read-only. Exposes the `"keyboardRemoved"` event type.
     keyboardRemoved: Event
+    --- Read-only. Exposes the `"screenKeyboardShown"` event type.
     screenKeyboardShown: Event
+    --- Read-only. Exposes the `"screenKeyboardHidden"` event type.
     screenKeyboardHidden: Event
+    --- Read-only. Exposes the `"mouseMotion"` event type.
     mouseMotion: Event
+    --- Read-only. Exposes the `"mouseDown"` event type.
     mouseDown: Event
+    --- Read-only. Exposes the `"mouseUp"` event type.
     mouseUp: Event
+    --- Read-only. Exposes the `"mouseWheel"` event type.
     mouseWheel: Event
+    --- Read-only. Exposes the `"mouseAdded"` event type.
     mouseAdded: Event
+    --- Read-only. Exposes the `"mouseRemoved"` event type.
     mouseRemoved: Event
+    --- Read-only. Exposes the `"fingerDown"` event type.
     fingerDown: Event
+    --- Read-only. Exposes the `"fingerUp"` event type.
     fingerUp: Event
+    --- Read-only. Exposes the `"fingerMotion"` event type.
     fingerMotion: Event
+    --- Read-only. Exposes the `"fingerCanceled"` event type.
     fingerCanceled: Event
+    --- Read-only. Exposes the `"pinchBegin"` event type.
     pinchBegin: Event
+    --- Read-only. Exposes the `"pinchUpdate"` event type.
     pinchUpdate: Event
+    --- Read-only. Exposes the `"pinchEnd"` event type.
     pinchEnd: Event
+    --- Read-only. Exposes the `"penProximityIn"` event type.
     penProximityIn: Event
+    --- Read-only. Exposes the `"penProximityOut"` event type.
     penProximityOut: Event
+    --- Read-only. Exposes the `"penDown"` event type.
     penDown: Event
+    --- Read-only. Exposes the `"penUp"` event type.
     penUp: Event
+    --- Read-only. Exposes the `"penMotion"` event type.
     penMotion: Event
+    --- Read-only. Exposes the `"penButtonDown"` event type.
     penButtonDown: Event
+    --- Read-only. Exposes the `"penButtonUp"` event type.
     penButtonUp: Event
+    --- Read-only. Exposes the `"penAxis"` event type.
     penAxis: Event
+    --- Read-only. Exposes the `"gamepadAdded"` event type.
     gamepadAdded: Event
+    --- Read-only. Exposes the `"gamepadRemoved"` event type.
     gamepadRemoved: Event
+    --- Read-only. Exposes the `"gamepadRemapped"` event type.
     gamepadRemapped: Event
+    --- Read-only. Exposes the `"gamepadButtonDown"` event type.
     gamepadButtonDown: Event
+    --- Read-only. Exposes the `"gamepadButtonUp"` event type.
     gamepadButtonUp: Event
+    --- Read-only. Exposes the `"gamepadAxis"` event type.
     gamepadAxis: Event
+    --- Read-only. Exposes the `"gamepadSensor"` event type.
     gamepadSensor: Event
+    --- Read-only. Exposes the `"gamepadTouchpadDown"` event type.
     gamepadTouchpadDown: Event
+    --- Read-only. Exposes the `"gamepadTouchpadUp"` event type.
     gamepadTouchpadUp: Event
+    --- Read-only. Exposes the `"gamepadTouchpadMotion"` event type.
     gamepadTouchpadMotion: Event
+    --- Read-only. Exposes the `"dropFile"` event type.
     dropFile: Event
+    --- Read-only. Exposes the `"dropText"` event type.
     dropText: Event
+    --- Read-only. Exposes the `"dropBegin"` event type.
     dropBegin: Event
+    --- Read-only. Exposes the `"dropComplete"` event type.
     dropComplete: Event
+    --- Read-only. Exposes the `"dropPosition"` event type.
     dropPosition: Event
+    --- Read-only. Exposes the `"clipboardUpdate"` event type.
     clipboardUpdate: Event
+    --- Read-only. Exposes the `"audioDeviceAdded"` event type.
     audioDeviceAdded: Event
+    --- Read-only. Exposes the `"audioDeviceRemoved"` event type.
     audioDeviceRemoved: Event
+    --- Read-only. Exposes the `"audioDeviceFormatChanged"` event type.
     audioDeviceFormatChanged: Event
+    --- Read-only. Exposes the `"sensorUpdate"` event type.
     sensorUpdate: Event
+    --- Read-only. Exposes the `"user"` event type.
     user: Event
     --- Read-only. Selects an event kind this build has no name for. Such an
     --- event carries `sdlType` and nothing else worth reading.
