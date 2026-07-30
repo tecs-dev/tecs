@@ -785,7 +785,7 @@ caller holds a distinct object, so a future stays usable as a map key, which
 three subsystems here already rely on.
 
 Files a game interprets itself go through `files.read` or
-`assets.loadBytes`, which are the two sanctioned ways to get bytes out of the
+`assets.loadString`, which are the two sanctioned ways to get bytes out of the
 content root: on Android content lives inside the package and `io.open` does not
 reach it. Both answer bytes rather than text, so an image, an archive or a
 binary sidecar comes back whole and being text is a decoder's opinion. The
@@ -801,7 +801,7 @@ local level = tecs.data.decodeJSON(bytes)
 
 `read` answers nil for a path with no file, so an absent document is
 distinguishable from a malformed one, which the decoder raises on.
-`loadBytes` reports the same absence as a failed future. It is not a stream:
+`loadString` reports the same absence as a failed future. It is not a stream:
 the worker sends one binary Lua string back, complete, and overlapping callers
 share that read while retaining futures of their own.
 
