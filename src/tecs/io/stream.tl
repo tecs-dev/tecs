@@ -27,6 +27,19 @@ local type WritableStream = types.WritableStream
 local type ReadWriteStream = types.ReadWriteStream
 local type Source = Future.Source
 
+local record BorrowedBytes
+    pointer: any
+    length: integer
+    owner: any
+end
+
+local newStringStream: function(text: string, contentType?: string): ReadableStream
+local newBufferStream: function(sourceBuffer: IOBuffer, contentType?: string): ReadWriteStream
+local newFileStream: function(path: string, contentType?: string): ReadWriteStream
+local withMetadata: function<T is Stream>(
+    source: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
+): T
+
 local CHUNK <const> = 64 * 1024
 -- Application polling shares this operation budget across every transfer.
 -- A step reads or writes at most CHUNK bytes, so one call performs at most
@@ -283,6 +296,129 @@ local function metadataBacking(stream: Stream): Stream
         stream = (stream as MetadataState)._source
     end
     return stream
+end
+
+local function borrowedBytes(source: ReadableStream): BorrowedBytes
+    if source == nil or not source:isReadable() or not source:isAvailable() then
+        return nil
+    end
+    local backing <const> = metadataBacking(source)
+    local mt <const> = getmetatable(backing as any) as any
+    if mt == (StringStreamMT as any) then
+        local text <const> = (backing as StringStream)._text
+        return {
+            pointer = ffi.cast("const uint8_t *", text),
+            length = #text,
+            owner = text,
+        }
+    elseif mt == (BufferStreamMT as any) then
+        local sourceBuffer <const> = (backing as BufferStream)._buffer
+        if sourceBuffer:isReleased() then
+            return nil
+        end
+        return {
+            pointer = sourceBuffer:getFFIPointer(),
+            length = sourceBuffer:length(),
+            owner = sourceBuffer,
+        }
+    elseif mt == (ByteStreamMT as any) then
+        local bytes <const> = backing as ByteStream
+        return {
+            pointer = bytes._pointer,
+            length = bytes._length,
+            owner = backing,
+        }
+    end
+    return nil
+end
+
+local function snapshotMetadata(source: Stream): string, integer, boolean
+    local contentTypeValue <const> = source:contentType()
+    local replayableValue <const> = source:isReplayable()
+    local lengthValue: integer = nil
+    local cursor = source
+    while isMetadataView(cursor) do
+        local metadata <const> = cursor as MetadataState
+        if lengthValue == nil and metadata._metadataLength ~= nil then
+            lengthValue = metadata._metadataLength
+        end
+        cursor = metadata._source
+    end
+    return contentTypeValue, lengthValue, replayableValue
+end
+
+local function snapshotStream(source: Stream, what: string): {string: any}
+    source = checkedStream(source, what, 3)
+    local contentTypeValue <const>, lengthValue <const>, replayableValue <const> = snapshotMetadata(source)
+    local backing <const> = metadataBacking(source)
+    local mt <const> = getmetatable(backing as any) as any
+    local saved: {string: any} = {
+        streamVersion = 1,
+        contentType = contentTypeValue,
+        contentLength = lengthValue,
+        isReplayable = replayableValue,
+    }
+    if mt == (StringStreamMT as any) then
+        saved.kind = "string"
+        saved.text = (backing as StringStream)._text
+    elseif mt == (BufferStreamMT as any) then
+        saved.kind = "buffer"
+        saved.bytes = (backing as BufferStream)._buffer:getString()
+    elseif mt == (ByteStreamMT as any) then
+        local bytes <const> = backing as ByteStream
+        saved.kind = "buffer"
+        saved.bytes = loader.toBytes(bytes._pointer, bytes._length)
+    elseif mt == (FileStreamMT as any) then
+        saved.kind = "file"
+        saved.path = (backing as FileStream)._path
+    elseif mt == (HandleStreamMT as any) then
+        error(("tecs: cannot snapshot %s: io.newHandleStream is runtime-only"):format(what), 0)
+    else
+        error(("tecs: cannot snapshot %s: custom Stream implementations are runtime-only"):format(what), 0)
+    end
+    return saved
+end
+
+local function restoredMetadata<T is Stream>(source: T, saved: {string: any}): T
+    local lengthValue = saved.streamVersion ~= nil and saved.contentLength as integer or nil
+    local replayableValue = saved.streamVersion ~= nil and saved.isReplayable as boolean or nil
+    return withMetadata(source, saved.contentType as string, lengthValue, replayableValue)
+end
+
+local function restoreStream(saved: {string: any}, what: string): Stream
+    if type(saved) ~= "table" then
+        error(("tecs: cannot restore %s: stream data is not a table"):format(what), 0)
+    end
+    local kind <const> = saved.kind as string
+    if kind == "string" then
+        local text = saved.text as string
+        if saved.streamVersion == nil then
+            text = saved._text as string
+        end
+        if type(text) ~= "string" then
+            error(("tecs: cannot restore %s: string stream has no bytes"):format(what), 0)
+        end
+        return restoredMetadata(newStringStream(text, saved.contentType as string), saved)
+    elseif kind == "buffer" then
+        local bytes <const> = saved.bytes as string
+        if type(bytes) ~= "string" then
+            error(("tecs: cannot restore %s: buffer stream has no bytes"):format(what), 0)
+        end
+        return restoredMetadata(newBufferStream(buffer.new(bytes), saved.contentType as string), saved)
+    elseif kind == "file" then
+        local path <const> = saved.path as string
+        if type(path) ~= "string" or path == "" then
+            error(("tecs: cannot restore %s: file stream has no path"):format(what), 0)
+        end
+        -- Legacy `length` was an observation made when the old descriptor was
+        -- constructed. Do not turn it into a permanent metadata override.
+        return restoredMetadata(newFileStream(path, saved.contentType as string), saved)
+    elseif kind == "bytes" then
+        error(("tecs: cannot restore %s: a persisted borrowed pointer is invalid"):format(what), 0)
+    elseif kind == "handle" then
+        error(("tecs: cannot restore %s: io.newHandleStream is runtime-only"):format(what), 0)
+    end
+    error(("tecs: cannot restore %s: unknown stream kind '%s'"):format(what, tostring(kind)), 0)
 end
 
 local function sharesBacking(source: Stream, destination: Stream): boolean
@@ -861,8 +997,6 @@ local function transferTo(source: ReadableStream, destination: WritableStream): 
     return transfer.future as Future<integer>
 end
 
-local newFileStream: function(path: string, contentType?: string): ReadWriteStream
-
 local function transferToFile(source: ReadableStream, path: string): Future<integer>
     if type(path) ~= "string" or path == "" then
         error("tecs: transferToFile needs a path", 3)
@@ -1329,7 +1463,7 @@ local function newEmptyStream(contentTypeValue?: string): ReadableStream
 end
 
 --- Creates a read-only stream retaining `text` without copying it.
-local function newStringStream(text: string, contentTypeValue?: string): ReadableStream
+newStringStream = function(text: string, contentTypeValue?: string): ReadableStream
     if type(text) ~= "string" then
         error("tecs: io.newStringStream needs a byte string", 2)
     end
@@ -1344,7 +1478,7 @@ local function newStringStream(text: string, contentTypeValue?: string): Readabl
 end
 
 --- Creates a stream retaining the caller's buffer.
-local function newBufferStream(sourceBuffer: IOBuffer, contentTypeValue?: string): ReadWriteStream
+newBufferStream = function(sourceBuffer: IOBuffer, contentTypeValue?: string): ReadWriteStream
     sourceBuffer = checkedBuffer(sourceBuffer, "io.newBufferStream", 2)
     if sourceBuffer:isReleased() then
         error("tecs: io.newBufferStream needs an open buffer", 2)
@@ -1546,7 +1680,7 @@ MetadataReadWriteStream.writeAll = metadataWriteAll
 MetadataReadWriteStream.writeBuffer = metadataWriteBuffer
 
 --- Returns a lazy metadata view preserving the source's concrete interface.
-local function withMetadata<T is Stream>(
+withMetadata = function<T is Stream>(
     source: T, contentTypeValue?: string, contentLengthValue?: integer, replayableValue?: boolean
 ): T
     source = checkedStream(source, "io.withMetadata", 2)
@@ -1637,6 +1771,10 @@ local record stream
     ): T
     poll: function(): integer
     pending: function(): integer
+    _check: function<T is Stream>(value: T, what: string, level: integer): T
+    _borrowBytes: function(source: ReadableStream): BorrowedBytes
+    _snapshot: function(source: Stream, what: string): {string: any}
+    _restore: function(saved: {string: any}, what: string): Stream
 end
 
 return {
@@ -1650,4 +1788,8 @@ return {
     withMetadata = withMetadata,
     poll = poll,
     pending = pending,
+    _check = checkedStream,
+    _borrowBytes = borrowedBytes,
+    _snapshot = snapshotStream,
+    _restore = restoreStream,
 } as stream

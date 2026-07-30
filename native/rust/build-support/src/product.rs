@@ -375,11 +375,11 @@ pub fn test_package(root: &Path, preset: Preset) -> Result<()> {
 
 pub fn benchmark(root: &Path, preset: Preset, name: &str, arguments: &[OsString]) -> Result<()> {
     let source = match name {
-        "shapes" | "physics" | "sprites" | "text" | "particles" | "latency" => name,
+        "shapes" | "physics" | "sprites" | "text" | "particles" | "latency" | "http" => name,
         "alloc" | "allocation" => "allocation",
         _ => anyhow::bail!(
             "unknown host benchmark {name:?}; expected shapes, physics, sprites, text, \
-             particles, latency, or allocation"
+             particles, latency, http, or allocation"
         ),
     };
     let executable = build(root, preset)?;

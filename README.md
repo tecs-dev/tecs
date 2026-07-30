@@ -1728,30 +1728,42 @@ what ends a client rather than losing the last reference to it, and the
 alternative -- a weak list -- is a fire-and-forget request that stops moving
 whenever a collection happens to run.
 
-**A body is one value.** The first shape had five: `body`, `bodyBytes` with
-`bodyLength` beside it, `into`, and a response whose `body` was nil exactly when
-its `path` was not. All of them answer one question, so they became one type. A
-`DataStream` is a string, a buffer, a path or a handle, and it reports a length
-when something can know one.
+**A body uses the same `tecs.io.Stream` as every other binary source and
+destination.** The first shape had five fields and then grew an HTTP-only
+`DataStream` with another set of readers, writers and constructors. Both were
+parallel vocabularies for bytes. A request now takes a string or
+`ReadableStream`, `into` takes a path or `WritableStream`, and a response always
+returns a `Stream`. Metadata stays on methods because a file can change between
+calls, and readers and writers are endpoints with their own cursors rather than
+state hidden on the descriptor.
 
-What the type is for is `into`, which existed so a 500 MB download would not be
-a 500 MB Lua string and was exactly that. Now the bounded Rust queue holds
-what has arrived, the pump hands it to the destination and consumes it, and the
-next pump starts from empty, so a body bound for a file is held for a frame.
-That needed the storage seam to be able to open a file rather than only take
-one whole. The running total the ceiling is measured against is what keeps
-`maxBytes` meaning the same thing whether or not something is draining.
+The two directions are bounded. A file or custom request source is read into
+one reusable 64 KiB `Buffer` on the SDL thread and offered to a bounded Rust
+channel. A full channel refuses the piece before copying it, so backpressure
+holds the upload near one MiB rather than materializing it. In-memory strings,
+buffers and borrowed byte regions take a synchronous direct-pointer path;
+native code makes the one ownership copy before `send` returns.
 
-**A request body is not streamed.** A string, file, or handle is read at
-`send`, copied into Rust-owned request storage, and handed to Reqwest whole.
-That keeps Lua out of foreign-thread callbacks and makes ownership explicit.
-Streaming upload can be added as a bounded Rust channel when a real use needs
-it; the size bound in the meantime is stated rather than implied.
+Response chunks remain Reqwest `Bytes` until Lua drains the event. The default
+destination copies them directly into one growable `Buffer`, with no
+intermediate Lua strings. A caller-supplied writer receives the same chunks
+through one reusable scratch `Buffer`, and partial writes are retried. A file
+writer therefore adds no body-sized allocation in Lua or Rust. Native response
+pieces are capped at 64 KiB before entering a 64-slot queue, so queued response
+storage is bounded near four MiB. The running total is checked before queueing
+each chunk, which keeps `maxBytes` identical for memory and streaming
+destinations.
 
-A body is deliberately not a stream in the other sense either. It is only ever
-handed over settled, over a string that is complete or a file that is closed,
-because a stream the caller must close is a connection held until it does, which
-is the one shape a frame-driven client cannot take.
+The response future settles only after the destination writer closes, so the
+body handed to game code is complete even though its transfer was streamed.
+The descriptor remains useful afterwards when it is replayable, as files and
+owned buffers are. A one-shot handle correctly reports itself unavailable
+after its endpoint consumed it.
+
+`cargo xtask bench http` compares string, buffer, file and structural-reader
+uploads with default-buffer and structural-writer downloads over loopback. It
+reports p50 and p95 request latency and payload throughput, validates CRC-32
+for every body, and states both queue bounds beside the results.
 
 ## Shelling out
 

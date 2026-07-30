@@ -10,19 +10,26 @@ A response status is still an answer rather than a transfer failure: 404
 settles a ready future whose `Response:ok()` is false. DNS, TLS, connection,
 timeout, and body-limit errors settle a failed future.
 
-Bodies headed for a file or handle remain streamed. Rust places bounded
-chunks on the client's event queue, and each pump writes those chunks before
-asking for more. A request body is copied at `send`, as it was before.
+Request readers feed a bounded Rust upload channel from the SDL thread.
+Response chunks append to one owned buffer or pass through one reusable
+scratch buffer to the caller's writer. Neither direction lets a foreign thread
+enter LuaJIT, and neither file direction materializes the whole body.
 ]=]
 
 local ffi <const> = require("ffi")
 local loader <const> = require("tecs.ffi.loader")
 local log <const> = require("tecs.log")
 local Future <const> = require("tecs.Future")
-local datastream <const> = require("tecs.io.http.DataStream")
+local buffer <const> = require("tecs.io.buffer")
+local stream <const> = require("tecs.io.stream")
 local clients <const> = require("tecs.io.http.clients")
+local type iotypes = require("tecs.io.types")
 
 loader.declare("http")
+
+local copy <const> = ffi.copy
+local floor <const> = math.floor
+local max <const> = math.max
 
 local H <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "http")
 -- Externally configured logger name; it remains stable if this module moves.
@@ -38,6 +45,14 @@ local DEFAULT_MAX_CONNECTIONS_PER_HOST <const> = 6
 local EVENT_CHUNK <const> = 1
 local EVENT_COMPLETE <const> = 2
 local EVENT_FAILED <const> = 3
+local BODY_NONE <const> = 0
+local BODY_INLINE <const> = 1
+local BODY_UPLOAD <const> = 2
+local UPLOAD_CLOSED <const> = -1
+local UPLOAD_BACKPRESSURE <const> = 0
+local UPLOAD_ACCEPTED <const> = 1
+local CHUNK <const> = 64 * 1024
+local UPLOAD_STEPS <const> = 16
 
 local record client
     --- Settings copied when a client is built.
@@ -93,12 +108,12 @@ local record client
         method: string
         --- Caller-writable. Sets headers merged over the client's defaults.
         headers: {string: string}
-        --- Caller-writable. Sets bytes to send. A stream is read before `send`
-        --- returns.
-        body: string | DataStream
+        --- Caller-writable. Sets bytes to send. A stream opens one reader when
+        --- this request begins and feeds it through a bounded upload queue.
+        body: string | iotypes.ReadableStream
         --- Caller-writable. Sets where response chunks are written. A string
         --- is a file path.
-        into: string | DataStream
+        into: string | iotypes.WritableStream
         --- Caller-writable. Overrides the client's whole-transfer timeout.
         timeoutMs: number
         --- Caller-writable. Overrides the client's no-progress timeout.
@@ -116,7 +131,7 @@ local record client
         headers: {string: string}
         --- Read-only. Provides response bytes in memory or in the requested
         --- destination.
-        body: DataStream
+        body: iotypes.Stream
         --- Read-only. Reports the effective URL after redirects.
         url: string
 
@@ -128,11 +143,15 @@ local record client
         id: integer
         future: Future<Response>
         response: Response
-        sink: DataStream
-        chunks: {string}
-        chunkCount: integer
+        sink: iotypes.WritableStream
+        writer: iotypes.Writer
+        responseBuffer: iotypes.Buffer
+        responseScratch: iotypes.Buffer
+        sourceReader: iotypes.Reader
+        sourceScratch: iotypes.Buffer
+        sourcePending: integer
+        transferred: integer
         url: string
-        closed: boolean
     end
 
     --- A reqwest connection pool and `Future.Source`.
@@ -175,7 +194,9 @@ local record client
 end
 
 local type Options = client.Options
-local type DataStream = datastream.DataStream
+local type Stream = iotypes.Stream
+local type ReadableStream = iotypes.ReadableStream
+local type WritableStream = iotypes.WritableStream
 local type Request = client.Request
 local type Response = client.Response
 local type Transfer = client.Transfer
@@ -212,17 +233,38 @@ local function hostOf(url: string): string
     return host ~= nil and host ~= "" and host:lower() or nil
 end
 
-local function streamOf(given: string | DataStream, sending: boolean, what: string): DataStream
+local function sourceOf(given: string | ReadableStream): ReadableStream
     if given == nil then
         return nil
     end
     if given is string then
-        return sending and datastream.newStringStream(given) or datastream.newFileStream(given)
+        return nil
     end
-    if not datastream.DataStream.is(given) then
-        error(("tecs: %s is not a string or a DataStream"):format(what), 3)
+    local checked <const> = stream._check(given as Stream, "an HTTP request body", 3)
+    if not checked:isReadable() then
+        error("tecs: an HTTP request body needs a ReadableStream", 3)
     end
-    return given
+    if not checked:isAvailable() then
+        error("tecs: the HTTP request body is unavailable", 3)
+    end
+    return checked as ReadableStream
+end
+
+local function sinkOf(given: string | WritableStream): WritableStream
+    if given == nil then
+        return nil
+    end
+    if given is string then
+        return stream.newFileStream(given)
+    end
+    local checked <const> = stream._check(given as Stream, "an HTTP response destination", 3)
+    if not checked:isWritable() then
+        error("tecs: an HTTP response destination needs a WritableStream", 3)
+    end
+    if not checked:isAvailable() then
+        error("tecs: the HTTP response destination is unavailable", 3)
+    end
+    return checked as WritableStream
 end
 
 local function nativeError(): string
@@ -239,9 +281,14 @@ local function setSlice(slice: loader.CStruct, value?: string)
     slice.length = #value
 end
 
+local function setPointerSlice(slice: loader.CStruct, pointer: any, length: integer)
+    slice.data = pointer
+    slice.length = length
+end
+
 local function eventBytes(self: Client, event: loader.CPtr, accessor: loader.CValue): string
     local data <const> = accessor(event, self._eventSize)
-    local length <const> = math.floor(tonumber(self._eventSize[0]) or 0) as integer
+    local length <const> = floor(tonumber(self._eventSize[0]) or 0) as integer
     return loader.toBytes(data, length)
 end
 
@@ -265,18 +312,54 @@ local function release(self: Client, transfer: Transfer)
     self._pending = self._pending - 1
 end
 
-local function finishSink(transfer: Transfer): boolean, string
-    if transfer.sink == nil or transfer.closed then
+local function closeSource(transfer: Transfer)
+    if transfer.sourceReader ~= nil then
+        pcall(transfer.sourceReader.close, transfer.sourceReader)
+        transfer.sourceReader = nil
+    end
+    if transfer.sourceScratch ~= nil then
+        transfer.sourceScratch:release()
+        transfer.sourceScratch = nil
+    end
+    transfer.sourcePending = 0
+end
+
+local function finishWriter(transfer: Transfer, openEmpty: boolean): boolean, string
+    if transfer.sink == nil then
         return true
     end
-    transfer.closed = true
-    return transfer.sink:_finish()
+    if transfer.writer == nil and openEmpty then
+        local reason: string
+        transfer.writer, reason = transfer.sink:newWriter()
+        if transfer.writer == nil then
+            return false, reason
+        end
+    end
+    if transfer.writer == nil then
+        return true
+    end
+    local writer <const> = transfer.writer
+    transfer.writer = nil
+    return writer:close()
+end
+
+local function releaseResponseBuffers(transfer: Transfer)
+    if transfer.responseBuffer ~= nil then
+        transfer.responseBuffer:release()
+        transfer.responseBuffer = nil
+    end
+    if transfer.responseScratch ~= nil then
+        transfer.responseScratch:release()
+        transfer.responseScratch = nil
+    end
 end
 
 local function failTransfer(self: Client, transfer: Transfer, reason: string)
     H.tecsHttpClientCancel(self._handle, transfer.id)
     release(self, transfer)
-    local ok <const>, closeFailure = finishSink(transfer)
+    closeSource(transfer)
+    local ok <const>, closeFailure = finishWriter(transfer, false)
+    releaseResponseBuffers(transfer)
     if not ok and (reason == nil or reason == "") then
         reason = closeFailure
     end
@@ -287,8 +370,10 @@ local function completeTransfer(
     self: Client, transfer: Transfer, status: integer, rawHeaders: string, effectiveUrl: string
 )
     release(self, transfer)
-    local ok <const>, failure = finishSink(transfer)
+    closeSource(transfer)
+    local ok <const>, failure = finishWriter(transfer, true)
     if not ok then
+        releaseResponseBuffers(transfer)
         transfer.future:fail(("tecs: %s: %s"):format(transfer.url, failure or "response destination failed"))
         return
     end
@@ -298,70 +383,180 @@ local function completeTransfer(
     response.headers = parseHeaders(rawHeaders)
     response.url = effectiveUrl ~= "" and effectiveUrl or transfer.url
     if transfer.sink ~= nil then
-        transfer.sink.contentType = response.headers["content-type"]
-        response.body = transfer.sink
+        response.body = stream.withMetadata(
+            transfer.sink, response.headers["content-type"], transfer.transferred
+        ) as Stream
     else
-        response.body = datastream.newStringStream(table.concat(transfer.chunks), response.headers["content-type"])
+        if transfer.responseBuffer == nil then
+            transfer.responseBuffer = stream.newBuffer()
+        end
+        response.body = stream.newBufferStream(transfer.responseBuffer, response.headers["content-type"]) as Stream
+        transfer.responseBuffer = nil
+    end
+    if transfer.responseScratch ~= nil then
+        transfer.responseScratch:release()
+        transfer.responseScratch = nil
     end
     transfer.future:complete(response)
 end
 
-local function copyEvent(self: Client, pointer: loader.CPtr): integer, integer, string, string, string, integer
-    local kind <const> = math.floor(tonumber(H.tecsHttpEventKind(pointer)) or 0) as integer
-    local id <const> = math.floor(tonumber(H.tecsHttpEventId(pointer)) or 0) as integer
-    local data = ""
-    local headers = ""
-    local url = ""
-    local status = 0
-    if kind == EVENT_CHUNK then
-        data = eventBytes(self, pointer, H.tecsHttpEventData)
-    elseif kind == EVENT_COMPLETE then
-        status = math.floor(tonumber(H.tecsHttpEventStatus(pointer)) or 0) as integer
-        headers = eventBytes(self, pointer, H.tecsHttpEventHeaders)
-        url = eventBytes(self, pointer, H.tecsHttpEventUrl)
-    elseif kind == EVENT_FAILED then
-        data = eventBytes(self, pointer, H.tecsHttpEventError)
+local function writeChunk(self: Client, transfer: Transfer, pointer: loader.CPtr): string
+    local data <const> = H.tecsHttpEventData(pointer, self._eventSize)
+    local length <const> = floor(tonumber(self._eventSize[0]) or 0) as integer
+    if length == 0 then
+        return nil
     end
-    H.tecsHttpEventDestroy(pointer)
-    return kind, id, data, headers, url, status
+    if transfer.sink == nil then
+        if transfer.responseBuffer == nil then
+            transfer.responseBuffer = stream.newBuffer()
+        end
+        local offset <const> = transfer.responseBuffer:length()
+        local output <const>, previousLength = buffer.prepareWrite(transfer.responseBuffer, offset, length)
+        copy(output as ffi.CData, data as ffi.CData, length)
+        buffer.commitWrite(transfer.responseBuffer, offset, length, previousLength)
+    else
+        if transfer.writer == nil then
+            local reason: string
+            transfer.writer, reason = transfer.sink:newWriter()
+            if transfer.writer == nil then
+                return reason or "cannot open response destination"
+            end
+        end
+        if transfer.responseScratch == nil then
+            transfer.responseScratch = stream.newBuffer()
+        end
+        transfer.responseScratch:clear()
+        local output <const>, previousLength = buffer.prepareWrite(transfer.responseScratch, 0, length)
+        copy(output as ffi.CData, data as ffi.CData, length)
+        buffer.commitWrite(transfer.responseScratch, 0, length, previousLength)
+        local offset = 0
+        while offset < length do
+            local wrote <const>, reason = transfer.writer:writeFrom(transfer.responseScratch, offset, length - offset)
+            if wrote == nil then
+                return reason or "cannot write response"
+            end
+            if wrote <= 0 then
+                return "response writer made no progress"
+            end
+            offset = offset + wrote
+        end
+    end
+    transfer.transferred = transfer.transferred + length
+    return nil
 end
 
 local function handleEvent(self: Client, pointer: loader.CPtr): boolean
-    local kind <const>, id <const>, data <const>, headers <const>, url <const>, status <const> = copyEvent(
-        self, pointer
-    )
+    local kind <const> = floor(tonumber(H.tecsHttpEventKind(pointer)) or 0) as integer
+    local id <const> = floor(tonumber(H.tecsHttpEventId(pointer)) or 0) as integer
     local transfer <const> = self._byId[id]
     if transfer == nil then
+        H.tecsHttpEventDestroy(pointer)
         return false
     end
     if kind == EVENT_CHUNK then
-        if transfer.sink ~= nil then
-            local ok <const>, failure = transfer.sink:_write(data)
-            if not ok then
-                failTransfer(self, transfer, ("tecs: %s: %s"):format(transfer.url, failure or "cannot write response"))
-                return true
-            end
-        else
-            transfer.chunkCount = transfer.chunkCount + 1
-            transfer.chunks[transfer.chunkCount] = data
+        local ok <const>, failure = pcall(writeChunk, self, transfer, pointer) as (boolean, string)
+        H.tecsHttpEventDestroy(pointer)
+        if not ok then
+            failTransfer(self, transfer, ("tecs: %s: %s"):format(transfer.url, tostring(failure)))
+            return true
+        end
+        if failure ~= nil then
+            failTransfer(self, transfer, ("tecs: %s: %s"):format(transfer.url, failure))
+            return true
         end
         return false
     end
     if kind == EVENT_COMPLETE then
+        local status <const> = floor(tonumber(H.tecsHttpEventStatus(pointer)) or 0) as integer
+        local headers <const> = eventBytes(self, pointer, H.tecsHttpEventHeaders)
+        local url <const> = eventBytes(self, pointer, H.tecsHttpEventUrl)
+        H.tecsHttpEventDestroy(pointer)
         completeTransfer(self, transfer, status, headers, url)
         return true
     end
     if kind == EVENT_FAILED then
-        failTransfer(self, transfer, data)
+        local reason <const> = eventBytes(self, pointer, H.tecsHttpEventError)
+        H.tecsHttpEventDestroy(pointer)
+        failTransfer(self, transfer, reason)
         return true
     end
+    H.tecsHttpEventDestroy(pointer)
     failTransfer(self, transfer, ("tecs: %s: unknown HTTP event"):format(transfer.url))
     return true
 end
 
-local function turn(self: Client, waitMs: number): integer
+local function serviceUpload(self: Client, transfer: Transfer): boolean, boolean
+    local reader <const> = transfer.sourceReader
+    if reader == nil then
+        return false, false
+    end
+    if transfer.sourcePending == 0 then
+        transfer.sourceScratch:clear()
+        local ok <const>, count, reason = pcall(
+            reader.readInto, reader, transfer.sourceScratch, CHUNK, 0
+        ) as (boolean, integer, string)
+        if not ok then
+            failTransfer(self, transfer, ("tecs: %s: %s"):format(transfer.url, tostring(count)))
+            return true, true
+        end
+        if count == nil then
+            failTransfer(self, transfer, ("tecs: %s: %s"):format(transfer.url, reason or "cannot read request body"))
+            return true, true
+        end
+        if count == 0 then
+            local uploaded <const> = floor(
+                tonumber(H.tecsHttpClientUpload(self._handle, transfer.id, nil, 0, 1)) or UPLOAD_CLOSED
+            ) as integer
+            if uploaded ~= UPLOAD_BACKPRESSURE then
+                closeSource(transfer)
+            end
+            return false, true
+        end
+        transfer.sourcePending = count
+    end
+
+    local uploaded <const> = floor(
+        tonumber(
+            H.tecsHttpClientUpload(
+                self._handle, transfer.id, transfer.sourceScratch:getFFIPointer(), transfer.sourcePending, 0
+            )
+        ) or UPLOAD_CLOSED
+    ) as integer
+    if uploaded == UPLOAD_ACCEPTED then
+        transfer.sourcePending = 0
+        return false, true
+    end
+    if uploaded == UPLOAD_CLOSED then
+        closeSource(transfer)
+    end
+    return false, false
+end
+
+local function serviceUploads(self: Client): integer
     local settled = 0
-    local event = H.tecsHttpClientNext(self._handle, math.max(0, math.floor(waitMs))) as loader.CPtr
+    local steps = 0
+    for _, transfer in pairs(self._byId) do
+        while transfer.sourceReader ~= nil and steps < UPLOAD_STEPS do
+            local didSettle <const>, progressed <const> = serviceUpload(self, transfer)
+            if didSettle then
+                settled = settled + 1
+                break
+            end
+            if not progressed then
+                break
+            end
+            steps = steps + 1
+        end
+        if steps >= UPLOAD_STEPS then
+            break
+        end
+    end
+    return settled
+end
+
+local function turn(self: Client, waitMs: number): integer
+    local settled = serviceUploads(self)
+    local event = H.tecsHttpClientNext(self._handle, max(0, floor(waitMs))) as loader.CPtr
     while event ~= nil do
         if handleEvent(self, event) then
             settled = settled + 1
@@ -405,7 +600,7 @@ function Client:pending(): integer
     return self._pending
 end
 
-local function mergedHeaders(self: Client, request: Request, source: DataStream): {string: string}
+local function mergedHeaders(self: Client, request: Request, source: ReadableStream): {string: string}
     local merged: {string: string} = {}
     for name, value in pairs(self._options.headers or {}) do
         merged[name:lower()] = value
@@ -416,8 +611,11 @@ local function mergedHeaders(self: Client, request: Request, source: DataStream)
     if self._options.userAgent ~= nil and merged["user-agent"] == nil then
         merged["user-agent"] = self._options.userAgent
     end
-    if source ~= nil and source.contentType ~= nil and merged["content-type"] == nil then
-        merged["content-type"] = source.contentType
+    if source ~= nil and merged["content-type"] == nil then
+        local contentType <const> = source:contentType()
+        if contentType ~= nil then
+            merged["content-type"] = contentType
+        end
     end
     return merged
 end
@@ -430,33 +628,20 @@ function Client:send(request: Request): Future<Response>
         error("tecs: http send needs a request with a url", 2)
     end
 
-    local source <const> = streamOf(request.body, true, "a request body")
-    local sink <const> = streamOf(request.into, false, "into")
-    if sink ~= nil and not sink:writable() then
-        error(("tecs: a %s stream is not somewhere a body can be written"):format(sink.kind), 2)
-    end
-
     local url <const> = request.url
     local scheme <const> = schemeOf(url)
     if scheme ~= "http" and scheme ~= "https" then
         return Future.failed(("tecs: %s is not an http or https url"):format(url)) as Future<Response>
     end
 
-    local body = ""
-    if source ~= nil then
-        local failure: string
-        body, failure = source:text()
-        if body == nil then
-            return Future.failed(failure or "tecs: the request body could not be read") as Future<Response>
-        end
+    local givenBody <const> = request.body
+    local source <const> = sourceOf(givenBody)
+    local sink <const> = sinkOf(request.into)
+    local bodyText: string = nil
+    if givenBody is string then
+        bodyText = givenBody
     end
-
-    if sink ~= nil then
-        local ok <const>, failure = sink:_beginWrite()
-        if not ok then
-            return Future.failed(failure) as Future<Response>
-        end
-    end
+    local borrowed = source ~= nil and stream._borrowBytes(source) or nil
 
     local id <const> = nextId
     nextId = nextId + 1
@@ -466,11 +651,35 @@ function Client:send(request: Request): Future<Response>
         future = future,
         response = setmetatable({status = 0, headers = {}, url = url} as Response, ResponseMT),
         sink = sink,
-        chunks = {},
-        chunkCount = 0,
+        sourcePending = 0,
+        transferred = 0,
         url = url,
-        closed = false,
     }
+
+    local method <const> = (request.method or "GET"):upper()
+    local carries <const> = method == "POST" or method == "PUT" or method == "PATCH"
+    local bodyKind = BODY_NONE
+    local bodyLength = -1
+    if bodyText ~= nil then
+        bodyKind = BODY_INLINE
+        bodyLength = #bodyText
+    elseif borrowed ~= nil then
+        bodyKind = BODY_INLINE
+        bodyLength = borrowed.length
+    elseif source ~= nil then
+        local reader <const>, reason = source:newReader()
+        if reader == nil then
+            return Future.failed(reason or "tecs: the request body could not be opened") as Future<Response>
+        end
+        transfer.sourceReader = reader
+        transfer.sourceScratch = stream.newBuffer()
+        bodyKind = BODY_UPLOAD
+        bodyLength = source:contentLength() or -1
+    elseif carries then
+        bodyKind = BODY_INLINE
+        bodyLength = 0
+        bodyText = ""
+    end
 
     local merged <const> = mergedHeaders(self, request, source)
     local headerCount = 0
@@ -489,8 +698,6 @@ function Client:send(request: Request): Future<Response>
         end
     end
 
-    local method <const> = (request.method or "GET"):upper()
-    local carries <const> = method == "POST" or method == "PUT" or method == "PATCH"
     local nativeArray <const> = loader.newArray("TecsHttpRequest[1]")
     local native <const> = nativeArray[0] as loader.CStruct
     native.id = id
@@ -498,8 +705,15 @@ function Client:send(request: Request): Future<Response>
     setSlice(native.method as loader.CStruct, method)
     native.headers = nativeHeaders
     native.headerCount = headerCount
-    setSlice(native.body as loader.CStruct, body)
-    native.hasBody = (source ~= nil or carries) and 1 or 0
+    if bodyText ~= nil then
+        setSlice(native.body as loader.CStruct, bodyText)
+    elseif borrowed ~= nil then
+        setPointerSlice(native.body as loader.CStruct, borrowed.pointer, borrowed.length)
+    else
+        setSlice(native.body as loader.CStruct, nil)
+    end
+    native.bodyKind = bodyKind
+    native.bodyLength = bodyLength
     native.timeoutMs = request.timeoutMs or self._options.timeoutMs
     native.stallTimeoutMs = request.stallTimeoutMs or self._options.stallTimeoutMs
     native.maxBytes = request.maxBytes ~= nil and request.maxBytes or self._options.maxBytes
@@ -507,7 +721,7 @@ function Client:send(request: Request): Future<Response>
     native.insecure = host ~= nil and self._insecure[host] and 1 or 0
 
     if (tonumber(H.tecsHttpClientSend(self._handle, nativeArray)) or 0) == 0 then
-        finishSink(transfer)
+        closeSource(transfer)
         return Future.failed(("tecs: cannot start %s: %s"):format(url, nativeError())) as Future<Response>
     end
 
@@ -524,7 +738,9 @@ function Client:cancel(future: Future<any>)
     end
     H.tecsHttpClientCancel(self._handle, transfer.id)
     release(self, transfer)
-    finishSink(transfer)
+    closeSource(transfer)
+    finishWriter(transfer, false)
+    releaseResponseBuffers(transfer)
     transfer.future:abandon("canceled")
 end
 
@@ -545,7 +761,9 @@ function Client:close()
         local transfer <const> = live[index]
         H.tecsHttpClientCancel(self._handle, transfer.id)
         release(self, transfer)
-        finishSink(transfer)
+        closeSource(transfer)
+        finishWriter(transfer, false)
+        releaseResponseBuffers(transfer)
         transfer.future:abandon("the http client was closed")
     end
 
