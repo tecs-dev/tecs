@@ -214,15 +214,14 @@ local record DeferredOptions
     ---
     --- Location 2 carries ambient occlusion, roughness and metallic in RGB.
     --- Ambient occlusion multiplies ambient lighting; roughness and metallic
-    --- are reserved for the physically based light term. Geometry that leaves
-    --- it at the default writes fully unoccluded, medium-roughness,
-    --- non-metallic surface properties.
+    --- are reserved for the physically based light term. Geometry must write
+    --- the neutral `(1, 0.5, 0, 1)` when it has no authored surface properties.
     ---
     --- Location 3 is a color in rgb and how much of it in alpha, and the resolve
     --- adds the product on top of the lighting rather than through it. Geometry
-    --- that leaves it at zero emits nothing, which is the clear as well, so a
-    --- pass that writes only the first two attachments is not a scene that glows
-    --- everywhere.
+    --- must write zero when it emits nothing. A fragment shader that declares
+    --- fewer than all four outputs leaves the omitted attachments undefined;
+    --- the render pass clear is not a substitute for an output.
     geometry: function(context: PassGraph.PassContext)
     --- Draws blended geometry over the composited image, back to front.
     ---
