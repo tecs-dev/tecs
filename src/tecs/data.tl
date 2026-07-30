@@ -64,12 +64,29 @@ them.
 
 None provides cryptographic integrity. Verify downloaded artifacts with a
 cryptographic digest and a signed manifest.
+
+## Typed stores
+
+Create typed keys once and use them with independent stores:
+
+```teal
+local SPEED <const>: tecs.data.Key<number> =
+    tecs.data.newKey("game.speed")
+local store <const> = tecs.data.newStore()
+store[SPEED] = 120
+```
+
+`world.resources` is a `Store`. Stores are in-memory and independent; a named
+key is the process-wide identity that lets hot reload and tooling find the same
+value again.
 ]=]
 
 local ffi <const> = require("ffi")
 local bit <const> = require("bit")
 local loader <const> = require("tecs.ffi.loader")
 local zlib <const> = require("tecs.ffi.zlib")
+local type TypedStore = require("tecs.data.Store")
+local storekeys <const> = require("tecs.internal.storekeys")
 
 -- Implementation details: The parser and encoder are C, from `vendor/cjson`,
 -- and the build produces them twice: linked into the host, where
@@ -309,7 +326,49 @@ end
 -- Implementation details: `adopt` adds lua-cjson's JSON interface to the
 -- compression and hashing functions defined here.
 local record data is JSON
+    --- `Store` holds typed values under process-wide keys.
+    type Store = TypedStore
+
+    --- `Key` identifies one typed store value.
+    type Key<T> = TypedStore.Key<T>
+
+    --- Creates an independent typed store.
+    ---
+    --- @return Returns an empty store. The caller owns it and its values.
+    newStore: function(): TypedStore
+
+    --- Creates a typed key.
+    ---
+    --- Always pass a name. Named keys are discoverable through `findKey` and
+    --- `listKeys`, and repeating a name returns the same key so values remain
+    --- reachable when a module reloads.
+    ---
+    --- @param name The caller supplies a namespaced identity such as
+    ---     `"game.state"`. Omitting it creates an anonymous key and warns.
+    --- @param forType The caller passes `nil as T` when Teal needs the value
+    ---     type carried explicitly. The function does not read it.
+    --- @return Returns the stable key for a name or a fresh anonymous key.
+    newKey: function<T>(name?: string, forType?: T): TypedStore.Key<T>
+
+    --- Returns a named key created by `newKey`.
+    ---
+    --- @param name The caller supplies the name used during key creation.
+    --- @return Returns the existing key, or nil before any module creates it.
+    findKey: function<T>(name: string): TypedStore.Key<T> | nil
+
+    --- Returns all named keys as name-to-id entries.
+    ---
+    --- @return Returns a fresh caller-owned process-wide table.
+    listKeys: function(): {string: integer}
 end
+
+function data.newStore(): TypedStore
+    return {} as TypedStore
+end
+
+data.newKey = storekeys.newKey as function<T>(name?: string, forType?: T): TypedStore.Key<T>
+data.findKey = storekeys.findKey
+data.listKeys = storekeys.listKeys
 
 local C <const> = zlib.C
 local K <const> = zlib.K

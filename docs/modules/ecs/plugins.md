@@ -86,8 +86,8 @@ A plugin that depends on another should read the required resource during
 setup and fail immediately:
 
 ```teal
-local SPAWNER <const>: tecs.ecs.Key<Spawner> =
-    tecs.ecs.newKey("game.spawner")
+local SPAWNER <const>: tecs.data.Key<Spawner> =
+    tecs.data.newKey("game.spawner")
 
 local function wavePlugin(world: tecs.World)
     local spawner <const> = world.resources[SPAWNER]
@@ -107,7 +107,8 @@ end
 ```
 
 Always name resource keys. Re-registering one name returns the same key, which
-supports hot reload and lets tooling discover the dependency.
+supports hot reload and lets tooling discover the dependency through
+`tecs.data.listKeys`.
 
 Export component and event types beside the plugin function when other modules
 need them. Keep one purpose per plugin, then group related plugins with another

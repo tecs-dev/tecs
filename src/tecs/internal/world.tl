@@ -5,7 +5,7 @@ WARNING: This is an internal module and should not be required directly.
 Instead, import the `tecs` module and use the methods provided there.
 ]]
 
-local Context <const> = require("tecs.internal.Context")
+local type Store = require("tecs.data.Store")
 local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
 
@@ -98,7 +98,7 @@ function WorldImpl.new(config?: types.World.Config): World
 
     local instance: WorldImpl = setmetatable(
         {
-            resources = Context.new(),
+            resources = {} as Store,
             messages = events.MessageBus.new(),
             _ffiSliceId = GLOBAL_FFI_EVENTS:acquireSlice(),
             _eventPool = pool.newTablePool({clearOn = "acquire", maxSize = 32}),

@@ -92,7 +92,7 @@ rather than refusing the component, so the save fails without naming either.
 local log <const> = require("tecs.log")
 local time <const> = require("tecs.platform.time")
 local type types = require("tecs.types")
-local Context <const> = require("tecs.internal.Context")
+local storekeys <const> = require("tecs.internal.storekeys")
 local seqawaitables <const> = require("tecs.sequence.internal.awaitables")
 
 local type World = types.World
@@ -994,7 +994,7 @@ end
 local type Tracked = {integer: {string: Future<any>}}
 
 --- Futures where a sequence can park, indexed by entity and then key.
-local TRACKED <const> = Context.newKey("tecs.future.tracked", nil as Tracked)
+local TRACKED <const> = storekeys.newKey("tecs.future.tracked", nil as Tracked)
 
 function Future.track<U>(world: World, entity: integer, key: string, future: Future<U>)
     if world == nil then

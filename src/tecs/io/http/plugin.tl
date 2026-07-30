@@ -53,6 +53,7 @@ is work for no one.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
+local storekeys <const> = require("tecs.internal.storekeys")
 local Future <const> = require("tecs.Future")
 local client <const> = require("tecs.io.http.client")
 local DataStream <const> = require("tecs.io.http.DataStream")
@@ -174,7 +175,7 @@ ecs.newComponent({
     transient = true,
 })
 
-local CLIENT <const> = ecs.newKey("tecs.http.client", nil as Client)
+local CLIENT <const> = storekeys.newKey("tecs.http.client", nil as Client)
 
 local installed <const>: {World: boolean} = setmetatable({}, {__mode = "k"} as metatable<{World: boolean}>)
 

@@ -11,6 +11,7 @@ declaration must exist in a module with no cyclic imports.
 ]=]
 
 local types <const> = require("tecs.types")
+local type Store = require("tecs.data.Store")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local pool <const> = require("tecs.utils.pool")
 local RelationshipStore <const> = require("tecs.internal.RelationshipStore")
@@ -345,7 +346,7 @@ local record internal
     record WorldImpl is types.World
         -- ----- Construction / orchestration -----
         pipeline: types.Pipeline
-        resources: types.Context
+        resources: Store
         messages: types.events.MessageBus
         _ffiSliceId: integer
         _eventPool: pool.TablePool

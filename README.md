@@ -900,7 +900,7 @@ Hashes and checksums remain under `tecs.data`. They operate on byte strings,
 their exact algorithms are part of stored formats, and none is numeric geometry
 merely because its implementation contains arithmetic.
 
-## Encoding, hashing and decompression
+## Data transforms and typed stores
 
 Encoding, hashing and decompression are one public module, `tecs.data`, and
 three files behind it. An earlier reading had them separate on the grounds that
@@ -918,6 +918,13 @@ while the compressors keep `deflate` and `inflate`, which already say their
 format. lua-cjson's own names come through unchanged, sentinels and settings
 alike, for the reason `STYLE.md` gives: renaming them would leave that
 library's documentation describing names that do not exist here.
+
+Typed stores live under `tecs.data` too, rather than under `tecs.ecs`.
+`tecs.data.Store` is an independent in-memory value bag, and a world merely
+owns one instance as `world.resources`. The key registry is process-wide so
+hot reload and tools recover the same identity, while values remain scoped to
+their store. No durability follows from the name: snapshots omit resources
+unless a handler saves them.
 
 `data.fnv1a64` is what identifies content: the shader pack carries one per
 source so a pack built before an edit is detected rather than trusted. It is

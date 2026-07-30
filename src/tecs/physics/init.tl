@@ -48,6 +48,7 @@ preserve the complete Rapier state.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
+local storekeys <const> = require("tecs.internal.storekeys")
 local loader <const> = require("tecs.ffi.loader")
 local World <const> = require("tecs.physics.World")
 local type Handle = World.Handle
@@ -549,9 +550,9 @@ ecs.newEvent(SensorBegin)
 ecs.newEvent(SensorEnd)
 
 -- Implementation details:
--- The context key stores a world's simulation. Debug tools and snapshots use
+-- The store key names a world's simulation. Debug tools and snapshots use
 -- this stable name, while physics.of keeps the storage private.
-local simulationKey <const> = ecs.newKey("tecs.physics", nil as World)
+local simulationKey <const> = storekeys.newKey("tecs.physics", nil as World)
 
 --- Returns the Rapier simulation installed in `world`.
 ---
