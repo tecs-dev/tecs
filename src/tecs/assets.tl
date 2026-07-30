@@ -3,7 +3,7 @@ Reads bytes and decodes images and sounds on a worker.
 
 Each load returns a [`Future`](tealdoc:tecs.Future) immediately:
 
-```teal
+```teal no-format
 return tecs.newApplication({
     plugin = function(world: tecs.World, app: tecs.Application)
         tecs.assets.loadImage(

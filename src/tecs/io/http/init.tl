@@ -1,14 +1,16 @@
 --[=[
 Asynchronous HTTP and HTTPS.
 
-```teal
+```teal no-format
 tecs.io.http.newClient({userAgent = "mygame/1.0"})
     :send({url = "https://example.com/manifest.json"})
     :map(function(response: tecs.io.http.Response): string
         local body <const> = response.body:text()
         return body
     end)
-    :onSettle(function(manifest: tecs.Future<string>) print(manifest.value) end)
+    :onSettle(function(manifest: tecs.Future<string>)
+        print(manifest.value)
+    end)
 ```
 
 An application turns every open client once per iteration, so requests

@@ -47,10 +47,11 @@ A future advances when its subsystem pumps the source.
 that automatically. `wait` pumps in blocking slices for startup, tools, and
 tests:
 
-```teal
+```teal no-format
 local result <const> = tecs.os.runProcess({
     args = {"git", "status", "--porcelain"},
-}):wait(2000)
+})
+    :wait(2000)
 
 if result.status == "ready" then
     print(result.value.output)
