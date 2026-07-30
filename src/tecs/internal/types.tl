@@ -105,7 +105,6 @@ local record internal
         -- such a consumer exists: a flag clears with the frame, and one whose
         -- work runs before the frame's later phases would never see what they
         -- changed. See `tecs.internal.Archetype` for the contract on each.
-        isComponentValueDirty: function(self, component: types.components.Component): boolean
         valueCount: function(self): integer
         structuralCount: function(self): integer
         structuralDescribed: function(self, count: integer): boolean
