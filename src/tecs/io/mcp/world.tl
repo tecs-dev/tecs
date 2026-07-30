@@ -282,14 +282,14 @@ mcp.register({
         -- it whole and the registry cannot change while this runs.
         local declared = ecs.declaredComponents()
 
-        local query = w:query({include = include})
+        local query = w:newQuery({include = include})
         local rows: {any} = {}
         local total = 0
 
         -- A cursor rather than iter, because this stops at the limit and
         -- leaving an archetype loop early through iter leaves the world
         -- deferred, which silently queues every later spawn.
-        local cursor = query:cursor()
+        local cursor = query:newCursor()
         for archetype, length in cursor:iter() do
             total = total + length
             for row = 1, length do

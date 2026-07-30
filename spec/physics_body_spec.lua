@@ -93,7 +93,7 @@ describe("ecs.physics declaration", function()
         second:loadSnapshot(snapshot)
 
         local restored
-        for _, length, entities in second:query({ include = { physics.Collider } }):iter() do
+        for _, length, entities in second:newQuery({ include = { physics.Collider } }):iter() do
             for row = 1, length do
                 restored = entities[row]
             end

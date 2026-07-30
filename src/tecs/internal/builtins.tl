@@ -454,7 +454,7 @@ function builtins.plugin(w: types.World)
 
     -- Handle despawning entities with TTLs.
     do
-        local ttlQuery = w:query({include = {TTL}, type = "logic"})
+        local ttlQuery = w:newQuery({include = {TTL}, type = "logic"})
         w:addSystem({
             name = "ttl",
             phase = phases.FixedUpdate,
@@ -542,7 +542,7 @@ function builtins.plugin(w: types.World)
             }
         )
 
-        local hierarchyQuery = w:query({
+        local hierarchyQuery = w:newQuery({
             name = "RelativeTransform",
             include = {RelativeTransform, ChildOf, Transform},
         })

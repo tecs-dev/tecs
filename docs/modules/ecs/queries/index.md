@@ -9,7 +9,7 @@ A query tracks archetypes whose component signatures match one descriptor:
 
 ```teal
 local Transform <const> = tecs.Transform
-local movers <const> = world:query({
+local movers <const> = world:newQuery({
     name = "game.Movers",
     include = {Transform, Velocity},
     exclude = {Frozen},
@@ -31,7 +31,7 @@ end
 with a listed component. `includeAny` adds an OR group:
 
 ```teal
-local drawn <const> = world:query({
+local drawn <const> = world:newQuery({
     include = {tecs.Transform, tecs.gfx.Renderable},
     includeAny = {tecs.gfx.Sprite, tecs.gfx.Material},
     type = "render",
@@ -83,7 +83,7 @@ Archetype iteration opens a deferred scope. Structural calls such as `spawn`,
 finishes:
 
 ```teal
-local expiring <const> = world:query({
+local expiring <const> = world:newQuery({
     include = {tecs.ecs.TTL},
     type = "logic",
 })
@@ -109,7 +109,7 @@ ordering.
 exhaustion. A loop that may `break` or return must use a cursor:
 
 ```teal
-local cursor <const> = query:cursor()
+local cursor <const> = query:newCursor()
 
 for archetype, _length, entities in cursor:iter() do
     if matchesSelection(archetype) then
@@ -138,7 +138,7 @@ that run every frame. Build them once during plugin setup.
 registering observers:
 
 ```teal
-for archetype, length in world:query({
+for archetype, length in world:newQuery({
     include = {tecs.gfx.PointLight},
     temp = true,
 }):iter() do
@@ -157,7 +157,7 @@ Every query excludes `tecs.ecs.Disabled` unless `include` explicitly names the
 tag. Renderer queries follow the same rule.
 
 ```teal
-local disabledRenderables <const> = world:query({
+local disabledRenderables <const> = world:newQuery({
     include = {
         tecs.Transform,
         tecs.gfx.Renderable,
@@ -173,12 +173,12 @@ paused entities should continue to match. An omitted type applies no pause
 filter.
 
 ```teal
-local movement <const> = world:query({
+local movement <const> = world:newQuery({
     include = {tecs.Transform, Velocity},
     type = "logic",
 })
 
-local sprites <const> = world:query({
+local sprites <const> = world:newQuery({
     include = {tecs.Transform, tecs.gfx.Sprite},
     type = "render",
 })

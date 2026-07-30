@@ -130,7 +130,7 @@ return tecs.newApplication({
         -- Translation only, matching the reference scene. Rotation would make
         -- the sync recompute a basis per entity per frame, which is a different
         -- amount of work and would not be comparable.
-        local moving = world:query({include = {Transform, Renderable}})
+        local moving = world:newQuery({include = {Transform, Renderable}})
         local phase = MODE == "fixed" and tecs.ecs.phases.FixedUpdate or tecs.ecs.phases.Update
 
         world:addSystem({

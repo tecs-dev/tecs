@@ -41,9 +41,10 @@ a transfer that ended with the world that started it. The `Response` a game
 eventually reads is the reissued request's.
 
 The exception is a `Request` whose `body` or `into` is a
-`DataStream.ofHandle`. The caller owns that live handle, and neither snapshot
-format can reconstruct its ownership or position, so saving the world raises.
-Use `DataStream.ofFile` when a request must survive a snapshot.
+`tecs.io.http.newHandleStream`. The caller owns that live handle, and neither
+snapshot format can reconstruct its ownership or position, so saving the world
+raises.
+Use `tecs.io.http.newFileStream` when a request must survive a snapshot.
 
 Loading stops the transfers that were open before it. A load replaces the
 world in place and despawns nothing, so the entities that asked are gone
@@ -56,12 +57,13 @@ local type types = require("tecs.types")
 local storekeys <const> = require("tecs.internal.storekeys")
 local Future <const> = require("tecs.Future")
 local client <const> = require("tecs.io.http.client")
-local DataStream <const> = require("tecs.io.http.DataStream")
+local datastream <const> = require("tecs.io.http.DataStream")
 
 local type World = types.World
 local type Component = ecs.Component
 local type Options = client.Options
 local type Client = client.Client
+local type DataStream = datastream.DataStream
 
 local record plugin
     --- What a game spawns to make a request. The fields of a `Request`,
@@ -76,12 +78,13 @@ local record plugin
         --- without regard to case.
         headers: {string: string}
         --- Caller-writable. Sets what to send. A snapshot rejects a
-        --- `DataStream.ofHandle` here because its live handle cannot be
-        --- reconstructed.
+        --- `tecs.io.http.newHandleStream` here because its live handle cannot
+        --- be reconstructed.
         body: string | DataStream
         --- Caller-writable. Sets where the body goes. Left out, it comes back
-        --- as a string. A snapshot rejects a `DataStream.ofHandle` here
-        --- because its live handle cannot be reconstructed.
+        --- as a string. A snapshot rejects a
+        --- `tecs.io.http.newHandleStream` here because its live handle cannot
+        --- be reconstructed.
         into: string | DataStream
         --- Caller-writable. Sets milliseconds for this transfer, overriding
         --- the client's value.
@@ -144,9 +147,16 @@ local type Response = plugin.Response
 local function serializeRequest(request: Request): {string: any}
     local data: {string: any} = {}
     for key, value in pairs(request as {string: any}) do
-        if (key == "body" or key == "into") and DataStream.is(value) and (value as DataStream).kind == "handle" then
+        if
+            (key == "body" or key == "into")
+            and datastream.DataStream.is(value)
+            and (value as DataStream).kind == "handle"
+        then
             error(
-                ("tecs: cannot snapshot tecs.http.Request: %s from DataStream.ofHandle is runtime-only"):format(key), 0
+                ("tecs: cannot snapshot tecs.http.Request: %s from io.http.newHandleStream is runtime-only"):format(
+                    key
+                ),
+                0
             )
         end
         if type(key) == "string" and not key:match("^component") and key ~= "storage" then
@@ -276,12 +286,12 @@ function plugin.install(world: World, options?: Options)
 
     local futures <const>: Waiting = {}
 
-    local unsent <const> = world:query({
+    local unsent <const> = world:newQuery({
         name = "tecs.http.Unsent",
         include = {plugin.Request},
         exclude = {plugin.Pending, plugin.Response},
     })
-    local inFlight <const> = world:query({
+    local inFlight <const> = world:newQuery({
         name = "tecs.http.InFlight",
         include = {plugin.Pending},
     })

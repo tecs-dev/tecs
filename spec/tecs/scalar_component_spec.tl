@@ -62,7 +62,7 @@ describe(
                 world:set(e, Heat, 7)
                 world:commit()
 
-                local q = world:query({include = {Heat}})
+                local q = world:newQuery({include = {Heat}})
                 local saw = false
                 for arch, len in q:iter() do
                     local col = arch:get(Heat)

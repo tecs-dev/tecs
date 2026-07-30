@@ -2364,7 +2364,7 @@ set of named slices carrying rectangles, nine-slice centers and pivots that
 move from frame to frame. Tag zero is the whole sheet, forward.
 
 Reading an Aseprite JSON export is one function in front of that model rather
-than a second model: `animation.fromAseprite` walks the export and writes what it
+than a second model: `animation.newSheetFromAseprite` walks the export and writes what it
 finds through the same builder everything else uses, so a reader for the binary
 `.aseprite` format populates the same sheet without reshaping anything. Both of
 Aseprite's frame layouts are read, the array and the object keyed by frame name,
@@ -2372,10 +2372,10 @@ the second in sorted name order because the names carry the frame number.
 Trimmed exports are not: `spriteSourceSize` is ignored, so export with trimming
 off.
 
-`animation.build` is the model's own front door, for an atlas from any other tool:
-frames, tags and slices in any order, `finish` to register. `animation.grid` cuts a
+`animation.newSheetBuilder` is the model's own front door, for an atlas from any other tool:
+frames, tags and slices in any order, `finish` to register. `animation.newGridSheet` cuts a
 uniform grid (with an optional margin around it and spacing between the cells)
-and `animation.rects` takes an explicit list, and both are that builder with a loop
+and `animation.newRectSheet` takes an explicit list, and both are that builder with a loop
 in front.
 
 Timing is per frame rather than per entity, which is the thing a single frames-
@@ -3303,7 +3303,7 @@ cost three dispatches and no per-frame host writes; what that buys is paid for
 by not being able to inspect, move, kill or count one of them.
 
 Three things divide the work. An `Effect` is immutable data describing how
-particles spawn and evolve, built by `particles.effect`, registered once under a
+particles spawn and evolve, built by `particles.newEffect`, registered once under a
 name and shared by every emitter naming it. The emitter component names an
 effect and carries playback state, a seed and a few per-instance scales, and
 deliberately nothing else: if an instance could override every effect field then

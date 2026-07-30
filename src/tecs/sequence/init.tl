@@ -1329,7 +1329,7 @@ function sequence.registerQuery(world: World, name: string, descriptor: types.Qu
         end
     end
 
-    state.queries[name] = world:query(spec)
+    state.queries[name] = world:newQuery(spec)
     -- Anything already parked on the name re-tests against the new query.
     state.dirtyQueries[name] = true
 end

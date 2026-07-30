@@ -29,7 +29,7 @@ component when each entity needs a value.
 Tags belong in query filters, not column loops:
 
 ```teal
-local activeEnemies <const> = world:query({
+local activeEnemies <const> = world:newQuery({
     include = {Enemy, Selected},
     exclude = {Stunned},
     type = "logic",
@@ -51,14 +51,14 @@ Adding or removing a tag moves the entity between archetypes, just like any
 component membership change. Use batch operations for large groups:
 
 ```teal
-local targets <const> = world:query({
+local targets <const> = world:newQuery({
     include = {Enemy, InBlastRadius},
     temp = true,
 })
 
 world:batchSet(targets, Stunned)
 
-local stunnedEnemies <const> = world:query({
+local stunnedEnemies <const> = world:newQuery({
     include = {Enemy, Stunned},
     temp = true,
 })

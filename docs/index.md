@@ -85,7 +85,7 @@ local Transform <const> = tecs.Transform
 
 return tecs.newApplication({
     plugin = function(world: tecs.World, app: tecs.Application)
-        local movers = world:query({ include = { Transform } })
+        local movers = world:newQuery({ include = { Transform } })
 
         world:addSystem({
             name = "game.Spin",
@@ -138,7 +138,7 @@ tecs.ecs.newFFIComponent({
 })
 
 -- Query and update entities
-local query = world:query({include = {Position, Velocity}})
+local query = world:newQuery({include = {Position, Velocity}})
 
 world:addSystem({
     phase = tecs.ecs.phases.Update,

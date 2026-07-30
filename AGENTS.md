@@ -334,7 +334,7 @@ The rules that prevent the most common defect class:
 - Dirty bits clear at the end of each `world:update`.
 - `world:batchSpawn` skips FFI defaults; set every field in the callback.
 - Keep `query:iter()` for loops that run to exhaustion. If an archetype-level query loop may `break` or return
-  early, use `query:cursor()` and call `cursor:close()` after the loop or immediately before returning. Leaving
+  early, use `query:newCursor()` and call `cursor:close()` after the loop or immediately before returning. Leaving
   one early through `iter` leaves the world deferred, which silently queues every later spawn.
 
 ### Code Style

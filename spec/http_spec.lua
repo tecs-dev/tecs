@@ -132,6 +132,17 @@ describe("http.newClient", function()
     local server, port, client
     local silent, silentPort
 
+    it("constructs streams from the module", function()
+        assert.is_function(http.newStringStream)
+        assert.is_function(http.newBytesStream)
+        assert.is_function(http.newFileStream)
+        assert.is_function(http.newHandleStream)
+        assert.is_nil(rawget(http.DataStream, "ofString"))
+        assert.is_nil(rawget(http.DataStream, "ofBytes"))
+        assert.is_nil(rawget(http.DataStream, "ofFile"))
+        assert.is_nil(rawget(http.DataStream, "ofHandle"))
+    end)
+
     setup(function()
         assert(sdl.C.SDL_Init(0))
     end)
@@ -359,7 +370,7 @@ describe("http.newClient", function()
         local file = assert(io.open(path, "wb"))
         local pending = client:send({
             url = url("/streamed"),
-            into = http.DataStream.ofHandle(file),
+            into = http.newHandleStream(file),
         })
         drive(pending, function()
             server:respond(200, "OK", BODY, "application/octet-stream")
@@ -385,7 +396,7 @@ describe("http.newClient", function()
         local file = assert(io.open(path, "wb"))
         local pending = client:send({
             url = url("/too-big-streamed"),
-            into = http.DataStream.ofHandle(file),
+            into = http.newHandleStream(file),
             maxBytes = 8,
         })
         drive(pending, function()
@@ -410,7 +421,7 @@ describe("http.newClient", function()
         local pending = client:send({
             url = url("/upload"),
             method = "PUT",
-            body = http.DataStream.ofFile(path, "application/octet-stream"),
+            body = http.newFileStream(path, "application/octet-stream"),
         })
         local seen = drive(pending, function()
             server:respond(204, "No Content", "", "text/plain")
@@ -622,7 +633,7 @@ describe("http.newClient", function()
         assert.has_error(function()
             client:send({
                 url = url("/nowhere-to-put-it"),
-                into = http.DataStream.ofString("not a destination"),
+                into = http.newStringStream("not a destination"),
             })
         end)
     end)
@@ -828,7 +839,7 @@ describe("http.plugin snapshots", function()
             it("rejects a handle-backed request " .. field .. " in a " .. format .. " snapshot", function()
                 local world = tecs.ecs.newWorld()
                 local handle = assert(io.tmpfile())
-                local stream = http.DataStream.ofHandle(handle)
+                local stream = http.newHandleStream(handle)
                 local request = { url = "https://example.com/upload", [field] = stream }
                 world:spawn(http.plugin.Request(request))
 
@@ -837,7 +848,9 @@ describe("http.plugin snapshots", function()
 
                 assert.is_false(ok)
                 assert.matches(
-                    "tecs: cannot snapshot tecs.http.Request: " .. field .. " from DataStream.ofHandle is runtime%-only",
+                    "tecs: cannot snapshot tecs.http.Request: "
+                        .. field
+                        .. " from io.http.newHandleStream is runtime%-only",
                     tostring(failure)
                 )
             end)

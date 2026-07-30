@@ -59,7 +59,7 @@ describe("physics declarations", function()
         local second = newWorld()
         second:loadSnapshot(snapshot)
         local restored
-        for _, length, entities in second:query({ include = { physics.Body } }):iter() do
+        for _, length, entities in second:newQuery({ include = { physics.Body } }):iter() do
             if length > 0 then
                 restored = entities[1]
             end

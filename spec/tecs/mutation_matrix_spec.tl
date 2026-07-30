@@ -78,7 +78,7 @@ local modes: {Mode} = {
         name = "query iteration",
         run = function(w: tecs.World, ops: Ops)
             w:spawn(MatMarker)
-            local q = w:query({include = {MatMarker}})
+            local q = w:newQuery({include = {MatMarker}})
             for _arch, _len in q:iter() do
                 ops(w)
             end
@@ -122,7 +122,7 @@ local function forEachMode(
 end
 
 local function countMatching(w: tecs.World, component: tecs.ecs.Component): integer
-    local q = w:query({include = {component}})
+    local q = w:newQuery({include = {component}})
     local n = 0
     for _arch, len in q:iter() do
         n = n + len
@@ -253,7 +253,7 @@ describe(
             function()
                 local w = tecs.ecs.newWorld()
                 local e = w:spawn(MatBatchTag)
-                local q = w:query({include = {MatBatchTag}})
+                local q = w:newQuery({include = {MatBatchTag}})
                 w:batchSet(q, MatArmor(2))
                 luassert.is_true(w:has(e, MatArmor))
                 luassert.equals(2, w:get(e, MatArmor).ar)
@@ -268,7 +268,7 @@ describe(
             function()
                 local w = tecs.ecs.newWorld()
                 local e = w:spawn(MatBatchTag)
-                local q = w:query({include = {MatBatchTag}})
+                local q = w:newQuery({include = {MatBatchTag}})
                 w:batchSet(
                     q,
                     MatArmor,
@@ -472,7 +472,7 @@ describe(
                 local b = w:spawn(MatBatchTag)
                 w:set(b, MatLink(target))
 
-                local q = w:query({include = {MatBatchTag}})
+                local q = w:newQuery({include = {MatBatchTag}})
                 w:batchSet(q, MatPos(5))
 
                 luassert.equals(5, w:get(a, MatPos).x)
@@ -529,7 +529,7 @@ describe(
                 local src = w:spawn(MatBatchTag)
                 w:set(src, MatMark(target))
 
-                local q = w:query({include = {MatBatchTag}})
+                local q = w:newQuery({include = {MatBatchTag}})
                 w:batchDespawn(q)
                 luassert.is_false(w:isAlive(src))
 

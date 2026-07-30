@@ -117,7 +117,7 @@ describe("ecs.physics snapshots", function()
         end
 
         local restored
-        for _, length, entities in second:query({ include = { Transform, physics.RigidBody } }):iter() do
+        for _, length, entities in second:newQuery({ include = { Transform, physics.RigidBody } }):iter() do
             for row = 1, length do
                 restored = entities[row]
             end
@@ -146,7 +146,7 @@ describe("ecs.physics snapshots", function()
             second:loadSnapshot(written.snapshot or written.buffer)
 
             local restored
-            for _, length, entities in second:query({ include = { physics.Body } }):iter() do
+            for _, length, entities in second:newQuery({ include = { physics.Body } }):iter() do
                 if length > 0 then
                     restored = entities[1]
                 end
@@ -168,7 +168,7 @@ describe("ecs.physics snapshots", function()
         second:loadSnapshot(snapshot)
 
         local restored
-        for _, length, entities in second:query({ include = { physics.Body } }):iter() do
+        for _, length, entities in second:newQuery({ include = { physics.Body } }):iter() do
             for row = 1, length do
                 restored = entities[row]
             end
@@ -187,7 +187,7 @@ describe("ecs.physics snapshots", function()
         local second = newWorld()
         second:loadSnapshot(snapshot)
         local restored
-        for _, length, entities in second:query({ include = { physics.Body } }):iter() do
+        for _, length, entities in second:newQuery({ include = { physics.Body } }):iter() do
             for row = 1, length do
                 restored = entities[row]
             end
@@ -227,7 +227,7 @@ describe("ecs.physics despawn", function()
         world:update(1 / 60)
         assert.equal(baseline + 8, physics.of(world):bodyCount())
 
-        world:batchDespawn(world:query({ include = { physics.RigidBody } }))
+        world:batchDespawn(world:newQuery({ include = { physics.RigidBody } }))
         world:update(1 / 60)
         assert.equal(baseline, physics.of(world):bodyCount())
     end)

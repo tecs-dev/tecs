@@ -198,7 +198,7 @@ return tecs.newApplication({
     plugin = function(world: tecs.World, _app: tecs.Application)
         spawnField(world)
 
-        local moving = world:query({
+        local moving = world:newQuery({
             name = "bench.AllocMoving",
             include = {Transform, Renderable},
         })

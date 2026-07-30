@@ -134,7 +134,7 @@ describe(
                         w:spawn(Tag())
                         w:commit()
 
-                        local query = w:query({include = {Tag}})
+                        local query = w:newQuery({include = {Tag}})
                         local observed: tecs.ecs.Archetype = nil
                         for arch in query:iter() do
                             observed = arch

@@ -674,7 +674,7 @@ local function resolveSaveFilters(
     if filterQuery then
         local d: types.Query.Descriptor = cloneQueryDescriptor(filterQuery)
         d.temp = true
-        query = world:query(d)
+        query = world:newQuery(d)
     end
     return query, layerMask
 end

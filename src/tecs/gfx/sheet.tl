@@ -12,7 +12,7 @@ playing forward.
 Bind the finished sheet to a renderer sprite before drawing:
 
 ```teal
-local hero <const> = tecs.gfx.animation.fromAseprite({
+local hero <const> = tecs.gfx.animation.newSheetFromAseprite({
     name = "game.hero",
     json = asepriteExport,
 })

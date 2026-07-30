@@ -275,7 +275,7 @@ describe("exception safety", function()
         local world = tecs.ecs.newWorld()
         world:spawn(Tint(1, 0, 0, 1))
 
-        local query = world:query({ name = "spec.Tinted", include = { Tint } })
+        local query = world:newQuery({ name = "spec.Tinted", include = { Tint } })
         local explode = true
         world:addSystem({
             name = "spec.ThrowsInIter",
@@ -314,8 +314,8 @@ describe("exception safety", function()
         local world = tecs.ecs.newWorld()
         world:spawn(Tint(1, 0, 0, 1))
 
-        local outer = world:query({ name = "spec.Outer", include = { Tint } })
-        local inner = world:query({ name = "spec.Inner", include = { Tint } })
+        local outer = world:newQuery({ name = "spec.Outer", include = { Tint } })
+        local inner = world:newQuery({ name = "spec.Inner", include = { Tint } })
         local explode = true
         world:addSystem({
             name = "spec.ThrowsInNestedIter",
@@ -347,9 +347,9 @@ describe("exception safety", function()
     it("survives a cursor closed after its scope was unwound", function()
         local world = tecs.ecs.newWorld()
         world:spawn(Tint(1, 0, 0, 1))
-        local query = world:query({ name = "spec.Stale", include = { Tint } })
+        local query = world:newQuery({ name = "spec.Stale", include = { Tint } })
 
-        local cursor = query:cursor()
+        local cursor = query:newCursor()
         for _ in cursor:iter() do
             break
         end

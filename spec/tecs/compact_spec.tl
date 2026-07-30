@@ -130,7 +130,7 @@ describe(
                         local follower = world:spawn(Follows(target) as tecs.ecs.Component)
                         world:commit()
 
-                        local query = world:query({include = {Follows}})
+                        local query = world:newQuery({include = {Follows}})
                         local count = 0
                         for _ in query:iter() do
                             count = count + 1

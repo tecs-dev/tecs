@@ -178,7 +178,7 @@ return tecs.newApplication({
         -- get: taking getMut to read would mark the component dirty on every
         -- archetype every frame and defeat every dirty-gated consumer.
         local static = os.getenv("TECS_STATIC") ~= nil
-        local spinning = world:query({include = {Transform, Renderable}})
+        local spinning = world:newQuery({include = {Transform, Renderable}})
         if not static then
             world:addSystem({
                 name = "demo.Spin",
@@ -195,7 +195,7 @@ return tecs.newApplication({
             })
         end
 
-        local orbiting = world:query({include = {Transform, PointLight}})
+        local orbiting = world:newQuery({include = {Transform, PointLight}})
         world:addSystem({
             name = "demo.OrbitLights",
             phase = tecs.ecs.phases.Update,

@@ -1553,7 +1553,7 @@ function Extractor:install(world: types.World, packet: FramePacket, published: f
     -- Snapshotting before anything in the step moves is what makes the pair a
     -- pair: taken later, the two would be the same value and every frame would
     -- draw the entity where the step left it.
-    local interpolated = world:query({
+    local interpolated = world:newQuery({
         include = {Transform, components.PreviousTransform},
     })
     world:addSystem({
@@ -1576,10 +1576,10 @@ function Extractor:install(world: types.World, packet: FramePacket, published: f
         end,
     })
 
-    self._renderables = world:query({
+    self._renderables = world:newQuery({
         include = {Transform, components.Tint, components.Renderable},
     })
-    self._lightSources = world:query({
+    self._lightSources = world:newQuery({
         include = {Transform, components.PointLight},
     })
 

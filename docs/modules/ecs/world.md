@@ -204,7 +204,7 @@ write through immediately while that entity has no staged structural change.
 The [mutation model](/modules/ecs/mutation-model) defines the complete contract.
 
 An archetype query loop must run to exhaustion. A loop that may stop early
-uses `query:cursor()` and calls `cursor:close()`, or it leaves the world
+uses `query:newCursor()` and calls `cursor:close()`, or it leaves the world
 deferred.
 
 `unwind()` closes every scope and drains pending work. It supplies the recovery

@@ -6,7 +6,7 @@ code controls an effect and its emitter rather than inspecting particles one
 at a time.
 
 ```teal
-local sparks <const> = tecs.gfx.particles.effect({
+local sparks <const> = tecs.gfx.particles.newEffect({
     name = "game.sparks",
     capacity = 256,
     schedule = {rate = 120, duration = 0.3},
@@ -18,7 +18,7 @@ local sparks <const> = tecs.gfx.particles.effect({
     },
     update = {
         drag = 2.0,
-        size = tecs.gfx.particles.curve({
+        size = tecs.gfx.particles.newCurve({
             {0.0, 1.0},
             {1.0, 0.0},
         }),
@@ -2223,12 +2223,12 @@ local function plugin(options: PoolOptions): function(World)
         -- age through the pause. Which of the two it is decides whether the
         -- clock advances, so they are two queries rather than one and a test
         -- per row.
-        local running <const> = world:query({
+        local running <const> = world:newQuery({
             name = "tecs.ParticleEmitters",
             include = {ParticleEmitter, Transform},
             exclude = {ecs.Paused},
         })
-        local held <const> = world:query({
+        local held <const> = world:newQuery({
             name = "tecs.PausedParticleEmitters",
             include = {ParticleEmitter, Transform, ecs.Paused},
         })
@@ -2253,10 +2253,10 @@ end
 -------------------------------------------------------------------------------
 
 local record particles
-    --- The handle `effect` returns and a
+    --- The handle `newEffect` returns and a
     --- [`ParticleEmitter`](tealdoc:tecs.gfx.particles.ParticleEmitter) names.
     type Effect = Effect
-    --- Configures `effect`.
+    --- Configures `newEffect`.
     type EffectOptions = EffectOptions
     --- Stores a compiled scalar curve.
     type Curve = Curve
@@ -2311,7 +2311,7 @@ local record particles
     ---     something drawable.
     --- @return Returns a handle that stays valid until `reset`. The process-wide
     ---     registry makes it reachable from every world.
-    effect: function(options: EffectOptions): Effect
+    newEffect: function(options: EffectOptions): Effect
 
     --- Returns the effect registered under `name`, or nil when none exists.
     ---
@@ -2336,16 +2336,17 @@ local record particles
     ---     in any order. Empty or nil raises, and one key defines a constant.
     --- @return Returns the piecewise-linear curve resampled at `CURVE_SAMPLES`
     ---     points. Ages outside zero through one read as the nearest endpoint.
-    curve: function(keys: {CurveKey}): Curve
+    newCurve: function(keys: {CurveKey}): Curve
 
     --- Compiles keyframes into a color gradient over normalized age.
     ---
     --- @param keys Supplies `{age, color}` pairs under the same rules as
-    ---     `curve`. Alpha fades a blended effect and is ignored by an opaque one.
+    ---     `newCurve`. Alpha fades a blended effect and is ignored by an opaque
+    ---     one.
     --- @return A gradient resampled like a curve, interpolating each channel
     ---     separately, so two colors blend through whatever lies between them
     ---     componentwise rather than around a color wheel.
-    gradient: function(keys: {CurveKey}): Gradient
+    newGradient: function(keys: {CurveKey}): Gradient
 
     --- Installs the pool on a world. Without it, Tecs allocates and dispatches
     --- no particle work.
@@ -2371,12 +2372,12 @@ particles.EMITTER_FLOATS = EMITTER_FLOATS
 particles.STATE_FLOATS = STATE_FLOATS
 particles.EFFECT = EFFECT
 particles.EMITTER = EMITTER
-particles.effect = newEffect
+particles.newEffect = newEffect
 particles.find = findEffect
 particles.names = effectNames
 particles.reset = resetEffects
-particles.curve = newCurve
-particles.gradient = newGradient
+particles.newCurve = newCurve
+particles.newGradient = newGradient
 particles.plugin = plugin
 
 function particles.poolOf(world: World): Pool

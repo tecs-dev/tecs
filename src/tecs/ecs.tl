@@ -8,7 +8,7 @@ entities:
 local moving: tecs.Query
 
 local function game(world: tecs.World)
-    moving = world:query({include = {tecs.Transform}})
+    moving = world:newQuery({include = {tecs.Transform}})
 
     world:addSystem({
         name = "game.Drift",

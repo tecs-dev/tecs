@@ -23,7 +23,7 @@ tecs.ecs.newFFIComponent({
 
 return tecs.newApplication({
     plugin = function(world: tecs.World)
-        local homing <const> = world:query({
+        local homing <const> = world:newQuery({
             include = {tecs.Transform, Homing},
         })
 

@@ -281,7 +281,7 @@ describe(
                         -- Fires during the spawn phase of the drain, before the move
                         -- phase relocates e1's staged move.
                         local fired = false
-                        w:query({
+                        w:newQuery({
                             name = "DrainMoveCancelWatcher",
                             include = {Extra},
                             onEntitiesAdded = function(
@@ -317,7 +317,7 @@ describe(
                         w:commit()
 
                         local cascaded = false
-                        w:query({
+                        w:newQuery({
                             name = "DespawnCascadeWatcher",
                             include = {Shared},
                             onEntitiesRemoved = function(
@@ -349,10 +349,10 @@ describe(
                         local s1 = w:spawn(Absent(1))
                         w:commit()
 
-                        local sharedQuery = w:query({include = {Shared}})
-                        local absentQuery = w:query({include = {Absent}})
+                        local sharedQuery = w:newQuery({include = {Shared}})
+                        local absentQuery = w:newQuery({include = {Absent}})
                         local staged = false
-                        w:query({
+                        w:newQuery({
                             name = "OneShotBatchWatcher",
                             include = {Extra},
                             onEntitiesAdded = function(

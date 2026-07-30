@@ -72,7 +72,7 @@ local function spawnEmitters(world: tecs.World)
     end
 
     local perEmitter <const> = math.floor(LIVE / EMITTERS)
-    local effect <const> = particles.effect({
+    local effect <const> = particles.newEffect({
         name = "benchSparks",
         capacity = perEmitter,
         overflow = "replace",
@@ -96,8 +96,8 @@ local function spawnEmitters(world: tecs.World)
         update = {
             drag = 0.4,
             tangentialAcceleration = {min = -60.0, max = 60.0},
-            size = particles.curve({{0.0, 0.2}, {0.1, 1.0}, {1.0, 0.1}}),
-            color = particles.gradient({
+            size = particles.newCurve({{0.0, 0.2}, {0.1, 1.0}, {1.0, 0.1}}),
+            color = particles.newGradient({
                 {0.0, "#fff4c0"},
                 {1.0, "#ff8020"},
             }),

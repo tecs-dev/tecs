@@ -62,7 +62,7 @@ describe(
                 local e1 = world:spawn(Pos(1, 1))
                 local e2 = world:spawn(Pos(2, 2))
                 local e3 = world:spawn(Pos(3, 3))
-                local q = world:query({include = {Pos}})
+                local q = world:newQuery({include = {Pos}})
 
                 local seen = {}
                 for arch, len in q:iter() do

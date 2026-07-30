@@ -32,9 +32,11 @@ frame.
 local client <const> = require("tecs.io.http.client")
 local clients <const> = require("tecs.io.http.clients")
 local plugin <const> = require("tecs.io.http.plugin")
-local DataStream <const> = require("tecs.io.http.DataStream")
+local datastream <const> = require("tecs.io.http.DataStream")
+local loader <const> = require("tecs.ffi.loader")
 
 local type Options = client.Options
+local type DataStream = datastream.DataStream
 
 local record http
     --- `Client` names a connection pool and its request
@@ -56,6 +58,53 @@ local record http
     --- Read-only. `DataStream` names bytes stored in a string, borrowed
     --- buffer, path, or caller-opened handle.
     DataStream: DataStream
+
+    --- Creates a stream over a string already in memory.
+    ---
+    --- @param text The stream retains this immutable string. A non-string
+    ---     value raises.
+    --- @param contentType Nil sends no `Content-Type` rather than guessing
+    ---     one.
+    --- @return A source-only stream whose `length` is the string's byte count.
+    newStringStream: function(text: string, contentType?: string): DataStream
+
+    --- Creates a stream over a borrowed FFI buffer.
+    ---
+    --- @param pointer The caller retains and keeps this buffer alive until the
+    ---     transfer finishes. Nil raises.
+    --- @param length The readable byte count. Nil or negative raises, and the
+    ---     function does not check it against the allocation.
+    --- @param contentType Nil sends no `Content-Type` rather than guessing
+    ---     one.
+    --- @return A source-only stream.
+    newBytesStream: function(pointer: loader.CValue, length: integer, contentType?: string): DataStream
+
+    --- Creates a stream over a path read and written through `tecs.io.files`.
+    ---
+    --- The function does not open the file. A source opens when a transfer
+    --- starts and a destination opens when its first byte arrives.
+    ---
+    --- @param path An empty or non-string path raises. A missing path is
+    ---     allowed because it may name a destination.
+    --- @param contentType Nil sends no `Content-Type` rather than guessing
+    ---     one.
+    --- @return A source and destination stream. `length` is set only when the
+    ---     path already names a file.
+    newFileStream: function(path: string, contentType?: string): DataStream
+
+    --- Creates a stream over a handle the caller opened and still owns.
+    ---
+    --- The stream never closes the handle. A request containing this stream
+    --- cannot be snapshotted because its ownership and position cannot be
+    --- reconstructed.
+    ---
+    --- @param handle Reading starts at this open handle's current position.
+    ---     Nil raises.
+    --- @param length Optional metadata that does not control HTTP framing.
+    --- @param contentType Nil sends no `Content-Type` rather than guessing
+    ---     one.
+    --- @return A source and destination stream.
+    newHandleStream: function(handle: FILE, length?: integer, contentType?: string): DataStream
 
     --- Read-only. `plugin` exposes requests and responses as ECS components.
     plugin: plugin
@@ -82,8 +131,12 @@ local record http
     openClients: function(): integer
 end
 
-http.DataStream = DataStream
+http.DataStream = datastream.DataStream
 http.plugin = plugin
+http.newStringStream = datastream.newStringStream
+http.newBytesStream = datastream.newBytesStream
+http.newFileStream = datastream.newFileStream
+http.newHandleStream = datastream.newHandleStream
 http.newClient = client.newClient
 http.pumpClients = clients.pump
 http.openClients = clients.count

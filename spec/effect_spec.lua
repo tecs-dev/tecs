@@ -34,7 +34,7 @@ local ParticleEmitter = particles.ParticleEmitter
 -- slot range, so it is a fact about the effect the restored component carries
 -- directly and no frame has to be drawn to read it.
 local function register(name, capacity)
-    return particles.effect({
+    return particles.newEffect({
         name = name,
         capacity = capacity,
         schedule = { bursts = { { time = 0, count = 1 } } },

@@ -1563,7 +1563,7 @@ function text.textPlugin(options: TextOptions): function(World)
     local renderer <const> = options.renderer
 
     return function(world: World)
-        local texts <const> = world:query({
+        local texts <const> = world:newQuery({
             name = "tecs.Text",
             include = {text.Text, Transform},
         })

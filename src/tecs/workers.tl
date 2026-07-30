@@ -159,6 +159,13 @@ local record workers
     --- Read-only. Exposes the [`Channel`](tealdoc:tecs.workers.Channel) type.
     Channel: Channel
 
+    --- Creates an independent channel.
+    ---
+    --- @return An owning handle. `destroy` releases the native queue, so
+    ---     exactly one state should hold it. Raises when the queue cannot be
+    ---     created.
+    newChannel: function(): Channel
+
     --- Read-only. Contains the absolute path of the loaded native library.
     path: string
 end
@@ -176,12 +183,7 @@ local messageOut <const> = loader.newArray("void*[1]")
 -- Channels
 -------------------------------------------------------------------------------
 
---- Creates a channel.
----
---- @return An owning handle: `destroy` on it releases the native queue, so exactly one
----     state should hold it. Raises rather than returning nil when the queue cannot be
----     made.
-function Channel.create(): Channel
+function workers.newChannel(): Channel
     local handle = C.tecsChannelCreate()
     if handle == nil then
         error("tecs: cannot create channel", 2)
@@ -326,8 +328,8 @@ function workers.spawn(options: SpawnOptions): Worker
         error("tecs: a worker needs source", 2)
     end
 
-    local toWorker = Channel.create()
-    local fromWorker = Channel.create()
+    local toWorker = workers.newChannel()
+    local fromWorker = workers.newChannel()
 
     local handle = C.tecsWorkerSpawn(
         options.source, options.luaPath or package.path, toWorker.handle, fromWorker.handle

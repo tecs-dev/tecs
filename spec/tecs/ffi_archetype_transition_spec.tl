@@ -390,7 +390,7 @@ describe(
                         end
                         world:update(1 / 60)
 
-                        local query = world:query({include = {FFI, Tag}})
+                        local query = world:newQuery({include = {FFI, Tag}})
 
                         local foundCount = 0
                         for archetype, len in query:iter() do
@@ -440,7 +440,7 @@ describe(
                         end
                         world:update(1 / 60)
 
-                        local query = world:query({include = {FFI, TagAComp, TagBComp}})
+                        local query = world:newQuery({include = {FFI, TagAComp, TagBComp}})
 
                         local foundCount = 0
                         for archetype, len in query:iter() do

@@ -982,7 +982,7 @@ function audio.newAudio(config?: Audio.Config): Audio
     self._inFlight = {}
     self._loadCallers = {}
     self._loading = 0
-    self._random = random.new()
+    self._random = random.newRandom()
     self._now = 0.0
     -- One options record, overwritten per play. Every field is set each time,
     -- so nothing carries over from the previous voice.
@@ -2547,7 +2547,7 @@ function Audio:install(world: types.World)
     -- the generator it was made with.
     self._random = random.stream(world, "tecs.audio")
 
-    local sounds = world:query({
+    local sounds = world:newQuery({
         name = "tecs.Sounds",
         include = {Sound},
     })
@@ -2555,7 +2555,7 @@ function Audio:install(world: types.World)
     -- Naming `Disabled` opts out of the exclusion every other query gets, so
     -- this is the disabled rows and only those. They are in archetypes of
     -- their own, so it matches nothing until something is disabled.
-    local hushed = world:query({
+    local hushed = world:newQuery({
         name = "tecs.DisabledSounds",
         include = {Sound, ecs.Disabled},
     })

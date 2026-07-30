@@ -548,7 +548,7 @@ local function archetypesOf(world: WorldImpl, query: Query): {Archetype}
     local items = (query as {string: any})._activeItems
     if not items then
         error(
-            "batch op requires a Query object (built via world:query(...)). "
+            "batch op requires a Query object (built via world:newQuery(...)). "
                 .. "Build the query once outside your hot loop and reuse it."
         )
     end
@@ -1111,7 +1111,7 @@ local function autoExcludeComponent(descriptor: QueryDescriptor, component: Comp
     end
 end
 
-function WorldImpl:query(descriptor: QueryDescriptor): Query
+function WorldImpl:newQuery(descriptor: QueryDescriptor): Query
     -- Auto-exclude Disabled entities from all queries (unless explicitly included)
     autoExcludeComponent(descriptor, builtins.Disabled)
 

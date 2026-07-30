@@ -290,7 +290,7 @@ describe(
                         world:update(0)
 
                         -- Child should be in ChildOf query
-                        local query = world:query({include = {ChildOf}})
+                        local query = world:newQuery({include = {ChildOf}})
                         local found = false
                         for _, len, entities in query:iter() do
                             for i = 1, len do
@@ -338,7 +338,7 @@ describe(
                         local orphan = world:spawn()
                         world:update(0)
 
-                        local query = world:query({include = {ChildOf}})
+                        local query = world:newQuery({include = {ChildOf}})
                         local found: {integer: boolean} = {}
                         for _, len, entities in query:iter() do
                             for i = 1, len do
@@ -372,7 +372,7 @@ describe(
                         local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
-                        local query = world:query({include = {ChildOf}})
+                        local query = world:newQuery({include = {ChildOf}})
                         for archetype, len in query:iter() do
                             local children = archetype:get(ChildOf)
                             for row = 1, len do
@@ -754,7 +754,7 @@ describe(
 
                         -- Count archetypes before spawning children
                         local archetypesBefore = 0
-                        for _ in world:query({include = {Transform}}):iter() do
+                        for _ in world:newQuery({include = {Transform}}):iter() do
                             archetypesBefore = archetypesBefore + 1
                         end
 
@@ -766,7 +766,7 @@ describe(
 
                         -- Count archetypes after -- should be at most 1 new archetype (Transform + ChildOf wildcard)
                         local archetypesAfter = 0
-                        for _ in world:query({include = {Transform}}):iter() do
+                        for _ in world:newQuery({include = {Transform}}):iter() do
                             archetypesAfter = archetypesAfter + 1
                         end
 
@@ -863,7 +863,7 @@ describe(
                         -- recycles it inside the same transaction.
                         local removals = 0
                         local recycled: integer = nil
-                        world:query({
+                        world:newQuery({
                             name = "SparseSlotReuseWatcher",
                             include = {Marker},
                             onEntitiesRemoved = function(

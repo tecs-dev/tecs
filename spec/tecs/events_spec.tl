@@ -642,7 +642,7 @@ describe(
                     "clears per-entity observers on batch despawn",
                     function()
                         local world = tecs.ecs.newWorld()
-                        local q = world:query({include = {LeakTag}})
+                        local q = world:newQuery({include = {LeakTag}})
                         assertNoLeak(world, function(_id: integer) world:batchDespawn(q) end)
                     end
                 )

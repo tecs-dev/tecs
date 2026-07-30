@@ -405,7 +405,7 @@ describe(
                         world:update(0)
 
                         -- Query using the wildcard relationship (no specific target)
-                        local query = world:query({include = {Likes}})
+                        local query = world:newQuery({include = {Likes}})
                         local foundEntities: {integer: boolean} = {}
                         for archetype, len, entities in query:iter() do
                             for row = 1, len do
@@ -441,7 +441,7 @@ describe(
                         world:update(0)
 
                         -- Query for entities following leader1 specifically
-                        local query = world:query({include = {Follows:targeting(leader1)}})
+                        local query = world:newQuery({include = {Follows:targeting(leader1)}})
                         local foundEntities: {integer: boolean} = {}
                         for archetype, len, entities in query:iter() do
                             for row = 1, len do
@@ -471,7 +471,7 @@ describe(
                         world:update(0)
 
                         -- Query using wildcard should find the child
-                        local query = world:query({include = {ChildOf}})
+                        local query = world:newQuery({include = {ChildOf}})
                         local foundEntities: {integer: boolean} = {}
                         for archetype, len, entities in query:iter() do
                             for row = 1, len do
@@ -524,7 +524,7 @@ describe(
                         world:update(0)
 
                         -- Query for children of parent1
-                        local query1 = world:query({include = {ChildOf:targeting(parent1)}})
+                        local query1 = world:newQuery({include = {ChildOf:targeting(parent1)}})
                         local found1: {integer: boolean} = {}
                         for archetype, len, entities in query1:iter() do
                             for row = 1, len do
@@ -774,7 +774,7 @@ describe(
                         local t2 = world:spawn()
                         world:commit()
 
-                        local q = world:query({include = {Owes:targeting(t1) as tecs.ecs.Component}})
+                        local q = world:newQuery({include = {Owes:targeting(t1) as tecs.ecs.Component}})
 
                         local e1 = world:spawn(Owes(t1) as tecs.ecs.Component)
                         world:commit()

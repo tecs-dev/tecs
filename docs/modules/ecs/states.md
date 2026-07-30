@@ -87,7 +87,7 @@ drawing.
 The tag returned by `createState` works in any query:
 
 ```teal
-local enemies <const> = world:query({
+local enemies <const> = world:newQuery({
     include = {GameState, Enemy},
     type = "logic",
 })

@@ -257,7 +257,7 @@ local function scene()
             world:batchSpawn(STILL, { Transform, Tint, Renderable }, fill)
             world:batchSpawn(MOVERS, { Transform, Tint, Renderable, Mover }, fill)
 
-            local movers = world:query({
+            local movers = world:newQuery({
                 name = "AllocationSpecMovers",
                 include = { Transform, Mover },
             })
@@ -369,17 +369,17 @@ describe("allocation", function()
         -- Reached through a query rather than through the module, which
         -- exports a constructor and keeps the implementation table private.
         -- Every query shares the one metatable, so this counts them all.
-        local methods = getmetatable(app.world:query({ include = { Transform } })).__index
-        local original = methods.cursor
+        local methods = getmetatable(app.world:newQuery({ include = { Transform } })).__index
+        local original = methods.newCursor
         assert.is_function(original)
 
         local opened = 0
-        methods.cursor = function(self)
+        methods.newCursor = function(self)
             opened = opened + 1
             return original(self)
         end
         finally(function()
-            methods.cursor = original
+            methods.newCursor = original
         end)
 
         for _ = 1, 10 do

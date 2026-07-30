@@ -250,7 +250,7 @@ is a name that matches nothing the library's own documentation says.
 
 - Create queries **once, during plugin setup**, and reuse them across the
   system's lifetime. Never create a query inside `run`.
-- Name persistent queries (`world:query({name = "GameStateEntities", ...})`).
+- Name persistent queries (`world:newQuery({name = "GameStateEntities", ...})`).
 - Iterate archetype-wise and bind columns once per archetype:
 
   ```teal

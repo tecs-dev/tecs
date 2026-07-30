@@ -42,6 +42,8 @@ end
 describe("workers", function()
     it("loads its native library", function()
         assert.is_string(workers.path)
+        assert.is_function(workers.newChannel)
+        assert.is_nil(rawget(workers.Channel, "create"))
     end)
 
     it("round trips a table through another state", function()
@@ -198,7 +200,7 @@ while self:receive() ~= nil do end
         -- under test is the encoder rejecting a function, and a live thread
         -- has nothing to do with that.
         --
-        local channel = workers.Channel.create()
+        local channel = workers.newChannel()
 
         -- Functions cannot cross: the other state shares neither heap nor
         -- upvalues with this one, so it could not run them. The rejection

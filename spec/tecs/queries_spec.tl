@@ -48,7 +48,7 @@ describe(
                     function()
                         local GroupA = tecs.ecs.newComponent({name = "FormatGroupA_" .. testId, container = {}})
                         local GroupB = tecs.ecs.newComponent({name = "FormatGroupB_" .. testId, container = {}})
-                        local query = world:query({
+                        local query = world:newQuery({
                             name = "Moving",
                             include = {Position, Velocity},
                             includeAny = {GroupA, GroupB},
@@ -96,7 +96,7 @@ describe(
                         luassert.is_not_nil(world:get(e3, Position), "Entity 3 should have Position")
                         luassert.is_nil(world:get(e3, Velocity), "Entity 3 should not have Velocity")
 
-                        local query = world:query({include = {Position, Velocity}})
+                        local query = world:newQuery({include = {Position, Velocity}})
 
                         luassert.is_not_nil(query, "Query should be created successfully")
 
@@ -125,7 +125,7 @@ describe(
                         world:spawn(Position(10, 20), Velocity(30, 40))
                         world:update(0)
 
-                        local query = world:query({include = {Position, Velocity}})
+                        local query = world:newQuery({include = {Position, Velocity}})
 
                         -- Test direct archetype access
                         local count = 0
@@ -164,7 +164,7 @@ describe(
                     "handles empty results",
                     function()
                         -- Create a query with no matching entities
-                        local query = world:query({include = {Position, Velocity, Health, Sprite, Transform}})
+                        local query = world:newQuery({include = {Position, Velocity, Health, Sprite, Transform}})
 
                         luassert.is_not_nil(query, "Query should be created even with no matches")
 
@@ -185,7 +185,7 @@ describe(
                         world:spawn(Position(2, 2))
                         world:update(0)
 
-                        local query = world:query({include = {Position}})
+                        local query = world:newQuery({include = {Position}})
 
                         luassert.is_not_nil(query, "Query should be created")
 
@@ -205,7 +205,7 @@ describe(
                 it(
                     "counts matched entities across archetypes and updates live",
                     function()
-                        local query = world:query({include = {Position}})
+                        local query = world:newQuery({include = {Position}})
                         luassert.is_equal(0, query:count())
 
                         world:spawn(Position(1, 1))
@@ -227,7 +227,7 @@ describe(
                         world:spawn(Position(2, 2), Velocity(1, 0))
                         world:update(0)
 
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position},
                             groupBy = function(archetype: tecs.ecs.Archetype): integer return archetype.id end,
                         })
@@ -246,7 +246,7 @@ describe(
                         world:spawn(Position(3, 3))
                         world:update(0)
 
-                        world:query({
+                        world:newQuery({
                             include = {Position},
                             onEntitiesAdded = function(
                                 _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
@@ -270,7 +270,7 @@ describe(
                         world:update(0)
 
                         -- This should not error even without callbacks
-                        local query = world:query({include = {Position}})
+                        local query = world:newQuery({include = {Position}})
 
                         local count = 0
                         for _, len in query:iter() do
@@ -295,7 +295,7 @@ describe(
                         world:spawn(Velocity(30, 30))
                         world:update(0)
 
-                        local query = world:query({include = {Position, Velocity}})
+                        local query = world:newQuery({include = {Position, Velocity}})
 
                         local count = 0
                         for archetype, len in query:iter() do
@@ -321,7 +321,7 @@ describe(
                         world:spawn(Position(3, 3), Health(50))
                         world:update(0)
 
-                        local query = world:query({include = {Position}, exclude = {Health}})
+                        local query = world:newQuery({include = {Position}, exclude = {Health}})
 
                         local count = 0
                         for archetype, len in query:iter() do
@@ -348,7 +348,7 @@ describe(
                         world:spawn(Position(3, 3), other)
                         world:update(0)
 
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position},
                             includeAny = {groupA, groupB},
                         })
@@ -374,7 +374,7 @@ describe(
                 it(
                     "updates when new matching entities are added",
                     function()
-                        local query = world:query({include = {Position}})
+                        local query = world:newQuery({include = {Position}})
 
                         -- Initially no entities
                         local count = 0
@@ -405,7 +405,7 @@ describe(
                     "fires onEntitiesAdded when entity starts matching",
                     function()
                         local addCalls = 0
-                        world:query({
+                        world:newQuery({
                             include = {Position, Health},
                             onEntitiesAdded = function(
                                 _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
@@ -431,7 +431,7 @@ describe(
                         local e = world:spawn(Position(1, 1))
                         world:update(0)
 
-                        world:query({
+                        world:newQuery({
                             include = {Position},
                             onEntitiesRemoved = function(
                                 _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
@@ -454,7 +454,7 @@ describe(
                         local e = world:spawn(Position(1, 1))
                         world:update(0)
 
-                        world:query({
+                        world:newQuery({
                             include = {Position},
                             onEntitiesRemoved = function(
                                 _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
@@ -476,7 +476,7 @@ describe(
                         local addCalls = 0
                         local removeCalls = 0
 
-                        world:query({
+                        world:newQuery({
                             include = {Position, Health},
                             onEntitiesAdded = function(
                                 _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
@@ -520,7 +520,7 @@ describe(
                         world:spawn(Velocity(10, 10))
                         world:update(0)
 
-                        local query = world:query({include = {Position}})
+                        local query = world:newQuery({include = {Position}})
 
                         local entities = {}
                         local positions = {} as {TestHelpers.Pos}
@@ -559,7 +559,7 @@ describe(
                         world:spawn(Velocity(30, 30)) -- No position
                         world:update(0)
 
-                        local query = world:query({include = {Position, Velocity}})
+                        local query = world:newQuery({include = {Position, Velocity}})
 
                         local entities = {}
                         local positions = {} as {TestHelpers.Pos}
@@ -612,7 +612,7 @@ describe(
                         world:spawn(Position(3, 3), Velocity(30, 30)) -- No health
                         world:update(0)
 
-                        local query = world:query({include = {Position, Velocity, Health}})
+                        local query = world:newQuery({include = {Position, Velocity, Health}})
 
                         local entities = {}
                         local positions = {} as {TestHelpers.Pos}
@@ -674,7 +674,7 @@ describe(
                         world:spawn(Position(2, 2), Velocity(20, 20), Health(80)) -- No sprite
                         world:update(0)
 
-                        local query = world:query({include = {Position, Velocity, Health, Sprite}})
+                        local query = world:newQuery({include = {Position, Velocity, Health, Sprite}})
 
                         local entities = {}
                         local positions = {} as {TestHelpers.Pos}
@@ -728,7 +728,7 @@ describe(
                         ) -- No transform
                         world:update(0)
 
-                        local query = world:query({include = {Position, Velocity, Health, Sprite, Transform}})
+                        local query = world:newQuery({include = {Position, Velocity, Health, Sprite, Transform}})
 
                         local entities = {}
                         local positions = {} as {TestHelpers.Pos}
@@ -781,7 +781,7 @@ describe(
                         world:update(0)
 
                         -- Test with 1 component
-                        local query1 = world:query({include = {Position}})
+                        local query1 = world:newQuery({include = {Position}})
                         local count1 = 0
                         for archetype, len in query1:iter() do
                             local poss = archetype:get(Position)
@@ -794,7 +794,7 @@ describe(
                         luassert.equals(1, count1)
 
                         -- Test with 2 components
-                        local query2 = world:query({include = {Position, Velocity}})
+                        local query2 = world:newQuery({include = {Position, Velocity}})
                         local count2 = 0
                         for archetype, len in query2:iter() do
                             local poss = archetype:get(Position)
@@ -810,7 +810,7 @@ describe(
                         luassert.equals(1, count2)
 
                         -- Test with 3 components
-                        local query3 = world:query({include = {Position, Velocity, Health}})
+                        local query3 = world:newQuery({include = {Position, Velocity, Health}})
                         local count3 = 0
                         for archetype, len in query3:iter() do
                             local poss = archetype:get(Position)
@@ -842,8 +842,8 @@ describe(
                         world:spawn(Position(2, 2), Velocity(1, 0))
                         world:update(0)
 
-                        local query = world:query({include = {Position}})
-                        local cursor: tecs.ecs.QueryCursor = query:cursor()
+                        local query = world:newQuery({include = {Position}})
+                        local cursor: tecs.ecs.QueryCursor = query:newCursor()
                         local selected: integer = nil
 
                         for _archetype, _len, entities in cursor:iter() do
@@ -870,8 +870,8 @@ describe(
                         local second = world:spawn(Position(2, 2), Velocity(1, 0))
                         world:update(0)
 
-                        local query = world:query({include = {Position}})
-                        local cursor = query:cursor()
+                        local query = world:newQuery({include = {Position}})
+                        local cursor = query:newCursor()
                         for _archetype, _len, entities in cursor:iter() do
                             for row = 1, _len do
                                 world:set(entities[row], Health(100))
@@ -897,12 +897,12 @@ describe(
                         world:spawn(Position(2, 2), Velocity(1, 0))
                         world:update(0)
 
-                        local query = world:query({include = {Position}})
-                        local outer = query:cursor()
+                        local query = world:newQuery({include = {Position}})
+                        local outer = query:newCursor()
                         local selected: integer = nil
 
                         for _outerArchetype in outer:iter() do
-                            local inner = query:cursor()
+                            local inner = query:newCursor()
                             for _innerArchetype, _len, entities in inner:iter() do
                                 selected = entities[1]
                                 world:set(selected, Health(100))
@@ -930,12 +930,12 @@ describe(
                         local selected = world:spawn(Position(1, 1))
                         world:update(0)
 
-                        local query = world:query({include = {Position}})
-                        local first = query:cursor()
+                        local query = world:newQuery({include = {Position}})
+                        local first = query:newCursor()
                         local firstNext, firstState, firstControl = first:iter()
                         luassert.is_not_nil(firstNext(firstState, firstControl))
 
-                        local second = query:cursor()
+                        local second = query:newCursor()
                         local secondNext, secondState, secondControl = second:iter()
                         luassert.is_not_nil(secondNext(secondState, secondControl))
 
@@ -959,13 +959,13 @@ describe(
                         world:spawn(Position(2, 2), Velocity(1, 0))
                         world:update(0)
 
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position},
                             groupBy = function(archetype: tecs.ecs.Archetype): integer return archetype.id end,
                         })
 
                         local matchedArchetypes = 0
-                        local iterCursor = query:cursor()
+                        local iterCursor = query:newCursor()
                         for _archetype in iterCursor:iter() do
                             matchedArchetypes = matchedArchetypes + 1
                             break
@@ -974,7 +974,7 @@ describe(
                         luassert.equals(1, matchedArchetypes)
 
                         local groupId: integer = nil
-                        local groupsCursor = query:cursor()
+                        local groupsCursor = query:newCursor()
                         for currentGroupId in groupsCursor:groups() do
                             groupId = currentGroupId
                             break
@@ -983,7 +983,7 @@ describe(
                         luassert.is_not_nil(groupId)
 
                         local archetypeCount = 0
-                        local groupCursor = query:cursor()
+                        local groupCursor = query:newCursor()
                         for _archetype in groupCursor:group(groupId) do
                             archetypeCount = archetypeCount + 1
                             break
@@ -996,8 +996,8 @@ describe(
                 it(
                     "cannot reuse a closed cursor",
                     function()
-                        local query = world:query({include = {Position}})
-                        local cursor = query:cursor()
+                        local query = world:newQuery({include = {Position}})
+                        local cursor = query:newCursor()
                         cursor:close()
                         cursor:close()
 
@@ -1024,7 +1024,7 @@ describe(
                         world:update(0)
 
                         -- Query without including Disabled (should exclude e3)
-                        local query = world:query({include = {Position, Velocity}})
+                        local query = world:newQuery({include = {Position, Velocity}})
 
                         local count = 0
                         for archetype, len in query:iter() do
@@ -1047,7 +1047,7 @@ describe(
                         world:update(0)
 
                         -- Query with explicit include of Disabled
-                        local query = world:query({include = {Position, Velocity, tecs.ecs.Disabled}})
+                        local query = world:newQuery({include = {Position, Velocity, tecs.ecs.Disabled}})
 
                         local count = 0
                         for archetype, len in query:iter() do
@@ -1082,7 +1082,7 @@ describe(
                 it(
                     "excludes paused entities from logic queries",
                     function()
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position, Velocity},
                             type = "logic",
                         })
@@ -1094,7 +1094,7 @@ describe(
                 it(
                     "keeps paused entities in render queries",
                     function()
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position, Velocity},
                             type = "render",
                         })
@@ -1106,7 +1106,7 @@ describe(
                 it(
                     "keeps paused entities when type is omitted",
                     function()
-                        local query = world:query({include = {Position, Velocity}})
+                        local query = world:newQuery({include = {Position, Velocity}})
 
                         luassert.equals(2, countEntities(query), "Expected both entities")
                     end
@@ -1115,7 +1115,7 @@ describe(
                 it(
                     "keeps paused entities that a logic query includes explicitly",
                     function()
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position, Velocity, tecs.ecs.Paused},
                             type = "logic",
                         })
@@ -1128,7 +1128,7 @@ describe(
                     "rejects an unknown type",
                     function()
                         luassert.has_error(function()
-                            world:query({
+                            world:newQuery({
                                 include = {Position},
                                 type = "gameplay" as tecs.Query.Kind,
                             })
@@ -1163,7 +1163,7 @@ describe(
                         world:spawn(Position(3, 3), GroupC)
                         world:update(0)
 
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position},
                             includeAny = {GroupA, GroupB, GroupC},
                             groupBy = function(archetype: tecs.ecs.Archetype): integer
@@ -1198,7 +1198,7 @@ describe(
                 it(
                     "maintains grouping when new archetypes are added",
                     function()
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position},
                             includeAny = {GroupA, GroupB, GroupC},
                             groupBy = function(archetype: tecs.ecs.Archetype): integer
@@ -1245,7 +1245,7 @@ describe(
                         world:spawn(Position(3, 3), GroupB) -- group 2
                         world:update(0)
 
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position},
                             includeAny = {GroupA, GroupB, GroupC},
                             groupBy = function(archetype: tecs.ecs.Archetype): integer
@@ -1283,7 +1283,7 @@ describe(
                         world:spawn(Position(4, 4), GroupC)
                         world:update(0)
 
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position},
                             includeAny = {GroupA, GroupB, GroupC},
                             groupBy = function(archetype: tecs.ecs.Archetype): integer
@@ -1321,7 +1321,7 @@ describe(
                         world:spawn(Position(1, 1), GroupA)
                         world:update(0)
 
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position},
                             includeAny = {GroupA, GroupB, GroupC},
                             groupBy = function(archetype: tecs.ecs.Archetype): integer
@@ -1354,7 +1354,7 @@ describe(
                         world:spawn(Position(2, 2), GroupB)
                         world:update(0)
 
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position},
                             includeAny = {GroupA, GroupB},
                             groupBy = function(archetype: tecs.ecs.Archetype): integer
@@ -1385,7 +1385,7 @@ describe(
                         world:spawn(Position(1, 1), GroupA)
                         world:update(0)
 
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position},
                             includeAny = {GroupA},
                         })
@@ -1403,7 +1403,7 @@ describe(
                         world:spawn(Position(1, 1), GroupA)
                         world:update(0)
 
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position},
                             includeAny = {GroupA},
                         })
@@ -1425,7 +1425,7 @@ describe(
                         world:spawn(Position(3, 3), GroupC)
                         world:update(0)
 
-                        local query = world:query({
+                        local query = world:newQuery({
                             include = {Position},
                             includeAny = {GroupA, GroupB, GroupC},
                             groupBy = function(archetype: tecs.ecs.Archetype): integer
@@ -1471,7 +1471,7 @@ describe(
                     "fires onEntitiesAdded once per batchSpawn with count=N",
                     function()
                         local calls: {{integer}} = {}
-                        world:query({
+                        world:newQuery({
                             include = {Position},
                             onEntitiesAdded = function(
                                 _arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, count: integer
@@ -1503,7 +1503,7 @@ describe(
                     "fires onEntitiesAdded with count=1 on single spawn",
                     function()
                         local calls: {{integer}} = {}
-                        world:query({
+                        world:newQuery({
                             include = {Position},
                             onEntitiesAdded = function(
                                 _arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, count: integer
@@ -1526,7 +1526,7 @@ describe(
                     "fires onEntitiesAdded when an entity transitions into the match set",
                     function()
                         local calls: {{integer}} = {}
-                        world:query({
+                        world:newQuery({
                             include = {Position, Velocity},
                             onEntitiesAdded = function(
                                 _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
@@ -1553,7 +1553,7 @@ describe(
                     "fires onEntitiesRemoved once per batchDespawn truncate",
                     function()
                         local calls: {{integer}} = {}
-                        world:query({
+                        world:newQuery({
                             include = {Position},
                             onEntitiesRemoved = function(
                                 _arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, count: integer
@@ -1574,7 +1574,7 @@ describe(
                         )
                         world:commit()
 
-                        local despawnQuery = world:query({include = {Position}})
+                        local despawnQuery = world:newQuery({include = {Position}})
                         world:batchDespawn(despawnQuery)
                         world:commit()
 
@@ -1589,7 +1589,7 @@ describe(
                     "fires onEntitiesRemoved with count=1 on single despawn",
                     function()
                         local calls: {{integer}} = {}
-                        world:query({
+                        world:newQuery({
                             include = {Position},
                             onEntitiesRemoved = function(
                                 _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
@@ -1614,7 +1614,7 @@ describe(
                     function()
                         local addedCalls: {any} = {}
                         local removedCalls: {any} = {}
-                        world:query({
+                        world:newQuery({
                             include = {Position},
                             onEntitiesAdded = function(
                                 _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, _count: integer
@@ -1659,7 +1659,7 @@ describe(
                         world:commit()
 
                         local calls: {{integer}} = {}
-                        world:query({
+                        world:newQuery({
                             include = {Position},
                             onEntitiesAdded = function(
                                 _arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, count: integer
@@ -1679,7 +1679,7 @@ describe(
                     "rejects onEntitiesAdded on a temp query",
                     function()
                         local ok = pcall(function()
-                            world:query({
+                            world:newQuery({
                                 include = {Position},
                                 temp = true,
                                 onEntitiesAdded = function() end,
@@ -1702,7 +1702,7 @@ describe(
                         local TagB = tecs.ecs.newTagComponent({name = "CascadeTagB"})
                         local TagC = tecs.ecs.newTagComponent({name = "CascadeTagC"})
 
-                        world:query({
+                        world:newQuery({
                             name = "AObs",
                             include = {TagA},
                             onEntitiesAdded = function(
@@ -1714,7 +1714,7 @@ describe(
                                 end
                             end,
                         })
-                        world:query({
+                        world:newQuery({
                             name = "BObs",
                             include = {TagB},
                             onEntitiesAdded = function(
@@ -1738,7 +1738,7 @@ describe(
                         -- in arch{A,B,C} exactly once and NOT appear in arch{A}
                         -- (alone) or arch{A,B} (no C) at all.
                         local function countIn(include: {tecs.ecs.Component}, exclude: {tecs.ecs.Component}): integer
-                            local q = world:query({
+                            local q = world:newQuery({
                                 name = "regress_probe_" .. tostring({}),
                                 include = include,
                                 exclude = exclude,
@@ -1769,7 +1769,7 @@ describe(
 
                         local seen: {integer: integer} = {}
                         eachEntityInQuery(
-                            world:query({name = "dupe_probe_A", include = {TagA}, temp = true}),
+                            world:newQuery({name = "dupe_probe_A", include = {TagA}, temp = true}),
                             function(id: integer) seen[id] = (seen[id] or 0) + 1 end
                         )
                         for i = 1, 3 do
@@ -1793,7 +1793,7 @@ describe(
                         world:spawn(Position(2, 2), Velocity(0, 0))
                         world:update(0)
 
-                        local q = world:query({include = {Position}})
+                        local q = world:newQuery({include = {Position}})
 
                         local outer = 0
                         local inner = 0
@@ -1816,7 +1816,7 @@ describe(
                         world:spawn(Position(2, 2), Velocity(0, 0))
                         world:update(0)
 
-                        local q = world:query({
+                        local q = world:newQuery({
                             include = {Position},
                             groupBy = function(archetype: tecs.ecs.Archetype): integer
                                 return archetype:get(Velocity) and 2 or 1
@@ -1844,7 +1844,7 @@ describe(
                         world:spawn(Position(2, 2), Velocity(0, 0))
                         world:update(0)
 
-                        local q = world:query({
+                        local q = world:newQuery({
                             include = {Position},
                             groupBy = function(archetype: tecs.ecs.Archetype): integer
                                 return archetype:get(Velocity) and 2 or 1
@@ -1878,7 +1878,7 @@ describe(
 
                         local spawned: integer = nil
                         local triggered = false
-                        local q = world:query({
+                        local q = world:newQuery({
                             include = {Position},
                             onEntitiesAdded = function(
                                 _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer

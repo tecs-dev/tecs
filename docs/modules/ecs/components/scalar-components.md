@@ -46,7 +46,7 @@ default exists, the kind supplies `0`, false, or an empty string.
 Scalar columns follow ordinary query and dirty rules:
 
 ```teal
-local living <const> = world:query({
+local living <const> = world:newQuery({
     include = {Health},
     type = "logic",
 })

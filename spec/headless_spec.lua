@@ -71,7 +71,7 @@ describe("tecs headless", function()
                 world:update(1 / 60)
 
                 local matched = 0
-                local query = world:query({ include = { Transform, Tag } })
+                local query = world:newQuery({ include = { Transform, Tag } })
                 for _, length in query:iter() do matched = matched + length end
 
                 local transform = world:get(entity, Transform)

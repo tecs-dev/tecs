@@ -1046,56 +1046,56 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
             return body
         end
 
-        local pendingBodies = world:query({
+        local pendingBodies = world:newQuery({
             name = "tecs.PendingBodies",
             include = {Transform, Body, Collider},
             exclude = {RigidBody},
         })
-        local detachedBodies = world:query({
+        local detachedBodies = world:newQuery({
             name = "tecs.DetachedBodies",
             include = {RigidBody},
             exclude = {Body},
         })
-        local detachedDisabledBodies = world:query({
+        local detachedDisabledBodies = world:newQuery({
             name = "tecs.DetachedDisabledBodies",
             include = {RigidBody, ecs.Disabled},
             exclude = {Body},
         })
-        local pausedBodies = world:query({
+        local pausedBodies = world:newQuery({
             name = "tecs.PausedBodies",
             include = {Body, Motion, RigidBody, ecs.Paused},
             exclude = {PhysicsHeld},
         })
-        local resumedBodies = world:query({
+        local resumedBodies = world:newQuery({
             name = "tecs.ResumedBodies",
             include = {Body, Motion, RigidBody, PhysicsHeld},
             exclude = {ecs.Paused},
         })
-        local disabledBodies = world:query({
+        local disabledBodies = world:newQuery({
             name = "tecs.DisabledBodies",
             include = {RigidBody, ecs.Disabled},
             exclude = {PhysicsDisabled},
         })
-        local enabledBodies = world:query({
+        local enabledBodies = world:newQuery({
             name = "tecs.EnabledBodies",
             include = {RigidBody, PhysicsDisabled},
             exclude = {ecs.Disabled},
         })
-        local declaredBodies = world:query({
+        local declaredBodies = world:newQuery({
             name = "tecs.LiveBodyDeclarations",
             include = {Body, RigidBody},
             exclude = {PhysicsHeld, PhysicsDisabled},
         })
-        local colliders = world:query({
+        local colliders = world:newQuery({
             name = "tecs.LiveColliders",
             include = {Collider, RigidBody},
         })
-        local pendingSecondary = world:query({
+        local pendingSecondary = world:newQuery({
             name = "tecs.PendingSecondaryColliders",
             include = {Collider, ColliderOf},
             exclude = {ColliderShape},
         })
-        local secondaryColliders = world:query({
+        local secondaryColliders = world:newQuery({
             name = "tecs.LiveSecondaryColliders",
             include = {Collider, ColliderOf, ColliderShape},
         })
@@ -1103,12 +1103,12 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
         local shapeQueue: {PendingShape} = {}
         local createdBodies: {integer: Handle} = {}
 
-        local bodies = world:query({
+        local bodies = world:newQuery({
             name = "tecs.SimulatedBodies",
             type = "logic",
             include = {Transform, RigidBody},
         })
-        local snapshotBodies = world:query({
+        local snapshotBodies = world:newQuery({
             name = "tecs.SnapshotBodies",
             include = {Motion, RigidBody},
             exclude = {PhysicsHeld},

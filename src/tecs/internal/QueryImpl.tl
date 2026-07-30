@@ -341,7 +341,7 @@ function QueryImpl:iter(): (Query.IterFn, Query, any)
     end
 end
 
-function QueryImpl:cursor(): QueryCursor
+function QueryImpl:newCursor(): QueryCursor
     local cursor: QueryCursorImpl = setmetatable(
         {
             _query = self,

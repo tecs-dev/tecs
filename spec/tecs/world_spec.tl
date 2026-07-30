@@ -751,7 +751,7 @@ describe(
                         w:spawn(VelComponent())
                         w:commit()
 
-                        local query = w:query({include = {PosComponent}})
+                        local query = w:newQuery({include = {PosComponent}})
 
                         luassert.is_not_nil(query)
 
@@ -773,7 +773,7 @@ describe(
                         w:spawn(PosComponent())
                         w:commit()
 
-                        local query = w:query({include = {PosComponent}, exclude = {DeadComponent}})
+                        local query = w:newQuery({include = {PosComponent}, exclude = {DeadComponent}})
 
                         local count = 0
                         for _archetype, len, _entities in query:iter() do
@@ -1323,7 +1323,7 @@ describe(
                         )
                         w:commit()
 
-                        local q = w:query({include = {PosComponent}})
+                        local q = w:newQuery({include = {PosComponent}})
                         local totalEntities = 0
                         for _, len in q:iter() do
                             totalEntities = totalEntities + len
@@ -1336,7 +1336,7 @@ describe(
                     "should notify query observers",
                     function()
                         local matchCount = 0
-                        w:query({
+                        w:newQuery({
                             include = {PosComponent},
                             onEntitiesAdded = function(
                                 _archetype: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
@@ -1430,7 +1430,7 @@ describe(
                         )
                         w:commit()
 
-                        local q = w:query({include = {PosComponent}})
+                        local q = w:newQuery({include = {PosComponent}})
                         local totalEntities = 0
                         for _, len in q:iter() do
                             totalEntities = totalEntities + len
@@ -1505,13 +1505,13 @@ describe(
                         end -- only Pos
                         w:commit()
 
-                        local q = w:query({include = {PosComponent, VelComponent}})
+                        local q = w:newQuery({include = {PosComponent, VelComponent}})
                         w:batchDespawn(q)
                         w:commit()
 
                         -- Pos-only survivors should still be alive
                         local remaining = 0
-                        for _, len in w:query({include = {PosComponent}}):iter() do
+                        for _, len in w:newQuery({include = {PosComponent}}):iter() do
                             remaining = remaining + len
                         end
                         luassert.equals(3, remaining)
@@ -1530,12 +1530,12 @@ describe(
                         end -- no tag
                         w:commit()
 
-                        local q = w:query({include = {PosComponent}, exclude = {Tag}})
+                        local q = w:newQuery({include = {PosComponent}, exclude = {Tag}})
                         w:batchDespawn(q)
                         w:commit()
 
                         local remaining = 0
-                        for _, len in w:query({include = {PosComponent}}):iter() do
+                        for _, len in w:newQuery({include = {PosComponent}}):iter() do
                             remaining = remaining + len
                         end
                         luassert.equals(4, remaining, "tagged entities survive")
@@ -1550,7 +1550,7 @@ describe(
                             ids[i] = w:spawn(PosComponent(i, i))
                         end
 
-                        local q = w:query({include = {PosComponent}})
+                        local q = w:newQuery({include = {PosComponent}})
                         -- Wrap in a defer scope to observe the deferred contract:
                         -- staged until commit. In eager (default) mode the
                         -- batchDespawn would apply synchronously.
@@ -1575,7 +1575,7 @@ describe(
                             ids[i] = w:spawn(PosComponent(i, i))
                         end
 
-                        local q = w:query({include = {PosComponent}})
+                        local q = w:newQuery({include = {PosComponent}})
                         w:batchDespawn(q)
                         for i = 1, 5 do
                             luassert.is_false(w:isAlive(ids[i]))
@@ -1595,7 +1595,7 @@ describe(
                         end
                         w:commit()
 
-                        local q = w:query({include = {PosComponent}})
+                        local q = w:newQuery({include = {PosComponent}})
                         w:batchDespawn(q)
                         w:commit()
 
@@ -1620,7 +1620,7 @@ describe(
                         local perEntityFires = 0
                         w:observe(id, tecs.ecs.OnDespawn, function(_ev) perEntityFires = perEntityFires + 1 end)
 
-                        local q = w:query({include = {PosComponent}})
+                        local q = w:newQuery({include = {PosComponent}})
                         w:batchDespawn(q)
                         w:commit()
 
@@ -1714,7 +1714,7 @@ describe(
                         local a = w:spawn(PosComponent(1, 2))
                         w:commit()
 
-                        local q = w:query({include = {PosComponent}})
+                        local q = w:newQuery({include = {PosComponent}})
                         w:batchSet(q, tecs.ecs.EntityKey("player"))
                         w:commit()
                         luassert.equals(a, w:byKey("player"))
@@ -1736,7 +1736,7 @@ describe(
                         w:spawn(PosComponent(3, 4))
                         w:commit()
 
-                        local q = w:query({include = {PosComponent}})
+                        local q = w:newQuery({include = {PosComponent}})
                         local ok = pcall(function() w:batchSet(q, tecs.ecs.EntityKey("player")) end)
                         luassert.is_false(ok)
                     end
@@ -1820,7 +1820,7 @@ describe(
                 it(
                     "keeps queries matching archetypes created after the clear",
                     function()
-                        local q = w:query({include = {PosComponent}})
+                        local q = w:newQuery({include = {PosComponent}})
                         w:spawn(PosComponent(1, 1))
                         w:spawn(PosComponent(2, 2))
                         luassert.equals(2, queryCount(q))

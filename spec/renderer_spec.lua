@@ -269,7 +269,7 @@ describe("ecs.Renderer", function()
             Renderable()
         )
 
-        local moving = world:query({ include = { Transform, Renderable } })
+        local moving = world:newQuery({ include = { Transform, Renderable } })
         world:addSystem({
             name = "spec.Move",
             phase = tecs.ecs.phases.Update,
@@ -1018,7 +1018,7 @@ describe("ecs.Renderer", function()
         local Marker = tecs.ecs.newTagComponent({ name = "AfterMissingImage" })
         world:spawn(Marker)
         local seen = 0
-        for _, length in world:query({ include = { Marker } }):iter() do
+        for _, length in world:newQuery({ include = { Marker } }):iter() do
             seen = seen + length
         end
         assert.are.equal(1, seen, "the failed frame left a query scope open behind it")
@@ -1062,7 +1062,7 @@ describe("ecs.Renderer", function()
 
         -- getMut is what marks the column dirty, so a system that writes is
         -- what wakes the sync back up.
-        local moving = world:query({ include = { Transform, Renderable } })
+        local moving = world:newQuery({ include = { Transform, Renderable } })
         world:addSystem({
             name = "spec.Nudge",
             phase = tecs.ecs.phases.Update,
@@ -1193,7 +1193,7 @@ describe("ecs.Renderer", function()
             run = function()
                 world:spawn(Marker)
                 seen = 0
-                for _, length in world:query({ include = { Marker } }):iter() do
+                for _, length in world:newQuery({ include = { Marker } }):iter() do
                     seen = seen + length
                 end
             end,

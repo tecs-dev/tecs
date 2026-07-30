@@ -11,7 +11,7 @@ matching archetype, reads through `get`, and takes writable columns through
 
 ```teal
 local Transform <const> = tecs.Transform
-local movers <const> = world:query({
+local movers <const> = world:newQuery({
     include = {Transform, Velocity},
 })
 

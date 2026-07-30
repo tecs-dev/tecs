@@ -450,7 +450,7 @@ local record types
             "render"
         end
 
-        --- The options passed to `world:query`.
+        --- The options passed to `world:newQuery`.
         interface Descriptor
             --- Caller-writable. Names the query in logs, profiles, and debug
             --- tools.
@@ -510,7 +510,7 @@ local record types
 
         --- An opt-in query iterator that can be closed before exhaustion.
         ---
-        --- Create one with `query:cursor()` when an archetype-level loop may
+        --- Create one with `query:newCursor()` when an archetype-level loop may
         --- `break` or return early. Call `close()` after leaving the loop.
         --- Natural exhaustion closes the cursor automatically, and repeated
         --- `close()` calls are safe.
@@ -578,10 +578,10 @@ local record types
         --- @return The three values a generic `for` takes. Iteration opens a
         ---     deferred scope on the world and closes it when the loop runs out
         ---     of archetypes, so a `break` or an early `return` leaves the world
-        ---     deferred and every later spawn silently queues. Use `cursor` for
-        ---     a loop that may stop early. The `entities` table and the columns
-        ---     are the archetype's own and are valid only for that turn of the
-        ---     loop.
+        ---     deferred and every later spawn silently queues. Use
+        ---     `newCursor()` for a loop that may stop early. The `entities`
+        ---     table and the columns are the archetype's own and are valid only
+        ---     for that turn of the loop.
         iter: function(self): (IterFn, Query, any)
 
         --- Create an opt-in cursor for a traversal that may stop early.
@@ -595,7 +595,7 @@ local record types
         --- @return A cursor the caller has to `close`, once, on every path out
         ---     of the loop including an early return. Closing it twice is
         ---     harmless; never closing it leaves the world deferred for good.
-        cursor: function(self): Cursor
+        newCursor: function(self): Cursor
 
         --- Iterate over active group IDs in sorted order.
         --- Only available when groupBy is specified.
@@ -1196,7 +1196,7 @@ local record types
         --- Bulk-despawn every entity matching `query`. The actual
         --- teardown is deferred until the next commit.
         ---
-        --- `query` must be a `Query` object built via `world:query(...)`
+        --- `query` must be a `Query` object built via `world:newQuery(...)`
         --- and reused across calls -- batch ops do not accept
         --- QueryDescriptors or raw component-type arrays. Build the
         --- query once outside your hot loop.
@@ -1213,7 +1213,7 @@ local record types
         ---     reverse-index targets fall back to per-entity despawn so
         ---     cascade-delete and reverse-index unlink run correctly.
         ---
-        --- @param query Query built via `world:query(...)`.
+        --- @param query Query built via `world:newQuery(...)`.
         batchDespawn: function(self, query: Query)
 
         --- Bulk-set a component on every entity matching `query`.
@@ -1248,7 +1248,7 @@ local record types
         --- path since they live in per-world stores, not archetype
         --- columns.
         ---
-        --- @param query Query built via `world:query(...)`.
+        --- @param query Query built via `world:newQuery(...)`.
         --- @param componentOrInstance Component instance (const mode) or component type (callback mode).
         --- @param callback Optional chunk writer `(arch, firstRow, lastRow, count)`.
         batchSet: function(
@@ -1271,7 +1271,7 @@ local record types
         --- correctly. Other components in the source archetype do not
         --- affect path selection.
         ---
-        --- @param query Query built via `world:query(...)`.
+        --- @param query Query built via `world:newQuery(...)`.
         --- @param componentType Component to remove.
         batchRemove: function(self, query: Query, componentType: components.Component)
 
@@ -1403,7 +1403,7 @@ local record types
         --- @return A query that keeps itself current as archetypes appear, so it
         ---     is built once during plugin setup and reused. Building one inside
         ---     a system's `run` pays the match cost every frame.
-        query: function(self, descriptor: Query.Descriptor): Query
+        newQuery: function(self, descriptor: Query.Descriptor): Query
 
         --- Find archetypes that have the given component.
         ---
@@ -1748,11 +1748,7 @@ local record types
             --- @param observer Called synchronously with each matching event.
             --- @param id An optional stable name accepted by `stopObserving`.
             observe: function<E is Event>(
-                self: MessageBus,
-                address: integer,
-                eventType: E,
-                observer: function(event: E),
-                id?: string
+                self: MessageBus, address: integer, eventType: E, observer: function(event: E), id?: string
             )
 
             --- Observe an event type at a specific address, at most once.

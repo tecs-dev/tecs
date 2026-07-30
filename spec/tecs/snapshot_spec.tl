@@ -280,7 +280,7 @@ describe(
                 luassert.equals(1, #snap.archetypes)
                 luassert.equals(3, #(snap.archetypes[1].entities))
 
-                local posQuery = world:query({name = "Pos", include = {PositionComp}})
+                local posQuery = world:newQuery({name = "Pos", include = {PositionComp}})
                 local function count(): integer
                     local n = 0
                     for _, len in posQuery:iter() do

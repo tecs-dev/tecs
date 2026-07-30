@@ -343,7 +343,7 @@ describe("Application", function()
             local app = build({
                 plugin = function(world)
                     scene(world)
-                    query = world:query({ name = "spec.Recovered", include = { components.Tint } })
+                    query = world:newQuery({ name = "spec.Recovered", include = { components.Tint } })
                     world:addSystem({
                         name = "spec.ThrowsInIter",
                         phase = phases.Update,

@@ -388,7 +388,7 @@ local function ensureChainObservers(world)
     if _chainObserversInstalled then
         return
     end
-    world:query({
+    world:newQuery({
         name = "ChainAObserver",
         include = { ChainA },
         onEntitiesAdded = function(archetype, firstRow, lastRow)
@@ -398,7 +398,7 @@ local function ensureChainObservers(world)
             end
         end,
     })
-    world:query({
+    world:newQuery({
         name = "ChainBObserver",
         include = { ChainB },
         onEntitiesAdded = function(archetype, firstRow, lastRow)
@@ -413,7 +413,7 @@ end
 
 -- Batch-op setup helper: 1k tracked (Position, Velocity, Alive) + 4k background
 -- (Health, BenchName, Aggro). The tracked query matches only Position.
--- The query is cached at module scope because world:query registers as an
+-- The query is cached at module scope because world:newQuery registers as an
 -- archetype observer -- fresh queries per iteration would leak observers and
 -- dominate timing.
 local _batchBenchQuery
@@ -442,7 +442,7 @@ local function setupBatchBenchWorld(case)
         entities[i] = firstId + i - 1
     end
     if not _batchBenchQuery then
-        _batchBenchQuery = world:query({ include = { Position } })
+        _batchBenchQuery = world:newQuery({ include = { Position } })
     end
     return { world = world, query = _batchBenchQuery, entities = entities }
 end
@@ -625,7 +625,7 @@ tecsScenarios.batchDespawn = {
         world:batchSpawn(case.params.count, { Position, Velocity }, fillPositionVelocity)
         world:commit()
         -- Batch ops require a Query object, built once and reused.
-        local query = world:query({ include = { Position, Velocity } })
+        local query = world:newQuery({ include = { Position, Velocity } })
         return { world = world, query = query }
     end,
     run = function(state)
@@ -804,7 +804,7 @@ tecsScenarios.queryIter = {
         local world = freshTecsWorld()
         world:batchSpawn(case.params.count, { Position }, fillPosition)
         world:commit()
-        return { world = world, query = world:query({ include = { Position } }) }
+        return { world = world, query = world:newQuery({ include = { Position } }) }
     end),
     run = function(state)
         local sum = 0
@@ -828,7 +828,7 @@ tecsScenarios.queryIterScalar = {
             end
         end)
         world:commit()
-        return { world = world, query = world:query({ include = { ScalarPosX } }) }
+        return { world = world, query = world:newQuery({ include = { ScalarPosX } }) }
     end),
     run = function(state)
         local sum = 0
@@ -847,7 +847,7 @@ tecsScenarios.queryIterFFI = {
         local world = freshTecsWorld()
         world:batchSpawn(case.params.count, { FFIPosition }, fillFFIPosition)
         world:commit()
-        return { world = world, query = world:query({ include = { FFIPosition } }) }
+        return { world = world, query = world:newQuery({ include = { FFIPosition } }) }
     end),
     run = function(state)
         local sum = 0
@@ -875,7 +875,7 @@ tecsScenarios.queryMulti = {
             end)
         end
         world:commit()
-        return { world = world, query = world:query({ include = { Position } }) }
+        return { world = world, query = world:newQuery({ include = { Position } }) }
     end),
     run = function(state)
         local sum = 0
@@ -896,7 +896,7 @@ tecsScenarios.queryBuild = {
         return { world = world }
     end,
     run = function(state)
-        local query = state.world:query({
+        local query = state.world:newQuery({
             include = { Position, Velocity },
             exclude = { Damage, Aggro },
             temp = true,
@@ -916,7 +916,7 @@ tecsScenarios.sysUpdate = {
         local world = freshTecsWorld()
         world:batchSpawn(case.params.count, { Position, Velocity }, fillPositionVelocity)
         world:commit()
-        return { world = world, query = world:query({ include = { Position, Velocity } }) }
+        return { world = world, query = world:newQuery({ include = { Position, Velocity } }) }
     end),
     run = function(state)
         for archetype, len in state.query:iter() do
@@ -944,7 +944,7 @@ tecsScenarios.sysUpdateScalar = {
             end
         end)
         world:commit()
-        return { world = world, query = world:query({ include = { ScalarPosX, ScalarVelX } }) }
+        return { world = world, query = world:newQuery({ include = { ScalarPosX, ScalarVelX } }) }
     end),
     run = function(state)
         for archetype, len in state.query:iter() do
@@ -962,7 +962,7 @@ tecsScenarios.sysUpdateFFI = {
         local world = freshTecsWorld()
         world:batchSpawn(case.params.count, { FFIPosition, FFIVelocity }, fillFFIPositionVelocity)
         world:commit()
-        return { world = world, query = world:query({ include = { FFIPosition, FFIVelocity } }) }
+        return { world = world, query = world:newQuery({ include = { FFIPosition, FFIVelocity } }) }
     end),
     run = function(state)
         for archetype, len in state.query:iter() do

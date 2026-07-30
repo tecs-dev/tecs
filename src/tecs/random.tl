@@ -17,8 +17,8 @@ advances `spawns`, so adding a stream leaves existing consumers unchanged.
 Use namespaced, nonempty names and call `seed` during world setup. Calling it
 later restarts every stream.
 
-Use `new` for tools, tests, and benchmarks that need a generator outside a
-world. Do not share a generator between threads.
+Use `newRandom` for tools, tests, and benchmarks that need a generator
+outside a world. Do not share a generator between threads.
 
 ## Snapshots
 
@@ -44,7 +44,7 @@ A [`Noise`](tealdoc:tecs.random.Noise) field depends only on its seed and
 coordinates. It advances no generator and needs no snapshot state.
 
 ```teal
-local field <const> = tecs.ecs.random.noise(1234)
+local field <const> = tecs.ecs.random.newNoise(1234)
 local height <const> = field:fbm2(x * 0.01, y * 0.01, 4)
 ```
 ]=]
@@ -239,7 +239,7 @@ local record random
         --- Restarts the sequence from `seed` in place. The generator retains
         --- its identity, so existing holders draw from the restart.
         ---
-        --- @param seed Read as a 32-bit word, as `new` reads one, so 2^31 and -2^31 restart
+        --- @param seed Read as a 32-bit word, as `newRandom` reads one, so 2^31 and -2^31 restart
         ---     the same sequence. Zero is a seed like any other; the generator
         ---     expands it instead of rejecting it.
         reseed: function(self: Random, seed: integer)
@@ -323,15 +323,15 @@ local record random
     ---     generator still repeats run to run.
     --- @return A generator nothing else holds and nothing else knows about: two calls on one
     ---     seed give two objects that draw the same sequence, each at its own pace.
-    new: function(seed?: integer): Random
+    newRandom: function(seed?: integer): Random
 
-    --- Creates a noise field from `seed`, read the same way `new` reads one.
+    --- Creates a noise field from `seed`, read the same way `newRandom` reads one.
     ---
-    --- @param seed Omitted takes the same fixed constant `new` does, so two
+    --- @param seed Omitted takes the same fixed constant `newRandom` does, so two
     ---     unseeded fields are the same field.
     --- @return A field with a permutation of its own. Building it draws 255 values from a
     ---     generator made for the purpose, so no stream and no other generator moves.
-    noise: function(seed?: integer): Noise
+    newNoise: function(seed?: integer): Noise
 
     --- Returns the generator named `name` in `world`, creating it on the first
     --- call and returning the same object afterwards.
@@ -358,7 +358,7 @@ local record random
     --- @param world The call reseeds each existing stream in place, so a holder
     ---     keeps the object. It also installs the snapshot handler, which is why
     ---     games that load snapshots call it during setup.
-    --- @param seed Read as a 32-bit word, as `new` reads one. There is no way
+    --- @param seed Read as a 32-bit word, as `newRandom` reads one. There is no way
     ---     to ask a world for its seed back; take it from a snapshot instead.
     seed: function(world: types.World, seed: integer)
 end
@@ -502,7 +502,7 @@ function random.Random:setState(words: {integer})
     self._s3 = s3
 end
 
-function random.new(seed?: integer): Random
+function random.newRandom(seed?: integer): Random
     local self <const> = setmetatable({} as Random, RandomMT)
     self._s0, self._s1, self._s2, self._s3 = expand(seed or DEFAULT_SEED)
     return self
@@ -620,9 +620,9 @@ function random.Noise:fbm3(x: number, y: number, z: number, octaves: integer): n
     return total / norm
 end
 
-function random.noise(seed?: integer): Noise
+function random.newNoise(seed?: integer): Noise
     local self <const> = setmetatable({} as Noise, NoiseMT)
-    local generator <const> = random.new(seed)
+    local generator <const> = random.newRandom(seed)
     local perm: {integer} = {}
     for i = 0, 255 do
         perm[i + 1] = i
@@ -693,7 +693,7 @@ local function restore(registry: Registry, value: {string: any})
     if saved ~= nil then
         for name, words in pairs(saved) do
             if registry.streams[name] == nil then
-                local generator <const> = random.new()
+                local generator <const> = random.newRandom()
                 generator:setState(words)
                 registry.streams[name] = generator
             end
@@ -746,7 +746,7 @@ function random.stream(world: types.World, name: string): Random
         return existing
     end
 
-    local generator <const> = random.new(streamSeed(registry.seed, name))
+    local generator <const> = random.newRandom(streamSeed(registry.seed, name))
     registry.streams[name] = generator
     return generator
 end

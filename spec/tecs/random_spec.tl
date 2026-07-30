@@ -24,14 +24,24 @@ end
 describe(
     "random",
     function()
+        it(
+            "uses result-named factories",
+            function()
+                luassert.is_function(random.newRandom)
+                luassert.is_function(random.newNoise)
+                luassert.is_nil(rawget(random as any, "new"))
+                luassert.is_nil(rawget(random as any, "noise"))
+            end
+        )
+
         describe(
             "the generator",
             function()
                 it(
                     "gives the same sequence for the same seed",
                     function()
-                        local a <const> = random.new(42)
-                        local b <const> = random.new(42)
+                        local a <const> = random.newRandom(42)
+                        local b <const> = random.newRandom(42)
                         for i = 1, 5000 do
                             luassert.equal(a:next(), b:next(), "draw " .. tostring(i))
                         end
@@ -41,8 +51,8 @@ describe(
                 it(
                     "gives a different sequence for a different seed",
                     function()
-                        local a <const> = draw(random.new(42), 200)
-                        local b <const> = draw(random.new(43), 200)
+                        local a <const> = draw(random.newRandom(42), 200)
+                        local b <const> = draw(random.newRandom(43), 200)
                         local shared = 0
                         for i = 1, 200 do
                             if a[i] == b[i] then
@@ -56,8 +66,8 @@ describe(
                 it(
                     "reads a seed as a 32-bit word",
                     function()
-                        local a <const> = draw(random.new(2 ^ 31), 20)
-                        local b <const> = draw(random.new(-(2 ^ 31)), 20)
+                        local a <const> = draw(random.newRandom(2 ^ 31), 20)
+                        local b <const> = draw(random.newRandom(-(2 ^ 31)), 20)
                         luassert.same(a, b)
                     end
                 )
@@ -67,8 +77,8 @@ describe(
                     function()
                         -- Four SplitMix32 draws rather than the seed itself, so seeds one
                         -- apart do not open with near-identical values.
-                        local a <const> = draw(random.new(0), 4)
-                        local b <const> = draw(random.new(1), 4)
+                        local a <const> = draw(random.newRandom(0), 4)
+                        local b <const> = draw(random.newRandom(1), 4)
                         for i = 1, 4 do
                             luassert.is_true(
                                 math.abs(a[i] - b[i]) > 0.01, "seeds 0 and 1 opened within 0.01 at draw " .. tostring(i)
@@ -80,7 +90,7 @@ describe(
                 it(
                     "stays inside [0, 1) and covers it evenly",
                     function()
-                        local generator <const> = random.new(7)
+                        local generator <const> = random.newRandom(7)
                         local buckets: {integer} = {}
                         for i = 1, 16 do
                             buckets[i] = 0
@@ -109,7 +119,7 @@ describe(
                         -- the host word size is, and the conversion to a fraction is an
                         -- exact scale by a power of two. So these are not approximately
                         -- the values another machine produces, they are the values.
-                        local generator <const> = random.new(12345)
+                        local generator <const> = random.newRandom(12345)
                         local expected <const>: {number} = {
                             0.25454781646840274,
                             0.047265402274206281,
@@ -130,7 +140,7 @@ describe(
                 it(
                     "reproduces a known run of integers",
                     function()
-                        local generator <const> = random.new(12345)
+                        local generator <const> = random.newRandom(12345)
                         local expected <const>: {integer} = {
                             26,
                             5,
@@ -159,7 +169,7 @@ describe(
                 it(
                     "keeps integer inside both ends and reaches each of them",
                     function()
-                        local generator <const> = random.new(11)
+                        local generator <const> = random.newRandom(11)
                         local seen: {integer: boolean} = {}
                         for _ = 1, 20000 do
                             local v <const> = generator:integer(-3, 3)
@@ -176,7 +186,7 @@ describe(
                 it(
                     "counts a one-argument integer from one",
                     function()
-                        local generator <const> = random.new(3)
+                        local generator <const> = random.newRandom(3)
                         local seen: {integer: boolean} = {}
                         for _ = 1, 20000 do
                             local v <const> = generator:integer(4)
@@ -192,7 +202,7 @@ describe(
                 it(
                     "refuses an empty integer range",
                     function()
-                        local generator <const> = random.new(1)
+                        local generator <const> = random.newRandom(1)
                         luassert.has_error(
                             function() generator:integer(5, 3) end, "random: integer(5, 3) has an empty range"
                         )
@@ -202,7 +212,7 @@ describe(
                 it(
                     "keeps range inside its ends",
                     function()
-                        local generator <const> = random.new(5)
+                        local generator <const> = random.newRandom(5)
                         local low, high = math.huge, -math.huge
                         for _ = 1, 50000 do
                             local v <const> = generator:range(-2.5, 7.5)
@@ -227,8 +237,8 @@ describe(
                             first[i] = i
                             second[i] = i
                         end
-                        random.new(99):shuffle(first)
-                        random.new(99):shuffle(second)
+                        random.newRandom(99):shuffle(first)
+                        random.newRandom(99):shuffle(second)
                         luassert.same(first, second)
 
                         local seen: {integer: boolean} = {}
@@ -253,14 +263,14 @@ describe(
                 it(
                     "carries four words that resume the sequence",
                     function()
-                        local generator <const> = random.new(5)
+                        local generator <const> = random.newRandom(5)
                         for _ = 1, 1000 do
                             generator:next()
                         end
                         local words <const> = generator:state()
                         local expected <const> = draw(generator, 50)
 
-                        local other <const> = random.new(0)
+                        local other <const> = random.newRandom(0)
                         other:setState(words)
                         luassert.same(expected, draw(other, 50))
                     end
@@ -269,7 +279,7 @@ describe(
                 it(
                     "refuses a state that is not four words",
                     function()
-                        local generator <const> = random.new(1)
+                        local generator <const> = random.newRandom(1)
                         luassert.has_error(
                             function() generator:setState({1, 2, 3}) end, "random: setState needs four state words"
                         )
@@ -279,7 +289,7 @@ describe(
                 it(
                     "refuses the all-zero state",
                     function()
-                        local generator <const> = random.new(1)
+                        local generator <const> = random.newRandom(1)
                         luassert.has_error(
                             function() generator:setState({0, 0, 0, 0}) end,
                             "random: the all-zero state is the one xoshiro cannot leave"
@@ -527,7 +537,7 @@ describe(
                 it(
                     "is exactly zero at integer coordinates",
                     function()
-                        local field <const> = random.noise(2024)
+                        local field <const> = random.newNoise(2024)
                         for x = -4, 4 do
                             for y = -4, 4 do
                                 luassert.equal(0, field:noise2(x, y))
@@ -540,7 +550,7 @@ describe(
                 it(
                     "stays inside [-1, 1]",
                     function()
-                        local field <const> = random.noise(2024)
+                        local field <const> = random.newNoise(2024)
                         for i = 0, 400 do
                             for j = 0, 400 do
                                 local v <const> = field:noise2(i * 0.037, j * 0.037)
@@ -561,7 +571,7 @@ describe(
                 it(
                     "moves smoothly, with no step between neighbors",
                     function()
-                        local field <const> = random.noise(2024)
+                        local field <const> = random.newNoise(2024)
                         local previous = field:noise2(0.5, 0.5)
                         for i = 1, 20000 do
                             local v <const> = field:noise2(0.5 + i * 0.0002, 0.5)
@@ -577,8 +587,8 @@ describe(
                 it(
                     "gives the same field for the same seed",
                     function()
-                        local a <const> = random.noise(2024)
-                        local b <const> = random.noise(2024)
+                        local a <const> = random.newNoise(2024)
+                        local b <const> = random.newNoise(2024)
                         for i = 1, 2000 do
                             luassert.equal(a:noise2(i * 0.31, i * 0.17), b:noise2(i * 0.31, i * 0.17))
                         end
@@ -588,8 +598,8 @@ describe(
                 it(
                     "gives a different field for a different seed",
                     function()
-                        local a <const> = random.noise(2024)
-                        local b <const> = random.noise(2025)
+                        local a <const> = random.newNoise(2024)
+                        local b <const> = random.newNoise(2025)
                         local shared = 0
                         for i = 1, 500 do
                             if a:noise2(i * 0.31, i * 0.17) == b:noise2(i * 0.31, i * 0.17) then
@@ -606,7 +616,7 @@ describe(
                         -- Floating-point rather than integer work, so this is held to a
                         -- tolerance: a backend free to contract a multiply and an add into
                         -- one instruction moves the last bits and nothing more.
-                        local field <const> = random.noise(777)
+                        local field <const> = random.newNoise(777)
                         local function near(expected: number, actual: number, what: string)
                             luassert.is_true(
                                 math.abs(expected - actual) < 1e-12, what .. " gave " .. string.format("%.17g", actual)
@@ -623,7 +633,7 @@ describe(
                 it(
                     "stacks octaves and stays inside [-1, 1]",
                     function()
-                        local field <const> = random.noise(2024)
+                        local field <const> = random.newNoise(2024)
                         local plain, layered = 0.0, 0.0
                         for i = 0, 300 do
                             for j = 0, 300 do
@@ -644,7 +654,7 @@ describe(
                 it(
                     "refuses an octave count below one",
                     function()
-                        local field <const> = random.noise(1)
+                        local field <const> = random.newNoise(1)
                         luassert.has_error(
                             function() field:fbm2(0.5, 0.5, 0) end, "random: fbm needs at least one octave"
                         )

@@ -35,7 +35,7 @@ describe(
                         local c = world:spawn(Position(3, 3), Tag)
                         world:commit()
 
-                        local q = world:query({include = {Tag}})
+                        local q = world:newQuery({include = {Tag}})
                         world:batchSet(q, Position(99, 99))
                         world:commit()
 
@@ -57,7 +57,7 @@ describe(
                         luassert.is_nil(world:get(a, Position))
                         luassert.is_nil(world:get(b, Position))
 
-                        local q = world:query({include = {Tag}})
+                        local q = world:newQuery({include = {Tag}})
                         world:batchSet(q, Position(5, 7))
                         world:commit()
 
@@ -75,7 +75,7 @@ describe(
                         local untagged = world:spawn(Position(2, 2))
                         world:commit()
 
-                        local q = world:query({include = {Tag}})
+                        local q = world:newQuery({include = {Tag}})
                         world:batchSet(q, Position(99, 99))
                         world:commit()
 
@@ -94,7 +94,7 @@ describe(
                         local b = world:spawn(Tag, Position(1, 1))
                         world:commit()
 
-                        local q = world:query({include = {Tag}})
+                        local q = world:newQuery({include = {Tag}})
                         world:batchSet(q, Position(42, 42))
                         world:commit()
 
@@ -112,12 +112,12 @@ describe(
                         world:commit()
 
                         -- Apply Tag to every Position-carrying entity.
-                        local q = world:query({include = {Position}})
+                        local q = world:newQuery({include = {Position}})
                         world:batchSet(q, Tag)
                         world:commit()
 
                         -- Matched entities should now be in a Position+Tag archetype.
-                        local tagged = world:query({include = {Position, Tag}})
+                        local tagged = world:newQuery({include = {Position, Tag}})
                         local count = 0
                         for _ in tagged:iter() do
                             count = count + 1
@@ -134,7 +134,7 @@ describe(
                         local b = world:spawn(Position(2, 2), Tag, OtherTag)
                         world:commit()
 
-                        local q = world:query({include = {Tag}, exclude = {OtherTag}})
+                        local q = world:newQuery({include = {Tag}, exclude = {OtherTag}})
                         world:batchSet(q, Position(50, 50))
                         world:commit()
 
@@ -150,7 +150,7 @@ describe(
                         world:spawn(Position(1, 1))
                         world:commit()
 
-                        local q = world:query({include = {OtherTag}})
+                        local q = world:newQuery({include = {OtherTag}})
                         world:batchSet(q, Position(99, 99))
                         world:commit()
                     end
@@ -172,7 +172,7 @@ describe(
 
                         local calls = 0
                         local seenFirst, seenLast, seenCount = 0, 0, 0
-                        local q = world:query({include = {Tag}})
+                        local q = world:newQuery({include = {Tag}})
                         world:batchSet(
                             q,
                             Position,
@@ -197,7 +197,7 @@ describe(
                         luassert.equals(5, seenCount)
 
                         -- Verify the writes stuck.
-                        local qTagPos = world:query({include = {Tag, Position}})
+                        local qTagPos = world:newQuery({include = {Tag, Position}})
                         for arch, len in qTagPos:iter() do
                             local col = arch:get(Position)
                             for r = 1, len do
@@ -221,7 +221,7 @@ describe(
                         -- rows are nil until the callback assigns an instance -- the
                         -- in-place `col[r].field = ...` mutation pattern is only
                         -- safe for FFI columns (where the struct comes zero-init'd).
-                        local q = world:query({include = {Tag}})
+                        local q = world:newQuery({include = {Tag}})
                         world:batchSet(
                             q,
                             Position,
@@ -253,7 +253,7 @@ describe(
                         local world = tecs.ecs.newWorld()
                         local a = world:spawn(Position(1, 1), Tag)
 
-                        local q = world:query({include = {Tag}})
+                        local q = world:newQuery({include = {Tag}})
                         world:defer()
                         world:batchSet(q, Position(99, 99))
                         -- Inside defer scope, the write hasn't happened.
@@ -270,7 +270,7 @@ describe(
                         local world = tecs.ecs.newWorld()
                         local a = world:spawn(Position(1, 1), Tag)
 
-                        local q = world:query({include = {Tag}})
+                        local q = world:newQuery({include = {Tag}})
                         world:batchSet(q, Position(99, 99))
                         -- Eager default: the write applied synchronously.
                         luassert.equals(99, world:get(a, Position).x)
@@ -293,7 +293,7 @@ describe(
                 world:commit()
 
                 luassert.is_not_nil(world:get(a, Velocity))
-                local q = world:query({include = {Position}})
+                local q = world:newQuery({include = {Position}})
                 world:batchRemove(q, Velocity)
                 world:commit()
 
@@ -316,7 +316,7 @@ describe(
                 world:commit()
 
                 -- Query matches BOTH archetypes via Position.
-                local q = world:query({include = {Position}})
+                local q = world:newQuery({include = {Position}})
                 world:batchRemove(q, Velocity)
                 world:commit()
 
@@ -333,7 +333,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 world:spawn(Position(1, 1))
                 world:commit()
-                local q = world:query({include = {OtherTag}})
+                local q = world:newQuery({include = {OtherTag}})
                 world:batchRemove(q, Velocity)
                 world:commit()
             end
@@ -345,7 +345,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 local a = world:spawn(Position(1, 1), Velocity(1, 1))
 
-                local q = world:query({include = {Velocity}})
+                local q = world:newQuery({include = {Velocity}})
                 world:defer()
                 world:batchRemove(q, Velocity)
                 -- Inside defer, Velocity still present.
@@ -362,7 +362,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 local a = world:spawn(Position(1, 1), Velocity(1, 1))
 
-                local q = world:query({include = {Velocity}})
+                local q = world:newQuery({include = {Velocity}})
                 world:batchRemove(q, Velocity)
                 -- Eager default: applied synchronously.
                 luassert.is_nil(world:get(a, Velocity))
@@ -415,7 +415,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 world:spawn(Tag, Position(1, 1))
                 world:commit()
-                local q = world:query({include = {Tag}})
+                local q = world:newQuery({include = {Tag}})
                 luassert.has_error(function()
                     -- Mistake: instance as arg2 when also passing a callback.
                     -- Must be the container (Position), not an instance.
@@ -441,7 +441,7 @@ describe(
                 world:spawn(ParentOf(parent) as tecs.ecs.Component, Tag)
                 world:commit()
 
-                local q = world:query({include = {Tag}})
+                local q = world:newQuery({include = {Tag}})
                 luassert.has_error(function()
                     world:batchSet(q, ParentOf as tecs.ecs.Component, function(_arch, _first, _last, _count) end)
                 end)
@@ -488,7 +488,7 @@ describe(
                 local srcArch = world:currentArchetype(ids[1])
                 srcArch:reserveCapacity(4096)
 
-                local q = world:query({include = {Pos}})
+                local q = world:newQuery({include = {Pos}})
                 world:batchSet(q, Extra(0.5))
                 world:commit()
 

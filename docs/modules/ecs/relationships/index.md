@@ -109,7 +109,7 @@ point at different targets occupy different archetypes. That layout supports a
 target-specific query:
 
 ```teal
-local followersOfLeader <const> = world:query({
+local followersOfLeader <const> = world:newQuery({
     include = {Follows:targeting(leader)},
 })
 ```
@@ -122,7 +122,7 @@ shares the relationship's wildcard component in its archetype, so a large
 target set does not fragment the world. `ChildOf` uses this layout.
 
 ```teal
-local children <const> = world:query({
+local children <const> = world:newQuery({
     include = {ChildOf, tecs.Transform},
 })
 

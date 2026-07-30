@@ -19,7 +19,7 @@ local ffi <const> = require("ffi")
 local loader <const> = require("tecs.ffi.loader")
 local log <const> = require("tecs.log")
 local Future <const> = require("tecs.Future")
-local DataStream <const> = require("tecs.io.http.DataStream")
+local datastream <const> = require("tecs.io.http.DataStream")
 local clients <const> = require("tecs.io.http.clients")
 
 loader.declare("http")
@@ -175,6 +175,7 @@ local record client
 end
 
 local type Options = client.Options
+local type DataStream = datastream.DataStream
 local type Request = client.Request
 local type Response = client.Response
 local type Transfer = client.Transfer
@@ -216,9 +217,9 @@ local function streamOf(given: string | DataStream, sending: boolean, what: stri
         return nil
     end
     if given is string then
-        return sending and DataStream.ofString(given) or DataStream.ofFile(given)
+        return sending and datastream.newStringStream(given) or datastream.newFileStream(given)
     end
-    if not DataStream.is(given) then
+    if not datastream.DataStream.is(given) then
         error(("tecs: %s is not a string or a DataStream"):format(what), 3)
     end
     return given
@@ -300,7 +301,7 @@ local function completeTransfer(
         transfer.sink.contentType = response.headers["content-type"]
         response.body = transfer.sink
     else
-        response.body = DataStream.ofString(table.concat(transfer.chunks), response.headers["content-type"])
+        response.body = datastream.newStringStream(table.concat(transfer.chunks), response.headers["content-type"])
     end
     transfer.future:complete(response)
 end

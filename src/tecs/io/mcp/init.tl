@@ -13,7 +13,7 @@ it does.
 ## Custom tools
 
 ```teal
-local placed <const> = world:query({include = {tecs.Transform}})
+local placed <const> = world:newQuery({include = {tecs.Transform}})
 
 tecs.io.mcp.register({
     name = "placed_count",

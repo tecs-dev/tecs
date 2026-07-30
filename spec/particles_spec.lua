@@ -59,6 +59,15 @@ end
 describe("tecs.gfx.particles", function()
     local window, device, screen
 
+    it("uses result-named factories", function()
+        assert.is_function(particles.newEffect)
+        assert.is_function(particles.newCurve)
+        assert.is_function(particles.newGradient)
+        assert.is_nil(rawget(particles, "effect"))
+        assert.is_nil(rawget(particles, "curve"))
+        assert.is_nil(rawget(particles, "gradient"))
+    end)
+
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
         window = newWindow({ title = "particles", width = SIZE, height = SIZE })
@@ -135,7 +144,7 @@ describe("tecs.gfx.particles", function()
     -- rather than "did it move the way I guessed".
     local function stillBurst(options)
         options = options or {}
-        return particles.effect({
+        return particles.newEffect({
             name = effectName(),
             capacity = options.capacity or 64,
             schedule = {
@@ -235,7 +244,7 @@ describe("tecs.gfx.particles", function()
 
     it("places particles where the emitter is", function()
         local world, renderer = newScene(true)
-        local effect = particles.effect({
+        local effect = particles.newEffect({
             name = effectName(),
             capacity = 64,
             schedule = { bursts = { { time = 0, count = 8 } } },
@@ -335,7 +344,7 @@ describe("tecs.gfx.particles", function()
 
     it("holds a paused emitter's field where it was", function()
         local world, renderer = newScene(true)
-        local effect = particles.effect({
+        local effect = particles.newEffect({
             name = effectName(),
             capacity = 64,
             schedule = { bursts = { { time = 0, count = 8 } } },
@@ -376,7 +385,7 @@ describe("tecs.gfx.particles", function()
     it("draws the same field twice from one seed", function()
         local function run(seed)
             local world, renderer = newScene(true)
-            local effect = particles.effect({
+            local effect = particles.newEffect({
                 name = effectName(),
                 capacity = 128,
                 schedule = { bursts = { { time = 0, count = 64 } } },
@@ -412,7 +421,7 @@ describe("tecs.gfx.particles", function()
             world,
             stillBurst({
                 lifetime = 0.5,
-                update = { size = particles.curve({ { 0.0, 1.0 }, { 0.4, 1.0 }, { 0.6, 0.0 } }) },
+                update = { size = particles.newCurve({ { 0.0, 1.0 }, { 0.4, 1.0 }, { 0.6, 0.0 } }) },
             })
         )
 
@@ -436,7 +445,7 @@ describe("tecs.gfx.particles", function()
             stillBurst({
                 lifetime = 1.0,
                 color = "#ffffff",
-                update = { color = particles.gradient({ { 0.0, "#ff0000" }, { 1.0, "#00ff00" } }) },
+                update = { color = particles.newGradient({ { 0.0, "#ff0000" }, { 1.0, "#00ff00" } }) },
             })
         )
 
@@ -450,7 +459,7 @@ describe("tecs.gfx.particles", function()
 
     it("moves a particle along its launch velocity", function()
         local world, renderer = newScene(true)
-        local effect = particles.effect({
+        local effect = particles.newEffect({
             name = effectName(),
             capacity = 64,
             schedule = { bursts = { { time = 0, count = 8 } } },
@@ -494,7 +503,7 @@ describe("tecs.gfx.particles", function()
         world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(0.0, 0.0, 1.0, 1.0), Renderable())
         newEmitter(
             world,
-            particles.effect({
+            particles.newEffect({
                 name = effectName(),
                 capacity = 64,
                 schedule = { bursts = { { time = 0, count = 1 } } },
@@ -563,7 +572,7 @@ describe("tecs.gfx.particles", function()
             nil,
             1.0,
             1.0,
-            particles.gradient({ { 0.0, { 1.0, 1.0, 1.0, 1.0 } }, { 1.0, { 1.0, 1.0, 1.0, 0.0 } } })
+            particles.newGradient({ { 0.0, { 1.0, 1.0, 1.0, 1.0 } }, { 1.0, { 1.0, 1.0, 1.0, 0.0 } } })
         )
 
         local early = center(frames(world, renderer, 3))
@@ -595,7 +604,7 @@ describe("tecs.gfx.particles", function()
         local blended = newEmitter(world, stillBurst({ capacity = 32, lifetime = 0.05 }))
         newEmitter(
             world,
-            particles.effect({
+            particles.newEffect({
                 name = effectName(),
                 capacity = 16,
                 initial = { lifetime = 1.0 },
@@ -626,7 +635,7 @@ describe("tecs.gfx.particles", function()
     -- would put thirty-two particles at thirty-two angles and testing it would
     -- mean guessing which pixels they reached.
     local function ringAt(rotation, outward, speed, direction)
-        return particles.effect({
+        return particles.newEffect({
             name = effectName(),
             capacity = 64,
             schedule = { bursts = { { time = 0, count = 8 } } },
@@ -688,7 +697,7 @@ describe("tecs.gfx.particles", function()
     -- The same burst, once in each space, with the emitter moved after it has
     -- fired. Which one moves with it is the whole difference between them.
     local function movingBurst(world, renderer, space)
-        local effect = particles.effect({
+        local effect = particles.newEffect({
             name = effectName(),
             capacity = 64,
             schedule = { bursts = { { time = 0, count = 8 } } },
@@ -772,7 +781,7 @@ describe("tecs.gfx.particles", function()
     ---------------------------------------------------------------------------
 
     it("compiles a curve to evenly spaced samples through its keys", function()
-        local curve = particles.curve({ { 0.0, 0.0 }, { 1.0, 1.0 } })
+        local curve = particles.newCurve({ { 0.0, 0.0 }, { 1.0, 1.0 } })
 
         assert.are.equal(particles.CURVE_SAMPLES, #curve.samples)
         assert.is_true(math.abs(curve.samples[1] - 0.0) < 1e-6)
@@ -785,14 +794,14 @@ describe("tecs.gfx.particles", function()
     it("places curve keys wherever they were authored", function()
         -- A key at one tenth, which no evenly spaced ramp could express. The
         -- value is already at its peak a tenth of the way through.
-        local curve = particles.curve({ { 0.0, 0.0 }, { 0.1, 1.0 }, { 1.0, 1.0 } })
+        local curve = particles.newCurve({ { 0.0, 0.0 }, { 0.1, 1.0 }, { 1.0, 1.0 } })
 
         assert.is_true(curve.samples[5] > 0.9, "the ramp finishes by the key's own time")
         assert.is_true(curve.samples[2] < 0.5, "and had not before it")
     end)
 
     it("compiles a gradient to four floats a sample", function()
-        local gradient = particles.gradient({ { 0.0, "#ff0000ff" }, { 1.0, "#0000ff00" } })
+        local gradient = particles.newGradient({ { 0.0, "#ff0000ff" }, { 1.0, "#0000ff00" } })
 
         assert.are.equal(particles.CURVE_SAMPLES * 4, #gradient.samples)
         assert.is_true(math.abs(gradient.samples[1] - 1.0) < 1e-6)
@@ -804,16 +813,16 @@ describe("tecs.gfx.particles", function()
 
     it("refuses an effect field it cannot make sense of", function()
         assert.has_error(function()
-            particles.effect({ name = effectName(), spawn = { shape = "trapezoid" } })
+            particles.newEffect({ name = effectName(), spawn = { shape = "trapezoid" } })
         end)
         assert.has_error(function()
-            particles.effect({ name = effectName(), spawn = { space = "sideways" } })
+            particles.newEffect({ name = effectName(), spawn = { space = "sideways" } })
         end)
         assert.has_error(function()
-            particles.effect({ name = effectName(), initial = { color = "#gg0000" } })
+            particles.newEffect({ name = effectName(), initial = { color = "#gg0000" } })
         end)
         assert.has_error(function()
-            particles.effect({
+            particles.newEffect({
                 name = effectName(),
                 schedule = {
                     bursts = {
@@ -830,7 +839,7 @@ describe("tecs.gfx.particles", function()
 
     it("answers finished from the schedule and never from the GPU", function()
         local world, renderer = newScene(true)
-        local effect = particles.effect({
+        local effect = particles.newEffect({
             name = effectName(),
             capacity = 64,
             schedule = { duration = 0.1, bursts = { { time = 0, count = 4 } } },
@@ -851,7 +860,7 @@ describe("tecs.gfx.particles", function()
 
     it("never reports finished for a looping emitter that is playing", function()
         local world, renderer = newScene(true)
-        local effect = particles.effect({
+        local effect = particles.newEffect({
             name = effectName(),
             capacity = 64,
             schedule = { rate = 30, duration = 0.1, looping = true },
@@ -867,7 +876,7 @@ describe("tecs.gfx.particles", function()
 
     it("predicts a steady emitter's live count from its schedule", function()
         local world, renderer = newScene(true)
-        local effect = particles.effect({
+        local effect = particles.newEffect({
             name = effectName(),
             capacity = 256,
             schedule = { rate = 60, looping = true },
@@ -895,7 +904,7 @@ describe("tecs.gfx.particles", function()
 
     it("integrates a lifetime range over its mean rather than over half its longest", function()
         local world, renderer = newScene(true)
-        local effect = particles.effect({
+        local effect = particles.newEffect({
             name = effectName(),
             capacity = 256,
             -- Mean one second, longest one and a half. Half the longest would be
@@ -918,7 +927,7 @@ describe("tecs.gfx.particles", function()
 
     it("counts nothing before an emitter's delay has passed", function()
         local world, renderer = newScene(true)
-        local effect = particles.effect({
+        local effect = particles.newEffect({
             name = effectName(),
             capacity = 64,
             schedule = { rate = 60, delay = 100 },
@@ -1022,7 +1031,7 @@ describe("tecs.gfx.particles", function()
         -- Sixty a second for two seconds needs a hundred and twenty slots and
         -- is given eight. A CPU system drops the emission with no diagnostic,
         -- which is the failure mode this refuses to reproduce.
-        local effect = particles.effect({
+        local effect = particles.newEffect({
             name = effectName(),
             capacity = 8,
             schedule = { rate = 60, looping = true },
@@ -1048,7 +1057,7 @@ describe("tecs.gfx.particles", function()
 
         log.get("tecs.gfx"):setLevel(log.ERROR)
         assert.is_true(log.openFile(LOG_PATH))
-        local effect = particles.effect({
+        local effect = particles.newEffect({
             name = effectName(),
             capacity = 8,
             initial = { lifetime = 1.0 },
@@ -1079,7 +1088,7 @@ describe("tecs.gfx.particles", function()
         -- accepted and logged, which meant an effect authored for a look drew
         -- something else and said so once in a log nobody was reading.
         local ok, err = pcall(function()
-            particles.effect({
+            particles.newEffect({
                 name = effectName(),
                 capacity = 8,
                 initial = { lifetime = 1.0 },
@@ -1091,13 +1100,13 @@ describe("tecs.gfx.particles", function()
     end)
 
     it("reports the mode an effect resolved to, and alpha when none was named", function()
-        local named = particles.effect({
+        local named = particles.newEffect({
             name = effectName(),
             capacity = 8,
             initial = { lifetime = 1.0 },
             render = { layer = 1, blend = "additive" },
         })
-        local bare = particles.effect({
+        local bare = particles.newEffect({
             name = effectName(),
             capacity = 8,
             initial = { lifetime = 1.0 },
@@ -1111,7 +1120,7 @@ describe("tecs.gfx.particles", function()
     it("names a material by name rather than by number", function()
         materials.install()
         local named = materials.names()[1]
-        local effect = particles.effect({
+        local effect = particles.newEffect({
             name = effectName(),
             capacity = 8,
             initial = { lifetime = 1.0 },
@@ -1130,7 +1139,7 @@ describe("tecs.gfx.particles", function()
         -- emitter cannot be saved on, and finding that out at save time is
         -- finding it out too late to do anything about.
         local ok, err = pcall(function()
-            particles.effect({ capacity = 8, initial = { lifetime = 1.0 } })
+            particles.newEffect({ capacity = 8, initial = { lifetime = 1.0 } })
         end)
         assert.is_false(ok)
         assert.is_truthy(tostring(err):find("needs a name", 1, true), tostring(err))
@@ -1138,10 +1147,10 @@ describe("tecs.gfx.particles", function()
 
     it("refuses a second effect under a name already taken", function()
         local taken = effectName()
-        particles.effect({ name = taken, capacity = 8, initial = { lifetime = 1.0 } })
+        particles.newEffect({ name = taken, capacity = 8, initial = { lifetime = 1.0 } })
 
         local ok, err = pcall(function()
-            particles.effect({ name = taken, capacity = 8, initial = { lifetime = 1.0 } })
+            particles.newEffect({ name = taken, capacity = 8, initial = { lifetime = 1.0 } })
         end)
         assert.is_false(ok)
         assert.is_truthy(tostring(err):find(taken, 1, true), tostring(err))
@@ -1149,7 +1158,7 @@ describe("tecs.gfx.particles", function()
 
     it("answers an effect by name and nil for one nothing has", function()
         local name = effectName()
-        local effect = particles.effect({ name = name, capacity = 8, initial = { lifetime = 1.0 } })
+        local effect = particles.newEffect({ name = name, capacity = 8, initial = { lifetime = 1.0 } })
 
         assert.are.equal(effect, particles.find(name))
         assert.are.equal(name, effect.name)

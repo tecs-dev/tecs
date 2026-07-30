@@ -112,10 +112,14 @@ describe("the surface a game reaches sheets through", function()
         assert.are.equal(sheet.Sheet, tecs.gfx.animation.Sheet)
         assert.are.equal(sheet.Pivot, tecs.gfx.animation.Pivot)
         assert.are.equal(sheet.DEFAULT_DURATION, tecs.gfx.animation.DEFAULT_DURATION)
-        assert.are.equal(sheet.grid, tecs.gfx.animation.grid)
-        assert.are.equal(sheet.rects, tecs.gfx.animation.rects)
-        assert.are.equal(sheet.build, tecs.gfx.animation.build)
-        assert.are.equal(sheet.fromAseprite, tecs.gfx.animation.fromAseprite)
+        assert.are.equal(sheet.grid, tecs.gfx.animation.newGridSheet)
+        assert.are.equal(sheet.rects, tecs.gfx.animation.newRectSheet)
+        assert.are.equal(sheet.build, tecs.gfx.animation.newSheetBuilder)
+        assert.are.equal(sheet.fromAseprite, tecs.gfx.animation.newSheetFromAseprite)
+        assert.is_nil(rawget(tecs.gfx.animation, "grid"))
+        assert.is_nil(rawget(tecs.gfx.animation, "rects"))
+        assert.is_nil(rawget(tecs.gfx.animation, "build"))
+        assert.is_nil(rawget(tecs.gfx.animation, "fromAseprite"))
         assert.are.equal(sheet.replace, tecs.gfx.animation.replace)
     end)
 
@@ -1265,7 +1269,7 @@ describe("tecs.gfx.animation", function()
             end)
 
             local dirtied = false
-            local query = world:query({
+            local query = world:newQuery({
                 name = "spec.SubscriberProbe",
                 include = { Animation, Sprite, AnimationEvents },
             })
@@ -1362,7 +1366,7 @@ describe("tecs.gfx.animation", function()
         -- read inside the frame that produced it.
         local function probe(world)
             local seen = { sprite = false, animation = false }
-            local query = world:query({
+            local query = world:newQuery({
                 name = "spec.AnimatedProbe",
                 include = { Animation, Sprite },
             })
@@ -1613,7 +1617,7 @@ describe("tecs.gfx.animation", function()
         -- read inside the frame that produced it.
         local function pivotProbe(world)
             local seen = { dirty = false }
-            local query = world:query({
+            local query = world:newQuery({
                 name = "spec.PivotProbe",
                 include = { Animation, Pivot },
             })
@@ -1847,7 +1851,7 @@ describe("tecs.gfx.animation", function()
             local fresh = animatedWorld()
             fresh:loadSnapshot(saved)
             local restored = nil
-            local query = fresh:query({ include = { Sprite } })
+            local query = fresh:newQuery({ include = { Sprite } })
             for archetype, length in query:iter() do
                 local column = archetype:get(Sprite)
                 for row = 1, length do

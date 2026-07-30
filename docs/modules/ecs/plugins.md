@@ -39,7 +39,7 @@ then close over them from systems:
 ```teal
 local function spinPlugin(speed: number): tecs.Plugin
     return function(world: tecs.World)
-        local spinning <const> = world:query({
+        local spinning <const> = world:newQuery({
             include = {tecs.Transform, tecs.gfx.Renderable},
             type = "logic",
         })

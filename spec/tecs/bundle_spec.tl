@@ -981,7 +981,7 @@ describe(
                         world:commit()
 
                         -- Wildcard queries match through the container marker.
-                        local q = world:query({include = {Owes as tecs.ecs.Component}, temp = true})
+                        local q = world:newQuery({include = {Owes as tecs.ecs.Component}, temp = true})
                         local found = false
                         for _, len, entities in q:iter() do
                             for r = 1, len do

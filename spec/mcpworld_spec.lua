@@ -252,7 +252,7 @@ describe("mcp world tools", function()
         local entity = world:spawn(components.Tint(1, 0, 0, 1))
         world:commit()
 
-        local query = world:query({ include = { components.Tint } })
+        local query = world:newQuery({ include = { components.Tint } })
         local function dirty()
             for archetype in query:iter() do
                 if archetype:isComponentDirty(components.Tint) then

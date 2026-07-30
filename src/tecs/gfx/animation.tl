@@ -7,7 +7,7 @@ names frame ranges with tags. An
 carries speed, loop, and playback state.
 
 ```teal
-local hero <const> = tecs.gfx.animation.grid({
+local hero <const> = tecs.gfx.animation.newGridSheet({
     name = "hero",
     imageWidth = 256,
     imageHeight = 32,
@@ -36,10 +36,10 @@ the same fixed-step clock.
 
 ## Sheet sources
 
-Use `grid` for uniform cells, `rects` for an explicit frame list, `build` for a
-custom sheet, or `fromAseprite` for an Aseprite JSON export. Frames count from
-one. Tags name inclusive frame spans and may play forward, reverse, or
-ping-pong.
+Use `newGridSheet` for uniform cells, `newRectSheet` for an explicit frame
+list, `newSheetBuilder` for a custom sheet, or `newSheetFromAseprite` for an
+Aseprite JSON export. Frames count from one. Tags name inclusive frame spans
+and may play forward, reverse, or ping-pong.
 
 Bind a sheet to a renderer sprite before drawing it. Every entity playing that
 sheet shares its frame and timing data.
@@ -336,7 +336,7 @@ local record animation
 
     --- Selects how a tag walks its span.
     type Direction = sheet.Direction
-    --- One frame, as `rects` and the builder take it.
+    --- One frame, as `newRectSheet` and the builder take it.
     type Rect = sheet.Rect
     --- A named span of frames, as the constructors take it.
     type Tag = sheet.Tag
@@ -344,11 +344,11 @@ local record animation
     type Slice = sheet.Slice
     --- Defines where a slice sits from one frame onward.
     type SliceKey = sheet.SliceKey
-    --- Configures `grid`.
+    --- Configures `newGridSheet`.
     type GridOptions = sheet.GridOptions
-    --- Configures `rects`.
+    --- Configures `newRectSheet`.
     type RectsOptions = sheet.RectsOptions
-    --- Configures `fromAseprite`.
+    --- Configures `newSheetFromAseprite`.
     type AsepriteOptions = sheet.AsepriteOptions
     --- Builds custom sheets one frame at a time.
     type Builder = sheet.Builder
@@ -370,14 +370,14 @@ local record animation
     ---     holds. Frames come out in row-major order.
     --- @return The finished sheet, already registered under its name and
     ---     carrying an `id`.
-    grid: function(options: sheet.GridOptions): sheet.Sheet
+    newGridSheet: function(options: sheet.GridOptions): sheet.Sheet
 
     --- Creates a sheet from explicitly listed frame rectangles.
     --- @param options Raises on a missing name, a non-positive image size, an
     ---     empty frame list, or a frame with no positive size.
     --- @return The finished sheet, already registered under its name and
     ---     carrying an `id`.
-    rects: function(options: sheet.RectsOptions): sheet.Sheet
+    newRectSheet: function(options: sheet.RectsOptions): sheet.Sheet
 
     --- Creates a builder for a sheet that the other constructors cannot
     --- describe.
@@ -385,13 +385,13 @@ local record animation
     --- @param imageWidth Size of the image the frames are cut from, in pixels.
     --- @param imageHeight The other size, in pixels.
     --- @return Returns a builder that registers the sheet when `finish` runs.
-    build: function(name: string, imageWidth: number, imageHeight: number): sheet.Builder
+    newSheetBuilder: function(name: string, imageWidth: number, imageHeight: number): sheet.Builder
 
     --- Creates a sheet from an Aseprite JSON export.
     --- @param options Raises on a missing name or an export the reader cannot
     ---     make a sheet out of.
     --- @return The finished sheet, already registered.
-    fromAseprite: function(options: sheet.AsepriteOptions): sheet.Sheet
+    newSheetFromAseprite: function(options: sheet.AsepriteOptions): sheet.Sheet
 
     --- Folds a re-exported sheet into the one already registered under its
     --- name, in place, so an entity playing the old id shows the new frames.
@@ -484,10 +484,10 @@ animation.AnimationEvents = AnimationEvents
 animation.Sheet = sheet.Sheet
 animation.Pivot = sheet.Pivot
 animation.DEFAULT_DURATION = sheet.DEFAULT_DURATION
-animation.grid = sheet.grid
-animation.rects = sheet.rects
-animation.build = sheet.build
-animation.fromAseprite = sheet.fromAseprite
+animation.newGridSheet = sheet.grid
+animation.newRectSheet = sheet.rects
+animation.newSheetBuilder = sheet.build
+animation.newSheetFromAseprite = sheet.fromAseprite
 animation.replace = sheet.replace
 animation.findSheetById = sheet.byId
 animation.findSheetByName = sheet.byName
@@ -952,12 +952,12 @@ function animation.plugin(world: World)
     -- and one that has never been encoded still has to be encoded. Which of the
     -- two it is decides the rate, so they are two queries rather than one and a
     -- test per row.
-    local running <const> = world:query({
+    local running <const> = world:newQuery({
         name = "tecs.EncodedSprites",
         include = {Animation, Sprite},
         exclude = {ecs.Paused},
     })
-    local paused <const> = world:query({
+    local paused <const> = world:newQuery({
         name = "tecs.EncodedPausedSprites",
         include = {Animation, Sprite, ecs.Paused},
     })
@@ -981,7 +981,7 @@ function animation.plugin(world: World)
     -- an entity that only just started playing is written above. A window of
     -- steps rather than one step: an update that ran several fixed steps reports
     -- one crossing over all of them, which is the contract `Looped` already had.
-    local subscribed <const> = world:query({
+    local subscribed <const> = world:newQuery({
         name = "tecs.AnimationSubscribers",
         include = {Animation, Sprite, AnimationEvents},
     })

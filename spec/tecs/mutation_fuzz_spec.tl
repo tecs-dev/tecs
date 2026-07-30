@@ -395,7 +395,7 @@ describe(
                     -- Per-world persistent queries for the batch ops.
                     local function makeQueries(w: tecs.World): {string: tecs.Query}
                         return {
-                            tag = w:query({
+                            tag = w:newQuery({
                                 include = {FzTag},
                                 onEntitiesAdded = function(
                                     _a: tecs.ecs.Archetype, _f: integer, _l: integer, count: integer
@@ -408,7 +408,7 @@ describe(
                                     removedCount[w] = removedCount[w] + count
                                 end,
                             }),
-                            a = w:query({include = {FzA}}),
+                            a = w:newQuery({include = {FzA}}),
                         }
                     end
                     local qs: {tecs.World: {string: tecs.Query}} = {

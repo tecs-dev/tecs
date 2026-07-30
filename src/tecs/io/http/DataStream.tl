@@ -12,8 +12,8 @@ large Lua string.
     tecs.io.http.newClient():send({
         url = "https://example.com/upload",
         method = "PUT",
-        body = tecs.io.http.DataStream.ofFile("save.bin"),
-        into = tecs.io.http.DataStream.ofFile("reply.bin"),
+        body = tecs.io.http.newFileStream("save.bin"),
+        into = tecs.io.http.newFileStream("reply.bin"),
     })
 
 ## One value, two directions
@@ -44,11 +44,11 @@ transport receives the materialized request string and sends its actual size.
 
 ## Files go through the storage seam and handles do not
 
-`ofFile` reads and writes through `tecs.io.files`, so a port that
+`newFileStream` reads and writes through `tecs.io.files`, so a port that
 replaced storage gets it. A response destination uses `openWrite`, while a
 request source uses the whole-file `read` operation described above.
-`ofHandle` is the other case on purpose: a caller that opened its own file is
-already outside the storage abstraction and has said so.
+`newHandleStream` is the other case on purpose: a caller that opened its own
+file is already outside the storage abstraction and has said so.
 ]=]
 
 local loader <const> = require("tecs.ffi.loader")
@@ -57,155 +57,107 @@ local files <const> = require("tecs.io.files")
 --- Bytes asked for in one directional read when nothing says otherwise.
 local CHUNK <const> = 64 * 1024
 
-local record DataStream
-    --- Where the bytes are.
-    enum Kind
-        --- A Lua string, already in memory.
-        "string"
-        --- An FFI buffer and a length, borrowed for as long as the send takes.
-        "bytes"
-        --- A path, read and written through `tecs.io.files`.
-        "file"
-        --- A handle the caller opened and still owns.
-        "handle"
+local record datastream
+    --- Stores bytes in memory, a borrowed buffer, a path, or a caller-owned
+    --- handle for use as an HTTP request source or response destination.
+    record DataStream
+        --- Where the bytes are.
+        enum Kind
+            --- A Lua string, already in memory.
+            "string"
+            --- An FFI buffer and a length, borrowed for as long as the send takes.
+            "bytes"
+            --- A path, read and written through `tecs.io.files`.
+            "file"
+            --- A handle the caller opened and still owns.
+            "handle"
+        end
+
+        --- Read-only. Reports which of the four storage kinds this is.
+        kind: Kind
+        --- Read-only. Reports the byte length, or nil when it is not known before
+        --- the bytes are read.
+        length: integer
+        --- Read-only. Reports what the bytes are when their producer supplied a
+        --- type. Requests send it as `Content-Type`; responses copy that header.
+        contentType: string
+        --- Read-only. Reports the path on a `"file"` and nil for every other kind.
+        path: string
+        --- Read-only. Reports the handle on a `"handle"` and nil for every other
+        --- kind.
+        handle: FILE
+
+        --- The string, on a "string".
+        _text: string
+        --- The buffer, on a "bytes".
+        _pointer: loader.CValue
+        --- How far a read has got, on a "string" or a "bytes".
+        _at: integer
+        --- The reader or the writer a "file" is being streamed through, held only
+        --- between the calls below that open and close it.
+        _reader: files.Reader
+        _writer: files.Writer
+
+        --- Whether `value` is one of these.
+        ---
+        --- For a caller reached from Lua, where a field typed as a string or a
+        --- stream was checked by nothing.
+        ---
+        --- @param value Anything at all, nil included, which answers false rather
+        ---     than raising.
+        --- @return Whether it was built by one of the four constructors here. A
+        ---     table shaped like one but built elsewhere is false: the test is the
+        ---     metatable, not the fields.
+        is: function(value: any): boolean
+
+        --- The whole thing as a string.
+        ---
+        --- Free for a "string", a read for a "file", and the rest of a "handle",
+        --- which it consumes. Nil and a reason when the bytes cannot be had.
+        ---
+        --- @return Every byte, in memory at once, so this is the call that undoes
+        ---     the point of streaming and is meant for bodies small enough not to
+        ---     care. A "handle" is read from wherever it sits and is left at its
+        ---     end, so a second call answers an empty string rather than the same
+        ---     bytes. Nil on failure.
+        --- @return The reason, when the first return is nil.
+        text: function(self: DataStream): string, string
+
+        --- Whether this can be written into. False for a "string" and a "bytes".
+        ---
+        --- @return Whether the kind can be a destination, which is a fact about the
+        ---     kind rather than about whether the path is writable: a "file" whose
+        ---     directory refuses it still answers true here and fails when the
+        ---     transfer opens it.
+        writable: function(self: DataStream): boolean
+
+        ---------------------------------------------------------------------------
+        -- The transfer's half
+        ---------------------------------------------------------------------------
+
+        --- Opens this as a source. Nil and a reason when it cannot be read.
+        _beginRead: function(self: DataStream): boolean, string
+        --- Up to `count` bytes, and an empty string once there are none left.
+        _read: function(self: DataStream, count: integer): string, string
+        --- Opens this as a destination.
+        _beginWrite: function(self: DataStream): boolean, string
+        --- Appends bytes to the destination.
+        _write: function(self: DataStream, bytes: string): boolean, string
+        --- Releases whatever was opened, in either direction. Answers false and a
+        --- reason when a destination's last bytes did not land.
+        _finish: function(self: DataStream): boolean, string
     end
 
-    --- Read-only. Reports which of the four storage kinds this is.
-    kind: Kind
-    --- Read-only. Reports the byte length, or nil when it is not known before
-    --- the bytes are read.
-    length: integer
-    --- Read-only. Reports what the bytes are when their producer supplied a
-    --- type. Requests send it as `Content-Type`; responses copy that header.
-    contentType: string
-    --- Read-only. Reports the path on a `"file"` and nil for every other kind.
-    path: string
-    --- Read-only. Reports the handle on a `"handle"` and nil for every other
-    --- kind.
-    handle: FILE
-
-    --- The string, on a "string".
-    _text: string
-    --- The buffer, on a "bytes".
-    _pointer: loader.CValue
-    --- How far a read has got, on a "string" or a "bytes".
-    _at: integer
-    --- The reader or the writer a "file" is being streamed through, held only
-    --- between the calls below that open and close it.
-    _reader: files.Reader
-    _writer: files.Writer
-
-    --- A stream over a string already in memory.
-    ---
-    --- @param text Held by reference, and Lua strings are immutable, so this is
-    ---     the one kind whose bytes cannot change under a transfer. Anything
-    ---     that is not a string raises.
-    --- @param contentType Optional. Nil sends no `Content-Type` rather than
-    ---     guessing one.
-    --- @return A source only. `length` reports the string's byte count.
-    ofString: function(text: string, contentType?: string): DataStream
-
-    --- A stream over an FFI buffer, which the caller keeps alive for the send.
-    ---
-    --- @param pointer Borrowed, not copied and not pinned: nothing here keeps it
-    ---     from being collected, so the caller holds a reference until the
-    ---     transfer ends or the send reads freed memory. Nil raises.
-    --- @param length Bytes readable from the pointer. Nil or negative raises.
-    ---     Nothing checks it against the allocation, so an over-long length is
-    ---     a read past the end.
-    --- @param contentType Optional, as `ofString` takes it.
-    --- @return A source only.
-    ofBytes: function(pointer: loader.CValue, length: integer, contentType?: string): DataStream
-
-    --- A stream over a path, read and written through `tecs.io.files`.
-    ---
-    --- The file is not opened here. A source is opened when the transfer
-    --- starts and a destination when the first byte arrives, so naming one
-    --- costs nothing until it is used and a request that never leaves the
-    --- ground leaves no handle behind.
-    ---
-    --- @param path Empty or not a string raises. A path that does not exist is
-    ---     not an error here: that is what a destination looks like before it
-    ---     is written.
-    --- @param contentType Optional, as `ofString` takes it.
-    --- @return A source and a destination both. `length` is filled in only when
-    ---     the path already names a file, so a destination has none until it
-    ---     has been written, and a file that changes size afterwards leaves it
-    ---     stale.
-    ofFile: function(path: string, contentType?: string): DataStream
-
-    --- A stream over a handle the caller opened and still owns.
-    ---
-    --- Nothing here closes it: whoever opened it decides when it is done with,
-    --- which is the whole difference between this and `ofFile`. Give `length`
-    --- when callers need the metadata; it does not control HTTP framing.
-    ---
-    --- A `tecs.io.http.plugin.Request` cannot snapshot this stream. The live
-    --- handle has no stable ownership or position to restore, so both snapshot
-    --- formats raise. Use `ofFile` for a request that must survive a save.
-    ---
-    --- @param handle An open file handle. Nil raises. Reading starts wherever it
-    ---     is positioned rather than at the beginning.
-    --- @param length Optional, and nothing verifies it. The HTTP client does
-    ---     not use it to select transfer framing.
-    --- @param contentType Optional, as `ofString` takes it.
-    --- @return A source and a destination both. A response destination receives
-    ---     pieces, while a request source is read to one string before sending.
-    ofHandle: function(handle: FILE, length?: integer, contentType?: string): DataStream
-
-    --- Whether `value` is one of these.
-    ---
-    --- For a caller reached from Lua, where a field typed as a string or a
-    --- stream was checked by nothing.
-    ---
-    --- @param value Anything at all, nil included, which answers false rather
-    ---     than raising.
-    --- @return Whether it was built by one of the four constructors here. A
-    ---     table shaped like one but built elsewhere is false: the test is the
-    ---     metatable, not the fields.
-    is: function(value: any): boolean
-
-    --- The whole thing as a string.
-    ---
-    --- Free for a "string", a read for a "file", and the rest of a "handle",
-    --- which it consumes. Nil and a reason when the bytes cannot be had.
-    ---
-    --- @return Every byte, in memory at once, so this is the call that undoes
-    ---     the point of streaming and is meant for bodies small enough not to
-    ---     care. A "handle" is read from wherever it sits and is left at its
-    ---     end, so a second call answers an empty string rather than the same
-    ---     bytes. Nil on failure.
-    --- @return The reason, when the first return is nil.
-    text: function(self: DataStream): string, string
-
-    --- Whether this can be written into. False for a "string" and a "bytes".
-    ---
-    --- @return Whether the kind can be a destination, which is a fact about the
-    ---     kind rather than about whether the path is writable: a "file" whose
-    ---     directory refuses it still answers true here and fails when the
-    ---     transfer opens it.
-    writable: function(self: DataStream): boolean
-
-    ---------------------------------------------------------------------------
-    -- The transfer's half
-    ---------------------------------------------------------------------------
-
-    --- Opens this as a source. Nil and a reason when it cannot be read.
-    _beginRead: function(self: DataStream): boolean, string
-    --- Up to `count` bytes, and an empty string once there are none left.
-    _read: function(self: DataStream, count: integer): string, string
-    --- Opens this as a destination.
-    _beginWrite: function(self: DataStream): boolean, string
-    --- Appends bytes to the destination.
-    _write: function(self: DataStream, bytes: string): boolean, string
-    --- Releases whatever was opened, in either direction. Answers false and a
-    --- reason when a destination's last bytes did not land.
-    _finish: function(self: DataStream): boolean, string
+    newStringStream: function(text: string, contentType?: string): DataStream
+    newBytesStream: function(pointer: loader.CValue, length: integer, contentType?: string): DataStream
+    newFileStream: function(path: string, contentType?: string): DataStream
+    newHandleStream: function(handle: FILE, length?: integer, contentType?: string): DataStream
 end
 
+local type DataStream = datastream.DataStream
 local type Kind = DataStream.Kind
 
-local DataStreamMT <const>: metatable<DataStream> = {__index = DataStream}
+local DataStreamMT <const>: metatable<DataStream> = {__index = datastream.DataStream}
 
 local function newStream(kind: Kind, contentType: string): DataStream
     local self <const> = setmetatable({} as DataStream, DataStreamMT)
@@ -214,9 +166,9 @@ local function newStream(kind: Kind, contentType: string): DataStream
     return self
 end
 
-function DataStream.ofString(text: string, contentType?: string): DataStream
+function datastream.newStringStream(text: string, contentType?: string): DataStream
     if type(text) ~= "string" then
-        error("tecs: DataStream.ofString needs a string", 2)
+        error("tecs: io.http.newStringStream needs a string", 2)
     end
     local self <const> = newStream("string", contentType)
     self._text = text
@@ -224,12 +176,12 @@ function DataStream.ofString(text: string, contentType?: string): DataStream
     return self
 end
 
-function DataStream.ofBytes(pointer: loader.CValue, length: integer, contentType?: string): DataStream
+function datastream.newBytesStream(pointer: loader.CValue, length: integer, contentType?: string): DataStream
     if pointer == nil then
-        error("tecs: DataStream.ofBytes needs a buffer", 2)
+        error("tecs: io.http.newBytesStream needs a buffer", 2)
     end
     if length == nil or length < 0 then
-        error("tecs: DataStream.ofBytes needs a length", 2)
+        error("tecs: io.http.newBytesStream needs a length", 2)
     end
     local self <const> = newStream("bytes", contentType)
     self._pointer = pointer
@@ -237,9 +189,9 @@ function DataStream.ofBytes(pointer: loader.CValue, length: integer, contentType
     return self
 end
 
-function DataStream.ofFile(path: string, contentType?: string): DataStream
+function datastream.newFileStream(path: string, contentType?: string): DataStream
     if type(path) ~= "string" or path == "" then
-        error("tecs: DataStream.ofFile needs a path", 2)
+        error("tecs: io.http.newFileStream needs a path", 2)
     end
     local self <const> = newStream("file", contentType)
     self.path = path
@@ -252,9 +204,9 @@ function DataStream.ofFile(path: string, contentType?: string): DataStream
     return self
 end
 
-function DataStream.ofHandle(handle: FILE, length?: integer, contentType?: string): DataStream
+function datastream.newHandleStream(handle: FILE, length?: integer, contentType?: string): DataStream
     if handle == nil then
-        error("tecs: DataStream.ofHandle needs a handle", 2)
+        error("tecs: io.http.newHandleStream needs a handle", 2)
     end
     local self <const> = newStream("handle", contentType)
     self.handle = handle
@@ -262,15 +214,15 @@ function DataStream.ofHandle(handle: FILE, length?: integer, contentType?: strin
     return self
 end
 
-function DataStream.is(value: any): boolean
+function datastream.DataStream.is(value: any): boolean
     return type(value) == "table" and getmetatable(value as DataStream) == DataStreamMT
 end
 
-function DataStream:writable(): boolean
+function datastream.DataStream:writable(): boolean
     return self.kind == "file" or self.kind == "handle"
 end
 
-function DataStream:text(): string, string
+function datastream.DataStream:text(): string, string
     local kind <const> = self.kind
     if kind == "string" then
         return self._text
@@ -296,7 +248,7 @@ end
 -- Being read
 -------------------------------------------------------------------------------
 
-function DataStream:_beginRead(): boolean, string
+function datastream.DataStream:_beginRead(): boolean, string
     self._at = 0
     if self.kind ~= "file" then
         return true
@@ -309,7 +261,7 @@ function DataStream:_beginRead(): boolean, string
     return true
 end
 
-function DataStream:_read(count: integer): string, string
+function datastream.DataStream:_read(count: integer): string, string
     local wanted <const> = count ~= nil and count > 0 and count or CHUNK
     local kind <const> = self.kind
 
@@ -351,7 +303,7 @@ end
 -- Being written
 -------------------------------------------------------------------------------
 
-function DataStream:_beginWrite(): boolean, string
+function datastream.DataStream:_beginWrite(): boolean, string
     self.length = 0
     if self.kind == "handle" then
         return true
@@ -367,7 +319,7 @@ function DataStream:_beginWrite(): boolean, string
     return true
 end
 
-function DataStream:_write(bytes: string): boolean, string
+function datastream.DataStream:_write(bytes: string): boolean, string
     self.length = self.length + #bytes
     if self.kind == "handle" then
         local ok <const>, failure = self.handle:write(bytes)
@@ -382,7 +334,7 @@ function DataStream:_write(bytes: string): boolean, string
     return self._writer:write(bytes)
 end
 
-function DataStream:_finish(): boolean, string
+function datastream.DataStream:_finish(): boolean, string
     local reader <const> = self._reader
     if reader ~= nil then
         self._reader = nil
@@ -396,4 +348,4 @@ function DataStream:_finish(): boolean, string
     return true
 end
 
-return DataStream
+return datastream

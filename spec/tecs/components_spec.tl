@@ -640,7 +640,7 @@ describe(
                                 world:update(0) -- Commit spawns
 
                                 -- Query for entities that like the specific target
-                                local likersQuery = world:query({include = {Likes:targeting(target)}})
+                                local likersQuery = world:newQuery({include = {Likes:targeting(target)}})
                                 local foundEntities: {integer} = {}
 
                                 for _archetype, len, entities in likersQuery:iter() do

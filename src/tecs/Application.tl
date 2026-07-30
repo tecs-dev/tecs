@@ -13,7 +13,7 @@ return tecs.newApplication({
         height = 720,
     },
     plugin = function(world: tecs.World, app: tecs.Application)
-        local transforms <const> = world:query({
+        local transforms <const> = world:newQuery({
             include = {tecs.Transform},
         })
 

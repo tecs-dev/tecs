@@ -15,7 +15,7 @@ local Kind <const> = {
     Flat = 3,
 }
 
-local renderables <const> = world:query({
+local renderables <const> = world:newQuery({
     include = {tecs.Transform, tecs.gfx.Renderable},
     groupBy = function(archetype: tecs.ecs.Archetype): integer
         if archetype:get(tecs.gfx.Sprite) then

@@ -235,7 +235,7 @@ return tecs.newApplication({
         }
         local radiusSq <const> = BLOWER_RADIUS * BLOWER_RADIUS
 
-        local blown = world:query({
+        local blown = world:newQuery({
             include = {Transform, physics.RigidBody},
         })
 

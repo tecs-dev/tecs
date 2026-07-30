@@ -9,7 +9,7 @@ outline: deep
 set. Each callback receives one contiguous row range:
 
 ```teal
-local physicsBodies <const> = world:query({
+local physicsBodies <const> = world:newQuery({
     include = {tecs.Transform, tecs.physics.RigidBody},
 
     onEntitiesAdded = function(

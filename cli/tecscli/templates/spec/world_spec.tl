@@ -37,7 +37,7 @@ describe(
                 world:update(1 / 60)
 
                 local matched = 0
-                for _, length in world:query({include = {Transform, Marker}}):iter() do
+                for _, length in world:newQuery({include = {Transform, Marker}}):iter() do
                     matched = matched + length
                 end
                 check.equal(1, matched)

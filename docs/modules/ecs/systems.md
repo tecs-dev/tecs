@@ -12,7 +12,7 @@ inside a plugin, then close over that query:
 local Transform <const> = tecs.Transform
 
 local function spinPlugin(world: tecs.World)
-    local spinning <const> = world:query({
+    local spinning <const> = world:newQuery({
         include = {Transform, Spin},
         type = "logic",
     })

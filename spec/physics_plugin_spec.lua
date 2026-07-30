@@ -147,7 +147,7 @@ describe("ecs.physics write-back", function()
             restitution = 0.0,
         })
 
-        local query = world:query({ include = { Transform, physics.RigidBody } })
+        local query = world:newQuery({ include = { Transform, physics.RigidBody } })
 
         -- Sampled from inside the frame, because the dirty bits clear at the
         -- end of every update and a check afterwards reads false whatever
