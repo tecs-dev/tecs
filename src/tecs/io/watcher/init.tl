@@ -2,24 +2,24 @@
 Polls loaded content and dispatches changes to reload handlers.
 
 ```teal
-local watch <const> = tecs.filesystem.watch
+local watcher <const> = tecs.io.watcher
 
-if watch.available() then
-    watch.on("document", function(change: watch.Change)
+if watcher.available() then
+    watcher.on("document", function(change: watcher.Change)
         print("reload " .. change.path)
     end)
-    watch.install({interval = 0.25})
+    watcher.install({interval = 0.25})
 end
 
 -- Once an iteration. An application with `watch` in its config does this and
 -- the install above for you.
-watch.poll()
+watcher.poll()
 ```
 
-The watcher scans only paths recorded by `filesystem.read`, `filesystem.note`,
-and the asset loaders. It waits for a changed file's size and modification
-time to settle before dispatching it. Empty, missing, and directory paths do
-not dispatch.
+The watcher scans only paths recorded by `tecs.io.filesystem.read`,
+`tecs.io.filesystem.note`, and the asset loaders. It waits for a changed file's
+size and modification time to settle before dispatching it. Empty, missing,
+and directory paths do not dispatch.
 
 Handlers run between frames. A handler error reaches the log and does not
 replace the current resource. Release builds report `available() == false`
@@ -84,7 +84,7 @@ local record Entry
     steady: integer
 end
 
-local record watch
+local record watcher
     --- `Config` controls polling frequency, settling and path scope.
     record Config
         --- Caller-writable. The caller sets `interval` in seconds before
@@ -120,7 +120,7 @@ local record watch
     scan: function(): integer
 end
 
-local handlers <const>: {string: watch.Handler} = {}
+local handlers <const>: {string: watcher.Handler} = {}
 local entries: {string: Entry} = {}
 local running = false
 local interval = DEFAULT_INTERVAL
@@ -159,7 +159,7 @@ end
 --- Returns whether this build supports hot reload.
 ---
 --- @return Returns true when this build can install the watcher.
-function watch.available(): boolean
+function watcher.available(): boolean
     return system.capabilities().hotReload
 end
 
@@ -170,12 +170,12 @@ end
 ---
 --- @param config The caller supplies polling options or omits them for the
 ---     documented defaults.
-function watch.install(config?: watch.Config)
-    if not watch.available() then
+function watcher.install(config?: watcher.Config)
+    if not watcher.available() then
         error("this build has no hot-reload support, so it has no business polling the filesystem", 0)
     end
 
-    local given = config or {} as watch.Config
+    local given = config or {} as watcher.Config
     interval = given.interval or DEFAULT_INTERVAL
     settleCount = given.settle or DEFAULT_SETTLE
     if settleCount < 0 then
@@ -186,20 +186,20 @@ function watch.install(config?: watch.Config)
     running = true
     dispatched = 0
     lastPoll = time.now()
-    watch.scan()
+    watcher.scan()
 end
 
 --- Returns whether the watcher is running.
 ---
 --- @return Returns true after `install` and before `uninstall`.
-function watch.installed(): boolean
+function watcher.installed(): boolean
     return running
 end
 
 --- Stops watching and forgets every path's state.
 ---
 --- Registered handlers remain available for a later installation.
-function watch.uninstall()
+function watcher.uninstall()
     running = false
     entries = {}
 end
@@ -211,7 +211,7 @@ end
 --- @param kind The caller supplies the content kind to register.
 --- @param handler The caller supplies the replacement handler or nil to remove
 ---     the current one.
-function watch.on(kind: string, handler: watch.Handler)
+function watcher.on(kind: string, handler: watcher.Handler)
     if kind == nil or kind == "" then
         error("tecs: a handler needs a kind to be registered under", 2)
     end
@@ -221,7 +221,7 @@ end
 --- Returns registered content kinds in sorted order.
 ---
 --- @return Returns a fresh caller-owned list.
-function watch.kinds(): {string}
+function watcher.kinds(): {string}
     local names: {string} = {}
     for kind, handler in pairs(handlers) do
         if handler ~= nil then
@@ -235,7 +235,7 @@ end
 --- Returns watched paths in sorted order.
 ---
 --- @return Returns a fresh caller-owned list.
-function watch.watching(): {string}
+function watcher.watching(): {string}
     local list: {string} = {}
     for path in pairs(entries) do
         list[#list + 1] = path
@@ -247,7 +247,7 @@ end
 --- Returns unsettled changed paths in sorted order.
 ---
 --- @return Returns a fresh caller-owned list.
-function watch.unsettled(): {string}
+function watcher.unsettled(): {string}
     local list: {string} = {}
     for path, entry in pairs(entries) do
         if entry.pendingSize >= 0 then
@@ -261,7 +261,7 @@ end
 --- Returns the changes dispatched since `install`.
 ---
 --- @return Returns the cumulative handler count.
-function watch.dispatched(): integer
+function watcher.dispatched(): integer
     return dispatched
 end
 
@@ -325,7 +325,7 @@ local function dispatch(path: string, entry: Entry): boolean
     return true
 end
 
-function watch.scan(): integer
+function watcher.scan(): integer
     if not running then
         return 0
     end
@@ -380,7 +380,7 @@ end
 --- Call once per iteration.
 ---
 --- @return Returns how many handlers ran during this call.
-function watch.poll(): integer
+function watcher.poll(): integer
     if not running then
         return 0
     end
@@ -389,7 +389,7 @@ function watch.poll(): integer
         return 0
     end
     lastPoll = now
-    return watch.scan()
+    return watcher.scan()
 end
 
-return watch
+return watcher

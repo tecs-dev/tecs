@@ -80,7 +80,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local assets <const> = require("tecs.assets")
-local filesystem <const> = require("tecs.platform.filesystem")
+local filesystem <const> = require("tecs.io.filesystem")
 local sheet <const> = require("tecs.gfx.sheet")
 local animation <const> = require("tecs.gfx.animation")
 local timing <const> = require("tecs.timing")

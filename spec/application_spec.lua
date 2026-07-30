@@ -19,7 +19,7 @@ local ecs = require("tecs.ecs")
 local passscope = require("tecs.gpu.passscope")
 local ComputePass = require("tecs.gpu.ComputePass")
 local time = require("tecs.platform.time")
-local filesystem = require("tecs.platform.filesystem")
+local filesystem = require("tecs.io.filesystem")
 local log = require("tecs.log")
 local mcp = require("tecs.net.mcp")
 

@@ -6,7 +6,7 @@
 --- license entry and another thing to build per platform, for three functions.
 ---
 --- SDL already answers all three, and the engine already reaches SDL through
---- `tecs.filesystem`. So this is the shim, installed under the name the tools
+--- `tecs.io.filesystem`. So this is the shim, installed under the name the tools
 --- ask for, and it is exactly as large as what they call:
 ---
 --- ```
@@ -38,7 +38,7 @@ local KIND <const>: {string: string} = {
 --- Only `mode` is answered, since it is the only one asked for. A caller
 --- naming another attribute gets nil rather than a wrong number.
 function lfsshim.attributes(path: string, request?: string): any, string
-    local info = tecs.filesystem.info(path)
+    local info = tecs.io.filesystem.info(path)
     if info == nil then
         return nil, ("cannot stat %s"):format(path)
     end
@@ -61,7 +61,7 @@ end
 --- and every caller filters them out; a shim that omitted them would be right
 --- about the filesystem and wrong about the interface.
 function lfsshim.dir(path: string): function(): string
-    local entries = tecs.filesystem.list(path)
+    local entries = tecs.io.filesystem.list(path)
     if entries == nil then
         error(("cannot list %s"):format(path), 2)
     end
@@ -75,7 +75,7 @@ end
 
 --- Creates one directory.
 function lfsshim.mkdir(path: string): boolean, string
-    return tecs.filesystem.createDirectory(path)
+    return tecs.io.filesystem.createDirectory(path)
 end
 
 --- Installs this under the name the tools require.

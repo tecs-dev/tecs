@@ -31,7 +31,7 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local filesystem = require("tecs.platform.filesystem")
+local filesystem = require("tecs.io.filesystem")
 
 -- The generated bindings. `tecs.ffi.loader` is deliberately not one: it finds
 -- and types libraries rather than being one, and the engine's own native code
@@ -438,8 +438,8 @@ describe("the platform seams", function()
         -- The property closing this bypass bought, stated on its own so that
         -- putting an SDL call back into the module fails with the reason
         -- rather than as one line of a table diff.
-        local text = sources["tecs/platform/filesystem.lua"]
-        assert.is_string(text, "the module is where it was")
+        local text = sources["tecs/io/filesystem/init.lua"]
+        assert.is_string(text, "the module is under tecs.io")
         for _, binding in ipairs(BINDINGS) do
             assert.is_nil(
                 text:find('require("tecs.ffi.' .. binding .. '")', 1, true),

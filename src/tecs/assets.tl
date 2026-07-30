@@ -7,7 +7,7 @@ Each load returns a [`Future`](tealdoc:tecs.Future) immediately:
 return tecs.newApplication({
     plugin = function(world: tecs.World, app: tecs.Application)
         tecs.assets.loadImage(
-            tecs.filesystem.assetPath("sprites/hero.png")
+            tecs.io.filesystem.assetPath("sprites/hero.png")
         )
             :map(function(image: tecs.assets.Image): tecs.gfx.Sprite
                 return app.renderer:registerImage(image)
@@ -58,7 +58,7 @@ local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
 local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local workers <const> = require("tecs.workers")
-local filesystem <const> = require("tecs.platform.filesystem")
+local filesystem <const> = require("tecs.io.filesystem")
 local Future <const> = require("tecs.Future")
 
 local MIX <const> = sdl3mixer.C
@@ -70,7 +70,7 @@ local ffi = require("ffi")
 local mixer = require("tecs.ffi.sdl3mixer")
 local rust = require("tecs.ffi.rust")
 local loader = require("tecs.ffi.loader")
-local filesystem = require("tecs.platform.filesystem")
+local filesystem = require("tecs.io.filesystem")
 local workers = require("tecs.workers")
 
 local MIX = mixer.C
@@ -671,7 +671,7 @@ end
 --- reads the file again.
 ---
 --- @param path The caller supplies an absolute path or one from
----     [`assetPath`](/modules/filesystem/#tecs.filesystem.assetPath).
+---     [`assetPath`](/modules/io/filesystem/#tecs.io.filesystem.assetPath).
 --- @param kind The caller supplies the content kind used by file watching, or
 ---     omits it to record a document.
 --- @return Returns a pending [`Future`](tealdoc:tecs.Future). A missing or

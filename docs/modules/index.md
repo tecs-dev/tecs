@@ -19,42 +19,42 @@ A module may contain one level of subordinate modules, such as
 
 ## Top-level modules
 
-| Module                                    | Description                                                 |
-| ----------------------------------------- | ----------------------------------------------------------- |
-| [`tecs.assets`](/modules/assets)          | background byte, image, and sound loading                   |
-| [`tecs.audio`](/modules/audio)            | clips, voices, groups, limits, components, and devices      |
-| [`tecs.data`](/modules/data)              | JSON, DEFLATE, and byte-string hashes                       |
-| [`tecs.ecs`](/modules/ecs/)               | worlds, components, queries, systems, events, and resources |
-| [`tecs.events`](/modules/events)          | typed platform events                                       |
-| [`tecs.filesystem`](/modules/filesystem/) | game paths and file access                                  |
-| [`tecs.gfx`](/modules/gfx/)               | cameras, rendering, text, and graphics components           |
-| [`tecs.input`](/modules/input)            | gameplay input, gamepads, and sensors                       |
-| [`tecs.io`](/modules/io)                  | directional binary readers and writers                      |
-| [`tecs.log`](/modules/log)                | named, leveled platform logging                             |
-| [`tecs.math`](/modules/math)              | allocation-free 2D vector and angle math                    |
-| [`tecs.net`](/modules/net/)               | nonblocking TCP streams and UDP datagrams                   |
-| [`tecs.physics`](/modules/physics)        | Rapier 2D rigid-body simulation                             |
-| [`tecs.regex`](/modules/regex)            | compiled regular expressions over Lua byte strings          |
-| [`tecs.sequence`](/modules/sequence)      | sequencing and tweening                                     |
-| [`tecs.system`](/modules/system)          | capabilities, clipboard access, and child processes         |
-| [`tecs.time`](/modules/time)              | monotonic time                                              |
-| [`tecs.window`](/modules/window)          | window size, display, and mode                              |
-| [`tecs.workers`](/modules/workers)        | typed background jobs                                       |
+| Module                               | Description                                                 |
+| ------------------------------------ | ----------------------------------------------------------- |
+| [`tecs.assets`](/modules/assets)     | background byte, image, and sound loading                   |
+| [`tecs.audio`](/modules/audio)       | clips, voices, groups, limits, components, and devices      |
+| [`tecs.data`](/modules/data)         | JSON, DEFLATE, and byte-string hashes                       |
+| [`tecs.ecs`](/modules/ecs/)          | worlds, components, queries, systems, events, and resources |
+| [`tecs.events`](/modules/events)     | typed platform events                                       |
+| [`tecs.gfx`](/modules/gfx/)          | cameras, rendering, text, and graphics components           |
+| [`tecs.input`](/modules/input)       | gameplay input, gamepads, and sensors                       |
+| [`tecs.io`](/modules/io/)            | directional binary readers and writers                      |
+| [`tecs.log`](/modules/log)           | named, leveled platform logging                             |
+| [`tecs.math`](/modules/math)         | allocation-free 2D vector and angle math                    |
+| [`tecs.net`](/modules/net/)          | nonblocking TCP streams and UDP datagrams                   |
+| [`tecs.physics`](/modules/physics)   | Rapier 2D rigid-body simulation                             |
+| [`tecs.regex`](/modules/regex)       | compiled regular expressions over Lua byte strings          |
+| [`tecs.sequence`](/modules/sequence) | sequencing and tweening                                     |
+| [`tecs.system`](/modules/system)     | capabilities, clipboard access, and child processes         |
+| [`tecs.time`](/modules/time)         | monotonic time                                              |
+| [`tecs.window`](/modules/window)     | window size, display, and mode                              |
+| [`tecs.workers`](/modules/workers)   | typed background jobs                                       |
 
 ## Subordinate modules
 
 Each subordinate module has its own page.
 
-| Module                                               | What it is                                      |
-| ---------------------------------------------------- | ----------------------------------------------- |
-| [`tecs.ecs.random`](/modules/ecs/random)             | seeded named streams and standalone generators  |
-| [`tecs.filesystem.watch`](/modules/filesystem/watch) | watching files for change                       |
-| [`tecs.gfx.animation`](/modules/gfx/animation)       | sprite sheets, and the playback that reads them |
-| [`tecs.gfx.layers`](/modules/gfx/layers)             | z-ordering and per-layer behavior               |
-| [`tecs.gfx.materials`](/modules/gfx/materials)       | the material a draw dispatches to               |
-| [`tecs.gfx.particles`](/modules/gfx/particles)       | emitters                                        |
-| [`tecs.net.http`](/modules/net/http)                 | fetching over HTTP without stopping the frame   |
-| [`tecs.net.mcp`](/modules/net/mcp)                   | the debug server, tools, and sandbox            |
+| Module                                         | What it is                                      |
+| ---------------------------------------------- | ----------------------------------------------- |
+| [`tecs.ecs.random`](/modules/ecs/random)       | seeded named streams and standalone generators  |
+| [`tecs.gfx.animation`](/modules/gfx/animation) | sprite sheets, and the playback that reads them |
+| [`tecs.gfx.layers`](/modules/gfx/layers)       | z-ordering and per-layer behavior               |
+| [`tecs.gfx.materials`](/modules/gfx/materials) | the material a draw dispatches to               |
+| [`tecs.gfx.particles`](/modules/gfx/particles) | emitters                                        |
+| [`tecs.io.filesystem`](/modules/io/filesystem) | game paths and file access                      |
+| [`tecs.io.watcher`](/modules/io/watcher)       | watching files for change                       |
+| [`tecs.net.http`](/modules/net/http)           | fetching over HTTP without stopping the frame   |
+| [`tecs.net.mcp`](/modules/net/mcp)             | the debug server, tools, and sandbox            |
 
 ## Root types and functions
 

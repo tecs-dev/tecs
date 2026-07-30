@@ -29,7 +29,7 @@ end
 Add a queryable file beside the platform destination:
 
 ```teal
-local path <const> = tecs.filesystem.writablePath("game.jsonl")
+local path <const> = tecs.io.filesystem.writablePath("game.jsonl")
 if not tecs.log.openFile(path) then
     logger:error("could not open %s", path)
 end

@@ -24,7 +24,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local adapter = require("tecs.platform.adapter")
-local filesystem = require("tecs.platform.filesystem")
+local filesystem = require("tecs.io.filesystem")
 local events = require("tecs.platform.events")
 local newInput = require("tecs.platform.input").newInput
 local system = require("tecs.platform.system")
@@ -340,7 +340,7 @@ describe("platform contract", function()
         -- defect on every platform.
         assert.has_error(function()
             filesystem.userFolder("picturez")
-        end, "tecs: filesystem.userFolder does not know 'picturez'")
+        end, "tecs: io.filesystem.userFolder does not know 'picturez'")
     end)
 
     it("keeps SDL's storage for a platform that only answers where", function()

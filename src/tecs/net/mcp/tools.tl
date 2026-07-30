@@ -9,13 +9,13 @@ knows anything else: is it alive, what is it, and what has it been saying.
 local data <const> = require("tecs.data")
 local sdl <const> = require("tecs.ffi.sdl3")
 local system <const> = require("tecs.platform.system")
-local filesystem <const> = require("tecs.platform.filesystem")
+local filesystem <const> = require("tecs.io.filesystem")
 local log <const> = require("tecs.log")
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
 local mcp <const> = require("tecs.net.mcp")
 local events <const> = require("tecs.platform.events")
-local watch <const> = require("tecs.platform.watch")
+local watcher <const> = require("tecs.io.watcher")
 local sandbox <const> = require("tecs.net.mcp.sandbox")
 local shaders <const> = require("tecs.gpu.shaders")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
@@ -826,34 +826,34 @@ mcp.register(
             },
         },
         handler = function(args: {string: any}): {string: any}
-            if not watch.available() then
+            if not watcher.available() then
                 error("this build has no hot-reload support, so it has no business polling the filesystem", 0)
             end
 
             local enabled = args.enabled as boolean
-            if enabled == true and not watch.installed() then
-                watch.install()
+            if enabled == true and not watcher.installed() then
+                watcher.install()
             elseif enabled == false then
-                watch.uninstall()
+                watcher.uninstall()
             end
 
             local fired = 0
             if args.poll == true then
-                fired = watch.scan()
+                fired = watcher.scan()
             end
 
-            local watching = watch.watching()
-            local unsettled = watch.unsettled()
-            local kinds = watch.kinds()
+            local watching = watcher.watching()
+            local unsettled = watcher.unsettled()
+            local kinds = watcher.kinds()
             return {
-                watching = watch.installed(),
+                watching = watcher.installed(),
                 files = #watching,
                 paths = #watching > 0 and watching or data.empty_array,
                 -- Files seen changing and not acted on yet, which is what a save
                 -- still being written looks like from here.
                 unsettled = #unsettled > 0 and unsettled or data.empty_array,
                 kinds = #kinds > 0 and kinds or data.empty_array,
-                dispatched = watch.dispatched(),
+                dispatched = watcher.dispatched(),
                 reloaded = fired,
             }
         end,

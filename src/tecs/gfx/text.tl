@@ -52,7 +52,7 @@ unlit.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
-local filesystem <const> = require("tecs.platform.filesystem")
+local filesystem <const> = require("tecs.io.filesystem")
 local loader <const> = require("tecs.ffi.loader")
 local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")

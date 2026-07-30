@@ -13,7 +13,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local cjson = require("cjson")
 local shaders = require("tecs.gpu.shaders")
-local filesystem = require("tecs.platform.filesystem")
+local filesystem = require("tecs.io.filesystem")
 local materials = require("tecs.gpu.materials")
 local mcp = require("tecs.net.mcp")
 local tools = require("tecs.net.mcp.tools")
@@ -468,7 +468,7 @@ end)
 -- asked. The watcher's own behavior is asserted in `watch_spec`; what is here
 -- is that the tool reports it, steps it, and stops it.
 describe("mcp watch", function()
-    local watch = require("tecs.platform.watch")
+    local watcher = require("tecs.io.watcher")
 
     local function callTool(arguments)
         local response = cjson.decode(mcp.dispatch(cjson.encode({
@@ -492,13 +492,13 @@ describe("mcp watch", function()
         dir = tempDir()
         contentRoot = filesystem.assetRoot()
         filesystem.setAssetRoot(dir)
-        watch.uninstall()
+        watcher.uninstall()
     end)
 
     after_each(function()
         filesystem.setAssetRoot(contentRoot)
-        watch.uninstall()
-        watch.on("shader", nil)
+        watcher.uninstall()
+        watcher.on("shader", nil)
         os.execute("rm -rf '" .. dir .. "'")
     end)
 
@@ -514,7 +514,7 @@ describe("mcp watch", function()
         assert.is_string(filesystem.read(dir .. "watched.frag.glsl"))
 
         local reloaded = 0
-        watch.on("shader", function()
+        watcher.on("shader", function()
             reloaded = reloaded + 1
         end)
 
@@ -547,7 +547,7 @@ end)
 -- running game answers with.
 describe("reload_shaders against a running application", function()
     local Application = require("tecs.Application")
-    local watch = require("tecs.platform.watch")
+    local watcher = require("tecs.io.watcher")
 
     it("rebuilds the pipelines of the application that is running", function()
         local app = Application.newApplication({
@@ -591,9 +591,9 @@ describe("reload_shaders against a running application", function()
         })
         assert.is_true(app:_init())
 
-        assert.is_true(watch.installed(), "the watcher the config asked for is not running")
+        assert.is_true(watcher.installed(), "the watcher the config asked for is not running")
         local kinds = {}
-        for _, kind in ipairs(watch.kinds()) do
+        for _, kind in ipairs(watcher.kinds()) do
             kinds[kind] = true
         end
         assert.is_true(kinds.shader, "no reloader owns a changed shader")
@@ -604,10 +604,10 @@ describe("reload_shaders against a running application", function()
         -- The engine's own shaders are read through `assets`, so a run that has
         -- drawn a frame is already watching them.
         app:_iterate(nil, 0, nil)
-        assert.is_true(#watch.watching() > 0, "a run that has drawn is watching nothing")
+        assert.is_true(#watcher.watching() > 0, "a run that has drawn is watching nothing")
 
         app:_shutdown()
-        assert.is_false(watch.installed(), "the watcher outlived the application")
+        assert.is_false(watcher.installed(), "the watcher outlived the application")
         tools.bind(nil, nil)
         tools.bindReload(nil)
         restore()

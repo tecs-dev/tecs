@@ -7,12 +7,12 @@ deliberate: a file opened for reading, an HTTP response destination and a
 decoder input do not need optional methods for the direction they cannot use.
 
 The module owns the contracts, while another module owns each resource and
-constructs it. For example, `tecs.filesystem.openRead` returns a `Reader` and
-`tecs.filesystem.openWrite` returns a `Writer`:
+constructs it. For example, `tecs.io.filesystem.openRead` returns a `Reader`
+and `tecs.io.filesystem.openWrite` returns a `Writer`:
 
 ```teal
-local reader <const> = assert(tecs.filesystem.openRead(source))
-local writer <const> = assert(tecs.filesystem.openWrite(destination))
+local reader <const> = assert(tecs.io.filesystem.openRead(source))
+local writer <const> = assert(tecs.io.filesystem.openWrite(destination))
 
 while true do
     local bytes, reason = reader:read(64 * 1024)
@@ -34,68 +34,30 @@ Reads and writes are synchronous. The returned Lua strings are binary-safe,
 including embedded NUL bytes. The module does not attach path, network or
 content-type policy to a stream; the module that constructs one owns those
 concerns.
+
+The module is also the lazy parent of
+[`filesystem`](/modules/io/filesystem/) and
+[`watcher`](/modules/io/watcher/). Naming `tecs.io` loads neither child, and
+reading one child does not load the other.
 ]=]
 
---- A caller-owned source of binary strings.
----
---- The module that constructs a reader owns its backing resource until
---- `close` releases it. A consumer reads forward until `read` returns an empty
---- string, then closes the reader. A failure returns nil and a reason instead
---- of raising.
-local record Reader
-    --- Caller-writable. Supplies the operation that reads the next bytes.
-    ---
-    --- @param self The reader whose cursor advances.
-    --- @param count The maximum number of bytes to return. A non-positive
-    ---     count may still return one byte so the reader can make progress.
-    --- @return Returns up to `count` bytes, fewer at the end, or an empty
-    ---     string after the source is exhausted.
-    --- @return Returns the source's reason when the first return is nil.
-    read: function(self: Reader, count: integer): string, string
-
-    --- Caller-writable. Supplies the operation that releases the source.
-    ---
-    --- Closing more than once must be a no-op.
-    ---
-    --- @param self The reader to close.
-    close: function(self: Reader)
-end
-
---- A caller-owned destination for binary strings.
----
---- A consumer writes pieces in order and closes the writer even after the last
---- `write` succeeds. The close can report a delayed flush failure that no
---- individual write observed.
-local record Writer
-    --- Caller-writable. Supplies the operation that appends bytes.
-    ---
-    --- @param self The writer receiving the bytes.
-    --- @param bytes The binary string to append, including any embedded NUL
-    ---     bytes.
-    --- @return Returns whether every byte reached the destination.
-    --- @return Returns the destination's reason when the first return is
-    ---     false.
-    write: function(self: Writer, bytes: string): boolean, string
-
-    --- Caller-writable. Supplies the operation that finishes the destination.
-    ---
-    --- Closing more than once must succeed.
-    ---
-    --- @param self The writer to finish and close.
-    --- @return Returns whether buffered bytes reached the destination and its
-    ---     resources were released.
-    --- @return Returns the destination's reason when the first return is
-    ---     false.
-    close: function(self: Writer): boolean, string
-end
+local type iotypes = require("tecs.io.types")
+local type filesystem = require("tecs.io.filesystem")
+local type watcher = require("tecs.io.watcher")
 
 local record binaryIO
+    --- Read-only. Exposes path resolution and synchronous file operations.
+    filesystem: filesystem
+
+    --- Read-only. Exposes loaded-content polling and reload notifications.
+    watcher: watcher
+
     --- `Reader` supplies bytes in order and releases its source on `close`.
-    type Reader = Reader
+    type Reader = iotypes.Reader
 
     --- `Writer` accepts bytes in order and finishes its destination on
     --- `close`.
-    type Writer = Writer
+    type Writer = iotypes.Writer
 end
 
 return binaryIO

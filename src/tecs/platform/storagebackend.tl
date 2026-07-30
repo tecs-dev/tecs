@@ -64,12 +64,12 @@ delegates, so a port inherits it rather than repeating it.
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
-local type binaryIO = require("tecs.io")
+local type iotypes = require("tecs.io.types")
 
 local C <const> = sdl.C
 
-local type Reader = binaryIO.Reader
-local type Writer = binaryIO.Writer
+local type Reader = iotypes.Reader
+local type Writer = iotypes.Writer
 
 --- What a path is. Symbolic links are followed where the platform has them, so
 --- a link never reports as one: "other" is a socket, a fifo or a device.

@@ -44,7 +44,7 @@ transport receives the materialized request string and sends its actual size.
 
 ## Files go through the storage seam and handles do not
 
-`ofFile` reads and writes through `tecs.filesystem`, so a port that
+`ofFile` reads and writes through `tecs.io.filesystem`, so a port that
 replaced storage gets it. A response destination uses `openWrite`, while a
 request source uses the whole-file `read` operation described above.
 `ofHandle` is the other case on purpose: a caller that opened its own file is
@@ -52,7 +52,7 @@ already outside the storage abstraction and has said so.
 ]=]
 
 local loader <const> = require("tecs.ffi.loader")
-local filesystem <const> = require("tecs.platform.filesystem")
+local filesystem <const> = require("tecs.io.filesystem")
 
 --- Bytes asked for in one directional read when nothing says otherwise.
 local CHUNK <const> = 64 * 1024
@@ -64,7 +64,7 @@ local record DataStream
         "string"
         --- An FFI buffer and a length, borrowed for as long as the send takes.
         "bytes"
-        --- A path, read and written through `tecs.filesystem`.
+        --- A path, read and written through `tecs.io.filesystem`.
         "file"
         --- A handle the caller opened and still owns.
         "handle"
@@ -115,7 +115,7 @@ local record DataStream
     --- @return A source only.
     ofBytes: function(pointer: loader.CValue, length: integer, contentType?: string): DataStream
 
-    --- A stream over a path, read and written through `tecs.filesystem`.
+    --- A stream over a path, read and written through `tecs.io.filesystem`.
     ---
     --- The file is not opened here. A source is opened when the transfer
     --- starts and a destination when the first byte arrives, so naming one

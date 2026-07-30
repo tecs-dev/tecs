@@ -231,10 +231,9 @@ The host loads `tecs` before the entry file. A game can use these names without 
 - [`tecs.data`](/modules/data) - JSON, DEFLATE and hashes over byte strings
 - [`tecs.ecs`](/modules/ecs/) - worlds, components, queries, systems, events and resources
 - [`tecs.events`](/modules/events) - typed platform events routed through the world
-- [`tecs.filesystem`](/modules/filesystem/) - where a game may read and write, and what to do with a path
 - [`tecs.gfx`](/modules/gfx/) - the camera, the components, the renderer, text, and the vocabularies below
 - [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
-- [`tecs.io`](/modules/io) - directional interfaces for streaming binary strings
+- [`tecs.io`](/modules/io/) - directional interfaces for streaming binary strings
 - [`tecs.log`](/modules/log) - named, leveled platform logging
 - [`tecs.math`](/modules/math) - allocation-free 2D vector and angle math
 - [`tecs.net`](/modules/net/) - nonblocking TCP streams and UDP datagrams
@@ -249,11 +248,12 @@ The host loads `tecs` before the entry file. A game can use these names without 
 Inside one of those, one level and no deeper:
 
 - [`tecs.ecs.random`](/modules/ecs/random) - seeded named streams and standalone generators
-- [`tecs.filesystem.watch`](/modules/filesystem/watch) - watching files for change
 - [`tecs.gfx.animation`](/modules/gfx/animation) - sprite sheets, and the playback that reads them
 - [`tecs.gfx.layers`](/modules/gfx/layers) - z-ordering and per-layer behavior
 - [`tecs.gfx.materials`](/modules/gfx/materials) - one fragment shader, compiled from the material set
 - [`tecs.gfx.particles`](/modules/gfx/particles) - emitters
+- [`tecs.io.filesystem`](/modules/io/filesystem) - where a game may read and write, and what to do with a path
+- [`tecs.io.watcher`](/modules/io/watcher) - watching files for change
 - [`tecs.net.http`](/modules/net/http) - fetching over HTTP without stopping the frame
 - [`tecs.net.mcp`](/modules/net/mcp) - the debug server agents and humans drive a running game through
 

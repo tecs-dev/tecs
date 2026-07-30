@@ -177,7 +177,7 @@ local replayBuffer = buffer.new()
 
 local result = world:saveSnapshot({
     buffer = replayBuffer,
-    path = tecs.filesystem.writablePath("checkpoint.bin"),
+    path = tecs.io.filesystem.writablePath("checkpoint.bin"),
     filterQuery = {include = {Persist}},
     layers = {2, 3},
     customData = {
@@ -297,20 +297,20 @@ Engine plugins register their own snapshot behavior:
 `path` provides the shortest binary save:
 
 ```teal
-local path = tecs.filesystem.writablePath("save.bin")
+local path = tecs.io.filesystem.writablePath("save.bin")
 world:saveSnapshot({path = path})
-world:loadSnapshot(tecs.filesystem.read(path))
+world:loadSnapshot(tecs.io.filesystem.read(path))
 ```
 
 To transform the bytes first, write the returned buffer:
 
 ```teal
-local path = tecs.filesystem.writablePath("save.bin")
+local path = tecs.io.filesystem.writablePath("save.bin")
 local bytes = tostring(world:saveSnapshot().buffer)
-tecs.filesystem.write(path, bytes)
+tecs.io.filesystem.write(path, bytes)
 ```
 
-`tecs.filesystem.writablePath` resolves a path inside the application's
+`tecs.io.filesystem.writablePath` resolves a path inside the application's
 writable directory and works on targets where stdio cannot reach platform
 storage.
 

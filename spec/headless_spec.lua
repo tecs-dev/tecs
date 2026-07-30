@@ -122,7 +122,7 @@ describe("tecs headless", function()
                     "tecs.gpu.Device", "tecs.ffi.sdl3",
                     "tecs.data", "tecs.math", "tecs.regex",
                     "tecs.platform.system",
-                    "tecs.platform.filesystem", "tecs.platform.watch",
+                    "tecs.io.filesystem", "tecs.io.watcher",
                     "tecs.net", "tecs.net.http", "tecs.net.http.client",
                 }
                 local loaded = {}
@@ -180,37 +180,40 @@ describe("tecs headless", function()
         end)
 
         -- And the same property where the parent is a module rather than a
-        -- table built for the name. `tecs.filesystem` is the module itself, so
-        -- naming it loads that module and nothing else: the watcher below it
-        -- polls on a timer and reaches SDL, and a program that reads a file has
-        -- not asked for one.
-        it("hangs a module under a module without loading it", function()
+        -- table built for the name. Naming `tecs.io` loads neither child, and
+        -- reading one child does not load its sibling.
+        it("hangs sibling modules under a module without loading them", function()
             local output = run(
                 [[
                 local tecs = require("tecs")
-                local filesystem = tecs.filesystem
-                local eager = package.loaded["tecs.platform.watch"] ~= nil
-                local watch = tecs.filesystem.watch
+                local binaryIO = tecs.io
+                local parentLoadedFilesystem =
+                    package.loaded["tecs.io.filesystem"] ~= nil
+                local parentLoadedWatcher =
+                    package.loaded["tecs.io.watcher"] ~= nil
+                local filesystem = tecs.io.filesystem
+                local siblingLoaded = package.loaded["tecs.io.watcher"] ~= nil
+                local watcher = tecs.io.watcher
 
                 -- The same shape one protocol down: naming the transport must
                 -- not initialize the HTTP runtime.
                 local net = tecs.net
                 local http = package.loaded["tecs.net.http"] ~= nil
 
-                print(("%s %s %s %s %s %s"):format(
-                    tostring(rawequal(filesystem, require("tecs.platform.filesystem"))),
-                    tostring(eager),
-                    tostring(rawequal(watch, require("tecs.platform.watch"))),
-                    tostring(tecs.filesystem.nosuchthing),
+                print(("%s %s %s %s %s %s %s %s %s"):format(
+                    tostring(rawequal(binaryIO, require("tecs.io"))),
+                    tostring(parentLoadedFilesystem),
+                    tostring(parentLoadedWatcher),
+                    tostring(rawequal(filesystem, require("tecs.io.filesystem"))),
+                    tostring(siblingLoaded),
+                    tostring(rawequal(watcher, require("tecs.io.watcher"))),
+                    tostring(tecs.filesystem),
                     tostring(rawequal(net, require("tecs.net"))),
                     tostring(http)))
             ]],
                 false
             )
-            -- The name is the module, the watcher did not come with it, and
-            -- reading it answers with the module rather than a copy. `net` is
-            -- the same, and HTTP did not come with it.
-            assert.are.equal("true false true nil true false\n", output)
+            assert.are.equal("true false false true false true nil true false\n", output)
         end)
 
         it("loads one network protocol without its sibling", function()

@@ -19,7 +19,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local system = require("tecs.platform.system")
-local filesystem = require("tecs.platform.filesystem")
+local filesystem = require("tecs.io.filesystem")
 
 -- Absolute, because every child below is given a working directory of its own
 -- and a relative path would then resolve against the scaffolded project rather

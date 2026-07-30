@@ -61,7 +61,7 @@ rather than one frame later.
    children that exited and the dialogs the user answered.
 4. The application pumps every open `tecs.net.http` client, which settles the
    transfers that completed.
-5. `tecs.filesystem.watch` polls, which reloads content whose file changed.
+5. `tecs.io.watcher` polls, which reloads content whose file changed.
 6. The debug server answers, `world:update(dt)` runs the phases, and the
    renderer records and submits one frame.
 7. The audio mixer updates, which reaps the voices it has finished with.
@@ -127,10 +127,10 @@ local audio <const> = require("tecs.audio")
 local type Audio = audio.Audio
 local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
-local filesystem <const> = require("tecs.platform.filesystem")
+local filesystem <const> = require("tecs.io.filesystem")
 local system <const> = require("tecs.platform.system")
 local httpClients <const> = require("tecs.net.http.clients")
-local watch <const> = require("tecs.platform.watch")
+local watcher <const> = require("tecs.io.watcher")
 local log <const> = require("tecs.log")
 local mcp <const> = require("tecs.net.mcp")
 local timing <const> = require("tecs.timing")
@@ -211,7 +211,7 @@ local record Application
         --- they change. Omitted means no watcher, on the same footing as the
         --- server above: a poll of the filesystem is not something to start
         --- because a build happened to be able to. A release refuses it.
-        watch: watch.Config
+        watch: watcher.Config
         --- Caller-writable. Sets the renderer buffer capacity in instances.
         --- Defaults to 65536.
         ---
@@ -849,9 +849,9 @@ function Application:_init(): boolean
 
     -- After the game's plugin, so the first look takes up everything the run has
     -- opened. Which reloader owns which kind is registered here rather than
-    -- inside the watcher: nothing in `tecs.platform` knows what an image or a
-    -- clip is, and the rules a reload may not break are stated once, in the
-    -- functions the debug tools are wrappers over.
+    -- inside the watcher: the I/O modules know neither images nor clips, and
+    -- the rules a reload may not break are stated once, in the functions the
+    -- debug tools are wrappers over.
     --
     -- Each reload ends by asking to resume, which is what the watcher is for.
     -- A file that broke the game is a file someone is about to fix, and a
@@ -862,15 +862,15 @@ function Application:_init(): boolean
     -- never reaches it: the reload refused, so nothing has changed.
     if config.watch ~= nil then
         local tools = require("tecs.net.mcp.tools")
-        watch.on("shader", function() tools.reloadShaders(); self:clearCrash() end)
-        watch.on("image", function(change: watch.Change) tools.reloadImage(change.path); self:clearCrash() end)
-        watch.on("sound", function(change: watch.Change) tools.reloadSound(change.path); self:clearCrash() end)
+        watcher.on("shader", function() tools.reloadShaders(); self:clearCrash() end)
+        watcher.on("image", function(change: watcher.Change) tools.reloadImage(change.path); self:clearCrash() end)
+        watcher.on("sound", function(change: watcher.Change) tools.reloadSound(change.path); self:clearCrash() end)
         -- The metrics, not the atlas beside them. The atlas was loaded as an
         -- image and reloads as one, under the rect it already occupies; the
         -- metrics are what decides where a glyph is and how wide it is, so they
         -- are what has to be read again and laid out from.
-        watch.on("font", function(change: watch.Change) tools.reloadFont(change.path); self:clearCrash() end)
-        watch.install(config.watch)
+        watcher.on("font", function(change: watcher.Change) tools.reloadFont(change.path); self:clearCrash() end)
+        watcher.install(config.watch)
     end
 
     -- Startup cost must not land in the first iteration's dt.
@@ -1008,7 +1008,7 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
     -- more: a shader edited to fix the crash is exactly what a stopped process
     -- is waiting for. Costs a clock read on a frame the interval has not
     -- elapsed on, and nothing at all when no watcher was asked for.
-    watch.poll()
+    watcher.poll()
 
     if not self.suspended then
         -- Answered on this thread, inside the frame, so a tool reads a world
@@ -1260,7 +1260,7 @@ function Application:_shutdown(): boolean
         guard(self, "shutdown", function() world:shutdown() end)
     end
 
-    watch.uninstall()
+    watcher.uninstall()
     if self.mcp ~= nil then
         self.mcp:destroy()
     end

@@ -100,6 +100,7 @@ end
 local BESIDE = {
     ["tecs.gfx.animation"] = { "tecs.gfx.sheet" },
     ["tecs.input"] = { "tecs.platform.Gamepad", "tecs.platform.sensors" },
+    ["tecs.io"] = { "tecs.io.types" },
 }
 
 --- Orders names the way a listing presents them: alphabetically, ignoring
@@ -303,7 +304,7 @@ end
 -- place teach a reader that the sidebar does not know where things are.
 --
 -- Alphabetical ignoring case, and spelled the way a game writes it. A reader
--- looking for `tecs.filesystem.watch` scans for that string; a thematic
+-- looking for `tecs.io.watcher` scans for that string; a thematic
 -- grouping makes them guess which of four headings somebody filed it under
 -- first. The name a group carries is the prefix of every name inside it, so a
 -- closed group still tells a reader scanning for a name whether to open it.
@@ -388,13 +389,6 @@ local SIDEBAR = {
             },
             { text = "tecs.events", path = "modules/events" },
             {
-                text = "tecs.filesystem",
-                path = "modules/filesystem",
-                items = {
-                    { text = "tecs.filesystem.watch", path = "modules/filesystem/watch" },
-                },
-            },
-            {
                 text = "tecs.gfx",
                 path = "modules/gfx",
                 items = {
@@ -405,7 +399,14 @@ local SIDEBAR = {
                 },
             },
             { text = "tecs.input", path = "modules/input" },
-            { text = "tecs.io", path = "modules/io" },
+            {
+                text = "tecs.io",
+                path = "modules/io",
+                items = {
+                    { text = "tecs.io.filesystem", path = "modules/io/filesystem" },
+                    { text = "tecs.io.watcher", path = "modules/io/watcher" },
+                },
+            },
             { text = "tecs.log", path = "modules/log" },
             { text = "tecs.math", path = "modules/math" },
             {

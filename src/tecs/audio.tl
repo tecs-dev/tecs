@@ -844,7 +844,7 @@ audio.Sound = Sound
 
 -- The device half, under this module's public names. `platform/audio.tl` is
 -- the seam and reaches only SDL; `tecs.audio` is the surface, the way
--- `tecs.filesystem` publishes what `platform/content.tl` holds.
+-- `tecs.io.filesystem` publishes what `platform/content.tl` holds.
 audio.playbackDevices = platformaudio.playbackDevices
 audio.recordingDevices = platformaudio.recordingDevices
 audio.openMicrophone = platformaudio.openMicrophone

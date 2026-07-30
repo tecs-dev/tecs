@@ -13,7 +13,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
-local filesystem = require("tecs.platform.filesystem")
+local filesystem = require("tecs.io.filesystem")
 local sdl = require("tecs.ffi.sdl3")
 local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
@@ -131,14 +131,14 @@ describe("gfx.text", function()
 
     it("shares an in-flight metrics read without sharing caller futures", function()
         local metricsPath = os.tmpname()
-        local source = assert(filesystem.read(tecs.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.json")))
+        local source = assert(filesystem.read(tecs.io.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.json")))
         local file = assert(io.open(metricsPath, "wb"))
         file:write(source)
         file:close()
 
         local options = {
             metrics = metricsPath,
-            atlas = tecs.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.png"),
+            atlas = tecs.io.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.png"),
         }
         local first = text.loadFont(options)
         local canceled = text.loadFont(options)
@@ -685,7 +685,7 @@ describe("gfx.text", function()
         --- nothing about the image behind them.
         local function shipped(factor)
             local cjson = require("cjson")
-            local source = filesystem.read(tecs.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.json"))
+            local source = filesystem.read(tecs.io.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.json"))
             local root = cjson.decode(source)
             for _, entry in ipairs(root.chars) do
                 entry.xadvance = entry.xadvance * factor
@@ -702,7 +702,7 @@ describe("gfx.text", function()
             write(secondPath, shipped(1))
             second = text.loadFont({
                 metrics = secondPath,
-                atlas = tecs.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.png"),
+                atlas = tecs.io.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.png"),
             })
                 :wait().value
         end)

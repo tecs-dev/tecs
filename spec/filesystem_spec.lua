@@ -13,7 +13,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local ffi = require("ffi")
 local sdl = require("tecs.ffi.sdl3")
-local filesystem = require("tecs.platform.filesystem")
+local filesystem = require("tecs.io.filesystem")
 local assets = require("tecs.assets")
 local workers = require("tecs.workers")
 
@@ -103,25 +103,26 @@ local function at(relative)
     return temp .. "/" .. relative
 end
 
-describe("platform.filesystem on the public surface", function()
+describe("io.filesystem on the public surface", function()
     it("resolves by name rather than being held", function()
         -- The module reaches SDL, so holding it on the eager half of the
         -- surface would make a tool that only wanted the ECS find a graphics
         -- stack. `headless_spec` proves that property in a fresh process; the
         -- wiring that keeps it true is observable here.
         local tecs = require("tecs")
-        assert.is_nil(rawget(tecs, "filesystem"), "nothing may hold the module before it is asked for")
-        assert.are.equal(filesystem.read, tecs.filesystem.read)
-        assert.is_not_nil(rawget(tecs, "filesystem"), "and the resolved namespace is kept, not rebuilt")
+        local binaryIO = tecs.io
+        assert.is_nil(rawget(binaryIO, "filesystem"), "nothing may hold the module before it is asked for")
+        assert.are.equal(filesystem.read, tecs.io.filesystem.read)
+        assert.is_not_nil(rawget(binaryIO, "filesystem"), "and the resolved namespace is kept, not rebuilt")
     end)
 
     it("is the module itself, not a table standing in front of it", function()
         -- The path half and the operations are one file under one name, so
-        -- the public name needs nothing built for it: `tecs.filesystem` is the
+        -- the public name needs nothing built for it: `tecs.io.filesystem` is the
         -- table `require` answers with, and everything on it is reached
         -- directly rather than through a proxy that has to restate it.
         local tecs = require("tecs")
-        assert.is_true(rawequal(filesystem, tecs.filesystem))
+        assert.is_true(rawequal(filesystem, tecs.io.filesystem))
     end)
 
     it("takes a write on the value that reads it back", function()
@@ -130,20 +131,21 @@ describe("platform.filesystem on the public surface", function()
         -- where the read looks, with nothing in between to route it.
         local tecs = require("tecs")
         local previous = filesystem.organization
-        tecs.filesystem.organization = "Ex Nihilo"
+        tecs.io.filesystem.organization = "Ex Nihilo"
         assert.are.equal("Ex Nihilo", filesystem.organization)
-        assert.are.equal("Ex Nihilo", tecs.filesystem.organization)
-        tecs.filesystem.organization = previous
+        assert.are.equal("Ex Nihilo", tecs.io.filesystem.organization)
+        tecs.io.filesystem.organization = previous
         assert.are.equal(previous, filesystem.organization)
     end)
 
-    it("reaches the watcher one level down", function()
+    it("does not carry the sibling watcher", function()
         local tecs = require("tecs")
-        assert.are.equal(require("tecs.platform.watch"), tecs.filesystem.watch)
+        assert.are.equal(require("tecs.io.watcher"), tecs.io.watcher)
+        assert.is_nil(tecs.io.filesystem.watch)
     end)
 end)
 
-describe("platform.filesystem", function()
+describe("io.filesystem", function()
     setup(function()
         -- A unique name under the system temporary directory, taken rather
         -- than invented so two runs at once cannot collide. `tmpnam` may leave
@@ -470,7 +472,7 @@ describe("platform.filesystem", function()
         it("refuses a folder name it does not know", function()
             assert.has_error(function()
                 filesystem.userFolder("downloadz")
-            end, "tecs: filesystem.userFolder does not know 'downloadz'")
+            end, "tecs: io.filesystem.userFolder does not know 'downloadz'")
         end)
     end)
 
@@ -496,24 +498,24 @@ describe("platform.filesystem", function()
             for _, call in ipairs(calls) do
                 assert.has_error(function()
                     call[2](nil)
-                end, ("tecs: filesystem.%s needs a path"):format(call[1]))
+                end, ("tecs: io.filesystem.%s needs a path"):format(call[1]))
             end
 
             assert.has_error(function()
                 filesystem.rename(nil, at("x"))
-            end, "tecs: filesystem.rename needs a path")
+            end, "tecs: io.filesystem.rename needs a path")
             assert.has_error(function()
                 filesystem.rename(at("x"), nil)
-            end, "tecs: filesystem.rename needs a path")
+            end, "tecs: io.filesystem.rename needs a path")
             assert.has_error(function()
                 filesystem.copy(nil, at("x"))
-            end, "tecs: filesystem.copy needs a path")
+            end, "tecs: io.filesystem.copy needs a path")
             assert.has_error(function()
                 filesystem.copy(at("x"), nil)
-            end, "tecs: filesystem.copy needs a path")
+            end, "tecs: io.filesystem.copy needs a path")
             assert.has_error(function()
                 filesystem.write(at("x"), nil)
-            end, "tecs: filesystem.write needs bytes to write")
+            end, "tecs: io.filesystem.write needs bytes to write")
         end)
     end)
 
@@ -580,7 +582,7 @@ describe("platform.filesystem", function()
             local worker = workers.spawn({
                 source = [==[
                     local workers = require("tecs.workers")
-                    local filesystem = require("tecs.platform.filesystem")
+                    local filesystem = require("tecs.io.filesystem")
                     local self = workers.current()
                     local job = self:receive(5000)
                     local entries = filesystem.glob(job.root)

@@ -349,20 +349,18 @@ describe("the public surface", function()
 
     describe("a module inside a module", function()
         it("answers with the parent module rather than a table in front of it", function()
-            -- The whole point of the shape: `tecs.filesystem` is the module,
-            -- so a game writing `tecs.filesystem.read` reaches the same
-            -- function `require` answers with, and `init.tl` needs no second
-            -- copy of the module's signatures to type it by.
-            assert.is_true(rawequal(tecs.filesystem, require("tecs.platform.filesystem")))
+            assert.is_true(rawequal(tecs.io, require("tecs.io")))
         end)
 
-        it("hangs the name below it on the parent, once", function()
-            assert.is_true(rawequal(tecs.filesystem.watch, require("tecs.platform.watch")))
+        it("hangs both names below it on the parent, once", function()
+            assert.is_true(rawequal(tecs.io.filesystem, require("tecs.io.filesystem")))
+            assert.is_true(rawequal(tecs.io.watcher, require("tecs.io.watcher")))
             -- Written onto the module after the first read, which a namespace
             -- cannot do: there the table has to stay empty so `__index` keeps
             -- firing. A module owns every name it answers, so there is nothing
             -- to route and nothing to keep consulting.
-            assert.is_true(rawequal(rawget(tecs.filesystem, "watch"), require("tecs.platform.watch")))
+            assert.is_true(rawequal(rawget(tecs.io, "filesystem"), require("tecs.io.filesystem")))
+            assert.is_true(rawequal(rawget(tecs.io, "watcher"), require("tecs.io.watcher")))
         end)
 
         it("hangs MCP below networking and nowhere deeper", function()
@@ -376,15 +374,17 @@ describe("the public surface", function()
         end)
 
         it("takes a write on the module that reads it back", function()
-            local filesystem = require("tecs.platform.filesystem")
+            local filesystem = require("tecs.io.filesystem")
             local previous = filesystem.organization
-            tecs.filesystem.organization = "Ex Nihilo"
+            tecs.io.filesystem.organization = "Ex Nihilo"
             assert.are.equal("Ex Nihilo", filesystem.organization)
-            tecs.filesystem.organization = previous
+            tecs.io.filesystem.organization = previous
         end)
 
         it("answers nil for a name neither it nor the names below it carry", function()
-            assert.is_nil(tecs.filesystem.nosuchthing)
+            assert.is_nil(tecs.io.nosuchthing)
+            assert.is_nil(tecs.io.filesystem.watch)
+            assert.is_nil(tecs.filesystem)
         end)
     end)
 end)

@@ -153,7 +153,7 @@ function builder.build(self: project, paths: layout, entry?: string): builder.Re
                 or ("entry must be a .tl file, and %s is not"):format(selected)
             )
     end
-    if not tecs.filesystem.isFile(project.path(self, selected)) then
+    if not tecs.io.filesystem.isFile(project.path(self, selected)) then
         return nil, ("entry does not exist: %s"):format(selected)
     end
 
@@ -209,7 +209,7 @@ function builder.build(self: project, paths: layout, entry?: string): builder.Re
     -- whole of what a game needs and moving it moves everything.
     local assetRoot = project.path(self, self.assets)
     local copied = 0
-    if tecs.filesystem.isDirectory(assetRoot) then
+    if tecs.io.filesystem.isDirectory(assetRoot) then
         copied = files.copyTree(assetRoot, buildRoot .. "/assets")
     end
 

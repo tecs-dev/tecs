@@ -40,7 +40,7 @@ world:addSystem({
     runIf = tecs.ecs.runif.after(5),
     run = function()
         session:stop(
-            tecs.filesystem.writablePath("tecs.collapsed")
+            tecs.io.filesystem.writablePath("tecs.collapsed")
         )
     end,
 })
@@ -74,7 +74,7 @@ local session <const> = profile.trace()
 -- Run the workload.
 
 local report <const> = session:stop(
-    tecs.filesystem.writablePath("aborts.csv")
+    tecs.io.filesystem.writablePath("aborts.csv")
 )
 
 print(report.totalAborts, report.blacklisted)

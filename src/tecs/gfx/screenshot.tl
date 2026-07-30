@@ -11,7 +11,7 @@ into Lua before Rust releases it. The resulting bytes go through
 local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local Texture <const> = require("tecs.gpu.Texture")
-local filesystem <const> = require("tecs.platform.filesystem")
+local filesystem <const> = require("tecs.io.filesystem")
 
 local RUST <const> = rust.C
 

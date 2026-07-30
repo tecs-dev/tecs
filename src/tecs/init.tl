@@ -33,7 +33,6 @@ local type input = require("tecs.platform.input")
 local type time = require("tecs.platform.time")
 local type events = require("tecs.platform.events")
 local type net = require("tecs.net")
-local type filesystem = require("tecs.platform.filesystem")
 local type binaryIO = require("tecs.io")
 local type layers = require("tecs.gfx.layers")
 local type sequence = require("tecs.sequence")
@@ -60,8 +59,8 @@ local type loader = require("tecs.ffi.loader")
 --
 -- A public name that one module answers needs none of this, and has none. It
 -- resolves to that module, is typed by the record the module declares, and
--- carries the names one level down as fields of its own: `tecs.filesystem` is
--- `src/tecs/platform/filesystem.tl`, `watch` included. That is the shape to
+-- carries the names one level down as fields of its own: `tecs.io` is
+-- `src/tecs/io.tl`, `filesystem` and `watcher` included. That is the shape to
 -- reach for, because a record here restates every signature and every docblock
 -- the module already carries and nothing checks the two against each other.
 --
@@ -72,7 +71,7 @@ local type loader = require("tecs.ffi.loader")
 -- going through `Window` first.
 --
 -- A module may also sit inside another module, one level and no deeper:
--- `tecs.gfx.layers`, `tecs.filesystem.watch`. `SURFACE` is what declares that,
+-- `tecs.gfx.layers`, `tecs.io.filesystem`. `SURFACE` is what declares that,
 -- through `within`, and a lowercase field of a record here is one of them only
 -- where the parent has no module of its own.
 
@@ -353,7 +352,6 @@ local record tecs
     physics: physics
     data: data
     events: events
-    filesystem: filesystem
     gfx: gfx
     input: input
     io: binaryIO
@@ -380,7 +378,7 @@ tecs.Transform = ecs.Transform
 --- How one public name resolves, at whatever depth it is written.
 ---
 --- A descriptor with one principal `module` answers with that module's own
---- table, so `tecs.filesystem` and `require("tecs.platform.filesystem")` are
+--- table, so `tecs.io` and `require("tecs.io")` are
 --- one value rather than a copy of one. Names one level down are hung off it
 --- lazily, so a `within` costs nothing until one of them is read.
 ---
@@ -434,10 +432,6 @@ local SURFACE <const>: {string: Namespace} = {
     physics = {module = "tecs.physics"},
     data = {module = "tecs.data"},
     events = {module = "tecs.platform.events"},
-    filesystem = {
-        module = "tecs.platform.filesystem",
-        within = {watch = {module = "tecs.platform.watch"}},
-    },
     gfx = {
         beside = {"tecs.components", "tecs.gfx.Camera", "tecs.Renderer", "tecs.gfx.text"},
         within = {
@@ -450,7 +444,13 @@ local SURFACE <const>: {string: Namespace} = {
         },
     },
     input = {module = "tecs.platform.input"},
-    io = {module = "tecs.io"},
+    io = {
+        module = "tecs.io",
+        within = {
+            filesystem = {module = "tecs.io.filesystem"},
+            watcher = {module = "tecs.io.watcher"},
+        },
+    },
     log = {module = "tecs.log"},
     math = {module = "tecs.math"},
     net = {
@@ -583,7 +583,7 @@ end
 --- table a write could belong on and nothing to route.
 ---
 --- @param module The table `require` answered with, which is edited in place:
----     `require("tecs.platform.filesystem").watch` is the same name reached the
+---     `require("tecs.io").filesystem` is the same name reached the
 ---     other way, and one table means one answer.
 --- @param within The names below it, each a descriptor like any other.
 local function hang(module: {string: any}, within: {string: Namespace})

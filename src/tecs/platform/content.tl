@@ -1,19 +1,17 @@
 --[=[
 Where content is, reading it, and remembering what was read.
 
-The half of `tecs.filesystem` that sits below the rest of the engine rather
-than beside it, and the reason it is a module of its own is a direction in
-the graph. Three things read content: the shader loader, the material
-loader, and the watcher that polls what this process has opened. The
-watcher also sits under `tecs.filesystem` as a name a game writes, so the
-public module has to name the watcher's type, and Teal refuses a require
-cycle even when one side of it is erased at codegen. So the names those
-three need are here, below both, and the public module is what a game
-writes.
+The content state shared below `tecs.io.filesystem`, `tecs.io.watcher`, and the
+rest of the engine.
 
-Nothing here is public and nothing here is a second API. Every name below
-appears on `tecs.filesystem`, documented there, and this file is the seam
-rather than the surface.
+The filesystem resolves roots and records every path it reads. The watcher
+polls that set, while the shader and material loaders resolve content through
+the same roots. Keeping those names here lets the two public I/O children
+remain siblings instead of requiring one another.
+
+Nothing here is public and nothing here is a second API. Filesystem operations
+publish the path half, the watcher consumes the loaded-path half, and this file
+is their seam rather than either surface.
 
 Content is resolved through `adapter`, never through the process working
 directory. On desktop that happens to work when launched from a project root

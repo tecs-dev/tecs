@@ -19,7 +19,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
-local filesystem = require("tecs.platform.filesystem")
+local filesystem = require("tecs.io.filesystem")
 local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
 local assets = require("tecs.assets")

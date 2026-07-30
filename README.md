@@ -238,30 +238,30 @@ copy of it, so `tecs.gfx.layers` and `require("tecs.gfx.layers")` are one
 table. That is not a detail: `layers.maxY` and `layers.maxZ` are assigned by a
 game, and two tables would mean a write through one that nothing reads.
 
-**A namespace with one principal module is that module.** `tecs.filesystem` is
-the table `require("tecs.platform.filesystem")` answers with, and `watch` is
-hung off it on the first read of that name. The alternative was a table built
+**A namespace with one principal module is that module.** `tecs.io` is the
+table `require("tecs.io")` answers with, and `filesystem` and `watcher` are
+hung off it when each name is first read. The alternative was a table built
 for the name, standing in front of the module and filling a member at a time,
 and it cost two things. Teal has to type what a game writes, and no module
 types a table like that, so `init.tl` had to declare a record restating every
-member's signature and every member's docblock: `init.tl` reached twelve hundred
-lines, two thirds of which were a second copy of documentation that already
-existed on the declaration it described, and nothing checked the copies against
-each other. And a write to a name on it had to be routed to whichever module
-below owned the name, because `tecs.filesystem.organization` is assigned by a
-game and read back by `preferencePath`. Being the module answers both: the
-record that types it is the module's own, checked against the implementation by
-the compiler, and a write lands where the read looks.
+member's signature and every member's docblock: `init.tl` reached twelve
+hundred lines, two thirds of which were a second copy of documentation that
+already existed on the declaration it described, and nothing checked the
+copies against each other. And a write to a name on it had to be routed to
+whichever module below owned the name. Being the parent module removes that
+proxy, while `tecs.io.filesystem.organization` still lands directly on the
+filesystem module that `preferencePath` reads.
 
 What that costs is a direction in the module graph. The parent has to name the
-type of every name below it, and Teal refuses a require cycle even when one side
-of it is erased at codegen, so a subordinate module cannot require its parent.
-`watch` polls what the process has opened, under the root the filesystem
-resolves, and the shader and material loaders read content through the same
-two. So those live in `platform/content.tl`, below both, and `tecs.filesystem`
-is what a game writes. A namespace assembled from several modules with no
-principal one keeps the table built for the name, and keeps the record with it:
-`tecs.gfx` is the one left.
+type of every name below it, and Teal refuses a require cycle even when one
+side of it is erased at codegen, so a subordinate module cannot require its
+parent. `Reader` and `Writer` therefore live in `io/types.tl`, below the parent
+and every constructor that uses them. The watcher polls what the process has
+opened, and the shader and material loaders read content through the same
+roots the filesystem resolves, so those shared names live in
+`platform/content.tl`, below both sibling modules. A namespace assembled from
+several modules with no principal one keeps the table built for the name, and
+keeps the record with it: `tecs.gfx` is the one left.
 
 `tecs.audio`, `tecs.input` and `tecs.window` were three of those until the
 constructors moved. Each was a class file reached through a namespace named for
@@ -792,7 +792,7 @@ whole-file read on the asset worker and answers a `Future<string>` when the main
 thread should not stop for it.
 
 ```lua
-local bytes = tecs.filesystem.read(tecs.filesystem.assetPath("levels/1.json"))
+local bytes = tecs.io.filesystem.read(tecs.io.filesystem.assetPath("levels/1.json"))
 local level = tecs.data.decodeJSON(bytes)
 ```
 
@@ -1453,7 +1453,7 @@ device from `tecs.audio.playbackDevices` and passes its id to
 `tecs.audio.newAudio`, and having to know which of two modules each half
 came from bought nothing. `src/tecs/platform/audio.tl` is still its own file
 and still reaches only SDL, and `tecs.audio` publishes what it holds under its
-own names, the way `tecs.filesystem` publishes `platform/content.tl`. The
+own names, the way `tecs.io.filesystem` publishes `platform/content.tl`. The
 module is the seam and the public name is the surface.
 
 File and folder dialogs are the exception to "one SDL call and return". SDL
@@ -1480,28 +1480,28 @@ method at runtime.
 
 The module owns no resources and constructs nothing. The subsystem that opens a
 resource remains responsible for its lifetime and its policy: filesystem paths
-stay with `tecs.filesystem`, socket state stays with `tecs.net`, and HTTP
-content types stay with `tecs.net.http`. `tecs.filesystem.Reader` and
-`tecs.filesystem.Writer` remain aliases, so moving the contracts does not
+stay with `tecs.io.filesystem`, socket state stays with `tecs.net`, and HTTP
+content types stay with `tecs.net.http`. `tecs.io.filesystem.Reader` and
+`tecs.io.filesystem.Writer` remain aliases, so moving the contracts does not
 invalidate code that named them where they originated.
 
 ## Touching the filesystem
 
-`tecs.filesystem` answers both halves: where a path is, and what to do once
+`tecs.io.filesystem` answers both halves: where a path is, and what to do once
 you have one. They are one module because they were never two questions. Every
 path a game touches is resolved and then acted on in the same breath, and a
 caller holding one half had to name the other module to do anything with it.
-`platform/content.tl` sits under it and holds the part the shader loader, the
-material loader and the watcher read, which is what keeps those three from
-requiring the module that names the watcher's type. It is one backend call per
-function and nothing composed out of several, and on SDL each of those is the obvious call: `SDL_GetPathInfo` behind
-`info`, `exists`, `isFile` and `isDirectory`, `SDL_GlobDirectory` behind `list`
-and `glob`, `SDL_LoadFile` behind `read`, then `createDirectory`, `remove`,
-`rename`, `copy`, `write`, `currentDirectory` and `userFolder`. No virtual
-filesystem and no invented path scheme, so a failure is the platform's failure
-and the name says which call to read about. Like the process half it
-initializes no
-subsystem and is more useful with no window than with one.
+`platform/content.tl` sits below it and its watcher sibling. It holds the roots
+the shader and material loaders read and the loaded-path set the watcher polls,
+so neither public child has to require the other. It is one backend call per
+function and nothing composed out of several, and on SDL each of those is the
+obvious call: `SDL_GetPathInfo` behind `info`, `exists`, `isFile` and
+`isDirectory`, `SDL_GlobDirectory` behind `list` and `glob`, `SDL_LoadFile`
+behind `read`, then `createDirectory`, `remove`, `rename`, `copy`, `write`,
+`currentDirectory` and `userFolder`. No virtual filesystem and no invented
+path scheme, so a failure is the platform's failure and the name says which
+call to read about. Like the process half it initializes no subsystem and is
+more useful with no window than with one.
 
 `openWrite` and `openRead` are the pair that is not one call, and they are the
 exception the streaming body needed: a backend that can open a file is asked
@@ -1518,10 +1518,11 @@ four questions that are one backend call answered differently.
 Reading is one of those calls rather than something `assets` owns, and there is
 exactly one reader in the tree, because a second one would mean a file opened
 through the wrong one never reloads. `read` is the load plus the record of what
-this process has opened that `watch` polls, and the decodes in `assets` write
-into that same record through `note` instead of keeping one of their own. Bytes
-are bytes, so nothing at this layer can tell a font's metrics from a level:
-whatever asked for them names the kind, and an unnamed read is a document.
+this process has opened that `tecs.io.watcher` polls, and the decodes in
+`assets` write into that same record through `note` instead of keeping one of
+their own. Bytes are bytes, so nothing at this layer can tell a font's metrics
+from a level: whatever asked for them names the kind, and an unnamed read is a
+document.
 
 Enumeration is glob rather than `SDL_EnumerateDirectory`, so no FFI callback is
 installed for a walk; the list comes back as one allocation holding the array
@@ -3556,7 +3557,7 @@ reachable from game code alone.
 SDL has no change notification: not in 3.4 and not behind a hint, and
 `SDL_AddEventWatch` watches the event queue rather than the filesystem. What
 `SDL_filesystem.h` offers is `SDL_GetPathInfo`, which answers a type, a size and
-three timestamps. So `tecs.platform.watch` polls through the installed storage
+three timestamps. So `tecs.io.watcher` polls through the installed storage
 backend, and going native to avoid polling would mean inotify, FSEvents and
 `ReadDirectoryChangesW`, plus one more for every platform whose SDK is licensed,
 to save work measured below in microseconds.
@@ -3596,10 +3597,10 @@ one. A suffix decides in one place only, because `read` answers bytes and cannot
 know what wanted them, so a `.glsl` document is a shader and every other
 unnamed document is a document. A font's metrics are the case that pins the
 rule: they are JSON, a level is JSON, and the suffix cannot tell them apart, so
-`read` takes the kind from whoever asked for the bytes and the call that loads a
-font is the one that names it a font. Which reloader owns a kind is registered
-by the application, not by the watcher, so nothing in `tecs.platform` has to
-know what an image or a clip is.
+`read` takes the kind from whoever asked for the bytes and the call that loads
+a font is the one that names it a font. Which reloader owns a kind is
+registered by the application, not by the watcher, so the I/O modules do not
+have to know what an image or a clip is.
 
 It is development only. `Application.Config.watch` starts it, the `watch` tool
 turns it on, off and a poll at a time, and `install` asks the explicit

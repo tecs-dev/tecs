@@ -6,19 +6,19 @@ Set `organization` and `application` before resolving the first writable
 path:
 
 ```teal
-tecs.filesystem.organization = "Ex Nihilo"
-tecs.filesystem.application = "Starfarer"
+tecs.io.filesystem.organization = "Ex Nihilo"
+tecs.io.filesystem.application = "Starfarer"
 
-local directory <const> = tecs.filesystem.writablePath("saves")
-local ok, reason = tecs.filesystem.createDirectory(directory)
+local directory <const> = tecs.io.filesystem.writablePath("saves")
+local ok, reason = tecs.io.filesystem.createDirectory(directory)
 if not ok then
     error(reason)
 end
 
 local path <const> =
-    tecs.filesystem.writablePath("saves/slot1.json")
+    tecs.io.filesystem.writablePath("saves/slot1.json")
 local bytes <const> = tecs.data.encodeJSON({ level = 3, hp = 100 })
-ok, reason = tecs.filesystem.write(path, bytes)
+ok, reason = tecs.io.filesystem.write(path, bytes)
 if not ok then
     error(reason)
 end
@@ -29,25 +29,16 @@ arguments raise because they indicate a defect in the calling program.
 Every operation runs synchronously. Send large tree walks to
 `tecs.workers`, and decode images or sounds through `tecs.assets`.
 
-`watch` polls paths recorded by `read` and `note`. It does not walk the
-whole asset tree.
+`tecs.io.watcher` polls paths recorded by `read` and `note`. It does not walk
+the whole asset tree.
 ]=]
 
 local adapter <const> = require("tecs.platform.adapter")
 local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
-local type binaryIO = require("tecs.io")
-
--- Type-only, so nothing loads here: the field below declares the name and
--- `tecs.init` fills it in on the first read of it. `watch` reaches content
--- through `platform.content` rather than through this module, which is what
--- keeps naming its type from being a require cycle.
-local type watch = require("tecs.platform.watch")
+local type iotypes = require("tecs.io.types")
 
 local record filesystem
-    --- Read-only. `watch` polls loaded files and dispatches settled changes.
-    watch: watch
-
     --- Caller-writable. The caller sets `organization` before
     --- `preferencePath` resolves the writable directory.
     organization: string
@@ -71,11 +62,11 @@ local record filesystem
 
     --- `Writer` accepts a write in pieces. This compatibility alias names
     --- [`tecs.io.Writer`](tealdoc:tecs.io.Writer).
-    type Writer = binaryIO.Writer
+    type Writer = iotypes.Writer
 
     --- `Reader` returns a read in pieces. This compatibility alias names
     --- [`tecs.io.Reader`](tealdoc:tecs.io.Reader).
-    type Reader = binaryIO.Reader
+    type Reader = iotypes.Reader
 end
 
 local type Info = filesystem.Info
@@ -94,7 +85,7 @@ local type Reader = filesystem.Reader
 --- it in ten functions.
 local function required(value: string, what: string)
     if value == nil then
-        error(("tecs: filesystem.%s needs a path"):format(what), 3)
+        error(("tecs: io.filesystem.%s needs a path"):format(what), 3)
     end
 end
 
@@ -410,7 +401,7 @@ end
 function filesystem.write(path: string, bytes: string): boolean, string
     required(path, "write")
     if bytes == nil then
-        error("tecs: filesystem.write needs bytes to write", 2)
+        error("tecs: io.filesystem.write needs bytes to write", 2)
     end
     return adapter.storage().write(path, bytes)
 end
@@ -423,7 +414,7 @@ end
 --- and this call reports a full disk.
 ---
 --- ```teal
---- local writer <const> = assert(tecs.filesystem.openWrite(path))
+--- local writer <const> = assert(tecs.io.filesystem.openWrite(path))
 --- writer:write(chunk)
 --- assert(writer:close())
 --- ```
@@ -494,7 +485,7 @@ end
 --- @return Returns the platform reason when the first return is nil.
 function filesystem.userFolder(which: UserFolder): string, string
     if not storagebackend.folders[which] then
-        error(("tecs: filesystem.userFolder does not know '%s'"):format(tostring(which)), 2)
+        error(("tecs: io.filesystem.userFolder does not know '%s'"):format(tostring(which)), 2)
     end
     local storage <const> = adapter.storage()
     if storage.userFolder == nil then
