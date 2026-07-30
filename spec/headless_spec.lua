@@ -120,9 +120,9 @@ describe("tecs headless", function()
                     "tecs.Application", "tecs.Renderer", "tecs.workers",
                     "tecs.assets", "tecs.physics", "tecs.io.mcp",
                     "tecs.gpu.Device", "tecs.ffi.sdl3",
-                    "tecs.data", "tecs.math", "tecs.math.vec2", "tecs.regex",
+                    "tecs.data", "tecs.input", "tecs.math", "tecs.math.vec2", "tecs.regex",
                     "tecs.platform.events",
-                    "tecs.platform.input", "tecs.platform.os",
+                    "tecs.platform.os",
                     "tecs.platform.time", "tecs.platform.window",
                     "tecs.io.files", "tecs.io.watcher",
                     "tecs.io", "tecs.io.http", "tecs.io.http.client",
@@ -146,7 +146,7 @@ describe("tecs headless", function()
                 local tecs = require("tecs")
                 local platform = tecs.platform
                 local facilities = {
-                    "tecs.platform.events", "tecs.platform.input",
+                    "tecs.input", "tecs.platform.events",
                     "tecs.platform.os", "tecs.platform.time",
                     "tecs.platform.window",
                 }
@@ -250,7 +250,7 @@ describe("tecs headless", function()
                 local platform = tecs.platform
                 local time = platform.time
                 local siblings = {
-                    "tecs.platform.events", "tecs.platform.input",
+                    "tecs.input", "tecs.platform.events",
                     "tecs.platform.os", "tecs.platform.window",
                 }
                 local loaded = {}

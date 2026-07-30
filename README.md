@@ -263,18 +263,19 @@ roots the filesystem resolves, so those shared names live in
 several modules with no principal one keeps the table built for the name, and
 keeps the record with it. `tecs.gfx` and `tecs.platform` are the two left:
 graphics joins modules that answer one scene vocabulary, while platform groups
-five independent host facilities without choosing one as the parent.
+four independent host facilities without choosing one as the parent.
 
-`tecs.audio`, `tecs.platform.input` and `tecs.platform.window` were three of those until the
+`tecs.audio` and `tecs.platform.window` were two of those until their
 constructors moved. Each was a class file reached through a namespace named for
 it, and a class file cannot be a principal module because the path has to end
 in the public name and the case does not match. Once `Audio.create` became
-`tecs.audio.newAudio`, and the same for the other two, none of the three files
-was a class any more: each was a module that contains one, which `STYLE.md`
-names luacase. So they are `src/tecs/audio.tl`, `src/tecs/platform/input.tl`
-and `src/tecs/platform/window.tl`, each returning a module record with the
-class nested inside it, and the three records `init.tl` wrote for them are
-gone.
+`tecs.audio.newAudio`, and the same happened for input and window, each file
+was a module that contains one class, which `STYLE.md` names luacase. Input
+then moved from `tecs.platform.input` to `tecs.input`, because games reach it
+continually rather than occasionally reaching a host facility. The files are
+therefore `src/tecs/audio.tl`, `src/tecs/input.tl` and
+`src/tecs/platform/window.tl`, each returning a module record with the class
+nested inside it, and the records `init.tl` wrote for them are gone.
 
 The `class` field in the descriptor went with them. It existed to make one
 member of a namespace answer with the namespace's own module, which is how
@@ -1468,7 +1469,7 @@ to do one thing. Names are qualified by what they act on, because a bare `text`,
 `data`, `clear`, `run` or `update` means nothing on a module that does all of
 it.
 
-Standalone sensor handles sit under `tecs.platform.input` instead, beside the pads and
+Standalone sensor handles sit under `tecs.input` instead, beside the pads and
 the keyboard, because a game asking what a device can sense is asking one
 question. Standard cursor shapes stay on `Input`, because cursor choice is an
 outbound input command on the same seam as visibility and relative mode.
@@ -3930,7 +3931,7 @@ src/tecs/ecs.tl           what a game writes, and what engine modules require
 src/tecs/global.d.tl      declares the `tecs` global, typed off init.tl
 src/tecs/Application.tl   the lifecycle the host drives
 src/tecs/ffi/             library loading and generated binding wrappers
-src/tecs/platform/        window, input, audio, sensors, files, OS services
+src/tecs/platform/        window, events, input backends, sensors, OS services
 src/tecs/gpu/             device, frame, passes, shaders, pipelines, buffers
 src/tecs/components.tl    components the engine renders and simulates
 src/tecs/gfx/             camera, layers, sheets and playback, text, particles
@@ -4064,7 +4065,7 @@ is rather than a page that quietly stops describing anything.
 
 A page's reference comes from a list of modules rather than one, because a
 public name is a namespace and a module is a file and the two do not have to
-agree. `tecs.gfx` is assembled from four files, `tecs.platform.input` from
+agree. `tecs.gfx` is assembled from four files, `tecs.input` from
 three and `tecs.gfx.animation` from two. `tecs.platform` itself has no
 principal module or combined reference; its children each keep their own page.
 Every entry in that list goes away the day its namespace is one module, which

@@ -88,7 +88,7 @@ window event's `which` field.
 
 ## Pointer ownership
 
-The window API owns mouse and keyboard confinement. `tecs.platform.input` owns relative
+The window API owns mouse and keyboard confinement. `tecs.input` owns relative
 mouse mode, warping, capture and cursor visibility. The GPU device owns
 presentation pacing after it claims a window.
 ]]

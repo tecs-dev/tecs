@@ -61,7 +61,7 @@ the emitter's phase and deferred scope.
 Platform events arrive before `world:update`, so their observers run outside
 the phase tree. They do not receive fixed-step timing, phase order, or state
 gating. Fold an event into state when a reaction needs those properties.
-[`Input`](/modules/platform/input) follows that pattern for keyboard, pointer, and
+[`Input`](/modules/input) follows that pattern for keyboard, pointer, and
 gamepad events.
 
 Observers suit immediate notification. Systems suit ordered frame work.

@@ -166,11 +166,11 @@ local record Capabilities
     touch: boolean
     --- Read-only. Reports true because every target reaches gamepads through the same subsystem,
     --- so only the connected devices vary, which the `gamepads`
-    --- method on [`Input`](tealdoc:tecs.platform.input.Input) answers.
+    --- method on [`Input`](tealdoc:tecs.input.Input) answers.
     gamepad: boolean
     --- Read-only. Reports whether the device carries a gyroscope or an accelerometer. This says
     --- nothing about a gamepad's sensors, which `hasSensor` on
-    --- [`Gamepad`](tealdoc:tecs.platform.input.Gamepad) answers per device.
+    --- [`Gamepad`](tealdoc:tecs.input.Gamepad) answers per device.
     sensors: boolean
     --- Read-only. Reports whether work can run off the main thread.
     workers: boolean

@@ -3,4 +3,4 @@ description: "Gameplay input in three tiers behind a layer stack, with gamepads 
 outline: deep
 ---
 
-# tecs.platform.input
+# tecs.input

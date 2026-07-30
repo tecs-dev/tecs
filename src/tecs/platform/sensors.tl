@@ -6,8 +6,8 @@ belong to a gamepad. Enumerate a snapshot, open the selected instance id, poll
 it, and close it explicitly.
 
 ```teal
-for _, device in ipairs(tecs.platform.input.sensors()) do
-    local sensor <const>, reason <const> = tecs.platform.input.openSensor(device.id)
+for _, device in ipairs(tecs.input.sensors()) do
+    local sensor <const>, reason <const> = tecs.input.openSensor(device.id)
     if sensor ~= nil then
         local values <const>, readError <const> = sensor:read()
         if values ~= nil then

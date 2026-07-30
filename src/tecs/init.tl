@@ -29,8 +29,8 @@ local type Renderer = require("tecs.Renderer")
 local type Camera = require("tecs.gfx.Camera")
 local type animation = require("tecs.gfx.animation")
 local type events = require("tecs.events")
+local type input = require("tecs.input")
 local type platformEvents = require("tecs.platform.events")
-local type platformInput = require("tecs.platform.input")
 local type platformOS = require("tecs.platform.os")
 local type platformTime = require("tecs.platform.time")
 local type platformWindow = require("tecs.platform.window")
@@ -54,7 +54,7 @@ local type loader = require("tecs.ffi.loader")
 
 -- The two records below are written for one reason: a public name that no
 -- single module answers. `tecs.gfx` is the modules one level down and the
--- facilities a scene reaches for directly. `tecs.platform` is five independent
+-- facilities a scene reaches for directly. `tecs.platform` is four independent
 -- host facilities with no principal module. No module's own record types either
 -- namespace, so their records live here.
 --
@@ -259,13 +259,11 @@ end
 ---
 --- Naming the namespace loads nothing. Each child resolves independently, so
 --- a headless tool can use operating-system services or monotonic time without
---- loading window, input, or event support.
+--- loading window or event support.
 local record platform
     --- Read-only. Exposes typed platform events routed through a world's
     --- event bus.
     events: platformEvents
-    --- Read-only. Exposes gameplay input, gamepads, and standalone sensors.
-    input: platformInput
     --- Read-only. Exposes operating-system capabilities, clipboard access,
     --- and child processes.
     os: platformOS
@@ -360,6 +358,7 @@ local record tecs
     physics: physics
     data: data
     events: events
+    input: input
     gfx: gfx
     io: binaryIO
     log: log
@@ -436,6 +435,7 @@ local SURFACE <const>: {string: Namespace} = {
     physics = {module = "tecs.physics"},
     data = {module = "tecs.data"},
     events = {module = "tecs.events"},
+    input = {module = "tecs.input"},
     gfx = {
         beside = {"tecs.components", "tecs.gfx.Camera", "tecs.Renderer", "tecs.gfx.text"},
         within = {
@@ -466,7 +466,6 @@ local SURFACE <const>: {string: Namespace} = {
     platform = {
         within = {
             events = {module = "tecs.platform.events"},
-            input = {module = "tecs.platform.input"},
             os = {module = "tecs.platform.os"},
             time = {module = "tecs.platform.time"},
             window = {module = "tecs.platform.window"},
