@@ -475,8 +475,10 @@ local record RenderOptions
     --- durations, reverse and pingpong all arrive already spent.
     sheet: Sheet
     --- Caller-writable. Selects the sheet tag to animate. An absent value
-    --- animates the whole sheet, and so does a name the sheet does not carry,
-    --- which is the sheet's own answer for an unknown tag rather than a raise.
+    --- animates the whole sheet. A name the sheet does not carry animates the
+    --- whole sheet too, and the sheet reports it at error level under the
+    --- `tecs.gfx` logger, naming the tags it does carry. Defining the effect
+    --- still succeeds, so a sheet re-exported without a tag keeps drawing.
     tag: string
     --- Caller-writable. Selects the render layer from one to `layers.MAX`.
     --- Defaults to one, and anything outside the range raises.
