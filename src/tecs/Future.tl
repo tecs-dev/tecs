@@ -35,10 +35,10 @@ stored directly, so reads after settlement are ordinary field reads. Use
 future. `recover` turns failure into a value. Canceled futures skip all three
 transforms except cancellation propagation.
 
-Listeners run in registration order. Registering a listener after settlement
-runs it before `onSettle` returns. A listener registered while another listener
-is running joins the current drain instead of growing the Lua stack, and the
-outermost drain delivers it before returning.
+Listeners run in registration order. With no delivery in progress, registering
+a listener after settlement runs it before `onSettle` returns. During delivery,
+a new listener joins the current drain instead of growing the Lua stack. It may
+run after that nested `onSettle` returns, but before the outermost drain returns.
 
 ## Pumping and waiting
 
@@ -211,11 +211,12 @@ local record Future<T>
 
     --- Registers a dependent, and returns this future.
     ---
-    --- The primitive the others are built on. A listener on a future that has
-    --- already settled runs before this call returns. If a listener registers
-    --- another listener while delivery is in progress, the new delivery joins
-    --- the current drain instead of growing the Lua stack. A listener that
-    --- raises writes to the log and does not stop the others.
+    --- The primitive the others are built on. With no delivery in progress, a
+    --- listener on a future that has already settled runs before this call
+    --- returns. During delivery, a new listener joins the current drain instead
+    --- of growing the Lua stack. It may run after this nested call returns, but
+    --- before the outermost drain returns. A listener that raises writes to the
+    --- log and does not stop the others.
     ---
     --- @param self The future on which to register the listener.
     --- @param listener Called once, with this future, whichever of the three terminal
@@ -348,8 +349,8 @@ local record Future<T>
     ---
     --- @param value The value to store without copying.
     --- @return A future at "ready" with no source, so `wait` on it returns at once and
-    ---     `cancel` does nothing. A listener added to it runs before `onSettle`
-    ---     returns, subject to the reentrant delivery rule documented there.
+    ---     `cancel` does nothing. A listener added to it follows the synchronous
+    ---     and reentrant delivery contract documented on `onSettle`.
     settled: function<U>(value: U): Future<U>
 
     --- Creates a future that already carries a failure.
