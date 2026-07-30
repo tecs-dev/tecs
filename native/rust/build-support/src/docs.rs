@@ -399,11 +399,16 @@ fn check_module_intro(root: &Path, site: &Path) -> Result<()> {
             output_path.display()
         )
     })?;
-    let summary = ["**Types**", "**Functions**", "**Values**"]
-        .into_iter()
-        .filter_map(|heading| output.find(heading))
-        .min()
-        .with_context(|| format!("{} has no API summary", output_path.display()))?;
+    let summary = [
+        "**Constructors**",
+        "**Types**",
+        "**Functions**",
+        "**Values**",
+    ]
+    .into_iter()
+    .filter_map(|heading| output.find(heading))
+    .min()
+    .with_context(|| format!("{} has no API summary", output_path.display()))?;
     if introduction > contents || contents > summary {
         anyhow::bail!(
             "{} does not order module prose, Module contents and its API summary",
@@ -416,9 +421,9 @@ fn check_module_intro(root: &Path, site: &Path) -> Result<()> {
     let type_summary = output
         .find("**Types**")
         .with_context(|| format!("{} has no type summary", output_path.display()))?;
-    if function_summary > type_summary {
+    if type_summary > function_summary {
         anyhow::bail!(
-            "{} places the type summary before the function summary",
+            "{} places the function summary before the type summary",
             output_path.display()
         );
     }
@@ -428,9 +433,9 @@ fn check_module_intro(root: &Path, site: &Path) -> Result<()> {
     let types = output
         .find("\n## Types\n")
         .with_context(|| format!("{} has no type details", output_path.display()))?;
-    if functions > types {
+    if types > functions {
         anyhow::bail!(
-            "{} places type details before function details",
+            "{} places function details before type details",
             output_path.display()
         );
     }
