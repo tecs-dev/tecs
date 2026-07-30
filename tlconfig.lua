@@ -456,10 +456,9 @@ local SIDEBAR = {
     },
 }
 
--- No group starts open unless it contains the page being read. Tealdoc's
--- sidebar_open setting owns this default, so a group added later inherits it
--- without a second traversal rewriting the sidebar.
-local SIDEBAR_OPEN = {}
+-- Modules starts open on every page. Other groups open only when they contain
+-- the page being read.
+local SIDEBAR_OPEN = { "Modules" }
 
 -- Public modules normally resolve through `SURFACE`. `tecs.ecs.random` is the
 -- exception: `tecs.ecs` owns it directly because engine modules also require
