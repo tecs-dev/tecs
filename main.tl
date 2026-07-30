@@ -168,7 +168,7 @@ return tecs.newApplication(
                 tecs.gfx.Text.new(
                     {
                         text = ("tecs %s\n%d entities"):format(tecs.version, COUNT),
-                        font = tecs.gfx.defaultFont():wait().value,
+                        font = tecs.gfx.defaultFont().value,
                         size = 28,
                     }
                 )

@@ -9,11 +9,11 @@ returns handle zero.
 ## Playback
 
 `load` returns a [`Future`](tealdoc:tecs.Future) for one shared clip per path.
-Loading never blocks the frame. Reading the future with `wait` is for startup,
-tools, and tests rather than a frame.
+Starting the load never blocks the frame. Reading a pending future's `value`
+does, so that dereference is for startup, tools, and tests rather than a frame.
 
 ```teal
-local step <const> = app.audio:load("assets/sfx/step.ogg"):wait().value
+local step <const> = app.audio:load("assets/sfx/step.ogg").value
 app.audio:setLimit("footstep", {
     voices = 3,
     cooldown = 0.05,

@@ -14,7 +14,7 @@ world:spawn(
     tecs.gfx.Tint(0.92, 0.96, 1.0, 1.0),
     tecs.gfx.Text.new({
         text = "tecs\n1200 entities",
-        font = tecs.gfx.defaultFont():wait().value,
+        font = tecs.gfx.defaultFont().value,
         size = 28,
         align = "center",
     })
