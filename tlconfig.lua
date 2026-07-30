@@ -437,23 +437,10 @@ local SIDEBAR = {
     },
 }
 
--- Every group starts closed, and tealdoc opens the ones that hold the page
--- being read. Opened all at once the sidebar is a hundred and fifty rows, and
--- the reader scrolls past the whole surface to reach the part they are in.
--- Written here rather than on each group so a group added later gets it, and
--- set only where a group has not asked for something else.
-local function collapseGroups(items)
-    for _, item in ipairs(items) do
-        if item.items then
-            if item.collapsed == nil then
-                item.collapsed = true
-            end
-            collapseGroups(item.items)
-        end
-    end
-end
-
-collapseGroups(SIDEBAR)
+-- No group starts open unless it contains the page being read. Tealdoc's
+-- sidebar_open setting owns this default, so a group added later inherits it
+-- without a second traversal rewriting the sidebar.
+local SIDEBAR_OPEN = {}
 
 -- Public modules normally resolve through `SURFACE`. `tecs.ecs.random` is the
 -- exception: `tecs.ecs` owns it directly because engine modules also require
@@ -880,6 +867,7 @@ return {
             sources = sources,
             pages = pages,
             sidebar = SIDEBAR,
+            sidebar_open = SIDEBAR_OPEN,
             before_build = function(context)
                 describePages(context)
                 checkWriting(context)

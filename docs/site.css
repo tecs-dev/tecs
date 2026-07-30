@@ -14,6 +14,9 @@
  * is found with the rest of the head and goes out at the same time. */
 
 :root {
+    /* The original VitePress theme's Tecs red. */
+    --tecs-c-crimson: #dd2020;
+
     /* One root size, at every width. Pico steps this from 100% to 131.25%
      * across five breakpoints, which makes `rem` a function of the viewport,
      * and browser zoom is a change in the viewport: crossing 1280 or 1536 on
@@ -132,6 +135,17 @@
     text-decoration-color: #a192b1;
     text-decoration-thickness: 2px;
     text-underline-offset: 5px;
+}
+
+.tealdoc-home-hero .tealdoc-hero-action.brand,
+.tealdoc-home-hero .tealdoc-hero-action.brand:hover {
+    border-color: var(--tecs-c-crimson);
+    background: var(--tecs-c-crimson);
+    color: #ffffff;
+}
+
+.tealdoc-home-hero .tealdoc-hero-action.brand:hover {
+    filter: brightness(1.12);
 }
 
 /* Headings carry the accent, which is what makes a page of them read as this
