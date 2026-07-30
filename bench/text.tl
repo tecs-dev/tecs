@@ -101,7 +101,10 @@ return tecs.newApplication({
         time.provider = function(realDt: number): number timing.mark(DELTA, realDt); return realDt end
 
         world:addPlugin(text.textPlugin({renderer = renderer}))
-        local font = text.defaultFont().value
+        local font = text.newTTF({
+            source = "fonts/JetBrainsMono-ExtraBold.ttf",
+            size = 64,
+        }).value
         transientFont = font
 
         math.randomseed(42)

@@ -95,13 +95,13 @@ loadable cjson module, so a shipped binary is such a copy. The notices are
 
 ### JetBrains Mono
 
-`assets/fonts/jetbrainsmono-extrabold-msdf.png` and its metrics are a
-signed-distance-field atlas generated from JetBrains Mono ExtraBold 2.304, and
-are what text draws with unless a game names another font. Font Software under
+`assets/fonts/JetBrainsMono-ExtraBold.ttf` is JetBrains Mono ExtraBold 2.304
+and is the source font used by the demo and text benchmark. Font Software under
 the SIL Open Font License 1.1: the licence is
-`assets/fonts/JetBrainsMono-OFL.txt` and the provenance, including how the atlas
-was generated, is `assets/fonts/JetBrainsMono-NOTICE.md`. Both are installed
-with the assets, so a package carries them.
+`assets/fonts/JetBrainsMono-OFL.txt` and the provenance, including how the font
+was sourced, is `assets/fonts/JetBrainsMono-NOTICE.md`. The sprite benchmark
+also retains a derived atlas under `assets/bench/sprites.png`. These are
+installed with the assets, so a package carries them.
 
 ### Jersey 15
 
@@ -120,10 +120,15 @@ their code.
 
 ### SDL
 
-**SDL3** and **SDL3_mixer**, both zlib licensed,
+**SDL3**, **SDL3_mixer**, and **SDL3_ttf**, all zlib licensed,
 copyright Sam Lantinga. The zlib licence binds source distribution rather than
 binary, so strictly it asks nothing of a shipped game; the notice is reproduced
 anyway.
+
+SDL3_ttf builds its vendored **FreeType** and **HarfBuzz**. FreeType is offered
+under the FreeType License or GPL-2.0-only; this engine elects the FreeType
+License. HarfBuzz is MIT licensed. PlutoSVG is disabled, so SDL3_ttf adds no SVG
+rasterizer or its dependencies.
 
 SDL3 vendors code it did not write, and two entries need a decision rather than
 a mention:
