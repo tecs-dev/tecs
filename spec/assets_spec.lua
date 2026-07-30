@@ -89,7 +89,9 @@ describe("assets", function()
 
         assert.are.equal("failed", loading.status)
         assert.is_truthy(loading.error:find("cannot decode"))
-        assert.is_nil(loading.value)
+        assert.has_error(function()
+            return loading.value
+        end)
     end)
 
     it("loads several files concurrently", function()
@@ -187,7 +189,9 @@ describe("assets", function()
 
         assets.waitAll()
         assert.are.equal("ready", first.status, "one sharer giving up must not stop the decode")
-        assert.is_nil(giving_up.value)
+        assert.has_error(function()
+            return giving_up.value
+        end)
 
         local image = first.value
         assert.are.equal(1, image._refs, "the caller that canceled was counted anyway")
@@ -208,8 +212,12 @@ describe("assets", function()
         assert.are.equal(1, assets.pending())
         assets.waitAll()
         assert.are.equal(0, assets.pending())
-        assert.is_nil(first.value)
-        assert.is_nil(second.value)
+        assert.has_error(function()
+            return first.value
+        end)
+        assert.has_error(function()
+            return second.value
+        end)
 
         -- And the path is free again, so the next load decodes rather than
         -- joining something nobody wanted.

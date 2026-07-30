@@ -242,16 +242,20 @@ local function finish(world: World, inFlight: types.Query, futures: Waiting)
                 -- `start` rather than leaving the entity waiting on nothing.
                 world:remove(entity, plugin.Pending)
             elseif future.status ~= "pending" then
-                local answer <const> = future.value
-                local settled <const>: Response = answer ~= nil
-                    and plugin.Response(
+                local settled: Response
+                if future.status == "ready" then
+                    local answer <const> = future.value
+                    settled = plugin.Response(
                         {
                             status = answer.status,
                             headers = answer.headers,
                             body = answer.body,
                             url = answer.url,
                         }
-                    ) or plugin.Response({status = 0, headers = {}, error = future.error})
+                    )
+                else
+                    settled = plugin.Response({status = 0, headers = {}, error = future.error})
+                end
                 futures[entity] = nil
                 world:set(entity, settled)
                 world:remove(entity, plugin.Pending)

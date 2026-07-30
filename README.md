@@ -1571,6 +1571,15 @@ should cost. `"canceled"` is a state of its own rather than a kind of failure,
 because `recover` must not run for it: a caller who canceled a load did not ask
 for a fallback value.
 
+**`value` is the blocking dereference.** Reading it advances a pending future
+for the source's default wait budget, returns the result when ready, and raises
+on failure or cancellation. An expired budget raises without changing the
+future, because running out of time to wait is not the work's outcome and it may
+still settle later. A successful non-nil result is already a field on the
+future, so the common read after settlement does not call through a method or a
+metamethod. The convenience is for startup, tools and tests; a frame reads
+`status`, and a listener does not re-enter the source that is settling it.
+
 **A `Source` is the whole driver interface.** Two functions carry it: `poll`,
 which takes whatever is ready, and `advance(ms)`, which blocks for up to that
 long and takes whatever arrives. That is all a worker channel is and all an HTTP

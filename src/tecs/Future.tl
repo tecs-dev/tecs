@@ -25,6 +25,12 @@ tecs.system.runProcess({args = {"git", "rev-parse", "HEAD"}})
 result because the operation returned an answer. Failure means the operation
 produced none.
 
+Reading `value` is the blocking dereference. It advances a pending future for
+its source's default wait budget, returns a ready result, and raises on failure,
+cancellation, or a budget that expires first. Successful non-nil results are
+stored directly, so reads after settlement are ordinary field reads. Use
+`status` and `error` when inspecting an outcome without raising.
+
 `map` transforms a ready value. `flatMap` starts dependent work and adopts its
 future. `recover` turns failure into a value. Canceled futures skip all three
 transforms except cancellation propagation.
@@ -49,7 +55,9 @@ if result.status == "ready" then
 end
 ```
 
-Do not call `wait` from a frame. A timeout leaves the future pending.
+Do not call `wait` or read a pending `value` from a frame. A timeout leaves the
+future pending. A listener must not wait on another pending future driven by the
+same non-reentrant source.
 
 Waiting until a subsystem has nothing outstanding is that subsystem's own drain
 rather than a join over futures a caller holds. `Future.all` reads its inputs
@@ -157,8 +165,15 @@ local record Future<T>
     --- Read-only. Reports `"pending"`, `"ready"`, `"failed"` or `"canceled"`.
     --- The source changes it once, and game code should not assign it.
     status: string
-    --- Read-only. Contains the settled result while `status` is `"ready"`.
-    --- The source writes it, and game code should not assign it.
+    --- Read-only. Returns the result, waiting for it when necessary.
+    ---
+    --- A pending read advances the source for its default wait budget. A
+    --- `"failed"` or `"canceled"` result raises with `error`, as does a future
+    --- that remains pending after that budget. A pending future with no source
+    --- raises immediately because nothing can advance it. Waiting here has the
+    --- same frame and source-reentrancy constraints as `wait`.
+    ---
+    --- The source writes this field, and game code should not assign it.
     value: T
     --- Read-only. Explains a `"failed"` or `"canceled"` result. The source
     --- writes it, and game code should not assign it.
@@ -413,7 +428,35 @@ end
 
 local type Source = Future.Source
 
-local FutureMT <const>: metatable<Future<any>> = {__index = Future}
+--- Returns the stored value without invoking the public blocking read.
+local function storedValue(future: Future<any>): any
+    return rawget(future as table, "value")
+end
+
+--- Resolves methods and the one field whose absence means work is pending.
+local function futureIndex(self: Future<any>, key: string): any
+    if key ~= "value" then
+        return (Future as {string: any})[key]
+    end
+
+    if self.status == "pending" then
+        if self._source == nil then
+            error("tecs: cannot read the value of a pending future with no source", 2)
+        end
+        self:wait()
+    end
+
+    if self.status == "ready" then
+        return storedValue(self)
+    elseif self.status == "failed" then
+        error("tecs: future failed: " .. (self.error or "failed"), 2)
+    elseif self.status == "canceled" then
+        error("tecs: future was canceled: " .. (self.error or "canceled"), 2)
+    end
+    error("tecs: future remained pending after its wait budget expired", 2)
+end
+
+local FutureMT <const>: metatable<Future<any>> = {__index = futureIndex}
 
 -------------------------------------------------------------------------------
 -- The drain
@@ -656,7 +699,7 @@ function Future:flatMap<U>(transform: function(T): Future<U>): Future<U>
                     if derived.status ~= "pending" then
                         return
                     end
-                    settle(derived, settledInner.status, settledInner.value, settledInner.error)
+                    settle(derived, settledInner.status, storedValue(settledInner), settledInner.error)
                 end
             )
         end
@@ -678,7 +721,7 @@ function Future:recover(recovery: function(string): T): Future<T>
                 return
             end
             if upstream.status ~= "failed" then
-                settle(derived, upstream.status, upstream.value, upstream.error)
+                settle(derived, upstream.status, storedValue(upstream), upstream.error)
                 return
             end
             local ok, result = pcall(recovery, upstream.error) as (boolean, any)

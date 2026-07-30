@@ -84,12 +84,11 @@ describe("tecs.Future", function()
             assert.are.equal("ready", future.status)
         end)
 
-        it("carries a failure as a value rather than a raise", function()
+        it("carries a failure separately from the result", function()
             local future = Future.pending()
             future:fail("no such file")
             assert.are.equal("failed", future.status)
             assert.are.equal("no such file", future.error)
-            assert.is_nil(future.value)
         end)
 
         it("builds one already settled", function()
@@ -97,6 +96,83 @@ describe("tecs.Future", function()
             assert.are.equal(3, Future.settled(3).value)
             assert.are.equal("failed", Future.failed("nope").status)
             assert.are.equal("nope", Future.failed("nope").error)
+        end)
+    end)
+
+    describe("value", function()
+        it("reads a ready non-nil result as a stored field", function()
+            local future = Future.settled(7)
+            assert.are.equal(7, rawget(future, "value"))
+            assert.are.equal(7, future.value)
+        end)
+
+        it("reads nil from a future that settled ready with nil", function()
+            local future = Future.settled(nil)
+            assert.are.equal("ready", future.status)
+            assert.is_nil(future.value)
+        end)
+
+        it("waits for a pending result", function()
+            local future
+            local source = newSource({
+                onAdvance = function()
+                    future:complete("arrived")
+                    return 1
+                end,
+            })
+            future = Future.pending(source)
+
+            assert.are.equal("arrived", future.value)
+            assert.are.equal("ready", future.status)
+            assert.are.equal(1, source.advances)
+        end)
+
+        it("raises a failed result", function()
+            local future = Future.failed("no such file")
+            local ok, reason = pcall(function()
+                return future.value
+            end)
+
+            assert.is_false(ok)
+            assert.is_truthy(tostring(reason):find("tecs: future failed: no such file", 1, true))
+        end)
+
+        it("raises a canceled result", function()
+            local future = Future.pending(newSource())
+            future:cancel()
+            local ok, reason = pcall(function()
+                return future.value
+            end)
+
+            assert.is_false(ok)
+            assert.is_truthy(tostring(reason):find("tecs: future was canceled: canceled", 1, true))
+        end)
+
+        it("raises after its wait budget and leaves the future pending", function()
+            local source = newSource({ sliceMs = 5, defaultWaitMs = 20 })
+            local future = Future.pending(source)
+            local ok, reason = pcall(function()
+                return future.value
+            end)
+
+            assert.is_false(ok)
+            assert.is_truthy(
+                tostring(reason):find("tecs: future remained pending after its wait budget expired", 1, true)
+            )
+            assert.are.equal("pending", future.status)
+        end)
+
+        it("raises at once when a pending future has no source", function()
+            local future = Future.pending()
+            local ok, reason = pcall(function()
+                return future.value
+            end)
+
+            assert.is_false(ok)
+            assert.is_truthy(
+                tostring(reason):find("tecs: cannot read the value of a pending future with no source", 1, true)
+            )
+            assert.are.equal("pending", future.status)
         end)
     end)
 

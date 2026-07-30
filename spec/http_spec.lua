@@ -432,7 +432,9 @@ describe("http.newClient", function()
         assert.are.equal("failed", pending.status)
         assert.is_string(pending.error)
         assert.is_truthy(pending.error:find("127.0.0.1:1", 1, true))
-        assert.is_nil(pending.value)
+        assert.has_error(function()
+            return pending.value
+        end)
     end)
 
     it("refuses a url that is not http or https", function()
@@ -496,7 +498,9 @@ describe("http.newClient", function()
         end
         assert.are.equal(0, settled)
         assert.are.equal("canceled", pending.status)
-        assert.is_nil(pending.value)
+        assert.has_error(function()
+            return pending.value
+        end)
     end)
 
     it("settles every transfer it still holds when it is closed", function()
@@ -557,7 +561,9 @@ describe("http.newClient", function()
         assert.are.equal("failed", pending.status)
         assert.is_string(pending.error)
         assert.is_truthy(pending.error:find(url("/too-big"), 1, true))
-        assert.is_nil(pending.value)
+        assert.has_error(function()
+            return pending.value
+        end)
     end)
 
     it("lets a request override maxBytes with unbounded zero", function()

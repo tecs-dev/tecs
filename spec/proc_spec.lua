@@ -105,7 +105,9 @@ describe("proc", function()
         assert.are.equal("failed", run.status, "a child that never started is the failure case")
         assert.is_string(run.error)
         assert.is_true(#run.error > 0, "a failure says what went wrong")
-        assert.is_nil(run.value, "there is no result for a child that never ran")
+        assert.has_error(function()
+            return run.value
+        end)
     end)
 
     it("runs the child in a given working directory", function()
@@ -298,7 +300,9 @@ describe("proc", function()
             })
             :wait(20000)
         assert.are.equal("canceled", run.status)
-        assert.is_nil(run.value)
+        assert.has_error(function()
+            return run.value
+        end)
         assert.are.equal("spoke", trimmed(system.processResult(run).output))
     end)
 
