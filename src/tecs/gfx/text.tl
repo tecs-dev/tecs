@@ -14,7 +14,7 @@ world:spawn(
     tecs.gfx.Tint(0.92, 0.96, 1.0, 1.0),
     tecs.gfx.Text.new({
         text = "tecs\n1200 entities",
-        font = tecs.gfx.defaultFont(),
+        font = tecs.gfx.defaultFont():wait().value,
         size = 28,
         align = "center",
     })
@@ -26,9 +26,11 @@ column clean and the displayed glyphs unchanged.
 
 ## Fonts and layout
 
-A `Font` holds metrics and an atlas path. `loadFont` loads BMFont-style JSON
-metrics. `defaultFont` loads the bundled font. The metrics path gives each font
-its snapshot identity. Worlds and renderers may share a font.
+A `Font` holds metrics and an atlas path. `loadFont` returns a
+[`Future`](tealdoc:tecs.Future) that reads BMFont-style JSON metrics off the
+main thread. `defaultFont` loads the bundled font on the same terms. The metrics
+path gives each font its snapshot identity. Worlds and renderers may share a
+font.
 
 Layout applies glyph advances, kerning, explicit newlines, line spacing,
 tracking, and left, center, or right alignment within the widest line.
@@ -61,7 +63,7 @@ local data <const> = require("tecs.data")
 local log <const> = require("tecs.log")
 
 local type Renderer = require("tecs.Renderer")
-local type Future = require("tecs.Future")
+local Future <const> = require("tecs.Future")
 
 local type Component = ecs.Component
 local type World = types.World
@@ -319,36 +321,42 @@ local record text
     --- Read-only. Exposes the text component.
     Text: Text
 
-    --- Loads a font's metrics and names its atlas.
+    --- Starts loading a font's metrics and names its atlas.
     ---
-    --- Returns the font already loaded under the same metrics path instead of
-    --- reading it twice.
+    --- Concurrent calls under the same metrics path share one read and parse
+    --- while receiving futures of their own, so canceling one does not cancel
+    --- the others. A call after settlement returns an already-ready future for
+    --- the shared font. The call reads `options` before returning.
     --- @param options The caller must set `metrics`. `atlas` defaults to the
     ---     first page in the metrics, resolved beside the metrics file, and
     ---     applies only on the first load of a path.
-    --- @return The shared [`Font`](tealdoc:tecs.gfx.text.Font) for that path. The
-    ---     renderer loads its atlas when a text first needs it.
-    loadFont: function(options: FontOptions): Font
-    --- Returns the bundled default font and loads it on first use.
-    --- @return The same shared [`Font`](tealdoc:tecs.gfx.text.Font) on every
-    ---     call.
-    defaultFont: function(): Font
+    --- @return Returns a [`Future`](tealdoc:tecs.Future) for the shared
+    ---     [`Font`](tealdoc:tecs.gfx.text.Font) for that path. A missing or
+    ---     malformed metrics document fails the future. The renderer still
+    ---     loads its atlas when a text first needs it.
+    loadFont: function(options: FontOptions): Future<Font>
+    --- Starts loading the bundled default font.
+    --- @return Returns a future for the same shared
+    ---     [`Font`](tealdoc:tecs.gfx.text.Font) on every call.
+    defaultFont: function(): Future<Font>
     --- Returns a loaded font by its metrics path, or nil.
     --- @param name The path exactly as passed to `loadFont`, before asset-root
     ---     resolution.
-    --- @return The shared [`Font`](tealdoc:tecs.gfx.text.Font), or nil when no
-    ---     caller has loaded that path.
+    --- @return The shared [`Font`](tealdoc:tecs.gfx.text.Font), or nil before a
+    ---     load of that path has settled successfully.
     findFont: function(name: string): Font
-    --- Reloads a font's metrics while preserving the Font value.
+    --- Starts reloading a font's metrics while preserving the Font value.
     ---
     --- Existing [`Text`](tealdoc:tecs.gfx.text.Text) components keep the same
     --- table and lay themselves out again. Reloading rejects metrics that
     --- change the atlas dimensions.
     --- @param path The metrics path passed to `loadFont`, or its resolved file
     ---     path.
-    --- @return The same [`Font`](tealdoc:tecs.gfx.text.Font) table with its
-    ---     metrics updated.
-    reloadFont: function(path: string): Font
+    --- @return Returns a future for the same
+    ---     [`Font`](tealdoc:tecs.gfx.text.Font) table with its metrics updated.
+    ---     A read or parse failure fails the future and leaves the font
+    ---     unchanged.
+    reloadFont: function(path: string): Future<Font>
     --- Returns a text item's width and height in world units.
     ---
     --- Uses the same layout as the plugin without adding or changing an
@@ -392,6 +400,10 @@ end
 --- Every font loaded in this process, by the path its metrics came from. A
 --- snapshot writes a name, so this is what one is resolved back through.
 local fontsByName <const>: {string: Font} = {}
+--- Loads still reading or parsing, by the same identity. The root belongs to
+--- this module and callers receive derived links, so one caller's cancellation
+--- is invisible to every other caller sharing the work.
+local fontLoads <const>: {string: Future<Font>} = {}
 
 --- Resolves a path against the asset root unless it already names one.
 local function resolve(path: string): string
@@ -492,44 +504,72 @@ local function parseMetrics(document: string, name: string, atlas: string): Font
     return self
 end
 
+--- Turns one metrics document into the process-wide font it describes.
+local function loadDocument(options: FontOptions, metricsPath: string, document: string): Font
+    local atlas = options.atlas
+    if atlas == nil then
+        local root = decodeMetrics(document, metricsPath)
+        local pages = root.pages as {string}
+        if pages == nil or pages[1] == nil then
+            error(("tecs: '%s' names no atlas page; pass `atlas`"):format(metricsPath), 0)
+        end
+        atlas = directoryOf(options.metrics) .. pages[1]
+    end
+    return parseMetrics(document, options.metrics, resolve(atlas))
+end
+
+--- A caller's own link to one shared font load.
+local function linkFont(loading: Future<Font>): Future<Font>
+    return loading:map(function(font: Font): Font return font end)
+end
+
 -- A metrics path identifies one process-wide font. Reusing the same path
--- returns the existing table, and the renderer loads the named atlas only when
--- text first needs it.
-function text.loadFont(options: FontOptions): Font
+-- returns a future for the existing table, and the renderer loads the named
+-- atlas only when text first needs it.
+function text.loadFont(options: FontOptions): Future<Font>
     if options == nil or options.metrics == nil then
         error("tecs: a font needs a `metrics` path", 2)
     end
 
     local existing = fontsByName[options.metrics]
     if existing ~= nil then
-        return existing
+        return Future.settled(existing)
     end
 
-    local metricsPath = resolve(options.metrics)
+    local loading = fontLoads[options.metrics]
+    if loading ~= nil then
+        return linkFont(loading)
+    end
+
+    if not assets.installed() then
+        assets.install()
+    end
+
+    local name <const> = options.metrics
+    local metricsPath <const> = resolve(name)
+    local requested <const>: FontOptions = {
+        metrics = name,
+        atlas = options.atlas,
+    }
     -- Named as a font, because the bytes are a document like any other and the
     -- only thing that knows they are a font's metrics is the call that asked
     -- for them. A watcher routes a change by that name.
-    local document = filesystem.read(metricsPath, "font")
-    if document == nil then
-        error(("tecs: cannot read the font metrics '%s'"):format(metricsPath), 2)
-    end
-
-    local atlas = options.atlas
-    if atlas == nil then
-        local root = decodeMetrics(document, metricsPath)
-        local pages = root.pages as {string}
-        if pages == nil or pages[1] == nil then
-            error(("tecs: '%s' names no atlas page; pass `atlas`"):format(metricsPath), 2)
+    loading = assets.loadBytes(metricsPath, "font"):map(function(document: string): Font
+        return loadDocument(requested, metricsPath, document)
+    end)
+    fontLoads[name] = loading
+    loading:onSettle(function(settled: Future<Font>)
+        if fontLoads[name] == settled then
+            fontLoads[name] = nil
         end
-        atlas = directoryOf(options.metrics) .. pages[1]
-    end
-
-    local self = parseMetrics(document, options.metrics, resolve(atlas))
-    fontsByName[self.name] = self
-    return self
+        if settled.status == "ready" and fontsByName[name] == nil then
+            fontsByName[name] = settled.value
+        end
+    end)
+    return linkFont(loading)
 end
 
-function text.defaultFont(): Font
+function text.defaultFont(): Future<Font>
     return text.loadFont({metrics = DEFAULT_METRICS})
 end
 
@@ -1235,7 +1275,7 @@ end
 -- reloaded set tells the layout pass which unchanged table contents need
 -- rebuilding. Atlas dimensions remain fixed because existing glyph UVs depend
 -- on them.
-function text.reloadFont(path: string): Font
+function text.reloadFont(path: string): Future<Font>
     if path == nil or path == "" then
         error("tecs: a font re-read needs a metrics path", 2)
     end
@@ -1245,46 +1285,47 @@ function text.reloadFont(path: string): Font
         error(("tecs: no font is loaded from '%s', so there is nothing to " .. "re-read"):format(path), 0)
     end
 
-    local document = filesystem.read(resolve(font.name), "font")
-    if document == nil then
-        error(("tecs: cannot read the font metrics '%s'"):format(path), 0)
+    if not assets.installed() then
+        assets.install()
     end
 
-    -- Into a fresh table first. A malformed document raises part way through
-    -- parsing, and the font every text is holding has to end up as the one it
-    -- was or as the whole new one, never as half of each.
-    local fresh = parseMetrics(document, font.name, font.atlas)
-    if fresh.atlasWidth ~= font.atlasWidth or fresh.atlasHeight ~= font.atlasHeight then
-        error(
-            (
-                "tecs: '%s' was loaded against a %dx%d atlas and now names one "
-                .. "of %dx%d; a re-read keeps the size, because the glyphs already "
-                .. "drawn hold rects measured against the old one"
-            ):format(font.name, font.atlasWidth, font.atlasHeight, fresh.atlasWidth, fresh.atlasHeight),
-            0
-        )
-    end
-
-    font.size = fresh.size
-    font.lineHeight = fresh.lineHeight
-    font.base = fresh.base
-    font.distanceRange = fresh.distanceRange
-    font.glyphs = fresh.glyphs
-    font.kernings = fresh.kernings
-    font._fallbackAdvance = fresh._fallbackAdvance
-
-    for _, install in pairs(installs) do
-        evict(install, font)
-        local reloaded = install.reloaded
-        if reloaded == nil then
-            reloaded = {}
-            install.reloaded = reloaded
+    return assets.loadBytes(resolve(font.name), "font"):map(function(document: string): Font
+        -- Into a fresh table first. A malformed document raises part way
+        -- through parsing, and the font every text is holding has to end up
+        -- as the one it was or as the whole new one, never as half of each.
+        local fresh = parseMetrics(document, font.name, font.atlas)
+        if fresh.atlasWidth ~= font.atlasWidth or fresh.atlasHeight ~= font.atlasHeight then
+            error(
+                (
+                    "tecs: '%s' was loaded against a %dx%d atlas and now names one "
+                    .. "of %dx%d; a re-read keeps the size, because the glyphs already "
+                    .. "drawn hold rects measured against the old one"
+                ):format(font.name, font.atlasWidth, font.atlasHeight, fresh.atlasWidth, fresh.atlasHeight),
+                0
+            )
         end
-        reloaded[font] = true
-        install.waiting = true
-    end
 
-    return font
+        font.size = fresh.size
+        font.lineHeight = fresh.lineHeight
+        font.base = fresh.base
+        font.distanceRange = fresh.distanceRange
+        font.glyphs = fresh.glyphs
+        font.kernings = fresh.kernings
+        font._fallbackAdvance = fresh._fallbackAdvance
+
+        for _, install in pairs(installs) do
+            evict(install, font)
+            local reloaded = install.reloaded
+            if reloaded == nil then
+                reloaded = {}
+                install.reloaded = reloaded
+            end
+            reloaded[font] = true
+            install.waiting = true
+        end
+
+        return font
+    end)
 end
 
 -- This diagnostic counter verifies that clean text rows skip layout work.

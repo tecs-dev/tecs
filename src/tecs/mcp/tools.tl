@@ -674,7 +674,12 @@ function tools.reloadFont(path: string): string, integer
     if path == nil or path == "" then
         error("path is required", 0)
     end
-    local font = text.reloadFont(path)
+    local loading = text.reloadFont(path)
+    loading:wait()
+    if loading.status ~= "ready" then
+        error(loading.error or "the font reload did not finish", 0)
+    end
+    local font = loading.value
     local glyphs = 0
     for _ in pairs(font.glyphs) do
         glyphs = glyphs + 1

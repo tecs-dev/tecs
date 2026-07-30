@@ -1,5 +1,5 @@
 ---
-description: "Asynchronous image and sound decoding with futures and reference-counted payloads"
+description: "Asynchronous byte loading and media decoding through futures"
 outline: deep
 ---
 

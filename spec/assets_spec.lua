@@ -328,6 +328,46 @@ describe("assets", function()
         assert.is_nil(images[1].pixels)
     end)
 
+    it("reads bytes in the background and isolates callers sharing the read", function()
+        local first = assets.loadBytes("spec/fixtures/test_material.glsl")
+        local canceled = assets.loadBytes("spec/fixtures/test_material.glsl")
+
+        assert.are.equal("pending", first.status)
+        assert.are_not.equal(first, canceled)
+        assert.are.equal(1, assets.pending(), "one path queued two reads")
+
+        canceled:cancel()
+        assets.waitAll()
+
+        assert.are.equal("ready", first.status)
+        assert.is_truthy(first.value:find("material", 1, true))
+        assert.are.equal("canceled", canceled.status)
+        assert.is_nil(canceled.value)
+    end)
+
+    it("keeps byte reads separate from image decodes of the same path", function()
+        local image = assets.loadImage(FIXTURE)
+        local bytes = assets.loadBytes(FIXTURE)
+
+        assert.are.equal(2, assets.pending(), "the byte reader joined an image future")
+        assets.waitAll()
+
+        assert.are.equal("ready", image.status)
+        assert.are.equal("ready", bytes.status)
+        assert.are.equal("PNG", bytes.value:sub(2, 4))
+        assert.is_truthy(bytes.value:find("\0", 1, true), "the worker cut bytes at the first NUL")
+        image.value:release()
+    end)
+
+    it("reports a missing byte source through its future", function()
+        local loading = assets.loadBytes("spec/fixtures/does-not-exist.data")
+        assets.waitAll()
+
+        assert.are.equal("failed", loading.status)
+        assert.is_truthy(loading.error:find("cannot read", 1, true))
+        assert.is_nil(loading.value)
+    end)
+
     it("reads a file's bytes, whatever they are", function()
         -- A PNG rather than a text file on purpose: the result has to carry
         -- its own length, or every binary sidecar read through here would be

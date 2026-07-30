@@ -228,25 +228,25 @@ local record gfx
     --- entities. Needs `textPlugin` installed on the world.
     Text: text.Text
 
-    --- Loads a font's metrics and names its atlas, answering with the font
-    --- already loaded under that path rather than reading it twice.
-    loadFont: function(options: text.FontOptions): text.Font
+    --- Starts loading a font's metrics and names its atlas, sharing one read
+    --- under a path while answering each caller with its own future.
+    loadFont: function(options: text.FontOptions): Future<text.Font>
 
-    --- The font the engine ships, loaded on first use.
-    defaultFont: function(): text.Font
+    --- Starts loading the font the engine ships.
+    defaultFont: function(): Future<text.Font>
 
     --- The font loaded under a metrics path.
     ---
     --- @param name The metrics path `loadFont` was given, not the family name
     ---     inside the file.
-    --- @return The font, or nil when nothing has loaded that path. Nil is a
-    ---     question about this process rather than about the disk, so a font
-    ---     that exists but no caller loaded answers nil too.
+    --- @return The font, or nil before a load of that path has settled
+    ---     successfully. Nil is a question about this process rather than about
+    ---     the disk, so a font that exists but no caller loaded answers nil too.
     findFont: function(name: string): text.Font
 
-    --- Re-reads a loaded font's metrics in place, so every `Text` naming it
-    --- keeps pointing at the same table.
-    reloadFont: function(path: string): text.Font
+    --- Starts re-reading a loaded font's metrics in place, so every `Text`
+    --- naming it keeps pointing at the same table.
+    reloadFont: function(path: string): Future<text.Font>
 
     --- Extent of a `Text` in world units, laid out the way the system lays it
     --- out and without touching any entity.

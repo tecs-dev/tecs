@@ -40,7 +40,7 @@ describe("gfx.text", function()
         device = Device.create(window, { debug = true })
         screen = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
         assets.install()
-        font = text.defaultFont()
+        font = text.defaultFont():wait().value
     end)
 
     teardown(function()
@@ -127,6 +127,56 @@ describe("gfx.text", function()
         assert.are.equal(8, font.distanceRange)
         assert.is_not_nil(font.glyphs[string.byte("H")])
         assert.are.equal(0, font.glyphs[string.byte(" ")].width, "a space has an advance and no quad")
+    end)
+
+    it("shares an in-flight metrics read without sharing caller futures", function()
+        local metricsPath = os.tmpname()
+        local source = assert(filesystem.read(tecs.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.json")))
+        local file = assert(io.open(metricsPath, "wb"))
+        file:write(source)
+        file:close()
+
+        local options = {
+            metrics = metricsPath,
+            atlas = tecs.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.png"),
+        }
+        local first = text.loadFont(options)
+        local canceled = text.loadFont(options)
+
+        assert.are.equal("pending", first.status)
+        assert.are_not.equal(first, canceled)
+        assert.is_nil(text.findFont(metricsPath), "a pending font was published as ready")
+
+        local atlas = options.atlas
+        options.atlas = "changed-after-load.png"
+        canceled:cancel()
+        first:wait()
+
+        assert.are.equal("ready", first.status)
+        assert.are.equal("canceled", canceled.status)
+        assert.are.equal(first.value, text.findFont(metricsPath))
+        assert.are.equal(atlas, first.value.atlas, "the load retained its caller's options table")
+
+        local again = text.loadFont(options)
+        assert.are.equal("ready", again.status)
+        assert.are.equal(first.value, again.value)
+        os.remove(metricsPath)
+    end)
+
+    it("reports an unreadable metrics document through its future", function()
+        local metricsPath = os.tmpname()
+        os.remove(metricsPath)
+
+        local loading = text.loadFont({
+            metrics = metricsPath,
+            atlas = "unused.png",
+        })
+        assert.are.equal("pending", loading.status)
+        loading:wait()
+
+        assert.are.equal("failed", loading.status)
+        assert.is_truthy(loading.error:find("cannot read", 1, true))
+        assert.is_nil(text.findFont(metricsPath))
     end)
 
     it("does not register an atlas after its renderer is destroyed", function()
@@ -654,6 +704,7 @@ describe("gfx.text", function()
                 metrics = secondPath,
                 atlas = tecs.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.png"),
             })
+                :wait().value
         end)
 
         after_each(function()
@@ -677,7 +728,10 @@ describe("gfx.text", function()
             local keptX, keptY = text.glyphAt(world, kept, 2)
 
             write(secondPath, shipped(2))
-            assert.are.equal(second, text.reloadFont(secondPath), "a re-read keeps the table the Text holds")
+            local reloading = text.reloadFont(secondPath)
+            assert.are.equal("pending", reloading.status)
+            reloading:wait()
+            assert.are.equal(second, reloading.value, "a re-read keeps the table the Text holds")
 
             -- The record holding the atlas was given up with the metrics, but
             -- the atlas is still on the renderer under its own name, so it is
@@ -723,9 +777,13 @@ describe("gfx.text", function()
             root.common.scaleW = root.common.scaleW * 2
             write(secondPath, cjson.encode(root))
 
-            local ok, reason = pcall(text.reloadFont, secondPath)
-            assert.is_false(ok)
-            assert.is_truthy(tostring(reason):find("1024", 1, true), "unexpected refusal: " .. tostring(reason))
+            local reloading = text.reloadFont(secondPath)
+            reloading:wait()
+            assert.are.equal("failed", reloading.status)
+            assert.is_truthy(
+                tostring(reloading.error):find("1024", 1, true),
+                "unexpected refusal: " .. tostring(reloading.error)
+            )
             assert.are.equal(512, second.atlasWidth, "a refusal leaves the font as it was")
 
             local before = text.textLayouts(world)

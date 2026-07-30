@@ -333,7 +333,10 @@ describe("the file watcher", function()
         write(dir .. "level.json", "{}")
         write(dir .. "specwatchfont.json", metrics)
         filesystem.read(dir .. "level.json")
-        text.loadFont({ metrics = dir .. "specwatchfont.json", atlas = dir .. "specwatch.png" })
+        text.loadFont({
+            metrics = dir .. "specwatchfont.json",
+            atlas = dir .. "specwatch.png",
+        }):wait()
 
         watch.install({ root = dir })
         local kinds = {}

@@ -772,12 +772,14 @@ counted and the number of holders is exact rather than optimistic. And every
 caller holds a distinct object, so a future stays usable as a map key, which
 three subsystems here already rely on.
 
-Files a game interprets itself go through `filesystem.read`, which is the only
-sanctioned way to get bytes out of the content root: on Android content lives
-inside the package and `io.open` does not reach it. It answers bytes rather than
-text, so an image, an archive or a binary sidecar comes back whole and being
-text is a decoder's opinion. Reading a document is that call and a decoder over
-it, with nothing in between:
+Files a game interprets itself go through `filesystem.read` or
+`assets.loadBytes`, which are the two sanctioned ways to get bytes out of the
+content root: on Android content lives inside the package and `io.open` does not
+reach it. Both answer bytes rather than text, so an image, an archive or a
+binary sidecar comes back whole and being text is a decoder's opinion. The
+first is synchronous and suits a small document. The second runs the same
+whole-file read on the asset worker and answers a `Future<string>` when the main
+thread should not stop for it.
 
 ```lua
 local bytes = tecs.filesystem.read(tecs.filesystem.assetPath("levels/1.json"))
@@ -786,6 +788,16 @@ local level = tecs.data.decodeJSON(bytes)
 
 `read` answers nil for a path with no file, so an absent document is
 distinguishable from a malformed one, which the decoder raises on.
+`loadBytes` reports the same absence as a failed future. It is not a stream:
+the worker sends one binary Lua string back, complete, and overlapping callers
+share that read while retaining futures of their own.
+
+Font metrics take that asynchronous path. A `Future<Font>` settles after the
+metrics have been read and parsed, which is the point the renderer-independent
+font exists. Its atlas residency is still a renderer's answer: the first text
+to use the font on each renderer starts that image decode and upload, so one
+process-wide font can remain useful to headless measurement and to several
+renderers.
 
 Waiting on several loads at once is `Future.all`, and there is no set type here.
 There used to be one, `assets.newBatch`, and the observation behind it was

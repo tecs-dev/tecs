@@ -1,5 +1,5 @@
 --[=[
-Decodes images and sounds on a worker.
+Reads bytes and decodes images and sounds on a worker.
 
 Each load returns a [`Future`](tealdoc:tecs.Future) immediately:
 
@@ -44,10 +44,10 @@ Overlapping image loads for one path share a decode. Each caller receives its
 own future and a hold on the same image. A later load after settlement decodes
 again. Sound loads never share.
 
-Image loads accept PNG and JPEG. `tecs.audio.decoders()` reports the sound
-formats linked into the current build. Sound mode `"resident"` decodes the
-complete clip, `"stream"` opens a source for each voice, and `"auto"` chooses
-from the duration threshold.
+`loadBytes` reads a complete file without interpreting it. Image loads accept
+PNG and JPEG. `tecs.audio.decoders()` reports the sound formats linked into the
+current build. Sound mode `"resident"` decodes the complete clip, `"stream"`
+opens a source for each voice, and `"auto"` chooses from the duration threshold.
 
 Use `Future.all` to join independent loads. Release each ready payload after
 its consumer takes ownership.
@@ -104,6 +104,14 @@ local function decodeImage(task)
         height = height,
         pitch = width * 4,
     }
+end
+
+local function readBytes(task)
+    local bytes = filesystem.read(task.path)
+    if bytes == nil then
+        return {id = task.id, error = "cannot read " .. task.path}
+    end
+    return {id = task.id, bytes = bytes}
 end
 
 -- Length in milliseconds, or -1 when the container cannot say. A format that
@@ -165,6 +173,8 @@ while true do
     if task == nil then break end
     if task.kind == "sound" then
         self:send(decodeSound(task))
+    elseif task.kind == "bytes" then
+        self:send(readBytes(task))
     else
         self:send(decodeImage(task))
     end
@@ -276,14 +286,14 @@ end
 local ImageMT <const>: metatable<Image> = {__index = Image}
 local SoundMT <const>: metatable<Sound> = {__index = Sound}
 
---- One decode the worker has been given and has not answered for.
+--- One load the worker has been given and has not answered for.
 ---
 --- The root future is here rather than handed out. Callers get futures derived
 --- from it, which is what lets several of them share one decode without sharing
 --- one object: see `loadImage`.
 local record Entry
     id: integer
-    --- "image" or "sound", which decides what the answer is built into.
+    --- "bytes", "image" or "sound", which decides what the answer is built into.
     kind: string
     path: string
     root: Future<any>
@@ -298,7 +308,10 @@ local pendingCount = 0
 --- Tracks queued image decodes that have not answered yet, by path. A second
 --- load of a path in this table joins the first rather than queueing a decode
 --- of the same file beside it.
-local inFlight: {string: Future<any>} = {}
+local imagesInFlight: {string: Future<any>} = {}
+--- Tracks queued byte reads on the same terms. Separate from image decodes
+--- because the same path may be requested in both representations at once.
+local bytesInFlight: {string: Future<any>} = {}
 local nextId = 1
 local worker: workers.Worker = nil
 
@@ -339,7 +352,7 @@ end
 --- of time leaves it pending and the next one joins the same drain.
 local idle: Future<integer> = nil
 
---- Forgets a decode the worker has answered for.
+--- Forgets a load the worker has answered for.
 local function retire(entry: Entry)
     pending[entry.id] = nil
     byFuture[entry.root] = nil
@@ -350,8 +363,9 @@ local function retire(entry: Entry)
     -- the derived future, so a root still reachable through this table would
     -- keep every future ever derived from it alive for the life of the process.
     -- Nothing shows that until it is measured, which is why it is said here.
-    if inFlight[entry.path] == entry.root then
-        inFlight[entry.path] = nil
+    local shared = entry.kind == "image" and imagesInFlight or entry.kind == "bytes" and bytesInFlight or nil
+    if shared ~= nil and shared[entry.path] == entry.root then
+        shared[entry.path] = nil
     end
 end
 
@@ -369,7 +383,7 @@ local function discard(result: {string: any})
     end
 end
 
---- Settles one decode result into its associated future.
+--- Settles one load result into its associated future.
 local function settleResult(result: {string: any}): boolean
     local entry = pending[result.id as integer]
     if entry == nil then
@@ -387,6 +401,11 @@ local function settleResult(result: {string: any}): boolean
 
     if result.error ~= nil then
         root:fail(result.error as string)
+        return true
+    end
+
+    if entry.kind == "bytes" then
+        root:complete(result.bytes as string)
         return true
     end
 
@@ -433,7 +452,7 @@ local function settleResult(result: {string: any}): boolean
     return true
 end
 
---- Settles one decode result, and ends a process-wide drain that this emptied.
+--- Settles one load result, and ends a process-wide drain that this emptied.
 ---
 --- The function settles the drain after the result rather than inside it, because a
 --- listener the settlement runs is free to start another load and a `waitAll`
@@ -539,7 +558,7 @@ function Loader:advance(ms: number): integer
     return complete(result as {string: any}) and 1 or 0
 end
 
---- Gives up a decode whose last caller has gone.
+--- Gives up a load whose last caller has gone.
 ---
 --- The worker takes its tasks off a channel and cannot be told to drop one, so
 --- the decode runs to the end whatever happens here. What this does is release
@@ -551,8 +570,9 @@ function Loader:cancel(future: Future<any>)
     if entry == nil then
         return
     end
-    if inFlight[entry.path] == future then
-        inFlight[entry.path] = nil
+    local shared = entry.kind == "image" and imagesInFlight or entry.kind == "bytes" and bytesInFlight or nil
+    if shared ~= nil and shared[entry.path] == future then
+        shared[entry.path] = nil
     end
 end
 
@@ -576,17 +596,17 @@ local source <const> = pump as Future.Source
 ---
 --- `Future.pending` counts whoever created a future as one of its watchers,
 --- which is right for a caller holding what it created and wrong here. The
---- loader is the producer: the root lives in `inFlight` and every consumer of
---- it is some caller's own derived future. A hold of the loader's own would
---- create a watcher nothing ever gives up, so the count could never reach zero
---- and let the source abandon the decode.
+--- loader is the producer: the root lives in one of the shared-work tables and
+--- every consumer of it is some caller's own derived future. A hold of the
+--- loader's own would create a watcher nothing ever gives up, so the count
+--- could never reach zero and let the source abandon the decode.
 local function newRoot(): Future<any>
     local root = Future.pending(source) as Future<any>
     root._watchers = 0
     return root
 end
 
---- Registers a decode, and answers the future it will settle and the id the
+--- Registers a load, and answers the future it will settle and the id the
 --- worker will answer with.
 local function queue(kind: string, path: string): Future<any>, integer
     if worker == nil then
@@ -629,10 +649,10 @@ end
 ---     caller's interest in the decode, and the last caller to do so abandons it.
 function assets.loadImage(path: string): Future<Image>
     filesystem.note(path, "image")
-    local shared = inFlight[path]
+    local shared = imagesInFlight[path]
     if shared == nil then
         local root, id = queue("image", path)
-        inFlight[path] = root
+        imagesInFlight[path] = root
         worker:send({id = id, kind = "image", path = path})
         shared = root
     end
@@ -641,6 +661,31 @@ function assets.loadImage(path: string): Future<Image>
     -- subsystems in this tree already use it as, and would leave this module
     -- with no way to count how many of them survived to settlement.
     return shared:map(claim) as Future<Image>
+end
+
+--- Queues a complete file read and answers a future for its bytes immediately.
+---
+--- The returned string preserves embedded NUL bytes. Overlapping reads of one
+--- path share the worker task while each caller receives its own future, so one
+--- caller may cancel without affecting another. A later read after settlement
+--- reads the file again.
+---
+--- @param path The caller supplies an absolute path or one from
+---     [`assetPath`](/modules/filesystem/#tecs.filesystem.assetPath).
+--- @param kind The caller supplies the content kind used by file watching, or
+---     omits it to record a document.
+--- @return Returns a pending [`Future`](tealdoc:tecs.Future). A missing or
+---     unreadable file settles it as failed.
+function assets.loadBytes(path: string, kind?: string): Future<string>
+    filesystem.note(path, kind or "document")
+    local shared = bytesInFlight[path]
+    if shared == nil then
+        local root, id = queue("bytes", path)
+        bytesInFlight[path] = root
+        worker:send({id = id, kind = "bytes", path = path})
+        shared = root
+    end
+    return shared:map(function(bytes: string): string return bytes end) as Future<string>
 end
 
 --- Queues a sound for loading and answers a future for it immediately.
@@ -692,13 +737,13 @@ end
 -- Draining
 -------------------------------------------------------------------------------
 
---- Takes finished decodes and settles their futures. Call once per frame.
+--- Takes finished loads and settles their futures. Call once per frame.
 ---
 --- Polls, never blocks, and drains everything the worker has answered rather than one
 --- result. Nothing settles without this, so a game that stops calling it has loads that
 --- stay pending forever.
 ---
---- @return How many decodes settled this call, which is zero when nothing has
+--- @return How many loads settled this call, which is zero when nothing has
 ---     finished and also zero when no worker exists.
 function assets.update(): integer
     return pump:poll()
@@ -706,7 +751,7 @@ end
 
 --- Returns the number of loads still waiting on the worker.
 ---
---- @return Every load in flight in this process, not one caller's. A decode every
+--- @return Every load in flight in this process, not one caller's. A load every
 ---     caller has canceled is still counted until the worker answers for it, because
 ---     the address it sends still has to be taken and destroyed.
 function assets.pending(): integer
@@ -749,7 +794,8 @@ function assets.shutdown()
     worker = nil
     pending = {}
     byFuture = {}
-    inFlight = {}
+    imagesInFlight = {}
+    bytesInFlight = {}
     pendingCount = 0
     if idle ~= nil then
         -- The drain it was waiting for will not finish, and saying so is more

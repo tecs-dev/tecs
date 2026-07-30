@@ -226,7 +226,7 @@ The host loads `tecs` before the entry file. A game can use these names without 
 
 ::: module-columns
 
-- [`tecs.assets`](/modules/assets) - loading content, cached and off the main thread
+- [`tecs.assets`](/modules/assets) - loading bytes, images and sounds off the main thread
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
 - [`tecs.data`](/modules/data) - JSON, DEFLATE and hashes over byte strings
 - [`tecs.ecs`](/modules/ecs/) - worlds, components, queries, systems, events and resources

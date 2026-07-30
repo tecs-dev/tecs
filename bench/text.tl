@@ -102,7 +102,7 @@ return tecs.newApplication(
             time.provider = function(realDt: number): number timing.mark(DELTA, realDt); return realDt end
 
             world:addPlugin(text.textPlugin({renderer = renderer}))
-            local font = text.defaultFont()
+            local font = text.defaultFont():wait().value
             transientFont = font
 
             math.randomseed(42)

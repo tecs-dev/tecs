@@ -21,7 +21,7 @@ A module may contain one level of subordinate modules, such as
 
 | Module                                    | Description                                                 |
 | ----------------------------------------- | ----------------------------------------------------------- |
-| [`tecs.assets`](/modules/assets)          | cached background content loading                           |
+| [`tecs.assets`](/modules/assets)          | background byte, image, and sound loading                   |
 | [`tecs.audio`](/modules/audio)            | clips, voices, groups, limits, components, and devices      |
 | [`tecs.data`](/modules/data)              | JSON, DEFLATE, and byte-string hashes                       |
 | [`tecs.ecs`](/modules/ecs/)               | worlds, components, queries, systems, events, and resources |

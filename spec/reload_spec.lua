@@ -350,7 +350,7 @@ describe("mcp reload_font", function()
         dir = tempDir()
         path = dir .. "specfont.json"
         write(path, metrics(256, 30))
-        font = text.loadFont({ metrics = path, atlas = dir .. "specfont.png" })
+        font = text.loadFont({ metrics = path, atlas = dir .. "specfont.png" }):wait().value
     end)
 
     after_each(function()
@@ -428,7 +428,11 @@ describe("mcp reload_font", function()
         local contentRoot = filesystem.assetRoot()
         filesystem.setAssetRoot(dir)
         write(dir .. "relative.json", metrics(256, 30))
-        local relative = text.loadFont({ metrics = "relative.json", atlas = dir .. "specfont.png" })
+        local relative = text.loadFont({
+            metrics = "relative.json",
+            atlas = dir .. "specfont.png",
+        })
+            :wait().value
 
         write(dir .. "relative.json", metrics(256, 51))
         local ok, _, message = callTool({ path = dir .. "relative.json" })
