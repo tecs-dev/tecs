@@ -350,7 +350,9 @@ describe("assets", function()
         assert.are.equal("ready", first.status)
         assert.is_truthy(first.value:find("material", 1, true))
         assert.are.equal("canceled", canceled.status)
-        assert.is_nil(canceled.value)
+        assert.has_error(function()
+            return canceled.value
+        end)
     end)
 
     it("keeps byte reads separate from image decodes of the same path", function()
@@ -373,7 +375,9 @@ describe("assets", function()
 
         assert.are.equal("failed", loading.status)
         assert.is_truthy(loading.error:find("cannot read", 1, true))
-        assert.is_nil(loading.value)
+        assert.has_error(function()
+            return loading.value
+        end)
     end)
 
     it("reads a file's bytes, whatever they are", function()
