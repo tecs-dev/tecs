@@ -200,7 +200,7 @@ local WIDTH <const> = 1280
 local HEIGHT <const> = 720
 
 --- The atlas the sprites are cut from, and the grid it is cut into.
-local ATLAS <const> = "fonts/jetbrainsmono-extrabold-msdf.png"
+local ATLAS <const> = "bench/sprites.png"
 local COLUMNS <const> = 4
 local ROWS <const> = 4
 

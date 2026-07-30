@@ -140,6 +140,10 @@ local record TextureArray
     --- Texels of the newest layer already given to shelves, so a new shelf
     --- knows where it starts and whether it fits at all. Packed only.
     _shelfTop: integer
+    --- Newest layer opened for shelves. An unpacked insertion can advance
+    --- `used` past it, so the next new shelf must not enter that occupied
+    --- layer.
+    _shelfLayer: integer
     --- Texels handed out, gutters included, for `usage`.
     _occupied: integer
 
@@ -193,6 +197,7 @@ function TextureArray.create(device: loader.CPtr, options: TextureArrayOptions):
     self._destroyed = false
     self._shelves = {}
     self._shelfTop = 0
+    self._shelfLayer = -1
     self._occupied = 0
     return self
 end
@@ -271,15 +276,16 @@ local function placePacked(
 
     -- The first image of all, and every image that outgrows the layer it is
     -- being packed into, starts a layer of its own.
-    if self.used == 0 or self._shelfTop + height > self.height then
+    if self.used == 0 or self._shelfLayer ~= self.used - 1 or self._shelfTop + height > self.height then
         if self.used >= self.layers then
             error(("tecs: texture array is full at %d layers"):format(self.layers), level)
         end
         self.used = self.used + 1
         self._shelfTop = 0
+        self._shelfLayer = self.used - 1
     end
 
-    local layer <const> = self.used - 1
+    local layer <const> = self._shelfLayer
     local y <const> = self._shelfTop
     shelves[#shelves + 1] = {
         layer = layer,
@@ -392,10 +398,12 @@ end
 ---     never does shears the image.
 --- @return Where the image landed, which the caller keeps: nothing here maps
 ---     an image back to its region.
-function TextureArray:add(pixels: loader.CValue, width: integer, height: integer, pitch: integer): TextureArray.Region
-    local pad <const> = self.packed and PADDING or 0
+local function add(
+    self: TextureArray, pixels: loader.CValue, width: integer, height: integer, pitch: integer, packed: boolean
+): TextureArray.Region
+    local pad <const> = packed and PADDING or 0
     local layer, x, y = 0, 0, 0
-    if self.packed then
+    if packed then
         layer, x, y = placePacked(self, width + pad * 2, height + pad * 2, 3)
     else
         layer, x, y = placeUnpacked(self, width, height, 3)
@@ -420,6 +428,27 @@ function TextureArray:add(pixels: loader.CValue, width: integer, height: integer
         width = width,
         height = height,
     }
+end
+
+function TextureArray:add(pixels: loader.CValue, width: integer, height: integer, pitch: integer): TextureArray.Region
+    return add(self, pixels, width, height, pitch, self.packed)
+end
+
+--- Uploads RGBA pixels into a packed region even when ordinary images use one
+--- layer each.
+---
+--- Text uses this path for individually cached glyphs. Packed and unpacked
+--- insertions may be interleaved; neither can place over a layer the other
+--- already occupied.
+--- @param pixels Tightly packed RGBA8 rows read during this call and not kept.
+--- @param width Image width in pixels, excluding the one-texel gutter.
+--- @param height Image height in pixels, excluding the one-texel gutter.
+--- @param pitch The source's row stride in bytes.
+--- @return Where the image landed.
+function TextureArray:addPacked(
+    pixels: loader.CValue, width: integer, height: integer, pitch: integer
+): TextureArray.Region
+    return add(self, pixels, width, height, pitch, true)
 end
 
 --- Writes new pixels over an image already in the array.

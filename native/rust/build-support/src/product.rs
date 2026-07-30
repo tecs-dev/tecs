@@ -17,7 +17,7 @@ use crate::{staging, tooling};
 
 pub const TEAL_REVISION: &str = "1326d829790b92e23defe69fcf40460103b60d1d";
 pub const CERULEAN_REVISION: &str = "d2420be67e79beaccfe45b064cb478227c03a5ea";
-pub const TEALDOC_REVISION: &str = "60518b86517005fe208efca14c2e78c4b0515158";
+pub const TEALDOC_REVISION: &str = "ce7c9225427ee5dca6d57858225bed649d5b4322";
 // Scintillua is not on LuaRocks and is pure Lua, so it is pinned and copied
 // rather than depended on. The lexers give the documentation site every
 // language that is not Teal; Teal keeps the compiler's own lexer.
@@ -40,6 +40,10 @@ pub const SDL3_VERSION: &str = "3.4.12";
 pub const SDL3_REVISION: &str = "f87239e71e42da91ca317a12eefb82cfbf3393eb";
 pub const SDL3_MIXER_VERSION: &str = "3.2.4";
 pub const SDL3_MIXER_REVISION: &str = "72a81869b45e249e8e67102db4e98dd2441f05a1";
+pub const SDL3_TTF_VERSION: &str = "3.2.2";
+pub const SDL3_TTF_REVISION: &str = "a1ce3670aec736ecbf0936c43f2f0cc53aa61e5b";
+pub const FREETYPE_REVISION: &str = "9973564cfa63763a3e4ac67c09147899539b1e07";
+pub const HARFBUZZ_REVISION: &str = "564bf9818a18709776856533829c0c04950773d6";
 // LuaJIT has no releases, so the two constants below are one fact written
 // twice: `LUAJIT_ROLLING` is `2.1.` and the Unix timestamp of the commit
 // `LUAJIT_REVISION` names, which is what LuaJIT's own build stamps into
@@ -253,6 +257,7 @@ fn check_product_abi(root: &Path, preset: Preset, paths: &Paths) -> Result<()> {
         BTreeMap::from([
             ("sdl3", vec![include.clone()]),
             ("sdl3mixer", vec![include.clone()]),
+            ("sdl3ttf", vec![include.clone()]),
             ("shaderc", vec![include.clone()]),
             ("spvc", vec![include.join("spirv_cross")]),
             ("zlib", vec![include]),
@@ -622,6 +627,24 @@ fn pinned_packages(
             "external/wavpack",
         ],
     )?;
+    let ttf = fetch_source(
+        &source_root,
+        "sdl3-ttf",
+        "https://github.com/libsdl-org/SDL_ttf.git",
+        SDL3_TTF_REVISION,
+    )?;
+    fetch_source_at(
+        &source_root,
+        &ttf.join("external/freetype"),
+        "https://github.com/freetype/freetype.git",
+        FREETYPE_REVISION,
+    )?;
+    fetch_source_at(
+        &source_root,
+        &ttf.join("external/harfbuzz"),
+        "https://github.com/harfbuzz/harfbuzz.git",
+        HARFBUZZ_REVISION,
+    )?;
     let zlib = fetch_source(
         &source_root,
         "zlib",
@@ -680,6 +703,22 @@ fn pinned_packages(
         ],
     )?;
     cmake_install(&build_root.join("sdl3"))?;
+
+    configure_cmake(
+        preset,
+        &ttf,
+        &build_root.join("sdl3-ttf"),
+        &prefix,
+        &[
+            define_bool("BUILD_SHARED_LIBS", shared),
+            "-DSDLTTF_VENDORED=ON".into(),
+            "-DSDLTTF_HARFBUZZ=ON".into(),
+            "-DSDLTTF_PLUTOSVG=OFF".into(),
+            "-DSDLTTF_STRICT=ON".into(),
+            "-DSDLTTF_SAMPLES=OFF".into(),
+        ],
+    )?;
+    cmake_install(&build_root.join("sdl3-ttf"))?;
 
     configure_cmake(
         preset,
@@ -785,6 +824,15 @@ fn pinned_packages(
             vec![prefix.join("include")],
             vec![library.clone()],
             vec!["SDL3_mixer".into()],
+        ),
+    );
+    packages.insert(
+        "sdl3ttf",
+        pinned_package(
+            "sdl3ttf",
+            vec![prefix.join("include")],
+            vec![library.clone()],
+            vec!["SDL3_ttf".into()],
         ),
     );
     packages.insert(
@@ -1415,6 +1463,7 @@ fn system_packages(preset: Preset) -> Result<BTreeMap<&'static str, Package>> {
     for (key, package) in [
         ("sdl3", "sdl3"),
         ("sdl3mixer", "sdl3-mixer"),
+        ("sdl3ttf", "sdl3-ttf"),
         ("luajit", "luajit"),
         ("zlib", "zlib"),
     ] {
@@ -1445,6 +1494,7 @@ fn check_system_versions(preset: Preset) -> Result<()> {
     let mut requirements = vec![
         ("SDL3", "sdl3", SDL3_VERSION, false),
         ("SDL3_mixer", "sdl3-mixer", SDL3_MIXER_VERSION, false),
+        ("SDL3_ttf", "sdl3-ttf", SDL3_TTF_VERSION, false),
         ("LuaJIT", "luajit", LUAJIT_ROLLING, false),
     ];
     if matches!(preset.shaders, ShaderMode::Runtime) {
@@ -1801,6 +1851,9 @@ fn generate_bindings(
     let sdl = package(packages, "sdl3")?.includes.clone();
     let mut mixer = package(packages, "sdl3mixer")?.includes.clone();
     mixer.extend(sdl.clone());
+    let mut ttf = package(packages, "sdl3ttf")?.includes.clone();
+    ttf.extend(sdl.clone());
+    ttf.extend(native.clone());
     let zlib = package(packages, "zlib")?.includes.clone();
     let shaderc = packages
         .get("shaderc")
@@ -1835,6 +1888,19 @@ fn generate_bindings(
             registry_struct: "TecsSdl3MixerApi",
             registry_prefix: "MIX_",
             registry_headers: &["SDL3_mixer/SDL_mixer.h"],
+            enabled: true,
+            _packages: packages,
+        },
+        Binding {
+            name: "sdl3ttf",
+            header: "ttf.h",
+            keeps: &["/SDL3_ttf/"],
+            prefix: "TTF_",
+            needed: &[],
+            includes: ttf,
+            registry_struct: "TecsSdl3TtfApi",
+            registry_prefix: "TTF_",
+            registry_headers: &["SDL3_ttf/SDL_ttf.h", "SDL3_ttf/SDL_textengine.h"],
             enabled: true,
             _packages: packages,
         },
@@ -2131,6 +2197,7 @@ fn compile_and_link(
     for name in [
         "sdl3",
         "sdl3mixer",
+        "sdl3ttf",
         "zlib",
         "worker",
         "logsink",
@@ -2297,6 +2364,7 @@ fn compile_and_link_single(
     for name in [
         "sdl3",
         "sdl3mixer",
+        "sdl3ttf",
         "zlib",
         "worker",
         "logsink",
@@ -2705,6 +2773,7 @@ fn native_dependency_flags(
 ) -> Result<Vec<OsString>> {
     let mut flags = package_link_flags(&[
         package(packages, "sdl3mixer")?,
+        package(packages, "sdl3ttf")?,
         package(packages, "sdl3")?,
         package(packages, "zlib")?,
     ]);

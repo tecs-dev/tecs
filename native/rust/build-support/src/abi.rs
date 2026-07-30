@@ -30,6 +30,12 @@ const LIBRARIES: &[Library] = &[
         requires: &["sdl3"],
     },
     Library {
+        name: "sdl3ttf",
+        headers: &["SDL3_ttf/SDL_ttf.h", "SDL3_ttf/SDL_textengine.h"],
+        include_key: Some("sdl3ttf"),
+        requires: &["sdl3"],
+    },
+    Library {
         name: "shaderc",
         headers: &["shaderc/shaderc.h"],
         include_key: Some("shaderc"),
@@ -106,6 +112,7 @@ pub fn check(root: &Path, generated: &Path) -> Result<usize> {
     for (name, package) in [
         ("sdl3", "sdl3"),
         ("sdl3mixer", "sdl3-mixer"),
+        ("sdl3ttf", "sdl3-ttf"),
         ("shaderc", "shaderc"),
         ("spvc", "spirv-cross-c"),
         ("zlib", "zlib"),

@@ -3269,7 +3269,7 @@ A `Text` names a font and a string, and a system in `PostUpdate` lays it out
 into instances. The glyphs are not entities: the text plugin registers an
 `InstanceProducer` with the renderer, which lays a producer out as its own run
 after the archetypes and asks it which sub-ranges changed. A glyph is still a
-quad with a UV rect addressing its cell of the font atlas and a material
+quad with a UV rect addressing its packed texture-array region and a material
 selecting the distance-field shader, so extraction, culling, the indirect draw,
 layers and depth all apply to it exactly as they apply to an entity, and a text
 on a screen-space layer or moved by a parent works without any of the text code
@@ -3282,14 +3282,12 @@ rewrite all of them; and spawning or despawning a glyph moves an archetype's
 length, which relays the whole scene out. Measured at four thousand short texts,
 editing a single string rewrote sixty-four thousand instances that frame.
 
-The glyph is a multi-channel signed distance field. The median of the three
-channels is the signed distance to the outline, and scaling it by how many
-screen pixels the field's range covers is what keeps the outline exact at any
-size: the quad grows and the threshold stays on the curve. The material
-reconstructs the field bilinearly itself, because the shared image sampler
-reads nearest and the median has to be taken after interpolation; taking it
-first collapses three channels into one and loses the corners they encode,
-which is exactly where a glyph has its sharp features.
+The glyph is SDL_ttf's single-channel signed distance field. Scaling it changes
+the quad while the threshold stays on the outline, and screen-space derivatives
+keep the transition one pixel wide. The material reconstructs the field
+bilinearly itself because the shared image sampler reads nearest. SDF trades
+some corner fidelity for a smaller texture footprint and, unlike MSDF, is
+available from SDL_ttf without a second rasterizer and cache.
 
 Each text owns a span of the producer's run, and spans come from a size-bucketed
 free list: allocating takes an exact-size span off the free list when one is
@@ -3578,37 +3576,29 @@ their names in sorted order, an `Animation` holds a tag index and a `Pivot`
 holds a slice index, so a re-export that adds, removes or renames either is
 refused by name, exactly as a material file appearing is.
 
-A font re-reads through `reload_font`, and it is the one reload with something
-in the world to put right afterwards. An image, a clip and a pipeline are each
-read through every frame, so replacing one is picked up by the next frame and
-nothing has to be told. A glyph is not: it is an instance laid out once from the
-metrics and left alone until something about its text changes, and re-reading
-the metrics changes nothing about its text.
+Fonts follow SDL_ttf's ownership model rather than exposing Tecs' old atlas
+model. `newTTF` asynchronously reads source bytes, opens one immutable
+`TTF_Font`, enables SDF rasterization, and returns it only after those steps
+succeed. SDL_ttf and HarfBuzz own shaping and line layout. Tecs deliberately
+does not use SDL_ttf's GPU text engine: that engine emits four vertices and six
+indices per glyph, while this renderer's throughput comes from one fixed quad
+and one instance per glyph.
 
-So identity is kept the same way and then has to be worked around. The metrics
-are read back into the `Font` table itself rather than into a new one, because a
-`Text` names its font by holding it and a replacement would strand every live
-text on the font that was. Which means nothing can infer from identity that
-anything happened, since a text is laid out again when what its glyphs were
-built from differs from what it holds and after a read in place none of it
-differs. The texts naming that font are therefore told, by forgetting the font
-in each one's build record: that makes the comparison fail, and it goes on
-failing until a build succeeds, which is what carries them across the frames the
-atlas is decoding in. Exactly those texts, and no others: one naming a different
-font is not laid out again however much of an archetype it shares with one that
-is.
+SDL_ttf's copy operations are therefore an interchange format, not a rendering
+backend. A dirty string updates one reusable `TTF_Text`; a transform, tint,
+clip, alignment, or display-size change reads its existing operations and
+rewrites only that entity's producer span. The first operation needing a glyph
+asks SDL_ttf for its SDF surface and uploads it into the renderer's packed
+texture array. The cache is keyed by native font and glyph index, so later
+texts reuse both the rasterization and the residency. `Text.size` scales those
+instances and never changes the native font generation.
 
-The refusal is the atlas's size, on the terms `reload_image` refuses an image
-whose size moved. Every glyph carries UV extents computed against the size the
-atlas had, and a page of another size makes each of them address something else.
-A font is two files, and only the metrics reload as a font: the atlas is an
-image, was loaded as one, and reloads as one under the rect it already occupies,
-so no glyph has to be told about it. What the metrics reload does give up is
-what the renderer resolved for the font, since the field's range arrives as a
-fraction of a cell computed from the metrics, and a page that would not decode
-is remembered so a broken path is reported once rather than every frame. Both
-are answers to a question the re-read just changed, and the second is the more
-useful one: a font regenerated over a page that was missing can come back.
+SDF is the sole field format for now. It costs one texture channel, works with
+SDL_ttf's public raster API, and preserves the instanced renderer. MSDF would
+require a separate generator and cache policy without changing the public text
+model, so it is deferred until its sharper corners justify that second
+backend. Source fonts are immutable after loading; editing one creates a new
+font through `newTTF` instead of mutating live layout and cache identity.
 
 ### The file watcher
 

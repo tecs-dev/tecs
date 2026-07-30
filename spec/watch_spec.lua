@@ -316,27 +316,16 @@ describe("the file watcher", function()
         assets.shutdown()
     end)
 
-    -- A font's metrics and a level are both JSON, and one of them has a
-    -- reloader. The suffix cannot tell them apart, and neither can `read`, which
-    -- answers bytes; what can is the call that asked for the bytes, which is the
-    -- one that knows it wanted a font.
-    it("routes a font's metrics by what read them, not by the .json on the end", function()
+    -- The content kind comes from the load that requested the bytes, rather
+    -- than from a filename suffix.
+    it("routes source bytes as a font when newTTF reads them", function()
         local text = require("tecs.gfx.text")
-        local metrics = require("cjson").encode({
-            pages = { "specwatch.png" },
-            info = { size = 32 },
-            common = { lineHeight = 40, base = 32, scaleW = 256, scaleH = 128 },
-            distanceField = { distanceRange = 4 },
-            chars = { { id = 72, x = 0, y = 0, width = 20, height = 24, xoffset = 0, yoffset = 2, xadvance = 30 } },
-        })
+        local source = assert(files.read(files.assetPath("fonts/JetBrainsMono-ExtraBold.ttf")))
 
         write(dir .. "level.json", "{}")
-        write(dir .. "specwatchfont.json", metrics)
+        write(dir .. "specwatchfont.ttf", source)
         files.read(dir .. "level.json")
-        text.loadFont({
-            metrics = dir .. "specwatchfont.json",
-            atlas = dir .. "specwatch.png",
-        }):wait()
+        text.newTTF({ source = dir .. "specwatchfont.ttf" }):wait()
 
         watcher.install({ root = dir })
         local kinds = {}
@@ -347,11 +336,11 @@ describe("the file watcher", function()
         end
 
         write(dir .. "level.json", '{"rooms":2}')
-        write(dir .. "specwatchfont.json", metrics .. "\n")
+        write(dir .. "specwatchfont.ttf", source .. "\0")
         watcher.scan()
         watcher.scan()
 
-        assert.are.equal("font", kinds[dir .. "specwatchfont.json"], "the metrics were read as a font")
+        assert.are.equal("font", kinds[dir .. "specwatchfont.ttf"], "the source was read as a font")
         assert.are.equal("document", kinds[dir .. "level.json"], "and a level is still a level")
     end)
 
