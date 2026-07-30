@@ -18,13 +18,19 @@ MaterialOutput material(MaterialInput frag) {
     // and draws whatever its tint alpha is, exactly as an untextured quad
     // always has.
     //
-    // Half is the threshold because coverage here is a yes or no. The pass
-    // writes with replace, so a texel kept at low alpha lands at full strength
-    // as a dark fringe rather than as a soft edge, and one dropped at high
-    // alpha eats into the silhouette. The halfway point is the split that puts
-    // the edge where the artwork drew it; smooth edges are the forward-blended
-    // path's job.
-    result.coverage = texel.a - 0.5;
+    // Half is the threshold wherever coverage is a yes or no. A pass that writes
+    // with replace lands a texel kept at low alpha at full strength as a dark
+    // fringe rather than as a soft edge, and one dropped at high alpha eats into
+    // the silhouette, so the halfway point is the split that puts the edge where
+    // the artwork drew it.
+    //
+    // The forward pass blends, so there is nothing to split there: a texel is
+    // part of the shape wherever the artwork put any ink at all, and how much of
+    // it lands is the alpha above. That is what makes a soft-edged sprite soft,
+    // and it is the whole difference between a smoke puff drawn at a third alpha
+    // throughout and the same puff vanishing because every texel of it fell
+    // below the cut.
+    result.coverage = frag.blended ? texel.a : texel.a - 0.5;
     result.lit = 1.0;
     return result;
 }

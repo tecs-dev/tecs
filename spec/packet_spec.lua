@@ -104,6 +104,30 @@ describe("render extraction", function()
         assert.are.equal(0, packet.instanceRanges.count, "a still frame gives the backend nothing to copy")
     end)
 
+    it("counts the blended instances the scene holds, and stops counting them", function()
+        -- One packet is created per renderer and reused for the life of it, so
+        -- the count has to describe the frame rather than the history: totalled
+        -- from what each run last wrote, and assigned rather than added to. An
+        -- accumulator here reads as "anything has ever blended", which pins the
+        -- backend's forward lane on for every later frame including the ones with
+        -- nothing in it to blend.
+        local world, _, packet = newExtraction()
+        local entity = world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 0.5), Renderable())
+
+        world:update(1 / 60)
+        assert.are.equal(1, packet.blendCount)
+
+        -- A second frame that rewrites nothing. The row is still resident and
+        -- still blended, so the count is what it was and not twice it.
+        world:update(1 / 60)
+        assert.are.equal(0, packet.rewritten, "and the run was not rewritten to arrive at it")
+        assert.are.equal(1, packet.blendCount)
+
+        world:getMut(entity, Tint).a = 1.0
+        world:update(1 / 60)
+        assert.are.equal(0, packet.blendCount, "an opaque scene reports nothing blended")
+    end)
+
     it("reports rows it could not fit", function()
         local world, _, packet = newExtraction()
         for _ = 1, CAPACITY + 6 do
@@ -454,6 +478,9 @@ describe("reserved instance runs", function()
             takeDirty = function()
                 return {}
             end,
+            blended = function()
+                return 0
+            end,
             write = function(_, floats, bounds, base, first, last)
                 writes = writes + 1
                 for slot = base + first - 1, base + last - 1 do
@@ -538,8 +565,11 @@ describe("partial structural rewrites", function()
 
     -- One archetype throughout, which is the case reserving cannot help with
     -- and the one this whole block exists for.
-    local function spawn(side)
-        local id = side.world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+    -- Opaque unless an alpha is named. A translucent row is routed to the forward
+    -- pass, which is a second thing a rewrite of it settles besides its bytes:
+    -- how many of the run's rows the frame reports as blended.
+    local function spawn(side, alpha)
+        local id = side.world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, alpha or 1), Renderable())
         side.live[#side.live + 1] = id
         return id
     end
@@ -651,11 +681,97 @@ describe("partial structural rewrites", function()
         assert.is_true(side.bounds[7 * 4] > 1e29)
     end)
 
+    ---------------------------------------------------------------------------
+    -- The blend count under a partial rewrite
+    --
+    -- A partial rewrite writes some of a run's rows, so the blended rows it
+    -- counts are that subset's and not the run's. Storing the subset's answer
+    -- reports fewer blended instances than the frame holds, and the backend
+    -- skips the entire forward lane at zero, so under-reporting here is every
+    -- blended instance in the scene going missing. These are the cases where the
+    -- two features have to be right together rather than each on its own.
+    ---------------------------------------------------------------------------
+
+    it("keeps a resident blended row counted when a spawn elsewhere is all that moved", function()
+        local side = newExtraction(true)
+        spawn(side, 0.5)
+        for _ = 1, 32 do
+            spawn(side)
+        end
+        side.world:update(1 / 60)
+        assert.are.equal(1, side.packet.blendCount, "the translucent row is routed forward")
+
+        -- One placement, landing as a suffix well past the blended row at row
+        -- one. The partial path rewrites the appended row and nothing else, so a
+        -- count taken from what it wrote would be zero and the lane would be
+        -- skipped with the blended row still resident.
+        spawn(side)
+        side.world:update(1 / 60)
+
+        assert.are.equal(1, side.packet.rewritten, "the placement wrote one row")
+        assert.are.equal(1, side.packet.blendCount, "and the blended row it did not touch is still counted")
+    end)
+
+    it("counts a blended row a swap-pop moved to another slot", function()
+        -- The despawn takes row one, so the run's last row is swapped down into
+        -- it. Both the row that left and the row that arrived are opaque, and the
+        -- blended row at row two neither moves nor is rewritten: what the count
+        -- has to survive is the run's rows being shuffled underneath it.
+        local side = newExtraction(true)
+        local first = spawn(side)
+        spawn(side, 0.5)
+        for _ = 1, 16 do
+            spawn(side)
+        end
+        side.world:update(1 / 60)
+        assert.are.equal(1, side.packet.blendCount)
+
+        side.world:despawn(first)
+        side.world:update(1 / 60)
+
+        assert.are.equal(1, side.packet.rewritten, "one swap-pop row")
+        assert.are.equal(1, side.packet.blendCount, "and the blended row is still one of the run's")
+    end)
+
+    it("stops counting a blended row a swap-pop wrote over", function()
+        -- The other direction, and the reason a run that holds a blended row is
+        -- recounted rather than adjusted by what the residue wrote. The blended
+        -- row is the run's last, so despawning row one swaps it down into row one
+        -- and the run gives up the slot it came from. Nothing was added and one
+        -- row was written, and the answer has to be one rather than two.
+        local side = newExtraction(true)
+        local first = spawn(side)
+        for _ = 1, 16 do
+            spawn(side)
+        end
+        local translucent = spawn(side, 0.5)
+        side.world:update(1 / 60)
+        assert.are.equal(1, side.packet.blendCount)
+
+        side.world:despawn(first)
+        side.world:update(1 / 60)
+        assert.are.equal(1, side.packet.blendCount, "the row moved rather than multiplied")
+
+        -- And now the blended row itself, which is row one: the run's opaque last
+        -- row swaps down over it and the scene blends nothing.
+        side.world:despawn(translucent)
+        side.world:update(1 / 60)
+        assert.are.equal(0, side.packet.blendCount, "a blended row the run gave up stops being counted")
+    end)
+
     -- One seeded op stream, generated once and applied to two worlds, so the
     -- pair differs in nothing but which rows each sync decided to write. Every
     -- float of both buffers is compared after every frame: a row the partial
     -- path skipped and should not have is a difference here and nothing
     -- anywhere else.
+    --
+    -- A third of the spawns are translucent, and the frame's blended count is
+    -- compared beside the bytes. That is not decoration: the count is derived
+    -- from the rows a sync wrote, so a partial rewrite has a subset's answer
+    -- where a whole-run rewrite has the run's, and the two features are wrong
+    -- together in a way neither is wrong alone. Every combination this reaches
+    -- for is here, because the stream shuffles blended rows between slots,
+    -- appends them past opaque ones, and drops them off the end of a run.
     --
     -- One renderable archetype, which is the case reserving cannot help with
     -- and the one this exists for. It is also what makes the comparison sound:
@@ -680,11 +796,20 @@ describe("partial structural rewrites", function()
                 end
             end
             for _ = 1, nextInt(8) - 1 do
-                ops[#ops + 1] = { "spawn" }
+                -- Translucent every third spawn or so, which is what makes a run
+                -- hold a mix and makes the blended count something a partial
+                -- rewrite can get wrong.
+                ops[#ops + 1] = { "spawn", nextInt(3) == 1 and 0.5 or 1 }
                 population = population + 1
             end
             if population > 0 and nextInt(4) == 1 then
                 ops[#ops + 1] = { "move", nextInt(population), nextInt(64), nextInt(64) }
+            end
+            -- A value write to Tint, which flips a row's lane and takes the
+            -- whole-run path on both sides: it is the case the partial path is
+            -- not allowed to narrow, and the count has to follow it too.
+            if population > 0 and nextInt(6) == 1 then
+                ops[#ops + 1] = { "tint", nextInt(population), nextInt(2) == 1 and 0.25 or 1 }
             end
             ops[#ops + 1] = { "frame", frame }
         end
@@ -694,7 +819,7 @@ describe("partial structural rewrites", function()
 
         local function apply(side, op)
             if op[1] == "spawn" then
-                spawn(side)
+                spawn(side, op[2])
             elseif op[1] == "despawn" then
                 local index = op[2]
                 local live = side.live
@@ -703,17 +828,28 @@ describe("partial structural rewrites", function()
                 live[#live] = nil
             elseif op[1] == "move" then
                 side.world:set(side.live[op[2]], Transform(op[3], op[4], 0, 1, 0, 4, 4))
+            elseif op[1] == "tint" then
+                side.world:getMut(side.live[op[2]], Tint).a = op[3]
             else
                 side.world:update(1 / 60)
             end
         end
 
         local savings = 0
+        local blended = 0
         for _, op in ipairs(ops) do
             apply(full, op)
             apply(part, op)
             if op[1] == "frame" then
                 assert.are.equal(full.packet.count, part.packet.count, "frame " .. op[2] .. ": the same extent")
+                -- Exact rather than at least, because the partial path can be
+                -- exact and settling for a bound would let it drift up to the
+                -- run's whole length under churn and stop meaning anything.
+                assert.are.equal(
+                    full.packet.blendCount,
+                    part.packet.blendCount,
+                    "frame " .. op[2] .. ": the same blended count"
+                )
                 for index = 0, full.packet.count * INSTANCE_FLOATS - 1 do
                     if full.instances[index] ~= part.instances[index] then
                         assert.are.equal(
@@ -733,19 +869,26 @@ describe("partial structural rewrites", function()
                     end
                 end
                 savings = savings + (full.packet.rewritten - part.packet.rewritten)
+                if part.packet.blendCount > blended then
+                    blended = part.packet.blendCount
+                end
             end
         end
-        return savings
+        return savings, blended
     end
 
     it("writes the same bytes as a whole-run rewrite, reserved", function()
-        assert.is_true(differential(true) > 0, "and wrote fewer rows somewhere, or this proves nothing")
+        local savings, blended = differential(true)
+        assert.is_true(savings > 0, "and wrote fewer rows somewhere, or this proves nothing")
+        assert.is_true(blended > 1, "and blended something while doing it, or the count proves nothing")
     end)
 
     it("writes the same bytes as a whole-run rewrite, packed", function()
         -- Packed, a length that moved relays the scene out and the partial path
         -- almost never runs. What this covers is that it never runs wrongly.
-        assert.is_true(differential(false) >= 0)
+        local savings, blended = differential(false)
+        assert.is_true(savings >= 0)
+        assert.is_true(blended > 1)
     end)
 end)
 

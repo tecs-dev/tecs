@@ -468,6 +468,151 @@ describe("tecs.gfx.particles", function()
     end)
 
     ---------------------------------------------------------------------------
+    -- Blending
+    --
+    -- Every claim here is one pixel over one opaque quad, because a blend cannot
+    -- be inferred from anything else: a lane that never ran, a mode that was
+    -- dropped and a sort that ordered the list backwards all produce a plausible
+    -- frame. The quad is blue and the particles are red, so the blue channel says
+    -- how much of what was behind survived and the red says how much of the
+    -- particle landed. That is the one arrangement in which alpha over, additive
+    -- and opaque give three different answers.
+    ---------------------------------------------------------------------------
+
+    -- An opaque blue quad filling the target, and one particle over it. One is
+    -- the whole point: eight of them at the same place would stack eight blends
+    -- deep and the arithmetic would say nothing about the mode. The effect is on
+    -- layer two so its particles are nearer than the quad, because the forward
+    -- pass tests the geometry pass's depth without writing it and a blended
+    -- particle behind opaque geometry is correctly hidden by it.
+    local function overQuad(world, blend, alpha, lifetime, gradient)
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(0.0, 0.0, 1.0, 1.0), Renderable())
+        newEmitter(
+            world,
+            particles.effect({
+                name = effectName(),
+                capacity = 64,
+                schedule = { bursts = { { time = 0, count = 1 } } },
+                initial = {
+                    lifetime = lifetime or 10,
+                    speed = 0,
+                    size = SIZE * 2,
+                    color = { 1.0, 0.0, 0.0, alpha },
+                },
+                update = { color = gradient },
+                render = { layer = 2, blend = blend },
+            })
+        )
+    end
+
+    it("blends a particle's alpha over what is behind it", function()
+        -- No blend named, so this is the default as well as the mode: an effect
+        -- authored with a translucent color blends, rather than writing that
+        -- color opaque over the scene.
+        local world, renderer = newScene(true)
+        overQuad(world, nil, 0.5)
+
+        local pixels = frames(world, renderer, 4)
+        local middle = center(pixels)
+
+        assert.is_true(middle.r > 100 and middle.r < 160, "half the particle's red must land, got " .. middle.r)
+        assert.is_true(middle.b > 100 and middle.b < 160, "and half the quad's blue must give way, got " .. middle.b)
+        renderer:destroy()
+    end)
+
+    it("adds an additive particle to what is behind it", function()
+        local world, renderer = newScene(true)
+        overQuad(world, "additive", 0.5)
+
+        local pixels = frames(world, renderer, 4)
+        local middle = center(pixels)
+
+        assert.is_true(middle.r > 100 and middle.r < 160, "half the particle's red must land, got " .. middle.r)
+        assert.are.equal(255, middle.b, "and none of the quad's blue may be taken away")
+        renderer:destroy()
+    end)
+
+    it("covers what is behind it when the effect asks for the opaque lane", function()
+        -- The opt-out, and what every effect drew before there was a choice: the
+        -- G-buffer is written with replace, so the particle's alpha reaches the
+        -- target having blended against nothing.
+        local world, renderer = newScene(true)
+        overQuad(world, "opaque", 0.5)
+
+        local pixels = frames(world, renderer, 4)
+        local middle = center(pixels)
+
+        assert.are.equal(255, middle.r, "the particle covers the quad whatever its alpha says")
+        assert.are.equal(0, middle.b, "and none of the quad survives")
+        renderer:destroy()
+    end)
+
+    it("fades a blended particle out along its gradient's alpha", function()
+        -- The fade the opaque lane could not do at all: the gradient's ends
+        -- differ only in alpha, and the size curve is left alone, so what takes
+        -- the particle off the screen is alpha and nothing else. Drawn opaque the
+        -- same effect would stay solid red for its whole life and then vanish.
+        local world, renderer = newScene(true)
+        overQuad(
+            world,
+            nil,
+            1.0,
+            1.0,
+            particles.gradient({ { 0.0, { 1.0, 1.0, 1.0, 1.0 } }, { 1.0, { 1.0, 1.0, 1.0, 0.0 } } })
+        )
+
+        local early = center(frames(world, renderer, 3))
+        assert.is_true(early.r > 220, "it starts all but opaque over the quad, got " .. early.r)
+        assert.is_true(early.b < 40, "covering it entirely, got " .. early.b)
+
+        -- Half a lifetime in, where the gradient's alpha is halfway too. This is
+        -- the frame the opaque lane cannot produce.
+        local middle = center(frames(world, renderer, 27))
+        assert.is_true(middle.r > 100 and middle.r < 160, "half the particle is left, got " .. middle.r)
+        assert.is_true(middle.b > 100 and middle.b < 160, "and half the quad shows through, got " .. middle.b)
+
+        local late = center(frames(world, renderer, 40))
+        assert.are.equal(0, late.r, "and it leaves without writing black over the quad")
+        assert.are.equal(255, late.b, "which is still whole")
+        renderer:destroy()
+    end)
+
+    it("reports the pool's blended slots so the forward lane is not skipped", function()
+        -- The gate, from the side the CPU can see. The backend runs no forward
+        -- lane on a frame nothing said was blended, and a pool whose instances
+        -- are written by compute is the one producer that cannot count what is
+        -- actually live, so it answers with the slots that may hold one.
+        local world, renderer = newScene(true)
+        local pool = particles.poolOf(world)
+
+        assert.are.equal(0, pool:blended(), "an empty pool has nothing to blend")
+
+        local blended = newEmitter(world, stillBurst({ capacity = 32, lifetime = 0.05 }))
+        newEmitter(
+            world,
+            particles.effect({
+                name = effectName(),
+                capacity = 16,
+                initial = { lifetime = 1.0 },
+                render = { layer = 1, blend = "opaque" },
+            })
+        )
+        frames(world, renderer, 2)
+
+        assert.are.equal(32, pool:blended(), "the opaque emitter's slots are not counted")
+
+        world:despawn(blended)
+        -- Its particles may still be alive and still being drawn, so its slots
+        -- stay counted until the range is released.
+        frame(world, renderer)
+        assert.are.equal(32, pool:blended(), "a draining range is still blending")
+
+        frames(world, renderer, 12)
+        assert.are.equal(0, pool:blended(), "and stops once the range comes back")
+        renderer:destroy()
+    end)
+
+    ---------------------------------------------------------------------------
     -- Spawn geometry
     ---------------------------------------------------------------------------
 
@@ -884,18 +1029,38 @@ describe("tecs.gfx.particles", function()
         assert.are.equal(2.0, effect.maxLifetime)
     end)
 
-    it("accepts a blend mode and says plainly that it is inert", function()
-        -- Accepted so an effect authored today draws correctly once there is a
-        -- blended pass, and logged so nobody ships believing it does now.
-        local effect = particles.effect({
+    it("refuses a blend mode it does not know", function()
+        -- Named rather than ignored. A mode nothing recognizes used to be
+        -- accepted and logged, which meant an effect authored for a look drew
+        -- something else and said so once in a log nobody was reading.
+        local ok, err = pcall(function()
+            particles.effect({
+                name = effectName(),
+                capacity = 8,
+                initial = { lifetime = 1.0 },
+                render = { layer = 1, blend = "screen" },
+            })
+        end)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(err):find("alpha, additive or opaque", 1, true), tostring(err))
+    end)
+
+    it("reports the mode an effect resolved to, and alpha when none was named", function()
+        local named = particles.effect({
             name = effectName(),
             capacity = 8,
             initial = { lifetime = 1.0 },
-            render = { layer = 1, blend = "add" },
+            render = { layer = 1, blend = "additive" },
+        })
+        local bare = particles.effect({
+            name = effectName(),
+            capacity = 8,
+            initial = { lifetime = 1.0 },
+            render = { layer = 1 },
         })
 
-        assert.is_not_nil(effect)
-        assert.are.equal(1, effect.index > 0 and 1 or 0)
+        assert.are.equal("additive", named.blend)
+        assert.are.equal("alpha", bare.blend, "the default blends rather than writing opaque over the scene")
     end)
 
     it("names a material by name rather than by number", function()

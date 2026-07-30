@@ -77,18 +77,35 @@ and logs the refusal.
 Snapshots store effect name, seed, configuration, and playback state. They do
 not store individual particles, so a restored emitter starts empty and refills.
 
-Particles currently use the opaque lane. Color alpha does not blend. Use a size
-curve that reaches zero for disappearance. Debris, rain, snow, confetti, and
-hard-edged sparks fit this system; smoke, glow, fire, and soft dust do not.
+## Blending
+
+`render.blend` selects `"alpha"`, `"additive"`, or `"opaque"`, and defaults to
+`"alpha"`. The first two draw in the forward pass over the composited image,
+depth tested and not written, so alpha means what it says: a gradient that ends
+transparent fades out, and `"additive"` adds light instead of covering, which is
+what fire, glow, and sparks want. `"opaque"` keeps the effect in the G-buffer.
+
+A blended effect is not in the G-buffer, so it casts no shadow and no light's
+occluder mask sees it, and it is not shadowed by one either. It also draws after
+compositing, so all of one effect's particles composite as one group in pool-slot
+order rather than being sorted against each other: an effect names one layer and
+its particles take one depth within it. Sorting within a pool is a separate
+feature.
+
+One blended emitter puts the frame's forward lane to work, which is five compute
+passes and a draw a world with nothing blended in it does not pay. A world of
+`"opaque"` effects pays none of it, which is the other reason that name exists.
 ]=]
 -- Implementation details:
 -- The pool sub-allocates one contiguous particle and renderer-instance range
 -- per emitter. Three compute passes simulate, spawn, and write instances before
 -- culling. No per-particle state crosses back to the CPU.
 --
--- Particle bounds always select the deferred lane. The pool implements both
--- `InstanceProducer` and `Backend.ComputeStage`, so host instance uploads never
--- overwrite the ranges that compute owns.
+-- A particle's bound selects its lane the way an entity's does, by the sign of
+-- the first half extent, and the simulate pass writes it negated for a blended
+-- effect. The pool implements both `InstanceProducer` and
+-- `Backend.ComputeStage`, so host instance uploads never overwrite the ranges
+-- that compute owns.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
@@ -127,7 +144,7 @@ local logger <const> = log.get("tecs.gfx")
 --- Floats per effect record. `PARTICLE_EFFECT_FLOATS` in
 --- `assets/shaders/include/particle.glsl` is the same number, as is every
 --- offset below, and the pair only works while they agree.
-local EFFECT_FLOATS <const> = 64
+local EFFECT_FLOATS <const> = 65
 
 --- Bursts one effect's schedule holds.
 local MAX_BURSTS <const> = 4
@@ -193,6 +210,7 @@ local EFFECT <const>: {string: integer} = {
     ALIGNMENT = 61,
     STRETCH = 62,
     OUTWARD = 63,
+    BLENDED = 64,
 }
 
 --- Floats per emitter record, and where each field sits.
@@ -253,7 +271,7 @@ local MAX_STEPS <const> = 8
 --- A ceiling rather than a hint, for the reason the frame table's is one:
 --- growing it would mean a second device buffer while a frame in flight is
 --- still reading the first. A quarter of a megabyte holds several hundred
---- effects, since one costs sixty-four floats plus thirty-two per curve and a
+--- effects, since one costs sixty-five floats plus thirty-two per curve and a
 --- hundred and twenty-eight per gradient.
 local EFFECT_TABLE_FLOATS <const> = 65536
 
@@ -291,7 +309,8 @@ end
 
 --- Stores a color gradient over normalized age as a compiled lookup table.
 ---
---- The table retains alpha, but the opaque particle lane cannot use it yet.
+--- Alpha is carried and used: a blended effect fades with it, and an effect whose
+--- `render.blend` is `"opaque"` writes it to a target that has nowhere to put it.
 local record Gradient
     --- Read-only. Provides evenly spaced RGBA samples over normalized age,
     --- with four floats per sample.
@@ -427,8 +446,9 @@ local record UpdateOptions
     --- curve multiplies by one, so leaving it out costs nothing.
     size: Curve
     --- Caller-writable. Multiplies each particle's color over its life. An absent
-    --- gradient multiplies by white, so leaving it out costs nothing. The opaque
-    --- particle lane ignores alpha.
+    --- gradient multiplies by white, so leaving it out costs nothing. Its alpha
+    --- fades a blended effect and is ignored by an effect whose `render.blend` is
+    --- `"opaque"`.
     color: Gradient
 end
 
@@ -475,11 +495,20 @@ local record RenderOptions
     --- Caller-writable. Multiplies the along-path axis when aligned to
     --- velocity. Defaults to one.
     stretch: number
-    --- Caller-writable. Selects a blend mode. Tecs currently accepts, logs
-    --- once, and ignores it because no particle reaches the
-    --- forward blended lane, so an effect authored with one today draws opaque
-    --- and will draw as written once the simulate pass can pick that lane. The
-    --- log carries the note once per name rather than once per effect.
+    --- Caller-writable. Selects `"alpha"`, `"additive"`, or `"opaque"`. Defaults
+    --- to `"alpha"`, and anything else raises.
+    ---
+    --- `"alpha"` and `"additive"` draw in the forward pass over the composited
+    --- image, depth tested and not written, so a particle is still hidden by
+    --- geometry in front of it. `"alpha"` keeps that much less of what is behind
+    --- it and `"additive"` adds to it, so a dark additive particle changes
+    --- nothing and overlapping ones brighten.
+    ---
+    --- `"opaque"` draws into the G-buffer instead. What it gives up is alpha,
+    --- which the G-buffer is written with replace and has nowhere to put: a fade
+    --- to transparent writes opaque over what was behind it, and the only fade
+    --- left is a size curve reaching zero. What it buys is everything that reads
+    --- the G-buffer, which is the occluder mask and being shadowed by one.
     blend: string
     --- Caller-writable. Selects the clip region that contains the fragments.
     --- Defaults to zero, which is no clipping.
@@ -530,6 +559,10 @@ local record Effect
     index: integer
     --- Read-only. Reports how many live particles one emitter can hold.
     capacity: integer
+    --- Read-only. Reports the blend mode the effect resolved to, which is one of
+    --- the three `render.blend` names and never nil. The pool reads it to say how
+    --- many of its slots may reach the forward pass.
+    blend: string
     --- Read-only. Reports the longest particle lifetime in seconds, which decides when an
     --- emitter that has stopped emitting has finished.
     maxLifetime: number
@@ -730,10 +763,9 @@ end
 
 --- Compiles keyframes into a color gradient.
 ---
---- Keys are `{ age, color }`. The alpha channel is carried and is inert until
---- a particle can be routed into the forward blended lane: today a fade to
---- transparent writes opaque, and the only fade that works is the size curve
---- going to zero.
+--- Keys are `{ age, color }`. The alpha channel fades a blended effect and is
+--- inert on one whose `render.blend` is `"opaque"`, where a fade to transparent
+--- writes opaque and the only fade that works is the size curve going to zero.
 local function newGradient(keys: {CurveKey}): Gradient
     return {
         samples = sampleKeys(
@@ -758,9 +790,29 @@ local SHAPES <const>: {string: number} = {
     cone = 6.0,
 }
 
---- Blend modes named so far, so the note about them being inert is logged once
---- per name rather than once per effect.
-local blendNoted: {string: boolean} = {}
+--- What one blend mode means to the two records that carry it.
+local record Blending
+    --- The value `packSlot` takes, which the forward pass reads back to choose
+    --- between covering and adding.
+    packed: integer
+    --- One for an effect the forward pass draws, zero for one the G-buffer draws,
+    --- and what `EFFECT.BLENDED` holds.
+    forward: number
+end
+
+--- What each blend mode packs into the effect's slot float, and whether the
+--- effect is drawn in the forward pass at all.
+---
+--- `"opaque"` has no packed mode of its own: it never reaches the pass that reads
+--- one, so it takes the value a writer with nothing to say about blending writes,
+--- and the bound the simulate pass puts beside it is what keeps it out of the
+--- lane. That is the same arrangement an entity has, where the tint decides the
+--- lane and the packed mode is only read once the lane has been chosen.
+local BLENDING <const>: {string: Blending} = {
+    opaque = {packed = 0, forward = 0.0},
+    alpha = {packed = instancelayout.blendOf("alpha"), forward = 1.0},
+    additive = {packed = instancelayout.blendOf("additive"), forward = 1.0},
+}
 
 --- Registers an effect and answers the handle an emitter names it by.
 local function newEffect(options: EffectOptions): Effect
@@ -912,6 +964,13 @@ local function newEffect(options: EffectOptions): Effect
         fields[EFFECT.MATERIAL] = materials.id(render.material) + param
     end
 
+    local blend <const> = render.blend or "alpha"
+    local blendEntry <const> = BLENDING[blend]
+    if blendEntry == nil then
+        error(("tecs: '%s' is not a blend mode; use alpha, additive or opaque"):format(tostring(blend)), 2)
+    end
+    fields[EFFECT.BLENDED] = blendEntry.forward
+
     local layer <const> = render.layer or 1
     if layer < 1 or layer > layers.MAX then
         error(("tecs: render.layer is 1 to %d, not %d"):format(layers.MAX, layer), 2)
@@ -919,7 +978,9 @@ local function newEffect(options: EffectOptions): Effect
     -- One depth for the effect rather than one per particle. An effect names
     -- one layer, so its band and sort mode are constant, and what a per
     -- particle depth would buy is sorting within the band, which is a
-    -- separate feature and not implied by this one.
+    -- separate feature and not implied by this one. It is what decides where a
+    -- blended effect's particles sort against the blended entities on the same
+    -- layer, and they take the depth an entity at the world origin would.
     fields[EFFECT.DEPTH] = layers.depthOf(layer, 0.0, 0.0, 0.0)
     fields[EFFECT.UNBOUNDED] = layers.viewCulled(layer) and 0.0 or 1.0
 
@@ -938,7 +999,9 @@ local function newEffect(options: EffectOptions): Effect
         fields[EFFECT.V1] = sprite.v1
         arrayLayer = sprite.slot >= 0.0 and sprite.slot or 0.0
     end
-    fields[EFFECT.SLOT] = instancelayout.packSlot(render.clip or 0, arrayLayer)
+    -- No cast height, because a particle casts nothing: the two roles that do
+    -- are chosen by a bound's signs and the simulate pass writes neither of them.
+    fields[EFFECT.SLOT] = instancelayout.packSlot(render.clip or 0, arrayLayer, nil, blendEntry.packed)
 
     if render.sheet ~= nil then
         local tag <const> = render.sheet:tagId(render.tag)
@@ -954,17 +1017,6 @@ local function newEffect(options: EffectOptions): Effect
     end
     fields[EFFECT.ALIGNMENT] = render.alignment == "velocity" and 1.0 or 0.0
     fields[EFFECT.STRETCH] = render.stretch or 1.0
-
-    if render.blend ~= nil and not blendNoted[render.blend] then
-        blendNoted[render.blend] = true
-        logger:warn(
-            "particle blend '%s' is accepted and ignored: nothing "
-                .. "particle-shaped reaches the forward blended lane, so "
-                .. "particles draw opaque and a color's alpha reaches the "
-                .. "target unblended",
-            render.blend
-        )
-    end
 
     if options.overflow ~= nil and options.overflow ~= "drop" and options.overflow ~= "replace" then
         error(("tecs: '%s' is not an overflow policy; use drop or replace"):format(tostring(options.overflow)), 2)
@@ -1010,6 +1062,7 @@ local function newEffect(options: EffectOptions): Effect
         name = name,
         index = #registry + 1,
         capacity = capacity,
+        blend = blend,
         maxLifetime = maxLifetime,
         meanLifetime = meanLifetime,
         emitFor = emitFor,
@@ -1132,8 +1185,9 @@ local record ParticleEmitter is ecs.Component
     sizeScale: number
     --- Caller-writable. Multiplies the speed of the effect clock.
     timeScale: number
-    --- Caller-writable. Multiplies every particle's color. The opaque particle
-    --- lane ignores alpha.
+    --- Caller-writable. Multiplies every particle's color, alpha included, so a
+    --- tint is how one emitter of a blended effect fades against another. An
+    --- effect whose `render.blend` is `"opaque"` ignores the alpha.
     tint: Color
 
     --- Engine-owned. Stores the emitter's pool index. Ordinary game code
@@ -1348,6 +1402,10 @@ local record Draining
     base: integer
     count: integer
     releaseAt: number
+    --- Whether the effect that held it blends. Carried rather than looked up,
+    --- because the emitter is gone and its effect went with it, and a draining
+    --- range's particles are still being drawn.
+    blended: boolean
 end
 
 --- Configures a
@@ -1446,6 +1504,11 @@ local record Pool
     --- Engine-owned. Stores the number of live emitters. Ordinary game code
     --- should ignore this field.
     _live: integer
+    --- Engine-owned. Stores slots reserved by emitters whose effect blends,
+    --- draining ranges included. Ordinary game code should ignore this field.
+    --- Kept as a running total rather than walked per frame, because the walk
+    --- would answer the same number every frame between two spawns.
+    _blendedSlots: integer
 
     --- Engine-owned. Tracks frames that still require a dispatch. Ordinary
     --- game code should ignore this field. It remains positive while an emitter is
@@ -1533,6 +1596,7 @@ local function newPool(renderer: Renderer, capacity: integer, maxEmitters: integ
     self._indexFree = {}
     self._indexHigh = 0
     self._live = 0
+    self._blendedSlots = 0
     self._settle = 0
     self._step = 0.0
     self._timestep = 0.0
@@ -1713,6 +1777,9 @@ local function admit(self: Pool, item: ParticleEmitter): Holding
     }
     self._holdings[item] = holding
     self._live = self._live + 1
+    if effect.blend ~= "opaque" then
+        self._blendedSlots = self._blendedSlots + effect.capacity
+    end
     return holding
 end
 
@@ -1735,6 +1802,7 @@ local function retire(self: Pool, holding: Holding, step: number)
         base = holding.base,
         count = holding.count,
         releaseAt = step + steps + 1,
+        blended = effect ~= nil and effect.blend ~= "opaque",
     }
     -- Unowned from now, so the simulate pass hides the slots as their
     -- particles expire and stops touching them once they all have.
@@ -1758,6 +1826,12 @@ local function drain(self: Pool, step: number)
         local entry <const> = held[index]
         if step >= entry.releaseAt then
             release(self, entry.base, entry.count)
+            -- Released here rather than when the emitter went, because the range
+            -- was still drawing its last particles until now and the forward lane
+            -- had to be running to draw them.
+            if entry.blended then
+                self._blendedSlots = self._blendedSlots - entry.count
+            end
         else
             kept = kept + 1
             held[kept] = entry
@@ -1822,6 +1896,21 @@ end
 
 function Pool:takeDirty(): {integer}
     return NOTHING
+end
+
+--- Slots the forward pass may find a particle in.
+---
+--- Reserved slots rather than live particles, and it has to be: what is alive
+--- lives in a buffer the CPU never reads, so the honest answer here is the only
+--- one that cannot be too small. Too small is the failure that matters, because
+--- the backend skips the whole forward lane on a frame nothing said was blended
+--- and every particle of every blended effect would then go missing.
+---
+--- A slot with no live particle in it writes the hidden bound, so over-reporting
+--- costs the lane five compute passes over slots the mark pass has already
+--- rejected, and never a draw.
+function Pool:blended(): integer
+    return self._blendedSlots
 end
 
 --- Hides the run and remembers where it landed.
@@ -2244,7 +2333,7 @@ local record particles
     --- Compiles keyframes into a color gradient over normalized age.
     ---
     --- @param keys Supplies `{age, color}` pairs under the same rules as
-    ---     `curve`. The table retains alpha, but the opaque lane ignores it.
+    ---     `curve`. Alpha fades a blended effect and is ignored by an opaque one.
     --- @return A gradient resampled like a curve, interpolating each channel
     ---     separately, so two colors blend through whatever lies between them
     ---     componentwise rather than around a color wheel.

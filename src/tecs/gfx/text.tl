@@ -865,6 +865,17 @@ function Glyphs:takeDirty(): {integer}
     return self._dirty
 end
 
+--- None, because a glyph is drawn in the G-buffer lane whatever its alpha is.
+---
+--- The distance field resolves its own edge and the material puts that edge in
+--- alpha, so a glyph does not need the forward pass to look right; routing text
+--- there instead would take it out of the G-buffer and out of everything that
+--- reads one, which is a change to how text is drawn rather than to how it is
+--- counted.
+function Glyphs:blended(): integer
+    return 0
+end
+
 function Glyphs:write(floats: loader.CArray, bounds: loader.CArray, base: integer, first: integer, last: integer)
     local count = last - first + 1
     if count <= 0 then

@@ -2464,6 +2464,11 @@ describe("ecs.Renderer", function()
                 self.dirty = {}
                 return out
             end
+            -- Opaque, which is what the bounds below say: both half extents are
+            -- written positive.
+            function self:blended()
+                return 0
+            end
             function self:write(floats, bounds, base, first, last)
                 for index = first, last do
                     local at = (base + index - 1) * 16

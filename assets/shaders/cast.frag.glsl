@@ -30,6 +30,9 @@ void main() {
     frag.uv = vUV;
     frag.color = vColor;
     frag.param = vParam;
+    // A silhouette is a yes or no, so this pass wants the same membership the
+    // G-buffer decided rather than a soft edge that would spread the shadow.
+    frag.blended = false;
 
     MaterialOutput shaded = materialDispatch(vMaterial, frag);
     if (shaded.coverage <= 0.0) { discard; }

@@ -56,12 +56,14 @@ MaterialOutput material(MaterialInput frag) {
 
 `frag.local` runs from -0.5 to 0.5 inside the quad. `frag.uv`, `frag.color`,
 and `frag.param` carry the image coordinates, tint, and instance parameter.
-Start from `materialDefaults`, then set `albedo`, `normal`, `lit`, and
-`coverage`.
+`frag.blended` says whether the fragment reaches a pass that blends it. Start
+from `materialDefaults`, then set `albedo`, `normal`, `lit`, and `coverage`.
 
 Coverage above zero keeps a fragment; zero or below discards it. The deferred
 lane does not blend partial coverage. A tint alpha below one routes the
-instance to the blended lane instead.
+instance to the blended lane instead, and so does a particle effect whose
+`render.blend` asks for it. A material that resolves an edge by discarding should
+put the edge in alpha where `frag.blended` is set, which is what `textured` does.
 
 ## Reloads
 

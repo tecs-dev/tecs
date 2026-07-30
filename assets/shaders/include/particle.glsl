@@ -45,7 +45,7 @@ layout(set = PARTICLE_SET, binding = PARTICLE_EMITTER_BINDING) readonly buffer E
 
 // Floats per effect record. `EFFECT_FLOATS` in src/tecs/gfx/particles.tl is
 // the same number.
-const int PARTICLE_EFFECT_FLOATS = 64;
+const int PARTICLE_EFFECT_FLOATS = 65;
 
 // Where each field sits within one effect record.
 const int EFFECT_RATE = 0;
@@ -107,6 +107,11 @@ const int EFFECT_PIVOT_Y = 60;
 const int EFFECT_ALIGNMENT = 61;
 const int EFFECT_STRETCH = 62;
 const int EFFECT_OUTWARD = 63;
+// Nonzero for an effect the forward pass draws. Which of the two blend modes it
+// is drawn with is already packed into EFFECT_SLOT, because the fragment shader
+// reads that and no effect record; what is here is only whether the bound beside
+// the instance selects the forward lane at all.
+const int EFFECT_BLENDED = 64;
 
 // Floats per emitter record, and where each field sits.
 const int PARTICLE_EMITTER_FLOATS = 24;

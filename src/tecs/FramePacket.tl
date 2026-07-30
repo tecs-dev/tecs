@@ -44,7 +44,7 @@ local record FramePacket
     --- Instances the extraction actually rewrote. Zero on a still frame.
     rewritten: integer
 
-    --- Resident instances extraction routed to the forward pass.
+    --- Resident instances the forward pass may draw.
     ---
     --- A number rather than a flag because it is the same walk that produces
     --- `count`, and a count says how close a scene is to the ceiling the
@@ -53,7 +53,13 @@ local record FramePacket
     --- list costs five compute passes to discover it is empty, and a world that
     --- blends nothing should not pay them.
     ---
-    --- Which instances those are is not carried here. Extraction says so per
+    --- Exact for the rows extraction wrote, and an upper bound for a producer's
+    --- run: a producer whose instances are written by compute reports the slots
+    --- that may hold blended instances rather than the ones that do, because the
+    --- CPU never learns what a compute pass put there. So this is at least what
+    --- the frame blends and never less.
+    ---
+    --- Which instances those are is not carried here. The writer says so per
     --- row, by writing the first of the two half extents in the cull bound
     --- negated, and the mark pass reads the sign; see
     --- `assets/shaders/include/cull.glsl`. This number and that sign come from
@@ -128,9 +134,18 @@ end
 
 --- Clears everything a frame reports, ready to be filled again.
 ---
---- The counts are not cleared: an extraction writes all three before it
---- returns, and a packet that reported zero drawn between being reset and
---- being filled would be a state no consumer should be able to observe.
+--- The counts are not cleared here, because an extraction assigns every one of
+--- them before it returns: a packet that reported zero drawn between being reset
+--- and being filled would be a state no consumer should be able to observe.
+---
+--- That every count is assigned rather than added to is load bearing, and one
+--- packet is created per renderer and reused for the life of it, so a count that
+--- accumulated would describe every frame there has ever been rather than this
+--- one. `blendCount` did, and the backend's forward lane read it as "anything has
+--- ever blended" and ran on every later frame including the ones with nothing to
+--- blend. So a count that has to survive a frame which rewrote nothing is kept
+--- where that frame can find it again, which for an archetype's blended rows is
+--- its `Run`, and never by leaving it here to grow.
 ---
 --- @param slot The staging slot this frame's bytes are going into, zero-based
 ---     and below `Buffer.slotCount`. Recorded rather than checked.

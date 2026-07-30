@@ -63,9 +63,10 @@ describe("forward blending", function()
 
     -- One quad covering the whole target, written by hand into the staging the
     -- backend mapped. This is exactly what an extractor writes, including the
-    -- one thing that says the quad is blended: the first half extent of its
-    -- cull bound, negated.
-    local function writeQuad(backend, index, depth, r, g, b, a, blended)
+    -- two things that decide how it is drawn: the first half extent of its cull
+    -- bound negated, which routes it forward, and the blend mode packed into the
+    -- slot float, which says what the forward pass does with it once it is there.
+    local function writeQuad(backend, index, depth, r, g, b, a, blended, mode)
         local instances, bounds = backend:mapSlot(0)
         local base = index * INSTANCE_FLOATS
         instances[base] = 0.0 -- rotation
@@ -74,7 +75,10 @@ describe("forward blending", function()
         instances[base + 3] = depth
         instances[base + 4] = SIZE / 2
         instances[base + 5] = SIZE / 2
-        instances[base + 6] = 0.0 -- white layer, no clip region
+        -- White layer, no clip region, no cast height. Alpha packs as zero, so
+        -- naming no mode writes the float a writer that never heard of blend
+        -- modes wrote.
+        instances[base + 6] = instancelayout.packSlot(0, 0, nil, instancelayout.blendOf(mode or "alpha"))
         instances[base + 7] = 0.0 -- default material
         instances[base + 8], instances[base + 9] = r, g
         instances[base + 10], instances[base + 11] = b, a
@@ -212,6 +216,45 @@ describe("forward blending", function()
         local center = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
         assert.are.equal(255, center.g)
         assert.are.equal(0, center.r, "the previous frame's forward list must not be drawn again")
+
+        backend:destroy()
+    end)
+
+    it("adds an additive instance to what is behind it instead of covering it", function()
+        -- The same scene twice, differing only in the blend mode packed into the
+        -- slot float. Blue behind, opaque. Red in front at half alpha, so alpha
+        -- over keeps half the blue and additive keeps all of it: the blue channel
+        -- is what tells the two apart, and neither pass changes the red.
+        local backend = newBackend()
+        local packet = FramePacket.create()
+
+        writeQuad(backend, 0, 0.6, 0.0, 0.0, 1.0, 1.0, false)
+        writeQuad(backend, 1, 0.5, 1.0, 0.0, 0.0, 0.5, true, "additive")
+        finish(packet, 2, 1)
+
+        local scene, pixels = consume(backend, packet)
+        local center = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
+        near(center.r, 128, "half the red must land")
+        near(center.g, 0, "nothing wrote green")
+        assert.are.equal(255, center.b, "an additive fragment must leave what is behind it whole")
+
+        backend:destroy()
+    end)
+
+    it("blends the same instance over what is behind it when the mode is alpha", function()
+        -- The revert check for the pair above, and the reason either means
+        -- anything: one number in one float is the whole difference.
+        local backend = newBackend()
+        local packet = FramePacket.create()
+
+        writeQuad(backend, 0, 0.6, 0.0, 0.0, 1.0, 1.0, false)
+        writeQuad(backend, 1, 0.5, 1.0, 0.0, 0.0, 0.5, true, "alpha")
+        finish(packet, 2, 1)
+
+        local scene, pixels = consume(backend, packet)
+        local center = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
+        near(center.r, 128, "half the red must land")
+        near(center.b, 128, "and half the blue behind it must give way")
 
         backend:destroy()
     end)

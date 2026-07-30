@@ -142,6 +142,20 @@ local record InstanceProducer
     --- the run is skipped.
     takeDirty: function(self: InstanceProducer): {integer}
 
+    --- Instances of its run that may reach the forward pass.
+    ---
+    --- Asked every sync, because the forward lane is skipped entirely on a frame
+    --- nothing said was blended and a producer whose run holds blended instances
+    --- would then not be drawn. A producer that never blends answers zero and
+    --- costs one call.
+    ---
+    --- An upper bound rather than a count, and deliberately: a producer whose
+    --- instances are written by compute cannot know how many of them a frame
+    --- actually has. Over-reporting runs a lane that finds less than it was told
+    --- to expect, which is the safe direction; under-reporting drops the whole
+    --- lane, which is not.
+    blended: function(self: InstanceProducer): integer
+
     --- Writes instances `first` through `last` of its run. `base` is the
     --- instance index the run starts at, so instance `first` is written at
     --- `base + first - 1`.
@@ -160,6 +174,21 @@ local record Run
     offset: integer
     --- Rows the run held after the last sync wrote it.
     length: integer
+    --- Rows of the run's first `length` that the forward pass draws.
+    ---
+    --- The run's whole total, and never a subset's: kept per run rather than
+    --- totalled per frame because a run whose columns are all clean is not
+    --- rewritten and its blended rows are still resident, so a frame that
+    --- counted only what it wrote would report none of them. A partial rewrite
+    --- makes that trap sharper, since it writes some of a run's rows and its
+    --- count answers for those alone; `syncInstances` is where the two are
+    --- reconciled, and it is the one place allowed to assign this.
+    ---
+    --- It survives a frame untouched only when that frame left the run's rows
+    --- untouched, which is what makes it still true: a length that moved is a
+    --- structural change, and a structural change either rewrites the run or
+    --- takes the partial path, both of which settle this again.
+    blended: integer
     --- Slots the run owns from `offset`. Equal to `length` when runs are
     --- packed, and at least it when they are reserved: the difference is the
     --- room the archetype grows into, written as hidden.
@@ -396,21 +425,26 @@ function Extractor:addProducer(producer: InstanceProducer)
     self._producers[#self._producers + 1] = producer
 end
 
---- Writes rows `first` through `last` of one archetype into its run.
+--- Writes rows `first` through `last` of one archetype into its run, and answers
+--- how many of them the forward pass draws.
 ---
---- Marks nothing: which bytes the frame names is the caller's, because a
---- caller writing scattered rows may want one span covering them rather than
---- one per row. See `markRun`.
+--- Marks nothing, and takes no packet so that it cannot: which bytes the frame
+--- names is the caller's, because a caller writing scattered rows may want one
+--- span covering them rather than one per row. See `markRun`.
+---
+--- The count is over the rows written and no others, so a caller that wrote a
+--- subset has a subset's answer and owes the rest of its run separately. See
+--- `countBlended`.
 ---
 --- Columns are read, not mutated, so `get` is correct here. Taking `getMut`
 --- would mark these components dirty on every archetype every frame, which
 --- would make the gate below always true and defeat its own purpose.
 local function writeRows(
-    self: Extractor, packet: FramePacket, archetype: ecs.Archetype, first: integer, last: integer, offset: integer
-)
+    self: Extractor, archetype: ecs.Archetype, first: integer, last: integer, offset: integer
+): integer
     local floats = self._instances
     local bounds = self._bounds
-    -- Rows in this run whose tint asks for blending. Counted here rather than
+    -- Rows written here whose tint asks for blending. Counted here rather than
     -- derived later because the sign that carries it is written here, so the
     -- count and the lane are right together or wrong together.
     local blended = 0
@@ -697,7 +731,7 @@ local function writeRows(
         end
     end
 
-    packet.blendCount = packet.blendCount + blended
+    return blended
 end
 
 --- Marks the bytes a run of instances occupies, in both range lists.
@@ -710,11 +744,37 @@ local function markRun(packet: FramePacket, offset: integer, count: integer)
 end
 
 --- Writes an archetype's whole run and marks it.
+---
+--- @return Rows of it the forward pass draws, which for a whole run is the run's
+---     own total and needs nothing else to complete it.
 local function writeRun(
     self: Extractor, packet: FramePacket, archetype: ecs.Archetype, length: integer, offset: integer
-)
-    writeRows(self, packet, archetype, 1, length, offset)
+): integer
+    local blended <const> = writeRows(self, archetype, 1, length, offset)
     markRun(packet, offset, length)
+    return blended
+end
+
+--- How many of a run's first `length` rows the forward pass draws.
+---
+--- One float per row, against the twenty a rewrite of the same row writes, and
+--- reached only from the partial path with a run that already holds a blended
+--- row. A run whose last write found none needs none of this: the partial path
+--- only runs while every value column is clean, so a row it did not rewrite is
+--- as opaque as it was and the rows it did rewrite counted themselves.
+---
+--- `writeRows` decides the same thing from the same field, inline, and the two
+--- only work while they agree: a row is drawn by the forward pass when its tint
+--- is not fully opaque.
+local function countBlended(archetype: ecs.Archetype, length: integer): integer
+    local tints <const> = archetype:get(components.Tint)
+    local blended = 0
+    for row = 1, length do
+        if tints[row].a < 1.0 then
+            blended = blended + 1
+        end
+    end
+    return blended
 end
 
 --- Puts `count` slots from `offset` where no view can see them.
@@ -767,6 +827,7 @@ local function newRun(): Run
     return {
         offset = 0,
         length = 0,
+        blended = 0,
         capacity = 0,
         pending = 0,
         moved = false,
@@ -1084,6 +1145,9 @@ end
 --- covering span it falls back to is what a whole-run rewrite already names.
 ---
 --- @return The rows written.
+--- @return Rows among them the forward pass draws. A subset's answer rather than
+---     the run's, because the rows this did not write are not in it: what
+---     completes it is the caller's, and `countBlended` is the other half.
 local function writeResidue(
     self: Extractor,
     packet: FramePacket,
@@ -1091,7 +1155,7 @@ local function writeResidue(
     run: Run,
     pending: integer,
     addedFrom: integer
-): integer
+): integer, integer
     local touched, touchedCount = archetype:structuralTouched()
     local offset <const> = run.offset
     local spans = (addedFrom > 0 and addedFrom <= pending) and 1 or 0
@@ -1102,16 +1166,17 @@ local function writeResidue(
         end
     end
     if spans == 0 then
-        return 0
+        return 0, 0
     end
 
     local fine <const> = packet.instanceRanges.count + spans <= MARK_BUDGET
     local low = pending + 1
     local high = 0
     local written = 0
+    local blended = 0
 
     if addedFrom > 0 and addedFrom <= pending then
-        writeRows(self, packet, archetype as ecs.Archetype, addedFrom, pending, offset)
+        blended = blended + writeRows(self, archetype as ecs.Archetype, addedFrom, pending, offset)
         written = pending - addedFrom + 1
         if fine then
             markRun(packet, offset + addedFrom - 1, written)
@@ -1124,7 +1189,7 @@ local function writeResidue(
     for index = 1, touchedCount do
         local row <const> = touched[index]
         if row <= pending and (addedFrom == 0 or row < addedFrom) then
-            writeRows(self, packet, archetype as ecs.Archetype, row, row, offset)
+            blended = blended + writeRows(self, archetype as ecs.Archetype, row, row, offset)
             written = written + 1
             if fine then
                 markRun(packet, offset + row - 1, 1)
@@ -1142,7 +1207,7 @@ local function writeResidue(
     if not fine then
         markRun(packet, offset + low - 1, high - low + 1)
     end
-    return written
+    return written, blended
 end
 
 --- Rewrites only what changed.
@@ -1206,6 +1271,11 @@ local function syncInstances(self: Extractor, packet: FramePacket)
     self._lastAlpha = self._alpha
 
     local rewritten = 0
+    -- Resident instances the forward pass draws, totalled from what each run
+    -- last wrote rather than accumulated across frames. A clean run contributes
+    -- the count it was written with, which is what makes the total a description
+    -- of the scene as it stands rather than of every frame there has ever been.
+    local blended = 0
     -- Runs to exhaustion, which is what `iter` requires and what makes it the
     -- right traversal: a cursor is allocated per call, and this is the frame
     -- path. Nothing below breaks or returns, an archetype the layout could not
@@ -1259,11 +1329,33 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         end
 
         if dirty then
-            writeRun(self, packet, archetype, pending, run.offset)
+            run.blended = writeRun(self, packet, archetype, pending, run.offset)
             rewritten = rewritten + pending
         elseif residue then
-            rewritten = rewritten + writeResidue(self, packet, inner, run, pending, addedFrom)
+            local wrote, found = writeResidue(self, packet, inner, run, pending, addedFrom)
+            rewritten = rewritten + wrote
+            -- A subset was written, so the subset's count is not the run's and
+            -- storing it would report fewer blended rows than the run holds. The
+            -- lane is skipped at zero, so under-reporting loses geometry while
+            -- over-reporting only runs a lane that finds less than it expected:
+            -- this has to be exact or wrong in the second direction.
+            --
+            -- Exact, and for free in the case worth the most. The partial path
+            -- only runs while every value column is clean, so a row it did not
+            -- write carries the tint it carried before and cannot have changed
+            -- lane. A run whose last write found nothing blended therefore has
+            -- the residue's own count as its whole answer, which is what an
+            -- opaque scene is and what this optimization exists for. A run that
+            -- did hold one has to be counted, because a swap-pop may have
+            -- written over that row or the run may have given it up off its end,
+            -- and neither is anything the residue names.
+            if run.blended == 0 then
+                run.blended = found
+            else
+                run.blended = countBlended(archetype, pending)
+            end
         end
+        blended = blended + run.blended
 
         if reserve then
             -- Slots the run holds and is not drawing from. A run that moved
@@ -1307,6 +1399,14 @@ local function syncInstances(self: Extractor, packet: FramePacket)
                 end
             end
 
+            -- Asked whether the run was rewritten or not, for the reason a run's
+            -- own count is kept rather than accumulated: what a producer holds is
+            -- resident between frames, and a producer whose instances are written
+            -- by compute never rewrites anything through here at all.
+            if count > 0 then
+                blended = blended + producer:blended()
+            end
+
             local ranges = producer:takeDirty()
             if (relayout or producerMoved) and count > 0 then
                 producer:write(floats, bounds, base, 1, count)
@@ -1332,6 +1432,7 @@ local function syncInstances(self: Extractor, packet: FramePacket)
     packet.count = total
     packet.dropped = dropped
     packet.rewritten = rewritten
+    packet.blendCount = blended
 end
 
 --- Collects lights from the world into the packet.

@@ -241,6 +241,9 @@ describe("exception safety", function()
             takeDirty = function()
                 return explode and { 1, 4 } or {}
             end,
+            blended = function()
+                return 0
+            end,
             write = function()
                 error("spec: the instance producer threw")
             end,

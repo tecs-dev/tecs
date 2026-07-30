@@ -16,6 +16,13 @@ struct MaterialInput {
     // The instance's material parameter, 0 to 1. What it means is the
     // material's business; a rounded rectangle reads it as a corner radius.
     float param;
+    // Whether the fragment reaches a pass that blends it, which is the forward
+    // pass and no other. A material that resolves an edge by discarding, because
+    // replace cannot hold partial coverage, keeps the edge in alpha instead when
+    // this is set. Nothing else in the contract depends on the lane: a material
+    // decides what color a fragment is, and this is the one thing about the
+    // fragment's destination it cannot decide without being told.
+    bool blended;
 };
 
 struct MaterialOutput {
