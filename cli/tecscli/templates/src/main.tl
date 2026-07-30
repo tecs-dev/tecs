@@ -22,15 +22,17 @@ return tecs.newApplication({
     plugin = function(world: tecs.World, app: tecs.Application)
         print(("{{name}} on tecs %s, drawing through %s"):format(tecs.version, app.device.driver))
 
-        -- Drawing text is opt-in, because a font atlas is uploaded into one
-        -- particular renderer. This is what teaches the world to draw strings.
+        -- Drawing text is opt-in because SDF glyphs become renderer instances.
         world:addPlugin(tecs.gfx.textPlugin({renderer = app.renderer}))
 
         -- Measuring first is how the greeting ends up centerd. It reads the
         -- font and touches no entity.
         local greeting <const> = tecs.gfx.Text.new({
             text = "Hello Tecs",
-            font = tecs.gfx.defaultFont(),
+            font = tecs.gfx.newTTF({
+                source = "fonts/JetBrainsMono-ExtraBold.ttf",
+                size = 64,
+            }).value,
             size = 96,
         })
         local textWidth <const>, textHeight <const> = tecs.gfx.measureText(greeting)

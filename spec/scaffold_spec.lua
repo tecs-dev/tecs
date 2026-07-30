@@ -173,8 +173,7 @@ describe("a scaffolded project", function()
     -- machine with no assets of its own only while these are in there.
     it("carries the font the template draws with", function()
         for _, name in ipairs({
-            "fonts/jetbrainsmono-extrabold-msdf.json",
-            "fonts/jetbrainsmono-extrabold-msdf.png",
+            "fonts/JetBrainsMono-ExtraBold.ttf",
         }) do
             local handle = io.open(root .. "/" .. name, "r")
             assert.is_not_nil(handle, "the content root carries no " .. name)

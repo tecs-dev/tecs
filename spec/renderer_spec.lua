@@ -2860,7 +2860,11 @@ describe("ecs.Renderer", function()
 
         it("clips a text drawn through the producer", function()
             local text = require("tecs.gfx.text")
-            local font = text.defaultFont():wait().value
+            local font = text.newTTF({
+                source = "fonts/JetBrainsMono-ExtraBold.ttf",
+                size = 64,
+            })
+                :wait().value
 
             -- The atlas decodes on a worker, so the font arrives no earlier
             -- than the frame after the one that asked for it.

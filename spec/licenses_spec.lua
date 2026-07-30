@@ -144,6 +144,9 @@ local TOOLING_ONLY = {
 local NOTICE_NAMES = {
     SDL3 = "SDL3",
     SDL3_MIXER = "SDL3_mixer",
+    SDL3_TTF = "SDL3_ttf",
+    FREETYPE = "FreeType",
+    HARFBUZZ = "HarfBuzz",
     LUAJIT = "LuaJIT",
     SHADERC = "shaderc",
     -- shaderc's own three, pinned here rather than left to the script that
