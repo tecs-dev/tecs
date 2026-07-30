@@ -35,6 +35,9 @@ void main() {
     frag.uv = vUV;
     frag.color = vColor;
     frag.param = vParam;
+    // This pass writes with replace, so a material that has an edge to resolve
+    // has to resolve it by discarding.
+    frag.blended = false;
 
     MaterialOutput shaded = materialDispatch(vMaterial, frag);
 
