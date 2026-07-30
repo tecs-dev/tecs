@@ -41,10 +41,10 @@ a transfer that ended with the world that started it. The `Response` a game
 eventually reads is the reissued request's.
 
 The exception is a `Request` whose `body` or `into` is a
-`tecs.io.http.newHandleStream`. The caller owns that live handle, and neither
+`tecs.io.newHandleStream`. The caller owns that live handle, and neither
 snapshot format can reconstruct its ownership or position, so saving the world
 raises.
-Use `tecs.io.http.newFileStream` when a request must survive a snapshot.
+Use `tecs.io.newFileStream` when a request must survive a snapshot.
 
 Loading stops the transfers that were open before it. A load replaces the
 world in place and despawns nothing, so the entities that asked are gone
@@ -57,13 +57,16 @@ local type types = require("tecs.types")
 local storekeys <const> = require("tecs.internal.storekeys")
 local Future <const> = require("tecs.Future")
 local client <const> = require("tecs.io.http.client")
-local datastream <const> = require("tecs.io.http.DataStream")
+local stream <const> = require("tecs.io.stream")
+local type iotypes = require("tecs.io.types")
 
 local type World = types.World
 local type Component = ecs.Component
 local type Options = client.Options
 local type Client = client.Client
-local type DataStream = datastream.DataStream
+local type Stream = iotypes.Stream
+local type ReadableStream = iotypes.ReadableStream
+local type WritableStream = iotypes.WritableStream
 
 local record plugin
     --- What a game spawns to make a request. The fields of a `Request`,
@@ -75,17 +78,19 @@ local record plugin
         --- Caller-writable. Sets the method. Defaults to `"GET"`.
         method: string
         --- Caller-writable. Sets headers merged over the client's defaults
-        --- without regard to case.
+        --- without regard to case. A `Content-Length` must contain decimal
+        --- digits and must match a body whose length is known.
         headers: {string: string}
         --- Caller-writable. Sets what to send. A snapshot rejects a
-        --- `tecs.io.http.newHandleStream` here because its live handle cannot
+        --- `tecs.io.newHandleStream` here because its live handle cannot
         --- be reconstructed.
-        body: string | DataStream
-        --- Caller-writable. Sets where the body goes. Left out, it comes back
-        --- as a string. A snapshot rejects a
-        --- `tecs.io.http.newHandleStream` here because its live handle cannot
+        body: string | ReadableStream
+        --- Caller-writable. Sets where the body goes. Left out, the response
+        --- carries a replayable in-memory [`Stream`](tealdoc:tecs.io.Stream).
+        --- A snapshot rejects a
+        --- `tecs.io.newHandleStream` here because its live handle cannot
         --- be reconstructed.
-        into: string | DataStream
+        into: string | WritableStream
         --- Caller-writable. Sets milliseconds for this transfer, overriding
         --- the client's value.
         timeoutMs: number
@@ -109,7 +114,7 @@ local record plugin
         --- Engine-owned. Reports response headers with lower-cased names.
         headers: {string: string}
         --- Engine-owned. Provides the body wherever it went.
-        body: DataStream
+        body: Stream
         --- Engine-owned. Reports the URL that actually answered.
         url: string
         --- Engine-owned. Reports why the transfer did not complete, or nil
@@ -144,29 +149,76 @@ end
 local type Request = plugin.Request
 local type Response = plugin.Response
 
+local function copyHeaders(headers: {string: string}): {string: string}
+    if headers == nil then
+        return nil
+    end
+    local copied: {string: string} = {}
+    for name, value in pairs(headers) do
+        copied[name] = value
+    end
+    return copied
+end
+
 local function serializeRequest(request: Request): {string: any}
     local data: {string: any} = {}
     for key, value in pairs(request as {string: any}) do
-        if
-            (key == "body" or key == "into")
-            and datastream.DataStream.is(value)
-            and (value as DataStream).kind == "handle"
-        then
-            error(
-                ("tecs: cannot snapshot tecs.http.Request: %s from io.http.newHandleStream is runtime-only"):format(
-                    key
-                ),
-                0
-            )
-        end
         if type(key) == "string" and not key:match("^component") and key ~= "storage" then
             local valueType <const> = type(value)
-            if valueType == "number" or valueType == "string" or valueType == "boolean" or valueType == "table" then
+            if key == "headers" and valueType == "table" then
+                data.headers = copyHeaders(value as {string: string})
+            elseif (key == "body" or key == "into") and valueType == "table" then
+                data[key] = stream._snapshot(value as Stream, ("tecs.http.Request %s"):format(key))
+            elseif valueType == "number" or valueType == "string" or valueType == "boolean" then
                 data[key] = value
             end
         end
     end
     return data
+end
+
+local function deserializeRequest(_world: World, data: {string: any}): Request
+    local restored: {string: any} = {}
+    for key, value in pairs(data) do
+        if key == "headers" and type(value) == "table" then
+            restored.headers = copyHeaders(value as {string: string})
+        elseif (key == "body" or key == "into") and type(value) == "table" then
+            restored[key] = stream._restore(value as {string: any}, ("tecs.http.Request %s"):format(key))
+        else
+            restored[key] = value
+        end
+    end
+    return plugin.Request(restored)
+end
+
+local function serializeResponse(response: Response): {string: any}
+    local data: {string: any} = {
+        status = response.status,
+        headers = copyHeaders(response.headers),
+        url = response.url,
+        error = response.error,
+    }
+    if response.body ~= nil then
+        data.body = stream._snapshot(response.body, "tecs.http.Response body")
+    end
+    return data
+end
+
+local function deserializeResponse(_world: World, data: {string: any}): Response
+    local restored: {string: any} = {}
+    for key, value in pairs(data) do
+        if key == "headers" and type(value) == "table" then
+            restored.headers = copyHeaders(value as {string: string})
+        elseif key == "body" and type(value) == "table" then
+            restored.body = stream._restore(value as {string: any}, "tecs.http.Response body")
+        else
+            restored[key] = value
+        end
+    end
+    if restored.body == nil then
+        restored.body = stream.newEmptyStream()
+    end
+    return plugin.Response(restored)
 end
 
 -- The three names below, the resource key under them and the system names
@@ -179,11 +231,14 @@ ecs.newComponent({
     name = "tecs.http.Request",
     container = plugin.Request,
     serialize = serializeRequest,
+    deserialize = deserializeRequest,
 })
 
 ecs.newComponent({
     name = "tecs.http.Response",
     container = plugin.Response,
+    serialize = serializeResponse,
+    deserialize = deserializeResponse,
 })
 
 ecs.newComponent({
@@ -234,7 +289,14 @@ local function start(world: World, owned: Client, unsent: types.Query, futures: 
                 world:set(entity, plugin.Pending)
             else
                 world:set(
-                    entity, plugin.Response({status = 0, headers = {}, url = request.url, error = tostring(result)})
+                    entity,
+                    plugin.Response({
+                        status = 0,
+                        headers = {},
+                        body = stream.newEmptyStream(),
+                        url = request.url,
+                        error = tostring(result),
+                    })
                 )
                 world:remove(entity, plugin.Request)
             end
@@ -264,7 +326,14 @@ local function finish(world: World, inFlight: types.Query, futures: Waiting)
                         url = answer.url,
                     })
                 else
-                    settled = plugin.Response({status = 0, headers = {}, error = future.error})
+                    local request <const> = world:get(entity, plugin.Request)
+                    settled = plugin.Response({
+                        status = 0,
+                        headers = {},
+                        body = stream.newEmptyStream(),
+                        url = request ~= nil and request.url or "",
+                        error = future.error,
+                    })
                 end
                 futures[entity] = nil
                 world:set(entity, settled)

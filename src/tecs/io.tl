@@ -1,16 +1,30 @@
 --[=[
 Input, output, and nonblocking network transport.
 
-A [`Reader`](tealdoc:tecs.io.Reader) is a binary source and a
-[`Writer`](tealdoc:tecs.io.Writer) is a binary destination. The module owns
-those directional contracts while the child that owns a resource constructs
-it. `tecs.io.files.openRead` and `openWrite` are the file implementations.
+A [`Stream`](tealdoc:tecs.io.Stream) describes binary storage without keeping
+a cursor. A [`Reader`](tealdoc:tecs.io.Reader) and
+[`Writer`](tealdoc:tecs.io.Writer) are the caller-owned directional endpoints
+opened from it. Strings, buffers, borrowed bytes, paths, and handles all use
+that one descriptor contract.
+
+Whole-source operations return futures. A caller outside a frame can use
+`value` to wait, raise a transfer error, and take the result:
+
+```teal
+local bytes <const> = tecs.io.newFileStream("save.bin"):readBuffer().value
+print(bytes:length())
+bytes:release()
+```
 
 TCP is an ordered byte stream: one write may take several reads to receive,
 several writes may arrive in one read, and message framing belongs to the
 caller. UDP preserves one send as one datagram, but the network may lose,
 duplicate, or reorder it. HTTP and HTTPS live under `tecs.io.http`; the MCP
 debug server lives under `tecs.io.mcp`.
+
+Hot TCP loops can reuse a `Buffer`. `Connection:readInto` lets the native
+socket fill its FFI allocation directly, and `Connection:writeFrom` queues a
+buffer range without constructing an intermediate Lua string.
 
 Resolution and client connection return asynchronous
 [`Future`](tealdoc:tecs.Future) values. An
@@ -28,8 +42,9 @@ end
 ```
 
 A headless program without an application calls `poll` once per loop, or uses
-a future's bounded `wait` when blocking is the honest operation. Listening,
-accepting, reading, writing, and receiving are nonblocking.
+a future's bounded `wait` when blocking is the honest operation. Stream
+transfers are cooperative futures too. Listening, accepting, reading, writing,
+and receiving are nonblocking.
 
 Every address, TCP connection, server, and datagram socket owns a resource. Close
 it explicitly. Closing is idempotent; using a closed value returns a failure.
@@ -49,7 +64,10 @@ Naming `tecs.io` loads none of its children. Reading `files`, `http`, `mcp`, or
 local binding <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local Future <const> = require("tecs.Future")
-local type iotypes = require("tecs.io.types")
+local buffer <const> = require("tecs.io.buffer")
+local stream <const> = require("tecs.io.stream")
+local type types = require("tecs.io.types")
+local type IOBuffer = types.Buffer
 
 -- Type-only, so nothing loads here and HTTP is not initialized by a program
 -- that only opens a socket: the field below declares the name and `tecs.init`
@@ -65,6 +83,7 @@ local type FutureType<T> = Future<T>
 local type Source = Future.Source
 
 local C <const> = binding.C
+local floor <const> = math.floor
 
 -- Enum values are ABI declarations rather than preprocessor constants, so the
 -- generated constants table does not carry them.
@@ -96,11 +115,103 @@ local record binaryIO
     watcher: watcher
 
     --- A `Reader` supplies bytes in order and releases its source on `close`.
-    type Reader = iotypes.Reader
+    type Reader = types.Reader
 
     --- A `Writer` accepts bytes in order and finishes its destination on
     --- `close`.
-    type Writer = iotypes.Writer
+    type Writer = types.Writer
+
+    --- A `Stream` describes binary storage without retaining a cursor.
+    type Stream = types.Stream
+
+    --- A `ReadableStream` opens readers and supplies whole-source transfers.
+    type ReadableStream = types.ReadableStream
+
+    --- A `WritableStream` opens writers and supplies whole-destination
+    --- transfers.
+    type WritableStream = types.WritableStream
+
+    --- A `ReadWriteStream` supports both directional interfaces.
+    type ReadWriteStream = types.ReadWriteStream
+
+    --- A `Buffer` is owned growable FFI-backed byte storage.
+    type Buffer = IOBuffer
+
+    --- Creates an owned growable byte buffer.
+    ---
+    --- @param initial The caller supplies a non-negative zero-filled logical
+    ---     length, a string to copy, or nil for an empty buffer.
+    --- @return Returns a caller-owned buffer.
+    newBuffer: function(initial?: integer | string): IOBuffer
+
+    --- Creates a replayable readable empty stream.
+    ---
+    --- @param contentType The caller supplies optional media type metadata.
+    --- @return Returns a source whose length is zero.
+    newEmptyStream: function(contentType?: string): types.ReadableStream
+
+    --- Creates a replayable read-only string stream.
+    ---
+    --- The stream retains the immutable string without copying it.
+    --- @param bytes The caller supplies complete binary contents.
+    --- @param contentType The caller supplies optional media type metadata.
+    --- @return Returns a readable stream.
+    newStringStream: function(bytes: string, contentType?: string): types.ReadableStream
+
+    --- Creates a stream sharing an owned growable buffer.
+    ---
+    --- `readBuffer` returns the same retained object. Releasing or mutating it
+    --- affects both caller and stream.
+    --- @param buffer The caller supplies an open buffer.
+    --- @param contentType The caller supplies optional media type metadata.
+    --- @return Returns a readable and writable stream.
+    newBufferStream: function(buffer: IOBuffer, contentType?: string): types.ReadWriteStream
+
+    --- Creates a replayable read-only stream over borrowed FFI bytes.
+    ---
+    --- @param pointer The caller keeps the backing allocation alive and
+    ---     unchanged until every reader and transfer future settles.
+    --- @param length The caller supplies the non-negative byte count.
+    --- @param contentType The caller supplies optional media type metadata.
+    --- @return Returns a readable stream.
+    newByteStream: function(pointer: loader.CValue, length: integer, contentType?: string): types.ReadableStream
+
+    --- Creates a replayable file stream.
+    ---
+    --- Readers open the current path through `tecs.io.files`; writers replace
+    --- it. A descriptor keeps no open file between endpoints.
+    --- @param path The caller supplies the source or destination path.
+    --- @param contentType The caller supplies optional media type metadata.
+    --- @return Returns a readable and writable stream.
+    newFileStream: function(path: string, contentType?: string): types.ReadWriteStream
+
+    --- Creates a one-shot stream over a borrowed Lua file handle.
+    ---
+    --- The first reader or writer claims its current cursor. Closing the
+    --- stream or endpoint does not close the caller's handle.
+    --- @param handle The caller keeps the Lua file handle open through the
+    ---     endpoint's close.
+    --- @param length The caller supplies the remaining byte count when known.
+    --- @param contentType The caller supplies optional media type metadata.
+    --- @return Returns a non-replayable readable and writable stream.
+    newHandleStream: function(handle: FILE, length?: integer, contentType?: string): types.ReadWriteStream
+
+    --- Returns a lazy metadata view over a stream.
+    ---
+    --- Nil inherits each value from `source`. The view retains and delegates
+    --- to the source, preserves its static and runtime directional interface,
+    --- and closes the source when it closes. If every supplied value already
+    --- matches, this returns `source` itself.
+    --- @param source The caller supplies any structural stream
+    ---     implementation.
+    --- @param contentType The caller overrides the media type or omits it.
+    --- @param contentLength The caller overrides the non-negative byte length
+    ---     or omits it.
+    --- @param isReplayable The caller overrides replayability or omits it.
+    --- @return Returns a metadata view with the same type as `source`.
+    withMetadata: function<T is types.Stream>(
+        source: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
+    ): T
 
     --- An `Address` owns one resolved network address.
     record Address
@@ -150,6 +261,26 @@ local record binaryIO
         --- @return Returns the reason only when reading fails or the peer
         ---     disconnects.
         read: function(self: Connection, maxBytes?: integer): string, string
+        --- Reads available bytes directly into reusable FFI memory.
+        ---
+        --- The call writes at a zero-based offset and extends the buffer
+        --- through the last byte read. It returns nil without a reason when no
+        --- bytes are ready and leaves the logical length and bytes unchanged;
+        --- reserving the requested range may still grow capacity. A zero count
+        --- returns zero without consuming input.
+        --- @param destination The caller supplies an open
+        ---     [`Buffer`](tealdoc:tecs.io.Buffer).
+        --- @param maxBytes The caller supplies a ceiling from 0 to 65536 bytes
+        ---     or omits it for 16384. Invalid values raise.
+        --- @param offset The caller supplies a zero-based destination offset
+        ---     or omits it for zero.
+        --- @return Returns the bytes read, zero for a zero-byte request, or nil
+        ---     when no bytes arrived or the read failed.
+        --- @return Returns the reason only when reading fails or the peer
+        ---     disconnects.
+        readInto: function(
+            self: Connection, destination: IOBuffer, maxBytes?: integer, offset?: integer
+        ): integer, string
         --- Queues one chunk for reliable ordered delivery.
         ---
         --- This accepting the bytes does not mean the peer has received them;
@@ -159,6 +290,21 @@ local record binaryIO
         --- @return Returns true only when the connection accepts the whole chunk.
         --- @return Returns the reason when the first return is false.
         write: function(self: Connection, bytes: string): boolean, string
+        --- Queues a buffer range for reliable ordered delivery.
+        ---
+        --- The native send queue copies the range before this call returns, so
+        --- the caller may mutate or release the buffer afterwards. This avoids
+        --- constructing an intermediate Lua string but does not bypass the
+        --- queue's ownership copy.
+        --- @param source The caller supplies an open
+        ---     [`Buffer`](tealdoc:tecs.io.Buffer).
+        --- @param offset The caller supplies a zero-based source offset or
+        ---     omits it for zero.
+        --- @param count The caller supplies at most 16777216 bytes or omits it
+        ---     for the remainder. Invalid ranges raise.
+        --- @return Returns the number of bytes accepted.
+        --- @return Returns the reason when the first return is nil.
+        writeFrom: function(self: Connection, source: IOBuffer, offset?: integer, count?: integer): integer, string
         --- Returns bytes accepted but not yet sent.
         ---
         --- @return Returns the queued byte count, zero after sending, or nil on
@@ -326,16 +472,27 @@ local record binaryIO
     --- @return Returns a caller-owned socket, or nil on failure.
     --- @return Returns the reason when the first return is nil.
     bind: function(port: integer, address?: Address): DatagramSocket, string
-    --- Advances every pending resolution and client connection without
-    --- waiting. Call once per frame while asynchronous network work exists.
+    --- Advances every pending stream transfer, resolution, and client
+    --- connection without waiting. Call once per frame while asynchronous I/O
+    --- work exists.
     --- @return Returns how many futures settled during this call, including
     ---     failures.
     poll: function(): integer
-    --- Returns the number of unresolved or connecting futures.
+    --- Returns the number of pending stream, resolution, or connection
+    --- futures.
     ---
     --- @return Returns zero after every operation settles or cancels.
     pending: function(): integer
 end
+
+binaryIO.newBuffer = stream.newBuffer
+binaryIO.newEmptyStream = stream.newEmptyStream
+binaryIO.newStringStream = stream.newStringStream
+binaryIO.newBufferStream = stream.newBufferStream
+binaryIO.newByteStream = stream.newByteStream
+binaryIO.newFileStream = stream.newFileStream
+binaryIO.newHandleStream = stream.newHandleStream
+binaryIO.withMetadata = stream.withMetadata
 
 local AddressMT <const>: metatable<binaryIO.Address> = {__index = binaryIO.Address}
 local ConnectionMT <const>: metatable<binaryIO.Connection> = {__index = binaryIO.Connection}
@@ -370,14 +527,14 @@ local operations: {Operation} = {}
 
 local function validPort(port: integer, allowZero: boolean, level: integer)
     local minimum <const> = allowZero and 0 or 1
-    if type(port) ~= "number" or port ~= math.floor(port) or port < minimum or port > 65535 then
+    if type(port) ~= "number" or port ~= floor(port) or port < minimum or port > 65535 then
         error(("tecs: port must be an integer from %d to 65535"):format(minimum), level)
     end
 end
 
 local function validTimeout(timeoutMs: integer, level: integer): integer
     local timeout <const> = timeoutMs or 0
-    if type(timeout) ~= "number" or timeout ~= math.floor(timeout) or timeout < 0 or timeout > MAX_TIMEOUT_MS then
+    if type(timeout) ~= "number" or timeout ~= floor(timeout) or timeout < 0 or timeout > MAX_TIMEOUT_MS then
         error(("tecs: timeout must be an integer from 0 to %d milliseconds"):format(MAX_TIMEOUT_MS), level)
     end
     return timeout
@@ -486,7 +643,7 @@ function binaryIO.Connection:read(maxBytes?: integer): string, string
         return nil, "connection is closed"
     end
     local count <const> = maxBytes or DEFAULT_READ_BYTES
-    if type(count) ~= "number" or count ~= math.floor(count) or count < 1 or count > MAX_READ_BYTES then
+    if type(count) ~= "number" or count ~= floor(count) or count < 1 or count > MAX_READ_BYTES then
         error(("tecs: stream reads from 1 to %d bytes at a time"):format(MAX_READ_BYTES), 2)
     end
     local read <const> = tonumber(C.tecsNetStreamRead(self._handle, self._buffer, count)) as integer
@@ -497,6 +654,35 @@ function binaryIO.Connection:read(maxBytes?: integer): string, string
         return nil
     end
     return loader.toBytes(self._buffer as loader.CValue, read)
+end
+
+function binaryIO.Connection:readInto(destination: IOBuffer, maxBytes?: integer, offset?: integer): integer, string
+    if self._closed then
+        return nil, "connection is closed"
+    end
+    local count <const> = maxBytes or DEFAULT_READ_BYTES
+    if type(count) ~= "number" or count ~= floor(count) or count < 0 or count > MAX_READ_BYTES then
+        error(("tecs: stream buffer reads from 0 to %d bytes at a time"):format(MAX_READ_BYTES), 2)
+    end
+    local at <const> = offset or 0
+    if type(at) ~= "number" or at ~= floor(at) or at < 0 then
+        error("tecs: Connection:readInto offset must be a non-negative integer", 2)
+    end
+    if count == 0 then
+        return 0
+    end
+
+    local pointer <const>, previousLength <const> = buffer.prepareWrite(destination, at, count)
+    local read <const> = tonumber(C.tecsNetStreamRead(self._handle, pointer, count)) as integer
+    if read <= 0 then
+        destination:resize(previousLength)
+        if read < 0 then
+            return nil, loader.toString(C.tecsRustError())
+        end
+        return nil
+    end
+    buffer.commitWrite(destination, at, read, previousLength)
+    return read
 end
 
 function binaryIO.Connection:write(bytes: string): boolean, string
@@ -511,6 +697,31 @@ function binaryIO.Connection:write(bytes: string): boolean, string
         return false, loader.toString(C.tecsRustError())
     end
     return true
+end
+
+function binaryIO.Connection:writeFrom(source: IOBuffer, offset?: integer, count?: integer): integer, string
+    if self._closed then
+        return nil, "connection is closed"
+    end
+    local length <const> = source:length()
+    local at <const> = offset or 0
+    if type(at) ~= "number" or at ~= floor(at) or at < 0 or at > length then
+        error("tecs: Connection:writeFrom offset is outside the buffer", 2)
+    end
+    local size <const> = count == nil and length - at or count
+    if type(size) ~= "number" or size ~= floor(size) or size < 0 or size > length - at then
+        error("tecs: Connection:writeFrom count is outside the buffer", 2)
+    end
+    if size > MAX_WRITE_BYTES then
+        error(("tecs: Connection:writeFrom accepts at most %d bytes, not %d"):format(MAX_WRITE_BYTES, size), 2)
+    end
+    if size == 0 then
+        return 0
+    end
+    if tonumber(C.tecsNetStreamWrite(self._handle, source:getFFIPointer() + at, size)) == 0 then
+        return nil, loader.toString(C.tecsRustError())
+    end
+    return size
 end
 
 function binaryIO.Connection:pendingWrites(): integer, string
@@ -722,7 +933,7 @@ function Operation:advance(ms: number): integer
     if self.at == 0 then
         return 0
     end
-    return finish(self, math.floor(ms) as integer)
+    return finish(self, floor(ms) as integer)
 end
 
 function Operation:cancel(future: FutureType<any>)
@@ -830,7 +1041,7 @@ function binaryIO.bind(port: integer, address?: binaryIO.Address): binaryIO.Data
 end
 
 function binaryIO.poll(): integer
-    local settled = 0
+    local settled = stream.poll()
     local at = 1
     while at <= #operations do
         local current <const> = operations[at]
@@ -843,7 +1054,7 @@ function binaryIO.poll(): integer
 end
 
 function binaryIO.pending(): integer
-    return #operations
+    return #operations + stream.pending()
 end
 
 function binaryIO.quit(): boolean, string

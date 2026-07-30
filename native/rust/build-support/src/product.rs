@@ -380,13 +380,20 @@ pub fn test_package(root: &Path, preset: Preset) -> Result<()> {
 
 pub fn benchmark(root: &Path, preset: Preset, name: &str, arguments: &[OsString]) -> Result<()> {
     let source = match name {
-        "shapes" | "physics" | "sprites" | "text" | "particles" | "latency" => name,
+        "shapes" | "physics" | "sprites" | "text" | "particles" | "latency" | "http" | "io"
+        | "tcp" => name,
         "alloc" | "allocation" => "allocation",
         _ => anyhow::bail!(
-            "unknown host benchmark {name:?}; expected shapes, physics, sprites, text, \
-             particles, latency, or allocation"
+            "unknown benchmark {name:?}; expected shapes, physics, sprites, text, \
+             particles, latency, http, io, tcp, or allocation"
         ),
     };
+    if matches!(source, "io" | "tcp") && preset.sanitize {
+        anyhow::bail!(
+            "the io and tcp benchmarks run under system LuaJIT, not the instrumented native host; \
+             sanitizer preset {preset} would not sanitize it"
+        );
+    }
     let executable = build(root, preset)?;
     let paths = Paths::new(root, preset);
     let entry = compile_teal_file(
@@ -395,12 +402,16 @@ pub fn benchmark(root: &Path, preset: Preset, name: &str, arguments: &[OsString]
         &root.join("bench").join(format!("{source}.tl")),
         &format!("bench/{source}.lua"),
     )?;
-    let mut command = Command::new(executable);
-    command
-        .arg("--entry")
-        .arg(entry)
-        .args(arguments)
-        .current_dir(root);
+    let mut command = if matches!(source, "io" | "tcp") {
+        let mut command = Command::new("luajit");
+        command.arg(entry);
+        command
+    } else {
+        let mut command = Command::new(executable);
+        command.arg("--entry").arg(entry);
+        command
+    };
+    command.args(arguments).current_dir(root);
     apply_development_environment(&mut command, &paths);
     run(&mut command, &format!("{source} benchmark"))
 }

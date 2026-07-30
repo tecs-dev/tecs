@@ -50,14 +50,24 @@ typedef struct TecsHttpRequest {
     const TecsHttpHeader *headers;
     size_t headerCount;
     TecsHttpSlice body;
-    int hasBody;
+    uint32_t bodyKind;
+    /* A non-negative upload length, or -1 when the source cannot know it. */
+    int64_t bodyLength;
     uint64_t timeoutMs;
     uint64_t stallTimeoutMs;
     uint64_t maxBytes;
     int insecure;
 } TecsHttpRequest;
 
+enum TecsHttpBodyKind { TECS_HTTP_BODY_NONE = 0, TECS_HTTP_BODY_INLINE = 1, TECS_HTTP_BODY_UPLOAD = 2 };
+
 enum TecsHttpEventKind { TECS_HTTP_EVENT_CHUNK = 1, TECS_HTTP_EVENT_COMPLETE = 2, TECS_HTTP_EVENT_FAILED = 3 };
+
+enum TecsHttpUploadResult {
+    TECS_HTTP_UPLOAD_CLOSED = -1,
+    TECS_HTTP_UPLOAD_BACKPRESSURE = 0,
+    TECS_HTTP_UPLOAD_ACCEPTED = 1
+};
 
 /* Builds a connection pool and starts the process-wide Tokio runtime on first
  * use. Returns NULL on invalid options or when the runtime cannot start;
@@ -74,6 +84,11 @@ int tecsHttpClientSend(TecsHttpClient *client, const TecsHttpRequest *request);
 /* Stops a request. Events already drained by Lua remain Lua's to settle or
  * discard; events still in the Rust queue are discarded when polled. */
 void tecsHttpClientCancel(TecsHttpClient *client, uint64_t id);
+
+/* Offers one copied request-body chunk of at most 65536 bytes to the bounded
+ * upload queue. A full queue returns BACKPRESSURE without copying. Set
+ * finished only with an empty slice to close the body. */
+int tecsHttpClientUpload(TecsHttpClient *client, uint64_t id, const uint8_t *data, size_t length, int finished);
 
 /* Answers the next event, waiting for at most waitMs. A zero wait never
  * blocks. The event and every pointer borrowed from it stay valid until

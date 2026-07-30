@@ -19,6 +19,8 @@ local sdl = require("tecs.ffi.sdl3")
 local http = require("tecs.io.http")
 local tecsIO = tecs.io
 
+local min = math.min
+
 local BODY = "the rust worker drove this without blocking\n"
 local CHUNK = 16384
 
@@ -132,16 +134,14 @@ describe("http.newClient", function()
     local server, port, client
     local silent, silentPort
 
-    it("constructs streams from the module", function()
-        assert.is_function(http.newStringStream)
-        assert.is_function(http.newByteStream)
-        assert.is_nil(rawget(http, "newBytesStream"))
-        assert.is_function(http.newFileStream)
-        assert.is_function(http.newHandleStream)
-        assert.is_nil(rawget(http.DataStream, "ofString"))
-        assert.is_nil(rawget(http.DataStream, "ofBytes"))
-        assert.is_nil(rawget(http.DataStream, "ofFile"))
-        assert.is_nil(rawget(http.DataStream, "ofHandle"))
+    it("uses the shared io stream surface", function()
+        assert.is_nil(rawget(http, "DataStream"))
+        assert.is_nil(rawget(http, "newStringStream"))
+        assert.is_function(tecsIO.newStringStream)
+        assert.is_function(tecsIO.newBufferStream)
+        assert.is_function(tecsIO.newByteStream)
+        assert.is_function(tecsIO.newFileStream)
+        assert.is_function(tecsIO.newHandleStream)
     end)
 
     setup(function()
@@ -221,6 +221,136 @@ describe("http.newClient", function()
         return seen
     end
 
+    local function partialSink(limit)
+        local received = tecsIO.newBuffer()
+        local closed = false
+        local sink = {}
+        function sink:contentLength()
+            return received:length()
+        end
+        function sink:contentType()
+            return nil
+        end
+        function sink:hasKnownLength()
+            return true
+        end
+        function sink:isReadable()
+            return false
+        end
+        function sink:isWritable()
+            return true
+        end
+        function sink:isReplayable()
+            return false
+        end
+        function sink:isAvailable()
+            return not closed
+        end
+        function sink:close()
+            closed = true
+        end
+        function sink:newWriter()
+            local writer = {}
+            function writer:write()
+                error("HTTP should use Writer:writeFrom for response chunks")
+            end
+            function writer:writeFrom(source, offset, count)
+                local taking = min(limit, count)
+                received:setString(source:getString(offset, taking), received:length())
+                return taking
+            end
+            function writer:flush()
+                return true
+            end
+            function writer:close()
+                closed = true
+                return true
+            end
+            return writer
+        end
+        function sink:writeAll()
+            error("unused")
+        end
+        function sink:writeBuffer()
+            error("unused")
+        end
+        return sink, received
+    end
+
+    local function chunkSource(text, limit)
+        local source = {}
+        function source:contentLength()
+            return #text
+        end
+        function source:contentType()
+            return "application/octet-stream"
+        end
+        function source:hasKnownLength()
+            return true
+        end
+        function source:isReadable()
+            return true
+        end
+        function source:isWritable()
+            return false
+        end
+        function source:isReplayable()
+            return true
+        end
+        function source:isAvailable()
+            return true
+        end
+        function source:close() end
+        function source:hasBuffer()
+            return false
+        end
+        function source:newReader()
+            local at = 0
+            local closed = false
+            local reader = {}
+            function reader:read(count)
+                if closed then
+                    return nil, "reader is closed"
+                end
+                local taking = min(limit, count, #text - at)
+                local bytes = text:sub(at + 1, at + taking)
+                at = at + taking
+                return bytes
+            end
+            function reader:readInto(buffer, count, offset)
+                if closed then
+                    return nil, "reader is closed"
+                end
+                local taking = min(limit, count, #text - at)
+                if taking > 0 then
+                    buffer:setString(text:sub(at + 1, at + taking), offset or 0)
+                    at = at + taking
+                end
+                return taking
+            end
+            function reader:close()
+                closed = true
+            end
+            return reader
+        end
+        function source:readAll()
+            error("HTTP should consume the Reader endpoint")
+        end
+        function source:readBuffer()
+            error("HTTP should consume the Reader endpoint")
+        end
+        function source:transferTo()
+            error("unused")
+        end
+        function source:transferToFile()
+            error("unused")
+        end
+        function source:discard()
+            error("unused")
+        end
+        return source
+    end
+
     it("leaves a transfer running after the first pump", function()
         -- The proof of non-blocking, and the only state a blocking
         -- implementation cannot produce: `send` returned, a pump happened, and
@@ -262,7 +392,7 @@ describe("http.newClient", function()
 
         drive(pending, nil)
         assert.are.equal("ready", pending.status)
-        assert.are.equal(BODY, pending.value.body:text())
+        assert.are.equal(BODY, pending.value.body:readAll().value)
     end)
 
     it("settles a completed body, its status and its headers", function()
@@ -277,13 +407,13 @@ describe("http.newClient", function()
         assert.is_true(response:ok())
         -- One field holding the body whatever it is, rather than a `body` and
         -- a `path` where exactly one is meaningful.
-        assert.are.equal("string", response.body.kind)
-        assert.are.equal(BODY, response.body:text())
-        assert.are.equal(#BODY, response.body.length)
-        assert.are.equal("text/plain", response.body.contentType)
+        assert.is_true(response.body:isReadable())
+        assert.is_true(response.body:hasBuffer())
+        assert.are.equal(BODY, response.body:readAll().value)
+        assert.are.equal(#BODY, response.body:contentLength())
+        assert.are.equal("text/plain", response.body:contentType())
         assert.are.equal("text/plain", response.headers["content-type"])
         assert.are.equal(url("/body"), response.url)
-        assert.is_nil(response.body.path)
     end)
 
     it("keeps only the final response headers", function()
@@ -328,9 +458,372 @@ describe("http.newClient", function()
         assert.is_nil(pending.error)
     end)
 
+    it("sends a shared Buffer without first making a Lua string", function()
+        local body = tecsIO.newBuffer(BODY)
+        local pending = client:send({
+            url = url("/buffer-upload"),
+            method = "PUT",
+            body = tecsIO.newBufferStream(body, "application/octet-stream"),
+        })
+        local seen = drive(pending, function()
+            server:respond(204, "No Content", "", "text/plain")
+        end)
+        body:release()
+
+        assert.are.equal("ready", pending.status)
+        assert.are.equal(BODY, seen.body)
+    end)
+
+    it("streams a structural Reader through the bounded upload channel", function()
+        local pending = client:send({
+            url = url("/reader-upload"),
+            method = "PUT",
+            headers = { ["Content-Length"] = tostring(#BODY) },
+            body = chunkSource(BODY, 5),
+        })
+        local seen = drive(pending, function()
+            server:respond(204, "No Content", "", "text/plain")
+        end)
+
+        assert.are.equal("ready", pending.status)
+        assert.are.equal(BODY, seen.body)
+    end)
+
+    it("does not open a non-replayable reader until native validation succeeds", function()
+        local source = chunkSource(BODY, 5)
+        local opened = 0
+        local original = source.newReader
+        function source:isReplayable()
+            return false
+        end
+        function source:newReader()
+            opened = opened + 1
+            return original(self)
+        end
+
+        local pending = client:send({
+            url = url("/native-rejection"),
+            method = "not a method",
+            body = source,
+        })
+
+        assert.are.equal("failed", pending.status)
+        assert.are.equal(0, opened)
+        assert.is_truthy(pending.error:find("cannot start", 1, true))
+    end)
+
+    it("cancels a started native upload when its reader cannot open", function()
+        local source = chunkSource(BODY, 5)
+        local opened = 0
+        function source:newReader()
+            opened = opened + 1
+            return nil, "reader open boom"
+        end
+
+        local pending = client:send({
+            url = silentUrl("/reader-open-failure"),
+            method = "PUT",
+            body = source,
+        })
+
+        assert.are.equal("failed", pending.status)
+        assert.are.equal(1, opened)
+        assert.are.equal(0, client:pending())
+        assert.is_truthy(pending.error:find("reader open boom", 1, true))
+    end)
+
+    it("rejects conflicting Content-Length for every known body backing", function()
+        local owned = tecsIO.newBuffer(BODY)
+        local bodies = {
+            BODY,
+            tecsIO.newBufferStream(owned),
+            tecsIO.newByteStream(owned:getFFIPointer(), owned:length()),
+            chunkSource(BODY, 5),
+        }
+
+        for index, body in ipairs(bodies) do
+            local pending = client:send({
+                url = url("/length-conflict-" .. index),
+                method = "PUT",
+                headers = { ["cOnTeNt-LeNgTh"] = tostring(#BODY + 1) },
+                body = body,
+            })
+            assert.are.equal("failed", pending.status)
+            assert.is_truthy(pending.error:find("but the request body contains", 1, true))
+        end
+        owned:release()
+    end)
+
+    it("rejects nonzero Content-Length when the request has no body", function()
+        local pending = client:send({
+            url = url("/missing-body"),
+            headers = { ["Content-Length"] = "5" },
+        })
+
+        assert.are.equal("failed", pending.status)
+        assert.is_truthy(pending.error:find("but the request body contains 0 bytes", 1, true))
+        assert.are.equal(0, client:pending())
+    end)
+
+    it("rejects malformed Content-Length before opening an upload", function()
+        local source = chunkSource(BODY, 5)
+        local opened = 0
+        local original = source.newReader
+        function source:newReader()
+            opened = opened + 1
+            return original(self)
+        end
+
+        for _, value in ipairs({ "-1", "1.5", "+1", "many" }) do
+            local pending = client:send({
+                url = url("/bad-length"),
+                method = "PUT",
+                headers = { ["Content-Length"] = value },
+                body = source,
+            })
+            assert.are.equal("failed", pending.status)
+            assert.is_truthy(pending.error:find("decimal digits", 1, true))
+        end
+        assert.are.equal(0, opened)
+    end)
+
+    it("rejects invalid or raising lazy body lengths", function()
+        local cases = {
+            { name = "negative", value = -1 },
+            { name = "fractional", value = 1.5 },
+            { name = "too-large", value = 9007199254740992 },
+            { name = "raising" },
+        }
+        for _, case in ipairs(cases) do
+            local source = chunkSource(BODY, 5)
+            local opened = 0
+            local original = source.newReader
+            function source:newReader()
+                opened = opened + 1
+                return original(self)
+            end
+            function source:contentLength()
+                if case.name == "raising" then
+                    error("metadata boom")
+                end
+                return case.value
+            end
+
+            local pending = client:send({
+                url = url("/bad-source-length-" .. case.name),
+                method = "PUT",
+                body = source,
+            })
+            assert.are.equal("failed", pending.status)
+            assert.are.equal(0, opened)
+            assert.is_truthy(pending.error:find("Content-Length", 1, true))
+        end
+    end)
+
+    it("gives every active upload a bounded scheduler turn", function()
+        local bytes = ("x"):rep(CHUNK * 17)
+        local readCounts = { 0, 0 }
+        local sources = { chunkSource(bytes, CHUNK), chunkSource(bytes, CHUNK) }
+        for index, source in ipairs(sources) do
+            local original = source.newReader
+            function source:newReader()
+                local reader = original(self)
+                local readInto = reader.readInto
+                function reader:readInto(destination, count, offset)
+                    readCounts[index] = readCounts[index] + 1
+                    return readInto(self, destination, count, offset)
+                end
+                return reader
+            end
+        end
+
+        local first = client:send({ url = silentUrl("/fair-one"), method = "PUT", body = sources[1] })
+        local second = client:send({ url = silentUrl("/fair-two"), method = "PUT", body = sources[2] })
+        client:pump()
+
+        assert.is_true(readCounts[1] > 0)
+        assert.is_true(readCounts[2] > 0)
+        first:cancel()
+        second:cancel()
+    end)
+
+    it("rejects Reader counts that cannot safely name initialized bytes", function()
+        local cases = {
+            { name = "negative", count = -1 },
+            { name = "fractional", count = 1.5 },
+            { name = "oversized", count = CHUNK + 1 },
+            { name = "not-a-number", count = "1" },
+            { name = "uninitialized", count = 1 },
+        }
+        local pending = {}
+        for _, case in ipairs(cases) do
+            local source = chunkSource(BODY, 5)
+            function source:newReader()
+                local reader = {}
+                function reader:read()
+                    error("HTTP should use Reader:readInto")
+                end
+                function reader:readInto(destination)
+                    if case.name ~= "uninitialized" and type(case.count) == "number" and case.count > 0 then
+                        destination:setString("x")
+                    end
+                    return case.count
+                end
+                function reader:close() end
+                return reader
+            end
+            pending[#pending + 1] = client:send({
+                url = silentUrl("/bad-reader-" .. case.name),
+                method = "PUT",
+                body = source,
+            })
+        end
+
+        client:pump()
+        for index, future in ipairs(pending) do
+            assert.are.equal("failed", future.status, cases[index].name)
+            assert.is_truthy(future.error:find("request reader returned", 1, true))
+        end
+    end)
+
+    it("rejects Writer counts outside the offered initialized range", function()
+        for _, value in ipairs({ 0, -1, 1.5, #BODY + 1, "1" }) do
+            local sink, received = partialSink(3)
+            function sink:newWriter()
+                local writer = {}
+                function writer:write()
+                    error("HTTP should use Writer:writeFrom")
+                end
+                function writer:writeFrom()
+                    return value
+                end
+                function writer:flush()
+                    return true
+                end
+                function writer:close()
+                    return true
+                end
+                return writer
+            end
+            local pending = client:send({ url = url("/bad-writer"), into = sink })
+            drive(pending, function()
+                server:respond(200, "OK", BODY, "application/octet-stream")
+            end)
+
+            assert.are.equal("failed", pending.status)
+            assert.is_truthy(pending.error:find("response writer returned", 1, true))
+            received:release()
+        end
+    end)
+
+    it("settles when opening or closing a structural Writer raises", function()
+        local opening, openingBuffer = partialSink(3)
+        function opening:newWriter()
+            error("writer open boom")
+        end
+        local openFuture = client:send({ url = url("/writer-open-boom"), into = opening })
+        drive(openFuture, function()
+            server:respond(200, "OK", BODY, "application/octet-stream")
+        end)
+        assert.are.equal("failed", openFuture.status)
+        assert.is_truthy(openFuture.error:find("writer open boom", 1, true))
+        openingBuffer:release()
+
+        local closing, closingBuffer = partialSink(3)
+        local newWriter = closing.newWriter
+        function closing:newWriter()
+            local writer = newWriter(self)
+            function writer:close()
+                error("writer close boom")
+            end
+            return writer
+        end
+        local closeFuture = client:send({ url = url("/writer-close-boom"), into = closing })
+        drive(closeFuture, function()
+            server:respond(200, "OK", BODY, "application/octet-stream")
+        end)
+        assert.are.equal("failed", closeFuture.status)
+        assert.is_truthy(closeFuture.error:find("writer close boom", 1, true))
+        closingBuffer:release()
+    end)
+
+    it("fails when destination metadata raises only after completion", function()
+        local sink, received = partialSink(3)
+        local completed = false
+        local newWriter = sink.newWriter
+        function sink:newWriter()
+            local writer = newWriter(self)
+            local close = writer.close
+            function writer:close()
+                local ok, reason = close(self)
+                completed = true
+                return ok, reason
+            end
+            return writer
+        end
+        function sink:contentType()
+            if completed then
+                error("destination metadata boom")
+            end
+            return nil
+        end
+
+        local pending = client:send({ url = url("/destination-metadata-boom"), into = sink })
+        drive(pending, function()
+            server:respond(200, "OK", BODY, "application/octet-stream")
+        end)
+
+        assert.are.equal("failed", pending.status)
+        assert.are.equal(0, client:pending())
+        assert.is_truthy(pending.error:find("destination metadata boom", 1, true))
+        received:release()
+    end)
+
+    it("preserves the primary transfer failure when Writer cleanup raises", function()
+        local sink, received = partialSink(3)
+        function sink:newWriter()
+            local writer = {}
+            function writer:write()
+                error("HTTP should use Writer:writeFrom")
+            end
+            function writer:writeFrom()
+                return nil, "primary write failure"
+            end
+            function writer:flush()
+                return true
+            end
+            function writer:close()
+                error("secondary close failure")
+            end
+            return writer
+        end
+
+        local pending = client:send({ url = url("/primary-writer-failure"), into = sink })
+        drive(pending, function()
+            server:respond(200, "OK", BODY, "application/octet-stream")
+        end)
+
+        assert.are.equal("failed", pending.status)
+        assert.is_truthy(pending.error:find("primary write failure", 1, true))
+        assert.is_nil(pending.error:find("secondary close failure", 1, true))
+        received:release()
+    end)
+
+    it("retries partial Writer:writeFrom results without losing bytes", function()
+        local sink, received = partialSink(3)
+        local pending = client:send({ url = url("/partial-writer"), into = sink })
+        drive(pending, function()
+            server:respond(200, "OK", BODY, "application/octet-stream")
+        end)
+
+        assert.are.equal("ready", pending.status)
+        assert.are.equal(BODY, received:getString())
+        received:release()
+    end)
+
     it("composes, because a request is a future like any other", function()
         local length = client:send({ url = url("/compose") }):map(function(response)
-            return response.body.length
+            return response.body:contentLength()
         end)
 
         drive(length, function()
@@ -351,16 +844,34 @@ describe("http.newClient", function()
         -- The body is where it was asked to go, and the response says so in
         -- the same field a string body would have come back in.
         local body = pending.value.body
-        assert.are.equal("file", body.kind)
-        assert.are.equal(path, body.path)
-        assert.are.equal(#BODY, body.length)
-        assert.are.equal(BODY, body:text())
+        assert.is_true(body:isReadable())
+        assert.is_true(body:isWritable())
+        assert.are.equal(#BODY, body:contentLength())
+        assert.are.equal(BODY, body:readAll().value)
 
         local file = assert(io.open(path, "rb"))
         local written = file:read("*a")
         file:close()
         os.remove(path)
         assert.are.equal(BODY, written)
+    end)
+
+    it("truncates a file destination for an empty successful response", function()
+        local path = os.tmpname()
+        local existing = assert(io.open(path, "wb"))
+        existing:write(BODY)
+        existing:close()
+
+        local pending = client:send({ url = url("/empty-download"), into = path })
+        drive(pending, function()
+            server:respond(204, "No Content", "", "application/octet-stream")
+        end)
+
+        assert.are.equal("ready", pending.status)
+        local file = assert(io.open(path, "rb"))
+        assert.are.equal("", file:read("*a"))
+        file:close()
+        os.remove(path)
     end)
 
     it("writes into a handle as the bytes arrive, never assembling them", function()
@@ -371,7 +882,7 @@ describe("http.newClient", function()
         local file = assert(io.open(path, "wb"))
         local pending = client:send({
             url = url("/streamed"),
-            into = http.newHandleStream(file),
+            into = tecsIO.newHandleStream(file),
         })
         drive(pending, function()
             server:respond(200, "OK", BODY, "application/octet-stream")
@@ -379,8 +890,8 @@ describe("http.newClient", function()
         file:close()
 
         assert.are.equal("ready", pending.status)
-        assert.are.equal("handle", pending.value.body.kind)
-        assert.are.equal(#BODY, pending.value.body.length)
+        assert.is_false(pending.value.body:isReplayable())
+        assert.are.equal(#BODY, pending.value.body:contentLength())
 
         local written = assert(io.open(path, "rb"))
         local bytes = written:read("*a")
@@ -397,7 +908,7 @@ describe("http.newClient", function()
         local file = assert(io.open(path, "wb"))
         local pending = client:send({
             url = url("/too-big-streamed"),
-            into = http.newHandleStream(file),
+            into = tecsIO.newHandleStream(file),
             maxBytes = 8,
         })
         drive(pending, function()
@@ -411,9 +922,9 @@ describe("http.newClient", function()
     end)
 
     it("sends a body read from a file", function()
-        -- The asymmetry, stated: a destination is written when Lua drains a
-        -- Rust event, while a request body has to cross into the background
-        -- task before it starts. The source is therefore read at `send`.
+        -- The SDL thread reads bounded pieces into one reusable Buffer. Rust
+        -- copies only pieces accepted by its bounded upload channel, so the
+        -- background request cannot make Lua materialize the whole file.
         local path = os.tmpname()
         local upload = assert(io.open(path, "wb"))
         upload:write(BODY)
@@ -422,7 +933,7 @@ describe("http.newClient", function()
         local pending = client:send({
             url = url("/upload"),
             method = "PUT",
-            body = http.newFileStream(path, "application/octet-stream"),
+            body = tecsIO.newFileStream(path, "application/octet-stream"),
         })
         local seen = drive(pending, function()
             server:respond(204, "No Content", "", "text/plain")
@@ -531,6 +1042,27 @@ describe("http.newClient", function()
         end)
     end)
 
+    it("rejects a transfer started by a listener during close", function()
+        local pending = client:send({ url = silentUrl("/close-listener") })
+        local sent
+        pending:onSettle(function()
+            sent = {
+                pcall(function()
+                    return client:send({ url = silentUrl("/reentrant-close-send") })
+                end),
+            }
+        end)
+
+        client:close()
+
+        assert.are.equal("canceled", pending.status)
+        assert.is_false(sent[1])
+        assert.is_truthy(tostring(sent[2]):find("client is closed", 1, true))
+        assert.are.equal(0, client:pending())
+        assert.is_nil(next(client._byId))
+        assert.is_nil(next(client._byFuture))
+    end)
+
     it("refuses to be pumped from inside its own pump", function()
         -- `wait` advances this client's source and settling runs listeners, so
         -- a listener that waits or pumps would recursively drain the same
@@ -587,7 +1119,7 @@ describe("http.newClient", function()
         end)
 
         assert.are.equal("ready", pending.status)
-        assert.are.equal(BODY, pending.value.body:text())
+        assert.are.equal(BODY, pending.value.body:readAll().value)
     end)
 
     it("takes a per-host list to skip TLS on, and nothing broader", function()
@@ -615,7 +1147,7 @@ describe("http.newClient", function()
             drive(pending, function()
                 server:respond(200, "OK", BODY, "text/plain")
             end, 400)
-            if pending.status == "ready" and pending.value.body:text() == BODY then
+            if pending.status == "ready" and pending.value.body:readAll().value == BODY then
                 completed = completed + 1
             end
         end
@@ -634,7 +1166,7 @@ describe("http.newClient", function()
         assert.has_error(function()
             client:send({
                 url = url("/nowhere-to-put-it"),
-                into = http.newStringStream("not a destination"),
+                into = tecsIO.newStringStream("not a destination"),
             })
         end)
     end)
@@ -661,7 +1193,7 @@ describe("http.newClient", function()
             end
 
             assert.are.equal("ready", pending.status)
-            assert.are.equal(BODY, pending.value.body:text())
+            assert.are.equal(BODY, pending.value.body:readAll().value)
         end)
 
         it("stops turning a client once it is closed", function()
@@ -721,7 +1253,7 @@ describe("http.newClient", function()
 
             assert.is_not_nil(response)
             assert.are.equal(200, response.status)
-            assert.are.equal(BODY, response.body:text())
+            assert.are.equal(BODY, response.body:readAll().value)
             assert.is_nil(response.error)
             -- The request is gone, so a system that reacts to one does not see
             -- the same one twice.
@@ -739,6 +1271,10 @@ describe("http.newClient", function()
             assert.is_not_nil(response)
             assert.are.equal(0, response.status)
             assert.is_string(response.error)
+            assert.is_true(response.body:isReadable())
+            assert.are.equal(0, response.body:contentLength())
+            assert.are.equal("", response.body:readAll().value)
+            assert.are.equal("http://127.0.0.1:1/", response.url)
         end)
 
         -- What a save does with a request that has not answered yet. The future
@@ -768,7 +1304,11 @@ describe("http.newClient", function()
                 assert.is_true(ok, tostring(saved))
 
                 local named = {}
-                for _, entry in ipairs(world:saveSnapshot({ format = "table" }).snapshot.componentTable) do
+                for _, entry in
+                    ipairs(world:saveSnapshot({
+                        format = "table",
+                    }).snapshot.componentTable)
+                do
                     named[entry.name] = true
                 end
                 assert.is_true(named["tecs.http.Request"])
@@ -801,7 +1341,7 @@ describe("http.newClient", function()
                 local response = turn(entity, http.plugin.Response)
                 assert.is_not_nil(response)
                 assert.are.equal(200, response.status)
-                assert.are.equal(BODY, response.body:text())
+                assert.are.equal(BODY, response.body:readAll().value)
             end)
 
             it("stops a transfer the load left nothing to receive", function()
@@ -835,12 +1375,28 @@ describe("http.newClient", function()
 end)
 
 describe("http.plugin snapshots", function()
+    local function only(world, component)
+        local query = world:newQuery({ include = { component } })
+        for archetype, length in query:iter() do
+            assert.are.equal(1, length)
+            return archetype:get(component)[1]
+        end
+        return nil
+    end
+
+    local function fixture(name)
+        local file = assert(io.open("spec/fixtures/http-legacy-snapshots/" .. name, "rb"))
+        local bytes = file:read("*a")
+        file:close()
+        return bytes
+    end
+
     for _, format in ipairs({ "table", "binary" }) do
         for _, field in ipairs({ "body", "into" }) do
             it("rejects a handle-backed request " .. field .. " in a " .. format .. " snapshot", function()
                 local world = tecs.ecs.newWorld()
                 local handle = assert(io.tmpfile())
-                local stream = http.newHandleStream(handle)
+                local stream = tecsIO.newHandleStream(handle)
                 local request = { url = "https://example.com/upload", [field] = stream }
                 world:spawn(http.plugin.Request(request))
 
@@ -849,12 +1405,79 @@ describe("http.plugin snapshots", function()
 
                 assert.is_false(ok)
                 assert.matches(
-                    "tecs: cannot snapshot tecs.http.Request: "
-                        .. field
-                        .. " from io.http.newHandleStream is runtime%-only",
+                    "tecs: cannot snapshot tecs.http.Request " .. field .. ": io.newHandleStream is runtime%-only",
                     tostring(failure)
                 )
             end)
         end
+
+        it("round-trips shared streams in a " .. format .. " snapshot", function()
+            local world = tecs.ecs.newWorld()
+            local requestHeaders = { ["authorization"] = "before-save" }
+            local responseHeaders = { ["content-type"] = "text/plain", ["x-state"] = "before-save" }
+            world:spawn(http.plugin.Request({
+                url = "https://example.test/upload",
+                method = "POST",
+                headers = requestHeaders,
+                body = tecsIO.newStringStream(BODY, "text/plain"),
+            }))
+            world:spawn(http.plugin.Response({
+                status = 0,
+                headers = responseHeaders,
+                body = tecsIO.newEmptyStream(),
+                url = "https://example.test/upload",
+                error = "saved failure",
+            }))
+            local saved = world:saveSnapshot({ format = format })
+            requestHeaders.authorization = "after-save"
+            responseHeaders["x-state"] = "after-save"
+
+            local restored = tecs.ecs.newWorld()
+            restored:loadSnapshot(saved)
+            local request = only(restored, http.plugin.Request)
+            assert.is_not_nil(request)
+            assert.are.equal("before-save", request.headers.authorization)
+            assert.are.equal(BODY, request.body:readAll().value)
+            assert.are.equal("text/plain", request.body:contentType())
+            assert.are.equal(#BODY, request.body:contentLength())
+
+            local response = only(restored, http.plugin.Response)
+            assert.are.equal("before-save", response.headers["x-state"])
+            assert.are.equal(0, response.body:contentLength())
+            assert.are.equal("", response.body:readAll().value)
+            assert.are.equal("saved failure", response.error)
+
+            request.headers.authorization = "after-load"
+            response.headers["x-state"] = "after-load"
+            if format == "table" then
+                local restoredAgain = tecs.ecs.newWorld()
+                restoredAgain:loadSnapshot(saved)
+                assert.are.equal("before-save", only(restoredAgain, http.plugin.Request).headers.authorization)
+                assert.are.equal("before-save", only(restoredAgain, http.plugin.Response).headers["x-state"])
+            end
+        end)
     end
+
+    it("loads legacy string and file request bodies", function()
+        local strings = tecs.ecs.newWorld()
+        strings:loadSnapshot(fixture("request-string.bin"))
+        local stringRequest = only(strings, http.plugin.Request)
+        assert.are.equal("legacy request body", stringRequest.body)
+
+        local files = tecs.ecs.newWorld()
+        files:loadSnapshot(fixture("request-file-datastream.bin"))
+        local fileRequest = only(files, http.plugin.Request)
+        assert.are.equal("text/plain", fileRequest.body:contentType())
+        assert.is_true(fileRequest.body:isReplayable())
+        assert.is_true(fileRequest.body:hasKnownLength())
+    end)
+
+    it("loads a legacy response body as a shared stream", function()
+        local world = tecs.ecs.newWorld()
+        world:loadSnapshot(fixture("response-string-datastream.bin"))
+        local response = only(world, http.plugin.Response)
+        assert.are.equal(201, response.status)
+        assert.are.equal("legacy response body", response.body:readAll().value)
+        assert.are.equal("text/plain", response.body:contentType())
+    end)
 end)

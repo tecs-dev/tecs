@@ -13,18 +13,31 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
+use bytes::Bytes;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::{Client, Method, Proxy, Url};
+use reqwest::{Body, Client, Method, Proxy, Url};
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::{mpsc, Semaphore};
 use tokio::task::AbortHandle;
+use tokio_stream::wrappers::ReceiverStream;
 
 const EVENT_QUEUE_CAPACITY: usize = 64;
+const UPLOAD_QUEUE_CAPACITY: usize = 16;
+const TRANSFER_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_HEADER_BYTES: usize = 256 * 1024;
 
 const EVENT_CHUNK: u32 = 1;
 const EVENT_COMPLETE: u32 = 2;
 const EVENT_FAILED: u32 = 3;
+const BODY_NONE: u32 = 0;
+const BODY_INLINE: u32 = 1;
+const BODY_UPLOAD: u32 = 2;
+const UPLOAD_CLOSED: i32 = -1;
+const UPLOAD_BACKPRESSURE: i32 = 0;
+const UPLOAD_ACCEPTED: i32 = 1;
+
+type UploadItem = Result<Bytes, std::io::Error>;
+type UploadSender = mpsc::Sender<UploadItem>;
 
 thread_local! {
     static LAST_HTTP_ERROR: RefCell<CString> =
@@ -80,7 +93,8 @@ pub struct TecsHttpRequest {
     headers: *const TecsHttpHeader,
     header_count: usize,
     body: TecsHttpSlice,
-    has_body: i32,
+    body_kind: u32,
+    body_length: i64,
     timeout_ms: u64,
     stall_timeout_ms: u64,
     max_bytes: u64,
@@ -90,7 +104,7 @@ pub struct TecsHttpRequest {
 enum Event {
     Chunk {
         id: u64,
-        data: Box<[u8]>,
+        data: Bytes,
     },
     Complete {
         id: u64,
@@ -128,6 +142,7 @@ struct Shared {
     total: Arc<Semaphore>,
     per_host_limit: usize,
     per_host: Mutex<HashMap<String, Arc<Semaphore>>>,
+    uploads: Mutex<HashMap<u64, UploadSender>>,
 }
 
 impl Shared {
@@ -164,11 +179,26 @@ struct OwnedRequest {
     url: Url,
     method: Method,
     headers: HeaderMap,
-    body: Option<Vec<u8>>,
+    body: Option<Body>,
     timeout: Duration,
     stall_timeout: Option<Duration>,
     max_bytes: u64,
     insecure: bool,
+}
+
+struct UploadGuard {
+    shared: Arc<Shared>,
+    id: u64,
+}
+
+impl Drop for UploadGuard {
+    fn drop(&mut self) {
+        self.shared
+            .uploads
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&self.id);
+    }
 }
 
 fn set_error(error: impl ToString) {
@@ -327,7 +357,10 @@ fn client_builder(options: &TecsHttpClientOptions, insecure: bool) -> Result<Cli
     builder.build().map_err(|error| error.to_string())
 }
 
-unsafe fn own_request(request: &TecsHttpRequest) -> Result<OwnedRequest, String> {
+unsafe fn own_request(
+    request: &TecsHttpRequest,
+    shared: &Arc<Shared>,
+) -> Result<OwnedRequest, String> {
     // SAFETY: The request's slices are borrowed only while they are copied.
     let url = unsafe { text(request.url, "request URL") }?;
     let url = Url::parse(&url).map_err(|error| error.to_string())?;
@@ -356,15 +389,35 @@ unsafe fn own_request(request: &TecsHttpRequest) -> Result<OwnedRequest, String>
         headers.insert(name, value);
     }
 
-    // SAFETY: The body is copied before this call returns.
-    let body = if request.has_body != 0 {
-        Some(
-            unsafe { bytes(request.body) }
-                .map_err(str::to_owned)?
-                .to_vec(),
-        )
-    } else {
-        None
+    let body = match request.body_kind {
+        BODY_NONE => None,
+        BODY_INLINE => {
+            // SAFETY: The bytes are copied before this call returns.
+            let copied =
+                Bytes::copy_from_slice(unsafe { bytes(request.body) }.map_err(str::to_owned)?);
+            Some(Body::from(copied))
+        }
+        BODY_UPLOAD => {
+            if request.body_length < -1 {
+                return Err("request body length must be -1 or non-negative".to_owned());
+            }
+            if request.body_length >= 0 && !headers.contains_key(reqwest::header::CONTENT_LENGTH) {
+                let length = HeaderValue::from_str(&request.body_length.to_string())
+                    .map_err(|error| error.to_string())?;
+                headers.insert(reqwest::header::CONTENT_LENGTH, length);
+            }
+            let (sender, receiver) = mpsc::channel::<UploadItem>(UPLOAD_QUEUE_CAPACITY);
+            let replaced = shared
+                .uploads
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .insert(request.id, sender);
+            if replaced.is_some() {
+                return Err("request id already has an upload body".to_owned());
+            }
+            Some(Body::wrap_stream(ReceiverStream::new(receiver)))
+        }
+        _ => return Err("request body kind is not valid".to_owned()),
     };
 
     Ok(OwnedRequest {
@@ -393,6 +446,10 @@ async fn fail(shared: &Shared, id: u64, url: &Url, reason: impl ToString) {
 
 async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
     let id = request.id;
+    let _upload_guard = UploadGuard {
+        shared: shared.clone(),
+        id,
+    };
     let url = request.url.clone();
     let host = request.url.host_str().unwrap_or("").to_owned();
     let total_permit = match shared.total.clone().acquire_owned().await {
@@ -503,14 +560,17 @@ async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
             .await;
             return;
         }
-        if !shared
-            .send(Event::Chunk {
-                id,
-                data: chunk.to_vec().into_boxed_slice(),
-            })
-            .await
-        {
-            return;
+        for start in (0..chunk.len()).step_by(TRANSFER_CHUNK_BYTES) {
+            let end = (start + TRANSFER_CHUNK_BYTES).min(chunk.len());
+            if !shared
+                .send(Event::Chunk {
+                    id,
+                    data: chunk.slice(start..end),
+                })
+                .await
+            {
+                return;
+            }
         }
     }
 
@@ -599,6 +659,7 @@ pub unsafe extern "C" fn tecsHttpClientCreate(
         total: Arc::new(Semaphore::new(options.max_connections as usize)),
         per_host_limit: options.max_connections_per_host as usize,
         per_host: Mutex::new(HashMap::new()),
+        uploads: Mutex::new(HashMap::new()),
     });
     Box::into_raw(Box::new(TecsHttpClient {
         secure,
@@ -624,6 +685,12 @@ pub unsafe extern "C" fn tecsHttpClientDestroy(client: *mut TecsHttpClient) {
     let client = unsafe { Box::from_raw(client) };
     client.shared.closed.store(true, Ordering::Release);
     let mut handles = client.handles.lock().unwrap_or_else(|e| e.into_inner());
+    client
+        .shared
+        .uploads
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
     for (_, handle) in handles.drain() {
         handle.abort();
     }
@@ -651,7 +718,7 @@ pub unsafe extern "C" fn tecsHttpClientSend(
         return 0;
     }
     // SAFETY: The request is copied synchronously.
-    let request = match unsafe { own_request(&*request) } {
+    let request = match unsafe { own_request(&*request, &client.shared) } {
         Ok(request) => request,
         Err(error) => {
             set_error(error);
@@ -692,6 +759,12 @@ pub unsafe extern "C" fn tecsHttpClientCancel(client: *mut TecsHttpClient, id: u
     }
     // SAFETY: A non-null pointer must be a live client.
     let client = unsafe { &*client };
+    client
+        .shared
+        .uploads
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .remove(&id);
     if let Some(handle) = client
         .handles
         .lock()
@@ -700,6 +773,69 @@ pub unsafe extern "C" fn tecsHttpClientCancel(client: *mut TecsHttpClient, id: u
     {
         handle.abort();
     }
+}
+
+/// Offers one request-body chunk to the bounded upload channel.
+///
+/// # Safety
+///
+/// `client` must be null or a live client pointer. A non-empty `data` range
+/// must remain readable for this call. Rust copies accepted bytes before
+/// returning.
+#[no_mangle]
+pub unsafe extern "C" fn tecsHttpClientUpload(
+    client: *mut TecsHttpClient,
+    id: u64,
+    data: *const u8,
+    length: usize,
+    finished: i32,
+) -> i32 {
+    if client.is_null() {
+        set_error("HTTP upload needs a client");
+        return UPLOAD_CLOSED;
+    }
+    if finished != 0 && length != 0 {
+        set_error("HTTP upload finish needs an empty byte slice");
+        return UPLOAD_CLOSED;
+    }
+    if length > TRANSFER_CHUNK_BYTES {
+        set_error("HTTP upload chunks cannot exceed 65536 bytes");
+        return UPLOAD_CLOSED;
+    }
+    // SAFETY: Null was rejected and the caller promises a live client.
+    let client = unsafe { &*client };
+    let mut uploads = client
+        .shared
+        .uploads
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if finished != 0 {
+        return if uploads.remove(&id).is_some() {
+            UPLOAD_ACCEPTED
+        } else {
+            UPLOAD_CLOSED
+        };
+    }
+    let Some(sender) = uploads.get(&id) else {
+        return UPLOAD_CLOSED;
+    };
+    let permit = match sender.try_reserve() {
+        Ok(permit) => permit,
+        Err(mpsc::error::TrySendError::Full(_)) => return UPLOAD_BACKPRESSURE,
+        Err(mpsc::error::TrySendError::Closed(_)) => return UPLOAD_CLOSED,
+    };
+    let source = TecsHttpSlice { data, length };
+    // SAFETY: The boundary contract keeps this slice readable for the call.
+    let source = match unsafe { bytes(source) } {
+        Ok(source) => source,
+        Err(error) => {
+            set_error(error);
+            return UPLOAD_CLOSED;
+        }
+    };
+    permit.send(Ok(Bytes::copy_from_slice(source)));
+    client.shared.activity.notify();
+    UPLOAD_ACCEPTED
 }
 
 fn try_next(client: &TecsHttpClient) -> Option<Event> {
@@ -948,6 +1084,51 @@ mod tests {
     }
 
     #[test]
+    fn upload_queue_refuses_the_seventeenth_chunk_without_copying() {
+        let (event_sender, event_receiver) = mpsc::channel(EVENT_QUEUE_CAPACITY);
+        let shared = Arc::new(Shared {
+            sender: event_sender,
+            activity: Activity {
+                generation: Mutex::new(0),
+                changed: Condvar::new(),
+            },
+            closed: AtomicBool::new(false),
+            total: Arc::new(Semaphore::new(1)),
+            per_host_limit: 1,
+            per_host: Mutex::new(HashMap::new()),
+            uploads: Mutex::new(HashMap::new()),
+        });
+        let (upload_sender, _upload_receiver) = mpsc::channel(UPLOAD_QUEUE_CAPACITY);
+        shared.uploads.lock().unwrap().insert(7, upload_sender);
+
+        let client = Box::into_raw(Box::new(TecsHttpClient {
+            secure: Client::new(),
+            insecure: Client::new(),
+            shared,
+            receiver: Mutex::new(event_receiver),
+            handles: Mutex::new(HashMap::new()),
+        }));
+        let chunk = vec![b'x'; TRANSFER_CHUNK_BYTES];
+        for _ in 0..UPLOAD_QUEUE_CAPACITY {
+            // SAFETY: The client and source remain live for the synchronous copy.
+            assert_eq!(
+                unsafe { tecsHttpClientUpload(client, 7, chunk.as_ptr(), chunk.len(), 0) },
+                UPLOAD_ACCEPTED
+            );
+        }
+        // Sixteen 64 KiB pieces are one MiB. The next offer encounters
+        // backpressure before constructing a Bytes allocation.
+        assert_eq!(UPLOAD_QUEUE_CAPACITY * TRANSFER_CHUNK_BYTES, 1024 * 1024);
+        // SAFETY: The client and source still remain live.
+        assert_eq!(
+            unsafe { tecsHttpClientUpload(client, 7, chunk.as_ptr(), chunk.len(), 0) },
+            UPLOAD_BACKPRESSURE
+        );
+        // SAFETY: Ownership is returned exactly once.
+        unsafe { tecsHttpClientDestroy(client) };
+    }
+
+    #[test]
     fn queues_chunks_and_completion_for_the_calling_thread() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -1004,7 +1185,8 @@ mod tests {
             headers: ptr::null(),
             header_count: 0,
             body: empty,
-            has_body: 0,
+            body_kind: BODY_NONE,
+            body_length: -1,
             timeout_ms: 5_000,
             stall_timeout_ms: 0,
             max_bytes: 0,
