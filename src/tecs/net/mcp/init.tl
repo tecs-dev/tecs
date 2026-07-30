@@ -212,13 +212,11 @@ local function reply(id: any, result: {string: any}): string
 end
 
 local function fail(id: any, code: integer, message: string): string
-    return data.encodeJSON(
-        {
-            jsonrpc = "2.0",
-            id = id,
-            error = {code = code, message = message},
-        }
-    )
+    return data.encodeJSON({
+        jsonrpc = "2.0",
+        id = id,
+        error = {code = code, message = message},
+    })
 end
 
 --- Runs one JSON-RPC request and returns the response text.
@@ -341,33 +339,31 @@ function mcp.Server:poll(): boolean
         self._transport:setTools(toolsJSON)
         self._toolsJSON = toolsJSON
     end
-    return self._transport:poll(
-        function(request: transport.Request)
-            local tool <const> = tools[request.name]
-            if tool == nil then
-                self._transport:respond(request, "no tool named '" .. request.name .. "'", true, false)
-                return
-            end
-
-            if crashed ~= nil and not tool.whenCrashed then
-                self._transport:respond(request, crashed, true, true)
-                return
-            end
-
-            local decoded, arguments = pcall(data.decodeJSON, request.arguments)
-            if not decoded then
-                self._transport:respond(request, "invalid tool arguments", true, false)
-                return
-            end
-            local called, payload = pcall(tool.handler, arguments as {string: any})
-            if not called then
-                LOGGER:warn("tool %s failed: %s", request.name, tostring(payload))
-                self._transport:respond(request, tostring(payload), true, false)
-                return
-            end
-            self._transport:respond(request, data.encodeJSON(payload or {}), false, false)
+    return self._transport:poll(function(request: transport.Request)
+        local tool <const> = tools[request.name]
+        if tool == nil then
+            self._transport:respond(request, "no tool named '" .. request.name .. "'", true, false)
+            return
         end
-    )
+
+        if crashed ~= nil and not tool.whenCrashed then
+            self._transport:respond(request, crashed, true, true)
+            return
+        end
+
+        local decoded, arguments = pcall(data.decodeJSON, request.arguments)
+        if not decoded then
+            self._transport:respond(request, "invalid tool arguments", true, false)
+            return
+        end
+        local called, payload = pcall(tool.handler, arguments as {string: any})
+        if not called then
+            LOGGER:warn("tool %s failed: %s", request.name, tostring(payload))
+            self._transport:respond(request, tostring(payload), true, false)
+            return
+        end
+        self._transport:respond(request, data.encodeJSON(payload or {}), false, false)
+    end)
 end
 
 --- Releases the server. Safe to call more than once.

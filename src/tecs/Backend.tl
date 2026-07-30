@@ -1162,24 +1162,22 @@ function Backend:rebuildPipelines()
     local mask: GraphicsPipeline = nil
     local shadow: GraphicsPipeline = nil
     local stamp: GraphicsPipeline = nil
-    local built, reason = pcall(
-        function(): string
-            pipeline = buildGeometry(self)
-            blend = buildForward(self)
-            mark = ComputePipeline.load(device, "instance.mark.comp", {})
-            scan = ComputePipeline.load(device, "instance.scan.comp", {})
-            compact = ComputePipeline.load(device, "instance.compact.comp", {})
-            rank = ComputePipeline.load(device, "instance.rank.comp", {})
-            place = ComputePipeline.load(device, "instance.place.comp", {})
-            if self._castCompact ~= nil then
-                castCompact = ComputePipeline.load(device, "instance.cast.comp", {})
-                local maskFormat, shadowFormat = self.deferred:castFormats()
-                mask = buildCast(self, maskFormat, "max", "ecs.occluders")
-                shadow = buildCast(self, shadowFormat, "min", "ecs.dropShadows")
-                stamp = buildCast(self, shadowFormat, "max", "ecs.dropShadowStamp")
-            end
+    local built, reason = pcall(function(): string
+        pipeline = buildGeometry(self)
+        blend = buildForward(self)
+        mark = ComputePipeline.load(device, "instance.mark.comp", {})
+        scan = ComputePipeline.load(device, "instance.scan.comp", {})
+        compact = ComputePipeline.load(device, "instance.compact.comp", {})
+        rank = ComputePipeline.load(device, "instance.rank.comp", {})
+        place = ComputePipeline.load(device, "instance.place.comp", {})
+        if self._castCompact ~= nil then
+            castCompact = ComputePipeline.load(device, "instance.cast.comp", {})
+            local maskFormat, shadowFormat = self.deferred:castFormats()
+            mask = buildCast(self, maskFormat, "max", "ecs.occluders")
+            shadow = buildCast(self, shadowFormat, "min", "ecs.dropShadows")
+            stamp = buildCast(self, shadowFormat, "max", "ecs.dropShadowStamp")
         end
-    )
+    end)
     if not built then
         if pipeline ~= nil then
             pipeline:destroy()

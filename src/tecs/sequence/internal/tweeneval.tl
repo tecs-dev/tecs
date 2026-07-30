@@ -108,8 +108,7 @@ end
 -- Per-slot working state. One flat struct so a whole playback's state is a
 -- single contiguous allocation the evaluation loop indexes rather than a
 -- table per slot.
-ffi.cdef(
-    [[
+ffi.cdef([[
     typedef struct {
         double init;
         double applied;
@@ -123,8 +122,7 @@ ffi.cdef(
         double d3;
         double d4;
     } TweenSlotState;
-]]
-)
+]])
 
 local record TweenSlotState
     init: number
@@ -902,14 +900,12 @@ local BUILTIN_TARGETS: {TargetName: TargetImpl} = {
     ["color.rgba"] = targets.color as TargetImpl,
 }
 
-tweeneval.TrackingTarget = ecs.newComponent(
-    {
-        name = "TweenTrackingTarget",
-        container = TrackingTarget,
-        fields = {"entity", "key"},
-        defaults = {0, ""},
-    }
-)
+tweeneval.TrackingTarget = ecs.newComponent({
+    name = "TweenTrackingTarget",
+    container = TrackingTarget,
+    fields = {"entity", "key"},
+    defaults = {0, ""},
+})
 
 -------------------------------------------------------------------------------
 -- Authoring resolution and the target/source codec

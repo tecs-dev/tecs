@@ -89,9 +89,9 @@ local function commandCheck(paths: layout, args: {string}): integer
         sources = args
     else
         local sourceRoot = project.path(found, found.source)
-        for _, relative in ipairs(
-            files.walk(sourceRoot, function(path: string): boolean return files.hasSuffix(path, ".tl") end)
-        ) do
+        for _, relative in ipairs(files.walk(
+            sourceRoot, function(path: string): boolean return files.hasSuffix(path, ".tl") end
+        )) do
             sources[#sources + 1] = found.source .. "/" .. relative
         end
     end

@@ -103,16 +103,14 @@ describe(
                             value: number
                         end
 
-                        local TC = tecs.ecs.newComponent(
-                            {
-                                name = "BundleTestComponent1",
-                                container = BundleTestComponent1,
-                                fields = {"value"},
-                                init = function(instance: BundleTestComponent1, value: number)
-                                    instance.value = value or 0
-                                end,
-                            }
-                        )
+                        local TC = tecs.ecs.newComponent({
+                            name = "BundleTestComponent1",
+                            container = BundleTestComponent1,
+                            fields = {"value"},
+                            init = function(instance: BundleTestComponent1, value: number)
+                                instance.value = value or 0
+                            end,
+                        })
 
                         local Tag4 = tecs.ecs.newTagComponent({name = "BundleTag4"})
 
@@ -148,14 +146,12 @@ describe(
                             id: integer
                         end
 
-                        local TC3 = tecs.ecs.newComponent(
-                            {
-                                name = "BundleTestComponent3",
-                                container = TestComponent3,
-                                fields = {"id"},
-                                init = function(instance: TestComponent3, id: integer) instance.id = id or 0 end,
-                            }
-                        )
+                        local TC3 = tecs.ecs.newComponent({
+                            name = "BundleTestComponent3",
+                            container = TestComponent3,
+                            fields = {"id"},
+                            init = function(instance: TestComponent3, id: integer) instance.id = id or 0 end,
+                        })
 
                         local callCount = 0
                         local bundle = world:newBundle(
@@ -206,17 +202,15 @@ describe(
                             y: number
                         end
 
-                        local TC = tecs.ecs.newComponent(
-                            {
-                                name = "BundleTestComponent4",
-                                container = TypedComponent,
-                                fields = {"x", "y"},
-                                init = function(instance: TypedComponent, x: number, y: number)
-                                    instance.x = x or 0
-                                    instance.y = y or 0
-                                end,
-                            }
-                        )
+                        local TC = tecs.ecs.newComponent({
+                            name = "BundleTestComponent4",
+                            container = TypedComponent,
+                            fields = {"x", "y"},
+                            init = function(instance: TypedComponent, x: number, y: number)
+                                instance.x = x or 0
+                                instance.y = y or 0
+                            end,
+                        })
 
                         -- This demonstrates type safety - the factory must return the correct type.
                         local bundle = world:newBundle(
@@ -266,27 +260,23 @@ describe(
                             id: integer
                         end
 
-                        local RequiredComp = tecs.ecs.newComponent(
-                            {
-                                name = "MetadataRequiredComp",
-                                container = RC,
-                                fields = {"id"},
-                                init = function(instance: RC, id: integer) instance.id = id or 0 end,
-                            }
-                        )
+                        local RequiredComp = tecs.ecs.newComponent({
+                            name = "MetadataRequiredComp",
+                            container = RC,
+                            fields = {"id"},
+                            init = function(instance: RC, id: integer) instance.id = id or 0 end,
+                        })
 
                         local record DC is tecs.ecs.Component
                             name: string
                         end
 
-                        local DefaultedComp = tecs.ecs.newComponent(
-                            {
-                                name = "MetadataDefaultedComp",
-                                container = DC,
-                                fields = {"name"},
-                                init = function(instance: DC, name: string) instance.name = name or "" end,
-                            }
-                        )
+                        local DefaultedComp = tecs.ecs.newComponent({
+                            name = "MetadataDefaultedComp",
+                            container = DC,
+                            fields = {"name"},
+                            init = function(instance: DC, name: string) instance.name = name or "" end,
+                        })
 
                         local bundle = world:newBundle(
                             "MetadataBundle",
@@ -312,16 +302,14 @@ describe(
                             value: number
                         end
 
-                        local TC = tecs.ecs.newComponent(
-                            {
-                                name = "RequiredBundleTestComponent",
-                                container = RequiredBundleTestComponent,
-                                fields = {"value"},
-                                init = function(instance: RequiredBundleTestComponent, value: number)
-                                    instance.value = value or 0
-                                end,
-                            }
-                        )
+                        local TC = tecs.ecs.newComponent({
+                            name = "RequiredBundleTestComponent",
+                            container = RequiredBundleTestComponent,
+                            fields = {"value"},
+                            init = function(instance: RequiredBundleTestComponent, value: number)
+                                instance.value = value or 0
+                            end,
+                        })
 
                         local Tag3 = tecs.ecs.newTagComponent({name = "RequiredTag3"})
 
@@ -349,14 +337,12 @@ describe(
                             name: string
                         end
 
-                        local TC2 = tecs.ecs.newComponent(
-                            {
-                                name = "RequiredBundleTestComponent2",
-                                container = TestComponent2,
-                                fields = {"name"},
-                                init = function(instance: TestComponent2, name: string) instance.name = name or "" end,
-                            }
-                        )
+                        local TC2 = tecs.ecs.newComponent({
+                            name = "RequiredBundleTestComponent2",
+                            container = TestComponent2,
+                            fields = {"name"},
+                            init = function(instance: TestComponent2, name: string) instance.name = name or "" end,
+                        })
 
                         local Tag4 = tecs.ecs.newTagComponent({name = "RequiredTag4"})
                         local bundle = world:newBundle(
@@ -380,29 +366,25 @@ describe(
                             id: integer
                         end
 
-                        local RC = tecs.ecs.newComponent(
-                            {
-                                name = "RequiredBundleComponent3",
-                                container = RequiredComp,
-                                fields = {"id"},
-                                init = function(instance: RequiredComp, id: integer) instance.id = id or 0 end,
-                            }
-                        )
+                        local RC = tecs.ecs.newComponent({
+                            name = "RequiredBundleComponent3",
+                            container = RequiredComp,
+                            fields = {"id"},
+                            init = function(instance: RequiredComp, id: integer) instance.id = id or 0 end,
+                        })
 
                         local record OptionalComp is tecs.ecs.Component
                             name: string
                         end
 
-                        local OC = tecs.ecs.newComponent(
-                            {
-                                name = "OptionalBundleComponent",
-                                container = OptionalComp,
-                                fields = {"name"},
-                                init = function(instance: OptionalComp, name: string)
-                                    instance.name = name or "default"
-                                end,
-                            }
-                        )
+                        local OC = tecs.ecs.newComponent({
+                            name = "OptionalBundleComponent",
+                            container = OptionalComp,
+                            fields = {"name"},
+                            init = function(instance: OptionalComp, name: string)
+                                instance.name = name or "default"
+                            end,
+                        })
 
                         local Tag6 = tecs.ecs.newTagComponent({name = "OptionalTag6"})
 
@@ -496,16 +478,12 @@ describe(
                             value: number
                         end
 
-                        local TC = tecs.ecs.newComponent(
-                            {
-                                name = "BundleSpawnTestComp",
-                                container = SpawnTestComp,
-                                fields = {"value"},
-                                init = function(instance: SpawnTestComp, value: number)
-                                    instance.value = value or 0
-                                end,
-                            }
-                        )
+                        local TC = tecs.ecs.newComponent({
+                            name = "BundleSpawnTestComp",
+                            container = SpawnTestComp,
+                            fields = {"value"},
+                            init = function(instance: SpawnTestComp, value: number) instance.value = value or 0 end,
+                        })
 
                         local bundle = world:newBundle(
                             "SpawnBundle",
@@ -535,14 +513,12 @@ describe(
                             name: string
                         end
 
-                        local TC = tecs.ecs.newComponent(
-                            {
-                                name = "WorldSpawnTestComp",
-                                container = SpawnTestComp2,
-                                fields = {"name"},
-                                init = function(instance: SpawnTestComp2, name: string) instance.name = name or "" end,
-                            }
-                        )
+                        local TC = tecs.ecs.newComponent({
+                            name = "WorldSpawnTestComp",
+                            container = SpawnTestComp2,
+                            fields = {"name"},
+                            init = function(instance: SpawnTestComp2, name: string) instance.name = name or "" end,
+                        })
 
                         world:newBundle(
                             "WorldSpawnBundle",
@@ -586,13 +562,11 @@ describe(
                         local record DC1 is tecs.ecs.Component
                             x: integer
                         end
-                        local Comp = tecs.ecs.newComponent(
-                            {
-                                name = "DeferComp1",
-                                container = DC1,
-                                fields = {"x"},
-                            }
-                        )
+                        local Comp = tecs.ecs.newComponent({
+                            name = "DeferComp1",
+                            container = DC1,
+                            fields = {"x"},
+                        })
                         local bundle = world:newBundle(
                             "DeferBundle1",
                             {
@@ -618,13 +592,11 @@ describe(
                         local record DC2 is tecs.ecs.Component
                             x: integer
                         end
-                        local Comp = tecs.ecs.newComponent(
-                            {
-                                name = "DeferComp2",
-                                container = DC2,
-                                fields = {"x"},
-                            }
-                        )
+                        local Comp = tecs.ecs.newComponent({
+                            name = "DeferComp2",
+                            container = DC2,
+                            fields = {"x"},
+                        })
                         local bundle = world:newBundle(
                             "DeferBundle2",
                             {
@@ -657,20 +629,16 @@ describe(
                         local record DC3Health is tecs.ecs.Component
                             hp: integer
                         end
-                        local Pos = tecs.ecs.newComponent(
-                            {
-                                name = "DeferPos3",
-                                container = DC3Pos,
-                                fields = {"x", "y"},
-                            }
-                        )
-                        local Health = tecs.ecs.newComponent(
-                            {
-                                name = "DeferHealth3",
-                                container = DC3Health,
-                                fields = {"hp"},
-                            }
-                        )
+                        local Pos = tecs.ecs.newComponent({
+                            name = "DeferPos3",
+                            container = DC3Pos,
+                            fields = {"x", "y"},
+                        })
+                        local Health = tecs.ecs.newComponent({
+                            name = "DeferHealth3",
+                            container = DC3Health,
+                            fields = {"hp"},
+                        })
 
                         local bundle = world:newBundle(
                             "DeferBundle3",
@@ -705,20 +673,16 @@ describe(
                         local record DC4B is tecs.ecs.Component
                             v: integer
                         end
-                        local CompA = tecs.ecs.newComponent(
-                            {
-                                name = "DeferA4",
-                                container = DC4A,
-                                fields = {"v"},
-                            }
-                        )
-                        local CompB = tecs.ecs.newComponent(
-                            {
-                                name = "DeferB4",
-                                container = DC4B,
-                                fields = {"v"},
-                            }
-                        )
+                        local CompA = tecs.ecs.newComponent({
+                            name = "DeferA4",
+                            container = DC4A,
+                            fields = {"v"},
+                        })
+                        local CompB = tecs.ecs.newComponent({
+                            name = "DeferB4",
+                            container = DC4B,
+                            fields = {"v"},
+                        })
 
                         local bundleA = world:newBundle("DeferBundle4A", {required = {CompA}}) as Bundle
                         local bundleB = world:newBundle("DeferBundle4B", {required = {CompB}}) as Bundle
@@ -744,16 +708,14 @@ describe(
                             strength: number
                             metamethod __call: function(self, target: integer, strength: number): DenseRelData
                         end
-                        local DenseRel = tecs.ecs.newRelationship(
-                            {
-                                name = "DeferDenseRel",
-                                container = DenseRelData,
-                                fields = {"strength"},
-                                init = function(instance: DenseRelData, _target: integer, strength: number)
-                                    instance.strength = strength or 1
-                                end,
-                            }
-                        )
+                        local DenseRel = tecs.ecs.newRelationship({
+                            name = "DeferDenseRel",
+                            container = DenseRelData,
+                            fields = {"strength"},
+                            init = function(instance: DenseRelData, _target: integer, strength: number)
+                                instance.strength = strength or 1
+                            end,
+                        })
 
                         local target = world:spawn()
                         world:commit()
@@ -777,25 +739,21 @@ describe(
                 it(
                     "routes sparse relationships through setSparse",
                     function()
-                        local SparseRel = tecs.ecs.newRelationship(
-                            {
-                                name = "DeferChildOf",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local SparseRel = tecs.ecs.newRelationship({
+                            name = "DeferChildOf",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
                         local record DCPos is tecs.ecs.Component
                             x: integer
                             y: integer
                         end
-                        local PosComp = tecs.ecs.newComponent(
-                            {
-                                name = "DeferChildPos",
-                                container = DCPos,
-                                fields = {"x", "y"},
-                            }
-                        )
+                        local PosComp = tecs.ecs.newComponent({
+                            name = "DeferChildPos",
+                            container = DCPos,
+                            fields = {"x", "y"},
+                        })
 
                         local parent = world:spawn(PosComp(0, 0))
                         world:commit()
@@ -836,13 +794,11 @@ describe(
                         local record DC5 is tecs.ecs.Component
                             v: integer
                         end
-                        local Comp = tecs.ecs.newComponent(
-                            {
-                                name = "DeferComp5",
-                                container = DC5,
-                                fields = {"v"},
-                            }
-                        )
+                        local Comp = tecs.ecs.newComponent({
+                            name = "DeferComp5",
+                            container = DC5,
+                            fields = {"v"},
+                        })
                         local bundle = world:newBundle(
                             "DeferBundle5",
                             {
@@ -877,13 +833,11 @@ describe(
                     x: number
                 end
 
-                local GC = tecs.ecs.newFFIComponent(
-                    {
-                        name = "BundleGenCacheComp",
-                        container = GenComp,
-                        fields = {{"x", "float"}},
-                    }
-                )
+                local GC = tecs.ecs.newFFIComponent({
+                    name = "BundleGenCacheComp",
+                    container = GenComp,
+                    fields = {{"x", "float"}},
+                })
 
                 local function newCountingBundle(name: string): Bundle, function(): number
                     local nextVal = 0
@@ -962,26 +916,22 @@ describe(
                         local record ReqBase is tecs.ecs.Component
                             v: number
                         end
-                        local Base = tecs.ecs.newComponent(
-                            {
-                                name = "BundleReqBase",
-                                container = ReqBase,
-                                fields = {"v"},
-                                defaults = {41},
-                            }
-                        )
+                        local Base = tecs.ecs.newComponent({
+                            name = "BundleReqBase",
+                            container = ReqBase,
+                            fields = {"v"},
+                            defaults = {41},
+                        })
                         local record ReqTop is tecs.ecs.Component
                             t: number
                         end
-                        local Top = tecs.ecs.newComponent(
-                            {
-                                name = "BundleReqTop",
-                                container = ReqTop,
-                                fields = {"t"},
-                                defaults = {0},
-                                requires = {Base},
-                            }
-                        )
+                        local Top = tecs.ecs.newComponent({
+                            name = "BundleReqTop",
+                            container = ReqTop,
+                            fields = {"t"},
+                            defaults = {0},
+                            requires = {Base},
+                        })
 
                         local bundle = world:newBundle(
                             "RequiresBundle",
@@ -1011,11 +961,9 @@ describe(
                 it(
                     "adds the wildcard container for dense relationship instances",
                     function()
-                        local Owes = tecs.ecs.newRelationship(
-                            {
-                                name = "BundleWildcardOwes",
-                            }
-                        )
+                        local Owes = tecs.ecs.newRelationship({
+                            name = "BundleWildcardOwes",
+                        })
                         local target = world:spawn()
                         world:commit()
                         local instance = Owes(target) as tecs.ecs.Component
@@ -1069,13 +1017,11 @@ describe(
                 it(
                     "applies sparse relationship values immediately at scope depth 0",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "BundleSparseFollows",
-                                sparse = true,
-                                exclusive = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "BundleSparseFollows",
+                            sparse = true,
+                            exclusive = true,
+                        })
                         local target = world:spawn()
                         world:commit()
 

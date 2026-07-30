@@ -315,21 +315,19 @@ local MODIFIERS <const>: {string: integer} = {
 
 --- Device family names, by SDL's type value.
 local GAMEPAD_TYPES <const>: {integer: string} = {}
-for name, kind in pairs(
-    {
-        SDL_GAMEPAD_TYPE_STANDARD = "standard",
-        SDL_GAMEPAD_TYPE_XBOX360 = "xbox360",
-        SDL_GAMEPAD_TYPE_XBOXONE = "xboxOne",
-        SDL_GAMEPAD_TYPE_PS3 = "ps3",
-        SDL_GAMEPAD_TYPE_PS4 = "ps4",
-        SDL_GAMEPAD_TYPE_PS5 = "ps5",
-        SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO = "switchPro",
-        SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT = "joyconLeft",
-        SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT = "joyconRight",
-        SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR = "joyconPair",
-        SDL_GAMEPAD_TYPE_GAMECUBE = "gamecube",
-    } as {string: string}
-) do
+for name, kind in pairs({
+    SDL_GAMEPAD_TYPE_STANDARD = "standard",
+    SDL_GAMEPAD_TYPE_XBOX360 = "xbox360",
+    SDL_GAMEPAD_TYPE_XBOXONE = "xboxOne",
+    SDL_GAMEPAD_TYPE_PS3 = "ps3",
+    SDL_GAMEPAD_TYPE_PS4 = "ps4",
+    SDL_GAMEPAD_TYPE_PS5 = "ps5",
+    SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO = "switchPro",
+    SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT = "joyconLeft",
+    SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT = "joyconRight",
+    SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR = "joyconPair",
+    SDL_GAMEPAD_TYPE_GAMECUBE = "gamecube",
+} as {string: string}) do
     local value = enumValue(name)
     if value ~= nil then
         GAMEPAD_TYPES[value] = kind
@@ -337,16 +335,14 @@ for name, kind in pairs(
 end
 
 local POWER_STATES <const>: {integer: string} = {}
-for name, state in pairs(
-    {
-        SDL_POWERSTATE_ERROR = "error",
-        SDL_POWERSTATE_UNKNOWN = "unknown",
-        SDL_POWERSTATE_ON_BATTERY = "onBattery",
-        SDL_POWERSTATE_NO_BATTERY = "noBattery",
-        SDL_POWERSTATE_CHARGING = "charging",
-        SDL_POWERSTATE_CHARGED = "charged",
-    } as {string: string}
-) do
+for name, state in pairs({
+    SDL_POWERSTATE_ERROR = "error",
+    SDL_POWERSTATE_UNKNOWN = "unknown",
+    SDL_POWERSTATE_ON_BATTERY = "onBattery",
+    SDL_POWERSTATE_NO_BATTERY = "noBattery",
+    SDL_POWERSTATE_CHARGING = "charging",
+    SDL_POWERSTATE_CHARGED = "charged",
+} as {string: string}) do
     local value = enumValue(name)
     if value ~= nil then
         POWER_STATES[value] = state
@@ -357,18 +353,16 @@ end
 --- is what a prompt has to show and what a positional name deliberately is
 --- not.
 local BUTTON_LABELS <const>: {integer: string} = {}
-for name, label in pairs(
-    {
-        SDL_GAMEPAD_BUTTON_LABEL_A = "a",
-        SDL_GAMEPAD_BUTTON_LABEL_B = "b",
-        SDL_GAMEPAD_BUTTON_LABEL_X = "x",
-        SDL_GAMEPAD_BUTTON_LABEL_Y = "y",
-        SDL_GAMEPAD_BUTTON_LABEL_CROSS = "cross",
-        SDL_GAMEPAD_BUTTON_LABEL_CIRCLE = "circle",
-        SDL_GAMEPAD_BUTTON_LABEL_SQUARE = "square",
-        SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE = "triangle",
-    } as {string: string}
-) do
+for name, label in pairs({
+    SDL_GAMEPAD_BUTTON_LABEL_A = "a",
+    SDL_GAMEPAD_BUTTON_LABEL_B = "b",
+    SDL_GAMEPAD_BUTTON_LABEL_X = "x",
+    SDL_GAMEPAD_BUTTON_LABEL_Y = "y",
+    SDL_GAMEPAD_BUTTON_LABEL_CROSS = "cross",
+    SDL_GAMEPAD_BUTTON_LABEL_CIRCLE = "circle",
+    SDL_GAMEPAD_BUTTON_LABEL_SQUARE = "square",
+    SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE = "triangle",
+} as {string: string}) do
     local value = enumValue(name)
     if value ~= nil then
         BUTTON_LABELS[value] = label

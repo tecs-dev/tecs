@@ -157,28 +157,22 @@ end
 -- agent selects a system by one, so they are a save format and a tooling
 -- surface rather than module paths. See `AGENTS.md` on externally typed
 -- strings.
-ecs.newComponent(
-    {
-        name = "tecs.http.Request",
-        container = plugin.Request,
-        serialize = serializeRequest,
-    }
-)
+ecs.newComponent({
+    name = "tecs.http.Request",
+    container = plugin.Request,
+    serialize = serializeRequest,
+})
 
-ecs.newComponent(
-    {
-        name = "tecs.http.Response",
-        container = plugin.Response,
-    }
-)
+ecs.newComponent({
+    name = "tecs.http.Response",
+    container = plugin.Response,
+})
 
-ecs.newComponent(
-    {
-        name = "tecs.http.Pending",
-        container = plugin.Pending,
-        transient = true,
-    }
-)
+ecs.newComponent({
+    name = "tecs.http.Pending",
+    container = plugin.Pending,
+    transient = true,
+})
 
 local CLIENT <const> = ecs.newKey("tecs.http.client", nil as Client)
 
@@ -245,14 +239,12 @@ local function finish(world: World, inFlight: types.Query, futures: Waiting)
                 local settled: Response
                 if future.status == "ready" then
                     local answer <const> = future.value
-                    settled = plugin.Response(
-                        {
-                            status = answer.status,
-                            headers = answer.headers,
-                            body = answer.body,
-                            url = answer.url,
-                        }
-                    )
+                    settled = plugin.Response({
+                        status = answer.status,
+                        headers = answer.headers,
+                        body = answer.body,
+                        url = answer.url,
+                    })
                 else
                     settled = plugin.Response({status = 0, headers = {}, error = future.error})
                 end
@@ -276,32 +268,26 @@ function plugin.install(world: World, options?: Options)
 
     local futures <const>: Waiting = {}
 
-    local unsent <const> = world:query(
-        {
-            name = "tecs.http.Unsent",
-            include = {plugin.Request},
-            exclude = {plugin.Pending, plugin.Response},
-        }
-    )
-    local inFlight <const> = world:query(
-        {
-            name = "tecs.http.InFlight",
-            include = {plugin.Pending},
-        }
-    )
+    local unsent <const> = world:query({
+        name = "tecs.http.Unsent",
+        include = {plugin.Request},
+        exclude = {plugin.Pending, plugin.Response},
+    })
+    local inFlight <const> = world:query({
+        name = "tecs.http.InFlight",
+        include = {plugin.Pending},
+    })
 
     -- `First`, so a request spawned last frame is in flight before anything
     -- this frame looks at it, and a response that settled between the two is
     -- already a component when the systems that read one run. The transfers
     -- themselves are turned by the application, outside any phase: a system
     -- that pumped would recursively drain the client while listeners settle.
-    world:addSystem(
-        {
-            name = "tecs.http.Drive",
-            phase = ecs.phases.First,
-            run = function() start(world, owned, unsent, futures); finish(world, inFlight, futures) end,
-        }
-    )
+    world:addSystem({
+        name = "tecs.http.Drive",
+        phase = ecs.phases.First,
+        run = function() start(world, owned, unsent, futures); finish(world, inFlight, futures) end,
+    })
 
     -- An entity that asked for something and then died wanted the answer, and
     -- nothing is left to give it to. Canceling is reference counted, so this

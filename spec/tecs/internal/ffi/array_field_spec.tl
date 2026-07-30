@@ -6,13 +6,11 @@ local record ArrHolder is tecs.ecs.Component
     vals: {number}
 end
 
-local Holder = tecs.ecs.newFFIComponent(
-    {
-        name = "FFIArrayFieldHolder",
-        container = ArrHolder,
-        fields = {{"vals", "float[3]"}},
-    }
-)
+local Holder = tecs.ecs.newFFIComponent({
+    name = "FFIArrayFieldHolder",
+    container = ArrHolder,
+    fields = {{"vals", "float[3]"}},
+})
 
 describe(
     "FFI array fields",

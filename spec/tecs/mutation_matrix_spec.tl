@@ -17,54 +17,44 @@ results.
 ]]
 
 -- Components exclusive to this spec to avoid cross-spec collisions.
-local MatHealth = tecs.ecs.newComponent(
-    {
-        name = "MatrixHealth",
-        container = {},
-        fields = {"hp"},
-        defaults = {100},
-    }
-)
+local MatHealth = tecs.ecs.newComponent({
+    name = "MatrixHealth",
+    container = {},
+    fields = {"hp"},
+    defaults = {100},
+})
 
-local MatArmor = tecs.ecs.newComponent(
-    {
-        name = "MatrixArmor",
-        container = {},
-        fields = {"ar"},
-        defaults = {1},
-        requires = {MatHealth},
-    }
-)
+local MatArmor = tecs.ecs.newComponent({
+    name = "MatrixArmor",
+    container = {},
+    fields = {"ar"},
+    defaults = {1},
+    requires = {MatHealth},
+})
 
-local MatPos = tecs.ecs.newComponent(
-    {
-        name = "MatrixPos",
-        container = {},
-        fields = {"x"},
-        defaults = {0},
-    }
-)
+local MatPos = tecs.ecs.newComponent({
+    name = "MatrixPos",
+    container = {},
+    fields = {"x"},
+    defaults = {0},
+})
 
-local MatVel = tecs.ecs.newComponent(
-    {
-        name = "MatrixVel",
-        container = {},
-        fields = {"dx"},
-        defaults = {0},
-    }
-)
+local MatVel = tecs.ecs.newComponent({
+    name = "MatrixVel",
+    container = {},
+    fields = {"dx"},
+    defaults = {0},
+})
 
 local MatMarker = tecs.ecs.newTagComponent({name = "MatrixMarker"})
 local MatBatchTag = tecs.ecs.newTagComponent({name = "MatrixBatchTag"})
 
 -- Dense exclusive reverse-indexed relationship (compact FFI layout).
-local MatLink = tecs.ecs.newRelationship(
-    {
-        name = "MatrixLink",
-        exclusive = true,
-        reverseIndex = true,
-    }
-)
+local MatLink = tecs.ecs.newRelationship({
+    name = "MatrixLink",
+    exclusive = true,
+    reverseIndex = true,
+})
 
 local type Ops = function(tecs.World)
 
@@ -355,9 +345,9 @@ describe(
                 luassert.equals(id, w:byKey("matrixHero"))
                 luassert.equals(3, w:get(id, MatPos).x)
 
-                local ok = pcall(
-                    function() w:spawnBundle("matrixKeyed", tecs.ecs.EntityKey("matrixHero"), MatPos(4)) end
-                )
+                local ok = pcall(function()
+                    w:spawnBundle("matrixKeyed", tecs.ecs.EntityKey("matrixHero"), MatPos(4))
+                end)
                 luassert.is_false(ok, "duplicate live key must error")
 
                 -- Despawn releases the key for reclaiming.
@@ -524,14 +514,12 @@ describe(
 describe(
     "sparse relationship store hygiene",
     function()
-        local MatMark = tecs.ecs.newRelationship(
-            {
-                name = "MatrixMark",
-                sparse = true,
-                reverseIndex = true,
-                transient = true,
-            }
-        )
+        local MatMark = tecs.ecs.newRelationship({
+            name = "MatrixMark",
+            sparse = true,
+            reverseIndex = true,
+            transient = true,
+        })
 
         it(
             "batchDespawn's bulk path cleans source store entries",

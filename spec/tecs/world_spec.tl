@@ -23,18 +23,16 @@ describe(
             return firstId as integer
         end
 
-        before_each(
-            function()
-                w = WorldImpl.new() as WorldImpl
-                testId = testId + 1
+        before_each(function()
+            w = WorldImpl.new() as WorldImpl
+            testId = testId + 1
 
-                -- Use the test helper provider
-                provider = TestHelpers.createComponentProvider("WorldTest", testId)
-                PosComponent = provider.PosComponent
-                VelComponent = provider.VelComponent
-                DeadComponent = provider.DeadComponent
-            end
-        )
+            -- Use the test helper provider
+            provider = TestHelpers.createComponentProvider("WorldTest", testId)
+            PosComponent = provider.PosComponent
+            VelComponent = provider.VelComponent
+            DeadComponent = provider.DeadComponent
+        end)
 
         describe(
             "basic world functionality",
@@ -54,17 +52,15 @@ describe(
                     "creates a world with a custom pipeline",
                     function()
                         local spyRun = spy.new(function() end)
-                        local w2 = tecs.ecs.newWorld(
-                            {
-                                pipelineFactory = function(): tecs.ecs.Pipeline
-                                    return {
-                                        -- builtin-plugins add systems. Don't assert on this though since more may be added in the future.
-                                        addSystem = spy.new(function() end),
-                                        run = spyRun,
-                                    } as tecs.ecs.Pipeline
-                                end,
-                            }
-                        )
+                        local w2 = tecs.ecs.newWorld({
+                            pipelineFactory = function(): tecs.ecs.Pipeline
+                                return {
+                                    -- builtin-plugins add systems. Don't assert on this though since more may be added in the future.
+                                    addSystem = spy.new(function() end),
+                                    run = spyRun,
+                                } as tecs.ecs.Pipeline
+                            end,
+                        })
 
                         luassert.is_not_nil(w2, "World should be created with custom pipeline")
                         w2:startup()
@@ -118,12 +114,10 @@ describe(
                 it(
                     "rejects stale handles after slot reuse",
                     function()
-                        local parentRel = tecs.ecs.newRelationship(
-                            {
-                                name = "WorldStaleParent_" .. tostring(testId),
-                                exclusive = true,
-                            }
-                        )
+                        local parentRel = tecs.ecs.newRelationship({
+                            name = "WorldStaleParent_" .. tostring(testId),
+                            exclusive = true,
+                        })
 
                         local stale = w:spawn(PosComponent(1, 2), parentRel(123) as tecs.ecs.Component)
                         w:commit()
@@ -477,14 +471,12 @@ describe(
                 it(
                     "returns true/false for a sparse relationship container",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "HasSpecSparseChildOf",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "HasSpecSparseChildOf",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
                         local parent = w:spawn()
                         local kid = w:spawn(ChildOf(parent) as tecs.ecs.Component)
                         local orphan = w:spawn()
@@ -500,14 +492,12 @@ describe(
                 it(
                     "routes sparse-instance checks through the relationship store",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "HasSpecSparseChildOfInstance",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "HasSpecSparseChildOfInstance",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
                         local parent1 = w:spawn()
                         local parent2 = w:spawn()
                         local kid = w:spawn(ChildOf(parent1) as tecs.ecs.Component)
@@ -540,14 +530,12 @@ describe(
                 it(
                     "reflects removal of a sparse relationship",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "HasSpecSparseChildOfRemove",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "HasSpecSparseChildOfRemove",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
                         local parent = w:spawn()
                         local kid = w:spawn(ChildOf(parent) as tecs.ecs.Component)
                         w:commit()
@@ -568,14 +556,12 @@ describe(
                         -- `:has` branch. Pin it so accidental propagation (e.g. to
                         -- dense instances or containers) is caught early.
                         local DenseRel = tecs.ecs.newRelationship({name = "HasSpecFlagDense"})
-                        local SparseRel = tecs.ecs.newRelationship(
-                            {
-                                name = "HasSpecFlagSparse",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local SparseRel = tecs.ecs.newRelationship({
+                            name = "HasSpecFlagSparse",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
                         local t = w:spawn()
 
                         luassert.is_nil(
@@ -906,13 +892,11 @@ describe(
                     function()
                         local w2 = tecs.ecs.newWorld()
                         local startupCalled = false
-                        w2:addSystem(
-                            {
-                                phase = tecs.ecs.phases.Startup,
-                                name = "StartupSystem",
-                                run = function() startupCalled = true end,
-                            }
-                        )
+                        w2:addSystem({
+                            phase = tecs.ecs.phases.Startup,
+                            name = "StartupSystem",
+                            run = function() startupCalled = true end,
+                        })
 
                         w2:startup()
 
@@ -925,13 +909,11 @@ describe(
                     function()
                         local w2 = tecs.ecs.newWorld()
                         local shutdownCalled = false
-                        w2:addSystem(
-                            {
-                                phase = tecs.ecs.phases.Shutdown,
-                                name = "ShutdownSystem",
-                                run = function(_dt, _w) shutdownCalled = true end,
-                            }
-                        )
+                        w2:addSystem({
+                            phase = tecs.ecs.phases.Shutdown,
+                            name = "ShutdownSystem",
+                            run = function(_dt, _w) shutdownCalled = true end,
+                        })
 
                         w2:shutdown()
 
@@ -957,13 +939,11 @@ describe(
                     function()
                         local w2 = tecs.ecs.newWorld()
                         local updateCalled = false
-                        w2:addSystem(
-                            {
-                                phase = tecs.ecs.phases.Update,
-                                name = "UpdateSystem",
-                                run = function(_dt, _w) updateCalled = true end,
-                            }
-                        )
+                        w2:addSystem({
+                            phase = tecs.ecs.phases.Update,
+                            name = "UpdateSystem",
+                            run = function(_dt, _w) updateCalled = true end,
+                        })
 
                         -- Disable the update phase
                         w2:disablePhase(tecs.ecs.phases.Update)
@@ -1110,21 +1090,17 @@ describe(
                         local totalDt: number = 0
 
                         -- Create world with fixed timestep
-                        local w2 = WorldImpl.new(
-                            {
-                                timestep = 0.01, -- 10ms fixed timestep
-                            }
-                        ) as WorldImpl
+                        local w2 = WorldImpl.new({
+                            timestep = 0.01, -- 10ms fixed timestep
+                        }) as WorldImpl
 
-                        w2:addSystem(
-                            {
-                                phase = phases.FixedUpdate,
-                                run = function(dt: number, _world: WorldImpl)
-                                    updateCount = updateCount + 1
-                                    totalDt = totalDt + dt
-                                end,
-                            }
-                        )
+                        w2:addSystem({
+                            phase = phases.FixedUpdate,
+                            run = function(dt: number, _world: WorldImpl)
+                                updateCount = updateCount + 1
+                                totalDt = totalDt + dt
+                            end,
+                        })
 
                         -- Update with 25ms - should run 2 fixed updates
                         w2:update(0.025)
@@ -1170,15 +1146,13 @@ describe(
                 it(
                     "should cascade delete children when parent with cascadeDelete relationship is despawned",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "ChildOfAliveTest",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                                cascadeDelete = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "ChildOfAliveTest",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                            cascadeDelete = true,
+                        })
 
                         local parent = w:spawn()
                         local child = w:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -1202,16 +1176,14 @@ describe(
                             value: number
                         end
 
-                        local TestComponent = tecs.ecs.newComponent(
-                            {
-                                name = "TestComponentAlive",
-                                container = TestComponentType,
-                                fields = {"value"},
-                                init = function(instance: TestComponentType, value: number)
-                                    instance.value = value or 42
-                                end,
-                            }
-                        )
+                        local TestComponent = tecs.ecs.newComponent({
+                            name = "TestComponentAlive",
+                            container = TestComponentType,
+                            fields = {"value"},
+                            init = function(instance: TestComponentType, value: number)
+                                instance.value = value or 42
+                            end,
+                        })
 
                         local componentValue: number = nil
                         local wasAlive: boolean = nil
@@ -1364,19 +1336,14 @@ describe(
                     "should notify query observers",
                     function()
                         local matchCount = 0
-                        w:query(
-                            {
-                                include = {PosComponent},
-                                onEntitiesAdded = function(
-                                    _archetype: tecs.ecs.Archetype,
-                                    _firstRow: integer,
-                                    _lastRow: integer,
-                                    count: integer
-                                )
-                                    matchCount = matchCount + count
-                                end,
-                            }
-                        )
+                        w:query({
+                            include = {PosComponent},
+                            onEntitiesAdded = function(
+                                _archetype: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
+                            )
+                                matchCount = matchCount + count
+                            end,
+                        })
 
                         w:batchSpawn(
                             20,
@@ -1397,14 +1364,12 @@ describe(
                 it(
                     "supports sparse relationship components in the signature",
                     function()
-                        local SparseRel = tecs.ecs.newRelationship(
-                            {
-                                name = "BatchSparse" .. testId,
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local SparseRel = tecs.ecs.newRelationship({
+                            name = "BatchSparse" .. testId,
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
                         local parent = w:spawn(PosComponent(0, 0))
                         w:commit()
 
@@ -1670,15 +1635,13 @@ describe(
                 it(
                     "cascades sparse relationships via the slow path",
                     function()
-                        local SparseRel = tecs.ecs.newRelationship(
-                            {
-                                name = "BatchDespawnRel" .. testId,
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                                cascadeDelete = true,
-                            }
-                        )
+                        local SparseRel = tecs.ecs.newRelationship({
+                            name = "BatchDespawnRel" .. testId,
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                            cascadeDelete = true,
+                        })
 
                         local parent2 = w:spawn(PosComponent(0, 0))
                         local kid1 = w:spawn(PosComponent(1, 1), SparseRel(parent2))
@@ -1782,11 +1745,9 @@ describe(
                 it(
                     "rejects batch spawning entities with builtin Key",
                     function()
-                        local ok = pcall(
-                            function()
-                                w:batchSpawn(2, {tecs.ecs.EntityKey}, function(_arch, _first, _last, _count) end)
-                            end
-                        )
+                        local ok = pcall(function()
+                            w:batchSpawn(2, {tecs.ecs.EntityKey}, function(_arch, _first, _last, _count) end)
+                        end)
                         luassert.is_false(ok)
                     end
                 )

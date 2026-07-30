@@ -22,13 +22,11 @@ describe(
                 it(
                     "should create a dense relationship with reverseIndex",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "DenseRevIdx1",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "DenseRevIdx1",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
                         luassert.is_false((Follows as ComponentInternal).isSparse)
                         luassert.is_true((Follows as ComponentInternal).reverseIndex)
                     end
@@ -37,13 +35,11 @@ describe(
                 it(
                     "resolves framework behavior from dense instances to their container",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "DenseRevIdxBehaviorOwner",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "DenseRevIdxBehaviorOwner",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
                         local instance = Follows(123) as tecs.ecs.Component
 
                         luassert.is_equal(Follows, behavior.behaviorOwner(instance))
@@ -58,13 +54,11 @@ describe(
                         -- Same regression as the sparse case: dense reverse indexes used to live on the
                         -- relationship container as a module-level singleton, leaking entity links across
                         -- worlds. The unified RelationshipStore makes both sparse and dense per-world.
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "DenseRevIdxIsolation",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "DenseRevIdxIsolation",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
 
                         local worldA = tecs.ecs.newWorld()
                         local leaderA = worldA:spawn()
@@ -92,13 +86,11 @@ describe(
                 it(
                     "should return source entities targeting an entity",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "DenseTargets1",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "DenseTargets1",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
 
                         local leader = world:spawn()
                         local f1 = world:spawn(Follows(leader) as tecs.ecs.Component)
@@ -115,13 +107,11 @@ describe(
                 it(
                     "should update inverse on relationship removal",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "DenseTargets2",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "DenseTargets2",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
 
                         local leader = world:spawn()
                         local follower = world:spawn(Follows(leader) as tecs.ecs.Component)
@@ -143,13 +133,11 @@ describe(
                 it(
                     "should update inverse on exclusive replace",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "DenseTargets3",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "DenseTargets3",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
 
                         local leader1 = world:spawn()
                         local leader2 = world:spawn()
@@ -173,13 +161,11 @@ describe(
                 it(
                     "should update inverse when source entity is despawned",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "DenseTargets4",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "DenseTargets4",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
 
                         local leader = world:spawn()
                         local follower = world:spawn(Follows(leader) as tecs.ecs.Component)
@@ -197,13 +183,11 @@ describe(
                 it(
                     "should remove relationship instances when target is despawned",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "DenseTargets5",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "DenseTargets5",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
 
                         local leader = world:spawn()
                         local follower = world:spawn(Follows(leader) as tecs.ecs.Component)
@@ -226,13 +210,11 @@ describe(
                 it(
                     "should DFS traverse a dense hierarchy",
                     function()
-                        local OwnedBy = tecs.ecs.newRelationship(
-                            {
-                                name = "DenseTraverse1",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local OwnedBy = tecs.ecs.newRelationship({
+                            name = "DenseTraverse1",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
 
                         local root = world:spawn()
                         local child1 = world:spawn(OwnedBy(root) as tecs.ecs.Component)
@@ -259,14 +241,12 @@ describe(
                 it(
                     "should despawn sources when target is despawned (cascadeDelete)",
                     function()
-                        local OwnedBy = tecs.ecs.newRelationship(
-                            {
-                                name = "DenseCascade1",
-                                exclusive = true,
-                                reverseIndex = true,
-                                cascadeDelete = true,
-                            }
-                        )
+                        local OwnedBy = tecs.ecs.newRelationship({
+                            name = "DenseCascade1",
+                            exclusive = true,
+                            reverseIndex = true,
+                            cascadeDelete = true,
+                        })
 
                         local owner = world:spawn()
                         local item1 = world:spawn(OwnedBy(owner) as tecs.ecs.Component)
@@ -284,14 +264,12 @@ describe(
                 it(
                     "should cascade recursively through dense hierarchy",
                     function()
-                        local OwnedBy = tecs.ecs.newRelationship(
-                            {
-                                name = "DenseCascadeDeep1",
-                                exclusive = true,
-                                reverseIndex = true,
-                                cascadeDelete = true,
-                            }
-                        )
+                        local OwnedBy = tecs.ecs.newRelationship({
+                            name = "DenseCascadeDeep1",
+                            exclusive = true,
+                            reverseIndex = true,
+                            cascadeDelete = true,
+                        })
 
                         local root = world:spawn()
                         local child = world:spawn(OwnedBy(root) as tecs.ecs.Component)
@@ -321,13 +299,11 @@ describe(
                 it(
                     "eager set then eager remove zeroes the reverse index",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "RevIdx_SetRemove",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "RevIdx_SetRemove",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
                         local w = tecs.ecs.newWorld()
                         local leader = w:spawn()
                         local f = w:spawn(Follows(leader) as tecs.ecs.Component)
@@ -340,13 +316,11 @@ describe(
                 it(
                     "deferred set then deferred remove yields the same terminal state",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "RevIdx_DeferredRoundtrip",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "RevIdx_DeferredRoundtrip",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
                         local w = tecs.ecs.newWorld()
                         local leader = w:spawn()
                         local follower = w:spawn()
@@ -367,13 +341,11 @@ describe(
                         local function build_world(
                             deferred: boolean
                         ): (integer, integer, integer, tecs.World, tecs.ecs.Component)
-                            local Follows = tecs.ecs.newRelationship(
-                                {
-                                    name = "RevIdx_Parity_" .. (deferred and "Deferred" or "Instant"),
-                                    exclusive = true,
-                                    reverseIndex = true,
-                                }
-                            )
+                            local Follows = tecs.ecs.newRelationship({
+                                name = "RevIdx_Parity_" .. (deferred and "Deferred" or "Instant"),
+                                exclusive = true,
+                                reverseIndex = true,
+                            })
                             local w = tecs.ecs.newWorld()
                             local l1, l2 = w:spawn(), w:spawn()
                             local a = w:spawn(Follows(l1) as tecs.ecs.Component)
@@ -417,13 +389,11 @@ describe(
                         -- -effects block and was unreachable when the entity was still
                         -- in STATE_SPAWN. Phase 4 fires the hook at the dispatcher
                         -- regardless of state, so both paths work.
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "RevIdx_SpawnReparent",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "RevIdx_SpawnReparent",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
                         local w = tecs.ecs.newWorld()
                         local l1, l2 = w:spawn(), w:spawn()
                         w:defer()
@@ -444,13 +414,11 @@ describe(
                 it(
                     "exclusive replace unlinks old target before linking new",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "RevIdx_ExclusiveReplace",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "RevIdx_ExclusiveReplace",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
                         local w = tecs.ecs.newWorld()
                         local l1, l2 = w:spawn(), w:spawn()
                         local f = w:spawn(Follows(l1) as tecs.ecs.Component)
@@ -468,13 +436,11 @@ describe(
                 it(
                     "many-to-one reverse index stays correct across interleaved ops",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "RevIdx_ManyToOne",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "RevIdx_ManyToOne",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
                         local w = tecs.ecs.newWorld()
                         local leader = w:spawn()
                         local followers: {integer} = {}
@@ -504,13 +470,11 @@ describe(
                 it(
                     "onDespawn hook reads old column value before row teardown",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "RevIdx_Ordering_OnDespawn",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "RevIdx_Ordering_OnDespawn",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
                         local w = tecs.ecs.newWorld()
                         local leader = w:spawn()
                         local follower = w:spawn(Follows(leader) as tecs.ecs.Component)

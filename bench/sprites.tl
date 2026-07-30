@@ -373,228 +373,220 @@ local function spawnOne(world: tecs.World, at: integer): integer
     )
 end
 
-return tecs.newApplication(
-    {
-        window = {title = "sprites", width = WIDTH, height = HEIGHT},
-        presentMode = "immediate",
-        ambientLight = {1.0, 1.0, 1.0},
-        capacity = TOTAL + HEADROOM,
-        reserveRuns = RESERVE,
-        partialRewrites = PARTIAL,
-        -- The default ceiling is a million slots, so a scale run has to raise it
-        -- rather than discovering the limit as a spawn failure.
-        maxEntities = TOTAL + 1024,
-        debugMaxFrames = WARMUP + FRAMES,
+return tecs.newApplication({
+    window = {title = "sprites", width = WIDTH, height = HEIGHT},
+    presentMode = "immediate",
+    ambientLight = {1.0, 1.0, 1.0},
+    capacity = TOTAL + HEADROOM,
+    reserveRuns = RESERVE,
+    partialRewrites = PARTIAL,
+    -- The default ceiling is a million slots, so a scale run has to raise it
+    -- rather than discovering the limit as a spawn failure.
+    maxEntities = TOTAL + 1024,
+    debugMaxFrames = WARMUP + FRAMES,
 
-        plugin = function(world: tecs.World, app: tecs.Application)
-            local renderer = app.renderer
-            if MODE ~= "static" and MODE ~= "dense" and MODE ~= "sparse" and MODE ~= "churn" and MODE ~= "spawner" then
-                error(("tecs: no sprite bench regime '%s'"):format(MODE))
+    plugin = function(world: tecs.World, app: tecs.Application)
+        local renderer = app.renderer
+        if MODE ~= "static" and MODE ~= "dense" and MODE ~= "sparse" and MODE ~= "churn" and MODE ~= "spawner" then
+            error(("tecs: no sprite bench regime '%s'"):format(MODE))
+        end
+        if MODE == "spawner" and (FIELDS < 1 or WAVE < 1 or SPAWN_RATE < 1) then
+            error("tecs: the spawner regime needs BENCH_FIELDS, BENCH_WAVE and BENCH_SPAWN of at least one", 0)
+        end
+
+        -- Blocking, because the field cannot be built before the sheet knows
+        -- which layer its frames live on and there is no frame to poll from
+        -- yet. A game polls `assets.update` instead.
+        if not assets.installed() then
+            assets.install()
+        end
+        local decoding <const> = assets.loadImage(filesystem.assetPath(ATLAS))
+        assets.waitAll()
+        if decoding.status ~= "ready" then
+            error(("tecs: cannot load '%s': %s"):format(ATLAS, decoding.error or decoding.status))
+        end
+        local decoded <const> = decoding.value
+        local imageWidth <const> = decoded.width
+        local imageHeight <const> = decoded.height
+        resident = renderer:registerImage(decoded)
+
+        playbook = sheet.grid({
+            name = "bench.sprites",
+            imageWidth = imageWidth,
+            imageHeight = imageHeight,
+            frameWidth = imageWidth / COLUMNS,
+            frameHeight = imageHeight / ROWS,
+            duration = FRAME_MS,
+        }):bind(resident)
+
+        if MODE ~= "static" then
+            animation.plugin(world)
+        end
+
+        math.randomseed(42)
+        if MODE == "spawner" then
+            -- A marker per archetype, and the field split evenly between
+            -- them. The remainder goes to the first rather than being
+            -- dropped, so the population is the one the report names.
+            local share <const> = math.floor(COUNT / FIELDS)
+            for index = 1, FIELDS do
+                local marker <const> = tecs.ecs.newTagComponent({name = ("BenchSpriteField%03d"):format(index)})
+                scatter(world, index == 1 and COUNT - share * (FIELDS - 1) or share, false, marker)
             end
-            if MODE == "spawner" and (FIELDS < 1 or WAVE < 1 or SPAWN_RATE < 1) then
-                error("tecs: the spawner regime needs BENCH_FIELDS, BENCH_WAVE and BENCH_SPAWN of at least one", 0)
-            end
+        else
+            scatter(world, COUNT, MODE == "dense" or MODE == "sparse")
+        end
 
-            -- Blocking, because the field cannot be built before the sheet knows
-            -- which layer its frames live on and there is no frame to poll from
-            -- yet. A game polls `assets.update` instead.
-            if not assets.installed() then
-                assets.install()
-            end
-            local decoding <const> = assets.loadImage(filesystem.assetPath(ATLAS))
-            assets.waitAll()
-            if decoding.status ~= "ready" then
-                error(("tecs: cannot load '%s': %s"):format(ATLAS, decoding.error or decoding.status))
-            end
-            local decoded <const> = decoding.value
-            local imageWidth <const> = decoded.width
-            local imageHeight <const> = decoded.height
-            resident = renderer:registerImage(decoded)
-
-            playbook = sheet.grid(
-                {
-                    name = "bench.sprites",
-                    imageWidth = imageWidth,
-                    imageHeight = imageHeight,
-                    frameWidth = imageWidth / COLUMNS,
-                    frameHeight = imageHeight / ROWS,
-                    duration = FRAME_MS,
-                }
-            ):bind(resident)
-
-            if MODE ~= "static" then
-                animation.plugin(world)
-            end
-
-            math.randomseed(42)
-            if MODE == "spawner" then
-                -- A marker per archetype, and the field split evenly between
-                -- them. The remainder goes to the first rather than being
-                -- dropped, so the population is the one the report names.
-                local share <const> = math.floor(COUNT / FIELDS)
-                for index = 1, FIELDS do
-                    local marker <const> = tecs.ecs.newTagComponent({name = ("BenchSpriteField%03d"):format(index)})
-                    scatter(world, index == 1 and COUNT - share * (FIELDS - 1) or share, false, marker)
-                end
-            else
-                scatter(world, COUNT, MODE == "dense" or MODE == "sparse")
-            end
-
-            if MODE == "churn" then
-                print(
-                    ("sprites: %d resident + %d churning, %d spawned and %d " .. "despawned per frame"):format(
-                        COUNT, POOL, SPAWN_RATE, SPAWN_RATE
-                    )
-                )
-            elseif MODE == "spawner" then
-                print(
-                    ("sprites: %d still over %d archetypes, a wave of %d in one " .. "more, %d rows a frame"):format(
-                        COUNT, FIELDS, POOL, SPAWN_RATE
-                    )
-                )
-            else
-                print(("sprites: %d sprites over %.0fx%.0f, %d animating"):format(COUNT, AREA_W, AREA_H, PLAYING))
-            end
-            -- The churn and the sampling both sit in `First`, which is where the
-            -- loop used to call this from: ahead of every system in the frame, so a
-            -- sprite spawned here is extracted by the frame that spawned it. The
-            -- one thing that is not the same is that a spawn from inside the step
-            -- is applied at the next phase boundary rather than at once, which is
-            -- what every other spawn in a world already does.
-            local frame = 0
-            world:addSystem(
-                {
-                    name = "bench.Churn",
-                    phase = tecs.ecs.phases.First,
-                    run = function(dt: number)
-                        -- Warmup frames are the ones that built and first uploaded the
-                        -- scene. Dropping them from every stage at once is what makes
-                        -- the report a distribution of the steady state rather than of
-                        -- the run.
-                        if frame == WARMUP then
-                            timing.reset()
-                        end
-
-                        if MODE == "churn" then
-                            local size <const> = POOL
-                            for _ = 1, SPAWN_RATE do
-                                local slot <const> = ringAt % size + 1
-                                local previous <const> = ring[slot]
-                                if previous ~= nil then
-                                    world:despawn(previous)
-                                end
-                                ring[slot] = spawnOne(world, ringAt)
-                                ringAt = ringAt + 1
-                            end
-                        elseif MODE == "spawner" then
-                            -- Every frame moves the pool's length, which is the
-                            -- whole point: a length that stood still is a layout
-                            -- neither of the two has to lay out again, and that is
-                            -- the case `churn` already covers. The turn is taken at
-                            -- the crest and at nothing left, so the wave is
-                            -- `WAVE` frames up and `WAVE` frames down whatever the
-                            -- rate is.
-                            if waveRising then
-                                for _ = 1, SPAWN_RATE do
-                                    waveHeld = waveHeld + 1
-                                    wave[waveHeld] = spawnOne(world, ringAt)
-                                    ringAt = ringAt + 1
-                                end
-                                if waveHeld >= POOL then
-                                    waveRising = false
-                                end
-                            else
-                                for _ = 1, SPAWN_RATE do
-                                    if waveHeld < 1 then
-                                        break
-                                    end
-                                    world:despawn(wave[waveHeld])
-                                    wave[waveHeld] = nil
-                                    waveHeld = waveHeld - 1
-                                end
-                                if waveHeld < 1 then
-                                    waveRising = true
-                                end
-                            end
-                        end
-
-                        if frame >= WARMUP then
-                            timing.mark(DELTA, dt)
-                            -- One frame behind, since the counter is published by the
-                            -- sync and this runs ahead of it. Over a run of hundreds
-                            -- that shifts the window by one frame and nothing else.
-                            local written <const> = renderer.rewritten
-                            rewrittenTotal = rewrittenTotal + written
-                            if written > rewrittenPeak then
-                                rewrittenPeak = written
-                            end
-                            if written == 0 then
-                                quietFrames = quietFrames + 1
-                            end
-                            instances = renderer.count
-                        end
-                        frame = frame + 1
-                    end,
-                }
-            )
-
-            world:addSystem(
-                {
-                    name = "bench.Report",
-                    phase = tecs.ecs.phases.Shutdown,
-                    run = function()
-                        local frames <const> = math.max(1, frame - WARMUP)
-                        -- Said again at the end, so a pasted report carries what it
-                        -- was measuring rather than only what came out.
-                        print(
-                            ("sprites: mode %s, runs %s, rewrites %s"):format(
-                                MODE, RESERVE and "reserved" or "packed", PARTIAL and "partial" or "whole-run"
-                            )
-                        )
-                        -- The first number is the extent the cull is dispatched
-                        -- over, which a reserved layout holds slack inside, so it
-                        -- reads above the population and is not one. The gap is
-                        -- what reserving costs the cull.
-                        print(
-                            ("%d of %d instances synced, %d changing per fixed step"):format(
-                                instances,
-                                TOTAL,
-                                MODE == "churn" and SPAWN_RATE * 2 or MODE == "spawner" and SPAWN_RATE or PLAYING
-                            )
-                        )
-                        -- `rewritten` counts the slots written from a component column
-                        -- and not the ones a reserved layout blanks when a run moves,
-                        -- an archetype leaves or a run shrinks, so it under-reports
-                        -- reserved and the two layouts are not comparable through it.
-                        -- The `extract` stage below is, p50 and p95 together.
-                        print(
-                            ("rewritten %.0f mean and %d peak per frame, %d of %d " .. "frames rewrote nothing"):format(
-                                rewrittenTotal / frames, rewrittenPeak, quietFrames, frames
-                            )
-                        )
-                        local report = timing.format()
-                        if report ~= "" then
-                            print(report)
-                        end
-                    end,
-                }
-            )
-
+        if MODE == "churn" then
             print(
-                (
-                    "sprites: mode %s, runs %s in %d slots, "
-                    .. "rewrites %s, viewport %dx%d, measuring %d frames after %d warmup"
-                ):format(
-                    MODE,
-                    RESERVE and "reserved" or "packed",
-                    TOTAL + HEADROOM,
-                    PARTIAL and "partial" or "whole-run",
-                    WIDTH,
-                    HEIGHT,
-                    FRAMES,
-                    WARMUP
+                ("sprites: %d resident + %d churning, %d spawned and %d " .. "despawned per frame"):format(
+                    COUNT, POOL, SPAWN_RATE, SPAWN_RATE
                 )
             )
-        end,
-    }
-)
+        elseif MODE == "spawner" then
+            print(
+                ("sprites: %d still over %d archetypes, a wave of %d in one " .. "more, %d rows a frame"):format(
+                    COUNT, FIELDS, POOL, SPAWN_RATE
+                )
+            )
+        else
+            print(("sprites: %d sprites over %.0fx%.0f, %d animating"):format(COUNT, AREA_W, AREA_H, PLAYING))
+        end
+        -- The churn and the sampling both sit in `First`, which is where the
+        -- loop used to call this from: ahead of every system in the frame, so a
+        -- sprite spawned here is extracted by the frame that spawned it. The
+        -- one thing that is not the same is that a spawn from inside the step
+        -- is applied at the next phase boundary rather than at once, which is
+        -- what every other spawn in a world already does.
+        local frame = 0
+        world:addSystem({
+            name = "bench.Churn",
+            phase = tecs.ecs.phases.First,
+            run = function(dt: number)
+                -- Warmup frames are the ones that built and first uploaded the
+                -- scene. Dropping them from every stage at once is what makes
+                -- the report a distribution of the steady state rather than of
+                -- the run.
+                if frame == WARMUP then
+                    timing.reset()
+                end
+
+                if MODE == "churn" then
+                    local size <const> = POOL
+                    for _ = 1, SPAWN_RATE do
+                        local slot <const> = ringAt % size + 1
+                        local previous <const> = ring[slot]
+                        if previous ~= nil then
+                            world:despawn(previous)
+                        end
+                        ring[slot] = spawnOne(world, ringAt)
+                        ringAt = ringAt + 1
+                    end
+                elseif MODE == "spawner" then
+                    -- Every frame moves the pool's length, which is the
+                    -- whole point: a length that stood still is a layout
+                    -- neither of the two has to lay out again, and that is
+                    -- the case `churn` already covers. The turn is taken at
+                    -- the crest and at nothing left, so the wave is
+                    -- `WAVE` frames up and `WAVE` frames down whatever the
+                    -- rate is.
+                    if waveRising then
+                        for _ = 1, SPAWN_RATE do
+                            waveHeld = waveHeld + 1
+                            wave[waveHeld] = spawnOne(world, ringAt)
+                            ringAt = ringAt + 1
+                        end
+                        if waveHeld >= POOL then
+                            waveRising = false
+                        end
+                    else
+                        for _ = 1, SPAWN_RATE do
+                            if waveHeld < 1 then
+                                break
+                            end
+                            world:despawn(wave[waveHeld])
+                            wave[waveHeld] = nil
+                            waveHeld = waveHeld - 1
+                        end
+                        if waveHeld < 1 then
+                            waveRising = true
+                        end
+                    end
+                end
+
+                if frame >= WARMUP then
+                    timing.mark(DELTA, dt)
+                    -- One frame behind, since the counter is published by the
+                    -- sync and this runs ahead of it. Over a run of hundreds
+                    -- that shifts the window by one frame and nothing else.
+                    local written <const> = renderer.rewritten
+                    rewrittenTotal = rewrittenTotal + written
+                    if written > rewrittenPeak then
+                        rewrittenPeak = written
+                    end
+                    if written == 0 then
+                        quietFrames = quietFrames + 1
+                    end
+                    instances = renderer.count
+                end
+                frame = frame + 1
+            end,
+        })
+
+        world:addSystem({
+            name = "bench.Report",
+            phase = tecs.ecs.phases.Shutdown,
+            run = function()
+                local frames <const> = math.max(1, frame - WARMUP)
+                -- Said again at the end, so a pasted report carries what it
+                -- was measuring rather than only what came out.
+                print(
+                    ("sprites: mode %s, runs %s, rewrites %s"):format(
+                        MODE, RESERVE and "reserved" or "packed", PARTIAL and "partial" or "whole-run"
+                    )
+                )
+                -- The first number is the extent the cull is dispatched
+                -- over, which a reserved layout holds slack inside, so it
+                -- reads above the population and is not one. The gap is
+                -- what reserving costs the cull.
+                print(
+                    ("%d of %d instances synced, %d changing per fixed step"):format(
+                        instances,
+                        TOTAL,
+                        MODE == "churn" and SPAWN_RATE * 2 or MODE == "spawner" and SPAWN_RATE or PLAYING
+                    )
+                )
+                -- `rewritten` counts the slots written from a component column
+                -- and not the ones a reserved layout blanks when a run moves,
+                -- an archetype leaves or a run shrinks, so it under-reports
+                -- reserved and the two layouts are not comparable through it.
+                -- The `extract` stage below is, p50 and p95 together.
+                print(
+                    ("rewritten %.0f mean and %d peak per frame, %d of %d " .. "frames rewrote nothing"):format(
+                        rewrittenTotal / frames, rewrittenPeak, quietFrames, frames
+                    )
+                )
+                local report = timing.format()
+                if report ~= "" then
+                    print(report)
+                end
+            end,
+        })
+
+        print(
+            (
+                "sprites: mode %s, runs %s in %d slots, "
+                .. "rewrites %s, viewport %dx%d, measuring %d frames after %d warmup"
+            ):format(
+                MODE,
+                RESERVE and "reserved" or "packed",
+                TOTAL + HEADROOM,
+                PARTIAL and "partial" or "whole-run",
+                WIDTH,
+                HEIGHT,
+                FRAMES,
+                WARMUP
+            )
+        )
+    end,
+})

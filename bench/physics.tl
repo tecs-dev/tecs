@@ -152,184 +152,166 @@ local function dropWave(world: tecs.World, count: integer, rand: function(): num
     end
 end
 
-return tecs.newApplication(
-    {
-        window = {title = "physics", width = WIDTH, height = HEIGHT},
-        presentMode = "immediate",
-        ambientLight = {1.0, 1.0, 1.0},
-        capacity = BODIES + 64,
-        debugMaxFrames = WARMUP + FRAMES,
+return tecs.newApplication({
+    window = {title = "physics", width = WIDTH, height = HEIGHT},
+    presentMode = "immediate",
+    ambientLight = {1.0, 1.0, 1.0},
+    capacity = BODIES + 64,
+    debugMaxFrames = WARMUP + FRAMES,
 
-        plugin = function(world: tecs.World, app: tecs.Application)
-            local renderer = app.renderer
+    plugin = function(world: tecs.World, app: tecs.Application)
+        local renderer = app.renderer
 
-            -- Iterations completed, which is what the drop schedule and the warmup
-            -- cut are both counted in. Incremented in `Last` so every phase in one
-            -- iteration reads the same number.
-            local frame = 0
-            world:addSystem(
-                {
-                    name = "bench.Frame",
-                    phase = tecs.ecs.phases.Last,
-                    run = function() frame = frame + 1 end,
-                }
-            )
+        -- Iterations completed, which is what the drop schedule and the warmup
+        -- cut are both counted in. Incremented in `Last` so every phase in one
+        -- iteration reads the same number.
+        local frame = 0
+        world:addSystem({
+            name = "bench.Frame",
+            phase = tecs.ecs.phases.Last,
+            run = function() frame = frame + 1 end,
+        })
 
-            -- Physics runs in the fixed phases, as it always does. The comparison
-            -- problem that creates is solved where it belongs: dt is pinned, so
-            -- the accumulator releases exactly one fixed step per frame.
-            --
-            -- Left measured, the workload would be a function of the frame rate it
-            -- produces. Cheap physics makes frames fast, fast frames accumulate
-            -- fewer steps, fewer steps means less jet impulse, the pile settles,
-            -- and the cost oscillates between runs by more than any change being
-            -- measured. `time.provider` exists for exactly this: frames are the
-            -- coordinate system and dt is data.
-            -- The real dt is recorded here rather than in a system, which sees the
-            -- pinned value: a stage fed the fiction would report the fiction. This
-            -- is the one place that sees both.
-            time.provider = function(realDt: number): number timing.mark(DELTA, realDt); return time.nominal end
+        -- Physics runs in the fixed phases, as it always does. The comparison
+        -- problem that creates is solved where it belongs: dt is pinned, so
+        -- the accumulator releases exactly one fixed step per frame.
+        --
+        -- Left measured, the workload would be a function of the frame rate it
+        -- produces. Cheap physics makes frames fast, fast frames accumulate
+        -- fewer steps, fewer steps means less jet impulse, the pile settles,
+        -- and the cost oscillates between runs by more than any change being
+        -- measured. `time.provider` exists for exactly this: frames are the
+        -- coordinate system and dt is data.
+        -- The real dt is recorded here rather than in a system, which sees the
+        -- pinned value: a stage fed the fiction would report the fiction. This
+        -- is the one place that sees both.
+        time.provider = function(realDt: number): number timing.mark(DELTA, realDt); return time.nominal end
 
-            -- The A/B knob for the solver's thread pool. One worker starts no
-            -- threads and runs every task inline, which is the no-executor path.
-            world:addPlugin(
-                physics.plugin(
-                    {
-                        gravity = {0.0, 900.0},
-                        workerCount = math.floor(tonumber(os.getenv("BENCH_WORKERS")) or 0) as integer,
-                    }
-                )
-            )
-            buildContainer(world)
+        -- The A/B knob for the solver's thread pool. One worker starts no
+        -- threads and runs every task inline, which is the no-executor path.
+        world:addPlugin(physics.plugin({
+            gravity = {0.0, 900.0},
+            workerCount = math.floor(tonumber(os.getenv("BENCH_WORKERS")) or 0) as integer,
+        }))
+        buildContainer(world)
 
-            -- Seeded, so every run drops the same bodies in the same order and two
-            -- measurements are of the same scene.
-            math.randomseed(42)
-            local rand <const> = math.random
+        -- Seeded, so every run drops the same bodies in the same order and two
+        -- measurements are of the same scene.
+        math.randomseed(42)
+        local rand <const> = math.random
 
-            local perWave <const> = math.floor(BODIES / WAVES)
-            local dropped = 0
+        local perWave <const> = math.floor(BODIES / WAVES)
+        local dropped = 0
 
-            world:addSystem(
-                {
-                    name = "bench.Drop",
-                    phase = tecs.ecs.phases.Update,
-                    run = function()
-                        if dropped >= WAVES then
-                            return
-                        end
-                        if frame < dropped * WAVE_FRAMES then
-                            return
-                        end
-                        dropped = dropped + 1
-                        dropWave(world, perWave, rand)
-                    end,
-                }
-            )
+        world:addSystem({
+            name = "bench.Drop",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                if dropped >= WAVES then
+                    return
+                end
+                if frame < dropped * WAVE_FRAMES then
+                    return
+                end
+                dropped = dropped + 1
+                dropWave(world, perWave, rand)
+            end,
+        })
 
-            -- x, y, then a unit direction. World Y runs down, so a positive y
-            -- component pushes downward.
-            local function jet(x: number, y: number, dx: number, dy: number): {number}
-                local length = math.sqrt(dx * dx + dy * dy)
-                return {x, y, dx / length, dy / length}
-            end
+        -- x, y, then a unit direction. World Y runs down, so a positive y
+        -- component pushes downward.
+        local function jet(x: number, y: number, dx: number, dy: number): {number}
+            local length = math.sqrt(dx * dx + dy * dy)
+            return {x, y, dx / length, dy / length}
+        end
 
-            -- Each aimed along the wall beside it, so the four together circulate
-            -- clockwise instead of fighting each other in the middle.
-            local blowers <const>: {{number}} = {
-                jet(WIDTH * 0.18, HEIGHT * 0.20, 1.0, 0.30), -- top left, right
-                jet(WIDTH * 0.82, HEIGHT * 0.20, -0.30, 1.0), -- top right, down
-                jet(WIDTH * 0.82, HEIGHT * 0.78, -1.0, -0.30), -- low right, left
-                jet(WIDTH * 0.18, HEIGHT * 0.78, 0.30, -1.0), -- low left, up
-            }
-            local radiusSq <const> = BLOWER_RADIUS * BLOWER_RADIUS
+        -- Each aimed along the wall beside it, so the four together circulate
+        -- clockwise instead of fighting each other in the middle.
+        local blowers <const>: {{number}} = {
+            jet(WIDTH * 0.18, HEIGHT * 0.20, 1.0, 0.30), -- top left, right
+            jet(WIDTH * 0.82, HEIGHT * 0.20, -0.30, 1.0), -- top right, down
+            jet(WIDTH * 0.82, HEIGHT * 0.78, -1.0, -0.30), -- low right, left
+            jet(WIDTH * 0.18, HEIGHT * 0.78, 0.30, -1.0), -- low left, up
+        }
+        local radiusSq <const> = BLOWER_RADIUS * BLOWER_RADIUS
 
-            local blown = world:query(
-                {
-                    include = {Transform, physics.RigidBody},
-                }
-            )
+        local blown = world:query({
+            include = {Transform, physics.RigidBody},
+        })
 
-            world:addSystem(
-                {
-                    name = "bench.Blowers",
-                    -- Beside the step rather than beside the frame, so a body takes
-                    -- the same impulse per step of simulated time however the frames
-                    -- fall.
-                    phase = tecs.ecs.phases.FixedUpdate,
-                    run = function()
-                        -- The physics step is fixed, so the push is too.
-                        local push = BLOWER_FORCE / 60.0
-                        for archetype, length in blown:iter() do
-                            -- Read rather than getMut: the blowers change velocity
-                            -- through Rapier, and the transform is written back by the
-                            -- physics sync. Taking it mutable here would mark the
-                            -- column dirty every frame and defeat the gate.
-                            local transforms = archetype:get(Transform)
-                            local bodies = archetype:get(physics.RigidBody)
-                            for row = 1, length do
-                                local transform = transforms[row]
-                                for index = 1, #blowers do
-                                    local blower = blowers[index]
-                                    local dx = transform.x - blower[1]
-                                    local dy = transform.y - blower[2]
-                                    local distanceSq = dx * dx + dy * dy
-                                    if distanceSq < radiusSq then
-                                        -- Falls off with distance, so a body at the
-                                        -- edge of the stream drifts rather than being
-                                        -- snapped into it.
-                                        local falloff = 1.0 - distanceSq / radiusSq
-                                        local strength = push * falloff
-                                        physics.applyImpulseTo(bodies[row], blower[3] * strength, blower[4] * strength)
-                                        break
-                                    end
-                                end
+        world:addSystem({
+            name = "bench.Blowers",
+            -- Beside the step rather than beside the frame, so a body takes
+            -- the same impulse per step of simulated time however the frames
+            -- fall.
+            phase = tecs.ecs.phases.FixedUpdate,
+            run = function()
+                -- The physics step is fixed, so the push is too.
+                local push = BLOWER_FORCE / 60.0
+                for archetype, length in blown:iter() do
+                    -- Read rather than getMut: the blowers change velocity
+                    -- through Rapier, and the transform is written back by the
+                    -- physics sync. Taking it mutable here would mark the
+                    -- column dirty every frame and defeat the gate.
+                    local transforms = archetype:get(Transform)
+                    local bodies = archetype:get(physics.RigidBody)
+                    for row = 1, length do
+                        local transform = transforms[row]
+                        for index = 1, #blowers do
+                            local blower = blowers[index]
+                            local dx = transform.x - blower[1]
+                            local dy = transform.y - blower[2]
+                            local distanceSq = dx * dx + dy * dy
+                            if distanceSq < radiusSq then
+                                -- Falls off with distance, so a body at the
+                                -- edge of the stream drifts rather than being
+                                -- snapped into it.
+                                local falloff = 1.0 - distanceSq / radiusSq
+                                local strength = push * falloff
+                                physics.applyImpulseTo(bodies[row], blower[3] * strength, blower[4] * strength)
+                                break
                             end
                         end
-                    end,
-                }
-            )
+                    end
+                end
+            end,
+        })
 
-            world:addSystem(
-                {
-                    name = "bench.Sample",
-                    phase = tecs.ecs.phases.First,
-                    run = function()
-                        -- Everything before this built the scene: waves still landing,
-                        -- the pile still settling, archetypes still moving. Dropping
-                        -- those frames from every stage at once is what makes the
-                        -- report a distribution of the steady state rather than of the
-                        -- run.
-                        if frame == WARMUP then
-                            timing.reset()
-                        end
-                    end,
-                }
-            )
+        world:addSystem({
+            name = "bench.Sample",
+            phase = tecs.ecs.phases.First,
+            run = function()
+                -- Everything before this built the scene: waves still landing,
+                -- the pile still settling, archetypes still moving. Dropping
+                -- those frames from every stage at once is what makes the
+                -- report a distribution of the steady state rather than of the
+                -- run.
+                if frame == WARMUP then
+                    timing.reset()
+                end
+            end,
+        })
 
-            world:addSystem(
-                {
-                    name = "bench.Report",
-                    phase = tecs.ecs.phases.Shutdown,
-                    run = function()
-                        print(
-                            ("frames after %d warmup, %d bodies spawned, " .. "%d instances synced"):format(
-                                WARMUP, spawned, renderer.count
-                            )
-                        )
-                        local report = timing.format()
-                        if report ~= "" then
-                            print(report)
-                        end
-                    end,
-                }
-            )
-
-            print(
-                ("physics: %d bodies in %d waves, %d frames apart, " .. "measuring %d after %d warmup"):format(
-                    BODIES, WAVES, WAVE_FRAMES, FRAMES, WARMUP
+        world:addSystem({
+            name = "bench.Report",
+            phase = tecs.ecs.phases.Shutdown,
+            run = function()
+                print(
+                    ("frames after %d warmup, %d bodies spawned, " .. "%d instances synced"):format(
+                        WARMUP, spawned, renderer.count
+                    )
                 )
+                local report = timing.format()
+                if report ~= "" then
+                    print(report)
+                end
+            end,
+        })
+
+        print(
+            ("physics: %d bodies in %d waves, %d frames apart, " .. "measuring %d after %d warmup"):format(
+                BODIES, WAVES, WAVE_FRAMES, FRAMES, WARMUP
             )
-        end,
-    }
-)
+        )
+    end,
+})

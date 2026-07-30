@@ -16,13 +16,11 @@ describe(
                             y: number
                             metamethod __call: function(self, x: number, y: number): Position
                         end
-                        local PositionComponent = tecs.ecs.newFFIComponent(
-                            {
-                                name = "FFITransitionTest_Position1",
-                                container = Position,
-                                fields = {{"x", "float"}, {"y", "float"}},
-                            }
-                        )
+                        local PositionComponent = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_Position1",
+                            container = Position,
+                            fields = {{"x", "float"}, {"y", "float"}},
+                        })
 
                         local record Tag is tecs.ecs.Component
                         end
@@ -53,9 +51,9 @@ describe(
                             radius: number
                             metamethod __call: function(self, radius: number): Circle
                         end
-                        local CircleComponent = tecs.ecs.newFFIComponent(
-                            {name = "FFITransitionTest_Circle1", container = Circle, fields = {{"radius", "float"}}}
-                        )
+                        local CircleComponent = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_Circle1", container = Circle, fields = {{"radius", "float"}}
+                        })
 
                         local record Marker is tecs.ecs.Component
                         end
@@ -85,13 +83,11 @@ describe(
                             y: number
                             metamethod __call: function(self, x: number, y: number): Vec2
                         end
-                        local TransformComponent = tecs.ecs.newFFIComponent(
-                            {
-                                name = "FFITransitionTest_Transform1",
-                                container = Vec2,
-                                fields = {{"x", "float"}, {"y", "float"}},
-                            }
-                        )
+                        local TransformComponent = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_Transform1",
+                            container = Vec2,
+                            fields = {{"x", "float"}, {"y", "float"}},
+                        })
 
                         local record Color is tecs.ecs.Component
                             r: number
@@ -100,25 +96,21 @@ describe(
                             a: number
                             metamethod __call: function(self, r: number, g: number, b: number, a: number): Color
                         end
-                        local ColorComponent = tecs.ecs.newFFIComponent(
-                            {
-                                name = "FFITransitionTest_Color1",
-                                container = Color,
-                                fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}, {"a", "float"}},
-                            }
-                        )
+                        local ColorComponent = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_Color1",
+                            container = Color,
+                            fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}, {"a", "float"}},
+                        })
 
                         local record Physics is tecs.ecs.Component
                             mass: number
                         end
-                        local PhysicsComponent = tecs.ecs.newComponent(
-                            {
-                                name = "FFITransitionTest_Physics1",
-                                container = Physics,
-                                fields = {"mass"},
-                                init = function(instance: Physics, mass: number) instance.mass = mass or 1.0 end,
-                            }
-                        )
+                        local PhysicsComponent = tecs.ecs.newComponent({
+                            name = "FFITransitionTest_Physics1",
+                            container = Physics,
+                            fields = {"mass"},
+                            init = function(instance: Physics, mass: number) instance.mass = mass or 1.0 end,
+                        })
 
                         local world = tecs.ecs.newWorld()
                         local id = world:spawn(TransformComponent(50.0, 75.0), ColorComponent(1.0, 0.5, 0.25, 0.8))
@@ -151,9 +143,9 @@ describe(
                             value: number
                             metamethod __call: function(self, v: number): TestFFI
                         end
-                        local FFI = tecs.ecs.newFFIComponent(
-                            {name = "FFITransitionTest_MutatedFFI1", container = TestFFI, fields = {{"value", "float"}}}
-                        )
+                        local FFI = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_MutatedFFI1", container = TestFFI, fields = {{"value", "float"}}
+                        })
 
                         local record TestTag is tecs.ecs.Component
                         end
@@ -180,13 +172,11 @@ describe(
                             y: number
                             metamethod __call: function(self, x: number, y: number): TestFFI
                         end
-                        local FFI = tecs.ecs.newFFIComponent(
-                            {
-                                name = "FFITransitionTest_MutatedFFI2",
-                                container = TestFFI,
-                                fields = {{"x", "float"}, {"y", "float"}},
-                            }
-                        )
+                        local FFI = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_MutatedFFI2",
+                            container = TestFFI,
+                            fields = {{"x", "float"}, {"y", "float"}},
+                        })
 
                         local record TagA is tecs.ecs.Component
                         end
@@ -223,26 +213,22 @@ describe(
                             y: number
                             metamethod __call: function(self, x: number, y: number): Pos
                         end
-                        local PosComponent = tecs.ecs.newFFIComponent(
-                            {
-                                name = "FFITransitionTest_MultiPos1",
-                                container = Pos,
-                                fields = {{"x", "float"}, {"y", "float"}},
-                            }
-                        )
+                        local PosComponent = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_MultiPos1",
+                            container = Pos,
+                            fields = {{"x", "float"}, {"y", "float"}},
+                        })
 
                         local record Velocity is tecs.ecs.Component
                             vx: number
                             vy: number
                             metamethod __call: function(self, vx: number, vy: number): Velocity
                         end
-                        local VelocityComponent = tecs.ecs.newFFIComponent(
-                            {
-                                name = "FFITransitionTest_MultiVel1",
-                                container = Velocity,
-                                fields = {{"vx", "float"}, {"vy", "float"}},
-                            }
-                        )
+                        local VelocityComponent = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_MultiVel1",
+                            container = Velocity,
+                            fields = {{"vx", "float"}, {"vy", "float"}},
+                        })
 
                         local world = tecs.ecs.newWorld()
 
@@ -276,13 +262,11 @@ describe(
                             value: number
                             metamethod __call: function(self, value: number): Data
                         end
-                        local DataComponent = tecs.ecs.newFFIComponent(
-                            {
-                                name = "FFITransitionTest_InterleavedData1",
-                                container = Data,
-                                fields = {{"value", "float"}},
-                            }
-                        )
+                        local DataComponent = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_InterleavedData1",
+                            container = Data,
+                            fields = {{"value", "float"}},
+                        })
 
                         local record TagA is tecs.ecs.Component
                         end
@@ -330,9 +314,9 @@ describe(
                             value: number
                             metamethod __call: function(self, v: number): TestFFI
                         end
-                        local FFI = tecs.ecs.newFFIComponent(
-                            {name = "FFITransitionTest_DespawnFFI1", container = TestFFI, fields = {{"value", "float"}}}
-                        )
+                        local FFI = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_DespawnFFI1", container = TestFFI, fields = {{"value", "float"}}
+                        })
 
                         local world = tecs.ecs.newWorld()
                         local id = world:spawn(FFI(42), Tag())
@@ -354,9 +338,9 @@ describe(
                             value: number
                             metamethod __call: function(self, v: number): TestFFI
                         end
-                        local FFI = tecs.ecs.newFFIComponent(
-                            {name = "FFITransitionTest_DespawnFFI2", container = TestFFI, fields = {{"value", "float"}}}
-                        )
+                        local FFI = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_DespawnFFI2", container = TestFFI, fields = {{"value", "float"}}
+                        })
 
                         local world = tecs.ecs.newWorld()
                         local id1 = world:spawn(FFI(1), Tag())
@@ -386,9 +370,9 @@ describe(
                             id: number
                             metamethod __call: function(self, id: number): TestFFI
                         end
-                        local FFI = tecs.ecs.newFFIComponent(
-                            {name = "FFITransitionTest_GrowthFFI1", container = TestFFI, fields = {{"id", "float"}}}
-                        )
+                        local FFI = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_GrowthFFI1", container = TestFFI, fields = {{"id", "float"}}
+                        })
 
                         local record TestTag is tecs.ecs.Component
                         end
@@ -430,9 +414,9 @@ describe(
                             value: number
                             metamethod __call: function(self, v: number): TestFFI
                         end
-                        local FFI = tecs.ecs.newFFIComponent(
-                            {name = "FFITransitionTest_GrowthFFI2", container = TestFFI, fields = {{"value", "float"}}}
-                        )
+                        local FFI = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_GrowthFFI2", container = TestFFI, fields = {{"value", "float"}}
+                        })
 
                         local record TagA is tecs.ecs.Component
                         end
@@ -487,29 +471,25 @@ describe(
                             z: number
                             metamethod __call: function(self, x: number, y: number, z: number): FFIData
                         end
-                        local FFIDataComponent = tecs.ecs.newFFIComponent(
-                            {
-                                name = "FFITransitionTest_MixedFFI1",
-                                container = FFIData,
-                                fields = {{"x", "float"}, {"y", "float"}, {"z", "float"}},
-                            }
-                        )
+                        local FFIDataComponent = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_MixedFFI1",
+                            container = FFIData,
+                            fields = {{"x", "float"}, {"y", "float"}, {"z", "float"}},
+                        })
 
                         local record TableData is tecs.ecs.Component
                             name: string
                             values: {number}
                         end
-                        local TableDataComponent = tecs.ecs.newComponent(
-                            {
-                                name = "FFITransitionTest_MixedTable1",
-                                container = TableData,
-                                fields = {"name", "values"},
-                                init = function(instance: TableData, name: string, values: {number})
-                                    instance.name = name
-                                    instance.values = values
-                                end,
-                            }
-                        )
+                        local TableDataComponent = tecs.ecs.newComponent({
+                            name = "FFITransitionTest_MixedTable1",
+                            container = TableData,
+                            fields = {"name", "values"},
+                            init = function(instance: TableData, name: string, values: {number})
+                                instance.name = name
+                                instance.values = values
+                            end,
+                        })
 
                         local record TransitionTag is tecs.ecs.Component
                         end
@@ -557,13 +537,11 @@ describe(
                             b: number
                             metamethod __call: function(self, a: number, b: number): ZeroData
                         end
-                        local ZeroDataComponent = tecs.ecs.newFFIComponent(
-                            {
-                                name = "FFITransitionTest_Zero1",
-                                container = ZeroData,
-                                fields = {{"a", "float"}, {"b", "float"}},
-                            }
-                        )
+                        local ZeroDataComponent = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_Zero1",
+                            container = ZeroData,
+                            fields = {{"a", "float"}, {"b", "float"}},
+                        })
 
                         local record ZeroTag is tecs.ecs.Component
                         end
@@ -590,13 +568,11 @@ describe(
                             y: number
                             metamethod __call: function(self, x: number, y: number): NegData
                         end
-                        local NegDataComponent = tecs.ecs.newFFIComponent(
-                            {
-                                name = "FFITransitionTest_Neg1",
-                                container = NegData,
-                                fields = {{"x", "float"}, {"y", "float"}},
-                            }
-                        )
+                        local NegDataComponent = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_Neg1",
+                            container = NegData,
+                            fields = {{"x", "float"}, {"y", "float"}},
+                        })
 
                         local record NegTag is tecs.ecs.Component
                         end
@@ -622,9 +598,9 @@ describe(
                             big: number
                             metamethod __call: function(self, big: number): LargeData
                         end
-                        local LargeDataComponent = tecs.ecs.newFFIComponent(
-                            {name = "FFITransitionTest_Large1", container = LargeData, fields = {{"big", "double"}}}
-                        )
+                        local LargeDataComponent = tecs.ecs.newFFIComponent({
+                            name = "FFITransitionTest_Large1", container = LargeData, fields = {{"big", "double"}}
+                        })
 
                         local record LargeTag is tecs.ecs.Component
                         end

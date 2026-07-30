@@ -717,24 +717,22 @@ local function ensure(world: types.World): Registry
     local registry <const>: Registry = {seed = DEFAULT_SEED, streams = {}}
     registries[world] = registry
 
-    world:addSnapshotHandler(
-        {
-            -- A save format rather than a module path, and it does not follow this
-            -- module if the module moves. A renamed key does not fail a load: the
-            -- restore below finds no state under the new name and reseeds from the
-            -- world seed, so an old save opens and the run diverges from what it
-            -- recorded. Moving it is a migration with validation, not a rename.
-            name = "tecs.random",
-            save = function(_world: types.World): any
-                local streams: {string: {integer}} = {}
-                for name, generator in pairs(registry.streams) do
-                    streams[name] = generator:state()
-                end
-                return {seed = registry.seed, streams = streams}
-            end,
-            load = function(_world: types.World, value: any) restore(registry, value as {string: any}) end,
-        }
-    )
+    world:addSnapshotHandler({
+        -- A save format rather than a module path, and it does not follow this
+        -- module if the module moves. A renamed key does not fail a load: the
+        -- restore below finds no state under the new name and reseeds from the
+        -- world seed, so an old save opens and the run diverges from what it
+        -- recorded. Moving it is a migration with validation, not a rename.
+        name = "tecs.random",
+        save = function(_world: types.World): any
+            local streams: {string: {integer}} = {}
+            for name, generator in pairs(registry.streams) do
+                streams[name] = generator:state()
+            end
+            return {seed = registry.seed, streams = streams}
+        end,
+        load = function(_world: types.World, value: any) restore(registry, value as {string: any}) end,
+    })
     return registry
 end
 

@@ -67,103 +67,83 @@ local Key <const> = tecs.ecs.EntityKey
 local Transform <const> = tecs.Transform
 
 -- Fuzz components: one numeric field each so canonical state is cheap.
-local FzA = tecs.ecs.newComponent(
-    {
-        name = "FuzzA",
-        container = {},
-        fields = {"v"},
-        defaults = {0},
-    }
-)
-local FzB = tecs.ecs.newComponent(
-    {
-        name = "FuzzB",
-        container = {},
-        fields = {"v"},
-        defaults = {0},
-    }
-)
-local FzHealth = tecs.ecs.newComponent(
-    {
-        name = "FuzzHealth",
-        container = {},
-        fields = {"v"},
-        defaults = {100},
-    }
-)
-local FzArmor = tecs.ecs.newComponent(
-    {
-        name = "FuzzArmor",
-        container = {},
-        fields = {"v"},
-        defaults = {1},
-        requires = {FzHealth},
-    }
-)
+local FzA = tecs.ecs.newComponent({
+    name = "FuzzA",
+    container = {},
+    fields = {"v"},
+    defaults = {0},
+})
+local FzB = tecs.ecs.newComponent({
+    name = "FuzzB",
+    container = {},
+    fields = {"v"},
+    defaults = {0},
+})
+local FzHealth = tecs.ecs.newComponent({
+    name = "FuzzHealth",
+    container = {},
+    fields = {"v"},
+    defaults = {100},
+})
+local FzArmor = tecs.ecs.newComponent({
+    name = "FuzzArmor",
+    container = {},
+    fields = {"v"},
+    defaults = {1},
+    requires = {FzHealth},
+})
 local FzTag = tecs.ecs.newTagComponent({name = "FuzzTag"})
 
 -- FFI component: cdata columns through moves, batch bulk copies, and
 -- snapshot memcpy paths.
-local FzF = tecs.ecs.newFFIComponent(
-    {
-        name = "FuzzF",
-        container = {},
-        fields = {{"v", "double"}},
-    }
-)
+local FzF = tecs.ecs.newFFIComponent({
+    name = "FuzzF",
+    container = {},
+    fields = {{"v", "double"}},
+})
 
 -- Raw-value scalar columns; string scalars ride builtin Key.
-local FzNum = tecs.ecs.newScalarComponent(
-    {
-        name = "FuzzNum",
-        kind = "number",
-        default = 0,
-    }
-)
-local FzBool = tecs.ecs.newScalarComponent(
-    {
-        name = "FuzzBool",
-        kind = "boolean",
-        default = false,
-    }
-)
+local FzNum = tecs.ecs.newScalarComponent({
+    name = "FuzzNum",
+    kind = "number",
+    default = 0,
+})
+local FzBool = tecs.ecs.newScalarComponent({
+    name = "FuzzBool",
+    kind = "boolean",
+    default = false,
+})
 
 -- Dense exclusive reverse-indexed relationship (ChildOf covers the
 -- sparse + cascadeDelete axis).
-local FzLink = tecs.ecs.newRelationship(
-    {
-        name = "FuzzLink",
-        exclusive = true,
-        reverseIndex = true,
-    }
-)
+local FzLink = tecs.ecs.newRelationship({
+    name = "FuzzLink",
+    exclusive = true,
+    reverseIndex = true,
+})
 
 -- Data-carrying dense relationship: payload fields ride the instance.
 -- Dense instances are cached one per target (weak values), so the fuzz
 -- always derives `w` from the target: a cache hit and a rebuilt
 -- instance then agree, keeping both worlds and snapshot round-trips
 -- deterministic.
-local FzRope = tecs.ecs.newRelationship(
-    {
-        name = "FuzzRope",
-        exclusive = true,
-        reverseIndex = true,
-        fields = {"w"},
-    }
-)
+local FzRope = tecs.ecs.newRelationship({
+    name = "FuzzRope",
+    exclusive = true,
+    reverseIndex = true,
+    fields = {"w"},
+})
 
 -- Non-exclusive sparse reverse-indexed relationship: multi-target
 -- stores and the removeOne path. Transient: multi-target sparse stores
 -- do not fit the snapshot row format (one value per entity/container),
 -- so marks drop through snapshot round-trips in both worlds alike.
-local FzMark = tecs.ecs.newRelationship(
-    {
-        name = "FuzzMark",
-        sparse = true,
-        reverseIndex = true,
-        transient = true,
-    }
-)
+local FzMark = tecs.ecs.newRelationship({
+    name = "FuzzMark",
+    sparse = true,
+    reverseIndex = true,
+    transient = true,
+})
 
 -- Pre-register the state tag so `createState("fuzzState")` reuses one
 -- global component across worlds and seeds.
@@ -241,94 +221,87 @@ local function canonicalState(
     w: tecs.World, skipTransient?: boolean, keep?: function(tecs.World, integer): boolean
 ): string
     local lines: {string} = {}
-    w:forEachArchetype(
-        function(arch: tecs.ecs.Archetype)
-            local entities = arch.entities
-            for row = 1, entities[0] as integer do
-                local id = entities[row] as integer
-                if keep == nil or keep(w, id) then
-                    local piece: {string} = {tostring(id)}
-                    for c = 1, #readComps do
-                        local comp = readComps[c]
-                        if w:has(id, comp) then
-                            if comp == FzTag then
-                                piece[#piece + 1] = "Tag"
-                            elseif comp == FzNum or comp == FzBool then
-                                -- Scalar columns hold raw values.
-                                piece[#piece + 1] = (comp as {string: any}).componentName as string
-                                    .. "="
-                                    .. tostring(w:get(id, comp))
-                            else
-                                local inst = w:get(id, comp) as {string: any}
-                                piece[#piece + 1] = (comp as {string: any}).componentName as string
-                                    .. "="
-                                    .. tostring(inst.v)
-                            end
+    w:forEachArchetype(function(arch: tecs.ecs.Archetype)
+        local entities = arch.entities
+        for row = 1, entities[0] as integer do
+            local id = entities[row] as integer
+            if keep == nil or keep(w, id) then
+                local piece: {string} = {tostring(id)}
+                for c = 1, #readComps do
+                    local comp = readComps[c]
+                    if w:has(id, comp) then
+                        if comp == FzTag then
+                            piece[#piece + 1] = "Tag"
+                        elseif comp == FzNum or comp == FzBool then
+                            -- Scalar columns hold raw values.
+                            piece[#piece + 1] = (comp as {string: any}).componentName as string
+                                .. "="
+                                .. tostring(w:get(id, comp))
+                        else
+                            local inst = w:get(id, comp) as {string: any}
+                            piece[#piece + 1] = (comp as {string: any}).componentName as string
+                                .. "="
+                                .. tostring(inst.v)
                         end
                     end
-                    if w:has(id, Key) then
-                        piece[#piece + 1] = "Key=" .. tostring(w:get(id, Key))
-                    end
-                    local tr = w:get(id, Transform) as {string: any}
-                    if tr then
-                        piece[#piece + 1] = "T=" .. tostring(tr.x) .. ";" .. tostring(tr.y) .. ";" .. tostring(tr.layer)
-                    end
-                    -- Sparse targets read from the store; `has` reads the
-                    -- archetype's container marker. Encode both so a
-                    -- marker-vs-store divergence is visible at its origin.
-                    if w:has(id, ChildOf) then
-                        piece[#piece + 1] = "ChildOfMark"
-                    end
-                    local parent = w:getFirstRelationship(id, ChildOf)
-                    if parent then
-                        piece[#piece + 1] = "ChildOf=" .. tostring(parent.target)
-                    end
-                    if w:has(id, FzLink) then
-                        piece[#piece + 1] = "LinkMark"
-                    end
-                    local link = w:getFirstRelationship(id, FzLink)
-                    if link then
-                        piece[#piece + 1] = "Link=" .. tostring(link.target)
-                    end
-                    if w:has(id, FzRope) then
-                        piece[#piece + 1] = "RopeMark"
-                    end
-                    local rope = w:getFirstRelationship(id, FzRope)
-                    if rope then
-                        piece[#piece + 1] = "Rope="
-                            .. tostring(rope.target)
-                            .. ":"
-                            .. tostring((rope as {string: any}).w)
-                    end
-                    if not skipTransient then
-                        if w:has(id, FzMark) then
-                            piece[#piece + 1] = "MarkMark"
-                        end
-                        local markSources: {string} = {}
-                        w:targets(
-                            id,
-                            FzMark,
-                            function(sourceId: integer, _ctx: nil)
-                                markSources[#markSources + 1] = tostring(sourceId)
-                            end,
-                            nil
-                        )
-                        if #markSources > 0 then
-                            table.sort(markSources)
-                            piece[#piece + 1] = "MarkSrcs=" .. table.concat(markSources, ";")
-                        end
-                    end
-                    if w:has(id, TTL) then
-                        piece[#piece + 1] = "TTL=" .. tostring((w:get(id, TTL) as {string: any}).remaining)
-                    end
-                    if w:has(id, FzState) then
-                        piece[#piece + 1] = "St"
-                    end
-                    lines[#lines + 1] = table.concat(piece, ",")
                 end
+                if w:has(id, Key) then
+                    piece[#piece + 1] = "Key=" .. tostring(w:get(id, Key))
+                end
+                local tr = w:get(id, Transform) as {string: any}
+                if tr then
+                    piece[#piece + 1] = "T=" .. tostring(tr.x) .. ";" .. tostring(tr.y) .. ";" .. tostring(tr.layer)
+                end
+                -- Sparse targets read from the store; `has` reads the
+                -- archetype's container marker. Encode both so a
+                -- marker-vs-store divergence is visible at its origin.
+                if w:has(id, ChildOf) then
+                    piece[#piece + 1] = "ChildOfMark"
+                end
+                local parent = w:getFirstRelationship(id, ChildOf)
+                if parent then
+                    piece[#piece + 1] = "ChildOf=" .. tostring(parent.target)
+                end
+                if w:has(id, FzLink) then
+                    piece[#piece + 1] = "LinkMark"
+                end
+                local link = w:getFirstRelationship(id, FzLink)
+                if link then
+                    piece[#piece + 1] = "Link=" .. tostring(link.target)
+                end
+                if w:has(id, FzRope) then
+                    piece[#piece + 1] = "RopeMark"
+                end
+                local rope = w:getFirstRelationship(id, FzRope)
+                if rope then
+                    piece[#piece + 1] = "Rope=" .. tostring(rope.target) .. ":" .. tostring((rope as {string: any}).w)
+                end
+                if not skipTransient then
+                    if w:has(id, FzMark) then
+                        piece[#piece + 1] = "MarkMark"
+                    end
+                    local markSources: {string} = {}
+                    w:targets(
+                        id,
+                        FzMark,
+                        function(sourceId: integer, _ctx: nil) markSources[#markSources + 1] = tostring(sourceId) end,
+                        nil
+                    )
+                    if #markSources > 0 then
+                        table.sort(markSources)
+                        piece[#piece + 1] = "MarkSrcs=" .. table.concat(markSources, ";")
+                    end
+                end
+                if w:has(id, TTL) then
+                    piece[#piece + 1] = "TTL=" .. tostring((w:get(id, TTL) as {string: any}).remaining)
+                end
+                if w:has(id, FzState) then
+                    piece[#piece + 1] = "St"
+                end
+                lines[#lines + 1] = table.concat(piece, ",")
             end
         end
-    )
+    end)
     table.sort(lines)
     return table.concat(lines, "\n")
 end
@@ -422,21 +395,19 @@ describe(
                     -- Per-world persistent queries for the batch ops.
                     local function makeQueries(w: tecs.World): {string: tecs.Query}
                         return {
-                            tag = w:query(
-                                {
-                                    include = {FzTag},
-                                    onEntitiesAdded = function(
-                                        _a: tecs.ecs.Archetype, _f: integer, _l: integer, count: integer
-                                    )
-                                        addedCount[w] = addedCount[w] + count
-                                    end,
-                                    onEntitiesRemoved = function(
-                                        _a: tecs.ecs.Archetype, _f: integer, _l: integer, count: integer
-                                    )
-                                        removedCount[w] = removedCount[w] + count
-                                    end,
-                                }
-                            ),
+                            tag = w:query({
+                                include = {FzTag},
+                                onEntitiesAdded = function(
+                                    _a: tecs.ecs.Archetype, _f: integer, _l: integer, count: integer
+                                )
+                                    addedCount[w] = addedCount[w] + count
+                                end,
+                                onEntitiesRemoved = function(
+                                    _a: tecs.ecs.Archetype, _f: integer, _l: integer, count: integer
+                                )
+                                    removedCount[w] = removedCount[w] + count
+                                end,
+                            }),
                             a = w:query({include = {FzA}}),
                         }
                     end
@@ -1378,12 +1349,10 @@ describe(
                     validate(freshLayers)
 
                     -- filterQuery save keeps only matching entities.
-                    local outQuery = wa:saveSnapshot(
-                        {
-                            format = "table",
-                            filterQuery = {include = {FzTag}},
-                        }
-                    )
+                    local outQuery = wa:saveSnapshot({
+                        format = "table",
+                        filterQuery = {include = {FzTag}},
+                    })
                     local freshQuery = tecs.ecs.newWorld()
                     freshQuery:createState("fuzzState")
                     freshQuery:loadSnapshot(outQuery.snapshot)

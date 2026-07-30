@@ -18,14 +18,12 @@ describe(
                         local callCount = 0
                         local systemName = "OneShotSystem"
 
-                        world:addSystem(
-                            {
-                                name = systemName,
-                                phase = tecs.ecs.phases.Update,
-                                runIf = tecs.ecs.runif.after(0.1),
-                                run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
-                            }
-                        )
+                        world:addSystem({
+                            name = systemName,
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.after(0.1),
+                            run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
+                        })
 
                         -- Should not run immediately
                         world:update(0.05)
@@ -46,13 +44,11 @@ describe(
                     function()
                         local callCount = 0
 
-                        world:addSystem(
-                            {
-                                phase = tecs.ecs.phases.Update,
-                                runIf = tecs.ecs.runif.after(0.1),
-                                run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
-                            }
-                        )
+                        world:addSystem({
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.after(0.1),
+                            run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
+                        })
 
                         world:update(0.05)
                         luassert.equals(0, callCount)
@@ -70,14 +66,12 @@ describe(
                     function()
                         local callCount = 0
 
-                        world:addSystem(
-                            {
-                                name = "ImmediateSystem",
-                                phase = tecs.ecs.phases.Update,
-                                runIf = tecs.ecs.runif.after(0),
-                                run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
-                            }
-                        )
+                        world:addSystem({
+                            name = "ImmediateSystem",
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.after(0),
+                            run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
+                        })
 
                         world:update(0.001)
                         luassert.equals(1, callCount, "System should run immediately with zero delay")
@@ -97,14 +91,12 @@ describe(
                     function()
                         local callCount = 0
 
-                        world:addSystem(
-                            {
-                                name = "RepeatingSystem",
-                                phase = tecs.ecs.phases.Update,
-                                runIf = tecs.ecs.runif.every(0.1),
-                                run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
-                            }
-                        )
+                        world:addSystem({
+                            name = "RepeatingSystem",
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.every(0.1),
+                            run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
+                        })
 
                         -- First interval
                         world:update(0.05)
@@ -128,14 +120,12 @@ describe(
                         local callCount = 0
 
                         -- Just verify that jitter doesn't cause errors
-                        world:addSystem(
-                            {
-                                name = "JitteredSystem",
-                                phase = tecs.ecs.phases.Update,
-                                runIf = tecs.ecs.runif.every(0.05, 0.02),
-                                run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
-                            }
-                        )
+                        world:addSystem({
+                            name = "JitteredSystem",
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.every(0.05, 0.02),
+                            run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
+                        })
 
                         -- Run several updates - with jitter this should still work
                         for _ = 1, 30 do
@@ -152,14 +142,12 @@ describe(
                     function()
                         local callCount = 0
 
-                        world:addSystem(
-                            {
-                                name = "AccumulatingSystem",
-                                phase = tecs.ecs.phases.Update,
-                                runIf = tecs.ecs.runif.every(0.1),
-                                run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
-                            }
-                        )
+                        world:addSystem({
+                            name = "AccumulatingSystem",
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.every(0.1),
+                            run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
+                        })
 
                         -- Run with irregular intervals that accumulate to the target
                         world:update(0.03) -- 0.03 accumulated
@@ -181,14 +169,12 @@ describe(
                     function()
                         local callCount = 0
 
-                        world:addSystem(
-                            {
-                                name = "CooldownSystem",
-                                phase = tecs.ecs.phases.Update,
-                                runIf = tecs.ecs.runif.cooldown(0.2),
-                                run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
-                            }
-                        )
+                        world:addSystem({
+                            name = "CooldownSystem",
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.cooldown(0.2),
+                            run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
+                        })
 
                         -- Should fire immediately on first update
                         world:update(0.01)
@@ -216,19 +202,17 @@ describe(
                 it(
                     "should error when adding duplicate system names",
                     function()
-                        world:addSystem(
-                            {name = "DuplicateSystem", phase = tecs.ecs.phases.Update, run = function() end}
-                        )
+                        world:addSystem({
+                            name = "DuplicateSystem", phase = tecs.ecs.phases.Update, run = function() end
+                        })
 
                         luassert.error_matches(
                             function()
-                                world:addSystem(
-                                    {
-                                        name = "DuplicateSystem",
-                                        phase = tecs.ecs.phases.PostUpdate,
-                                        run = function() end,
-                                    }
-                                )
+                                world:addSystem({
+                                    name = "DuplicateSystem",
+                                    phase = tecs.ecs.phases.PostUpdate,
+                                    run = function() end,
+                                })
                             end,
                             "System with name 'DuplicateSystem' already exists",
                             "Should error on duplicate system name"
@@ -240,13 +224,13 @@ describe(
                     "should allow systems without names",
                     function()
                         -- Should not error when adding unnamed systems
-                        local success1 = pcall(
-                            function() world:addSystem({phase = tecs.ecs.phases.Update, run = function() end}) end
-                        )
+                        local success1 = pcall(function()
+                            world:addSystem({phase = tecs.ecs.phases.Update, run = function() end})
+                        end)
 
-                        local success2 = pcall(
-                            function() world:addSystem({phase = tecs.ecs.phases.Update, run = function() end}) end
-                        )
+                        local success2 = pcall(function()
+                            world:addSystem({phase = tecs.ecs.phases.Update, run = function() end})
+                        end)
 
                         -- Both systems should be added successfully without error
                         luassert.is_true(success1, "First unnamed system should be added without error")
@@ -264,13 +248,11 @@ describe(
                     function()
                         local callCount = 0
 
-                        world:addSystem(
-                            {
-                                name = "TestSystem",
-                                phase = tecs.ecs.phases.Update,
-                                run = function() callCount = callCount + 1 end,
-                            }
-                        )
+                        world:addSystem({
+                            name = "TestSystem",
+                            phase = tecs.ecs.phases.Update,
+                            run = function() callCount = callCount + 1 end,
+                        })
 
                         world:update(0.01)
                         luassert.equals(1, callCount, "System should run before removal")
@@ -307,14 +289,12 @@ describe(
 
                         local callCount = 0
 
-                        world:addSystem(
-                            {
-                                name = "PlayingOnlySystem",
-                                phase = tecs.ecs.phases.Update,
-                                runIf = tecs.ecs.runif.inState("playing"),
-                                run = function() callCount = callCount + 1 end,
-                            }
-                        )
+                        world:addSystem({
+                            name = "PlayingOnlySystem",
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.inState("playing"),
+                            run = function() callCount = callCount + 1 end,
+                        })
 
                         -- Should not run when no state is active
                         world:update(0.01)
@@ -345,14 +325,12 @@ describe(
 
                         local callCount = 0
 
-                        world:addSystem(
-                            {
-                                name = "NotPlayingSystem",
-                                phase = tecs.ecs.phases.Update,
-                                runIf = tecs.ecs.runif.negate(tecs.ecs.runif.inState("playing")),
-                                run = function() callCount = callCount + 1 end,
-                            }
-                        )
+                        world:addSystem({
+                            name = "NotPlayingSystem",
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.negate(tecs.ecs.runif.inState("playing")),
+                            run = function() callCount = callCount + 1 end,
+                        })
 
                         -- Push menu state first
                         world:pushState("menu")

@@ -711,14 +711,12 @@ function Application:_init(): boolean
     -- Passed through rather than validated here. `pipeline.new` is where a
     -- timestep of zero or a negative step count is refused, so there is one
     -- description of what is legal and it is the one the world enforces.
-    self.world = ecs.newWorld(
-        {
-            maxEntities = config.maxEntities,
-            timestep = config.timestep,
-            fixedMaxSteps = config.fixedMaxSteps,
-            fixedOverload = config.fixedOverload,
-        }
-    )
+    self.world = ecs.newWorld({
+        maxEntities = config.maxEntities,
+        timestep = config.timestep,
+        fixedMaxSteps = config.fixedMaxSteps,
+        fixedOverload = config.fixedOverload,
+    })
     self.renderer = Renderer.newRenderer(
         self.device.handle,
         self.device:getSwapchainFormat(),
@@ -757,20 +755,16 @@ function Application:_init(): boolean
     -- between two steps. Bracketing the fixed phases is the whole mechanism,
     -- so the engine installs it rather than leaving it to the game.
     local held = self.input
-    self.world:addSystem(
-        {
-            name = "tecs.EnterFixedInput",
-            phase = ecs.phases.FixedFirst,
-            run = function() held:enterFixedPhase() end,
-        }
-    )
-    self.world:addSystem(
-        {
-            name = "tecs.ExitFixedInput",
-            phase = ecs.phases.FixedLast,
-            run = function() held:exitFixedPhase() end,
-        }
-    )
+    self.world:addSystem({
+        name = "tecs.EnterFixedInput",
+        phase = ecs.phases.FixedFirst,
+        run = function() held:enterFixedPhase() end,
+    })
+    self.world:addSystem({
+        name = "tecs.ExitFixedInput",
+        phase = ecs.phases.FixedLast,
+        run = function() held:exitFixedPhase() end,
+    })
 
     -- The debug tools carry the reloads, and both the server and the file
     -- watcher drive them, so they are bound when either is asked for rather
@@ -799,25 +793,23 @@ function Application:_init(): boolean
         -- this application and there is no other way for a tool to reach one.
         -- Callable after a crash for the obvious reason: every moment it is
         -- useful in is one.
-        mcp.register(
-            {
-                name = "clear_crash",
-                description = "Lets the loop simulate and render again after a "
-                    .. "gameplay crash. A chance to look at another frame and to "
-                    .. "reload, not a repair: engine invariants are restored and "
-                    .. "the game's are not, so reload before trusting the world.",
-                destructive = true,
-                whenCrashed = true,
-                inputSchema = {type = "object", properties = data.empty_array},
-                handler = function(_: {string: any}): {string: any}
-                    local resumed, refusal = self:clearCrash()
-                    return {
-                        resumed = resumed,
-                        reason = refusal or data.null,
-                    }
-                end,
-            }
-        )
+        mcp.register({
+            name = "clear_crash",
+            description = "Lets the loop simulate and render again after a "
+                .. "gameplay crash. A chance to look at another frame and to "
+                .. "reload, not a repair: engine invariants are restored and "
+                .. "the game's are not, so reload before trusting the world.",
+            destructive = true,
+            whenCrashed = true,
+            inputSchema = {type = "object", properties = data.empty_array},
+            handler = function(_: {string: any}): {string: any}
+                local resumed, refusal = self:clearCrash()
+                return {
+                    resumed = resumed,
+                    reason = refusal or data.null,
+                }
+            end,
+        })
     end
 
     -- Before the game's plugin, so a pad that was already plugged in when the

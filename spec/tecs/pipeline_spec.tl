@@ -52,20 +52,18 @@ describe(
     function()
         local test: Test
 
-        before_each(
-            function()
-                test = {
-                    world = makeDummyWorld(),
-                    pipeline = nil,
-                    counter = 0,
-                    fixedCounter = 0,
-                    updateCounter = 0,
-                    beforeCounter = 0,
-                    afterCounter = 0,
-                }
-                test.pipeline = pipeline.new(FPS)
-            end
-        )
+        before_each(function()
+            test = {
+                world = makeDummyWorld(),
+                pipeline = nil,
+                counter = 0,
+                fixedCounter = 0,
+                updateCounter = 0,
+                beforeCounter = 0,
+                afterCounter = 0,
+            }
+            test.pipeline = pipeline.new(FPS)
+        end)
 
         it(
             "exposes concrete phase positions through the public Phase type",
@@ -80,33 +78,27 @@ describe(
             "should add and run systems in the correct phases",
             function()
                 -- Add systems to different phases
-                test.pipeline:addSystem(
-                    {
-                        phase = tecs.ecs.phases.PreUpdate,
-                        run = createCounterSystem(test, "before"),
-                        name = "before_system",
-                    }
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.PreUpdate,
+                    run = createCounterSystem(test, "before"),
+                    name = "before_system",
+                })
 
-                test.pipeline:addSystem(
-                    {
-                        phase = tecs.ecs.phases.FixedUpdate,
-                        run = createCounterSystem(test, "fixed"),
-                        name = "fixed_system",
-                    }
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.FixedUpdate,
+                    run = createCounterSystem(test, "fixed"),
+                    name = "fixed_system",
+                })
 
-                test.pipeline:addSystem(
-                    {phase = tecs.ecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"}
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"
+                })
 
-                test.pipeline:addSystem(
-                    {
-                        phase = tecs.ecs.phases.PostUpdate,
-                        run = createCounterSystem(test, "after"),
-                        name = "after_system",
-                    }
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.PostUpdate,
+                    run = createCounterSystem(test, "after"),
+                    name = "after_system",
+                })
 
                 test.pipeline:update(FPS, test.world)
 
@@ -131,15 +123,13 @@ describe(
 
                 -- Add systems with explicit dependencies
                 -- C should run before A, and B should run after A
-                test.pipeline:addSystem(
-                    {
-                        phase = tecs.ecs.phases.Update,
-                        run = systemA,
-                        name = "systemA",
-                        before = {"systemB"},
-                        after = {"systemC"},
-                    }
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    run = systemA,
+                    name = "systemA",
+                    before = {"systemB"},
+                    after = {"systemC"},
+                })
 
                 test.pipeline:addSystem({phase = tecs.ecs.phases.Update, run = systemB, name = "systemB"})
 
@@ -160,13 +150,13 @@ describe(
                 local systemB = function(_dt: number, _world: tecs.World) end
 
                 -- Create a circular dependency: A before B, B before A
-                test.pipeline:addSystem(
-                    {phase = tecs.ecs.phases.Update, run = systemA, name = "systemA", before = {"systemB"}}
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.Update, run = systemA, name = "systemA", before = {"systemB"}
+                })
 
-                test.pipeline:addSystem(
-                    {phase = tecs.ecs.phases.Update, run = systemB, name = "systemB", before = {"systemA"}}
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.Update, run = systemB, name = "systemB", before = {"systemA"}
+                })
 
                 luassert.error_matches(
                     function() test.pipeline:update(FPS, test.world) end,
@@ -182,13 +172,11 @@ describe(
                 local fixedTimestep = 1 / 10
                 test.pipeline = pipeline.new(fixedTimestep)
 
-                test.pipeline:addSystem(
-                    {
-                        phase = tecs.ecs.phases.FixedUpdate,
-                        run = createCounterSystem(test, "fixed"),
-                        name = "fixed_system",
-                    }
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.FixedUpdate,
+                    run = createCounterSystem(test, "fixed"),
+                    name = "fixed_system",
+                })
 
                 -- Run with dt less than fixed timestep
                 test.pipeline:update(fixedTimestep / 2, test.world)
@@ -212,13 +200,11 @@ describe(
                 local fixedTimestep = 1 / 10
                 test.pipeline = pipeline.new(fixedTimestep)
 
-                test.pipeline:addSystem(
-                    {
-                        phase = tecs.ecs.phases.FixedUpdate,
-                        run = createCounterSystem(test, "fixed"),
-                        name = "fixed_system",
-                    }
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.FixedUpdate,
+                    run = createCounterSystem(test, "fixed"),
+                    name = "fixed_system",
+                })
 
                 -- Run with a very large dt, which the default fixedMaxSteps bounds.
                 test.pipeline:update(fixedTimestep * 20, test.world)
@@ -232,9 +218,9 @@ describe(
             function()
                 local system, runIf = createConditionalSystem(test)
 
-                test.pipeline:addSystem(
-                    {phase = tecs.ecs.phases.Update, run = system, runIf = runIf, name = "conditional_system"}
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.Update, run = system, runIf = runIf, name = "conditional_system"
+                })
 
                 -- First run with counter = 0 (even, should run)
                 test.pipeline:update(FPS, test.world)
@@ -256,9 +242,9 @@ describe(
         it(
             "should enable and disable phases correctly",
             function()
-                test.pipeline:addSystem(
-                    {phase = tecs.ecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"}
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"
+                })
 
                 -- Run once with all phases enabled
                 test.pipeline:update(FPS, test.world)
@@ -323,13 +309,11 @@ describe(
             "should handle children",
             function()
                 -- Add system to FixedUpdate phase
-                test.pipeline:addSystem(
-                    {
-                        phase = tecs.ecs.phases.FixedUpdate,
-                        run = createCounterSystem(test, "fixed"),
-                        name = "fixed_system",
-                    }
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.FixedUpdate,
+                    run = createCounterSystem(test, "fixed"),
+                    name = "fixed_system",
+                })
 
                 -- Run with all phases enabled
                 test.pipeline:update(FPS, test.world)
@@ -364,17 +348,15 @@ describe(
                     commit = function(_self: tecs.World) commitCount = commitCount + 1 end,
                 } as tecs.World
 
-                test.pipeline:addSystem(
-                    {
-                        phase = tecs.ecs.phases.PreUpdate,
-                        run = createCounterSystem(test, "before"),
-                        name = "before_system",
-                    }
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.PreUpdate,
+                    run = createCounterSystem(test, "before"),
+                    name = "before_system",
+                })
 
-                test.pipeline:addSystem(
-                    {phase = tecs.ecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"}
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"
+                })
 
                 test.pipeline:update(FPS, test.world)
 
@@ -403,21 +385,17 @@ describe(
                     "honors before when the target system registered first",
                     function()
                         local order: {string} = {}
-                        test.pipeline:addSystem(
-                            {
-                                phase = tecs.ecs.phases.Update,
-                                name = "beforeTargetB",
-                                run = function(_dt: number, _world: tecs.World) order[#order + 1] = "B" end,
-                            }
-                        )
-                        test.pipeline:addSystem(
-                            {
-                                phase = tecs.ecs.phases.Update,
-                                name = "beforeSourceA",
-                                run = function(_dt: number, _world: tecs.World) order[#order + 1] = "A" end,
-                                before = {"beforeTargetB"},
-                            }
-                        )
+                        test.pipeline:addSystem({
+                            phase = tecs.ecs.phases.Update,
+                            name = "beforeTargetB",
+                            run = function(_dt: number, _world: tecs.World) order[#order + 1] = "B" end,
+                        })
+                        test.pipeline:addSystem({
+                            phase = tecs.ecs.phases.Update,
+                            name = "beforeSourceA",
+                            run = function(_dt: number, _world: tecs.World) order[#order + 1] = "A" end,
+                            before = {"beforeTargetB"},
+                        })
 
                         test.pipeline:update(FPS, test.world)
 
@@ -429,22 +407,18 @@ describe(
                     "accepts a redundant consistent constraint pair",
                     function()
                         local order: {string} = {}
-                        test.pipeline:addSystem(
-                            {
-                                phase = tecs.ecs.phases.Update,
-                                name = "redundantA",
-                                run = function(_dt: number, _world: tecs.World) order[#order + 1] = "A" end,
-                                before = {"redundantB"},
-                            }
-                        )
-                        test.pipeline:addSystem(
-                            {
-                                phase = tecs.ecs.phases.Update,
-                                name = "redundantB",
-                                run = function(_dt: number, _world: tecs.World) order[#order + 1] = "B" end,
-                                after = {"redundantA"},
-                            }
-                        )
+                        test.pipeline:addSystem({
+                            phase = tecs.ecs.phases.Update,
+                            name = "redundantA",
+                            run = function(_dt: number, _world: tecs.World) order[#order + 1] = "A" end,
+                            before = {"redundantB"},
+                        })
+                        test.pipeline:addSystem({
+                            phase = tecs.ecs.phases.Update,
+                            name = "redundantB",
+                            run = function(_dt: number, _world: tecs.World) order[#order + 1] = "B" end,
+                            after = {"redundantA"},
+                        })
 
                         test.pipeline:update(FPS, test.world)
 
@@ -457,20 +431,16 @@ describe(
                     function()
                         local runs = 0
                         local shared = function(_dt: number, _world: tecs.World) runs = runs + 1 end
-                        test.pipeline:addSystem(
-                            {
-                                phase = tecs.ecs.phases.Update,
-                                name = "sharedFn1",
-                                run = shared,
-                            }
-                        )
-                        test.pipeline:addSystem(
-                            {
-                                phase = tecs.ecs.phases.Update,
-                                name = "sharedFn2",
-                                run = shared,
-                            }
-                        )
+                        test.pipeline:addSystem({
+                            phase = tecs.ecs.phases.Update,
+                            name = "sharedFn1",
+                            run = shared,
+                        })
+                        test.pipeline:addSystem({
+                            phase = tecs.ecs.phases.Update,
+                            name = "sharedFn2",
+                            run = shared,
+                        })
 
                         test.pipeline:update(FPS, test.world)
 
@@ -484,13 +454,11 @@ describe(
             "run() on a disabled leaf phase executes nothing",
             function()
                 local ran = 0
-                test.pipeline:addSystem(
-                    {
-                        phase = tecs.ecs.phases.Update,
-                        name = "disabledLeafProbe",
-                        run = function(_dt: number, _world: tecs.World) ran = ran + 1 end,
-                    }
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    name = "disabledLeafProbe",
+                    run = function(_dt: number, _world: tecs.World) ran = ran + 1 end,
+                })
 
                 test.pipeline:disablePhase(tecs.ecs.phases.Update)
                 test.pipeline:run(tecs.ecs.phases.Update, FPS, test.world)
@@ -506,24 +474,20 @@ describe(
             "a phase registered on another pipeline does not break this one",
             function()
                 local ran = 0
-                test.pipeline:addSystem(
-                    {
-                        phase = tecs.ecs.phases.Update,
-                        name = "crossPipelineProbe",
-                        run = function(_dt: number, _world: tecs.World) ran = ran + 1 end,
-                    }
-                )
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    name = "crossPipelineProbe",
+                    run = function(_dt: number, _world: tecs.World) ran = ran + 1 end,
+                })
 
                 local other = pipeline.new(FPS)
                 local custom = {name = "CrossPipelineCustom"} as tecs.ecs.Phase
                 other:registerPhase(custom)
-                other:addSystem(
-                    {
-                        phase = custom,
-                        name = "crossPipelineCustomSystem",
-                        run = function(_dt: number, _world: tecs.World) end,
-                    }
-                )
+                other:addSystem({
+                    phase = custom,
+                    name = "crossPipelineCustomSystem",
+                    run = function(_dt: number, _world: tecs.World) end,
+                })
 
                 -- Rebuild iterates the shared phase index; the position registered
                 -- only on `other` must be tolerated.
@@ -550,13 +514,11 @@ describe(
         end
 
         local function counting(p: tecs.ecs.Pipeline): tecs.ecs.Pipeline
-            p:addSystem(
-                {
-                    phase = tecs.ecs.phases.FixedUpdate,
-                    name = "overloadStep",
-                    run = function(_dt: number, _world: tecs.World) steps = steps + 1 end,
-                }
-            )
+            p:addSystem({
+                phase = tecs.ecs.phases.FixedUpdate,
+                name = "overloadStep",
+                run = function(_dt: number, _world: tecs.World) steps = steps + 1 end,
+            })
             return p
         end
 
@@ -683,13 +645,11 @@ describe(
             function()
                 local world <const> = tecs.ecs.newWorld({timestep = 1 / 8, fixedMaxSteps = 2})
                 local steps = 0
-                world:addSystem(
-                    {
-                        phase = tecs.ecs.phases.FixedUpdate,
-                        name = "worldOverloadStep",
-                        run = function(_dt: number, _world: tecs.World) steps = steps + 1 end,
-                    }
-                )
+                world:addSystem({
+                    phase = tecs.ecs.phases.FixedUpdate,
+                    name = "worldOverloadStep",
+                    run = function(_dt: number, _world: tecs.World) steps = steps + 1 end,
+                })
 
                 world:update(1.0)
 

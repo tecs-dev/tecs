@@ -3,32 +3,26 @@ local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 
 -- Components exclusive to this spec to avoid cross-spec collisions.
-local Shared = tecs.ecs.newComponent(
-    {
-        name = "DeferStageShared",
-        container = {},
-        fields = {"v"},
-        defaults = {0},
-    }
-)
+local Shared = tecs.ecs.newComponent({
+    name = "DeferStageShared",
+    container = {},
+    fields = {"v"},
+    defaults = {0},
+})
 
-local Extra = tecs.ecs.newComponent(
-    {
-        name = "DeferStageExtra",
-        container = {},
-        fields = {"e"},
-        defaults = {0},
-    }
-)
+local Extra = tecs.ecs.newComponent({
+    name = "DeferStageExtra",
+    container = {},
+    fields = {"e"},
+    defaults = {0},
+})
 
-local Absent = tecs.ecs.newComponent(
-    {
-        name = "DeferStageAbsent",
-        container = {},
-        fields = {"a"},
-        defaults = {0},
-    }
-)
+local Absent = tecs.ecs.newComponent({
+    name = "DeferStageAbsent",
+    container = {},
+    fields = {"a"},
+    defaults = {0},
+})
 
 describe(
     "deferred staging",
@@ -287,20 +281,18 @@ describe(
                         -- Fires during the spawn phase of the drain, before the move
                         -- phase relocates e1's staged move.
                         local fired = false
-                        w:query(
-                            {
-                                name = "DrainMoveCancelWatcher",
-                                include = {Extra},
-                                onEntitiesAdded = function(
-                                    _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
-                                )
-                                    if not fired then
-                                        fired = true
-                                        w:despawn(e1)
-                                    end
-                                end,
-                            }
-                        )
+                        w:query({
+                            name = "DrainMoveCancelWatcher",
+                            include = {Extra},
+                            onEntitiesAdded = function(
+                                _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
+                            )
+                                if not fired then
+                                    fired = true
+                                    w:despawn(e1)
+                                end
+                            end,
+                        })
 
                         w:defer()
                         w:set(e1, Extra(1))
@@ -325,20 +317,18 @@ describe(
                         w:commit()
 
                         local cascaded = false
-                        w:query(
-                            {
-                                name = "DespawnCascadeWatcher",
-                                include = {Shared},
-                                onEntitiesRemoved = function(
-                                    _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
-                                )
-                                    if not cascaded then
-                                        cascaded = true
-                                        w:despawn(ids[3])
-                                    end
-                                end,
-                            }
-                        )
+                        w:query({
+                            name = "DespawnCascadeWatcher",
+                            include = {Shared},
+                            onEntitiesRemoved = function(
+                                _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
+                            )
+                                if not cascaded then
+                                    cascaded = true
+                                    w:despawn(ids[3])
+                                end
+                            end,
+                        })
 
                         w:defer()
                         w:despawn(ids[1])
@@ -362,22 +352,20 @@ describe(
                         local sharedQuery = w:query({include = {Shared}})
                         local absentQuery = w:query({include = {Absent}})
                         local staged = false
-                        w:query(
-                            {
-                                name = "OneShotBatchWatcher",
-                                include = {Extra},
-                                onEntitiesAdded = function(
-                                    _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
-                                )
-                                    if not staged then
-                                        staged = true
-                                        -- Targets an archetype untouched by the running
-                                        -- mutation, so the snapshot is stable.
-                                        w:batchSet(absentQuery, Absent(77))
-                                    end
-                                end,
-                            }
-                        )
+                        w:query({
+                            name = "OneShotBatchWatcher",
+                            include = {Extra},
+                            onEntitiesAdded = function(
+                                _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
+                            )
+                                if not staged then
+                                    staged = true
+                                    -- Targets an archetype untouched by the running
+                                    -- mutation, so the snapshot is stable.
+                                    w:batchSet(absentQuery, Absent(77))
+                                end
+                            end,
+                        })
 
                         w:defer()
                         -- Applied in the one-shot phase; its onEntitiesAdded stages a

@@ -329,12 +329,10 @@ function assets.install(luaPath?: string)
     if worker ~= nil then
         return
     end
-    worker = workers.spawn(
-        {
-            source = DECODER,
-            luaPath = luaPath or package.path,
-        }
-    )
+    worker = workers.spawn({
+        source = DECODER,
+        luaPath = luaPath or package.path,
+    })
 end
 
 function assets.installed(): boolean
@@ -721,15 +719,13 @@ function assets.loadSound(path: string, mode: string, streamMs: integer): Future
     -- handed out as it is: canceling it takes the count to zero and abandons
     -- the decode, which is what the only caller giving up should do.
     root._watchers = 1
-    worker:send(
-        {
-            id = id,
-            kind = "sound",
-            path = path,
-            mode = mode,
-            streamMs = streamMs,
-        }
-    )
+    worker:send({
+        id = id,
+        kind = "sound",
+        path = path,
+        mode = mode,
+        streamMs = streamMs,
+    })
     return root as Future<Sound>
 end
 

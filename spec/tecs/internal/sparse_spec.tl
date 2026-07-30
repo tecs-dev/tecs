@@ -21,15 +21,13 @@ describe(
                 it(
                     "should create a sparse relationship with reverseIndex and cascadeDelete",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseReg1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                                cascadeDelete = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseReg1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                            cascadeDelete = true,
+                        })
                         luassert.is_true((ChildOf as ComponentInternal).isSparse)
                         luassert.is_true((ChildOf as ComponentInternal).cascadeDelete)
                         luassert.is_true((ChildOf as ComponentInternal).reverseIndex)
@@ -41,14 +39,12 @@ describe(
                     function()
                         luassert.error_matches(
                             function()
-                                tecs.ecs.newRelationship(
-                                    {
-                                        name = "SparseRegBad1",
-                                        exclusive = true,
-                                        sparse = true,
-                                        cascadeDelete = true,
-                                    }
-                                )
+                                tecs.ecs.newRelationship({
+                                    name = "SparseRegBad1",
+                                    exclusive = true,
+                                    sparse = true,
+                                    cascadeDelete = true,
+                                })
                             end,
                             "reverseIndex"
                         )
@@ -60,14 +56,12 @@ describe(
                     function()
                         luassert.error_matches(
                             function()
-                                tecs.ecs.newRelationship(
-                                    {
-                                        name = "SparseRegBad2",
-                                        sparse = true,
-                                        reverseIndex = true,
-                                        cascadeDelete = true,
-                                    }
-                                )
+                                tecs.ecs.newRelationship({
+                                    name = "SparseRegBad2",
+                                    sparse = true,
+                                    reverseIndex = true,
+                                    cascadeDelete = true,
+                                })
                             end,
                             "exclusive"
                         )
@@ -77,13 +71,11 @@ describe(
                 it(
                     "should allow reverseIndex on dense relationships",
                     function()
-                        local Dense = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseRegDense",
-                                exclusive = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local Dense = tecs.ecs.newRelationship({
+                            name = "SparseRegDense",
+                            exclusive = true,
+                            reverseIndex = true,
+                        })
                         luassert.is_true((Dense as ComponentInternal).reverseIndex)
                         luassert.is_false((Dense as ComponentInternal).isSparse)
                     end
@@ -95,14 +87,12 @@ describe(
                         -- Regression: previously the SparseStore lived on the relationship container
                         -- (module-level), so creating a fresh world after using one would inherit the
                         -- prior world's sparse entries. With per-world stores, each world starts empty.
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseWorldIsolation",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseWorldIsolation",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local worldA = tecs.ecs.newWorld()
                         local parentA = worldA:spawn()
@@ -130,14 +120,12 @@ describe(
                 it(
                     "should set and get a sparse relationship",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseGet1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseGet1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local parent = world:spawn()
                         local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -152,14 +140,12 @@ describe(
                 it(
                     "should get sparse relationship by target instance",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseGetTarget1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseGetTarget1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local parent = world:spawn()
                         local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -174,14 +160,12 @@ describe(
                 it(
                     "should return nil for non-existent target",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseGetNil1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseGetNil1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local parent = world:spawn()
                         local other = world:spawn()
@@ -196,14 +180,12 @@ describe(
                 it(
                     "should not read pending sparse value inside a defer scope",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparsePending1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparsePending1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local parent = world:spawn()
                         world:defer()
@@ -221,14 +203,12 @@ describe(
                 it(
                     "should replace exclusive sparse relationship on set",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseReplace1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseReplace1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local parent1 = world:spawn()
                         local parent2 = world:spawn()
@@ -254,14 +234,12 @@ describe(
                 it(
                     "should remove all targets with container removal",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseRemoveAll1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseRemoveAll1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local parent = world:spawn()
                         local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -278,14 +256,12 @@ describe(
                 it(
                     "should remove specific target with instance removal",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseRemoveOne1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseRemoveOne1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local parent = world:spawn()
                         local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -302,14 +278,12 @@ describe(
                 it(
                     "should remove wildcard from archetype when no entries remain",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseRemoveWild1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseRemoveWild1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local parent = world:spawn()
                         local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -351,14 +325,12 @@ describe(
                 it(
                     "should match entities with sparse relationships in queries",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseQuery1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseQuery1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local parent = world:spawn()
                         local child1 = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -389,14 +361,12 @@ describe(
                 it(
                     "should allow row-indexed access to sparse data",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseProxy1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseProxy1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local parent = world:spawn()
                         local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -422,14 +392,12 @@ describe(
                 it(
                     "should return children of an entity",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseTargets1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseTargets1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local parent = world:spawn()
                         local child1 = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -447,14 +415,12 @@ describe(
                 it(
                     "should call nothing for entity with no children",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseTargetsEmpty1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseTargetsEmpty1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local entity = world:spawn()
                         world:update(0)
@@ -473,14 +439,12 @@ describe(
                 it(
                     "should walk up the parent chain calling the callback per ancestor",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseWalkUp1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseWalkUp1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local root = world:spawn()
                         local mid = world:spawn(ChildOf(root) as tecs.ecs.Component)
@@ -510,14 +474,12 @@ describe(
                 it(
                     "should stop early when callback returns false",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseWalkUp2",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseWalkUp2",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local root = world:spawn()
                         local mid = world:spawn(ChildOf(root) as tecs.ecs.Component)
@@ -542,14 +504,12 @@ describe(
                 it(
                     "should pass through the context argument",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseWalkUp3",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseWalkUp3",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local root = world:spawn()
                         local leaf = world:spawn(ChildOf(root) as tecs.ecs.Component)
@@ -574,14 +534,12 @@ describe(
                 it(
                     "should be a no-op for entities with no parent",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseWalkUp4",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseWalkUp4",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local lonely = world:spawn()
                         world:update(0)
@@ -602,14 +560,12 @@ describe(
                     function()
                         -- A real cycle is hard to construct since ChildOf is exclusive,
                         -- but a low maxDepth on a legitimate deep chain proves the guard.
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseWalkUp5",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseWalkUp5",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local root = world:spawn()
                         local a = world:spawn(ChildOf(root) as tecs.ecs.Component)
@@ -617,17 +573,11 @@ describe(
                         local c = world:spawn(ChildOf(b) as tecs.ecs.Component)
                         world:update(0)
 
-                        luassert.has_error(
-                            function()
-                                world:walkUp(
-                                    c,
-                                    ChildOf,
-                                    function(_a: integer, _d: integer, _c: any): boolean return true end,
-                                    nil,
-                                    2
-                                )
-                            end
-                        )
+                        luassert.has_error(function()
+                            world:walkUp(
+                                c, ChildOf, function(_a: integer, _d: integer, _c: any): boolean return true end, nil, 2
+                            )
+                        end)
                     end
                 )
             end
@@ -639,14 +589,12 @@ describe(
                 it(
                     "should DFS traverse a hierarchy",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseTraverse1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseTraverse1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local root = world:spawn()
                         local child1 = world:spawn(ChildOf(root) as tecs.ecs.Component)
@@ -685,15 +633,13 @@ describe(
                 it(
                     "should despawn children when parent is despawned",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseCascade1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                                cascadeDelete = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseCascade1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                            cascadeDelete = true,
+                        })
 
                         local parent = world:spawn()
                         local child1 = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -712,15 +658,13 @@ describe(
                 it(
                     "should cascade delete recursively through hierarchy",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseCascadeDeep1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                                cascadeDelete = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseCascadeDeep1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                            cascadeDelete = true,
+                        })
 
                         local root = world:spawn()
                         local child = world:spawn(ChildOf(root) as tecs.ecs.Component)
@@ -739,15 +683,13 @@ describe(
                 it(
                     "should not cascade when relationship is removed (not parent despawned)",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseCascadeNoOrphan1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                                cascadeDelete = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseCascadeNoOrphan1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                            cascadeDelete = true,
+                        })
 
                         local parent = world:spawn()
                         local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -765,15 +707,13 @@ describe(
                 it(
                     "should not despawn unrelated entities",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseCascadeUnrelated1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                                cascadeDelete = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseCascadeUnrelated1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                            cascadeDelete = true,
+                        })
 
                         local parent = world:spawn()
                         local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -796,14 +736,12 @@ describe(
                 it(
                     "should not create per-target archetypes for sparse relationships",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseNoFrag1",
-                                exclusive = true,
-                                sparse = true,
-                                reverseIndex = true,
-                            }
-                        )
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "SparseNoFrag1",
+                            exclusive = true,
+                            sparse = true,
+                            reverseIndex = true,
+                        })
 
                         local Transform = tecs.Transform
 
@@ -851,12 +789,10 @@ describe(
                 it(
                     "set then remove of the same target in one scope leaves nothing",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseStagedFollows1",
-                                sparse = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "SparseStagedFollows1",
+                            sparse = true,
+                        })
                         local target = world:spawn()
                         local e = world:spawn()
                         world:commit()
@@ -876,12 +812,10 @@ describe(
                 it(
                     "removing one staged target keeps the other staged target",
                     function()
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseStagedFollows2",
-                                sparse = true,
-                            }
-                        )
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "SparseStagedFollows2",
+                            sparse = true,
+                        })
                         local t1 = world:spawn()
                         local t2 = world:spawn()
                         local e = world:spawn()
@@ -906,20 +840,16 @@ describe(
                 it(
                     "staged values die with a same-transaction despawn and slot reuse",
                     function()
-                        local Marker = tecs.ecs.newComponent(
-                            {
-                                name = "SparseStagedMarker",
-                                container = {},
-                                fields = {"v"},
-                                defaults = {0},
-                            }
-                        )
-                        local Follows = tecs.ecs.newRelationship(
-                            {
-                                name = "SparseStagedFollows3",
-                                sparse = true,
-                            }
-                        )
+                        local Marker = tecs.ecs.newComponent({
+                            name = "SparseStagedMarker",
+                            container = {},
+                            fields = {"v"},
+                            defaults = {0},
+                        })
+                        local Follows = tecs.ecs.newRelationship({
+                            name = "SparseStagedFollows3",
+                            sparse = true,
+                        })
                         local target = world:spawn()
                         local e1 = world:spawn(Marker(1))
                         local e2 = world:spawn(Marker(2))
@@ -933,20 +863,18 @@ describe(
                         -- recycles it inside the same transaction.
                         local removals = 0
                         local recycled: integer = nil
-                        world:query(
-                            {
-                                name = "SparseSlotReuseWatcher",
-                                include = {Marker},
-                                onEntitiesRemoved = function(
-                                    _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
-                                )
-                                    removals = removals + 1
-                                    if removals == 2 and not recycled then
-                                        recycled = world:spawn()
-                                    end
-                                end,
-                            }
-                        )
+                        world:query({
+                            name = "SparseSlotReuseWatcher",
+                            include = {Marker},
+                            onEntitiesRemoved = function(
+                                _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
+                            )
+                                removals = removals + 1
+                                if removals == 2 and not recycled then
+                                    recycled = world:spawn()
+                                end
+                            end,
+                        })
 
                         world:defer()
                         world:set(e1, Follows(target) as tecs.ecs.Component)

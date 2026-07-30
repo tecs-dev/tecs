@@ -85,143 +85,131 @@ local function phrase(seed: integer, length: integer): string
     return table.concat(out)
 end
 
-return tecs.newApplication(
-    {
-        window = {title = "text", width = WIDTH, height = HEIGHT},
-        presentMode = "immediate",
-        ambientLight = {1.0, 1.0, 1.0},
-        capacity = TEXTS * (LENGTH + 4) + 256,
-        maxEntities = TEXTS * (LENGTH + 4) + 4096,
-        debugMaxFrames = WARMUP + FRAMES,
+return tecs.newApplication({
+    window = {title = "text", width = WIDTH, height = HEIGHT},
+    presentMode = "immediate",
+    ambientLight = {1.0, 1.0, 1.0},
+    capacity = TEXTS * (LENGTH + 4) + 256,
+    maxEntities = TEXTS * (LENGTH + 4) + 4096,
+    debugMaxFrames = WARMUP + FRAMES,
 
-        plugin = function(world: tecs.World, app: tecs.Application)
-            local renderer = app.renderer
-            -- Real time, recorded where both values are visible. The world's dt is
-            -- whatever the loop measured, and this is that same measurement kept
-            -- for the report.
-            time.provider = function(realDt: number): number timing.mark(DELTA, realDt); return realDt end
+    plugin = function(world: tecs.World, app: tecs.Application)
+        local renderer = app.renderer
+        -- Real time, recorded where both values are visible. The world's dt is
+        -- whatever the loop measured, and this is that same measurement kept
+        -- for the report.
+        time.provider = function(realDt: number): number timing.mark(DELTA, realDt); return realDt end
 
-            world:addPlugin(text.textPlugin({renderer = renderer}))
-            local font = text.defaultFont().value
-            transientFont = font
+        world:addPlugin(text.textPlugin({renderer = renderer}))
+        local font = text.defaultFont().value
+        transientFont = font
 
-            math.randomseed(42)
-            local spawnStart <const> = time.now()
-            local columns <const> = math.max(1, math.floor(WIDTH / (LENGTH * SIZE * 0.62)))
-            for index = 1, TEXTS do
-                local column = (index - 1) % columns
-                local row = math.floor((index - 1) / columns)
-                entities[index] = world:spawn(
-                    Transform(column * (WIDTH / columns), 8.0 + row * SIZE * 1.4, 0.0, 1, 0.0, 1.0, 1.0),
-                    Tint(0.9, 0.95, 1.0, 1.0),
-                    text.Text.new(
-                        {
-                            text = phrase(index, LENGTH),
-                            font = font,
+        math.randomseed(42)
+        local spawnStart <const> = time.now()
+        local columns <const> = math.max(1, math.floor(WIDTH / (LENGTH * SIZE * 0.62)))
+        for index = 1, TEXTS do
+            local column = (index - 1) % columns
+            local row = math.floor((index - 1) / columns)
+            entities[index] = world:spawn(
+                Transform(column * (WIDTH / columns), 8.0 + row * SIZE * 1.4, 0.0, 1, 0.0, 1.0, 1.0),
+                Tint(0.9, 0.95, 1.0, 1.0),
+                text.Text.new({
+                    text = phrase(index, LENGTH),
+                    font = font,
+                    size = SIZE,
+                })
+            )
+        end
+
+        local spawnMs <const> = (time.now() - spawnStart) * 1000.0
+        print(
+            ("text: spawned %d texts (%d glyphs) in %.1f ms, %.3f ms each"):format(
+                TEXTS, TEXTS * LENGTH, spawnMs, spawnMs / TEXTS
+            )
+        )
+        print(
+            ("text: %d texts of %d characters, churn %.0f%%%s, " .. "measuring %d frames after %d warmup"):format(
+                TEXTS, LENGTH, CHURN * 100.0, RESIZE and " with length changes" or "", FRAMES, WARMUP
+            )
+        )
+
+        -- In `First`, which is where the loop used to call this from: a text
+        -- spawned here is laid out and extracted by the frame that spawned it.
+        local frame = 0
+        world:addSystem({
+            name = "bench.Churn",
+            phase = tecs.ecs.phases.First,
+            run = function()
+                if frame == WARMUP then
+                    timing.reset()
+                end
+
+                -- Damage numbers: a burst appears every frame and each is gone a
+                -- moment later, so the population is steady while the identities turn
+                -- over completely.
+                for index = 1, SPAWN_RATE do
+                    local at = (frame * SPAWN_RATE + index) % 997
+                    transient[#transient + 1] = world:spawn(
+                        Transform(8.0 + (at % 60) * 20.0, 8.0 + math.floor(at / 60) * 18.0, 0.0, 1, 0.0, 1.0, 1.0),
+                        Tint(1.0, 0.8, 0.2, 1.0),
+                        text.Text.new({
+                            text = tostring(100 + at),
+                            font = transientFont,
                             size = SIZE,
-                        }
+                        })
+                    )
+                end
+                if SPAWN_RATE > 0 then
+                    local expire <const> = #transient - SPAWN_RATE * LIFETIME
+                    for index = 1, expire do
+                        world:despawn(transient[index])
+                        transient[index] = nil
+                    end
+                    if expire > 0 then
+                        local moved: {integer} = {}
+                        for index = expire + 1, #transient + expire do
+                            moved[#moved + 1] = transient[index]
+                        end
+                        transient = moved
+                    end
+                end
+
+                local changing = math.floor(TEXTS * CHURN)
+                for index = 1, changing do
+                    -- Spread across the set rather than always the first N, so the
+                    -- churn is not confined to one archetype.
+                    local at = ((frame * 31 + index * 17) % TEXTS) + 1
+                    local length = LENGTH
+                    if RESIZE then
+                        length = LENGTH - (frame + index) % 3
+                    end
+                    local item = world:getMut(entities[at], text.Text)
+                    item.text = phrase(frame + index, length)
+                end
+
+                if frame >= WARMUP then
+                    rewritten = rewritten + renderer.rewritten
+                    glyphs = renderer.count
+                end
+                frame = frame + 1
+            end,
+        })
+
+        world:addSystem({
+            name = "bench.Report",
+            phase = tecs.ecs.phases.Shutdown,
+            run = function()
+                local frames <const> = math.max(1, frame - WARMUP)
+                print(
+                    ("%d instances drawn, %d layouts, %.0f instances " .. "rewritten per frame"):format(
+                        glyphs, text.textLayouts(world), rewritten / frames
                     )
                 )
-            end
-
-            local spawnMs <const> = (time.now() - spawnStart) * 1000.0
-            print(
-                ("text: spawned %d texts (%d glyphs) in %.1f ms, %.3f ms each"):format(
-                    TEXTS, TEXTS * LENGTH, spawnMs, spawnMs / TEXTS
-                )
-            )
-            print(
-                ("text: %d texts of %d characters, churn %.0f%%%s, " .. "measuring %d frames after %d warmup"):format(
-                    TEXTS, LENGTH, CHURN * 100.0, RESIZE and " with length changes" or "", FRAMES, WARMUP
-                )
-            )
-
-            -- In `First`, which is where the loop used to call this from: a text
-            -- spawned here is laid out and extracted by the frame that spawned it.
-            local frame = 0
-            world:addSystem(
-                {
-                    name = "bench.Churn",
-                    phase = tecs.ecs.phases.First,
-                    run = function()
-                        if frame == WARMUP then
-                            timing.reset()
-                        end
-
-                        -- Damage numbers: a burst appears every frame and each is gone a
-                        -- moment later, so the population is steady while the identities turn
-                        -- over completely.
-                        for index = 1, SPAWN_RATE do
-                            local at = (frame * SPAWN_RATE + index) % 997
-                            transient[#transient + 1] = world:spawn(
-                                Transform(
-                                    8.0 + (at % 60) * 20.0, 8.0 + math.floor(at / 60) * 18.0, 0.0, 1, 0.0, 1.0, 1.0
-                                ),
-                                Tint(1.0, 0.8, 0.2, 1.0),
-                                text.Text.new(
-                                    {
-                                        text = tostring(100 + at),
-                                        font = transientFont,
-                                        size = SIZE,
-                                    }
-                                )
-                            )
-                        end
-                        if SPAWN_RATE > 0 then
-                            local expire <const> = #transient - SPAWN_RATE * LIFETIME
-                            for index = 1, expire do
-                                world:despawn(transient[index])
-                                transient[index] = nil
-                            end
-                            if expire > 0 then
-                                local moved: {integer} = {}
-                                for index = expire + 1, #transient + expire do
-                                    moved[#moved + 1] = transient[index]
-                                end
-                                transient = moved
-                            end
-                        end
-
-                        local changing = math.floor(TEXTS * CHURN)
-                        for index = 1, changing do
-                            -- Spread across the set rather than always the first N, so the
-                            -- churn is not confined to one archetype.
-                            local at = ((frame * 31 + index * 17) % TEXTS) + 1
-                            local length = LENGTH
-                            if RESIZE then
-                                length = LENGTH - (frame + index) % 3
-                            end
-                            local item = world:getMut(entities[at], text.Text)
-                            item.text = phrase(frame + index, length)
-                        end
-
-                        if frame >= WARMUP then
-                            rewritten = rewritten + renderer.rewritten
-                            glyphs = renderer.count
-                        end
-                        frame = frame + 1
-                    end,
-                }
-            )
-
-            world:addSystem(
-                {
-                    name = "bench.Report",
-                    phase = tecs.ecs.phases.Shutdown,
-                    run = function()
-                        local frames <const> = math.max(1, frame - WARMUP)
-                        print(
-                            ("%d instances drawn, %d layouts, %.0f instances " .. "rewritten per frame"):format(
-                                glyphs, text.textLayouts(world), rewritten / frames
-                            )
-                        )
-                        local report = timing.format()
-                        if report ~= "" then
-                            print(report)
-                        end
-                    end,
-                }
-            )
-        end,
-    }
-)
+                local report = timing.format()
+                if report ~= "" then
+                    print(report)
+                end
+            end,
+        })
+    end,
+})

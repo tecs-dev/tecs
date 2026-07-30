@@ -196,17 +196,15 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
     -- The white pixel's extent is the backend's answer, decided by uploading
     -- it, and the extractor needs it for every row that carries no Sprite. It
     -- crosses once, at construction, rather than being asked for per frame.
-    local extractor = Extractor.create(
-        {
-            capacity = self.capacity,
-            reserveRuns = options.reserveRuns,
-            partialRewrites = options.partialRewrites,
-            whiteU0 = backend.whiteU0,
-            whiteV0 = backend.whiteV0,
-            whiteU1 = backend.whiteU1,
-            whiteV1 = backend.whiteV1,
-        }
-    )
+    local extractor = Extractor.create({
+        capacity = self.capacity,
+        reserveRuns = options.reserveRuns,
+        partialRewrites = options.partialRewrites,
+        whiteU0 = backend.whiteU0,
+        whiteV0 = backend.whiteV0,
+        whiteU1 = backend.whiteU1,
+        whiteV1 = backend.whiteV1,
+    })
     self._extractor = extractor
     self.camera = extractor.camera
     extractor:setStaging(self._slot, backend:mapSlot(self._slot))

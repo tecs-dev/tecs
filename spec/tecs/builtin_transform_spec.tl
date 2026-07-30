@@ -12,24 +12,20 @@ describe(
         local TestTag: tecs.ecs.Component
         local TestColor: tecs.ecs.Component
 
-        before_each(
-            function()
-                local testId = math.random(1, 1000000)
+        before_each(function()
+            local testId = math.random(1, 1000000)
 
-                local tagContainer: tecs.ecs.Component = {}
-                TestTag = tecs.ecs.newTagComponent({name = "BuiltinTest_Tag" .. testId, container = tagContainer})
+            local tagContainer: tecs.ecs.Component = {}
+            TestTag = tecs.ecs.newTagComponent({name = "BuiltinTest_Tag" .. testId, container = tagContainer})
 
-                local colorContainer: tecs.ecs.Component = {}
-                TestColor = tecs.ecs.newFFIComponent(
-                    {
-                        name = "BuiltinTest_Color" .. testId,
-                        container = colorContainer,
-                        fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}},
-                        defaults = {1, 1, 1},
-                    }
-                )
-            end
-        )
+            local colorContainer: tecs.ecs.Component = {}
+            TestColor = tecs.ecs.newFFIComponent({
+                name = "BuiltinTest_Color" .. testId,
+                container = colorContainer,
+                fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}},
+                defaults = {1, 1, 1},
+            })
+        end)
 
         it(
             "preserves Transform values after spawn/despawn cycles using builtin Transform",
@@ -270,23 +266,21 @@ describe(
         -- system marks Transform when it recomputes).
         local function addDirtyProbe(w: tecs.World, child: integer): {boolean}
             local seen: {boolean} = {}
-            w:addSystem(
-                {
-                    name = "TransformDirtyProbe",
-                    phase = tecs.ecs.phases.Last,
-                    run = function()
-                        local arch = (w as WorldImpl):currentArchetype(child)
-                        local found = false
-                        for darch in w:dirtyArchetypes() do
-                            if darch == arch then
-                                found = true
-                                break
-                            end
+            w:addSystem({
+                name = "TransformDirtyProbe",
+                phase = tecs.ecs.phases.Last,
+                run = function()
+                    local arch = (w as WorldImpl):currentArchetype(child)
+                    local found = false
+                    for darch in w:dirtyArchetypes() do
+                        if darch == arch then
+                            found = true
+                            break
                         end
-                        seen[#seen + 1] = found
-                    end,
-                }
-            )
+                    end
+                    seen[#seen + 1] = found
+                end,
+            })
             return seen
         end
 
@@ -365,20 +359,18 @@ describe(
                 w:update(1 / 60)
 
                 local wrote = false
-                w:addSystem(
-                    {
-                        name = "LastHierarchyWriter",
-                        phase = tecs.ecs.phases.Last,
-                        run = function()
-                            if not wrote then
-                                wrote = true
-                                w:set(parent1, Transform(500, 0, 0))
-                                w:set(relativeChild, RelativeTransform(60, 0, 0))
-                                w:set(relationshipChild, ChildOf(parent2) as tecs.ecs.Component)
-                            end
-                        end,
-                    }
-                )
+                w:addSystem({
+                    name = "LastHierarchyWriter",
+                    phase = tecs.ecs.phases.Last,
+                    run = function()
+                        if not wrote then
+                            wrote = true
+                            w:set(parent1, Transform(500, 0, 0))
+                            w:set(relativeChild, RelativeTransform(60, 0, 0))
+                            w:set(relationshipChild, ChildOf(parent2) as tecs.ecs.Component)
+                        end
+                    end,
+                })
 
                 -- The hierarchy system has already run when Last writes.
                 w:update(1 / 60)

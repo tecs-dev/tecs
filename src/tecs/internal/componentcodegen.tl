@@ -7,13 +7,11 @@ local EMPTY = pool.EMPTY
 
 -- Reusable string buffer and tables for codegen.
 local CODEGEN_BUF <const>: buffer = buffer.new()
-local ARRAY_POOL <const> = pool.newTablePool(
-    {
-        clearOn = "release",
-        arrayHint = 8,
-        hashHint = 0,
-    }
-)
+local ARRAY_POOL <const> = pool.newTablePool({
+    clearOn = "release",
+    arrayHint = 8,
+    hashHint = 0,
+})
 
 --- Shared constructor/new codegen for components and relationships.
 ---

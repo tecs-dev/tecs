@@ -9,13 +9,11 @@ describe(
         it(
             "supports set(entity, component, value) and get(entity, component)",
             function()
-                local Health = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecHealth",
-                        kind = "number",
-                        default = 100,
-                    }
-                )
+                local Health = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecHealth",
+                    kind = "number",
+                    default = 100,
+                })
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn()
@@ -32,13 +30,11 @@ describe(
         it(
             "uses default value when added without explicit scalar payload",
             function()
-                local Ammo = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecAmmo",
-                        kind = "number",
-                        default = 12,
-                    }
-                )
+                local Ammo = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecAmmo",
+                    kind = "number",
+                    default = 12,
+                })
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn()
@@ -54,13 +50,11 @@ describe(
         it(
             "stores scalar values directly in query columns",
             function()
-                local Heat = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecHeat",
-                        kind = "number",
-                        default = 0,
-                    }
-                )
+                local Heat = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecHeat",
+                    kind = "number",
+                    default = 0,
+                })
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn()
@@ -83,18 +77,14 @@ describe(
         it(
             "uses implicit zero defaults by kind",
             function()
-                local Flag = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecFlag",
-                        kind = "boolean",
-                    }
-                )
-                local Label = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecLabel",
-                        kind = "string",
-                    }
-                )
+                local Flag = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecFlag",
+                    kind = "boolean",
+                })
+                local Label = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecLabel",
+                    kind = "string",
+                })
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn()
@@ -112,12 +102,10 @@ describe(
         it(
             "supports scalar instances directly in spawn(...)",
             function()
-                local Tag = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecSpawnTag",
-                        kind = "string",
-                    }
-                )
+                local Tag = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecSpawnTag",
+                    kind = "string",
+                })
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn(Tag("hero"))
@@ -130,19 +118,15 @@ describe(
         it(
             "supports mixing scalar and table components in spawn(...)",
             function()
-                local Score = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecSpawnScore",
-                        kind = "number",
-                        default = 0,
-                    }
-                )
-                local Label = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecSpawnLabel",
-                        kind = "string",
-                    }
-                )
+                local Score = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecSpawnScore",
+                    kind = "number",
+                    default = 0,
+                })
+                local Label = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecSpawnLabel",
+                    kind = "string",
+                })
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn(tecs.Transform(1, 2), Score(99), Label("boss"))
@@ -159,13 +143,11 @@ describe(
         it(
             "supports 2-arg set with a scalar instance wrapper",
             function()
-                local Mana = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecSetMana",
-                        kind = "number",
-                        default = 0,
-                    }
-                )
+                local Mana = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecSetMana",
+                    kind = "number",
+                    default = 0,
+                })
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn()
@@ -181,12 +163,10 @@ describe(
         it(
             "returns the raw scalar value (not a wrapper) from world:get",
             function()
-                local Title = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecRawGet",
-                        kind = "string",
-                    }
-                )
+                local Title = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecRawGet",
+                    kind = "string",
+                })
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn(Title("Knight"))
@@ -201,12 +181,10 @@ describe(
         it(
             "reuses wrapper instances for repeated string values",
             function()
-                local Tag = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecCache",
-                        kind = "string",
-                    }
-                )
+                local Tag = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecCache",
+                    kind = "string",
+                })
 
                 local a = Tag("frank")
                 local b = Tag("frank")
@@ -217,12 +195,10 @@ describe(
         it(
             "serialize unwraps wrapper instances and raw column reads",
             function()
-                local Title: tecs.ecs.ScalarComponent<string> = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecSerializeShape",
-                        kind = "string",
-                    }
-                )
+                local Title: tecs.ecs.ScalarComponent<string> = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecSerializeShape",
+                    kind = "string",
+                })
 
                 -- Wrapper instance from `__call` must serialize as `{value = "x"}`,
                 -- not `{value = {componentType=..., value="x"}}`.
@@ -249,21 +225,17 @@ describe(
 
                 -- With `default` present, the typed field target binds T directly;
                 -- no cast needed.
-                fakeModule.Stamina = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecModuleStamina",
-                        kind = "number",
-                        default = 50,
-                    }
-                )
+                fakeModule.Stamina = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecModuleStamina",
+                    kind = "number",
+                    default = 50,
+                })
                 -- Without `default`, the literal has no T-typed value, so T can't
                 -- bind from the target either; cast the result.
-                fakeModule.Title = tecs.ecs.newScalarComponent(
-                    {
-                        name = "ScalarSpecModuleTitle",
-                        kind = "string",
-                    }
-                ) as tecs.ecs.ScalarComponent<string>
+                fakeModule.Title = tecs.ecs.newScalarComponent({
+                    name = "ScalarSpecModuleTitle",
+                    kind = "string",
+                }) as tecs.ecs.ScalarComponent<string>
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn(fakeModule.Stamina(80), fakeModule.Title("hero"))

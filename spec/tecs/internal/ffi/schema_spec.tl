@@ -16,22 +16,20 @@ describe(
                 it(
                     "accepts fields with array types",
                     function()
-                        assert.has_no.errors(
-                            function() schema.validateFields({{"matrix", "float[16]"}, {"color", "uint8_t[4]"}}) end
-                        )
+                        assert.has_no.errors(function()
+                            schema.validateFields({{"matrix", "float[16]"}, {"color", "uint8_t[4]"}})
+                        end)
                     end
                 )
 
                 it(
                     "accepts underscored and mixed-case identifiers",
                     function()
-                        assert.has_no.errors(
-                            function()
-                                schema.validateFields(
-                                    {{"_private", "int32_t"}, {"camelCase", "float"}, {"ALL_CAPS", "double"}}
-                                )
-                            end
-                        )
+                        assert.has_no.errors(function()
+                            schema.validateFields({
+                                {"_private", "int32_t"}, {"camelCase", "float"}, {"ALL_CAPS", "double"}
+                            })
+                        end)
                     end
                 )
 
@@ -112,9 +110,9 @@ describe(
                 it(
                     "allows non-reserved fields when reserved set is provided",
                     function()
-                        assert.has_no.errors(
-                            function() schema.validateFields({{"x", "float"}, {"y", "float"}}, {eventId = true}) end
-                        )
+                        assert.has_no.errors(function()
+                            schema.validateFields({{"x", "float"}, {"y", "float"}}, {eventId = true})
+                        end)
                     end
                 )
 

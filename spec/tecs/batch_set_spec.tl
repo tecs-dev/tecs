@@ -3,23 +3,19 @@ local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 
 -- Components exclusive to this spec to avoid cross-spec collisions.
-local Position = tecs.ecs.newComponent(
-    {
-        name = "BatchSetTestPosition",
-        container = {},
-        fields = {"x", "y"},
-        defaults = {0, 0},
-    }
-)
+local Position = tecs.ecs.newComponent({
+    name = "BatchSetTestPosition",
+    container = {},
+    fields = {"x", "y"},
+    defaults = {0, 0},
+})
 
-local Velocity = tecs.ecs.newComponent(
-    {
-        name = "BatchSetTestVelocity",
-        container = {},
-        fields = {"vx", "vy"},
-        defaults = {0, 0},
-    }
-)
+local Velocity = tecs.ecs.newComponent({
+    name = "BatchSetTestVelocity",
+    container = {},
+    fields = {"vx", "vy"},
+    defaults = {0, 0},
+})
 
 local Tag = tecs.ecs.newTagComponent({name = "BatchSetTestTag"})
 local OtherTag = tecs.ecs.newTagComponent({name = "BatchSetTestOtherTag"})
@@ -420,19 +416,17 @@ describe(
                 world:spawn(Tag, Position(1, 1))
                 world:commit()
                 local q = world:query({include = {Tag}})
-                luassert.has_error(
-                    function()
-                        -- Mistake: instance as arg2 when also passing a callback.
-                        -- Must be the container (Position), not an instance.
-                        world:batchSet(
-                            q,
-                            Position(0, 0),
-                            function(_a, _f, _l, _c)
-                                -- body irrelevant, the precondition check fires first
-                            end
-                        )
-                    end
-                )
+                luassert.has_error(function()
+                    -- Mistake: instance as arg2 when also passing a callback.
+                    -- Must be the container (Position), not an instance.
+                    world:batchSet(
+                        q,
+                        Position(0, 0),
+                        function(_a, _f, _l, _c)
+                            -- body irrelevant, the precondition check fires first
+                        end
+                    )
+                end)
             end
         )
 
@@ -440,21 +434,17 @@ describe(
             "callback form rejects dense relationships via NoBulkBatch metadata",
             function()
                 local world = tecs.ecs.newWorld()
-                local ParentOf = tecs.ecs.newRelationship(
-                    {
-                        name = "BatchSetNoBulkDenseRelationship",
-                    }
-                )
+                local ParentOf = tecs.ecs.newRelationship({
+                    name = "BatchSetNoBulkDenseRelationship",
+                })
                 local parent = world:spawn()
                 world:spawn(ParentOf(parent) as tecs.ecs.Component, Tag)
                 world:commit()
 
                 local q = world:query({include = {Tag}})
-                luassert.has_error(
-                    function()
-                        world:batchSet(q, ParentOf as tecs.ecs.Component, function(_arch, _first, _last, _count) end)
-                    end
-                )
+                luassert.has_error(function()
+                    world:batchSet(q, ParentOf as tecs.ecs.Component, function(_arch, _first, _last, _count) end)
+                end)
             end
         )
     end
@@ -472,20 +462,16 @@ describe(
             e: number
         end
 
-        local Pos = tecs.ecs.newFFIComponent(
-            {
-                name = "BatchSwapCapPos",
-                container = SwapPos,
-                fields = {{"x", "float"}},
-            }
-        )
-        local Extra = tecs.ecs.newFFIComponent(
-            {
-                name = "BatchSwapCapExtra",
-                container = SwapExtra,
-                fields = {{"e", "float"}},
-            }
-        )
+        local Pos = tecs.ecs.newFFIComponent({
+            name = "BatchSwapCapPos",
+            container = SwapPos,
+            fields = {{"x", "float"}},
+        })
+        local Extra = tecs.ecs.newFFIComponent({
+            name = "BatchSwapCapExtra",
+            container = SwapExtra,
+            fields = {{"e", "float"}},
+        })
 
         it(
             "keeps capacity within every column after a swap fast path",
