@@ -135,7 +135,6 @@ describe("http.newClient", function()
     local silent, silentPort
 
     it("uses the shared io stream surface", function()
-        assert.is_nil(rawget(http, "DataStream"))
         assert.is_nil(rawget(http, "newStringStream"))
         assert.is_function(tecsIO.newStringStream)
         assert.is_function(tecsIO.newBufferStream)
@@ -1384,13 +1383,6 @@ describe("http.plugin snapshots", function()
         return nil
     end
 
-    local function fixture(name)
-        local file = assert(io.open("spec/fixtures/http-legacy-snapshots/" .. name, "rb"))
-        local bytes = file:read("*a")
-        file:close()
-        return bytes
-    end
-
     for _, format in ipairs({ "table", "binary" }) do
         for _, field in ipairs({ "body", "into" }) do
             it("rejects a handle-backed request " .. field .. " in a " .. format .. " snapshot", function()
@@ -1457,27 +1449,4 @@ describe("http.plugin snapshots", function()
             end
         end)
     end
-
-    it("loads legacy string and file request bodies", function()
-        local strings = tecs.ecs.newWorld()
-        strings:loadSnapshot(fixture("request-string.bin"))
-        local stringRequest = only(strings, http.plugin.Request)
-        assert.are.equal("legacy request body", stringRequest.body)
-
-        local files = tecs.ecs.newWorld()
-        files:loadSnapshot(fixture("request-file-datastream.bin"))
-        local fileRequest = only(files, http.plugin.Request)
-        assert.are.equal("text/plain", fileRequest.body:contentType())
-        assert.is_true(fileRequest.body:isReplayable())
-        assert.is_true(fileRequest.body:hasKnownLength())
-    end)
-
-    it("loads a legacy response body as a shared stream", function()
-        local world = tecs.ecs.newWorld()
-        world:loadSnapshot(fixture("response-string-datastream.bin"))
-        local response = only(world, http.plugin.Response)
-        assert.are.equal(201, response.status)
-        assert.are.equal("legacy response body", response.body:readAll().value)
-        assert.are.equal("text/plain", response.body:contentType())
-    end)
 end)

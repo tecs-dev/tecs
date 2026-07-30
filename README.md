@@ -1820,13 +1820,10 @@ alternative -- a weak list -- is a fire-and-forget request that stops moving
 whenever a collection happens to run.
 
 **A body uses the same `tecs.io.Stream` as every other binary source and
-destination.** The first shape had five fields and then grew an HTTP-only
-`DataStream` with another set of readers, writers and constructors. Both were
-parallel vocabularies for bytes. A request now takes a string or
-`ReadableStream`, `into` takes a path or `WritableStream`, and a response always
-returns a `Stream`. Metadata stays on methods because a file can change between
-calls, and readers and writers are endpoints with their own cursors rather than
-state hidden on the descriptor.
+destination.** A request takes a string or `ReadableStream`, `into` takes a path
+or `WritableStream`, and a response always returns a `Stream`. Metadata stays on
+methods because a file can change between calls, and readers and writers are
+endpoints with their own cursors rather than state hidden on the descriptor.
 
 The two directions are bounded. A file or custom request source is read into
 one reusable 64 KiB `Buffer` on the SDL thread and offered to a bounded Rust
