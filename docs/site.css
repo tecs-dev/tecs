@@ -161,6 +161,13 @@
     );
 }
 
+.tealdoc-feature-details a,
+.tealdoc-feature-details a:visited,
+.tealdoc-feature-details a:hover {
+    color: inherit;
+    text-decoration-color: currentColor;
+}
+
 @media (min-width: 640px) {
     :root {
         --tealdoc-hero-glow-size: 256px;
