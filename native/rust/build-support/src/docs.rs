@@ -403,6 +403,7 @@ fn check_module_intro(root: &Path, site: &Path) -> Result<()> {
         "**Constructors**",
         "**Types**",
         "**Functions**",
+        "**Macros**",
         "**Values**",
     ]
     .into_iter()
