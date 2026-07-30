@@ -184,6 +184,15 @@
     font-weight: 400;
 }
 
+/* A linkable type reads as a type first. Tealdoc paints it in the link color,
+ * which in a block of code is the one thing that is not syntax and so pulls
+ * the eye off the code it is part of. The underline already says it is a
+ * link, so the color goes back to the one every other nominal type has. */
+.tealdoc-code-link,
+.tealdoc-code-link .tealdoc-token-type {
+    color: var(--tealdoc-syntax-type);
+}
+
 /* A home page layout, which is the page's own and not the generator's: a list
  * of module names reads down two columns rather than along one tall one. */
 .module-columns ul {
