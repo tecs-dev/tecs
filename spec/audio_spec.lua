@@ -300,8 +300,7 @@ local function loaded(config, path)
     config = config or {}
     config.backend = config.backend or recorder()
     local audio = newAudio(config)
-    local clip = audio:load(path or FIXTURE)
-    audio:waitForLoads()
+    local clip = audio:load(path or FIXTURE):wait().value
     return audio, clip, config.backend
 end
 
@@ -341,14 +340,18 @@ describe("audio", function()
     end)
 
     describe("clips", function()
-        it("returns a clip immediately and resolves it later", function()
+        it("returns a future immediately and resolves it with the clip", function()
             local audio = newAudio({ backend = recorder() })
-            local clip = audio:load(FIXTURE)
+            local loading = audio:load(FIXTURE)
+            local clip = audio:clip(Audio.clipId(FIXTURE))
 
-            assert.are.equal("pending", clip.status, "loading must not block the caller")
+            assert.are.equal("pending", loading.status, "loading must not block the caller")
+            assert.are.equal("pending", clip.status, "the cached clip exposes the same work to inspection")
             assert.are.equal(1, audio:loading())
 
             audio:waitForLoads()
+            assert.are.equal("ready", loading.status)
+            assert.are.equal(clip, loading.value)
             assert.are.equal("ready", clip.status)
             assert.are.equal(0, audio:loading())
             audio:destroy()
@@ -372,9 +375,13 @@ describe("audio", function()
 
         it("reports a missing file as failed rather than raising", function()
             local audio = newAudio({ backend = recorder() })
-            local clip = audio:load("spec/fixtures/does-not-exist.wav")
+            local path = "spec/fixtures/does-not-exist.wav"
+            local loading = audio:load(path)
             audio:waitForLoads()
 
+            local clip = audio:clip(Audio.clipId(path))
+            assert.are.equal("failed", loading.status)
+            assert.are.equal(clip.error, loading.error)
             assert.are.equal("failed", clip.status)
             assert.is_truthy(clip.error:find("cannot load"))
             assert.are.equal(0, audio:play(clip), "a failed clip plays nothing")
@@ -385,9 +392,59 @@ describe("audio", function()
             local audio = newAudio({ backend = recorder() })
             local first = audio:load(FIXTURE)
             local second = audio:load(FIXTURE)
-            assert.are.equal(first, second)
+            assert.are_not.equal(first, second, "each caller needs an independently cancelable future")
             assert.are.equal(1, audio:loading())
             audio:waitForLoads()
+            assert.are.equal("ready", first.status)
+            assert.are.equal("ready", second.status)
+            assert.are.equal(first.value, second.value, "one path still names one clip")
+            audio:destroy()
+        end)
+
+        it("lets one caller cancel without giving up the cached load", function()
+            local audio = newAudio({ backend = recorder() })
+            local canceled = audio:load(FIXTURE)
+            local kept = audio:load(FIXTURE)
+
+            canceled:cancel()
+            assert.are.equal("canceled", canceled.status)
+            assert.are.equal("pending", kept.status)
+            assert.are.equal(1, audio:loading())
+
+            audio:waitForLoads()
+            assert.are.equal("ready", kept.status)
+            assert.are.equal("ready", kept.value.status)
+            assert.are.equal(kept.value, audio:clip(Audio.clipId(FIXTURE)))
+            audio:destroy()
+        end)
+
+        it("keeps its cached load after every caller cancels", function()
+            local audio = newAudio({ backend = recorder() })
+            local canceled = audio:load(FIXTURE)
+
+            canceled:cancel()
+            audio:waitForLoads()
+
+            assert.are.equal("canceled", canceled.status)
+            assert.are.equal("ready", audio:clip(Audio.clipId(FIXTURE)).status)
+            assert.are.equal(0, audio:loading())
+            audio:destroy()
+        end)
+
+        it("returns settled futures after the cached load has answered", function()
+            local audio = newAudio({ backend = recorder() })
+            local first = audio:load(FIXTURE):wait()
+            local ready = audio:load(FIXTURE)
+
+            assert.are.equal("ready", ready.status)
+            assert.are.equal(first.value, ready.value)
+
+            local missingPath = "spec/fixtures/does-not-exist.wav"
+            local failed = audio:load(missingPath):wait()
+            local failedAgain = audio:load(missingPath)
+            assert.are.equal("failed", failed.status)
+            assert.are.equal("failed", failedAgain.status)
+            assert.are.equal(failed.error, failedAgain.error)
             audio:destroy()
         end)
 
@@ -421,7 +478,8 @@ describe("audio", function()
         -- drained or canceled.
         it("settles a load in flight before it frees the mixer", function()
             local audio = newAudio({ backend = recorder() })
-            local clip = audio:load(FIXTURE)
+            local loading = audio:load(FIXTURE)
+            local clip = audio:clip(Audio.clipId(FIXTURE))
             assert.are.equal(1, audio:loading())
             assert.is_true(assets.pending() >= 1, "the loader has nothing queued to destroy under")
 
@@ -429,6 +487,7 @@ describe("audio", function()
 
             assert.are.equal(0, assets.pending(), "the mixer went while a decode was outstanding")
             assert.are.equal(0, audio:loading())
+            assert.are.equal("ready", loading.status)
             assert.are.equal("released", clip.status)
             assert.is_nil(clip._sound, "a released clip still points at samples")
 
@@ -475,16 +534,14 @@ describe("audio", function()
                 backend = recorder(),
                 streamSeconds = 10,
             })
-            local streamed = audio:load(VORBIS, { stream = true })
-            audio:waitForLoads()
+            local streamed = audio:load(VORBIS, { stream = true }):wait().value
             assert.is_false(streamed.resident)
 
             local other = newAudio({
                 backend = recorder(),
                 streamSeconds = 0.05,
             })
-            local kept = other:load(FIXTURE, { stream = false })
-            other:waitForLoads()
+            local kept = other:load(FIXTURE, { stream = false }):wait().value
             assert.is_true(kept.resident)
 
             audio:destroy()
@@ -579,8 +636,7 @@ describe("audio", function()
 
         it("has nothing to replace for a streamed clip", function()
             local audio = newAudio({ backend = recorder() })
-            local clip = audio:load(temp, { stream = true })
-            audio:waitForLoads()
+            local clip = audio:load(temp, { stream = true }):wait().value
             assert.is_false(clip.resident)
             local handle = clip._sound
 
@@ -621,8 +677,7 @@ describe("audio", function()
 
         it("is driven by the debug tool the way an agent drives it", function()
             local audio, clip, _, world = scene()
-            local reloadable = audio:load(temp)
-            audio:waitForLoads()
+            local reloadable = audio:load(temp):wait().value
             mcpTools.bind(nil, world)
             assert.are.equal("ready", clip.status)
 
@@ -2039,8 +2094,7 @@ describe("audio", function()
         it("keeps working when no mixer opens", function()
             local backend = recorder({ silent = true })
             local audio = newAudio({ backend = backend })
-            local clip = audio:load(FIXTURE)
-            audio:waitForLoads()
+            local clip = audio:load(FIXTURE):wait().value
 
             assert.is_false(audio.available)
             assert.are.equal("ready", clip.status, "loading does not need an output")

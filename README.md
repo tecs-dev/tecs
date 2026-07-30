@@ -750,16 +750,26 @@ the payload. `"released"` was the one word with nowhere to go, and losing it is 
 gain: a released image is a load that _succeeded_ and then had its memory given
 back, and erasing the success was less truthful than keeping it.
 
-`Audio.Clip` is where that word survived, and it earns its place there for the
-opposite reason. A clip is not a payload. It outlives its load, holds the `Sound`
-behind it, and is the thing a game keeps and plays. So its first three states are
-its load's and are spelled the way `Future` spells them, `"pending"`, `"ready"`
-and `"failed"`, and the fourth is a state only a clip can be in. It is not
-`"canceled"` either: nothing gives up a clip's load but `destroy`, which has
-written `"released"` by the time the cancel reaches it. Those four words go out
-over JSON-RPC in the `audio` debug tool's clip list, so the declaration says so.
-They moved in one commit because an agent reads them and nothing persists them,
-which is the whole of what separates them from a snapshot key.
+`Audio:load` returns a `Future<Clip>` for the same reason an asset load returns
+a future: the answer does not exist until the worker has read it. `Audio.Clip`
+still keeps the state words, and they earn their place for a different reason.
+A clip outlives its load, holds the `Sound` behind it, and remains inspectable
+through `Audio:clip` while its load is pending or after it failed. Its first
+three states are therefore spelled the way `Future` spells them, `"pending"`,
+`"ready"` and `"failed"`, and the fourth is a state only a clip can be in. It is
+not `"canceled"` either: nothing gives up the cache's load but `destroy`, which
+has written `"released"` by the time the cancel reaches it. Those four words go
+out over JSON-RPC in the `audio` debug tool's clip list, so the declaration says
+so. They moved in one commit because an agent reads them and nothing persists
+them, which is the whole of what separates them from a snapshot key.
+
+Audio owns the cache's interest in that load. Concurrent callers receive
+distinct derived futures whose ready values are the same `Clip`, so one caller
+can cancel without changing another caller or the clip the audio object still
+needs. This deliberately differs from the image loader, where callers are the
+only interests and the last cancellation abandons the decode. `Audio:destroy`
+cancels every caller link before canceling its root, so a future retained past
+the audio object cannot keep a decode alive underneath a mixer that has gone.
 
 The shared decode is what decides the shape. A path already in flight does not
 hand its future to the second caller; it keeps one root future to itself and
