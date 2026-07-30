@@ -35,8 +35,14 @@ if not tecs.log.openFile(path) then
 end
 ```
 
-Each line records time, level, logger, and message. `closeFile` stops file
-output and leaves the platform destination active.
+With file output open, the earlier `info` call writes a line like:
+
+```json
+{"time":12.345,"level":"INFO","logger":"game.combat","message":"wave 3 spawned 12 enemies"}
+```
+
+Each line records elapsed platform time, level, logger, and message.
+`closeFile` stops file output and leaves the platform destination active.
 ]=]
 
 -- Implementation details:
