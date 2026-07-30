@@ -25,7 +25,7 @@ A module may contain one level of subordinate modules, such as
 | [`tecs.audio`](/modules/audio)       | clips, voices, groups, limits, components, and devices      |
 | [`tecs.data`](/modules/data)         | JSON, DEFLATE, and byte-string hashes                       |
 | [`tecs.ecs`](/modules/ecs/)          | worlds, components, queries, systems, events, and resources |
-| [`tecs.events`](/modules/events)     | typed platform events                                       |
+| [`tecs.events`](/modules/events)     | typed events and address-based message buses                |
 | [`tecs.gfx`](/modules/gfx/)          | cameras, rendering, text, and graphics components           |
 | [`tecs.input`](/modules/input)       | gameplay input, gamepads, and sensors                       |
 | [`tecs.io`](/modules/io/)            | binary I/O, sockets, HTTP, and external tools               |

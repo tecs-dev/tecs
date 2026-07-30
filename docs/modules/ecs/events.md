@@ -29,7 +29,7 @@ return tecs.newApplication({
 ```
 
 The platform event stream uses the same bus. The host emits each platform kind
-at address `0`; [`tecs.events`](/modules/events) defines those event types.
+at address `0`; `tecs.platform.events` defines those event types.
 
 ## World and entity addresses
 
@@ -103,7 +103,7 @@ before it constructs an event.
 Define a record, give it an in-place initializer, then register it:
 
 ```teal
-local record PlayerDamaged is tecs.ecs.Event
+local record PlayerDamaged is tecs.events.Event
     amount: number
     source: string
 
@@ -123,7 +123,7 @@ PlayerDamaged.init = function(
     event.source = source
 end
 
-tecs.ecs.newEvent(PlayerDamaged)
+tecs.events.newEvent(PlayerDamaged)
 
 world:emit(player, PlayerDamaged, 10, "fire")
 ```
@@ -144,7 +144,7 @@ callback.
 `newFFIEvent` stores fixed-size fields in a C struct:
 
 ```teal
-local record DamageEvent is tecs.ecs.Event
+local record DamageEvent is tecs.events.Event
     amount: number
     entity: integer
 
@@ -155,7 +155,7 @@ local record DamageEvent is tecs.ecs.Event
     ): DamageEvent
 end
 
-tecs.ecs.newFFIEvent(DamageEvent, {
+tecs.events.newFFIEvent(DamageEvent, {
     {"amount", "float"},
     {"entity", "double"},
 }, "Game_DamageEvent")
@@ -175,7 +175,7 @@ userdata; table events can.
 
 ## Standalone message buses
 
-Each world owns a `MessageBus`. `tecs.ecs.newMessageBus()` creates the same
+Each world owns a `MessageBus`. `tecs.events.newMessageBus()` creates the same
 address router without a world.
 
 A standalone bus dispatches an event instance that the caller constructs. It

@@ -1,5 +1,5 @@
 ---
-description: "Typed platform events delivered through the ECS event bus"
+description: "Typed event definitions and address-based message buses"
 outline: deep
 ---
 

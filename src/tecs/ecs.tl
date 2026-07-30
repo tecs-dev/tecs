@@ -47,7 +47,6 @@ require("tecs.internal.compat")
 
 local types <const> = require("tecs.types")
 local components <const> = require("tecs.internal.components")
-local events <const> = require("tecs.internal.events")
 local builtins <const> = require("tecs.internal.builtins")
 local phases <const> = require("tecs.internal.phases")
 local runIfHelpers <const> = require("tecs.internal.runif")
@@ -106,14 +105,6 @@ local record ecs
     --- `ArchetypeEntityObserver` receives entity changes
     --- within an archetype.
     type ArchetypeEntityObserver = types.ArchetypeEntityObserver
-    --- `Event` names any ECS event record.
-    type Event = types.events.Event
-    --- `EventListener` receives matching ECS events.
-    type EventListener = types.events.EventListener
-    --- `EventInit` initializes an event definition.
-    type EventInit = types.events.EventInit
-    --- `MessageBus` dispatches events outside a world.
-    type MessageBus = types.events.MessageBus
     --- `Context` stores values under typed keys.
     type Context = types.Context
     --- `Key` identifies one typed context value.
@@ -308,25 +299,6 @@ local record ecs
     --- @return Returns the registered relationship.
     newFFIRelationship: function<R is Relationship>(config: FFIRelationshipOptions<R>): R
 
-    --- Configures an event with a callable constructor.
-    ---
-    --- @param event The caller supplies the event record to configure in place.
-    newEvent: function<E is Event>(event: E)
-
-    --- Configures an FFI event with a callable constructor.
-    ---
-    --- @param event The caller supplies the event record to configure in place.
-    --- @param fields The caller supplies each field name and C type in
-    ---     constructor order.
-    --- @param structName The caller supplies a shared C struct name or omits it
-    ---     to generate one.
-    newFFIEvent: function<E is Event>(event: E, fields: {{string, string}}, structName?: string)
-
-    --- Creates an address-based event message bus.
-    ---
-    --- @return Returns an independent bus for messaging outside a world.
-    newMessageBus: function(): MessageBus
-
     --- Creates a typed key for `world.resources`.
     ---
     --- Always pass a name: named keys are discoverable at runtime through
@@ -466,9 +438,6 @@ ecs.StartSnapshotLoad = builtins.StartSnapshotLoad
 ecs.FinishSnapshotLoad = builtins.FinishSnapshotLoad
 
 ecs.newWorld = WorldImpl.new
-ecs.newEvent = events.newEvent
-ecs.newFFIEvent = events.newFFIEvent
-ecs.newMessageBus = events.MessageBus.new
 ecs.findKey = Context.findKey
 ecs.listKeys = Context.listKeys
 ecs.newContext = Context.new

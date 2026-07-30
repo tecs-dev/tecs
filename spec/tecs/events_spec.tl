@@ -2,7 +2,7 @@ require("busted")
 local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 
-local type Event = tecs.ecs.Event
+local type Event = tecs.events.Event
 
 -- Test fixtures
 
@@ -18,9 +18,9 @@ end
 
 -- Register events with mutate-in-place constructors
 Greet.init = function(e: Greet, name: string) e.name = name end
-tecs.ecs.newEvent(Greet)
+tecs.events.newEvent(Greet)
 Depart.init = function(e: Depart, name: string) e.name = name end
-tecs.ecs.newEvent(Depart)
+tecs.events.newEvent(Depart)
 
 -- Test address
 local ADDR <const> = 0
@@ -30,7 +30,7 @@ local ADDR <const> = 0
 describe(
     "MessageBus",
     function()
-        describe("new", function() it("works", function() tecs.ecs.newMessageBus() end) end)
+        describe("new", function() it("works", function() tecs.events.newMessageBus() end) end)
 
         describe(
             "subscribe",
@@ -39,7 +39,7 @@ describe(
                     "emits in order",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.ecs.newMessageBus()
+                        local bus = tecs.events.newMessageBus()
                         bus:observe(ADDR, Greet, function(greet: Greet) table.insert(messages, greet.name .. " 1") end)
                         bus:observe(ADDR, Greet, function(greet: Greet) table.insert(messages, greet.name .. " 2") end)
                         bus:observe(
@@ -65,7 +65,7 @@ describe(
                     "emits once with observeOnce",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.ecs.newMessageBus()
+                        local bus = tecs.events.newMessageBus()
                         bus:observeOnce(
                             ADDR, Greet, function(greet: Greet) table.insert(messages, greet.name .. " 1") end
                         )
@@ -87,7 +87,7 @@ describe(
                     "can unsubscribe by receiver",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.ecs.newMessageBus()
+                        local bus = tecs.events.newMessageBus()
                         local listener = function(greet: Greet) table.insert(messages, greet.name) end
                         bus:observe(ADDR, Greet, listener)
                         bus:emit(ADDR, Greet("Hi"))
@@ -104,7 +104,7 @@ describe(
                     "can unsubscribe by id",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.ecs.newMessageBus()
+                        local bus = tecs.events.newMessageBus()
                         local listener = function(greet: Greet) table.insert(messages, greet.name) end
                         bus:observe(ADDR, Greet, listener, "id")
                         bus:emit(ADDR, Greet("Hi"))
@@ -126,7 +126,7 @@ describe(
                     "events at different addresses are isolated",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.ecs.newMessageBus()
+                        local bus = tecs.events.newMessageBus()
 
                         bus:observe(
                             1, Greet, function(greet: Greet) table.insert(messages, "addr1: " .. greet.name) end
@@ -150,7 +150,7 @@ describe(
                     function()
                         local count1 = 0
                         local count2 = 0
-                        local bus = tecs.ecs.newMessageBus()
+                        local bus = tecs.events.newMessageBus()
 
                         bus:observe(1, Greet, function() count1 = count1 + 1 end)
                         bus:observe(2, Greet, function() count2 = count2 + 1 end)
@@ -178,7 +178,7 @@ describe(
                     "handles single observer fast path",
                     function()
                         local count = 0
-                        local bus = tecs.ecs.newMessageBus()
+                        local bus = tecs.events.newMessageBus()
                         bus:observe(ADDR, Greet, function() count = count + 1 end)
 
                         bus:emit(ADDR, Greet("test"))
@@ -190,7 +190,7 @@ describe(
                     "handles small observer count fast path",
                     function()
                         local counts = {0, 0, 0}
-                        local bus = tecs.ecs.newMessageBus()
+                        local bus = tecs.events.newMessageBus()
 
                         for i = 1, 3 do
                             local idx = i
@@ -208,7 +208,7 @@ describe(
                     "maintains order after swap-and-pop removal",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.ecs.newMessageBus()
+                        local bus = tecs.events.newMessageBus()
 
                         local listener1 = function() table.insert(messages, "1") end
                         local listener2 = function() table.insert(messages, "2") end
@@ -238,7 +238,7 @@ describe(
                     "handles multiple IDs for same callback",
                     function()
                         local count = 0
-                        local bus = tecs.ecs.newMessageBus()
+                        local bus = tecs.events.newMessageBus()
                         local listener = function() count = count + 1 end
 
                         bus:observe(ADDR, Greet, listener, "id1")
@@ -275,7 +275,7 @@ describe(
                 it(
                     "correctly cleans up reverse mappings",
                     function()
-                        local bus = tecs.ecs.newMessageBus()
+                        local bus = tecs.events.newMessageBus()
                         local listener1 = function() end
                         local listener2 = function() end
 
@@ -304,7 +304,7 @@ describe(
                     "handles removing during emission",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.ecs.newMessageBus()
+                        local bus = tecs.events.newMessageBus()
 
                         local listener2: function(Greet)
                         local listener1 = function(_: Greet)
@@ -348,7 +348,7 @@ describe(
                             metamethod __call: function(self: Foo, hi: string): Foo
                         end
                         Foo.init = function(e: Foo, hi: string) e.hi = hi end
-                        tecs.ecs.newEvent(Foo)
+                        tecs.events.newEvent(Foo)
 
                         luassert.is_not_nil(getmetatable(Foo), "Expected Foo to have a metatable")
 
@@ -366,7 +366,7 @@ describe(
                             metamethod __call: function(self: Bar, value: number): Bar
                         end
                         Bar.init = function(e: Bar, value: number) e.value = value end
-                        tecs.ecs.newEvent(Bar)
+                        tecs.events.newEvent(Bar)
 
                         local instance1 = Bar(42)
                         local instance2 = Bar(99)
@@ -392,7 +392,7 @@ describe(
                                 e.b = b
                             end
                         end
-                        tecs.ecs.newEvent(Baz)
+                        tecs.events.newEvent(Baz)
 
                         local world = tecs.ecs.newWorld()
                         local first: Baz = nil
@@ -427,7 +427,7 @@ describe(
                             metamethod __call: function(self: Nested, value: integer): Nested
                         end
                         Nested.init = function(e: Nested, value: integer) e.value = value end
-                        tecs.ecs.newEvent(Nested)
+                        tecs.events.newEvent(Nested)
 
                         local world = tecs.ecs.newWorld()
                         local outer: Nested = nil
@@ -465,7 +465,7 @@ describe(
                             initCount = initCount + 1
                             e.value = value
                         end
-                        tecs.ecs.newEvent(SkipInit)
+                        tecs.events.newEvent(SkipInit)
 
                         local world = tecs.ecs.newWorld()
                         world:emit(ADDR, SkipInit, 7)
@@ -488,7 +488,7 @@ describe(
 
                         assert.has_error(
                             function()
-                                tecs.ecs.newFFIEvent(
+                                tecs.events.newFFIEvent(
                                     FFIReservedField,
                                     {
                                         {"typeId", "int32_t"},
@@ -503,7 +503,7 @@ describe(
                             FFIReservedField.eventId, "Expected invalid FFI event registration to leave eventId unset"
                         )
 
-                        tecs.ecs.newFFIEvent(
+                        tecs.events.newFFIEvent(
                             FFIReservedField,
                             {
                                 {"value", "int32_t"},
@@ -526,7 +526,7 @@ describe(
                             metamethod __call: function(self: FFILazyEmit, value: integer): FFILazyEmit
                         end
 
-                        tecs.ecs.newFFIEvent(
+                        tecs.events.newFFIEvent(
                             FFILazyEmit,
                             {
                                 {"value", "int32_t"},

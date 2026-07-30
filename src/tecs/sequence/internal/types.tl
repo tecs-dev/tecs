@@ -6,7 +6,7 @@ modules read these without requiring the public surface back, which would
 be a cycle. `tecs.sequence` re-exports every one of them.
 ]=]
 
-local ecs <const> = require("tecs.ecs")
+local events <const> = require("tecs.events")
 local type types = require("tecs.types")
 local seqclock <const> = require("tecs.sequence.internal.clock")
 
@@ -236,7 +236,7 @@ end
 local type Action = function(world: World, ctx: ActionContext)
 
 --- Emitted by an `emit` step, at address 0.
-local record Event is ecs.Event
+local record Event is events.Event
     --- Name supplied to `sequence.emit`.
     name: string
     --- Arguments supplied to `sequence.emit`, with bindings resolved.
@@ -311,7 +311,7 @@ function Event.init(e: Event, name: string, args: {any}, handle: Handle)
     e.handle = handle
 end
 
-ecs.newEvent(Event)
+events.newEvent(Event)
 
 -------------------------------------------------------------------------------
 -- Runtime representations

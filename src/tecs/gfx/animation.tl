@@ -68,6 +68,7 @@ their playback state. A replacement must preserve the bound image dimensions.
 -- the frame is.
 
 local ecs <const> = require("tecs.ecs")
+local events <const> = require("tecs.events")
 local type types = require("tecs.types")
 local components <const> = require("tecs.components")
 local sheet <const> = require("tecs.gfx.sheet")
@@ -155,7 +156,7 @@ end
 --- Reports when a non-looping tag runs past its
 --- last frame. The animation stops and holds that frame, so this fires once per
 --- playthrough and never again until something restarts it.
-local record Completed is ecs.Event
+local record Completed is events.Event
     --- Read-only. Identifies the entity whose animation completed.
     entity: integer
     --- Read-only. Reports the sheet that completed.
@@ -179,7 +180,7 @@ end
 --- Once per step at most, not once per cycle: a step long enough to cover
 --- several cycles wraps the time once and reports one loop, so counting these
 --- is not a way to count playthroughs.
-local record Looped is ecs.Event
+local record Looped is events.Event
     --- Read-only. Identifies the entity whose animation looped.
     entity: integer
     --- Read-only. Reports the sheet that looped.
@@ -495,12 +496,12 @@ animation.sheetRevision = sheet.revision
 animation.Completed.init = function(event: Completed, entity: integer, source: Sheet, tag: string)
     event.entity, event.sheet, event.tag = entity, source, tag
 end
-ecs.newEvent(animation.Completed)
+events.newEvent(animation.Completed)
 
 animation.Looped.init = function(event: Looped, entity: integer, source: Sheet, tag: string)
     event.entity, event.sheet, event.tag = entity, source, tag
 end
-ecs.newEvent(animation.Looped)
+events.newEvent(animation.Looped)
 
 -------------------------------------------------------------------------------
 -- Authoring

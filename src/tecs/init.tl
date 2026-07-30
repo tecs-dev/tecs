@@ -31,7 +31,7 @@ local type animation = require("tecs.gfx.animation")
 local type window = require("tecs.platform.window")
 local type input = require("tecs.platform.input")
 local type time = require("tecs.platform.time")
-local type events = require("tecs.platform.events")
+local type events = require("tecs.events")
 local type binaryIO = require("tecs.io")
 local type layers = require("tecs.gfx.layers")
 local type sequence = require("tecs.sequence")
@@ -430,7 +430,7 @@ local SURFACE <const>: {string: Namespace} = {
     audio = {module = "tecs.audio"},
     physics = {module = "tecs.physics"},
     data = {module = "tecs.data"},
-    events = {module = "tecs.platform.events"},
+    events = {module = "tecs.events"},
     gfx = {
         beside = {"tecs.components", "tecs.gfx.Camera", "tecs.Renderer", "tecs.gfx.text"},
         within = {

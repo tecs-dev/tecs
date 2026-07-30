@@ -349,6 +349,16 @@ describe("the public surface", function()
             assert.is_not_nil(require("tecs.ecs").findComponentByName)
             assert.is_nil(rawget(tecs, "findComponentByName"))
         end)
+
+        it("keeps generic event construction on tecs.events only", function()
+            local events = require("tecs.events")
+            local ecs = require("tecs.ecs")
+
+            assert.is_true(rawequal(tecs.events, events))
+            assert.is_nil(rawget(ecs, "newEvent"))
+            assert.is_nil(rawget(ecs, "newFFIEvent"))
+            assert.is_nil(rawget(ecs, "newMessageBus"))
+        end)
     end)
 
     describe("a module inside a module", function()

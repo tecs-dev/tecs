@@ -80,6 +80,7 @@ after the previous block ends.
 -- playback cursor, wait, and branch as ordinary data.
 
 local ecs <const> = require("tecs.ecs")
+local events <const> = require("tecs.events")
 local type types = require("tecs.types")
 local seqtypes <const> = require("tecs.sequence.internal.types")
 local seqprogram <const> = require("tecs.sequence.internal.program")
@@ -844,7 +845,7 @@ local record sequence
     --- @param event Observed at address 0, and only there. The observer lasts
     ---     for the life of the world; wiring the same pair twice observes it
     ---     twice, and there is nothing that unwires one.
-    signalOnEvent: function<T is ecs.Event>(world: World, name: string, event: T)
+    signalOnEvent: function<T is events.Event>(world: World, name: string, event: T)
 
     --- Raises a named signal and wakes every playback blocked on it.
     ---
@@ -1337,7 +1338,7 @@ function sequence.hasQuery(world: World, name: string): boolean
     return seqcursors.stateFor(world).queries[name] ~= nil
 end
 
-function sequence.signalOnEvent<T is ecs.Event>(world: World, name: string, event: T)
+function sequence.signalOnEvent<T is events.Event>(world: World, name: string, event: T)
     if type(name) ~= "string" or name == "" then
         error("sequence.signalOnEvent requires a non-empty signal name", 2)
     end
