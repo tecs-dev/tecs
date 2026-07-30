@@ -1,8 +1,8 @@
---[[
+--[=[
 # Gameplay input
 
-`tecs.platform.input` folds typed platform events into gameplay input. The application
-creates one [`Input`](tealdoc:tecs.platform.input.Input) as `app.input`; ordinary game
+`tecs.input` folds typed platform events into gameplay input. The application
+creates one [`Input`](tealdoc:tecs.input.Input) as `app.input`; ordinary game
 code does not construct or feed it. The module owns replay, layers, edge
 detection and fixed-step latching.
 
@@ -59,14 +59,14 @@ moves.
 ## Gamepads and sensors
 
 `Input:gamepads` returns a live connection-order list. Hold a
-[`Gamepad`](tealdoc:tecs.platform.input.Gamepad) object or match its `guid` to follow
+[`Gamepad`](tealdoc:tecs.input.Gamepad) object or match its `guid` to follow
 hardware because list positions move and instance ids do not survive a
 reconnect. Gamepad queries use the same layers and fixed-step tiers as keyboard
 and mouse queries.
 
 Standalone sensors do not belong to a gamepad. Enumerate them with
-`tecs.platform.input.sensors`, open one by instance id, poll it, and close it explicitly.
-]]
+`tecs.input.sensors`, open one by instance id, poll it, and close it explicitly.
+]=]
 
 -- Implementation details: SDL owns device mechanics. Input folds its events
 -- into replay state, layer gates and fixed-step latches.
@@ -151,17 +151,17 @@ local record input
     --- An `Input` folds platform events once a frame and exposes live state,
     --- frame edges and fixed-step latched edges.
     record Input
-        --- Read-only. [`Layer`](tealdoc:tecs.platform.input.Layer) names a position
+        --- Read-only. [`Layer`](tealdoc:tecs.input.Layer) names a position
         --- returned by `pushLayer`.
         Layer: Layer
-        --- Read-only. [`Touch`](tealdoc:tecs.platform.input.Touch) names a finger record
+        --- Read-only. [`Touch`](tealdoc:tecs.input.Touch) names a finger record
         --- returned by `touches`.
         Touch: Touch
-        --- Read-only. Exposes [`TextArea`](tealdoc:tecs.platform.input.TextArea), whose
+        --- Read-only. Exposes [`TextArea`](tealdoc:tecs.input.TextArea), whose
         --- records callers pass to text-input methods.
         TextArea: TextArea
         --- Read-only. Exposes
-        --- [`TextOptions`](tealdoc:tecs.platform.input.TextOptions), whose records
+        --- [`TextOptions`](tealdoc:tecs.input.TextOptions), whose records
         --- callers pass to `startTextInput`.
         TextOptions: TextOptions
         --- Engine-owned. Exposes the framework construction options. Ordinary
@@ -351,7 +351,7 @@ local record input
         --- Returns the live list of connected gamepads.
         ---
         --- @return Returns Input-owned storage. Callers may retain a
-        ---     [`Gamepad`](tealdoc:tecs.platform.input.Gamepad) from it but must not edit
+        ---     [`Gamepad`](tealdoc:tecs.input.Gamepad) from it but must not edit
         ---     the list.
         gamepads: function(self: Input): {Gamepad}
 
@@ -545,7 +545,7 @@ local record input
         screenKeyboardSupported: function(self: Input): boolean
     end
 
-    --- Read-only. [`Gamepad`](tealdoc:tecs.platform.input.Gamepad) names one attached
+    --- Read-only. [`Gamepad`](tealdoc:tecs.input.Gamepad) names one attached
     --- device. Ordinary game code gets objects from `Input:gamepads` and does
     --- not replace this module field.
     Gamepad: Gamepad
@@ -1193,7 +1193,7 @@ end
 input.Gamepad = Gamepad
 
 -- The standalone sensors, under this module's public names. `sensors.tl` is
--- the seam and reaches only SDL; `tecs.platform.input` is the surface, the way
+-- the seam and reaches only SDL; `tecs.input` is the surface, the way
 -- `tecs.io.files` publishes what `platform/content.tl` holds.
 input.sensors = sensors.sensors
 input.openSensor = sensors.openSensor

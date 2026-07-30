@@ -24,7 +24,7 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local newInput = require("tecs.platform.input").newInput
+local newInput = require("tecs.input").newInput
 local inputbackend = require("tecs.platform.inputbackend")
 
 -- Input consumes the engine's typed events, so the tests build those. The

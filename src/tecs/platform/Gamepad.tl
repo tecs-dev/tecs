@@ -1,7 +1,7 @@
 --[[
 # Gamepads
 
-Each [`Gamepad`](tealdoc:tecs.platform.input.Gamepad) owns one device's identity, event
+Each [`Gamepad`](tealdoc:tecs.input.Gamepad) owns one device's identity, event
 state, capabilities, and outputs. A retained reference remains safe after
 disconnection: queries return neutral values, outputs return false, and
 `connected` stays false. A reconnect creates a new object rather than reviving
@@ -67,7 +67,7 @@ end
 --- read-only snapshots that change on connection and remap events.
 local record Gamepad
     --- Read-only. Exposes
-    --- [`TouchpadFinger`](tealdoc:tecs.platform.input.TouchpadFinger), whose records
+    --- [`TouchpadFinger`](tealdoc:tecs.input.TouchpadFinger), whose records
     --- `touchpadFingers` returns. Ordinary game code does not replace this
     --- field.
     TouchpadFinger: TouchpadFinger

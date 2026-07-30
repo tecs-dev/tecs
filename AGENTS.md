@@ -77,7 +77,7 @@ tecs/
 │   ├── ffi/               # Generated bindings plus the Rust runtime ABI
 │   ├── gpu/               # Device, pipelines, buffers, pass graph, shaders
 │   ├── gfx/               # Camera, layers, distance-field text
-│   ├── platform/          # window, input, audio, events, time, files, the OS
+│   ├── platform/          # window, events, input backends, time, files, the OS
 │   ├── physics/           # Rapier world integration
 │   ├── sequence/          # Sequencer, with the tween runtime inside it
 │   ├── io.tl              # Binary contracts plus TCP and UDP transport
@@ -88,6 +88,7 @@ tecs/
 │   ├── Extractor.tl       # World-facing: a world to a frame packet
 │   ├── Backend.tl         # Device-facing: a frame packet to a frame
 │   ├── FramePacket.tl     # What crosses between them
+│   ├── input.tl           # Gameplay input, gamepads and standalone sensors
 │   ├── audio.tl           # Clips, voices, groups, limits, the Sound component
 │   ├── components.tl      # Engine components
 │   ├── assets.tl

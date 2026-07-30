@@ -1,5 +1,5 @@
 ---
-description: "Platform events, input, operating-system services, time, and windows"
+description: "Platform events, operating-system services, time, and windows"
 ---
 
 # tecs.platform

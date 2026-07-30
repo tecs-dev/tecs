@@ -88,7 +88,7 @@ end
 -- The modules a page's reference is assembled from beyond the one `SURFACE`
 -- names. A public name is a namespace and a module is a file, and the two do
 -- not have to agree: `tecs.gfx.animation` hands out the sheet types that
--- `tecs.gfx.sheet` declares, and `tecs.platform.input` the gamepad and the sensors.
+-- `tecs.gfx.sheet` declares, and `tecs.input` the gamepad and the sensors.
 -- `SURFACE` does not carry these because nothing resolves through them at run
 -- time; each module re-exports those names on its own record, so one require
 -- answers for both.
@@ -99,7 +99,7 @@ end
 -- Every entry goes away the day its namespace is one file.
 local BESIDE = {
     ["tecs.gfx.animation"] = { "tecs.gfx.sheet" },
-    ["tecs.platform.input"] = { "tecs.platform.Gamepad", "tecs.platform.sensors" },
+    ["tecs.input"] = { "tecs.platform.Gamepad", "tecs.platform.sensors" },
     ["tecs.io"] = { "tecs.io.types" },
 }
 
@@ -418,6 +418,7 @@ local SIDEBAR = {
                     { text = "tecs.io.watcher", path = "modules/io/watcher" },
                 },
             },
+            { text = "tecs.input", path = "modules/input" },
             { text = "tecs.log", path = "modules/log" },
             {
                 text = "tecs.math",
@@ -432,7 +433,6 @@ local SIDEBAR = {
                 path = "modules/platform",
                 items = {
                     { text = "tecs.platform.events", path = "modules/platform/events" },
-                    { text = "tecs.platform.input", path = "modules/platform/input" },
                     { text = "tecs.platform.os", path = "modules/platform/os" },
                     { text = "tecs.platform.time", path = "modules/platform/time" },
                     { text = "tecs.platform.window", path = "modules/platform/window" },
