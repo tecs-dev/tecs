@@ -848,39 +848,6 @@ return {
                 { text = "Modules", path = "modules" },
                 { text = "CLI", path = "cli" },
             },
-            -- The display face, asked for here rather than through an
-            -- `@import` in `docs/site.css`. An import is found only once that
-            -- sheet has been fetched and parsed, so the request for the font
-            -- queued behind it and a reader watched the page repaint out of
-            -- the fallback face. From the head it goes out with everything
-            -- else. The two preconnects open the connections while the CSS
-            -- that needs them is still in flight; `fonts.gstatic.com` serves
-            -- the font files themselves and is reached anonymously, which is
-            -- what `crossorigin` says here.
-            head = {
-                {
-                    tag = "link",
-                    attributes = {
-                        rel = "preconnect",
-                        href = "https://fonts.googleapis.com",
-                    },
-                },
-                {
-                    tag = "link",
-                    attributes = {
-                        rel = "preconnect",
-                        href = "https://fonts.gstatic.com",
-                        crossorigin = "",
-                    },
-                },
-                {
-                    tag = "link",
-                    attributes = {
-                        rel = "stylesheet",
-                        href = "https://fonts.googleapis.com/css2" .. "?family=Jersey+15&display=swap",
-                    },
-                },
-            },
             sources = sources,
             pages = pages,
             sidebar = SIDEBAR,

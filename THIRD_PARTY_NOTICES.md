@@ -103,6 +103,14 @@ the SIL Open Font License 1.1: the licence is
 was generated, is `assets/fonts/JetBrainsMono-NOTICE.md`. Both are installed
 with the assets, so a package carries them.
 
+### Jersey 15
+
+`docs/public/fonts/jersey-15` carries the Latin and Latin-extended WOFF2
+subsets used by the documentation site. Jersey 15 is copyright 2023 The Soft
+Type Project Authors and is Font Software under the SIL Open Font License 1.1.
+The copyright notice and complete licence are
+`docs/public/fonts/jersey-15/OFL.txt`, published beside the font files.
+
 ## Linked by a build
 
 These are fetched at configure time rather than checked in, so a source checkout
