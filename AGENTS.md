@@ -38,8 +38,23 @@ cargo xtask check-package out/package
 cargo xtask test-package --preset macos-arm64 # Verify the installed release
 cargo xtask single         # Build the one-file CLI in out/single/bin
 cargo xtask presets        # List the platform matrix
-cargo xtask deps           # Install development dependencies
+cargo xtask deps           # Install development dependencies, then check the pins
+cargo xtask dev-tools      # Stage vendor/ only, which is what a worktree needs
 ```
+
+`cargo xtask deps` is the one setup command, and after it a checkout builds,
+type-checks and tests with nothing done by hand. It installs the Homebrew
+packages, then stages `vendor/`: the pinned Teal compiler, Cerulean, tealdoc,
+Busted, the Scintillua lexers, and the Teal type definitions for `ffi`, `bit`,
+`string.buffer`, `table.new`, Busted and Luassert, without which
+`cargo xtask check` cannot resolve `ffi` in most of `src`. It finishes by
+holding the machine to the tree's pinned dependency versions, because four of
+the packages it installs are pinned here and Homebrew carries only the current
+version of each, so installing them is itself a way out of the gate.
+
+`cargo xtask dev-tools` is the `vendor/` half alone. Everything it stages is
+ignored and per checkout, so a new worktree needs it and needs nothing from
+Homebrew; `vendor/cjson` is the one tracked thing under there.
 
 `--preset` selects the target and defaults to the host development preset. A development preset resolves
 dependencies from the system, which is convenient and not shippable. A packaged preset builds pinned revisions

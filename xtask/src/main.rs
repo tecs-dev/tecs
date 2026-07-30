@@ -222,6 +222,19 @@ fn main() -> Result<()> {
                 &root,
             )?;
             install_dev_tools(&root)?;
+            // Homebrew carries one version of each formula and it is the
+            // current one, so four of the packages above are pinned by this
+            // tree and unpinnable through `brew`: SDL3, SDL3_mixer, shaderc and
+            // LuaJIT. Installing them can therefore leave the machine outside
+            // the tree's own version gate, which is what a build fails on next.
+            // So `deps` runs that gate itself, here, while whoever ran it is
+            // still reading the output and knows what moved.
+            product::check_system_dependencies(host_default()?).map_err(|error| {
+                error.context(
+                    "`cargo xtask deps` installed the current Homebrew version of \
+                     each system dependency, and Homebrew carries no older one",
+                )
+            })?;
         }
         Task::DevTools => install_dev_tools(&root)?,
         Task::Build { preset } => {

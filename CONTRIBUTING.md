@@ -2,6 +2,36 @@
 
 Thanks for your interest in contributing!
 
+## Getting set up
+
+One command, and it is the whole of it:
+
+```bash
+cargo xtask deps
+```
+
+That installs the Homebrew packages a development build links, then stages
+`vendor/`: the pinned Teal compiler, Cerulean, tealdoc, Busted, the Scintillua
+lexers, and the Teal type definitions for the modules this tree requires from
+outside itself. The last of those is not optional. `cargo xtask check` hands the
+compiler `vendor/share/lua/5.1` as an include directory, so a checkout missing
+them fails to resolve `ffi` in most of `src` rather than reporting a missing
+tool, and the failure looks like broken sources.
+
+**`vendor/` is per checkout and ignored, so a new worktree needs it staged
+again.** Homebrew is machine-wide and already done, so that half is
+`cargo xtask dev-tools` on its own. Nothing else has to be copied by hand; if
+something does, that is the defect rather than the workaround.
+
+`deps` finishes by holding the machine to the versions the build-support crate
+pins. It does that because it can break the gate itself: SDL3, SDL3_mixer,
+shaderc and LuaJIT are pinned here, Homebrew carries only the current version of
+each, and installing the current one is how a machine ends up outside the pin
+with every later `cargo xtask` command failing on it. Reporting that where it
+happens is the most `deps` can do, since there is no older bottle to ask for.
+When it does happen, either raise the pin deliberately, revision and version
+together, or set `TECS_ALLOW_VERSION_DRIFT=1` while working on that update.
+
 ## Mandatory requirements
 
 - `cargo xtask test` must pass. It runs the Rust workspace tests, checks the

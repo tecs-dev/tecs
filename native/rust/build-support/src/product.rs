@@ -1417,6 +1417,20 @@ fn system_packages(preset: Preset) -> Result<BTreeMap<&'static str, Package>> {
     Ok(packages)
 }
 
+/// Holds the machine's dependencies to the revisions this tree pins, without
+/// building anything.
+///
+/// This is the same gate a development build runs, exposed so that the command
+/// which installs those dependencies can run it too. A preset that builds its
+/// dependencies from pinned sources has nothing on the machine to check, so it
+/// answers Ok.
+pub fn check_system_dependencies(preset: Preset) -> Result<()> {
+    if matches!(preset.dependencies, DependencyMode::System) {
+        check_system_versions(preset)?;
+    }
+    Ok(())
+}
+
 fn check_system_versions(preset: Preset) -> Result<()> {
     let mut requirements = vec![
         ("SDL3", "sdl3", SDL3_VERSION, false),
