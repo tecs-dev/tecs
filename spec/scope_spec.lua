@@ -2,7 +2,7 @@ local tecs = require("tecs")
 local scopeModule = require("tecs.scope")
 
 local function resource(name, closed, failure)
-    local value = {name = name}
+    local value = { name = name }
     function value:close()
         closed[#closed + 1] = self.name
         if failure then
@@ -28,7 +28,7 @@ describe("resource scopes", function()
             assert.same({}, closed)
         end)
 
-        assert.same({"second", "first"}, closed)
+        assert.same({ "second", "first" }, closed)
     end)
 
     it("closes a nested scope before its containing scope", function()
@@ -39,10 +39,10 @@ describe("resource scopes", function()
             tecs.scoped(function(inner)
                 inner:own(resource("inner", closed))
             end)
-            assert.same({"inner"}, closed)
+            assert.same({ "inner" }, closed)
         end)
 
-        assert.same({"inner", "outer"}, closed)
+        assert.same({ "inner", "outer" }, closed)
     end)
 
     it("closes every registration after the body raises", function()
@@ -57,7 +57,7 @@ describe("resource scopes", function()
 
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("body failed", 1, true))
-        assert.same({"second", "first"}, closed)
+        assert.same({ "second", "first" }, closed)
     end)
 
     it("attempts every close and reports cleanup failures", function()
@@ -72,7 +72,7 @@ describe("resource scopes", function()
         reason = tostring(reason)
 
         assert.is_false(ok)
-        assert.same({"third", "second", "first"}, closed)
+        assert.same({ "third", "second", "first" }, closed)
         assert.is_truthy(reason:find("Scoped cleanup failed", 1, true))
         assert.is_truthy(reason:find("Resource 3 failed to close", 1, true))
         assert.is_truthy(reason:find("third close failed", 1, true))
@@ -91,7 +91,7 @@ describe("resource scopes", function()
         reason = tostring(reason)
 
         assert.is_false(ok)
-        assert.same({"resource"}, closed)
+        assert.same({ "resource" }, closed)
         local body = assert(reason:find("body failed", 1, true))
         local cleanup = assert(reason:find("Scoped cleanup also failed", 1, true))
         assert.is_true(body < cleanup)
@@ -131,7 +131,7 @@ describe("resource scopes", function()
         end)
 
         assert.is_false(ok)
-        assert.same({"registered"}, closed)
+        assert.same({ "registered" }, closed)
         assert.is_truthy(tostring(reason):find("Scope is no longer active", 1, true))
     end)
 
@@ -144,7 +144,19 @@ describe("resource scopes", function()
             scope:own(value)
         end)
 
-        assert.same({"same", "same"}, closed)
+        assert.same({ "same", "same" }, closed)
+    end)
+
+    it("owns Lua files", function()
+        local file
+
+        tecs.scoped(function(scope)
+            file = scope:own(assert(io.tmpfile()))
+
+            assert.are.equal("file", io.type(file))
+        end)
+
+        assert.are.equal("closed file", io.type(file))
     end)
 
     it("validates untyped callers at registration", function()

@@ -40,7 +40,6 @@ local loader <const> = require("tecs.ffi.loader")
 local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
 local type types = require("tecs.io.types")
-local pump <const> = require("tecs.io.pump")
 
 local floor <const> = math.floor
 local max <const> = math.max
@@ -446,7 +445,8 @@ local function bufferedWriter(backend: storagebackend.Backend, path: string): Wr
     local pieces: {string} = {}
     local count = 0
 
-    local writer <const>: Writer = {}
+    local writer <const> = {} as {string: any}
+    local basicWriter <const> = writer as Writer
     writer.write = function(_self: Writer, bytes: string): boolean, string
         if pieces == nil then
             return false, "the writer is closed"
@@ -459,7 +459,7 @@ local function bufferedWriter(backend: storagebackend.Backend, path: string): Wr
         _self: Writer, sourceBuffer: IOBuffer, offset?: integer, length?: integer
     ): integer, string
         local bytes <const> = sourceBuffer:getString(offset, length)
-        local ok <const>, reason = writer:write(bytes)
+        local ok <const>, reason = basicWriter:write(bytes)
         if not ok then
             return nil, reason
         end
@@ -482,7 +482,7 @@ local function bufferedWriter(backend: storagebackend.Backend, path: string): Wr
             error("tecs: Writer:writeView count is outside the view", 2)
         end
         local bytes <const> = loader.toBytes((sourceView:getFFIPointer() + offset) as loader.CValue, length)
-        local ok <const>, reason = writer:write(bytes)
+        local ok <const>, reason = basicWriter:write(bytes)
         if not ok then
             return nil, reason
         end
@@ -498,11 +498,11 @@ local function bufferedWriter(backend: storagebackend.Backend, path: string): Wr
         if pieces == nil then
             return true
         end
-        local ok <const>, reason = writer:flush()
+        local ok <const>, reason = basicWriter:flush()
         pieces = nil
         return ok, reason
     end
-    return writer
+    return basicWriter
 end
 
 --- A `Reader` over bytes already in memory, for the same reason.
@@ -510,7 +510,7 @@ local function slicingReader(bytes: string): Reader
     local at = 1
     local pointer <const> = ffi.cast("const uint8_t *", bytes) as loader.BytePointer
 
-    local reader <const>: Reader = {}
+    local reader <const> = {} as {string: any}
     reader.read = function(_self: Reader, count: integer): string, string
         if at > #bytes then
             return ""
@@ -538,9 +538,8 @@ local function slicingReader(bytes: string): Reader
         at = at + taking
         return taking
     end
-    reader.transferTo = pump.transfer
     reader.close = function(_self: Reader) at = #bytes + 1 end
-    return reader
+    return reader as Reader
 end
 
 --- Writes `bytes` to `path`, replacing whatever was there.

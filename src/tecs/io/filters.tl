@@ -19,6 +19,8 @@ local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
 local type Reader = types.Reader
 local type Writer = types.Writer
+local type Input = Reader | FILE
+local type Output = Writer | FILE
 
 local C <const> = zlib.C
 local K <const> = zlib.K
@@ -100,7 +102,7 @@ local type DeflateWriterOptions = types.DeflateWriterOptions
 
 local record FilterReader is Reader
     _kind: ReaderKind
-    _source: Reader
+    _source: Input
     _input: IOBuffer
     _output: IOBuffer
     _outputAt: integer
@@ -122,7 +124,7 @@ end
 
 local record FilterWriter is Writer
     _kind: WriterKind
-    _destination: Writer
+    _destination: Output
     _output: IOBuffer
     _carryCount: integer
     _carryFirst: integer
@@ -153,9 +155,7 @@ local function zlibReason(fields: loader.CStruct, status: integer): string
         return "tecs: this zlib stream needs a preset dictionary, which is not supported"
     end
     if fields.msg ~= nil then
-        return ("tecs: the compressed stream is not valid: %s"):format(
-            loader.toString(fields.msg as loader.CValue)
-        )
+        return ("tecs: the compressed stream is not valid: %s"):format(loader.toString(fields.msg as loader.CValue))
     end
     return ("tecs: the compressed stream is not valid: %s"):format(
         CODE_NAMES[status] or ("zlib returned %d"):format(status)
@@ -169,13 +169,12 @@ local function nonNegative(value: integer, what: string, level: integer): intege
     return value
 end
 
-local function checkedReader(value: Reader, what: string): Reader
+local function checkedReader(value: Input, what: string): Input
     local dynamic <const> = value as {string: any}
+    local kind <const> = type(value as any)
     if
-        type(value) ~= "table"
+        (kind ~= "table" and kind ~= "userdata" and kind ~= "cdata")
         or type(dynamic.read) ~= "function"
-        or type(dynamic.readInto) ~= "function"
-        or type(dynamic.transferTo) ~= "function"
         or type(dynamic.close) ~= "function"
     then
         error(("tecs: %s must implement io.Reader"):format(what), 3)
@@ -183,13 +182,12 @@ local function checkedReader(value: Reader, what: string): Reader
     return value
 end
 
-local function checkedWriter(value: Writer, what: string): Writer
+local function checkedWriter(value: Output, what: string): Output
     local dynamic <const> = value as {string: any}
+    local kind <const> = type(value as any)
     if
-        type(value) ~= "table"
+        (kind ~= "table" and kind ~= "userdata" and kind ~= "cdata")
         or type(dynamic.write) ~= "function"
-        or type(dynamic.writeFrom) ~= "function"
-        or type(dynamic.writeView) ~= "function"
         or type(dynamic.flush) ~= "function"
         or type(dynamic.close) ~= "function"
     then
@@ -310,12 +308,7 @@ local function word(pointer: loader.BytePointer, index: integer, little: boolean
 end
 
 local function validUTF16Prefix(
-    pointer: loader.BytePointer,
-    length: integer,
-    final: boolean,
-    base: integer,
-    little: boolean,
-    name: string
+    pointer: loader.BytePointer, length: integer, final: boolean, base: integer, little: boolean, name: string
 ): integer, string
     local index = 0
     while index < length do
@@ -348,12 +341,7 @@ local function validUTF16Prefix(
 end
 
 local function validUTF32Prefix(
-    pointer: loader.BytePointer,
-    length: integer,
-    final: boolean,
-    base: integer,
-    little: boolean,
-    name: string
+    pointer: loader.BytePointer, length: integer, final: boolean, base: integer, little: boolean, name: string
 ): integer, string
     local complete <const> = length - length % 4
     if final and complete ~= length then
@@ -374,11 +362,7 @@ local function validUTF32Prefix(
 end
 
 local function validPrefix(
-    converter: Converter,
-    pointer: loader.BytePointer,
-    length: integer,
-    final: boolean,
-    base: integer
+    converter: Converter, pointer: loader.BytePointer, length: integer, final: boolean, base: integer
 ): integer, string
     local normalized <const> = converter.normalized
     if normalized == "UTF8" then
@@ -395,9 +379,7 @@ local function validPrefix(
     return length
 end
 
-local function retainConverterSuffix(
-    converter: Converter, pointer: loader.BytePointer, length: integer
-)
+local function retainConverterSuffix(converter: Converter, pointer: loader.BytePointer, length: integer)
     local staging <const> = converter.staging:getFFIPointer()
     for index = 0, length - 1 do
         staging[index] = pointer[index]
@@ -407,11 +389,7 @@ local function retainConverterSuffix(
 end
 
 local function convertPointer(
-    converter: Converter,
-    pointer: loader.BytePointer,
-    length: integer,
-    final: boolean,
-    destination: IOBuffer
+    converter: Converter, pointer: loader.BytePointer, length: integer, final: boolean, destination: IOBuffer
 ): boolean, string
     destination:clear()
     local total <const> = converter.carryLength + length
@@ -422,9 +400,7 @@ local function convertPointer(
     end
     converter.inputBytes = converter.inputBytes + length
     local staging <const> = converter.staging:getFFIPointer()
-    local taking, invalid <const> = validPrefix(
-        converter, staging, total, final, converter.inputBytes - total
-    )
+    local taking, invalid <const> = validPrefix(converter, staging, total, final, converter.inputBytes - total)
     if taking == nil then
         return false, invalid
     end
@@ -443,11 +419,10 @@ local function convertPointer(
         buffer.commitWrite(destination, produced, wrote, previous)
         produced = produced + wrote
         if result == ICONV_E2BIG then
+
         elseif result == ICONV_EINVAL and not final then
             local remaining <const> = tonumber(converter.inputLeft[0]) as integer
-            retainConverterSuffix(
-                converter, ffi.cast("uint8_t *", converter.input[0]) as loader.BytePointer, remaining
-            )
+            retainConverterSuffix(converter, ffi.cast("uint8_t *", converter.input[0]) as loader.BytePointer, remaining)
             return true
         elseif result == ICONV_EILSEQ or result == ICONV_EINVAL or result == ICONV_ERROR then
             return false, ("tecs: invalid or incomplete %s input"):format(converter.fromEncoding)
@@ -466,13 +441,12 @@ local function convertPointer(
             local outputPointer <const>, previous = buffer.prepareWrite(destination, produced, CHUNK)
             converter.output[0] = outputPointer
             converter.outputLeft[0] = CHUNK
-            local result <const> = iconv(
-                converter.handle, nil, nil, converter.output, converter.outputLeft
-            )
+            local result <const> = iconv(converter.handle, nil, nil, converter.output, converter.outputLeft)
             local wrote <const> = CHUNK - (tonumber(converter.outputLeft[0]) as integer)
             buffer.commitWrite(destination, produced, wrote, previous)
             produced = produced + wrote
             if result == ICONV_E2BIG then
+
             elseif result == ICONV_ERROR or result == ICONV_EILSEQ or result == ICONV_EINVAL then
                 return false, "tecs: target encoding could not be finalized"
             else
@@ -531,7 +505,7 @@ local function readSourcePointer(self: FilterReader): loader.BytePointer, intege
             self._source, CHUNK
         )
     end
-    local read <const>, reason = self._source:readInto(self._input, CHUNK, 0)
+    local read <const>, reason = pump.readInto(self._source, self._input, CHUNK, 0)
     return read ~= nil and read > 0 and self._input:getFFIPointer() or nil, read, reason
 end
 
@@ -668,9 +642,7 @@ local function feedInflateReader(self: FilterReader): boolean, string
     return true
 end
 
-local function inflateInto(
-    self: FilterReader, destination: IOBuffer, count: integer, offset: integer
-): integer, string
+local function inflateInto(self: FilterReader, destination: IOBuffer, count: integer, offset: integer): integer, string
     while not self._finished do
         local fed <const>, feedReason = feedInflateReader(self)
         if not fed then
@@ -766,9 +738,7 @@ function FilterReader:read(count: integer): string, string
     if taking == 0 then
         return ""
     end
-    local result <const> = loader.toBytes(
-        (self._output:getFFIPointer() + self._outputAt) as loader.CValue, taking
-    )
+    local result <const> = loader.toBytes((self._output:getFFIPointer() + self._outputAt) as loader.CValue, taking)
     self._outputAt = self._outputAt + taking
     return result
 end
@@ -809,10 +779,6 @@ function FilterReader:readInto(destination: IOBuffer, count: integer, offset?: i
     return taking
 end
 
-function FilterReader:transferTo(destination: Writer): integer, string
-    return pump.transfer(self, destination)
-end
-
 function FilterReader:close()
     if self._closed then
         return
@@ -826,14 +792,15 @@ function FilterReader:close()
     closeConverter(self._converter)
     bufferpool.release(self._input)
     bufferpool.release(self._output)
-    self._source:close()
+    local source <const> = self._source as {string: any}
+    (source.close as function(any))(self._source)
 end
 
 local function writeOutput(self: FilterWriter): boolean, string
     local offset = 0
     local length <const> = self._output:length()
     while offset < length do
-        local wrote, reason = self._destination:writeFrom(self._output, offset, length - offset)
+        local wrote, reason = pump.writeFrom(self._destination, self._output, offset, length - offset)
         if wrote == nil then
             return false, reason
         end
@@ -845,9 +812,7 @@ local function writeOutput(self: FilterWriter): boolean, string
     return true
 end
 
-local function reserveWriterOutput(
-    self: FilterWriter, count: integer
-): loader.BytePointer, boolean, integer, string
+local function reserveWriterOutput(self: FilterWriter, count: integer): loader.BytePointer, boolean, integer, string
     local dynamic <const> = self._destination as {string: any}
     if type(dynamic._reserve) == "function" and type(dynamic._commit) == "function" then
         local output <const>, reason = (dynamic._reserve as function(any, integer): loader.BytePointer, string)(
@@ -943,9 +908,7 @@ local function encodeBase64Pointer(
     return true
 end
 
-local function encodeHexPointer(
-    self: FilterWriter, pointer: loader.BytePointer, length: integer
-): boolean, string
+local function encodeHexPointer(self: FilterWriter, pointer: loader.BytePointer, length: integer): boolean, string
     if length > floor(MAX_INTEGER / 2) then
         return false, "tecs: hexadecimal output is too large"
     end
@@ -1101,7 +1064,8 @@ function FilterWriter:flush(): boolean, string
             return false, reason
         end
     end
-    local ok, reason <const> = self._destination:flush()
+    local destination <const> = self._destination as {string: any}
+    local ok, reason <const> = (destination.flush as function(any): boolean, string)(self._destination)
     if not ok then
         self._failure = reason
     end
@@ -1135,7 +1099,8 @@ function FilterWriter:close(): boolean, string
         reason = "tecs: SDL could not close the conversion context"
     end
     bufferpool.release(self._output)
-    local closed, closeReason <const> = self._destination:close()
+    local destination <const> = self._destination as {string: any}
+    local closed, closeReason <const> = (destination.close as function(any): boolean, string)(self._destination)
     if ok and not closed then
         ok = false
         reason = closeReason
@@ -1145,7 +1110,7 @@ function FilterWriter:close(): boolean, string
     return ok, reason
 end
 
-local function newTextReader(kind: ReaderKind, source: Reader): Reader
+local function newTextReader(kind: ReaderKind, source: Input): Reader
     return rawSetMetatable(
         {
             _kind = kind,
@@ -1167,7 +1132,7 @@ local function newTextReader(kind: ReaderKind, source: Reader): Reader
     ) as Reader
 end
 
-local function newInflateReader(source: Reader, options?: InflateReaderOptions): Reader
+local function newInflateReader(source: Input, options?: InflateReaderOptions): Reader
     source = checkedReader(source, "inflate reader source")
     if options ~= nil and type(options) ~= "table" then
         error("tecs: inflate reader options must be a table", 2)
@@ -1206,7 +1171,7 @@ local function newInflateReader(source: Reader, options?: InflateReaderOptions):
     ) as Reader
 end
 
-local function newTextWriter(kind: WriterKind, destination: Writer): Writer
+local function newTextWriter(kind: WriterKind, destination: Output): Writer
     return rawSetMetatable(
         {
             _kind = kind,
@@ -1222,7 +1187,7 @@ local function newTextWriter(kind: WriterKind, destination: Writer): Writer
     ) as Writer
 end
 
-local function newDeflateWriter(destination: Writer, options?: DeflateWriterOptions): Writer
+local function newDeflateWriter(destination: Output, options?: DeflateWriterOptions): Writer
     destination = checkedWriter(destination, "deflate writer destination")
     if options ~= nil and type(options) ~= "table" then
         error("tecs: deflate writer options must be a table", 2)
@@ -1266,7 +1231,7 @@ local function newDeflateWriter(destination: Writer, options?: DeflateWriterOpti
     ) as Writer
 end
 
-local function newTranscodeReader(source: Reader, fromEncoding: string, toEncoding: string): Reader
+local function newTranscodeReader(source: Input, fromEncoding: string, toEncoding: string): Reader
     source = checkedReader(source, "transcode reader source")
     local converter <const> = newConverter(fromEncoding, toEncoding)
     return rawSetMetatable(
@@ -1286,7 +1251,7 @@ local function newTranscodeReader(source: Reader, fromEncoding: string, toEncodi
     ) as Reader
 end
 
-local function newTranscodeWriter(destination: Writer, fromEncoding: string, toEncoding: string): Writer
+local function newTranscodeWriter(destination: Output, fromEncoding: string, toEncoding: string): Writer
     destination = checkedWriter(destination, "transcode writer destination")
     local converter <const> = newConverter(fromEncoding, toEncoding)
     return rawSetMetatable(
@@ -1303,31 +1268,23 @@ local function newTranscodeWriter(destination: Writer, fromEncoding: string, toE
 end
 
 local record filters
-    newInflateReader: function(Reader, InflateReaderOptions): Reader
-    newDeflateWriter: function(Writer, DeflateWriterOptions): Writer
-    newBase64DecodeReader: function(Reader): Reader
-    newBase64EncodeWriter: function(Writer): Writer
-    newHexDecodeReader: function(Reader): Reader
-    newHexEncodeWriter: function(Writer): Writer
-    newTranscodeReader: function(Reader, string, string): Reader
-    newTranscodeWriter: function(Writer, string, string): Writer
+    newInflateReader: function(Input, InflateReaderOptions): Reader
+    newDeflateWriter: function(Output, DeflateWriterOptions): Writer
+    newBase64DecodeReader: function(Input): Reader
+    newBase64EncodeWriter: function(Output): Writer
+    newHexDecodeReader: function(Input): Reader
+    newHexEncodeWriter: function(Output): Writer
+    newTranscodeReader: function(Input, string, string): Reader
+    newTranscodeWriter: function(Output, string, string): Writer
 end
 
 return {
     newInflateReader = newInflateReader,
     newDeflateWriter = newDeflateWriter,
-    newBase64DecodeReader = function(source: Reader): Reader
-        return newTextReader("base64", source)
-    end,
-    newBase64EncodeWriter = function(destination: Writer): Writer
-        return newTextWriter("base64", destination)
-    end,
-    newHexDecodeReader = function(source: Reader): Reader
-        return newTextReader("hex", source)
-    end,
-    newHexEncodeWriter = function(destination: Writer): Writer
-        return newTextWriter("hex", destination)
-    end,
+    newBase64DecodeReader = function(source: Input): Reader return newTextReader("base64", source) end,
+    newBase64EncodeWriter = function(destination: Output): Writer return newTextWriter("base64", destination) end,
+    newHexDecodeReader = function(source: Input): Reader return newTextReader("hex", source) end,
+    newHexEncodeWriter = function(destination: Output): Writer return newTextWriter("hex", destination) end,
     newTranscodeReader = newTranscodeReader,
     newTranscodeWriter = newTranscodeWriter,
 } as filters

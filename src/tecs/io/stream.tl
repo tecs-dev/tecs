@@ -563,7 +563,7 @@ function MemoryReader:transferTo(destination: Writer): integer, string
         )(destination, pointer, count)
         return wrote and count or nil, writeReason
     end
-    return pump.transfer(self, destination)
+    return pump.transferBuffered(self, destination)
 end
 
 function MemoryReader:close()
@@ -600,10 +600,6 @@ function HandleReader:readInto(destination: IOBuffer, count: integer, offset?: i
     end
     destination:setString(piece, offset)
     return #piece
-end
-
-function HandleReader:transferTo(destination: Writer): integer, string
-    return pump.transfer(self, destination)
 end
 
 function HandleReader:close()
@@ -714,7 +710,7 @@ local function readIntoBuffer(source: ReadableStream, maxBytes: integer): IOBuff
             count = min(count, maxBytes - total + 1)
         end
         output:resize(total)
-        local got <const>, reason = reader:readInto(output, count, total)
+        local got <const>, reason = pump.readInto(reader, output, count, total)
         if got == nil then
             closeReader(reader)
             output:close()
@@ -765,7 +761,7 @@ local function transferTo(source: ReadableStream, destination: WritableStream): 
         return nil, writeReason
     end
 
-    local total <const>, failure = reader:transferTo(writer)
+    local total <const>, failure = pump.transfer(reader, writer)
 
     local readerClose <const> = closeReader(reader)
     local writerClose <const> = closeWriter(writer)
@@ -794,7 +790,7 @@ local function discard(source: ReadableStream): integer, string
     local failure: string
     while failure == nil do
         scratch:clear()
-        local got <const>, reason = reader:readInto(scratch, CHUNK)
+        local got <const>, reason = pump.readInto(reader, scratch, CHUNK)
         if got == nil then
             failure = reason
         elseif got == 0 then
@@ -840,7 +836,7 @@ local function writeBuffer(
     local at = offset
     local failure: string
     while at < finish do
-        local wrote <const>, reason = writer:writeFrom(sourceBuffer, at, min(CHUNK, finish - at))
+        local wrote <const>, reason = pump.writeFrom(writer, sourceBuffer, at, min(CHUNK, finish - at))
         if wrote == nil then
             failure = reason
             break
@@ -871,8 +867,11 @@ local function writeView(
         local wrote: integer
         local reason: string
         local dynamic <const> = writer as {string: any}
-        if type(dynamic.writeView) == "function" then
-            wrote, reason = writer:writeView(sourceView, at, requested)
+        local directWriteView <const> = dynamic.writeView
+        if type(directWriteView) == "function" then
+            wrote, reason = (directWriteView as function(any, ByteView, integer, integer): integer, string)(
+                writer, sourceView, at, requested
+            )
         else
             local piece <const> = loader.toBytes((sourceView:getFFIPointer() + at) as loader.CValue, requested)
             local ok <const>, writeReason = writer:write(piece)

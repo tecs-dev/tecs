@@ -75,6 +75,7 @@ local tecs <const> = require("tecs")
 local type loader = require("tecs.ffi.loader")
 local type iotypes = require("tecs.io.types")
 local adapter <const> = require("tecs.platform.adapter")
+local pump <const> = require("tecs.io.pump")
 
 local ioModule <const> = tecs.io
 local files <const> = ioModule.files
@@ -278,7 +279,7 @@ local function readInto(path: string, materialize: boolean): string, integer, in
     local count = 0
     while true do
         scratch:clear()
-        local read <const>, readFailure = reader:readInto(scratch, CHUNK)
+        local read <const>, readFailure = pump.readInto(reader, scratch, CHUNK)
         if read == nil then
             reader:close()
             scratch:close()
@@ -330,7 +331,7 @@ local function writeFrom(path: string, bytes: IOBuffer)
     local length <const> = bytes:length()
     while at < length do
         local wanted <const> = min(CHUNK, length - at)
-        local written <const>, writeFailure = writer:writeFrom(bytes, at, wanted)
+        local written <const>, writeFailure = pump.writeFrom(writer, bytes, at, wanted)
         if written == nil or written == 0 then
             writer:close()
             error(format("bench: cannot write %s: %s", path, writeFailure or "made no progress"), 0)

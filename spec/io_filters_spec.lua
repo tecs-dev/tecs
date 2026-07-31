@@ -12,14 +12,6 @@ local function limitedReader(bytes, maximum)
         return source:read(math.min(count, maximum))
     end
 
-    function reader:readInto(destination, count, offset)
-        return source:readInto(destination, math.min(count, maximum), offset)
-    end
-
-    function reader:transferTo(destination)
-        return source:transferTo(destination)
-    end
-
     function reader:close()
         self.closed = true
         source:close()
@@ -75,7 +67,7 @@ describe("io transform filters", function()
         local encoded, sink = bufferWriter()
         local writer = ioModule.newHexEncodeWriter(sink)
 
-        local copied, reason = reader:transferTo(writer)
+        local copied, reason = ioModule.transfer(reader, writer)
 
         assert.are.equal(7, copied, reason)
         assert(writer:close())
@@ -242,5 +234,103 @@ describe("io transform filters", function()
         assert.is_false(writer:close())
 
         destination:close()
+    end)
+end)
+
+describe("io directional transfer", function()
+    it("uses the basic string protocol when accelerators are absent", function()
+        local source = { at = 1, bytes = "basic endpoint", closed = false }
+        function source:read(count)
+            if self.at > #self.bytes then
+                return ""
+            end
+            local piece = self.bytes:sub(self.at, self.at + count - 1)
+            self.at = self.at + #piece
+            return piece
+        end
+        function source:close()
+            self.closed = true
+        end
+        local pieces = {}
+        local destination = { closed = false }
+        function destination:write(piece)
+            pieces[#pieces + 1] = piece
+            return true
+        end
+        function destination:flush()
+            return true
+        end
+        function destination:close()
+            self.closed = true
+            return true
+        end
+
+        local count, reason = ioModule.transfer(source, destination)
+
+        assert.are.equal(14, count, reason)
+        assert.are.equal("basic endpoint", table.concat(pieces))
+        assert.is_false(source.closed)
+        assert.is_false(destination.closed)
+
+        source:close()
+        destination:close()
+    end)
+
+    it("transfers directly between Lua files without taking ownership", function()
+        local source = assert(io.tmpfile())
+        local destination = assert(io.tmpfile())
+        assert(source:write("file endpoint"))
+        assert(source:seek("set", 0))
+
+        local count, reason = ioModule.transfer(source, destination)
+        assert(destination:seek("set", 0))
+
+        assert.are.equal(13, count, reason)
+        assert.are.equal("file endpoint", destination:read("*a"))
+        assert.are.equal("file", io.type(source))
+        assert.are.equal("file", io.type(destination))
+
+        source:close()
+        destination:close()
+    end)
+
+    it("transfers an accelerated memory reader into a Lua file", function()
+        local source = ioModule.newBuffer("memory endpoint")
+        local reader = source:newReader()
+        local destination = assert(io.tmpfile())
+
+        local count, reason = ioModule.transfer(reader, destination)
+        assert(destination:seek("set", 0))
+
+        assert.are.equal(15, count, reason)
+        assert.are.equal("memory endpoint", destination:read("*a"))
+
+        reader:close()
+        source:close()
+        destination:close()
+    end)
+
+    it("lets a transform reader own its Lua file", function()
+        local compressed = transformedByWriter(ioModule.newDeflateWriter, { "owned file" })
+        local source = assert(io.tmpfile())
+        assert(source:write(compressed))
+        assert(source:seek("set", 0))
+        local reader = ioModule.newInflateReader(source)
+
+        assert.are.equal("owned file", readAll(reader, 4))
+
+        reader:close()
+
+        assert.are.equal("closed file", io.type(source))
+    end)
+
+    it("lets a transform writer own its Lua file", function()
+        local destination = assert(io.tmpfile())
+        local writer = ioModule.newBase64EncodeWriter(destination)
+
+        assert(writer:write("owned file"))
+        assert(writer:close())
+
+        assert.are.equal("closed file", io.type(destination))
     end)
 end)

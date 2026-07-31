@@ -69,7 +69,6 @@ local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local buffer <const> = require("tecs.io.buffer")
 local type types = require("tecs.io.types")
-local pump <const> = require("tecs.io.pump")
 
 local C <const> = sdl.C
 local R <const> = rust.C
@@ -267,7 +266,7 @@ local function sdlWriter(path: string, mode: string): Writer, string
     end
     stream = ffi.gc(stream as ffi.CData, C.SDL_CloseIO as function(ffi.CData)) as loader.CPtr
 
-    local writer <const>: Writer = {}
+    local writer <const> = {} as {string: any}
     writer.write = function(_self: Writer, bytes: string): boolean, string
         if stream == nil then
             return false, "the writer is closed"
@@ -358,7 +357,7 @@ local function sdlWriter(path: string, mode: string): Writer, string
         end
         return true
     end
-    return writer
+    return writer as Writer
 end
 
 --- Opens an `SDL_IOStream` and wraps it as a `Reader`.
@@ -374,7 +373,7 @@ local function sdlReader(path: string): Reader, string
     local scratch: loader.CArray = nil
     local capacity = 0
 
-    local reader <const>: Reader = {}
+    local reader <const> = {} as {string: any}
     reader.read = function(_self: Reader, count: integer): string, string
         if stream == nil then
             return nil, "the reader is closed"
@@ -422,7 +421,6 @@ local function sdlReader(path: string): Reader, string
         buffer.commitWrite(destination, offset, got, previousLength)
         return got
     end
-    reader.transferTo = pump.transfer
     reader.close = function(_self: Reader)
         if stream == nil then
             return
@@ -432,7 +430,7 @@ local function sdlReader(path: string): Reader, string
         ffi.gc(held as ffi.CData, nil)
         C.SDL_CloseIO(held)
     end
-    return reader
+    return reader as Reader
 end
 
 --- One SDL call each, and nothing composed out of several.

@@ -242,7 +242,9 @@ end
 --- The constructor documents whether the reader owns retained state or
 --- borrows externally owned storage. A consumer reads forward until `read`
 --- returns an empty string, then closes the reader. A failure returns nil and
---- a reason instead of raising.
+--- a reason instead of raising. Implementations may provide direct-buffer
+--- accelerators which `tecs.io.transfer` selects without making them part of
+--- this basic protocol.
 local interface Reader is Closeable
     --- Caller-writable. Supplies the operation that reads the next bytes.
     ---
@@ -254,32 +256,6 @@ local interface Reader is Closeable
     ---     empty string after the source is exhausted.
     --- @return Returns the source's reason when the first return is nil.
     read: function(self: Reader, count: integer): string, string
-
-    --- Reads bytes directly into reusable FFI memory.
-    ---
-    --- The call writes at a zero-based offset and extends the buffer through
-    --- the last byte read. A zero result is end of input. SDL file readers
-    --- fill the allocation directly without making a Lua string.
-    --- @param self The reader whose cursor advances.
-    --- @param buffer The caller supplies an open
-    ---     [`Buffer`](tealdoc:tecs.io.Buffer).
-    --- @param count The caller supplies a non-negative maximum byte count.
-    --- @param offset The caller supplies a zero-based destination offset or
-    ---     omits it for zero.
-    --- @return Returns the bytes read, or zero at the end.
-    --- @return Returns the source's reason when the first return is nil.
-    readInto: function(self: Reader, buffer: Buffer, count: integer, offset?: integer): integer, string
-
-    --- Copies every remaining byte into a writer synchronously.
-    ---
-    --- The call does not close either endpoint. It borrows reusable transfer
-    --- storage and drains short writes before reading again.
-    --- @param self The reader whose cursor advances to its end.
-    --- @param destination The caller supplies an open writer.
-    --- @return Returns the bytes written.
-    --- @return Returns the source or destination reason when the first return
-    ---     is nil.
-    transferTo: function(self: Reader, destination: Writer): integer, string
 
     --- Caller-writable. Supplies the operation that releases the source.
     ---
@@ -294,7 +270,9 @@ end
 --- A consumer writes pieces in order and closes the writer even after the last
 --- `write` succeeds. The close can report a delayed flush failure that no
 --- individual write observed. The constructor documents whether closing the
---- writer also closes or merely releases its destination.
+--- writer also closes or merely releases its destination. Implementations may
+--- provide direct-buffer accelerators which `tecs.io.transfer` selects without
+--- making them part of this basic protocol.
 local interface Writer is Closeable
     --- Caller-writable. Supplies the operation that appends bytes.
     ---
@@ -305,37 +283,6 @@ local interface Writer is Closeable
     --- @return Returns the destination's reason when the first return is
     ---     false.
     write: function(self: Writer, bytes: string): boolean, string
-
-    --- Writes bytes directly from reusable FFI memory.
-    ---
-    --- A successful call may accept fewer bytes than requested. The caller
-    --- repeats it with the returned count until the range is exhausted. SDL
-    --- file writers read the allocation directly without making a Lua string.
-    --- @param self The writer receiving the bytes.
-    --- @param buffer The caller supplies an open
-    ---     [`Buffer`](tealdoc:tecs.io.Buffer).
-    --- @param offset The caller supplies a zero-based source offset or omits
-    ---     it for zero.
-    --- @param count The caller supplies a byte count or omits it for the
-    ---     remainder.
-    --- @return Returns the number of bytes accepted.
-    --- @return Returns the destination's reason when the first return is nil.
-    writeFrom: function(self: Writer, buffer: Buffer, offset?: integer, count?: integer): integer, string
-
-    --- Writes bytes directly from an immutable retained range.
-    ---
-    --- A successful call may accept fewer bytes than requested. The caller
-    --- repeats it with the returned count until the range is exhausted.
-    --- @param self The writer receiving the bytes.
-    --- @param view The caller supplies an open
-    ---     [`ByteView`](tealdoc:tecs.io.ByteView).
-    --- @param offset The caller supplies a zero-based source offset or omits
-    ---     it for zero.
-    --- @param count The caller supplies a byte count or omits it for the
-    ---     remainder.
-    --- @return Returns the number of bytes accepted.
-    --- @return Returns the destination's reason when the first return is nil.
-    writeView: function(self: Writer, view: ByteView, offset?: integer, count?: integer): integer, string
 
     --- Flushes buffered bytes without closing the destination.
     ---

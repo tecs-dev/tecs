@@ -390,7 +390,7 @@ function BufferReader:readInto(destination: IOBuffer, count: integer, offset?: i
     self._at = self._at + taking
     return taking
 end
-function BufferReader:transferTo(destination: Writer): integer, string
+function BufferReader:transferTo(destination: Writer | FILE): integer, string
     if self._closed then
         return nil, "the reader is closed"
     end
@@ -409,9 +409,26 @@ function BufferReader:transferTo(destination: Writer): integer, string
         self._at = self._at + remaining
         return remaining
     end
+    local writeView <const> = dynamic.writeView
     local total = 0
     while remaining > 0 do
-        local wrote <const>, reason = destination:writeView(self._view, self._at, remaining)
+        local requested <const> = math.min(64 * 1024, remaining)
+        local wrote: integer
+        local reason: string
+        if type(writeView) == "function" then
+            wrote, reason = (writeView as function(any, ByteView, integer, integer): integer, string)(
+                destination, self._view, self._at, requested
+            )
+        else
+            local bytes <const> = loader.toBytes((self._view:getFFIPointer() + self._at) as loader.CValue, requested)
+            local accepted <const>, writeReason = (dynamic.write as function(any, string): any, string)(
+                destination, bytes
+            )
+            reason = writeReason
+            if accepted ~= nil and accepted ~= false then
+                wrote = requested
+            end
+        end
         if wrote == nil then
             return nil, reason
         end

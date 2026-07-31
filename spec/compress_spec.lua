@@ -87,7 +87,7 @@ local function inflateInto(bytes, destination, maxBytes, raw)
     destination:clear()
     local reader = ioModule.newInflateReader(sourceReader(bytes), { maxBytes = maxBytes, raw = raw })
     local writer = bufferWriter(destination)
-    local copied, reason = reader:transferTo(writer)
+    local copied, reason = ioModule.transfer(reader, writer)
     reader:close()
     writer:close()
     if copied == nil then

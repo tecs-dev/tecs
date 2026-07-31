@@ -7,10 +7,10 @@ returns it unchanged, so its concrete type is preserved:
 
 ```teal
 tecs.scoped(function(scope: tecs.Scope)
-    local reader <const> = scope:own(openReader())
-    local buffer <const> = scope:own(newBuffer())
+    local input <const> = scope:own(assert(io.open("save.bin", "rb")))
+    local output <const> = scope:own(assert(io.open("save.copy", "wb")))
 
-    consume(reader, buffer)
+    assert(tecs.io.transfer(input, output))
 end)
 ```
 
@@ -32,7 +32,7 @@ local type types = require("tecs.types")
 local type Closeable = types.Closeable
 
 local record Registration
-    value: Closeable
+    value: Closeable | FILE
     close: function(any)
 end
 
@@ -45,11 +45,11 @@ local interface Scope
     --- run.
     ---
     --- @param self The active scope that will own the value.
-    --- @param value An open [`Closeable`](tealdoc:tecs.Closeable). Each call
-    ---     adds one cleanup obligation, including repeated calls with the same
-    ---     value.
+    --- @param value An open [`Closeable`](tealdoc:tecs.Closeable) or Lua file.
+    ---     Each call adds one cleanup obligation, including repeated calls
+    ---     with the same value.
     --- @return The same value with its concrete type unchanged.
-    own: function<T is Closeable>(self, value: T): T
+    own: function<T>(self, value: T): T
 end
 
 local record ScopeImpl is Scope
@@ -85,9 +85,7 @@ local function appendCleanupFailures(primary: string, failures: {string}): strin
     if #failures == 0 then
         return primary
     end
-    return primary
-        .. "\n\nScoped cleanup also failed:\n"
-        .. table.concat(failures, "\n\n")
+    return primary .. "\n\nScoped cleanup also failed:\n" .. table.concat(failures, "\n\n")
 end
 
 function scope.scoped(body: function(Scope))
@@ -116,12 +114,10 @@ function scope.scoped(body: function(Scope))
         local registration <const> = owned.registrations[index]
         owned.registrations[index] = nil
         local closed <const>, closeFailure = xpcall(
-            function() registration.close(registration.value) end,
-            traceback
+            function() registration.close(registration.value) end, traceback
         ) as (boolean, string)
         if not closed then
-            cleanupFailures[#cleanupFailures + 1] =
-                ("Resource %d failed to close:\n%s"):format(index, closeFailure)
+            cleanupFailures[#cleanupFailures + 1] = ("Resource %d failed to close:\n%s"):format(index, closeFailure)
         end
     end
 
@@ -133,7 +129,7 @@ function scope.scoped(body: function(Scope))
     end
 end
 
-function ScopeImpl:own<T is Closeable>(value: T): T
+function ScopeImpl:own<T>(value: T): T
     if not self.active then
         error("tecs: Scope is no longer active", 2)
     end
@@ -152,7 +148,7 @@ function ScopeImpl:own<T is Closeable>(value: T): T
 
     self.count = self.count + 1
     self.registrations[self.count] = {
-        value = value,
+        value = value as Closeable | FILE,
         close = close as function(any),
     }
     return value

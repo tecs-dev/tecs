@@ -233,7 +233,7 @@ tecs.scoped(function(scope: tecs.Scope)
 
     local reader <const> = scope:own(tecs.io.newInflateReader(compressed:newReader()))
     local sink <const> = scope:own(restored:newWriter())
-    local count <const>, reason = reader:transferTo(sink)
+    local count <const>, reason = tecs.io.transfer(reader, sink)
 
     assert(count, reason)
     assert(restored:getString() == "snapshot bytes")
@@ -338,35 +338,16 @@ reader:close()
 source:close()
 -- #endregion tecs.io.Reader.read
 
--- #region tecs.io.Reader.readInto
-local source <const> = tecs.io.newStringStream("abcdefgh")
-local reader <const> = assert(source:newReader())
-local bytes <const> = tecs.io.newBuffer()
-local count <const>, reason = reader:readInto(bytes, 4)
+-- #region tecs.io.transfer
+local source <const> = assert(io.open("save.bin", "rb"))
+local destination <const> = assert(io.open("save.copy", "wb"))
+local count <const>, reason = tecs.io.transfer(source, destination)
 
 assert(count, reason)
-print(bytes:getString())
 
-reader:close()
 source:close()
-bytes:close()
--- #endregion tecs.io.Reader.readInto
-
--- #region tecs.io.Reader.transferTo
-local sourceStream <const> = tecs.io.newStringStream("save data")
-local reader <const> = assert(sourceStream:newReader())
-local bytes <const> = tecs.io.newBuffer()
-local writer <const> = bytes:newWriter()
-local count <const>, reason = reader:transferTo(writer)
-
-assert(count == 9, reason)
-assert(bytes:getString() == "save data")
-
-reader:close()
-writer:close()
-sourceStream:close()
-bytes:close()
--- #endregion tecs.io.Reader.transferTo
+destination:close()
+-- #endregion tecs.io.transfer
 
 -- #region tecs.io.Reader.close
 local source <const> = tecs.io.newStringStream("data")
@@ -387,19 +368,6 @@ print(bytes:getString())
 
 bytes:close()
 -- #endregion tecs.io.Writer.write
-
--- #region tecs.io.Writer.writeFrom
-local source <const> = tecs.io.newBuffer("data")
-local output <const> = tecs.io.newBuffer()
-local writer <const> = output:newWriter()
-local count <const>, reason = writer:writeFrom(source)
-
-assert(count, reason)
-assert(writer:close())
-
-source:close()
-output:close()
--- #endregion tecs.io.Writer.writeFrom
 
 -- #region tecs.io.Writer.flush
 local destination <const> = tecs.io.newFileStream("save.bin")

@@ -21,6 +21,7 @@ local loader <const> = require("tecs.ffi.loader")
 local log <const> = require("tecs.log")
 local Future <const> = require("tecs.Future")
 local buffer <const> = require("tecs.io.buffer")
+local pump <const> = require("tecs.io.pump")
 local stream <const> = require("tecs.io.stream")
 local clients <const> = require("tecs.io.http.clients")
 local uri <const> = require("tecs.io.http.uri")
@@ -470,7 +471,9 @@ local function writeChunk(self: Client, transfer: Transfer, pointer: loader.CPtr
         local offset = 0
         while offset < length do
             local remaining <const> = length - offset
-            local wrote <const>, reason = transfer.writer:writeFrom(transfer.responseScratch, offset, length - offset)
+            local wrote <const>, reason = pump.writeFrom(
+                transfer.writer, transfer.responseScratch, offset, length - offset
+            )
             if wrote == nil then
                 return reason or "cannot write response"
             end
@@ -532,7 +535,7 @@ local function serviceUpload(self: Client, transfer: Transfer): boolean, boolean
     if transfer.sourcePending == 0 then
         transfer.sourceScratch:clear()
         local ok <const>, count, reason = pcall(
-            reader.readInto, reader, transfer.sourceScratch, CHUNK, 0
+            pump.readInto, reader, transfer.sourceScratch, CHUNK, 0
         ) as (boolean, integer, string)
         if not ok then
             failTransfer(self, transfer, ("tecs: %s: %s"):format(transfer.url, tostring(count)))

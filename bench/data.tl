@@ -154,7 +154,7 @@ local function readTransform(source: string, destination: IOBuffer, constructor:
     destination:clear()
     local reader <const> = constructor(ioModule.newStringReader(source))
     local writer <const> = destination:newWriter()
-    assert(reader:transferTo(writer))
+    assert(ioModule.transfer(reader, writer))
     reader:close()
     assert(writer:close())
     return destination

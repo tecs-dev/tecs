@@ -7,6 +7,11 @@ a cursor. A [`Reader`](tealdoc:tecs.io.Reader) and
 opened from it. Strings, buffers, borrowed bytes, paths, and handles all use
 that one descriptor contract.
 
+A Lua `FILE` is also a basic reader and writer. `transfer` accepts files
+directly and uses `readInto` or `writeFrom` accelerators when an endpoint
+provides them. Transform constructors take ownership of either a Tecs endpoint
+or a file and close it with the wrapper.
+
 Whole-source operations run synchronously and return their result directly.
 They return nil and a reason when an endpoint cannot be opened, read, written,
 flushed, or closed:
@@ -97,6 +102,7 @@ local loader <const> = require("tecs.ffi.loader")
 local Future <const> = require("tecs.Future")
 local buffer <const> = require("tecs.io.buffer")
 local filters <const> = require("tecs.io.filters")
+local pump <const> = require("tecs.io.pump")
 local stream <const> = require("tecs.io.stream")
 local type types = require("tecs.io.types")
 local type coretypes = require("tecs.types")
@@ -206,6 +212,21 @@ local record binaryIO
     --- @return Returns a caller-owned reader whose cursor starts at zero.
     newByteReader: function(pointer: loader.CValue, length: integer): types.Reader
 
+    --- Transfers every remaining byte between directional endpoints.
+    ---
+    --- Lua files satisfy the basic endpoint protocol directly. Tecs readers
+    --- and writers may additionally provide `readInto` and `writeFrom` fast
+    --- paths, which this call selects without changing the source code using
+    --- them. The call borrows both endpoints and closes neither one.
+    --- @param source The caller supplies an open reader or Lua file positioned
+    ---     at its first byte to transfer.
+    --- @param destination The caller supplies an open writer or Lua file
+    ---     positioned where transferred bytes should begin.
+    --- @return Returns the number of bytes written.
+    --- @return Returns the source or destination reason when the first return
+    ---     is nil.
+    transfer: function(source: types.Reader | FILE, destination: types.Writer | FILE): integer, string
+
     --- Creates a replayable readable empty stream.
     ---
     --- @param contentType The caller supplies optional media type metadata.
@@ -259,7 +280,7 @@ local record binaryIO
     --- @param options The caller selects raw framing and an output ceiling or
     ---     omits it for a zlib stream and the default ceiling.
     --- @return Returns a caller-owned reader of decompressed bytes.
-    newInflateReader: function(source: types.Reader, options?: types.InflateReaderOptions): types.Reader
+    newInflateReader: function(source: types.Reader | FILE, options?: types.InflateReaderOptions): types.Reader
 
     --- Creates a writer that incrementally deflates bytes into a destination.
     ---
@@ -271,7 +292,7 @@ local record binaryIO
     --- @param options The caller selects raw framing and a compression level
     ---     or omits it for zlib framing and zlib's default level.
     --- @return Returns a caller-owned writer that accepts uncompressed bytes.
-    newDeflateWriter: function(destination: types.Writer, options?: types.DeflateWriterOptions): types.Writer
+    newDeflateWriter: function(destination: types.Writer | FILE, options?: types.DeflateWriterOptions): types.Writer
 
     --- Creates a reader that incrementally decodes RFC 4648 Base64 text.
     ---
@@ -279,7 +300,7 @@ local record binaryIO
     --- between source reads.
     --- @param source The caller supplies the reader of Base64 text.
     --- @return Returns a caller-owned reader of decoded bytes.
-    newBase64DecodeReader: function(source: types.Reader): types.Reader
+    newBase64DecodeReader: function(source: types.Reader | FILE): types.Reader
 
     --- Creates a writer that incrementally encodes bytes as RFC 4648 Base64.
     ---
@@ -288,7 +309,7 @@ local record binaryIO
     --- @param destination The caller supplies the writer receiving Base64
     ---     text.
     --- @return Returns a caller-owned writer that accepts unencoded bytes.
-    newBase64EncodeWriter: function(destination: types.Writer): types.Writer
+    newBase64EncodeWriter: function(destination: types.Writer | FILE): types.Writer
 
     --- Creates a reader that incrementally decodes hexadecimal text.
     ---
@@ -296,7 +317,7 @@ local record binaryIO
     --- source reads.
     --- @param source The caller supplies the reader of hexadecimal text.
     --- @return Returns a caller-owned reader of decoded bytes.
-    newHexDecodeReader: function(source: types.Reader): types.Reader
+    newHexDecodeReader: function(source: types.Reader | FILE): types.Reader
 
     --- Creates a writer that incrementally encodes bytes as lowercase hexadecimal text.
     ---
@@ -305,7 +326,7 @@ local record binaryIO
     --- @param destination The caller supplies the writer receiving hexadecimal
     ---     text.
     --- @return Returns a caller-owned writer that accepts unencoded bytes.
-    newHexEncodeWriter: function(destination: types.Writer): types.Writer
+    newHexEncodeWriter: function(destination: types.Writer | FILE): types.Writer
 
     --- Creates a reader that incrementally converts character encodings.
     ---
@@ -317,7 +338,7 @@ local record binaryIO
     --- @param toEncoding The caller supplies an SDL iconv destination encoding
     ---     name such as `UTF-16LE`.
     --- @return Returns a caller-owned reader of converted text.
-    newTranscodeReader: function(source: types.Reader, fromEncoding: string, toEncoding: string): types.Reader
+    newTranscodeReader: function(source: types.Reader | FILE, fromEncoding: string, toEncoding: string): types.Reader
 
     --- Creates a writer that incrementally converts character encodings.
     ---
@@ -332,7 +353,9 @@ local record binaryIO
     ---     name such as `UTF-16LE`.
     --- @return Returns a caller-owned writer that accepts bytes in
     ---     `fromEncoding`.
-    newTranscodeWriter: function(destination: types.Writer, fromEncoding: string, toEncoding: string): types.Writer
+    newTranscodeWriter: function(
+        destination: types.Writer | FILE, fromEncoding: string, toEncoding: string
+    ): types.Writer
 
     --- Creates a lazy metadata view over a stream.
     ---
@@ -639,6 +662,7 @@ end
 binaryIO.newBuffer = stream.newBuffer
 binaryIO.newStringReader = stream.newStringReader
 binaryIO.newByteReader = stream.newByteReader
+binaryIO.transfer = pump.transfer
 binaryIO.newEmptyStream = stream.newEmptyStream
 binaryIO.newStringStream = stream.newStringStream
 binaryIO.newByteStream = stream.newByteStream
