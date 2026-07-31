@@ -149,12 +149,11 @@ local record Event is genericEvents.Event
     --- Read-only. Reports vertical whole-notch wheel movement under the same
     --- sign convention as `wheelTicksX`.
     wheelTicksY: integer
-    --- Read-only. Reports whether an event passed to `push` uses natural
-    --- scrolling. This is one a platform with
-    --- natural scrolling would send, which is what SDL's direction flag says
-    --- and what the conversion undoes. Read only there: an event coming out
-    --- of the conversion has had that applied already, so nothing above it
-    --- has a flag to check.
+    --- Read-only. Reports whether the platform marked this wheel event as
+    --- flipped for its configured scroll direction. `wheelX` and `wheelY`
+    --- remain normalized; a consumer that intentionally follows the user's
+    --- scrolling preference can reverse the normalized pair once when this is
+    --- true.
     flipped: boolean
     --- Read-only. Reports the zoom factor since the previous pinch event.
     --- Below one is a pinch closed, above one is a pinch opened.
@@ -778,6 +777,7 @@ local function convert(raw: loader.CValue): Event
             wheelX, wheelY = -wheelX, -wheelY
             ticksX, ticksY = -ticksX, -ticksY
         end
+        event.flipped = flipped
         event.wheelX = wheelX
         event.wheelY = wheelY
         event.wheelTicksX = ticksX

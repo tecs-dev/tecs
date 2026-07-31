@@ -408,6 +408,20 @@ describe("platform.Input", function()
         assert.are.equal(0.0, input.wheelY)
     end)
 
+    it("retains platform-preferred scrolling beside normalized wheel motion", function()
+        input:beginFrame()
+        input:handleEvent({ kind = "mouseWheel", wheelX = 1.0, wheelY = -2.0, flipped = true })
+
+        assert.are.equal(1.0, input.wheelX)
+        assert.are.equal(-2.0, input.wheelY)
+        assert.are.equal(-1.0, input.wheelPreferredX)
+        assert.are.equal(2.0, input.wheelPreferredY)
+
+        input:beginFrame()
+        assert.are.equal(0.0, input.wheelPreferredX)
+        assert.are.equal(0.0, input.wheelPreferredY)
+    end)
+
     it("accumulates whole scroll notches beside the fractional pair", function()
         -- A menu stepping one item per notch reads these, so a trackpad that
         -- reports a tenth of a notch per event steps once rather than ten

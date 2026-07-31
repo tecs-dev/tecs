@@ -64,7 +64,8 @@ The plugin emits one bubbling [`Event`](tealdoc:tecs.ui.Event) at entity
 addresses. Mouse and touch identities capture independently; releasing over a
 captured target emits `"click"` and then `"activate"`, while draggable targets
 emit semantic drag events. Tab and Shift-Tab traverse visible focusable
-controls, and Return or Space emits `"activate"` at the focused control.
+controls and repeat while held, and Return or Space emits `"activate"` at the
+focused control.
 Programmatic focus, focus reveal, and modal focus scopes use the same state. A
 `"wheel"` event begins at the deepest viewport under the pointer; setting
 `event.consumed = true` prevents both ancestor delivery and default scrolling.
@@ -394,9 +395,12 @@ local interface InputReader
     mouseY: number
     wheelX: number
     wheelY: number
+    wheelPreferredX: number
+    wheelPreferredY: number
     canRead: function(self: InputReader, layer?: any): boolean
     mousePressed: function(self: InputReader, button: string | integer, layer?: any): boolean
     mouseReleased: function(self: InputReader, button: string | integer, layer?: any): boolean
+    keyDown: function(self: InputReader, key: string | integer, layer?: any): boolean
     keyPressed: function(self: InputReader, key: string | integer, layer?: any): boolean
     modifierDown: function(self: InputReader, name: string, layer?: any): boolean
     touches: function(self: InputReader, layer?: any): {TouchReader}
@@ -688,6 +692,9 @@ local record Install
     layer: any
     wheelStep: number
     dragThreshold: number
+    tabRepeating: boolean
+    tabRepeated: boolean
+    tabRepeatElapsed: number
     geometryDirty: boolean
     hasWorldRoots: boolean
     hasCameraRoots: boolean
@@ -710,6 +717,8 @@ local installs <const>: {World: Install} = setmetatable(
     {} as {World: Install}, {__mode = "k"} as metatable<{World: Install}>
 )
 local noTouches <const>: {TouchReader} = {}
+local TAB_REPEAT_DELAY <const> = 0.4
+local TAB_REPEAT_INTERVAL <const> = 0.075
 
 local function unit(value: any, output: any)
     local target = output as {string: any}
@@ -1156,6 +1165,9 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             layer = layer,
             wheelStep = wheelStep,
             dragThreshold = dragThreshold,
+            tabRepeating = false,
+            tabRepeated = false,
+            tabRepeatElapsed = 0,
             geometryDirty = true,
             hasWorldRoots = false,
             hasCameraRoots = false,
@@ -2647,7 +2659,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             world:addSystem({
                 name = "tecs.UiInput",
                 phase = ecs.phases.PreUpdate,
-                run = function()
+                run = function(dt: number)
                     local input = install.input
                     while
                         #install.focusScopes > 0
@@ -2757,10 +2769,18 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                     end
 
                     local x, y = mouse.x, mouse.y
-                    if canRead and (input.wheelX ~= 0 or input.wheelY ~= 0) then
+                    local preferredWheelX = input.wheelPreferredX
+                    local preferredWheelY = input.wheelPreferredY
+                    if preferredWheelX == nil then
+                        preferredWheelX = input.wheelX
+                    end
+                    if preferredWheelY == nil then
+                        preferredWheelY = input.wheelY
+                    end
+                    if canRead and (preferredWheelX ~= 0 or preferredWheelY ~= 0) then
                         local target = targetAt(install.scrollHits, install.scrollHitCount, x, y, true)
                         if target ~= nil then
-                            local wheelX, wheelY = input.wheelX, input.wheelY
+                            local wheelX, wheelY = preferredWheelX, preferredWheelY
                             if input:modifierDown("shift", install.layer) and wheelX == 0 then
                                 wheelX, wheelY = wheelY, 0
                             end
@@ -2773,8 +2793,25 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                         end
                     end
 
-                    if canRead and input:keyPressed("tab", install.layer) then
+                    local tabPressed = canRead and input:keyPressed("tab", install.layer)
+                    local tabDown = canRead and input:keyDown("tab", install.layer)
+                    if tabPressed then
                         moveFocus(input:modifierDown("shift", install.layer))
+                        install.tabRepeating = true
+                        install.tabRepeated = false
+                        install.tabRepeatElapsed = 0
+                    elseif not tabDown then
+                        install.tabRepeating = false
+                        install.tabRepeated = false
+                        install.tabRepeatElapsed = 0
+                    elseif install.tabRepeating then
+                        local threshold = install.tabRepeated and TAB_REPEAT_INTERVAL or TAB_REPEAT_DELAY
+                        install.tabRepeatElapsed = install.tabRepeatElapsed + dt
+                        if install.tabRepeatElapsed >= threshold then
+                            install.tabRepeatElapsed = install.tabRepeatElapsed - threshold
+                            install.tabRepeated = true
+                            moveFocus(input:modifierDown("shift", install.layer))
+                        end
                     end
                     if
                         canRead

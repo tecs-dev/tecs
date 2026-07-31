@@ -76,6 +76,7 @@ local function fakeInput()
         pressed = {},
         released = {},
         keys = {},
+        down = {},
         modifiers = {},
         touchList = {},
         readable = true,
@@ -92,6 +93,9 @@ local function fakeInput()
     function input:keyPressed(key)
         return self.keys[key] == true
     end
+    function input:keyDown(key)
+        return self.down[key] == true
+    end
     function input:modifierDown(name)
         return self.modifiers[name] == true
     end
@@ -100,6 +104,7 @@ local function fakeInput()
     end
     function input:clear()
         self.wheelX, self.wheelY = 0, 0
+        self.wheelPreferredX, self.wheelPreferredY = nil, nil
         self.pressed, self.released = {}, {}
         self.keys, self.modifiers = {}, {}
     end
@@ -478,6 +483,25 @@ describe("tecs.ui", function()
         assert.are.equal(10, world:get(outer, ui.Scroll).y)
     end)
 
+    it("uses the platform-preferred wheel direction for scrolling", function()
+        local renderer = fakeRenderer()
+        local input = fakeInput()
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer, input = input, wheelStep = 10 }))
+
+        local viewport = world:spawn(ui.Style({ width = 100, height = 60 }), ui.Root("screen", 100, 60, 1), ui.Scroll())
+        world:spawn(ui.Style({ width = 100, height = 180 }), RelativeTransform(), ChildOf(viewport))
+        world:update(1 / 60)
+
+        input.mouseX, input.mouseY = 20, 20
+        input.wheelY = 1
+        input.wheelPreferredY = -1
+        input.wheelPreferredX = 0
+        world:update(1 / 60)
+
+        assert.are.equal(10, world:get(viewport, ui.Scroll).y)
+    end)
+
     it("tracks negative content, clamps offsets, and persists only offsets", function()
         local renderer = fakeRenderer()
         local world = tecs.ecs.newWorld()
@@ -584,6 +608,44 @@ describe("tecs.ui", function()
         world:update(1 / 60)
         assert.is_true(world:get(first, ui.InteractionState).focused)
         assert.is_false(world:get(second, ui.InteractionState).focused)
+    end)
+
+    it("repeats focus traversal while Tab remains held", function()
+        local renderer = fakeRenderer()
+        local input = fakeInput()
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer, input = input }))
+
+        local rootEntity =
+            world:spawn(ui.Style({ width = 120, height = 40, flexDirection = "row" }), ui.Root("screen", 120, 40, 1))
+        local controls = {}
+        for index = 1, 3 do
+            controls[index] = world:spawn(
+                ui.Style({ width = 40, height = 30 }),
+                ui.Interaction(),
+                RelativeTransform(),
+                ChildOf(rootEntity)
+            )
+        end
+
+        world:update(1 / 60)
+        input.keys.tab = true
+        input.down.tab = true
+        world:update(1 / 60)
+        assert.are.equal(controls[1], ui.focused(world))
+
+        input:clear()
+        world:update(0.39)
+        assert.are.equal(controls[1], ui.focused(world))
+        world:update(0.02)
+        assert.are.equal(controls[2], ui.focused(world))
+        world:update(0.08)
+        assert.are.equal(controls[3], ui.focused(world))
+
+        input.down.tab = false
+        world:update(1 / 60)
+        world:update(1)
+        assert.are.equal(controls[3], ui.focused(world))
     end)
 
     it("supports programmatic focus, reveal, and nested focus scopes", function()

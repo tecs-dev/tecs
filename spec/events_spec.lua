@@ -229,8 +229,10 @@ describe("platform.events", function()
         -- Positive is away from the player and to the right, always.
         assert.are.equal(3.0, seen[1].wheelY)
         assert.are.equal(1.0, seen[1].wheelX)
+        assert.is_false(seen[1].flipped)
         assert.are.equal(-3.0, seen[2].wheelY, "a flagged pair means the opposite of what it reads as")
         assert.are.equal(-1.0, seen[2].wheelX, "and the horizontal axis flips with it")
+        assert.is_true(seen[2].flipped, "the preference remains available to scrolling interfaces")
     end)
 
     it("carries the whole notches the platform counted", function()
