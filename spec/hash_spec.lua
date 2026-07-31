@@ -93,6 +93,29 @@ describe("data.adler32", function()
         assert.are.equal(0x8454d48d, data.adler32(long))
     end)
 
+    it("continues over chunks without joining them", function()
+        local chunks = { "The quick ", "", "brown\0fox", string.rep("\255", 32) }
+        local checksum = data.adler32(chunks[1])
+        for index = 2, #chunks do
+            local before = checksum
+            checksum = data.adler32(chunks[index], checksum)
+            if chunks[index] == "" then
+                assert.are.equal(before, checksum)
+            end
+        end
+        assert.are.equal(data.adler32(table.concat(chunks)), checksum)
+    end)
+
+    it("rejects an invalid previous checksum", function()
+        for _, previous in ipairs({ -1, 0.5, 4294967296, 0 / 0 }) do
+            assert.has_error(function()
+                data.adler32("next", previous)
+            end, "tecs: adler32 previous checksum must be an unsigned 32-bit integer")
+        end
+        local boundary = data.adler32("", 4294967295)
+        assert.is_true(boundary >= 0 and boundary < 4294967296)
+    end)
+
     it("returns a value inside thirty-two bits", function()
         -- zlib returns a uLong, which is 64 bits here and arrives as cdata.
         -- A conversion that forgot that would hand back a boxed number that
@@ -135,5 +158,27 @@ describe("data.crc32", function()
         local checksum = data.crc32(string.rep("\255", 8192))
         assert.are.equal("number", type(checksum))
         assert.is_true(checksum >= 0 and checksum < 4294967296)
+    end)
+
+    it("continues over chunks without joining them", function()
+        local chunks = { "123", "", "45\0", "6789", string.rep("\255", 32) }
+        local checksum = data.crc32(chunks[1])
+        for index = 2, #chunks do
+            local before = checksum
+            checksum = data.crc32(chunks[index], checksum)
+            if chunks[index] == "" then
+                assert.are.equal(before, checksum)
+            end
+        end
+        assert.are.equal(data.crc32(table.concat(chunks)), checksum)
+    end)
+
+    it("rejects an invalid previous checksum", function()
+        for _, previous in ipairs({ -1, 0.5, 4294967296, 0 / 0 }) do
+            assert.has_error(function()
+                data.crc32("next", previous)
+            end, "tecs: crc32 previous checksum must be an unsigned 32-bit integer")
+        end
+        assert.are.equal(4294967295, data.crc32("", 4294967295))
     end)
 end)
