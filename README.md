@@ -379,6 +379,20 @@ _when_ it ran, not what it could see. A system that captured the application
 when the plugin registered it gets phase order, the fixed step, pause and state
 gating, and the guard, and reaches everything a callback did.
 
+### Timer callbacks stay out of Lua
+
+`tecs.platform.time` exposes SDL's realtime and monotonic clocks, calendar
+conversion, unit conversion, and blocking delays, but not `SDL_AddTimer`.
+SDL runs a timer callback on a separate thread, so entering the main LuaJIT
+state from it is undefined. Moving the callback through Rust and a queue would
+make it safe, but it would duplicate scheduling that a system already expresses
+in Lua.
+
+A real-time deadline compares `time.now()` in a system. Work tied to simulated
+time belongs in the sequence clock or the fixed-step pipeline. Both keep
+execution on the main state and retain phase order, pause behavior, and the
+application's crash guard, which an SDL timer callback would bypass.
+
 ### When the fixed step cannot keep up
 
 A frame hands the pipeline however long the last one took, and the fixed step
