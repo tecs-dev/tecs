@@ -11,7 +11,8 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local data = require("tecs").data
+local tecs = require("tecs")
+local data = tecs.data
 local cjson = require("cjson")
 
 describe("tecs.data", function()
@@ -68,6 +69,38 @@ describe("tecs.data", function()
         assert.are.equal("Zm9v", data.base64Encode("foo"))
         assert.are.equal("/wA=", data.base64Encode("\255\0"))
         assert.are.equal("\255\0", data.base64Decode("/wA="))
+    end)
+
+    it("consumes retained byte views without crossing through strings", function()
+        local source = tecs.io.newBuffer("before:payload:after")
+        local view = source:view(7, 7)
+        view.getString = function()
+            error("a byte transform copied its input")
+        end
+
+        source:setString("changed", 7)
+        source:release()
+
+        assert.are.equal("7061796c6f6164", data.hexEncode(view))
+        assert.are.equal("cGF5bG9hZA==", data.base64Encode(view))
+        assert.are.equal(data.fnv1a64("payload"), data.fnv1a64(view))
+        assert.are.equal(data.sha256("payload"), data.sha256(view))
+        assert.are.equal(data.adler32("payload"), data.adler32(view))
+        assert.are.equal(data.crc32("payload"), data.crc32(view))
+        assert.are.equal("payload", data.transcode(view, "UTF-8", "UTF-8"))
+
+        local hex = tecs.io.newBuffer("7061796c6f6164")
+        local base64 = tecs.io.newBuffer("cGF5bG9hZA==")
+        local hexView = hex:view()
+        local base64View = base64:view()
+        hex:release()
+        base64:release()
+        assert.are.equal("payload", data.hexDecode(hexView))
+        assert.are.equal("payload", data.base64Decode(base64View))
+
+        hexView:release()
+        base64View:release()
+        view:release()
     end)
 
     it("rejects non-canonical or malformed Base64 text", function()

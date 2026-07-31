@@ -44,6 +44,7 @@ end
 local OwnedBufferMT <const>: metatable<OwnedBuffer> = {__index = OwnedBuffer}
 local OwnedViewMT <const>: metatable<OwnedView> = {__index = OwnedView}
 local OwnedWriteRangeMT <const>: metatable<OwnedWriteRange> = {__index = OwnedWriteRange}
+local rawSetMetatable <const> = setmetatable as function(any, any): any
 
 local function integer(value: integer, what: string, level: integer): integer
     if type(value) ~= "number" or value ~= floor(value) or value < 0 or value > MAX_INTEGER then
@@ -172,20 +173,18 @@ function OwnedBuffer:view(offset?: integer, count?: integer): ByteView
     offset, count = range(self._length, offset, count, "io.Buffer", 2)
     local held <const> = self._allocation
     held.references = held.references + 1
-    local view <const> = setmetatable(
+    return rawSetMetatable(
         {_allocation = held, _offset = offset, _length = count, _released = false} as OwnedView, OwnedViewMT
-    )
-    return view
+    ) as ByteView
 end
 function OwnedBuffer:reserveRange(offset: integer, minimum: integer): WriteRange
     local pointer <const> = prepareWrite(self, offset, minimum)
-    local writeRange <const> = setmetatable(
+    return rawSetMetatable(
         {
             _buffer = self, _pointer = pointer, _offset = offset, _capacity = minimum, _released = false
         } as OwnedWriteRange,
         OwnedWriteRangeMT
-    )
-    return writeRange
+    ) as WriteRange
 end
 function OwnedBuffer:getFFIPointer(): loader.BytePointer
     open(self, 2)
@@ -230,13 +229,12 @@ function OwnedView:view(offset?: integer, count?: integer): ByteView
     end
     offset, count = range(self._length, offset, count, "io.ByteView", 2)
     self._allocation.references = self._allocation.references + 1
-    local view <const> = setmetatable(
+    return rawSetMetatable(
         {
             _allocation = self._allocation, _offset = self._offset + offset, _length = count, _released = false
         } as OwnedView,
         OwnedViewMT
-    )
-    return view
+    ) as ByteView
 end
 function OwnedView:isReleased(): boolean
     return self._released

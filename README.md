@@ -1507,14 +1507,16 @@ touches is resolved and then acted on in the same breath.
 `platform/content.tl` sits below it and its watcher sibling. It holds the roots
 the shader and material loaders read and the loaded-path set the watcher polls,
 so neither public child has to require the other. It is one backend call per
-function and nothing composed out of several, and on SDL each of those is the
+primitive and nothing composed out of several, and on SDL each of those is the
 obvious call: `SDL_GetPathInfo` behind `info`, `exists`, `isFile` and
-`isDirectory`, `SDL_GlobDirectory` behind `list` and `glob`, `SDL_LoadFile`
-behind `read`, then `createDirectory`, `remove`, `rename`, `copy`, `write`,
-`currentDirectory` and `userFolder`. No virtual filesystem and no invented
-path scheme, so a failure is the platform's failure and the name says which
-call to read about. Like the process half it initializes no subsystem and is
-more useful with no window than with one.
+`isDirectory`, Rust filesystem metadata behind `isSymlink`,
+`SDL_GlobDirectory` behind `list` and `glob`, `SDL_LoadFile` behind `read`,
+then `createDirectory`, `remove`, `rename`, `copy`, `write`, `append`,
+`currentDirectory` and `userFolder`. `lines` and `load` compose over the one
+watched whole-file read rather than opening a second path around it. No virtual
+filesystem and no invented path scheme, so a failure is the platform's failure
+and the name says which call to read about. Like the process half it initializes
+no subsystem and is more useful with no window than with one.
 
 `openWrite` and `openRead` are the pair that is not one call, and they are the
 exception the streaming body needed: a backend that can open a file is asked
@@ -1526,7 +1528,7 @@ seam and a seam that covered only _where_ content is would leave every read of a
 path under that root going to the host's own file API anyway. So the calls are
 `storagebackend`'s and what stays in this module is what a port should not have
 to write twice: the argument checks, the record of what has been opened, and the
-four questions that are one backend call answered differently.
+path predicates that answer one backend call in useful forms.
 
 Reading is one of those calls rather than something `assets` owns, and there is
 exactly one reader in the tree, because a second one would mean a file opened

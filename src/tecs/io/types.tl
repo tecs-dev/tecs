@@ -18,19 +18,75 @@ local type Closeable = coretypes.Closeable
 --- buffer's allocation, so the view keeps seeing the bytes it was created
 --- from. `getString` is the explicit copying boundary.
 local interface ByteView
+    --- Returns the retained range's byte length.
+    ---
+    --- @param self The open view to inspect.
+    --- @return Returns the number of readable bytes.
     length: function(self: ByteView): integer
+
+    --- Copies the retained range into a Lua string.
+    ---
+    --- @param self The open view to copy.
+    --- @return Returns a fresh binary string.
     getString: function(self: ByteView): string
+
+    --- Borrows the retained range's read-only address.
+    ---
+    --- LuaJIT FFI cannot enforce constness. Writing through a cast pointer is
+    --- unsafe and breaks the snapshot guarantee.
+    --- @param self The open view whose storage to borrow.
+    --- @return Returns a pointer valid until `release`.
     getFFIPointer: function(self: ByteView): loader.BytePointer
+
+    --- Retains a zero-copy subrange.
+    ---
+    --- @param self The open source view.
+    --- @param offset The caller supplies a zero-based offset or omits it for
+    ---     zero.
+    --- @param count The caller supplies a byte count or omits it for the
+    ---     remainder.
+    --- @return Returns a caller-owned view retaining the same allocation.
     view: function(self: ByteView, offset?: integer, count?: integer): ByteView
+
+    --- Returns whether the view has released its retained allocation.
+    ---
+    --- @param self The view to inspect.
+    --- @return Returns true after release.
     isReleased: function(self: ByteView): boolean
+
+    --- Releases the retained allocation.
+    ---
+    --- Repeated calls are safe. Every method except `isReleased` and
+    --- `release` raises afterwards.
+    --- @param self The view to release.
     release: function(self: ByteView)
 end
 
 --- An exclusive, zero-copy writable range reserved from a [`Buffer`](tealdoc:tecs.io.Buffer).
 local interface WriteRange
+    --- Borrows the reserved range's writable address.
+    ---
+    --- @param self The open range whose storage to borrow.
+    --- @return Returns a pointer valid until `commit` or `release`.
     getFFIPointer: function(self: WriteRange): loader.BytePointer
+
+    --- Returns the maximum byte count the native writer may fill.
+    ---
+    --- @param self The open range to inspect.
+    --- @return Returns the reserved byte capacity.
     capacity: function(self: WriteRange): integer
+
+    --- Commits bytes written through the borrowed pointer.
+    ---
+    --- The call releases the range. A gap before the committed bytes is
+    --- zero-filled.
+    --- @param self The open range to commit.
+    --- @param used The caller supplies the written count up to `capacity`.
     commit: function(self: WriteRange, used: integer)
+
+    --- Releases the range without changing the buffer's logical length.
+    ---
+    --- @param self The range to release.
     release: function(self: WriteRange)
 end
 
@@ -95,9 +151,23 @@ local interface Buffer
     setString: function(self: Buffer, bytes: string, offset?: integer)
 
     --- Returns a zero-copy immutable snapshot of a byte range.
+    ---
+    --- @param self The open buffer to retain.
+    --- @param offset The caller supplies a zero-based offset or omits it for
+    ---     zero.
+    --- @param count The caller supplies a byte count or omits it for the
+    ---     remainder.
+    --- @return Returns a caller-owned retained view.
     view: function(self: Buffer, offset?: integer, count?: integer): ByteView
 
     --- Reserves an exclusive range for a native writer without an intermediate string.
+    ---
+    --- The buffer detaches from retained views before exposing mutable
+    --- storage.
+    --- @param self The open buffer to reserve.
+    --- @param offset The caller supplies a zero-based write offset.
+    --- @param minimum The caller supplies the minimum writable capacity.
+    --- @return Returns a caller-owned exclusive range.
     reserveRange: function(self: Buffer, offset: integer, minimum: integer): WriteRange
 
     --- Borrows the address of the first byte.
@@ -194,6 +264,21 @@ local interface Writer is Closeable
     --- @return Returns the number of bytes accepted.
     --- @return Returns the destination's reason when the first return is nil.
     writeFrom: function(self: Writer, buffer: Buffer, offset?: integer, count?: integer): integer, string
+
+    --- Writes bytes directly from an immutable retained range.
+    ---
+    --- A successful call may accept fewer bytes than requested. The caller
+    --- repeats it with the returned count until the range is exhausted.
+    --- @param self The writer receiving the bytes.
+    --- @param view The caller supplies an open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView).
+    --- @param offset The caller supplies a zero-based source offset or omits
+    ---     it for zero.
+    --- @param count The caller supplies a byte count or omits it for the
+    ---     remainder.
+    --- @return Returns the number of bytes accepted.
+    --- @return Returns the destination's reason when the first return is nil.
+    writeView: function(self: Writer, view: ByteView, offset?: integer, count?: integer): integer, string
 
     --- Flushes buffered bytes without closing the destination.
     ---
@@ -356,6 +441,20 @@ local interface WritableStream is Stream
     ---     remainder.
     --- @return Returns a future carrying the bytes written.
     writeBuffer: function(self: WritableStream, buffer: Buffer, offset?: integer, count?: integer): Future<integer>
+
+    --- Replaces the destination with a retained immutable byte range.
+    ---
+    --- The operation retains its own view until the future settles, so the
+    --- caller may release `view` immediately after this call.
+    --- @param self The writable descriptor.
+    --- @param view The caller supplies an open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView).
+    --- @param offset The caller supplies a zero-based offset or omits it for
+    ---     zero.
+    --- @param count The caller supplies a byte count or omits it for the
+    ---     remainder.
+    --- @return Returns a future carrying the bytes written.
+    writeView: function(self: WritableStream, view: ByteView, offset?: integer, count?: integer): Future<integer>
 end
 
 --- Describes storage that supports both directions.

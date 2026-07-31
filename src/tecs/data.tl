@@ -48,6 +48,9 @@ assert(bytes == "\0sprite bytes")
 Base64 uses the padded RFC 4648 alphabet. Hexadecimal output is lowercase;
 the decoder accepts either ASCII letter case. Both decoders reject malformed
 or non-canonical input rather than recovering a different byte sequence.
+Every byte transform accepts a Lua string or an open
+[`ByteView`](tealdoc:tecs.io.ByteView). A view is read through its retained
+pointer without first becoming a Lua string.
 
 The sentinel and option names retain lua-cjson spelling because they belong to
 that library's compatibility surface.
@@ -155,10 +158,13 @@ local bit <const> = require("bit")
 local loader <const> = require("tecs.ffi.loader")
 local binding <const> = require("tecs.ffi.rust")
 local zlib <const> = require("tecs.ffi.zlib")
+local type ioTypes = require("tecs.io.types")
 local type TypedStore = require("tecs.data.Store")
 local transcode <const> = require("tecs.data.transcode")
 local type utf8Module = require("tecs.data.utf8")
 local storekeys <const> = require("tecs.internal.storekeys")
+local type ByteView = ioTypes.ByteView
+local type ByteInput = string | ByteView
 
 -- Implementation details: The parser and encoder are C, from `vendor/cjson`,
 -- and the build produces them twice: linked into the host, where
@@ -413,6 +419,9 @@ local record data is JSON
         listKeys: function(): {string: integer}
     end
 
+    --- `ByteInput` accepts either retained bytes or a Lua byte string.
+    type ByteInput = ByteInput
+
     --- Creates an independent typed store.
     ---
     --- @return Returns an empty store. The caller owns it and its values.
@@ -439,32 +448,36 @@ local record data is JSON
 
     --- Encodes bytes as lowercase hexadecimal text.
     ---
-    --- @param bytes The caller supplies arbitrary bytes, including NUL.
+    --- @param bytes The caller supplies a byte string or an open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView), including NUL.
     --- @return Returns two lowercase ASCII hex digits for every input byte.
-    hexEncode: function(bytes: string): string
+    hexEncode: function(bytes: ByteInput): string
 
     --- Decodes lowercase or uppercase hexadecimal text into bytes.
     ---
-    --- @param text The caller supplies an even number of ASCII hex digits.
+    --- @param text The caller supplies an even number of ASCII hex digits in
+    ---     a string or open [`ByteView`](tealdoc:tecs.io.ByteView).
     --- @return Returns the decoded bytes. Raises when `text` has an odd
     ---     length or contains a character outside the hexadecimal alphabet.
-    hexDecode: function(text: string): string
+    hexDecode: function(text: ByteInput): string
 
     --- Encodes bytes with the padded RFC 4648 Base64 alphabet.
     ---
-    --- @param bytes The caller supplies arbitrary bytes, including NUL.
+    --- @param bytes The caller supplies a byte string or an open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView), including NUL.
     --- @return Returns ASCII Base64 text. The result has no line breaks and
     ---     uses `=` padding when its length is not divisible by three.
-    base64Encode: function(bytes: string): string
+    base64Encode: function(bytes: ByteInput): string
 
     --- Decodes canonical padded RFC 4648 Base64 text into bytes.
     ---
-    --- @param text The caller supplies Base64 text in groups of four ASCII
+    --- @param text The caller supplies Base64 text in a string or open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView), in groups of four ASCII
     ---     characters. It must use standard `+` and `/` characters and
     ---     required `=` padding.
     --- @return Returns the decoded bytes. Raises when `text` has invalid
     ---     characters, malformed padding, or non-zero unused bits.
-    base64Decode: function(text: string): string
+    base64Decode: function(text: ByteInput): string
 
     --- Generates a random RFC 9562 UUID version 4.
     ---
@@ -493,14 +506,15 @@ local record data is JSON
     --- `"UTF-32"` names is platform iconv behavior, so use an explicit `LE` or
     --- `BE` suffix when a file format fixes it.
     ---
-    --- @param bytes A complete byte string in `fromEncoding`.
+    --- @param bytes A complete byte string or open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView) in `fromEncoding`.
     --- @param fromEncoding The source encoding name. It must be non-empty and
     ---     contain no NUL.
     --- @param toEncoding The target encoding name. It must be non-empty and
     ---     contain no NUL.
     --- @return Returns a fresh byte string in `toEncoding`, including any NUL
     ---     bytes the target representation requires.
-    transcode: function(bytes: string, fromEncoding: string, toEncoding: string): string
+    transcode: function(bytes: ByteInput, fromEncoding: string, toEncoding: string): string
 end
 
 function data.newStore(): TypedStore
@@ -510,12 +524,45 @@ end
 data.newKey = storekeys.newKey as function<T>(name?: string, forType?: T): data.Key<T>
 data.findKey = storekeys.findKey as function<T>(name: string): data.Key<T> | nil
 data.Key.listKeys = storekeys.listKeys
-data.transcode = transcode
+data.transcode = transcode as function(ByteInput, string, string): string
 
 local sbyte <const> = string.byte
 local schar <const> = string.char
 local ssub <const> = string.sub
 local concat <const> = table.concat
+
+local record ByteRange
+    pointer: loader.BytePointer
+    length: integer
+    owner: ByteInput
+end
+
+local function byteRange(value: ByteInput, what: string, level: integer): ByteRange
+    if type(value) == "string" then
+        local text <const> = value as string
+        return {
+            pointer = ffi.cast("uint8_t *", text) as loader.BytePointer,
+            length = #text,
+            owner = text,
+        }
+    end
+    local dynamic <const> = value as {string: any}
+    if
+        type(value) ~= "table"
+        or type(dynamic.length) ~= "function"
+        or type(dynamic.getFFIPointer) ~= "function"
+        or type(dynamic.isReleased) ~= "function"
+        or (dynamic.isReleased as function(any): boolean)(value)
+    then
+        error(("tecs: %s needs a byte string or open io.ByteView"):format(what), level)
+    end
+    local view <const> = value as ByteView
+    return {
+        pointer = view:getFFIPointer(),
+        length = view:length(),
+        owner = view,
+    }
+end
 
 local HEX <const> = "0123456789abcdef"
 local BASE64 <const> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -526,13 +573,15 @@ end
 
 --- Encodes bytes as lowercase hexadecimal text.
 ---
---- @param bytes The caller supplies arbitrary bytes, including NUL.
+--- @param bytes The caller supplies a byte string or open
+---     [`ByteView`](tealdoc:tecs.io.ByteView), including NUL.
 --- @return Returns two lowercase ASCII hex digits for every input byte.
-function data.hexEncode(bytes: string): string
+function data.hexEncode(bytes: ByteInput): string
+    local input <const> = byteRange(bytes, "hexEncode", 2)
     local output: {string} = {}
-    for index = 1, #bytes do
-        local byte <const> = sbyte(bytes, index)
-        output[index] = ssub(HEX, math.floor(byte / 16) + 1, math.floor(byte / 16) + 1)
+    for index = 0, input.length - 1 do
+        local byte <const> = input.pointer[index] as integer
+        output[index + 1] = ssub(HEX, math.floor(byte / 16) + 1, math.floor(byte / 16) + 1)
             .. ssub(HEX, byte % 16 + 1, byte % 16 + 1)
     end
     return concat(output)
@@ -553,18 +602,20 @@ end
 
 --- Decodes lowercase or uppercase hexadecimal text into bytes.
 ---
---- @param text The caller supplies an even number of ASCII hex digits.
+--- @param text The caller supplies an even number of ASCII hex digits in a
+---     byte string or open [`ByteView`](tealdoc:tecs.io.ByteView).
 --- @return Returns the decoded bytes. Raises when `text` has an odd length or
 ---     contains a character outside the hexadecimal alphabet.
-function data.hexDecode(text: string): string
-    if #text % 2 ~= 0 then
+function data.hexDecode(text: ByteInput): string
+    local input <const> = byteRange(text, "hexDecode", 2)
+    if input.length % 2 ~= 0 then
         error("tecs: hexadecimal text must contain an even number of digits", 2)
     end
     local output: {string} = {}
     local outputIndex = 1
-    for index = 1, #text, 2 do
-        local high <const> = hexValue(sbyte(text, index))
-        local low <const> = hexValue(sbyte(text, index + 1))
+    for index = 0, input.length - 1, 2 do
+        local high <const> = hexValue(input.pointer[index] as integer)
+        local low <const> = hexValue(input.pointer[index + 1] as integer)
         if high == nil or low == nil then
             error("tecs: hexadecimal text contains a non-hexadecimal character", 2)
         end
@@ -576,16 +627,24 @@ end
 
 --- Encodes bytes with the padded RFC 4648 Base64 alphabet.
 ---
---- @param bytes The caller supplies arbitrary bytes, including NUL.
+--- @param bytes The caller supplies a byte string or open
+---     [`ByteView`](tealdoc:tecs.io.ByteView), including NUL.
 --- @return Returns ASCII Base64 text. The result has no line breaks and uses
 ---     `=` padding when its length is not divisible by three.
-function data.base64Encode(bytes: string): string
+function data.base64Encode(bytes: ByteInput): string
+    local input <const> = byteRange(bytes, "base64Encode", 2)
     local output: {string} = {}
     local outputIndex = 1
-    for index = 1, #bytes, 3 do
-        local first <const> = sbyte(bytes, index)
-        local second = sbyte(bytes, index + 1)
-        local third = sbyte(bytes, index + 2)
+    for index = 0, input.length - 1, 3 do
+        local first <const> = input.pointer[index] as integer
+        local second: integer = nil
+        local third: integer = nil
+        if index + 1 < input.length then
+            second = input.pointer[index + 1] as integer
+        end
+        if index + 2 < input.length then
+            third = input.pointer[index + 2] as integer
+        end
         output[outputIndex] = ssub(BASE64, math.floor(first / 4) + 1, math.floor(first / 4) + 1)
         output[outputIndex + 1] = ssub(
             BASE64,
@@ -614,25 +673,27 @@ end
 
 --- Decodes canonical padded RFC 4648 Base64 text into bytes.
 ---
---- @param text The caller supplies Base64 text in groups of four ASCII
+--- @param text The caller supplies Base64 text in a byte string or open
+---     [`ByteView`](tealdoc:tecs.io.ByteView), in groups of four ASCII
 ---     characters. It must use standard `+` and `/` characters and required
 ---     `=` padding.
 --- @return Returns the decoded bytes. Raises when `text` has invalid
 ---     characters, malformed padding, or non-zero unused bits.
-function data.base64Decode(text: string): string
-    local length <const> = #text
+function data.base64Decode(text: ByteInput): string
+    local input <const> = byteRange(text, "base64Decode", 2)
+    local length <const> = input.length
     if length % 4 ~= 0 then
         error("tecs: Base64 text must contain groups of four characters", 2)
     end
 
     local output: {string} = {}
     local outputIndex = 1
-    for index = 1, length, 4 do
-        local first <const> = base64Value(sbyte(text, index))
-        local second <const> = base64Value(sbyte(text, index + 1))
-        local thirdByte <const> = sbyte(text, index + 2)
-        local fourthByte <const> = sbyte(text, index + 3)
-        local final <const> = index + 3 == length
+    for index = 0, length - 1, 4 do
+        local first <const> = base64Value(input.pointer[index] as integer)
+        local second <const> = base64Value(input.pointer[index + 1] as integer)
+        local thirdByte <const> = input.pointer[index + 2] as integer
+        local fourthByte <const> = input.pointer[index + 3] as integer
+        local final <const> = index + 4 == length
 
         if thirdByte == 61 then
             if not final or fourthByte ~= 61 or second % 16 ~= 0 then
@@ -748,7 +809,8 @@ end
 
 --- Inflates all of `bytes` under `windowBits`, which is what selects the
 --- wrapper. Returns the bytes, or nil and what went wrong.
-local function run(bytes: string, windowBits: integer, sizeHint?: integer): string, string
+local function run(bytes: ByteInput, windowBits: integer, sizeHint?: integer): string, string
+    local input <const> = byteRange(bytes, "inflate", 3)
     local capacity = sizeHint
     if capacity == nil or capacity < 1 then
         capacity = INITIAL_CAPACITY
@@ -763,10 +825,10 @@ local function run(bytes: string, windowBits: integer, sizeHint?: integer): stri
         return nil, describe(fields, status)
     end
 
-    -- The pointer does not keep the string alive, but `bytes` is a parameter
-    -- and stays reachable for as long as zlib is reading through it.
-    fields.next_in = ffi.cast("uint8_t *", bytes)
-    fields.avail_in = #bytes
+    -- The range retains its Lua string or view owner for as long as zlib reads
+    -- through the borrowed pointer.
+    fields.next_in = input.pointer
+    fields.avail_in = input.length
 
     local out = loader.newArray("uint8_t[?]", capacity)
     local produced = 0
@@ -822,7 +884,8 @@ end
 --- Deflates all of `bytes` under `windowBits`, returning the bytes or nil and
 --- the native failure. `deflateBound` guarantees one output buffer is enough,
 --- so encoding allocates once and never grows or copies.
-local function encode(bytes: string, windowBits: integer, level?: integer): string, string
+local function encode(bytes: ByteInput, windowBits: integer, level?: integer): string, string
+    local input <const> = byteRange(bytes, "deflate", 3)
     local stream <const> = loader.newStruct("z_stream")
     local fields <const> = stream as loader.CStruct
     local status = deflateInit2(
@@ -832,10 +895,10 @@ local function encode(bytes: string, windowBits: integer, level?: integer): stri
         return nil, describe(fields, status)
     end
 
-    local capacity = tonumber(deflateBound(stream, #bytes)) as integer
+    local capacity = tonumber(deflateBound(stream, input.length)) as integer
     local out <const> = loader.newArray("uint8_t[?]", capacity)
-    fields.next_in = ffi.cast("uint8_t *", bytes)
-    fields.avail_in = #bytes
+    fields.next_in = input.pointer
+    fields.avail_in = input.length
     fields.next_out = out
     fields.avail_out = capacity
 
@@ -852,9 +915,12 @@ end
 
 --- Compresses bytes as a raw RFC 1951 DEFLATE stream.
 ---
+--- @param bytes The caller supplies a byte string or open
+---     [`ByteView`](tealdoc:tecs.io.ByteView).
 --- @param level Minus one or omitted uses zlib's default. Zero stores without
 ---     compression; one through nine trade time for size.
-function data.deflateRaw(bytes: string, level?: integer): string
+--- @return Returns a fresh string containing the compressed bytes.
+function data.deflateRaw(bytes: ByteInput, level?: integer): string
     local result, reason = encode(bytes, -WINDOW_BITS, level)
     if result == nil then
         error(reason, 2)
@@ -865,9 +931,12 @@ end
 --- Compresses bytes as an RFC 1950 zlib stream, including its header and
 --- Adler-32 trailer.
 ---
+--- @param bytes The caller supplies a byte string or open
+---     [`ByteView`](tealdoc:tecs.io.ByteView).
 --- @param level Minus one or omitted uses zlib's default. Zero stores without
 ---     compression; one through nine trade time for size.
-function data.deflate(bytes: string, level?: integer): string
+--- @return Returns a fresh string containing the compressed bytes.
+function data.deflate(bytes: ByteInput, level?: integer): string
     local result, reason = encode(bytes, WINDOW_BITS, level)
     if result == nil then
         error(reason, 2)
@@ -881,13 +950,15 @@ end
 --- stream of something else until the codes stop making sense. A container that
 --- carries a length or a checksum of its own should check it.
 ---
---- @param bytes The whole stream, compressed. An empty string raises, since it is not one.
+--- @param bytes The caller supplies the whole compressed stream in a byte
+---     string or open [`ByteView`](tealdoc:tecs.io.ByteView). An empty input
+---     raises because it is not a stream.
 --- @param sizeHint The decompressed size, when the caller's format records it.
 ---     Only an allocation hint: a wrong one costs a copy, never an error.
 --- @return The decompressed bytes, which may be empty. Never nil: a stream that does not
 ---     decode raises.
-function data.inflateRaw(bytes: string, sizeHint?: integer): string
-    if #bytes == 0 then
+function data.inflateRaw(bytes: ByteInput, sizeHint?: integer): string
+    if byteRange(bytes, "inflateRaw", 2).length == 0 then
         error("tecs: an empty string is not a DEFLATE stream", 2)
     end
     local result, reason = run(bytes, -WINDOW_BITS, sizeHint)
@@ -909,14 +980,16 @@ end
 --- failure worth never returning. zlib stops and asks for the dictionary, and
 --- since there is nowhere to get one, the ask is the refusal.
 ---
---- @param bytes The whole stream, header and Adler-32 trailer included. An empty string
----     raises, since it is not one.
+--- @param bytes The caller supplies the whole stream, including its header
+---     and Adler-32 trailer, in a byte string or open
+---     [`ByteView`](tealdoc:tecs.io.ByteView). An empty input raises because
+---     it is not a stream.
 --- @param sizeHint The decompressed size, when the caller's format records it.
 ---     Only an allocation hint: a wrong one costs a copy, never an error.
 --- @return The decompressed bytes, which may be empty. Never nil: a bad header, a corrupt
 ---     block, a truncated stream and a trailer that disagrees all raise.
-function data.inflate(bytes: string, sizeHint?: integer): string
-    if #bytes == 0 then
+function data.inflate(bytes: ByteInput, sizeHint?: integer): string
+    if byteRange(bytes, "inflate", 2).length == 0 then
         error("tecs: an empty string is not a zlib stream", 2)
     end
     local result, reason = run(bytes, WINDOW_BITS, sizeHint)
@@ -947,8 +1020,10 @@ local BASIS <const> = bor(lshift(u64(0xcbf29ce4), 32), 0x84222325)
 
 -- The `_z` checksum forms accept `z_size_t`, so a string past 4 GB cannot wrap
 -- a 32-bit length. LuaJIT returns their `uLong` result as cdata.
-local adler32 <const> = zlib.C.adler32_z as function(seed: integer, bytes: string, length: integer): loader.CValue
-local crc32 <const> = zlib.C.crc32_z as function(seed: integer, bytes: string, length: integer): loader.CValue
+local adler32 <const> = zlib.C.adler32_z as function(
+    seed: integer, bytes: loader.CValue, length: integer
+): loader.CValue
+local crc32 <const> = zlib.C.crc32_z as function(seed: integer, bytes: loader.CValue, length: integer): loader.CValue
 local floor <const> = math.floor
 local MAX_U32 <const> = 4294967295
 
@@ -960,17 +1035,20 @@ local function checksumSeed(previous: integer, algorithm: string): integer
 end
 
 local sha256Text <const> = loader.newArray("char[65]")
-local sha256 <const> = R.tecsSha256 as function(bytes: string, length: integer, output: loader.CArray): boolean
+local sha256 <const> = R.tecsSha256 as function(bytes: loader.CValue, length: integer, output: loader.CArray): boolean
 
 --- FNV-1a over the bytes of `text`, 64-bit, as sixteen lowercase hex digits.
 ---
---- @param text Any string. NUL and bytes above 127 hash like any other.
+--- @param text The caller supplies a byte string or open
+---     [`ByteView`](tealdoc:tecs.io.ByteView). NUL and bytes above 127 hash
+---     like any other.
 --- @return Sixteen hex digits, high half first, so hashes sort as their values
 ---     do and two of them compare as strings.
-function data.fnv1a64(text: string): string
+function data.fnv1a64(text: ByteInput): string
+    local input <const> = byteRange(text, "fnv1a64", 2)
     local state = BASIS
-    for index = 1, #text do
-        state = bxor(state, sbyte(text, index)) * PRIME
+    for index = 0, input.length - 1 do
+        state = bxor(state, input.pointer[index] as integer) * PRIME
     end
     return tohex(state, 16)
 end
@@ -981,10 +1059,13 @@ end
 --- supplied either value, so artifact verification obtains the expected
 --- digest through a trusted channel or a signed manifest.
 ---
---- @param text Any string. NUL and bytes above 127 hash like any other.
+--- @param text The caller supplies a byte string or open
+---     [`ByteView`](tealdoc:tecs.io.ByteView). NUL and bytes above 127 hash
+---     like any other.
 --- @return Sixty-four lowercase hexadecimal digits, high byte first.
-function data.sha256(text: string): string
-    if not sha256(text, #text, sha256Text) then
+function data.sha256(text: ByteInput): string
+    local input <const> = byteRange(text, "sha256", 2)
+    if not sha256(input.pointer as loader.CValue, input.length, sha256Text) then
         error("SHA-256 output buffer is unavailable", 2)
     end
     return loader.toString(sha256Text as loader.CValue)
@@ -1003,16 +1084,19 @@ end
 --- return value back as `previous` to continue the checksum over another
 --- chunk. An empty chunk leaves `previous` unchanged.
 ---
---- @param text Any string. NUL and bytes above 127 contribute like any other.
+--- @param text The caller supplies a byte string or open
+---     [`ByteView`](tealdoc:tecs.io.ByteView). NUL and bytes above 127
+---     contribute like any other.
 --- @param previous The checksum returned after all preceding bytes. Omit it
 ---     for the first chunk. Raises unless it is an unsigned 32-bit integer.
 --- @return The checksum after `text`, as an exact Lua number in [0, 2^32).
-function data.adler32(text: string, previous?: integer): integer
+function data.adler32(text: ByteInput, previous?: integer): integer
+    local input <const> = byteRange(text, "adler32", 2)
     local seed = 1
     if previous ~= nil then
         seed = checksumSeed(previous, "adler32")
     end
-    return tonumber(adler32(seed, text, #text)) as integer
+    return tonumber(adler32(seed, input.pointer as loader.CValue, input.length)) as integer
 end
 
 --- Computes CRC-32 over the bytes of `text` as a number in [0, 2^32).
@@ -1023,16 +1107,19 @@ end
 --- Pass the return value back as `previous` to continue the checksum over
 --- another chunk. An empty chunk leaves `previous` unchanged.
 ---
---- @param text Any string. NUL and bytes above 127 contribute like any other.
+--- @param text The caller supplies a byte string or open
+---     [`ByteView`](tealdoc:tecs.io.ByteView). NUL and bytes above 127
+---     contribute like any other.
 --- @param previous The checksum returned after all preceding bytes. Omit it
 ---     for the first chunk. Raises unless it is an unsigned 32-bit integer.
 --- @return The checksum after `text`, as an exact Lua number in [0, 2^32).
-function data.crc32(text: string, previous?: integer): integer
+function data.crc32(text: ByteInput, previous?: integer): integer
+    local input <const> = byteRange(text, "crc32", 2)
     local seed = 0
     if previous ~= nil then
         seed = checksumSeed(previous, "crc32")
     end
-    return tonumber(crc32(seed, text, #text)) as integer
+    return tonumber(crc32(seed, input.pointer as loader.CValue, input.length)) as integer
 end
 
 -- Names adopted from lua-cjson. Listing them prevents upstream additions from

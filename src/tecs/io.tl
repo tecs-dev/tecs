@@ -27,6 +27,10 @@ debug server lives under `tecs.io.mcp`.
 Hot TCP loops can reuse a `Buffer`. `TCPSocket:readInto` lets the native
 socket fill its FFI allocation directly, and `TCPSocket:writeFrom` queues a
 buffer range without constructing an intermediate Lua string.
+`Buffer:view` retains an immutable zero-copy snapshot. `writeView` on sockets,
+writers, and writable streams consumes that retained range directly, while
+`newViewStream` gives it replayable stream behavior without copying payload
+bytes.
 
 Resolution and client connection return asynchronous
 [`Future`](tealdoc:tecs.Future) values. An
@@ -179,6 +183,16 @@ local record binaryIO
     --- @param contentType The caller supplies optional media type metadata.
     --- @return Returns a readable and writable stream.
     newBufferStream: function(buffer: IOBuffer, contentType?: string): types.ReadWriteStream
+
+    --- Creates a replayable read-only stream retaining a byte view.
+    ---
+    --- The stream retains its own view, so the caller may release `view`
+    --- immediately after construction. Closing the stream releases its
+    --- retained range after already-open readers release theirs.
+    --- @param view The caller supplies an open immutable byte view.
+    --- @param contentType The caller supplies optional media type metadata.
+    --- @return Returns a readable stream.
+    newViewStream: function(view: types.ByteView, contentType?: string): types.ReadableStream
 
     --- Creates a replayable read-only stream over borrowed FFI bytes.
     ---
@@ -516,6 +530,7 @@ binaryIO.newBuffer = stream.newBuffer
 binaryIO.newEmptyStream = stream.newEmptyStream
 binaryIO.newStringStream = stream.newStringStream
 binaryIO.newBufferStream = stream.newBufferStream
+binaryIO.newViewStream = stream.newViewStream
 binaryIO.newByteStream = stream.newByteStream
 binaryIO.newFileStream = stream.newFileStream
 binaryIO.newHandleStream = stream.newHandleStream
