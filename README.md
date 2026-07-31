@@ -1410,6 +1410,11 @@ to do one thing. Names are qualified by what they act on, because a bare `text`,
 `data`, `clear`, `run` or `update` means nothing on a module that does all of
 it.
 
+The process sandbox is reported separately from the target. The same Linux or
+macOS build can run without one or inside Flatpak, Snap, an unknown container,
+or the macOS app sandbox, and those environments change filesystem and child
+process expectations without changing what executable was built.
+
 Standalone sensor handles sit under `tecs.input` instead, beside the pads and
 the keyboard, because a game asking what a device can sense is asking one
 question. Standard cursor shapes stay on `Input`, because cursor choice is an

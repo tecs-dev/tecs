@@ -174,6 +174,7 @@ mcp.register({
             world = worldContext() or data.null,
             target = caps.target,
             architecture = caps.architecture,
+            sandbox = caps.sandbox,
             jit = caps.jit,
             dynamicLibraries = caps.dynamicLibraries,
             hotReload = caps.hotReload,

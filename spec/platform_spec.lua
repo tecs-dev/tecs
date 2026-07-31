@@ -57,6 +57,18 @@ describe("platform.capabilities", function()
         assert.is_true(caps.cores >= 1)
     end)
 
+    it("reports the sandbox SDL detects for this process", function()
+        local sandboxes = {
+            [tonumber(sdl.C.SDL_SANDBOX_NONE)] = "none",
+            [tonumber(sdl.C.SDL_SANDBOX_UNKNOWN_CONTAINER)] = "unknownContainer",
+            [tonumber(sdl.C.SDL_SANDBOX_FLATPAK)] = "flatpak",
+            [tonumber(sdl.C.SDL_SANDBOX_SNAP)] = "snap",
+            [tonumber(sdl.C.SDL_SANDBOX_MACOS)] = "macOS",
+        }
+        local detected = tonumber(sdl.C.SDL_GetSandbox())
+        assert.are.equal(sandboxes[detected] or "unknownContainer", platformOS.capabilities().sandbox)
+    end)
+
     it("requires the FFI and treats the JIT as separate", function()
         local caps = platformOS.capabilities()
         -- The engine has no path that avoids the FFI, so a build without it
