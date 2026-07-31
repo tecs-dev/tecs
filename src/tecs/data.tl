@@ -1,5 +1,5 @@
 --[=[
-Typed stores, JSON, DEFLATE, UUIDs, hashes, and checksums.
+Typed stores, JSON, DEFLATE, text transcoding, UUIDs, hashes, and checksums.
 
 ## JSON
 
@@ -56,6 +56,19 @@ hint may cost a copy but does not weaken validation.
 Inflation raises on malformed, truncated, or dictionary-dependent streams.
 Treat zlib error text as a diagnostic, not a string-matching interface.
 
+## Text encodings
+
+Convert a complete byte string when an asset or protocol uses an encoding
+other than UTF-8:
+
+```teal
+local utf8 <const> = tecs.data.transcode(utf16Bytes, "UTF-16", "UTF-8")
+```
+
+The input and result are byte strings. Embedded NULs are ordinary bytes, so
+binary encodings such as UTF-16 and UTF-32 round-trip without truncation.
+Conversion raises for an unknown encoding name or malformed input.
+
 ## UUIDs
 
 Generate RFC 9562 identifiers without a central allocator:
@@ -104,6 +117,7 @@ local loader <const> = require("tecs.ffi.loader")
 local binding <const> = require("tecs.ffi.rust")
 local zlib <const> = require("tecs.ffi.zlib")
 local type TypedStore = require("tecs.data.Store")
+local transcode <const> = require("tecs.data.transcode")
 local storekeys <const> = require("tecs.internal.storekeys")
 
 -- Implementation details: The parser and encoder are C, from `vendor/cjson`,
@@ -392,6 +406,28 @@ local record data is JSON
     ---
     --- @return Returns a fresh UUID in canonical lowercase 8-4-4-4-12 form.
     uuid7: function(): string
+
+    --- Converts a complete byte string between character encodings.
+    ---
+    --- Encoding names use the platform iconv spelling, such as `"UTF-8"`,
+    --- `"UTF-16LE"` and `"ISO-8859-1"`; the names available beyond SDL's
+    --- Unicode encodings depend on the platform. UTF-8 and explicitly ordered
+    --- UTF-16 and UTF-32 input is validated strictly; other encodings use the
+    --- platform converter's substitution rules. Conversion raises for an
+    --- unsupported name, invalid Unicode input, or an incomplete final
+    --- sequence. The input and result are binary-safe Lua strings; neither
+    --- stops at an embedded NUL. Byte order for the unsuffixed `"UTF-16"` and
+    --- `"UTF-32"` names is platform iconv behavior, so use an explicit `LE` or
+    --- `BE` suffix when a file format fixes it.
+    ---
+    --- @param bytes A complete byte string in `fromEncoding`.
+    --- @param fromEncoding The source encoding name. It must be non-empty and
+    ---     contain no NUL.
+    --- @param toEncoding The target encoding name. It must be non-empty and
+    ---     contain no NUL.
+    --- @return Returns a fresh byte string in `toEncoding`, including any NUL
+    ---     bytes the target representation requires.
+    transcode: function(bytes: string, fromEncoding: string, toEncoding: string): string
 end
 
 function data.newStore(): TypedStore
@@ -401,6 +437,7 @@ end
 data.newKey = storekeys.newKey as function<T>(name?: string, forType?: T): TypedStore.Key<T>
 data.findKey = storekeys.findKey
 data.listKeys = storekeys.listKeys
+data.transcode = transcode
 
 local C <const> = zlib.C
 local K <const> = zlib.K
