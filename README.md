@@ -1304,9 +1304,10 @@ on a frame that could pay for it. The host times the hook and says so past
 Staging again replaces what was staged: there is one checkpoint, not a queue.
 Staging once and backgrounding twice writes once, on the argument the host
 deduplicates backgroundings with, which is that the second write is the one that
-gets interrupted and it had nothing new to say. The write goes through a
-neighboring file and a rename, so what is on disk is either the previous
-checkpoint or this one and never half of either. `app:readCheckpoint()` is the
+gets interrupted and it had nothing new to say. The write uses the storage
+backend's atomic durable commit, so what is on disk is either the previous
+checkpoint or this one and never half of either, and success confirms the
+platform's durable flush contract. `app:readCheckpoint()` is the
 other half, read while building the world; nil covers a first run, a game that
 staged nothing and a file the player deleted, and none of those is an error.
 `config.checkpoint` names the file, and staging without one raises rather than
@@ -1502,7 +1503,7 @@ primitive and nothing composed out of several, and on SDL each of those is the
 obvious call: `SDL_GetPathInfo` behind `info`, `exists`, `isFile` and
 `isDirectory`, Rust filesystem metadata behind `isSymlink`,
 `SDL_GlobDirectory` behind `list` and `glob`, `SDL_LoadFile` behind `read`,
-then `createDirectory`, `remove`, `rename`, `copy`, `write`, `append`,
+then `createDirectory`, `remove`, `rename`, `copy`, `write`, `writeAtomic`, `append`,
 `currentDirectory` and `userFolder`. `lines` and `load` compose over the one
 watched whole-file read rather than opening a second path around it. No virtual
 filesystem and no invented path scheme, so a failure is the platform's failure
@@ -1513,6 +1514,30 @@ no subsystem and is more useful with no window than with one.
 exception the streaming body needed: a backend that can open a file is asked
 to, and one that cannot is buffered over, so a download that ends in a file and
 an upload read out of one both work whatever a port supplied.
+
+`writeAtomic` is the operation ordinary `write` deliberately is not. The SDL
+filesystem backend creates an exclusive neighboring temporary file, writes and
+durably synchronizes it, atomically replaces the destination, then synchronizes
+the parent directory on systems that expose that operation. A failure before
+replacement leaves the destination alone and removes the temporary. A failure
+after replacement reports that the new file is complete and visible but its
+directory entry was not confirmed durable. Apple platforms request
+`F_FULLFSYNC` and fall back to `fsync` where a filesystem does not support it,
+Windows requests a write-through replacement, and Unix
+filesystems synchronize the containing directory. This is a storage capability,
+not a composition: a console backend may map it to its own transaction, and a
+backend with no equivalent reports unsupported rather than quietly falling back
+to `write` plus `rename` and claiming a guarantee it cannot make.
+
+`openRead` returns a `SeekableReader`, not merely the basic directional
+`Reader`. Files have an addressable byte space even when a platform's storage
+API can only return their complete contents, so a backend with a real seek
+opens one and a backend without it gets an in-memory cursor over its required
+whole-file `read`. Seeking therefore stays off `Reader`: a transform, socket,
+or pipe cannot implement it honestly, while the common file constructor needs
+no parallel random-access variant. The specialized result also types
+`readInto`; direct buffer reads are a file capability rather than a dynamic
+transfer optimization once the caller has asked for this kind of reader.
 
 Nothing here reaches the operating system, because `adapter` names storage as a
 seam and a seam that covered only _where_ content is would leave every read of a
@@ -1649,27 +1674,61 @@ tracked, `isPending` answers false, and the parked cursor resumes on the next
 fixed step; a game that wants the wait to mean something re-issues the work and
 re-tracks it under the same key.
 
+## One process-wide pump
+
+Asynchronous work crosses back into Lua in more than one subsystem. Asset
+workers answer, children exit, native dialogs complete, DNS and connections
+finish, HTTP clients receive events, and the content watcher reaches its next
+scan. They all have the same constraint: Lua listeners may settle only on the
+Lua thread, and no game system is obliged to ask whether unrelated work has
+finished.
+
+`tecs.runtime.poll` is that boundary for both an `Application` and a headless
+program. It is a root module rather than an extension of `tecs.io`: asset
+decoding and child processes are not I/O operations owned by that module, and
+changing `tecs.io.poll` would make its existing `pending` and `shutdown`
+contracts silently describe only part of what its pump advances. It is not an
+`Application` method because a command-line tool has no application, and it is
+not a `Future` scheduler because `Future` describes one value and the source
+that can advance it rather than owning a process.
+
+The implementation is a registry below every participating module. A facility
+registers while it has an active service or pending work and unregisters when
+that ends. Numeric stages preserve the application order independently of load
+order. The registry snapshots its current turn, so a listener may open or
+close another facility without turning one twice or skipping a neighbor.
+Nothing requires a participant in the other direction, and merely reading or
+polling `tecs.runtime` loads no native service.
+
+There is deliberately no process-wide `pending`. An installed watcher and an
+idle reusable HTTP client are active but have no finite work to count, so one
+number could not mean both "unsettled futures" and "safe to exit". The same
+ownership line rules out `runtime.shutdown`: the pump borrows each facility's
+nonblocking progress operation, while applications and headless tools retain
+the resource-specific teardown order. MCP remains application-owned because
+it reads a particular world, audio remains mixer-owned, and synchronous
+streams remain synchronous.
+
 ## Asking the network for something
 
 Every HTTP request is a future, which is the easy half. The two questions worth
 recording are who drives the transfer and what a body is.
 
-**A game never pumps.** Reqwest runs transfers on a bounded Tokio runtime, but
-their results still have to enter Lua on the SDL thread. That is engine work,
-and it is the same work
-`assets.update` and `proc.update` already do in the loop for the same reason: a
-decode that finished has finished, a child that exited has exited, a transfer
-that completed has completed, and nothing else in a frame is obliged to ask.
-`assets` and `proc` are module singletons, while a game may construct several
-HTTP clients. The clients therefore register with the loop: building one puts it on the
-private application registry turns, `close` takes it off, and the
-application turns whatever is on the list. Native workers send bounded chunk,
-completion and error messages to a queue; the frame pump drains it without any
-Rust callback entering Lua. The list holds its clients strongly, so a request whose
-future is the only thing a game kept still lands; the price is that `close` is
-what ends a client rather than losing the last reference to it, and the
-alternative -- a weak list -- is a fire-and-forget request that stops moving
-whenever a collection happens to run.
+**A game never pumps individual facilities.** Reqwest runs transfers on a
+bounded Tokio runtime, but their results still have to enter Lua on the SDL
+thread. That is engine work, and it is the same work asset and process updates
+already do in the loop for the same reason: a decode that finished has
+finished, a child that exited has exited, a transfer that completed has
+completed, and nothing else in a frame is obliged to ask. `assets` and `proc`
+are module singletons, while a game may construct several HTTP clients. The
+clients therefore keep a process-wide list: building one adds it, `close`
+takes it off, and `tecs.runtime.poll` turns whatever remains. Native workers
+send bounded chunk, completion and error messages to a queue; the frame pump
+drains it without any Rust callback entering Lua. The list holds its clients
+strongly, so a request whose future is the only thing a game kept still lands;
+the price is that `close` is what ends a client rather than losing the last
+reference to it, and the alternative -- a weak list -- is a fire-and-forget
+request that stops moving whenever a collection happens to run.
 
 **A body uses the same `tecs.io.Stream` as every other binary source and
 destination.** A request takes a string or `ReadableStream`, `into` takes a path

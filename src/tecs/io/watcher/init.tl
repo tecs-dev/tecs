@@ -13,10 +13,10 @@ end
 ```
 
 An [`Application`](tealdoc:tecs.Application) with `watch` in its configuration
-installs the watcher and calls `poll` once per host iteration, including while
-the game is suspended or handling a crash. Game systems, plugins, and update
-functions do not call `poll`. Only a headless program without an application
-owns the manual loop shown on `poll`.
+installs the watcher and calls `tecs.runtime.poll` once per host iteration,
+including while the game is suspended or handling a crash. Game systems,
+plugins, and update functions do not poll. A headless program without an
+application owns the manual loop shown on `poll`.
 
 The watcher scans only paths recorded by `tecs.io.files.read` and the asset
 loaders. It waits for a changed file's
@@ -46,7 +46,13 @@ local adapter <const> = require("tecs.platform.adapter")
 local content <const> = require("tecs.platform.content")
 local platformOS <const> = require("tecs.platform.os")
 local time <const> = require("tecs.platform.time")
+local runtime <const> = require("tecs.internal.runtime")
 local log <const> = require("tecs.log")
+
+local runtimePoll: function(): integer
+local function pollRuntime(): integer
+    return runtimePoll()
+end
 
 -- The name a developer filters on with `SDL_SetLogPriority`, so it is
 -- configuration rather than an identifier and does not follow this module if
@@ -188,6 +194,8 @@ function watcher.install(config?: watcher.Config)
     root = given.root or content.assetRoot()
     entries = {}
     running = true
+    runtime.unregister("watcher")
+    runtime.register("watcher", 60, pollRuntime)
     dispatched = 0
     lastPoll = time.now()
     watcher.scan()
@@ -205,6 +213,7 @@ end
 --- Registered handlers remain available for a later installation.
 function watcher.uninstall()
     running = false
+    runtime.unregister("watcher")
     entries = {}
 end
 
@@ -381,16 +390,16 @@ end
 
 --- Advances a manually driven headless watcher.
 ---
---- An [`Application`](tealdoc:tecs.Application) calls this automatically once
---- per host iteration, including while suspended or crashed. Game systems,
---- plugins, and update functions must not call it. A second call in the same
---- loop can distort `intervalSeconds` and the number of matching observations
---- counted by `Config.settle`.
+--- [`runtime.poll`](/modules/runtime/#tecs.runtime.poll) calls this while the
+--- watcher is installed. Game systems, plugins, and update functions must not
+--- call it. A second call in the same loop can distort `intervalSeconds` and
+--- the number of matching observations counted by `Config.settle`.
 ---
---- Only a headless program without an application calls this manually,
---- normally once per loop after `install`. The function returns immediately
---- until `intervalSeconds` has elapsed, then scans only content already
---- recorded by file or asset loading. It performs no sleeping.
+--- A headless program normally calls `tecs.runtime.poll` once per loop after
+--- `install`. Call this narrower operation when a test or tool deliberately
+--- drives only the watcher. It returns immediately until `intervalSeconds`
+--- has elapsed, then scans only content already recorded by file or asset
+--- loading. It performs no sleeping.
 ---
 --- @return Returns how many handlers ran during this call.
 function watcher.poll(): integer
@@ -404,5 +413,7 @@ function watcher.poll(): integer
     lastPoll = now
     return watcher.scan()
 end
+
+runtimePoll = watcher.poll
 
 return watcher

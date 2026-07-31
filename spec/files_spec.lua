@@ -13,7 +13,9 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local ffi = require("ffi")
 local sdl = require("tecs.ffi.sdl3")
+local tecsIO = require("tecs.io")
 local files = require("tecs.io.files")
+local buffer = require("tecs.io.buffer")
 local content = require("tecs.platform.content")
 local assets = require("tecs.assets")
 local workers = require("tecs.workers")
@@ -350,6 +352,40 @@ describe("io.files", function()
             assert.are.equal(blob, files.read(at("blob.bin")))
         end)
 
+        it("atomically creates and replaces complete binary contents", function()
+            local path = at("atomic.bin")
+            assert.is_true(files.writeAtomic(path, "first\0value"))
+            assert.are.equal("first\0value", files.read(path))
+
+            assert.is_true(files.writeAtomic(path, "short"))
+            assert.are.equal("short", files.read(path))
+        end)
+
+        it("borrows buffers and views without a string conversion", function()
+            local source = buffer.new("buffer contents")
+            local view = source:view(7)
+
+            assert.is_true(files.writeAtomic(at("buffer.bin"), source))
+            assert.are.equal("buffer contents", files.read(at("buffer.bin")))
+            assert.is_true(files.writeAtomic(at("view.bin"), view))
+            assert.are.equal("contents", files.read(at("view.bin")))
+
+            view:close()
+            source:close()
+        end)
+
+        it("leaves no temporary file when atomic replacement fails", function()
+            local destination = at("occupied")
+            assert.is_true(files.createDirectory(destination))
+            assert.is_true(files.write(destination .. "/kept", "original"))
+
+            local ok, reason = files.writeAtomic(destination, "replacement")
+            assert.is_false(ok)
+            assert.is_true(#reason > 0)
+            assert.are.equal("original", files.read(destination .. "/kept"))
+            assert.are.same({ "occupied", "occupied/kept" }, sorted(files.glob(temp)))
+        end)
+
         it("pairs with the read beside it", function()
             -- One pair in one module, and the record of what was opened kept
             -- with them, because that record is what `watch` polls.
@@ -539,6 +575,84 @@ describe("io.files", function()
             assert.are.equal("", reader:read(3))
             reader:close()
         end)
+
+        it("reports and repositions the file cursor from every origin", function()
+            assert.is_true(files.write(at("seek.bin"), "0123456789"))
+            local reader = assert(files.openRead(at("seek.bin")))
+
+            assert.are.equal(10, reader:size())
+            assert.are.equal(0, reader:tell())
+            assert.are.equal(4, reader:seek("start", 4))
+            assert.are.equal("45", reader:read(2))
+            assert.are.equal(4, reader:seek("current", -2))
+            assert.are.equal("456", reader:read(3))
+            assert.are.equal(8, reader:seek("end", -2))
+            assert.are.equal("89", reader:read(8))
+            assert.are.equal(10, reader:tell())
+
+            reader:close()
+        end)
+
+        it("allows the EOF position and rejects positions outside the file", function()
+            assert.is_true(files.write(at("bounds.bin"), "abcd"))
+            local reader = assert(files.openRead(at("bounds.bin")))
+
+            assert.are.equal(4, reader:seek("end"))
+            assert.are.equal("", reader:read(1))
+            assert.are.equal(4, reader:tell())
+            local position, reason = reader:seek("start", 9)
+
+            assert.is_nil(position)
+            assert.is_string(reason)
+            assert.is_true(#reason > 0)
+            assert.are.equal(4, reader:tell())
+
+            position, reason = reader:seek("current", -5)
+            assert.is_nil(position)
+            assert.is_string(reason)
+            assert.are.equal(4, reader:tell())
+
+            reader:close()
+        end)
+
+        it("reads directly into a buffer at a caller-selected offset", function()
+            assert.is_true(files.write(at("direct.bin"), "abcdefgh"))
+            local reader = assert(files.openRead(at("direct.bin")))
+            local destination = tecsIO.newBuffer("prefix")
+
+            assert.are.equal(3, reader:seek("start", 3))
+            assert.are.equal(4, reader:readInto(destination, 4, 6))
+            assert.are.equal("prefixdefg", destination:getString())
+            assert.are.equal(7, reader:tell())
+
+            destination:close()
+            reader:close()
+        end)
+
+        it("raises for invalid seeks and closes idempotently", function()
+            assert.is_true(files.write(at("closed.bin"), "abc"))
+            local reader = assert(files.openRead(at("closed.bin")))
+
+            assert.has_error(function()
+                reader:seek("middle", 0)
+            end, "tecs: SeekableReader:seek origin must be 'start', 'current', or 'end'")
+            assert.has_error(function()
+                reader:seek("start", 0.5)
+            end, "tecs: SeekableReader:seek offset must be an integer")
+
+            reader:close()
+            reader:close()
+            local bytes, readReason = reader:read(1)
+            local size, sizeReason = reader:size()
+            local position, seekReason = reader:seek("start")
+
+            assert.is_nil(bytes)
+            assert.are.equal("the reader is closed", readReason)
+            assert.is_nil(size)
+            assert.are.equal("the reader is closed", sizeReason)
+            assert.is_nil(position)
+            assert.are.equal("the reader is closed", seekReason)
+        end)
     end)
 
     describe("streaming writes", function()
@@ -630,6 +744,7 @@ describe("io.files", function()
                 { "createDirectory", files.createDirectory },
                 { "remove", files.remove },
                 { "write", files.write },
+                { "writeAtomic", files.writeAtomic },
                 { "append", files.append },
                 { "read", files.read },
                 { "lines", files.lines },
@@ -656,6 +771,9 @@ describe("io.files", function()
             assert.has_error(function()
                 files.write(at("x"), nil)
             end, "tecs: io.files.write needs bytes to write")
+            assert.has_error(function()
+                files.writeAtomic(at("x"), nil)
+            end, "tecs: io.files.writeAtomic needs bytes to write")
             assert.has_error(function()
                 files.append(at("x"), nil)
             end, "tecs: io.files.append needs bytes to append")

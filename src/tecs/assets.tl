@@ -31,10 +31,11 @@ voices.
 
 ## Lifetime
 
-[`Application`](tealdoc:tecs.Application) installs, updates, and shuts down the process-wide worker.
-Headless code must call `install`, pump with `update` or `waitAll`, then call
-`shutdown`. Drain wanted results before shutdown because in-flight futures
-otherwise remain pending.
+[`Application`](tealdoc:tecs.Application) installs and shuts down the process-wide worker, and
+[`runtime.poll`](/modules/runtime/#tecs.runtime.poll) updates it. Headless code
+must call `install`, pump with `tecs.runtime.poll` or wait with `waitAll`, then
+call `shutdown`. Drain wanted results before shutdown because in-flight
+futures otherwise remain pending.
 
 Cancel a pending future to release one caller's interest. Release a ready
 payload when its consumer takes ownership. The final release frees the decoded
@@ -64,6 +65,12 @@ local loader <const> = require("tecs.ffi.loader")
 local workers <const> = require("tecs.workers")
 local content <const> = require("tecs.platform.content")
 local Future <const> = require("tecs.Future")
+local runtime <const> = require("tecs.internal.runtime")
+
+local runtimePoll: function(): integer
+local function pollRuntime(): integer
+    return runtimePoll()
+end
 
 local MIX <const> = sdl3mixer.C
 local RUST <const> = rust.C
@@ -337,6 +344,7 @@ function assets.install(luaPath?: string)
         source = DECODER,
         luaPath = luaPath or package.path,
     })
+    runtime.register("assets", 10, pollRuntime)
 end
 
 function assets.installed(): boolean
@@ -751,6 +759,8 @@ function assets.update(): integer
     return pump:poll()
 end
 
+runtimePoll = assets.update
+
 --- Returns the number of loads still waiting on the worker.
 ---
 --- @return Every load in flight in this process, not one caller's. A load every
@@ -794,6 +804,7 @@ function assets.shutdown()
     end
     worker:stop()
     worker = nil
+    runtime.unregister("assets")
     pending = {}
     byFuture = {}
     imagesInFlight = {}

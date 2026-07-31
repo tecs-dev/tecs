@@ -19,7 +19,7 @@ tecs.io.http.newClient({userAgent = "mygame/1.0"})
     end)
 ```
 
-An application turns every open client once per iteration, so requests
+The process runtime turns every open client once per iteration, so requests
 advance without game code pumping them.
 
 An HTTP error status still produces a ready response. A failed future means
@@ -27,8 +27,8 @@ that DNS, connection, TLS, timeout, or streaming produced no response.
 
 Call `Client:close` when you no longer need its connection pool. Losing the
 last Lua reference does not cancel its requests. A headless tool calls
-`Client:pump`; [`Application`](tealdoc:tecs.Application) pumps the private
-client registry once per frame.
+[`tecs.runtime.poll`](/modules/runtime/#tecs.runtime.poll);
+[`Application`](tealdoc:tecs.Application) calls it once per frame.
 ]=]
 
 -- Implementation details:

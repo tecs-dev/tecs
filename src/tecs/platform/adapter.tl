@@ -193,7 +193,9 @@ function adapter.install(platform: adapter.Platform)
     -- calls these without checking, so a missing operation would surface as
     -- whichever file the game happened to open first rather than here. The two
     -- that are left out are `currentDirectory` and `userFolder`, which have no
-    -- answer on a target that is not a desktop and are documented as absent.
+    -- answer on a target that is not a desktop and are documented as absent,
+    -- and `writeAtomic`, whose durability contract cannot be synthesized from
+    -- the required `write` and `rename` operations.
     if platform.storage ~= nil then
         for _, operation in ipairs({
             "read",

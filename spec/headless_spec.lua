@@ -119,6 +119,7 @@ describe("tecs headless", function()
                     "tecs.assets", "tecs.physics", "tecs.io.mcp",
                     "tecs.gpu.Device", "tecs.ffi.sdl3",
                     "tecs.data", "tecs.input", "tecs.math", "tecs.math.vec2", "tecs.regex",
+                    "tecs.runtime", "tecs.internal.runtime",
                     "tecs.platform.events",
                     "tecs.platform.os",
                     "tecs.platform.time", "tecs.platform.window",
@@ -162,6 +163,30 @@ describe("tecs headless", function()
                 false
             )
             assert.are.equal("table true none\n", output)
+        end)
+
+        it("polls the runtime without loading any facility", function()
+            local output = run(
+                [[
+                local tecs = require("tecs")
+                local settled = tecs.runtime.poll()
+                local facilities = {
+                    "tecs.assets", "tecs.io", "tecs.io.http",
+                    "tecs.io.watcher", "tecs.platform.os",
+                }
+                local loaded = {}
+                for _, name in ipairs(facilities) do
+                    if package.loaded[name] ~= nil then
+                        loaded[#loaded + 1] = name
+                    end
+                end
+                print(("%d %s"):format(
+                    settled,
+                    #loaded == 0 and "none" or table.concat(loaded, " ")))
+            ]],
+                false
+            )
+            assert.are.equal("0 none\n", output)
         end)
 
         -- The same property one level down, which is where it stops being
