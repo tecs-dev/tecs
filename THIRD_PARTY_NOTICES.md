@@ -151,12 +151,12 @@ Vulkan headers (Apache-2.0).
 
 The static native archive includes `clap` for CLI parsing and `clap_complete`
 for shell completion generation, `image` for PNG and JPEG decoding and PNG
-encoding, `reqwest` with Rustls for HTTP, `rmcp` for the official MCP protocol
-and Streamable HTTP server, `rapier2d` for physics, and `regex` for compiled
-regular expressions. It also owns the host lifecycle, worker channels, logging,
-dialogs, Lua module registration, LuaJIT's machine-code arena, and the
-single-file payload loader. SDL still owns the application loop and LuaJIT
-still owns game execution.
+encoding, `resvg` for static SVG rasterization, `reqwest` with Rustls for HTTP,
+`rmcp` for the official MCP protocol and Streamable HTTP server, `rapier2d` for
+physics, and `regex` for compiled regular expressions. It also owns the host
+lifecycle, worker channels, logging, dialogs, Lua module registration, LuaJIT's
+machine-code arena, and the single-file payload loader. SDL still owns the
+application loop and LuaJIT still owns game execution.
 
 The exact versions and declared SPDX expressions are pinned in
 the root `Cargo.lock` and Cargo metadata. The graph is permissive: MIT,
@@ -171,48 +171,56 @@ The complete Cargo package inventory is below. It is generated from the lock
 file as part of the notice audit; target-specific entries are named because a
 release for that target compiles them:
 
-`adler2`, `aho-corasick`, `allocator-api2`, `anstyle`, `approx`, `arrayvec`,
+`adler2`, `aho-corasick`, `allocator-api2`, `anstyle`, `approx`, `arrayref`,
+`arrayvec`,
 `async-compression`, `atomic-waker`, `autocfg`, `base64`, `bincode`,
 `bitflags`, `bumpalo`, `bytemuck`, `byteorder-lite`, `bytes`, `cc`, `cfg-if`,
 `clap`, `clap_builder`, `clap_complete`, `clap_derive`, `clap_lex`, `combine`,
 `compression-codecs`, `compression-core`, `core-foundation`,
-`core-foundation-sys`, `crc32fast`, `crossbeam-deque`, `crossbeam-epoch`,
-`crossbeam-utils`, `displaydoc`, `downcast-rs`, `either`, `ena`, `equivalent`,
-`fdeflate`, `find-msvc-tools`, `flate2`, `foldhash`, `form_urlencoded`,
+`core-foundation-sys`, `core_maths`, `crc32fast`, `crossbeam-deque`,
+`crossbeam-epoch`, `crossbeam-utils`, `data-url`, `displaydoc`, `downcast-rs`,
+`either`, `ena`, `equivalent`, `euclid`, `fdeflate`, `find-msvc-tools`,
+`flate2`, `float-cmp`, `foldhash`, `fontdb`, `form_urlencoded`,
 `futures-channel`, `futures-core`, `futures-io`, `futures-macro`,
 `futures-sink`, `futures-task`, `futures-util`, `getrandom`, `glam`, `glamx`,
 `hashbrown`, `heck`, `http`, `http-body`, `http-body-util`, `httparse`,
 `hyper`, `hyper-rustls`, `hyper-util`, `icu_collections`, `icu_locale_core`,
 `icu_normalizer`, `icu_normalizer_data`, `icu_properties`,
 `icu_properties_data`, `icu_provider`, `idna`, `idna_adapter`, `image`,
-`indexmap`, `ipnet`, `itoa`, `jni`, `jni-macros`, `jni-sys`,
-`jni-sys-macros`, `js-sys`, `libc`, `libm`, `litemap`, `log`,
+`imagesize`, `indexmap`, `ipnet`, `itoa`, `jni`, `jni-macros`, `jni-sys`,
+`jni-sys-macros`, `js-sys`, `kurbo`, `libc`, `libm`, `litemap`, `log`,
 `matrixmultiply`, `memchr`, `miniz_oxide`, `mio`, `moxcms`, `nalgebra`,
 `nalgebra-macros`, `num-bigint`, `num-complex`, `num-derive`, `num-integer`,
 `num-rational`, `num-traits`, `once_cell`, `openssl-probe`, `ordered-float`,
-`parry2d`, `percent-encoding`, `pin-project-lite`, `png`, `potential_utf`,
+`parry2d`, `percent-encoding`, `pico-args`, `pin-project-lite`, `png`,
+`polycool`, `potential_utf`,
 `proc-macro2`, `profiling`, `profiling-procmacros`, `pxfm`, `quote`,
 `rapier2d`, `rawpointer`, `rayon`, `rayon-core`, `regex`, `regex-automata`,
-`regex-syntax`, `reqwest`, `ring`, `robust`,
+`regex-syntax`, `reqwest`, `resvg`, `rgb`, `ring`, `robust`, `roxmltree`,
 `rustc_version`, `rustls`, `rustls-native-certs`, `rustls-pki-types`,
 `rustls-platform-verifier`, `rustls-platform-verifier-android`,
-`rustls-webpki`, `rustversion`, `safe_arch`, `same-file`, `schannel`,
+`rustls-webpki`, `rustversion`, `rustybuzz`, `safe_arch`, `same-file`, `schannel`,
 `sdl3-sys`, `security-framework`, `security-framework-sys`, `semver`, `serde`,
 `serde_arrays`, `serde_core`, `serde_derive`, `shlex`, `simba`,
-`simd-adler32`, `simd_cesu8`, `simdutf8`, `slab`, `smallvec`, `socket2`,
-`spade`, `stable_deref_trait`, `static_assertions`, `subtle`, `syn`,
-`sync_wrapper`, `synstructure`, `thiserror`, `thiserror-impl`, `tinystr`,
+`simd-adler32`, `simd_cesu8`, `simdutf8`, `simplecss`, `siphasher`,
+`slab`, `slotmap`, `smallvec`, `socket2`, `spade`, `stable_deref_trait`,
+`static_assertions`, `strict-num`, `subtle`, `svgtypes`, `syn`, `sync_wrapper`,
+`synstructure`, `thiserror`, `thiserror-impl`, `tiny-skia`, `tiny-skia-path`,
+`tinystr`, `tinyvec`, `tinyvec_macros`,
 `tokio`, `tokio-rustls`, `tokio-util`, `tower`, `tower-http`, `tower-layer`,
-`tower-service`, `tracing`, `tracing-core`, `try-lock`, `typenum`,
-`unicode-ident`, `untrusted`, `url`, `utf8_iter`, `walkdir`, `want`, `wasi`,
+`tower-service`, `tracing`, `tracing-core`, `try-lock`, `ttf-parser`, `typenum`,
+`unicode-bidi`, `unicode-bidi-mirroring`, `unicode-ccc`, `unicode-ident`,
+`unicode-properties`, `unicode-script`, `unicode-vo`, `untrusted`, `url`,
+`usvg`, `utf8_iter`, `version_check`, `walkdir`, `want`, `wasi`,
 `wasm-bindgen`, `wasm-bindgen-futures`, `wasm-bindgen-macro`,
 `wasm-bindgen-macro-support`, `wasm-bindgen-shared`, `wasm-streams`, `web-sys`,
 `webpki-root-certs`, `wide`, `winapi-util`, `windows-link`, `windows-sys`,
 `windows-targets`, `windows_aarch64_gnullvm`, `windows_aarch64_msvc`,
 `windows_i686_gnu`, `windows_i686_gnullvm`, `windows_i686_msvc`,
 `windows_x86_64_gnu`, `windows_x86_64_gnullvm`, `windows_x86_64_msvc`,
-`writeable`, `yoke`, `yoke-derive`, `zerofrom`, `zerofrom-derive`, `zeroize`,
-`zerotrie`, `zerovec`, `zerovec-derive`, `zune-core`, and `zune-jpeg`.
+`writeable`, `xmlwriter`, `yoke`, `yoke-derive`, `zerofrom`, `zerofrom-derive`,
+`zeroize`, `zerotrie`, `zerovec`, `zerovec-derive`, `zune-core`, and
+`zune-jpeg`.
 
 The official MCP SDK and Streamable HTTP server add `android_system_properties`,
 `async-trait`, `axum`, `axum-core`, `chacha20`, `chrono`, `cpufeatures`,

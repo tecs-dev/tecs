@@ -652,13 +652,24 @@ slowly. `TECS_TRACEPROF=1` makes each worker report its trace aborts when it
 stops, which is how that is told apart from a worker that is merely busy: the
 failure reads as tens of thousands of `failed to allocate mcode memory`.
 
-Asset loading rides on that. Decoding a PNG or JPEG is pure CPU work, so it
-happens on a worker and the main thread only uploads. Rust's `image` crate
-decodes from bytes supplied through the storage seam into a tightly packed
-RGBA8 allocation. The worker returns the allocation's address rather than
-serializing its pixels; ownership transfers with that address and Rust frees
-it after upload. Only PNG and JPEG features are compiled, so the accepted
-formats are identical on every target and carry no platform image framework.
+Asset loading rides on that. Decoding a PNG or JPEG, or rasterizing a static
+SVG, is pure CPU work, so it happens on a worker and the main thread only
+uploads. Rust's `image` crate decodes raster bytes supplied through the storage
+seam and `resvg` rasterizes SVG into the same tightly packed RGBA8 allocation.
+The worker returns the allocation's address rather than serializing its pixels;
+ownership transfers with that address and Rust frees it after upload.
+
+An SVG renders at its intrinsic dimensions. The path is already an image's
+identity in sprites, snapshots, deduplication and hot reload, so a second API
+that accepts a target size would let one path mean several incompatible pixel
+allocations where the renderer can name only one. The renderer can grow a
+sized image identity if that use case arrives; the loader does not pretend it
+has one now. SVG text always uses the bundled JetBrains Mono and the parser
+does not scan system fonts. External image references are ignored instead of
+reading around the storage seam and creating dependencies file watching cannot
+see. The raster decoder compiles only PNG and JPEG, and `resvg` compiles no
+embedded raster-image codecs, so accepted top-level formats and SVG output are
+identical on every target and carry no platform image framework.
 
 Sound takes the same route. A clip is read and decoded on the worker by
 SDL_mixer and handed back as the address of a `MIX_Audio`, so a file that turns
@@ -3930,8 +3941,9 @@ name at `MIX_Init`, so a developer's machine may well have the LGPL ones
 available where the pinned package does not.
 `Audio.decoders()` is how to tell which build is running.
 
-Image decoding does not have that development/package split: the same pinned
-Rust `image` crate with only PNG and JPEG enabled is linked in every build.
+Image decoding does not have that development/package split: every build links
+the same pinned Rust `image` crate with only PNG and JPEG enabled and the same
+`resvg` SVG rasterizer.
 
 ### Licenses
 
