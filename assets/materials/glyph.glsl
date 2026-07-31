@@ -21,10 +21,14 @@ float glyphField(vec3 coordinate) {
 MaterialOutput material(MaterialInput frag) {
     MaterialOutput result = materialDefaults();
 
-    float inside = glyphField(frag.uv) - 0.5;
-
     // Derivatives make the transition one screen pixel wide at every scale.
-    float width = max(fwidth(inside), 1.0 / 255.0);
+    float distance = glyphField(frag.uv) - 0.5;
+    float width = max(fwidth(distance), 1.0 / 255.0);
+
+    // A small outward bias keeps a one-pixel stem from vanishing when a UI
+    // screenshot is reduced. Expressing it through the derivative makes it a
+    // fraction of one screen pixel rather than a font-size-dependent weight.
+    float inside = distance + width * 0.35;
     float edge = smoothstep(-width, width, inside);
     result.albedo = vec4(frag.color.rgb, frag.color.a * edge);
     result.coverage = inside;

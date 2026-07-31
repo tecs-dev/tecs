@@ -136,7 +136,9 @@ return tecs.newApplication({
     maxEntities = COUNT + 1024,
     debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
     presentMode = os.getenv("TECS_PRESENT"),
-    mcpPort = tonumber(os.getenv("TECS_MCP")) as integer,
+    -- The demo is inspectable out of the box. TECS_MCP still selects another
+    -- port when several games are running on the same machine.
+    mcpPort = math.floor(tonumber(os.getenv("TECS_MCP")) or 19999),
 
     plugin = function(world: tecs.World, app: tecs.Application)
         local width, height = app.window:getPixelSize()
