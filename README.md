@@ -79,8 +79,9 @@ Working today:
   backgrounded or terminated
 - Per-stage frame timing with percentiles, which supplies the measurements in
   this file, and event-to-photon latency reported through the same stages
-- Text from a signed distance field, laid out into one entity per glyph so it
-  goes through the same cull and the same draw as everything else
+- Text from scalable distance fields or fixed-size alpha glyphs, laid out into
+  one entity per glyph so it goes through the same cull and the same draw as
+  everything else
 - Deterministic sequencing with tweening merged into it: programs compiled to
   instructions, playback position kept as data so it survives a snapshot, and
   three clocks (fixed, frame, presentation) for the three rates gameplay,
@@ -3326,12 +3327,20 @@ rewrite all of them; and spawning or despawning a glyph moves an archetype's
 length, which relays the whole scene out. Measured at four thousand short texts,
 editing a single string rewrote sixty-four thousand instances that frame.
 
-The glyph is SDL_ttf's single-channel signed distance field. Scaling it changes
-the quad while the threshold stays on the outline, and screen-space derivatives
-keep the transition one pixel wide. The material reconstructs the field
-bilinearly itself because the shared image sampler reads nearest. SDF trades
-some corner fidelity for a smaller texture footprint and, unlike MSDF, is
-available from SDL_ttf without a second rasterizer and cache.
+The default glyph is SDL_ttf's single-channel signed distance field. Scaling it
+changes the quad while the threshold stays on the outline, and screen-space
+derivatives keep the transition one pixel wide. The material reconstructs the
+field bilinearly itself because the shared image sampler reads nearest. SDF
+trades some corner fidelity for a smaller texture footprint and, unlike MSDF,
+is available from SDL_ttf without a second rasterizer and cache.
+
+A small fixed-size UI makes the opposite trade. Its font can store SDL_ttf's
+direct antialiased alpha glyph at the exact displayed size, keeping the font
+rasterizer's fitting of thin strokes to the pixel grid. It uses the same atlas,
+producer, instance, forward lane, and dirty ranges with a material that reads
+coverage instead of a distance. An exact-size, unrotated alpha font on a
+screen-space layer also rounds the text origin to a pixel, so retained layout
+cannot leave one line on a blurrier subpixel phase than the next.
 
 Each text owns a span of the producer's run, and spans come from a size-bucketed
 free list: allocating takes an exact-size span off the free list when one is
@@ -3618,9 +3627,9 @@ holds a slice index, so a re-export that adds, removes or renames either is
 refused by name, exactly as a material file appearing is.
 
 Fonts follow SDL_ttf's ownership model. `newTTF` asynchronously reads source
-bytes, opens one immutable
-`TTF_Font`, enables SDF rasterization, and returns it only after those steps
-succeed. SDL_ttf and HarfBuzz own shaping and line layout. Tecs deliberately
+bytes, opens one immutable `TTF_Font`, selects SDF or alpha rasterization, and
+returns it only after those steps succeed. SDL_ttf and HarfBuzz own shaping and
+line layout. Tecs deliberately
 does not use SDL_ttf's GPU text engine: that engine emits four vertices and six
 indices per glyph, while this renderer's throughput comes from one fixed quad
 and one instance per glyph.
@@ -3629,17 +3638,17 @@ SDL_ttf's copy operations are therefore an interchange format, not a rendering
 backend. A dirty string updates one reusable `TTF_Text`; a transform, tint,
 clip, alignment, or display-size change reads its existing operations and
 rewrites only that entity's producer span. The first operation needing a glyph
-asks SDL_ttf for its SDF surface and uploads it into the renderer's packed
+asks SDL_ttf for its glyph surface and uploads it into the renderer's packed
 texture array. The cache is keyed by native font and glyph index, so later
 texts reuse both the rasterization and the residency. `Text.size` scales those
 instances and never changes the native font generation.
 
-SDF is the sole field format for now. It costs one texture channel, works with
-SDL_ttf's public raster API, and preserves the instanced renderer. MSDF would
-require a separate generator and cache policy without changing the public text
-model, so it is deferred until its sharper corners justify that second
-backend. Source fonts are immutable after loading; editing one creates a new
-font through `newTTF` instead of mutating live layout and cache identity.
+SDF and direct alpha both use SDL_ttf's public raster API and preserve the
+instanced renderer. MSDF would require a separate generator and cache policy
+without changing the public text model, so it is deferred until its sharper
+corners justify that second backend. Source fonts are immutable after loading;
+editing one creates a new font through `newTTF` instead of mutating live layout
+and cache identity.
 
 ### The file watcher
 

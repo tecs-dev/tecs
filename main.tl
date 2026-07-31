@@ -175,22 +175,16 @@ return tecs.newApplication({
         world:addPlugin(tecs.gfx.textPlugin({renderer = app.renderer}))
         local displayFont <const> = tecs.gfx.newTTF({
             source = "fonts/JetBrainsMono-ExtraBold.ttf",
+            name = "demo-display-32",
             size = 32,
+            raster = "alpha",
         }).value
         local font <const> = tecs.gfx.newTTF({
             source = "fonts/JetBrainsMono-ExtraBold.ttf",
+            name = "demo-ui-16",
             size = 16,
+            raster = "alpha",
         }).value
-        world:spawn(
-            Transform(24, 24, 0, 1),
-            Tint(0.92, 0.96, 1.0, 1.0),
-            tecs.gfx.Text.new({
-                text = ("tecs %s\n%d entities"):format(tecs.version, COUNT),
-                font = displayFont,
-                size = 32,
-            })
-        )
-
         -- The UI is retained layout over the same entities and instance
         -- producers. Retained layout positions containers; these leaves remain
         -- ordinary rectangles, circles, images, and text.
@@ -215,6 +209,18 @@ return tecs.newApplication({
             }),
             ui.Root("screen"),
             Transform(0, 0, 900, 16)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", inset = {left = 24, top = 24}}),
+            ui.Intrinsic("text"),
+            RelativeTransform(0, 0, 3),
+            Tint(0.92, 0.96, 1.0, 1.0),
+            tecs.gfx.Text.new({
+                text = ("tecs %s\n%d entities"):format(tecs.version, COUNT),
+                font = displayFont,
+                size = 32,
+            }),
+            ChildOf(uiRoot)
         )
         local panel <const> = world:spawn(
             ui.Style({
@@ -255,7 +261,7 @@ return tecs.newApplication({
             tecs.gfx.Text.new({
                 text = "Tecs UI",
                 font = displayFont,
-                size = 25,
+                size = 32,
             }),
             ChildOf(header)
         )
@@ -267,7 +273,7 @@ return tecs.newApplication({
             tecs.gfx.Text.new({
                 text = "Retained ECS | GPU instanced",
                 font = font,
-                size = 13,
+                size = 16,
             }),
             ChildOf(header)
         )
@@ -280,7 +286,7 @@ return tecs.newApplication({
             tecs.gfx.Text.new({
                 text = "Click, Tab, Shift-Tab, Return, or scroll",
                 font = font,
-                size = 13,
+                size = 16,
             }),
             ChildOf(panel)
         )
@@ -360,7 +366,7 @@ return tecs.newApplication({
                 ui.Intrinsic("text"),
                 RelativeTransform(0, 0, 2),
                 Tint(0.9, 0.95, 1.0, 1.0),
-                tecs.gfx.Text.new({text = label, font = font, size = 15}),
+                tecs.gfx.Text.new({text = label, font = font, size = 16}),
                 ChildOf(control)
             )
             controls[#controls + 1] = {control, visual}
@@ -468,7 +474,7 @@ return tecs.newApplication({
             ui.Intrinsic("text"),
             RelativeTransform(0, 0, 3),
             Tint(0.9, 0.95, 1.0, 1.0),
-            tecs.gfx.Text.new({text = "Image leaf", font = font, size = 17}),
+            tecs.gfx.Text.new({text = "Image leaf", font = font, size = 16}),
             ChildOf(imageCard)
         )
         world:spawn(
@@ -476,7 +482,7 @@ return tecs.newApplication({
             ui.Intrinsic("text"),
             RelativeTransform(0, 0, 3),
             Tint(0.48, 0.66, 0.78, 1.0),
-            tecs.gfx.Text.new({text = "Sprite + intrinsic ratio", font = font, size = 12}),
+            tecs.gfx.Text.new({text = "Sprite + intrinsic ratio", font = font, size = 16}),
             ChildOf(imageCard)
         )
         local labels <const> = {

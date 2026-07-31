@@ -182,6 +182,12 @@ local record layers
     --- @return Whether extraction should write this row's real world bound.
     viewCulled: function(layer: integer): boolean
 
+    --- Returns whether a layer uses screen-pixel coordinates.
+    --- @param layer One to `MAX`. Outside that this answers false, which is
+    ---     what an unconfigured layer answers too.
+    --- @return Whether `configure` selected `screenSpace` for the layer.
+    isScreenSpace: function(layer: integer): boolean
+
     --- Returns the two terms `depthIn` takes, resolved once for a layer.
     ---
     --- What `depthOf` works out before it looks at an entity at all, and what
@@ -386,6 +392,10 @@ function layers.viewCulled(layer: integer): boolean
         return true
     end
     return culled
+end
+
+function layers.isScreenSpace(layer: integer): boolean
+    return modes[layer] == MODE_SCREEN
 end
 
 function layers.bandOf(layer: integer): number, integer

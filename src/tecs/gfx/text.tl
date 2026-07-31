@@ -1,5 +1,5 @@
 --[=[
-Shaped SDF text as entities in the rendered world.
+Shaped text as entities in the rendered world.
 
 A `Text` names a font and string. `Transform` places its top-left corner,
 `Tint` colors every glyph, and `Clip` clips it like any other drawable.
@@ -30,13 +30,14 @@ column clean and the displayed glyphs unchanged.
 
 `newTTF` reads source font bytes off the main thread and returns a
 [`Future`](tealdoc:tecs.Future). SDL_ttf and HarfBuzz shape and lay out UTF-8.
-Tecs asks SDL_ttf for SDF glyph images lazily, caches each glyph once per
-renderer, and keeps its own one-instance-per-glyph producer.
+Tecs asks SDL_ttf for glyph images lazily, caches each glyph once per renderer,
+and keeps its own one-instance-per-glyph producer.
 
-The loaded point size is the field's raster resolution, not the only size the
-font can draw. `Text.size` scales the cached SDF geometry without regenerating
-glyphs. Choose a loaded size near the largest ordinary on-screen size and use
-separate fonts for materially different quality tiers.
+The default `"sdf"` raster scales without regenerating glyphs. Choose a loaded
+size near the largest ordinary on-screen size. A fixed-size UI may instead load
+an `"alpha"` raster at exactly its displayed size. Alpha glyphs retain the font
+rasterizer's small-size fitting and automatically snap their origin on a
+screen-space layer when they are unrotated and unscaled.
 
 Text supports explicit newlines and left, center, or right alignment. It does
 not wrap to a width, anchor outside the top-left corner, or style individual
@@ -86,7 +87,8 @@ local sin <const> = math.sin
 
 --- Material the glyph quads select, resolved by name because the numbering
 --- depends on which material files exist.
-local MATERIAL <const> = "glyph"
+local SDF_MATERIAL <const> = "glyph"
+local ALPHA_MATERIAL <const> = "glyphalpha"
 
 local C <const> = sdl.C
 local TTF <const> = ttf.C
@@ -107,7 +109,15 @@ local BLENDED_X <const>, BLENDED_Y <const> = instancelayout.signsOf("blended")
 --- doubles from.
 local MINIMUM_SLOTS <const> = 64
 
---- Represents a shaped TrueType or OpenType font rendered as SDF glyphs.
+--- Selects how SDL_ttf rasterizes a font's glyph images.
+local enum FontRaster
+    --- Read-only. Stores a scalable signed distance field.
+    "sdf"
+    --- Read-only. Stores direct antialiased coverage at the loaded size.
+    "alpha"
+end
+
+--- Represents a shaped TrueType or OpenType font.
 ---
 --- A font is immutable after its future settles. Its source bytes remain
 --- resident because SDL_ttf reads them lazily for the font's lifetime.
@@ -116,8 +126,11 @@ local record Font
     name: string
     --- Read-only. Reports the source path passed to `newTTF`.
     source: string
-    --- Read-only. Reports the point size at which SDL_ttf rasterizes SDFs.
+    --- Read-only. Reports the point size at which SDL_ttf rasterizes glyphs.
     size: number
+    --- Read-only. Reports whether glyph images contain a scalable distance
+    --- field or direct alpha coverage.
+    raster: FontRaster
     --- Engine-owned. Keeps the source allocation reachable. Ordinary game
     --- code should ignore this field.
     _bytes: string
@@ -126,9 +139,10 @@ local record Font
     _font: loader.CPtr
 end
 
---- Stores one SDF glyph after it enters a renderer's texture array.
+--- Stores one glyph after it enters a renderer's texture array.
 local record Glyph
     region: TextureArray.Region
+    material: integer
 end
 
 --- Lays a string out into glyph instances.
@@ -244,13 +258,16 @@ local record TTFOptions
     source: string
     --- Caller-writable. Sets the snapshot identity. It defaults to `source`.
     name: string
-    --- Caller-writable. Sets the SDF raster point size. It defaults to 48.
+    --- Caller-writable. Sets the glyph raster point size. It defaults to 48.
     size: number
+    --- Caller-writable. Selects `"sdf"` for scalable text or `"alpha"` for
+    --- crisp text drawn at the loaded size. It defaults to `"sdf"`.
+    raster: FontRaster
 end
 
 --- Configures the text layout plugin.
 local record TextOptions
-    --- Caller-writable. Selects the renderer that receives glyph SDFs and
+    --- Caller-writable. Selects the renderer that receives glyph images and
     --- instances.
     renderer: Renderer
 end
@@ -258,6 +275,8 @@ end
 local record text
     --- Represents a loaded font named by `Text`.
     type Font = Font
+    --- Selects a font's glyph raster representation.
+    type FontRaster = FontRaster
     --- Configures `newTTF`.
     type TTFOptions = TTFOptions
     --- Configures `textPlugin`.
@@ -269,10 +288,11 @@ local record text
     --- Starts loading and opening a source font with SDL_ttf.
     ---
     --- The file read happens on the asset worker. The future settles only
-    --- after SDL_ttf has opened the bytes, enabled SDF rendering, and verified
-    --- the requested point size.
+    --- after SDL_ttf has opened the bytes, selected the raster mode, and
+    --- verified the requested point size.
     --- @param options The caller must set `source`. `name` defaults to that
-    ---     path and `size` defaults to 48 points.
+    ---     path, `size` defaults to 48 points, and `raster` defaults to
+    ---     `"sdf"`.
     --- @return Returns a [`Future`](tealdoc:tecs.Future) for an immutable
     ---     [`Font`](tealdoc:tecs.gfx.text.Font).
     newTTF: function(options: TTFOptions): Future<Font>
@@ -359,7 +379,7 @@ local function openFont(bytes: string, options: TTFOptions): Font
     end
     handle = ffi.gc(handle as ffi.CData, TTF.TTF_CloseFont as function(ffi.CData)) as loader.CPtr
 
-    if not TTF.TTF_SetFontSDF(handle, true) then
+    if not TTF.TTF_SetFontSDF(handle, options.raster == "sdf") then
         ffi.gc(handle as ffi.CData, nil)
         TTF.TTF_CloseFont(handle)
         sdl.fail("TTF_SetFontSDF")
@@ -369,6 +389,7 @@ local function openFont(bytes: string, options: TTFOptions): Font
         name = options.name,
         source = options.source,
         size = options.size,
+        raster = options.raster,
         _bytes = bytes,
         _font = handle,
     }
@@ -384,9 +405,13 @@ function text.newTTF(options: TTFOptions): Future<Font>
         source = options.source,
         name = options.name or options.source,
         size = options.size or 48.0,
+        raster = options.raster or "sdf",
     }
     if requested.size <= 0.0 then
         error("tecs: a TTF font `size` must be greater than zero", 2)
+    end
+    if requested.raster ~= "sdf" and requested.raster ~= "alpha" then
+        error("tecs: a TTF font `raster` must be 'sdf' or 'alpha'", 2)
     end
 
     if not assets.installed() then
@@ -948,7 +973,7 @@ local layoutCounts <const>: {World: integer} = setmetatable(
 --- What the plugin holds for one world and renderer.
 local record Install
     glyphs: Glyphs
-    --- Cached SDF regions by native font address then glyph index. Fonts are
+    --- Cached glyph regions by native font address then glyph index. Fonts are
     --- immutable, so their generation cannot invalidate a cache entry.
     known: {number: {integer: Glyph}}
 end
@@ -961,7 +986,26 @@ local installs <const>: {World: Install} = setmetatable(
 -- Resolving glyphs
 -------------------------------------------------------------------------------
 
---- Returns one renderer-resident SDF glyph, rasterizing and uploading it once.
+--- Material ids, resolved on first use: reading material files needs an asset
+--- root, and module load is too early to have one.
+local materialId = -1
+local alphaMaterialId = -1
+
+local function glyphMaterial(): integer
+    if materialId < 0 then
+        materialId = materials.id(SDF_MATERIAL)
+    end
+    return materialId
+end
+
+local function alphaGlyphMaterial(): integer
+    if alphaMaterialId < 0 then
+        alphaMaterialId = materials.id(ALPHA_MATERIAL)
+    end
+    return alphaMaterialId
+end
+
+--- Returns one renderer-resident glyph, rasterizing and uploading it once.
 local function residency(install: Install, renderer: Renderer, copy: loader.CStruct): Glyph
     local address <const> = tonumber(ffi.cast("uintptr_t", copy.glyph_font)) as number
     local fontGlyphs = install.known[address]
@@ -976,12 +1020,10 @@ local function residency(install: Install, renderer: Renderer, copy: loader.CStr
         return glyph
     end
 
-    if not TTF.TTF_GetFontSDF(copy.glyph_font) then
-        error("tecs: SDL_ttf selected a glyph font without SDF enabled", 0)
+    local material = alphaGlyphMaterial()
+    if TTF.TTF_GetFontSDF(copy.glyph_font) then
+        material = glyphMaterial()
     end
-    -- SDL_ttf 3.2 labels FreeType's grayscale SDF surface as
-    -- TTF_IMAGE_ALPHA even though its alpha channel contains the field, so
-    -- the font mode is the authoritative check.
     local surface = TTF.TTF_GetGlyphImageForIndex(copy.glyph_font, index, nil)
     if surface == nil then
         sdl.fail("TTF_GetGlyphImageForIndex")
@@ -996,7 +1038,7 @@ local function residency(install: Install, renderer: Renderer, copy: loader.CStr
     )
     C.SDL_DestroySurface(converted)
 
-    glyph = {region = region}
+    glyph = {region = region, material = material}
     fontGlyphs[index] = glyph
     return glyph
 end
@@ -1026,17 +1068,6 @@ function text.glyphAt(world: World, entity: integer, index: integer): number, nu
     local width <const> = instances[base + 1] as number
     local height <const> = instances[base + 2] as number
     return x, y, width, height
-end
-
---- The material id, resolved on first use: reading the material files needs
---- an asset root, and module load is too early to have one.
-local materialId = -1
-
-local function glyphMaterial(): integer
-    if materialId < 0 then
-        materialId = materials.id(MATERIAL)
-    end
-    return materialId
 end
 
 --- Rewrites one text's glyph instances, or empties them without a font.
@@ -1081,16 +1112,26 @@ local function build(
     local turnY <const> = sin(rotation)
     local blockX <const> = transform.scaleX
     local blockY <const> = transform.scaleY
-    local originX <const> = transform.x
-    local originY <const> = transform.y
+    local originX = transform.x
+    local originY = transform.y
     local z <const> = transform.z
     local layer <const> = transform.layer as integer
     local viewCulled <const> = layersModule.viewCulled(layer)
+    if
+        font.raster == "alpha"
+        and item.size == font.size
+        and rotation == 0.0
+        and blockX == 1.0
+        and blockY == 1.0
+        and layersModule.isScreenSpace(layer)
+    then
+        originX = math.floor(originX + 0.5)
+        originY = math.floor(originY + 0.5)
+    end
     -- Every glyph sits on the text's own layer, so the band is the block's and
     -- not the glyph's: resolved here and spent per glyph below.
     local bandBase <const>, bandSort <const> = layersModule.bandOf(layer)
 
-    local material <const> = glyphMaterial()
     local native <const> = item._native as loader.CStruct
     local ops <const> = (native.internal as loader.CStruct).ops as loader.CArray
 
@@ -1125,7 +1166,7 @@ local function build(
         instances[base + 4] = x
         instances[base + 5] = y
         instances[base + 6] = slot
-        instances[base + 7] = material
+        instances[base + 7] = glyph.material
 
         instances[base + 8] = r
         instances[base + 9] = g

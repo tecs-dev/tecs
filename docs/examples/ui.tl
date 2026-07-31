@@ -30,9 +30,17 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
         name = "example.SpawnUi",
         phase = tecs.ecs.phases.Startup,
         run = function()
+            local headingFont <const> = tecs.gfx.newTTF({
+                source = "fonts/JetBrainsMono-ExtraBold.ttf",
+                name = "example-heading-24",
+                size = 24,
+                raster = "alpha",
+            }):wait().value
             local font <const> = tecs.gfx.newTTF({
                 source = "fonts/JetBrainsMono-ExtraBold.ttf",
-                size = 48,
+                name = "example-ui-16",
+                size = 16,
+                raster = "alpha",
             }):wait().value
             local root <const> = world:spawn(
                 ui.Style({
@@ -99,7 +107,7 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                 Tint(0.94, 0.97, 1.0, 1.0),
                 tecs.gfx.Text.new({
                     text = "Retained, composed UI",
-                    font = font,
+                    font = headingFont,
                     size = 24,
                 }),
                 ChildOf(heading)
@@ -115,7 +123,7 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                 tecs.gfx.Text.new({
                     text = "Click, Tab, Return, or scroll",
                     font = font,
-                    size = 14,
+                    size = 16,
                 }),
                 ChildOf(panel)
             )

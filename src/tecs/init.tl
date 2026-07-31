@@ -220,20 +220,22 @@ local record gfx
 
     --- What `newTTF` answers with, and what a `Text` names.
     type Font = text.Font
+    --- Whether a font stores scalable distance fields or direct alpha glyphs.
+    type FontRaster = text.FontRaster
     --- What `newTTF` takes.
     type TTFOptions = text.TTFOptions
     --- What `textPlugin` takes.
     type TextOptions = text.TextOptions
 
-    --- A run of distance-field text, drawn as one entity whose glyphs are not
-    --- entities. Needs `textPlugin` installed on the world.
+    --- A run of shaped text, drawn as one entity whose glyphs are not entities.
+    --- Needs `textPlugin` installed on the world.
     Text: text.Text
 
     --- Starts loading a TrueType or OpenType source font with SDL_ttf.
     --- @param options The caller supplies a source path and may select the
     ---     raster point size and snapshot identity.
-    --- @return A future that settles with an immutable SDF font after its
-    ---     source bytes have been read and opened.
+    --- @return A future that settles with an immutable font after its source
+    ---     bytes have been read and opened.
     newTTF: function(options: text.TTFOptions): Future<text.Font>
 
     --- Extent of a `Text` in world units, laid out the way the system lays it

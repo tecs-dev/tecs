@@ -1955,11 +1955,12 @@ describe("ecs.Renderer", function()
         it("leaves every built-in material emitting nothing", function()
             -- The unchanged half, and the reason the tests above mean anything: a
             -- built-in in the dark is still dark, so the attachment changed
-            -- nothing that was already drawing correctly. `glyph` is excluded
-            -- because it asks not to be lit, so darkness is not what it answers.
+            -- nothing that was already drawing correctly. The two glyph
+            -- materials are excluded because they ask not to be lit, so
+            -- darkness is not what either answers.
             materials.reset()
             for _, name in ipairs(materials.names()) do
-                if name ~= "glyph" then
+                if name ~= "glyph" and name ~= "glyphalpha" then
                     local pixel = draw({ 0.0, 0.0, 0.0 }, name, 1.0)
                     assert.are.equal(0, pixel.r, ("%s must stay dark"):format(name))
                     assert.are.equal(0, pixel.g, ("%s must not emit"):format(name))

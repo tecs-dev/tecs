@@ -1,4 +1,4 @@
--- SDL_ttf shaping feeding Tecs' instanced SDF renderer.
+-- SDL_ttf shaping feeding Tecs' instanced glyph renderer.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
@@ -24,7 +24,7 @@ local ChildOf = tecs.ecs.ChildOf
 local RelativeTransform = tecs.ecs.RelativeTransform
 
 describe("gfx.text", function()
-    local window, device, screen, font
+    local window, device, screen, font, alphaFont
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
@@ -34,7 +34,15 @@ describe("gfx.text", function()
         assets.install()
         font = text.newTTF({
             source = "fonts/JetBrainsMono-ExtraBold.ttf",
+            name = "text-sdf-64",
             size = 64,
+        })
+            :wait().value
+        alphaFont = text.newTTF({
+            source = "fonts/JetBrainsMono-ExtraBold.ttf",
+            name = "text-alpha-16",
+            size = 16,
+            raster = "alpha",
         })
             :wait().value
     end)
@@ -102,14 +110,41 @@ describe("gfx.text", function()
         )
     end
 
-    it("opens a source font asynchronously and enables a scalable field", function()
-        assert.are.equal("fonts/JetBrainsMono-ExtraBold.ttf", font.name)
+    it("opens source fonts with scalable or direct-alpha glyphs", function()
+        assert.are.equal("text-sdf-64", font.name)
         assert.are.equal("fonts/JetBrainsMono-ExtraBold.ttf", font.source)
         assert.are.equal(64, font.size)
+        assert.are.equal("sdf", font.raster)
         assert.is_not_nil(font._font)
+        assert.are.equal("alpha", alphaFont.raster)
+        assert.are.equal(16, alphaFont.size)
 
         local failed = text.newTTF({ source = "fonts/missing.ttf" }):wait(1000)
         assert.are.equal("failed", failed.status)
+        assert.has_error(function()
+            text.newTTF({ source = "fonts/JetBrainsMono-ExtraBold.ttf", raster = "lcd" })
+        end, "tecs: a TTF font `raster` must be 'sdf' or 'alpha'")
+    end)
+
+    it("draws alpha glyphs and snaps their screen-space origin", function()
+        local world, renderer = newScene()
+        tecs.gfx.layers.configure(16, { sort = "z", screenSpace = true, unlit = true })
+        local entity = world:spawn(
+            Transform(32.2, 32.2, 0, 16),
+            Tint(0.0, 1.0, 0.0, 1.0),
+            text.Text.new({ text = "Aligned", font = alphaFont, size = 16 })
+        )
+        local pixels = frame(world, renderer)
+        local firstX, firstY = text.glyphAt(world, entity, 1)
+        assert.is_true(ink(pixels) > 10)
+
+        local transform = world:getMut(entity, Transform)
+        transform.x, transform.y = 32.4, 32.4
+        frame(world, renderer)
+        local secondX, secondY = text.glyphAt(world, entity, 1)
+        assert.are.equal(firstX, secondX)
+        assert.are.equal(firstY, secondY)
+        renderer:destroy()
     end)
 
     it("draws one renderer instance per shaped copy operation", function()
