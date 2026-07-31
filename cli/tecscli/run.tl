@@ -13,8 +13,9 @@
 ---  check    Type-checks the project against the engine's installed types
 ---  format   Formats, or checks formatting, with the carried Cerulean
 ---  test     Compiles spec/ and runs it
----  build    Compiles src/, stages assets, writes build/
----  run      Builds, then becomes the selected application entry
+---  build    Stages development assets without compiling source
+---  dist     Type-checks, precompiles, and stages a distributable build/
+---  run      Becomes the selected source entry without precompiling it
 ---  clean    Removes build/
 ---  info     Versions, pins, project status, packaging targets
 ---  docs     Searches the offline reference carried with the command
@@ -126,18 +127,30 @@ local function commandFormat(check: boolean, _paths: {string}): integer
 end
 
 --- `tecs build`
-local function commandBuild(paths: layout): integer
+local function commandBuild(): integer
     local found, reason = project.find()
     if found == nil then
         return noProject(reason)
     end
 
-    local result, failure = builder.build(found, paths)
+    local assets <const> = builder.build(found)
+    say(("Staged %s: %d assets; source runs directly"):format(found.name, assets))
+    return 0
+end
+
+--- `tecs dist`
+local function commandDist(paths: layout): integer
+    local found, reason = project.find()
+    if found == nil then
+        return noProject(reason)
+    end
+
+    local result, failure = builder.dist(found, paths)
     if result == nil then
-        complain(("tecs build: %s"):format(failure))
+        complain(("tecs dist: %s"):format(failure))
         return 1
     end
-    say(("Built %s: %d sources, %d assets"):format(found.name, result.compiled, result.assets))
+    say(("Distributed %s: %d sources, %d assets"):format(found.name, result.compiled, result.assets))
     return 0
 end
 
@@ -151,8 +164,8 @@ local function commandRun(paths: layout, gameArguments: {string}, entry?: string
         return noProject(reason)
     end
 
-    local result, failure = builder.build(found, paths, entry)
-    if result == nil then
+    local source, failure = builder.sourceEntry(found, entry)
+    if source == nil then
         complain(("tecs run: %s"):format(failure))
         return 1
     end
@@ -162,8 +175,9 @@ local function commandRun(paths: layout, gameArguments: {string}, entry?: string
     -- thing that knows where it was installed.
     shell.setenv("TECS_LUA", paths.root)
     shell.setenv("TECS_ASSETS", paths.root)
+    shell.setenv("TECS_TL_PATH", project.path(found, found.source))
 
-    local command <const>: {string} = {layout.self(), "--entry", result.entry}
+    local command <const>: {string} = {layout.self(), "--entry", source}
     for _, argument in ipairs(gameArguments) do
         command[#command + 1] = argument
     end
@@ -211,7 +225,7 @@ local function commandTest(paths: layout): integer
 
     -- The game's own modules are compiled first, since a spec that tests them
     -- has to be able to require them.
-    local built = builder.build(found, paths)
+    local built = builder.dist(found, paths)
     if built == nil then
         complain("tecs test: the project does not build")
         return 1
@@ -313,7 +327,9 @@ function run.main(root: string)
         end
         code = commandFormat(args[1] == "true", formatPaths)
     elseif command == "build" then
-        code = commandBuild(paths)
+        code = commandBuild()
+    elseif command == "dist" then
+        code = commandDist(paths)
     elseif command == "run" then
         local hasEntry <const> = args[1] == "true"
         local entry: string

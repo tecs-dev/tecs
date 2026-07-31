@@ -8,7 +8,7 @@
 ---
 --- It runs in a child process rather than in this one, and that is deliberate.
 --- `tlcli.main` ends with `os.exit`, which is right for a program whose whole
---- job is one check and wrong for `tecs build`, which type-checks and then has
+--- job is one check and wrong for `tecs dist`, which type-checks and then has
 --- work left to do. Intercepting `os.exit` would work until the day the
 --- compiler reached it through the compatibility shim it already loads. A child
 --- also gets the project root as its working directory for free, which is what
@@ -84,7 +84,7 @@ function teal.generate(
     for _, argument in ipairs(includes(paths, projectSource)) do
         args[#args + 1] = argument
     end
-    -- Quiet, because `tecs build` reports what it built and a second listing
+    -- Quiet, because `tecs dist` reports what it built and a second listing
     -- of every file the compiler wrote is the same answer told twice.
     args[#args + 1] = "-q"
     args[#args + 1] = "gen"

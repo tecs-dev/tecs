@@ -3620,6 +3620,27 @@ at all. The build states where content sits relative to the executable, the C
 host resolves both its entry chunk and the asset root against that, and an
 installed tree runs from an unrelated directory with nothing in the environment.
 
+### Runtime Teal
+
+The host also accepts a `.tl` entry. It loads the pinned Teal compiler carried
+beside the engine, compiles that entry in memory, and installs Teal's module
+searcher for the state. A required `.lua` still wins over a `.tl` file with the
+same module name, so an ordinary precompiled release changes neither its load
+order nor its startup work.
+
+Set `TECS_TL_PATH` to one or more semicolon-separated source roots when an
+entry is below the root that its module names are relative to:
+
+```sh
+TECS_TL_PATH=src tecs --entry src/main.tl
+```
+
+The entry's own directory is always searched. Runtime compilation parses and
+generates Lua but does not reject Teal type errors, so `tecs check` and a
+precompiled release remain the normal gates. This is deliberately available in
+production for source-distributed games and mod loaders; it does not make that
+the default release path.
+
 ## Porting to a platform SDL does not cover
 
 SDL covers every platform this engine can be built for openly. It does not
