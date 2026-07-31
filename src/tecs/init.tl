@@ -24,6 +24,7 @@ local ecs <const> = require("tecs.ecs")
 -- graphics stack from a test, a server or a tool that only wanted the ECS.
 local type Application = require("tecs.Application")
 local type Future = require("tecs.Future")
+local type scopeModule = require("tecs.scope")
 local type audio = require("tecs.audio")
 local type Renderer = require("tecs.Renderer")
 local type Camera = require("tecs.gfx.Camera")
@@ -317,6 +318,21 @@ local record tecs
     --- all `Future<T>`, and no one of them owns the type.
     Future: Future
 
+    --- `Scope` owns explicitly registered resources for one lexical lifetime.
+    type Scope = scopeModule.Scope
+
+    --- Runs a callback inside a fresh resource scope.
+    ---
+    --- Every [`Closeable`](tealdoc:tecs.Closeable) registered through the
+    --- callback's [`Scope`](tealdoc:tecs.Scope) closes in reverse order after
+    --- the callback returns or raises. Cleanup attempts every close. The
+    --- callback must not yield, and a captured scope refuses registration
+    --- after cleanup starts.
+    ---
+    --- @param body The synchronous callback that owns the scope and every
+    ---     resource registered through it. Returned values are ignored.
+    scoped: function(body: function(scopeModule.Scope))
+
     --- Builds the application an entry file returns.
     ---
     --- Not a function that runs until done: an entry file ends with
@@ -436,6 +452,7 @@ local SURFACE <const>: {string: Namespace} = {
     Application = {module = "tecs.Application"},
     Future = {module = "tecs.Future"},
     newApplication = {module = "tecs.Application", member = "newApplication"},
+    scoped = {module = "tecs.scope", member = "scoped"},
     assets = {module = "tecs.assets"},
     audio = {module = "tecs.audio"},
     physics = {module = "tecs.physics"},

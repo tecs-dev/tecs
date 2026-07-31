@@ -60,6 +60,19 @@ local record Tick is tecs.events.Event
     metamethod __call: function(self, count: integer): Tick
 end
 
+local record ScopedReader is tecs.Closeable
+    label: string
+end
+
+function ScopedReader:close()
+end
+
+local scopedReader = {} as ScopedReader
+tecs.scoped(function(scope: tecs.Scope)
+    local kept: ScopedReader = scope:own(scopedReader)
+    print(kept.label)
+end)
+
 Tick.init = function(event: Tick, count: integer)
     event.count = count
 end

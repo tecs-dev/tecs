@@ -239,6 +239,16 @@ local PAGE_OVERRIDES = {
                 module = "tecs.init",
                 include = { "newApplication", "version" },
             },
+            {
+                module = "tecs.scope",
+                public = "tecs",
+                include = { "Scope", "scoped" },
+            },
+            {
+                module = "tecs.types",
+                public = "tecs",
+                include = { "Closeable" },
+            },
         },
     },
     {

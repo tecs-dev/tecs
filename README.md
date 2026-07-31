@@ -1493,6 +1493,16 @@ end-of-input while `destroy` releases the queue, and a `Buffer` uses `release`.
 Calling either through a generic ownership contract would promise the wrong
 lifetime.
 
+`tecs.scoped` is that generic owner. Its callback receives a `Scope` and adds
+each acquired `Closeable` through `scope:own`, so ownership can grow across
+branches without a fixed-arity `with2`, `with3` family. Teal preserves the
+concrete type returned from `own`; explicit registration also keeps ownership
+visible where Lua cannot inspect local assignments. The scope expires before
+cleanup, closes in reverse registration order, and attempts every close. A
+callback failure remains primary when cleanup also fails. The callback is
+synchronous because an abandoned suspended Lua coroutine cannot be unwound by
+a library function.
+
 Sockets, files, protocol transfers and external tool traffic are all I/O, so
 transport, HTTP and MCP live under `tecs.io`. The operation carries the useful
 distinction without adding another organizational root or a third module level.
