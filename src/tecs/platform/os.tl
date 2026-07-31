@@ -23,7 +23,7 @@ reads may return only the value this process wrote.
 ## Child processes
 
 `runProcess` runs the child on a worker and returns immediately. Pump
-`updateProcesses` once per frame until the future settles:
+`tecs.runtime.poll` once per loop until the future settles:
 
 ```teal
 local run <const> = tecs.platform.os.runProcess({
@@ -31,7 +31,10 @@ local run <const> = tecs.platform.os.runProcess({
     timeoutMs = 2000,
 })
 
-tecs.platform.os.updateProcesses()
+while run.status == "pending" do
+    tecs.runtime.poll()
+end
+
 if run.status == "ready" and run.value:succeeded() then
     tecs.platform.os.setClipboardText(run.value.output)
 elseif run.status == "failed" then
@@ -66,10 +69,16 @@ local shaderpack <const> = require("tecs.gpu.shaderpack")
 local workers <const> = require("tecs.workers")
 local time <const> = require("tecs.platform.time")
 local Future <const> = require("tecs.Future")
+local runtime <const> = require("tecs.internal.runtime")
 local buffer <const> = require("tecs.io.buffer")
 local type iotypes = require("tecs.io.types")
 local type Window = require("tecs.platform.window").Window
 local type IOBuffer = iotypes.Buffer
+
+local dialogRuntimePoll: function(): integer
+local function pollDialogs(): integer
+    return dialogRuntimePoll()
+end
 
 loader.declare("dialogs")
 
@@ -741,6 +750,9 @@ function DialogSource:poll(): integer
             settled = settled + 1
         end
     end
+    if #pendingDialogs == 0 then
+        runtime.unregister("dialogs")
+    end
     return settled
 end
 
@@ -788,6 +800,9 @@ local function trackDialog(handle: loader.CPtr): Future<DialogResult>
     end
     local future = Future.pending(dialogSource as Future.Source) as Future<DialogResult>
     pendingDialogs[#pendingDialogs + 1] = {handle = handle, future = future}
+    if #pendingDialogs == 1 then
+        runtime.register("dialogs", 30, pollDialogs)
+    end
     -- A setup allocation can fail before SDL opens anything.
     dialogSource:poll()
     return future
@@ -820,11 +835,14 @@ end
 
 --- Settles file and folder dialogs that have answered.
 ---
---- [`Application`](tealdoc:tecs.Application) calls this every frame. It is public for a headless tool that
---- creates dialogs without an application.
+--- [`runtime.poll`](/modules/runtime/#tecs.runtime.poll) calls this while a
+--- dialog is open. It remains public for a test or a specialized headless loop
+--- that deliberately drives dialogs alone.
 function platformOS.updateDialogs(): integer
     return dialogSource:poll()
 end
+
+dialogRuntimePoll = platformOS.updateDialogs
 
 local resolved: Capabilities = nil
 local cachedGeneration = -1
@@ -1157,6 +1175,7 @@ function platformOS.installProcessRunner(luaPath?: string)
         source = RUNNER,
         luaPath = luaPath or package.path,
     })
+    runtime.register("processes", 20, platformOS.updateProcesses)
 end
 
 function platformOS.processRunnerInstalled(): boolean
@@ -1418,6 +1437,7 @@ function platformOS.shutdownProcesses(graceMs?: number)
 
     worker:stop()
     worker = nil
+    runtime.unregister("processes")
     pending = {}
     byFuture = {}
     pendingCount = 0

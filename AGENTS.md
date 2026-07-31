@@ -172,6 +172,38 @@ Not ported: post-processing, UI, tiled maps and multi-camera.
 - Avoid `any` unless the boundary is genuinely dynamic, for example generic JSON payloads.
 - Keep casts narrow and justified.
 
+### Error reporting
+
+Tecs distinguishes mistakes in a call from failures of valid work rather than
+putting every outcome in one allocated result wrapper.
+
+- An invalid caller argument raises at the call site. A missing required
+  value, an invalid enum string, a value from the wrong constructor, and a
+  range the signature forbids are programmer errors, not operational
+  outcomes.
+- A synchronous operation that could not produce its value returns
+  `nil, reason`. A synchronous operation whose useful answer is whether it
+  succeeded returns `false, reason`. The reason is a non-empty string suitable
+  for context in a log or a raised error.
+- An asynchronous operational failure settles its `Future` as `"failed"`
+  with its reason. It does not raise later from the pump that discovers the
+  failure. Reading `future.value` may raise because that read is the explicit
+  blocking dereference defined by `Future`.
+- Cancellation is `"canceled"`, separate from failure. Giving up on work is
+  not evidence that the work failed, and recovery handlers must not treat it
+  as one.
+- `close`, `flush`, and similar final operations report failures discovered
+  only after buffered work reaches its destination. An earlier successful
+  write does not suppress that delayed error. Finalizers remain a leak safety
+  net and cannot report such failures, so callers explicitly close resources
+  whose completion matters.
+
+Do not introduce a `Result` record, tuple wrapper, or per-call allocation only
+to make these shapes look uniform. Their uniformity is semantic: raises mean
+the caller broke the contract, returned reasons mean valid synchronous work
+failed, and failed futures mean valid asynchronous work failed. Document an
+intentional exception on its declaration.
+
 ### Binding a C library that calls back
 
 A C library that takes a function pointer is the one binding shape with a rule, and it is not

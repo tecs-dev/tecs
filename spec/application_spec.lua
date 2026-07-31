@@ -23,6 +23,7 @@ local files = require("tecs.io.files")
 local tecsIO = require("tecs.io")
 local log = require("tecs.log")
 local mcp = require("tecs.io.mcp")
+local runtime = require("tecs.runtime")
 
 local FIXTURE = "spec/fixtures/split.png"
 
@@ -37,6 +38,26 @@ local function build(config)
 end
 
 describe("Application", function()
+    it("polls the process runtime once per host iteration", function()
+        local app = build({})
+        assert.is_true(app:_init())
+
+        local original = runtime.poll
+        local calls = 0
+        runtime.poll = function()
+            calls = calls + 1
+            return 0
+        end
+        local ok, reason = pcall(function()
+            app:_iterate(nil, 0, nil)
+        end)
+        runtime.poll = original
+
+        app:_shutdown()
+        assert.is_true(ok, reason)
+        assert.are.equal(1, calls)
+    end)
+
     -- The two renderer options a game can only reach through this config. A
     -- field declared on Config and not forwarded type-checks, documents itself
     -- and does nothing, which is the failure these catch. The renderer is

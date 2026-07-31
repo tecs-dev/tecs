@@ -60,7 +60,7 @@ logical length, and requires it to remain open through the writer's close.
 
 Resolution and client connection return asynchronous
 [`Future`](tealdoc:tecs.Future) values. An
-[`Application`](tealdoc:tecs.Application) polls this module once per
+[`Application`](tealdoc:tecs.Application) polls [`runtime`](/modules/runtime/) once per
 iteration, so a game waits on status without driving I/O itself:
 
 ```teal
@@ -73,12 +73,14 @@ local function update()
 end
 ```
 
-An `Application` calls `poll` automatically once per host iteration. Game
-systems and update functions must not call it themselves. Only a headless
-program without an application calls `poll` once per manual loop; it can use a
-future's bounded `wait` instead when blocking is the honest operation. Stream
-transfers already block until their bytes have moved. Listening, accepting,
-reading, writing, and receiving are nonblocking.
+An `Application` calls `tecs.runtime.poll` automatically once per host
+iteration. Game systems and update functions must not drive either pump. A
+headless program normally calls `tecs.runtime.poll` once per manual loop;
+`tecs.io.poll` remains the narrower operation for code deliberately driving
+only generic network futures. A future's bounded `wait` is available when
+blocking is the honest operation. Stream transfers already block until their
+bytes have moved. Listening, accepting, reading, writing, and receiving are
+nonblocking.
 
 Every address, TCP socket, listener, UDP socket, and UDP packet owns a
 resource. Close it explicitly. A GC finalizer releases an abandoned network
@@ -101,6 +103,7 @@ local ffi <const> = require("ffi")
 local binding <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local Future <const> = require("tecs.Future")
+local runtime <const> = require("tecs.internal.runtime")
 local buffer <const> = require("tecs.io.buffer")
 local filters <const> = require("tecs.io.filters")
 local pump <const> = require("tecs.io.pump")
@@ -1121,6 +1124,9 @@ local function removeOperation(operation: Operation)
         moved.at = at
     end
     operation.at = 0
+    if #operations == 0 then
+        runtime.unregister("io")
+    end
 end
 
 local function finish(operation: Operation, waitMs: integer): integer
@@ -1183,6 +1189,9 @@ local function operation(kind: OperationKind, host: string, handle: loader.CPtr)
     source.defaultWaitMs = DEFAULT_WAIT_MS
     source.future = Future.pending(source as Source) as FutureType<any>
     operations[source.at] = source
+    if source.at == 1 then
+        runtime.register("io", 40, binaryIO.poll)
+    end
     return source
 end
 

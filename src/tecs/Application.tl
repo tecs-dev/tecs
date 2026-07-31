@@ -56,19 +56,13 @@ rather than one frame later.
 1. The application starts the input frame and drains every platform event SDL
    delivered since the previous iteration. A quit request ends the iteration
    here.
-2. `tecs.assets.update` settles the loads the worker finished.
-3. `tecs.platform.os.updateProcesses` and `tecs.platform.os.updateDialogs` settle the
-   children that exited and the dialogs the user answered.
-4. `tecs.io.poll` advances asynchronous I/O sources, including address
-   resolution and client connection.
-5. The application pumps every open `tecs.io.http` client, which settles the
-   transfers that completed.
-6. `tecs.io.watcher` polls, which reloads content whose file changed.
-7. The debug server answers, `world:update(dt)` runs the phases, and the
+2. `tecs.runtime.poll` settles process-wide asynchronous work: finished asset
+   loads, child processes, dialogs, generic I/O, HTTP clients, and file changes.
+3. The debug server answers, `world:update(dt)` runs the phases, and the
    renderer records and submits one frame.
-8. The audio mixer updates, which reaps the voices it has finished with.
+4. The audio mixer updates, which reaps the voices it has finished with.
 
-Steps 2 through 6 and step 8 run whatever else is true of the process. A decode
+Steps 2 and 4 run whatever else is true of the process. A decode
 that finished, a child that exited, a transfer that completed and a file that
 changed have all already happened, and a voice the mixer is done with has to be
 reaped either way, so a suspended run and a crashed one keep settling them.
@@ -129,9 +123,9 @@ local audio <const> = require("tecs.audio")
 local type Audio = audio.Audio
 local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
-local tecsIO <const> = require("tecs.io")
 local files <const> = require("tecs.io.files")
 local platformOS <const> = require("tecs.platform.os")
+local runtime <const> = require("tecs.runtime")
 
 -- Host-only event conversion operations. The public events record omits these
 -- engine-facing helpers, while the implementation table retains them for the
@@ -143,7 +137,6 @@ local record EventHost
 end
 
 local eventHost <const> = events as EventHost
-local httpClients <const> = require("tecs.io.http.clients")
 local watcher <const> = require("tecs.io.watcher")
 local log <const> = require("tecs.log")
 local mcp <const> = require("tecs.io.mcp")
@@ -976,51 +969,13 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
         return false
     end
 
-    -- The loading worker answers whenever it finishes, and nothing else in a
-    -- frame is obliged to ask. A subsystem that loads assets of its own drains
-    -- the same queue when it looks at its own waiting list, but a game that
-    -- loaded an image and nothing else has no such subsystem, and its future
-    -- would stay pending for the life of the process. Outside the suspension
-    -- guard, because a decode that finished while backgrounded is finished.
-    assets.update()
-
-    -- The same argument, for the same reason: a child that has exited has
-    -- exited, and a game that shelled out and did nothing else would otherwise
-    -- hold a future that never settles. Costs a nil check on a
-    -- process that has never started a child.
-    platformOS.updateProcesses()
-    platformOS.updateDialogs()
-
-    -- Address resolution, connection attempts and generic stream transfers
-    -- are finite asynchronous work just like the services above. A game with
-    -- an Application gets one nonblocking poll every iteration, including
-    -- while suspended or crashed, so its futures cannot stall because no
-    -- system happened to ask the I/O module for progress.
-    --
-    -- This precedes the protocol-specific HTTP pump. Generic sources settle
-    -- first, then transports with their own client lifecycle, then the file
-    -- watcher. Costs one empty-list check when no source is pending.
-    tecsIO.poll()
-
-    -- And again for every open HTTP client. A transfer that completed while
-    -- the game was backgrounded has completed, so this is outside the
-    -- suspension guard like the two above it. It is outside the crash guard
-    -- too, and for a reason the event path does not have: an observer that
-    -- throws after a crash is a second traceback nobody needed, while a
-    -- future's listeners already run inside the drain's own pcall, so nothing
-    -- here can produce one. Not pumping would hold a socket open and let a
-    -- transfer reach a deadline it had no reason to.
-    --
-    -- Costs an integer compare on a process that has never built a client.
-    -- This module is what makes that true: the list of live clients does not
-    -- initialize Reqwest, so a game with no HTTP in it starts no HTTP runtime.
-    httpClients.pump()
-
-    -- Outside the suspension and crash guards, for the reason above and one
-    -- more: a shader edited to fix the crash is exactly what a stopped process
-    -- is waiting for. Costs a clock read on a frame the interval has not
-    -- elapsed on, and nothing at all when no watcher was asked for.
-    watcher.poll()
+    -- Process-wide asynchronous work settles on this Lua thread, whether or
+    -- not a world system happened to ask for it. This stays outside the
+    -- suspension and crash guards: completed work is already complete, and a
+    -- changed shader may be exactly what repairs a crashed run. The runtime
+    -- reaches only facilities already loaded by this application, so the
+    -- empty path starts no native service.
+    runtime.poll()
 
     if not self.suspended then
         -- Answered on this thread, inside the frame, so a tool reads a world

@@ -1649,27 +1649,61 @@ tracked, `isPending` answers false, and the parked cursor resumes on the next
 fixed step; a game that wants the wait to mean something re-issues the work and
 re-tracks it under the same key.
 
+## One process-wide pump
+
+Asynchronous work crosses back into Lua in more than one subsystem. Asset
+workers answer, children exit, native dialogs complete, DNS and connections
+finish, HTTP clients receive events, and the content watcher reaches its next
+scan. They all have the same constraint: Lua listeners may settle only on the
+Lua thread, and no game system is obliged to ask whether unrelated work has
+finished.
+
+`tecs.runtime.poll` is that boundary for both an `Application` and a headless
+program. It is a root module rather than an extension of `tecs.io`: asset
+decoding and child processes are not I/O operations owned by that module, and
+changing `tecs.io.poll` would make its existing `pending` and `shutdown`
+contracts silently describe only part of what its pump advances. It is not an
+`Application` method because a command-line tool has no application, and it is
+not a `Future` scheduler because `Future` describes one value and the source
+that can advance it rather than owning a process.
+
+The implementation is a registry below every participating module. A facility
+registers while it has an active service or pending work and unregisters when
+that ends. Numeric stages preserve the application order independently of load
+order. The registry snapshots its current turn, so a listener may open or
+close another facility without turning one twice or skipping a neighbor.
+Nothing requires a participant in the other direction, and merely reading or
+polling `tecs.runtime` loads no native service.
+
+There is deliberately no process-wide `pending`. An installed watcher and an
+idle reusable HTTP client are active but have no finite work to count, so one
+number could not mean both "unsettled futures" and "safe to exit". The same
+ownership line rules out `runtime.shutdown`: the pump borrows each facility's
+nonblocking progress operation, while applications and headless tools retain
+the resource-specific teardown order. MCP remains application-owned because
+it reads a particular world, audio remains mixer-owned, and synchronous
+streams remain synchronous.
+
 ## Asking the network for something
 
 Every HTTP request is a future, which is the easy half. The two questions worth
 recording are who drives the transfer and what a body is.
 
-**A game never pumps.** Reqwest runs transfers on a bounded Tokio runtime, but
-their results still have to enter Lua on the SDL thread. That is engine work,
-and it is the same work
-`assets.update` and `proc.update` already do in the loop for the same reason: a
-decode that finished has finished, a child that exited has exited, a transfer
-that completed has completed, and nothing else in a frame is obliged to ask.
-`assets` and `proc` are module singletons, while a game may construct several
-HTTP clients. The clients therefore register with the loop: building one puts it on the
-private application registry turns, `close` takes it off, and the
-application turns whatever is on the list. Native workers send bounded chunk,
-completion and error messages to a queue; the frame pump drains it without any
-Rust callback entering Lua. The list holds its clients strongly, so a request whose
-future is the only thing a game kept still lands; the price is that `close` is
-what ends a client rather than losing the last reference to it, and the
-alternative -- a weak list -- is a fire-and-forget request that stops moving
-whenever a collection happens to run.
+**A game never pumps individual facilities.** Reqwest runs transfers on a
+bounded Tokio runtime, but their results still have to enter Lua on the SDL
+thread. That is engine work, and it is the same work asset and process updates
+already do in the loop for the same reason: a decode that finished has
+finished, a child that exited has exited, a transfer that completed has
+completed, and nothing else in a frame is obliged to ask. `assets` and `proc`
+are module singletons, while a game may construct several HTTP clients. The
+clients therefore keep a process-wide list: building one adds it, `close`
+takes it off, and `tecs.runtime.poll` turns whatever remains. Native workers
+send bounded chunk, completion and error messages to a queue; the frame pump
+drains it without any Rust callback entering Lua. The list holds its clients
+strongly, so a request whose future is the only thing a game kept still lands;
+the price is that `close` is what ends a client rather than losing the last
+reference to it, and the alternative -- a weak list -- is a fire-and-forget
+request that stops moving whenever a collection happens to run.
 
 **A body uses the same `tecs.io.Stream` as every other binary source and
 destination.** A request takes a string or `ReadableStream`, `into` takes a path
