@@ -298,7 +298,7 @@ describe("platform.clipboard", function()
         assert.is_true(platformOS.hasClipboardData(TEXT_MIME))
         local bytes = platformOS.clipboardData(TEXT_MIME)
         assert.are.equal("by mime", bytes:getString())
-        bytes:release()
+        bytes:close()
     end)
 
     it("answers nil for a mime type the clipboard does not offer", function()
@@ -344,7 +344,7 @@ describe("platform.clipboard", function()
             platformOS.clipboardText()
             platformOS.primarySelection()
             local bytes = platformOS.clipboardData(TEXT_MIME)
-            bytes:release()
+            bytes:close()
         end
         local grew = settled() - before
         assert.is_true(

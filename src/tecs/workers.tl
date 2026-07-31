@@ -59,6 +59,7 @@ machine-code allocation failures.
 local ffi <const> = require("ffi")
 local buffer <const> = require("string.buffer")
 local loader <const> = require("tecs.ffi.loader")
+local type Closeable = require("tecs.types").Closeable
 
 loader.declare("worker")
 
@@ -73,7 +74,7 @@ local FOREVER <const> = -1
 --- object and mutating either one is invisible to the other. A `nil` is encodable and does
 --- cross, but `receive` also answers nil for "nothing here", so nil is not usable as a
 --- message a reader can recognize.
-local record Channel
+local record Channel is Closeable
     --- Engine-owned. Stores the native queue pointer until `destroy` runs.
     --- Ordinary game code should ignore this field.
     handle: loader.CPtr

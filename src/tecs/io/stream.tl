@@ -244,6 +244,7 @@ local function viewRange(sourceView: ByteView, offset: integer, count: integer, 
         or type(dynamic.getFFIPointer) ~= "function"
         or type(dynamic.view) ~= "function"
         or type(dynamic.isReleased) ~= "function"
+        or type(dynamic.close) ~= "function"
         or (dynamic.isReleased as function(any): boolean)(sourceView)
     then
         error("tecs: stream writeView needs an open io.ByteView", level)
@@ -277,6 +278,7 @@ local function checkedBuffer(value: any, what: string, level: integer): IOBuffer
         or type((value as {string: any}).length) ~= "function"
         or type((value as {string: any}).getFFIPointer) ~= "function"
         or type((value as {string: any}).isReleased) ~= "function"
+        or type((value as {string: any}).close) ~= "function"
     then
         error(("tecs: %s needs an io.Buffer"):format(what), level)
     end
@@ -582,7 +584,7 @@ end
 
 function MemoryReader:close()
     if self._view ~= nil then
-        self._view:release()
+        self._view:close()
         self._view = nil
     end
     self._closed = true
@@ -790,14 +792,14 @@ end
 
 local function releaseScratch(transfer: Transfer)
     if transfer.scratch ~= nil then
-        transfer.scratch:release()
+        transfer.scratch:close()
         transfer.scratch = nil
     end
 end
 
 local function releaseView(transfer: Transfer)
     if transfer.view ~= nil then
-        transfer.view:release()
+        transfer.view:close()
         transfer.view = nil
     end
 end
@@ -808,7 +810,7 @@ local function fail(transfer: Transfer, reason: string)
     releaseScratch(transfer)
     releaseView(transfer)
     if transfer.kind == "transferToBuffer" and transfer.buffer ~= nil then
-        transfer.buffer:release()
+        transfer.buffer:close()
         transfer.buffer = nil
     end
     transfer.future:fail(reason or "stream transfer failed")
@@ -821,7 +823,7 @@ local function finish(transfer: Transfer)
     releaseView(transfer)
     if not closed then
         if transfer.kind == "transferToBuffer" and transfer.buffer ~= nil then
-            transfer.buffer:release()
+            transfer.buffer:close()
             transfer.buffer = nil
         end
         transfer.future:fail(reason)
@@ -829,7 +831,7 @@ local function finish(transfer: Transfer)
     end
     if transfer.kind == "readString" then
         local result <const> = transfer.buffer:getString()
-        transfer.buffer:release()
+        transfer.buffer:close()
         transfer.buffer = nil
         transfer.future:complete(result)
     elseif transfer.kind == "transferToBuffer" then
@@ -1009,7 +1011,7 @@ function Transfer:cancel(future: Future<any>)
     releaseScratch(self)
     releaseView(self)
     if self.kind == "transferToBuffer" and self.buffer ~= nil then
-        self.buffer:release()
+        self.buffer:close()
         self.buffer = nil
     end
 end
@@ -1057,13 +1059,13 @@ local function beginRead(source: ReadableStream, kind: TransferKind, maxBytes: i
             outputBuffer.ensureCapacity, outputBuffer, known
         ) as (boolean, any)
         if not reserved then
-            outputBuffer:release()
+            outputBuffer:close()
             return failed(tostring(reserveReason))
         end
     end
     local reader <const>, reason = source:newReader()
     if reader == nil then
-        outputBuffer:release()
+        outputBuffer:close()
         return failed(reason)
     end
     local transfer <const> = newTransfer(kind)
@@ -1092,12 +1094,12 @@ local function transferTo(source: ReadableStream, destination: WritableStream): 
     local scratch <const> = scratchOrReason as IOBuffer
     local reader <const>, readReason = source:newReader()
     if reader == nil then
-        scratch:release()
+        scratch:close()
         return failed(readReason)
     end
     local writer <const>, writeReason = destination:newWriter()
     if writer == nil then
-        scratch:release()
+        scratch:close()
         pcall(reader.close, reader)
         return failed(writeReason)
     end
@@ -1123,7 +1125,7 @@ local function discard(source: ReadableStream): Future<integer>
     local scratch <const> = scratchOrReason as IOBuffer
     local reader <const>, reason = source:newReader()
     if reader == nil then
-        scratch:release()
+        scratch:close()
         return failed(reason)
     end
     local transfer <const> = newTransfer("discard")
@@ -1171,7 +1173,7 @@ local function writeView(
     local retained <const> = sourceView:view(offset, count)
     local writer <const>, reason = destination:newWriter()
     if writer == nil then
-        retained:release()
+        retained:close()
         return failed(reason)
     end
     local transfer <const> = newTransfer("writeView")
@@ -1448,7 +1450,7 @@ function ViewStream:isAvailable(): boolean
 end
 function ViewStream:close()
     if self._view ~= nil then
-        self._view:release()
+        self._view:close()
         self._view = nil
     end
     close(self)

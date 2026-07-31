@@ -14,7 +14,7 @@ Whole-source operations return futures. A caller outside a frame can use
 local save <const> = tecs.io.newFileStream("save.bin")
 local bytes <const> = save:transferToBuffer().value
 print(bytes:length())
-bytes:release()
+bytes:close()
 save:close()
 ```
 
@@ -177,7 +177,7 @@ local record binaryIO
 
     --- Creates a stream sharing an owned growable buffer.
     ---
-    --- `transferToBuffer` returns the same retained object. Releasing or mutating it
+    --- `transferToBuffer` returns the same retained object. Closing or mutating it
     --- affects both caller and stream.
     --- @param buffer The caller supplies an open buffer.
     --- @param contentType The caller supplies optional media type metadata.
@@ -186,9 +186,9 @@ local record binaryIO
 
     --- Creates a replayable read-only stream retaining a byte view.
     ---
-    --- The stream retains its own view, so the caller may release `view`
-    --- immediately after construction. Closing the stream releases its
-    --- retained range after already-open readers release theirs.
+    --- The stream retains its own view, so the caller may close `view`
+    --- immediately after construction. Closing the stream closes its retained
+    --- view after already-open readers close theirs.
     --- @param view The caller supplies an open immutable byte view.
     --- @param contentType The caller supplies optional media type metadata.
     --- @return Returns a readable stream.
@@ -320,7 +320,7 @@ local record binaryIO
         --- Queues a buffer range for reliable ordered delivery.
         ---
         --- The native send queue copies the range before this call returns, so
-        --- the caller may mutate or release the buffer afterwards. This avoids
+        --- the caller may mutate or close the buffer afterwards. This avoids
         --- constructing an intermediate Lua string but does not bypass the
         --- queue's ownership copy.
         --- @param source The caller supplies an open
@@ -872,7 +872,7 @@ end
 
 function binaryIO.UDPPacket:close()
     self.address:close()
-    self.bytes:release()
+    self.bytes:close()
 end
 
 function binaryIO.UDPSocket:send(address: binaryIO.Address, port: integer, bytes: string): boolean, string

@@ -79,7 +79,7 @@ describe("tecs.data", function()
         end
 
         source:setString("changed", 7)
-        source:release()
+        source:close()
 
         assert.are.equal("7061796c6f6164", data.hexEncode(view))
         assert.are.equal("cGF5bG9hZA==", data.base64Encode(view))
@@ -93,14 +93,14 @@ describe("tecs.data", function()
         local base64 = tecs.io.newBuffer("cGF5bG9hZA==")
         local hexView = hex:view()
         local base64View = base64:view()
-        hex:release()
-        base64:release()
+        hex:close()
+        base64:close()
         assert.are.equal("payload", data.hexDecode(hexView))
         assert.are.equal("payload", data.base64Decode(base64View))
 
-        hexView:release()
-        base64View:release()
-        view:release()
+        hexView:close()
+        base64View:close()
+        view:close()
     end)
 
     it("rejects non-canonical or malformed Base64 text", function()
