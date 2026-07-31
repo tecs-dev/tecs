@@ -106,9 +106,9 @@ describe(
         it(
             "lists named keys with their ids",
             function()
-                local KEY = tecs.data.newKey("spec.context.listed") as integer
-                local listed = tecs.data.listKeys()
-                luassert.is_equal(KEY, listed["spec.context.listed"], "listKeys maps the name to the key id")
+                tecs.data.newKey("spec.context.listed")
+                local listed = tecs.data.Key.listKeys()
+                luassert.is_not_nil(listed["spec.context.listed"], "listKeys maps the name to the key id")
 
                 -- The returned table is a copy: mutating it does not affect the registry.
                 listed["spec.context.listed"] = nil

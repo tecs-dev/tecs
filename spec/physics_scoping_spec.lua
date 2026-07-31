@@ -50,7 +50,7 @@ describe("ecs.physics world scoping", function()
     -- into a world without every module exporting its key.
     it("names its resource key", function()
         assert.is_not_nil(tecs.data.findKey("tecs.physics"))
-        assert.is_not_nil(tecs.data.listKeys()["tecs.physics"])
+        assert.is_not_nil(tecs.data.Key.listKeys()["tecs.physics"])
     end)
 
     -- Each world owns an independent simulation.

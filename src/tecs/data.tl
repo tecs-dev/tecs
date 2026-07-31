@@ -95,7 +95,7 @@ store[SPEED] = 120
 
 `world.resources` is a `Store`. Stores are in-memory and independent; a named
 key is the process-wide identity that lets hot reload and tooling find the same
-value again.
+value again. `Key.listKeys` reports the named keys registered by the process.
 ]=]
 
 local ffi <const> = require("ffi")
@@ -347,8 +347,13 @@ local record data is JSON
     --- `Store` holds typed values under process-wide keys.
     type Store = TypedStore
 
-    --- `Key` identifies one typed store value.
-    type Key<T> = TypedStore.Key<T>
+    --- `Key` identifies one typed store value and exposes key discovery.
+    record Key<T> is TypedStore.Key<T>
+        --- Returns all named keys as name-to-id entries.
+        ---
+        --- @return Returns a fresh caller-owned process-wide table.
+        listKeys: function(): {string: integer}
+    end
 
     --- Creates an independent typed store.
     ---
@@ -358,26 +363,21 @@ local record data is JSON
     --- Creates a typed key.
     ---
     --- Always pass a name. Named keys are discoverable through `findKey` and
-    --- `listKeys`, and repeating a name returns the same key so values remain
-    --- reachable when a module reloads.
+    --- `Key.listKeys`, and repeating a name returns the same key so values
+    --- remain reachable when a module reloads.
     ---
     --- @param name The caller supplies a namespaced identity such as
     ---     `"game.state"`. Omitting it creates an anonymous key and warns.
     --- @param forType The caller passes `nil as T` when Teal needs the value
     ---     type carried explicitly. The function does not read it.
     --- @return Returns the stable key for a name or a fresh anonymous key.
-    newKey: function<T>(name?: string, forType?: T): TypedStore.Key<T>
+    newKey: function<T>(name?: string, forType?: T): Key<T>
 
     --- Returns a named key created by `newKey`.
     ---
     --- @param name The caller supplies the name used during key creation.
     --- @return Returns the existing key, or nil before any module creates it.
-    findKey: function<T>(name: string): TypedStore.Key<T> | nil
-
-    --- Returns all named keys as name-to-id entries.
-    ---
-    --- @return Returns a fresh caller-owned process-wide table.
-    listKeys: function(): {string: integer}
+    findKey: function<T>(name: string): Key<T> | nil
 
     --- Generates a random RFC 9562 UUID version 4.
     ---
@@ -398,9 +398,9 @@ function data.newStore(): TypedStore
     return {} as TypedStore
 end
 
-data.newKey = storekeys.newKey as function<T>(name?: string, forType?: T): TypedStore.Key<T>
-data.findKey = storekeys.findKey
-data.listKeys = storekeys.listKeys
+data.newKey = storekeys.newKey as function<T>(name?: string, forType?: T): data.Key<T>
+data.findKey = storekeys.findKey as function<T>(name: string): data.Key<T> | nil
+data.Key.listKeys = storekeys.listKeys
 
 local C <const> = zlib.C
 local K <const> = zlib.K

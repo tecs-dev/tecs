@@ -228,8 +228,9 @@ world:addPlugin(spinPlugin)
 ```
 
 Callers own resource values and may replace them. Tecs owns resource-key
-identity. Always name keys so hot reload, tooling, `findKey`, and `listKeys`
-on `tecs.data` can find the same key. Snapshots omit `world.resources`; register a
+identity. Always name keys so hot reload, tooling, `findKey`, and
+`Key.listKeys` on `tecs.data` can find the same key. Snapshots omit
+`world.resources`; register a
 [snapshot handler](/modules/ecs/save-games#snapshot-handlers) for durable resource
 state.
 

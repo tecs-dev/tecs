@@ -108,7 +108,7 @@ end
 
 Always name resource keys. Re-registering one name returns the same key, which
 supports hot reload and lets tooling discover the dependency through
-`tecs.data.listKeys`.
+`tecs.data.Key.listKeys`.
 
 Export component and event types beside the plugin function when other modules
 need them. Keep one purpose per plugin, then group related plugins with another

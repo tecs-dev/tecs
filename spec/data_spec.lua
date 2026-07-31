@@ -36,6 +36,11 @@ describe("tecs.data", function()
         assert.are.equal("function", type(data.uuid7))
     end)
 
+    it("publishes key enumeration on the Key namespace", function()
+        assert.are.equal("function", type(data.Key.listKeys))
+        assert.is_nil(data.listKeys)
+    end)
+
     it("answers an independent settings table from newJSON", function()
         local copy = data.newJSON()
         assert.are_not.equal(data, copy)
