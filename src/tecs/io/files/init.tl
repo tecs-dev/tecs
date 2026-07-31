@@ -36,7 +36,7 @@ loaders. It does not walk the whole asset tree.
 local ffi <const> = require("ffi")
 local adapter <const> = require("tecs.platform.adapter")
 local buffer <const> = require("tecs.io.buffer")
-local type loader = require("tecs.ffi.loader")
+local loader <const> = require("tecs.ffi.loader")
 local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
 local type types = require("tecs.io.types")
@@ -74,6 +74,7 @@ local type LineIterator = files.LineIterator
 local type Writer = types.Writer
 local type Reader = types.Reader
 local type IOBuffer = types.Buffer
+local type ByteView = types.ByteView
 
 --- Raises when a required string argument is missing.
 ---
@@ -469,6 +470,29 @@ local function bufferedWriter(backend: storagebackend.Backend, path: string): Wr
             return nil, reason
         end
         return #bytes
+    end
+    writer.writeView = function(
+        _self: Writer, sourceView: ByteView, offset?: integer, length?: integer
+    ): integer, string
+        if sourceView == nil or sourceView:isReleased() then
+            error("tecs: Writer:writeView needs an open io.ByteView", 2)
+        end
+        offset = offset or 0
+        local viewLength <const> = sourceView:length()
+        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 or offset > viewLength then
+            error("tecs: Writer:writeView offset is outside the view", 2)
+        end
+        if length == nil then
+            length = viewLength - offset
+        elseif type(length) ~= "number" or length ~= floor(length) or length < 0 or length > viewLength - offset then
+            error("tecs: Writer:writeView count is outside the view", 2)
+        end
+        local bytes <const> = loader.toBytes((sourceView:getFFIPointer() + offset) as loader.CValue, length)
+        local ok <const>, reason = writer:write(bytes)
+        if not ok then
+            return nil, reason
+        end
+        return length
     end
     writer.flush = function(_self: Writer): boolean, string
         if pieces == nil then

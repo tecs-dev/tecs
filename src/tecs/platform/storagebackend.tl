@@ -77,6 +77,7 @@ local max <const> = math.max
 local type Reader = types.Reader
 local type Writer = types.Writer
 local type IOBuffer = types.Buffer
+local type ByteView = types.ByteView
 
 --- What a path is. Symbolic links are followed where the platform has them, so
 --- a link never reports as one: "other" is a socket, a fifo or a device.
@@ -298,6 +299,33 @@ local function sdlWriter(path: string, mode: string): Writer, string
             return 0
         end
         local pointer <const> = sourceBuffer:getFFIPointer() + offset
+        local written <const> = tonumber(C.SDL_WriteIO(stream, pointer, count)) as integer
+        if written == 0 and tonumber(C.SDL_GetIOStatus(stream)) == tonumber(C.SDL_IO_STATUS_ERROR) then
+            return nil, sdl.error()
+        end
+        return written
+    end
+    writer.writeView = function(_self: Writer, sourceView: ByteView, offset?: integer, count?: integer): integer, string
+        if stream == nil then
+            return nil, "the writer is closed"
+        end
+        if sourceView == nil or sourceView:isReleased() then
+            error("tecs: Writer:writeView needs an open io.ByteView", 2)
+        end
+        offset = offset or 0
+        local length <const> = sourceView:length()
+        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 or offset > length then
+            error("tecs: Writer:writeView offset is outside the view", 2)
+        end
+        if count == nil then
+            count = length - offset
+        elseif type(count) ~= "number" or count ~= floor(count) or count < 0 or count > length - offset then
+            error("tecs: Writer:writeView count is outside the view", 2)
+        end
+        if count == 0 then
+            return 0
+        end
+        local pointer <const> = sourceView:getFFIPointer() + offset
         local written <const> = tonumber(C.SDL_WriteIO(stream, pointer, count)) as integer
         if written == 0 and tonumber(C.SDL_GetIOStatus(stream)) == tonumber(C.SDL_IO_STATUS_ERROR) then
             return nil, sdl.error()

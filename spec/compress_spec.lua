@@ -278,6 +278,32 @@ describe("data.inflate", function()
 end)
 
 describe("data.deflate", function()
+    it("compresses and inflates retained views after their buffers release", function()
+        local ioModule = require("tecs").io
+        local source = ioModule.newBuffer("payload")
+        local sourceView = source:view()
+        sourceView.getString = function()
+            error("compression copied its input")
+        end
+        source:release()
+
+        local wrapped = data.deflate(sourceView)
+        local raw = data.deflateRaw(sourceView)
+        local wrappedBuffer = ioModule.newBuffer(wrapped)
+        local rawBuffer = ioModule.newBuffer(raw)
+        local wrappedView = wrappedBuffer:view()
+        local rawView = rawBuffer:view()
+        wrappedBuffer:release()
+        rawBuffer:release()
+
+        assert.are.equal("payload", data.inflate(wrappedView))
+        assert.are.equal("payload", data.inflateRaw(rawView))
+
+        sourceView:release()
+        wrappedView:release()
+        rawView:release()
+    end)
+
     it("round trips zlib and raw streams", function()
         local text = mixture(32768)
         assert.are.equal(text, data.inflate(data.deflate(text)))

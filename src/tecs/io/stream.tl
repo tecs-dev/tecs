@@ -19,6 +19,7 @@ local type types = require("tecs.io.types")
 local type Files = require("tecs.io.files")
 
 local type IOBuffer = types.Buffer
+local type ByteView = types.ByteView
 local type Reader = types.Reader
 local type Writer = types.Writer
 local type Stream = types.Stream
@@ -39,6 +40,7 @@ end
 
 local newStringStream: function(text: string, contentType?: string): ReadableStream
 local newBufferStream: function(sourceBuffer: IOBuffer, contentType?: string): ReadWriteStream
+local newViewStream: function(sourceView: ByteView, contentType?: string): ReadableStream
 local newFileStream: function(path: string, contentType?: string): ReadWriteStream
 local withMetadata: function<T is Stream>(
     source: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
@@ -74,6 +76,11 @@ local record ByteStream is Backing, ReadableStream
     _length: integer
 end
 
+--- A retained immutable byte view.
+local record ViewStream is Backing, ReadableStream
+    _view: ByteView
+end
+
 --- A path reopened for each direction.
 local record FileStream is Backing, ReadWriteStream
     _path: string
@@ -94,6 +101,7 @@ end
 local StringStreamMT <const>: metatable<StringStream> = {__index = StringStream}
 local BufferStreamMT <const>: metatable<BufferStream> = {__index = BufferStream}
 local ByteStreamMT <const>: metatable<ByteStream> = {__index = ByteStream}
+local ViewStreamMT <const>: metatable<ViewStream> = {__index = ViewStream}
 local FileStreamMT <const>: metatable<FileStream> = {__index = FileStream}
 local HandleStreamMT <const>: metatable<HandleStream> = {__index = HandleStream}
 
@@ -102,6 +110,7 @@ local record MemoryReader is Reader
     _text: string
     _buffer: IOBuffer
     _pointer: loader.CValue
+    _view: ByteView
     _length: integer
     _at: integer
     _closed: boolean
@@ -161,6 +170,7 @@ local enum TransferKind
     "copy"
     "discard"
     "writeBuffer"
+    "writeView"
     "writeString"
 end
 
@@ -170,6 +180,7 @@ local record Transfer
     reader: Reader
     writer: Writer
     buffer: IOBuffer
+    view: ByteView
     scratch: IOBuffer
     text: string
     future: Future<any>
@@ -221,6 +232,34 @@ local function bufferRange(sourceBuffer: IOBuffer, offset: integer, count: integ
     end
     if count > length - offset then
         error("tecs: stream buffer range is past its length", level)
+    end
+    return offset, count
+end
+
+local function viewRange(sourceView: ByteView, offset: integer, count: integer, level: integer): integer, integer
+    local dynamic <const> = sourceView as {string: any}
+    if
+        type(sourceView) ~= "table"
+        or type(dynamic.length) ~= "function"
+        or type(dynamic.getFFIPointer) ~= "function"
+        or type(dynamic.view) ~= "function"
+        or type(dynamic.isReleased) ~= "function"
+        or (dynamic.isReleased as function(any): boolean)(sourceView)
+    then
+        error("tecs: stream writeView needs an open io.ByteView", level)
+    end
+    offset = nonNegative(offset or 0, "stream view offset", level)
+    local length <const> = sourceView:length()
+    if offset > length then
+        error("tecs: stream view offset is past its length", level)
+    end
+    if count == nil then
+        count = length - offset
+    else
+        count = nonNegative(count, "stream view count", level)
+    end
+    if count > length - offset then
+        error("tecs: stream view range is past its length", level)
     end
     return offset, count
 end
@@ -330,6 +369,16 @@ local function borrowedBytes(source: ReadableStream): BorrowedBytes
             length = bytes._length,
             owner = backing,
         }
+    elseif mt == (ViewStreamMT as any) then
+        local view <const> = (backing as ViewStream)._view
+        if view:isReleased() then
+            return nil
+        end
+        return {
+            pointer = view:getFFIPointer(),
+            length = view:length(),
+            owner = view,
+        }
     end
     return nil
 end
@@ -370,6 +419,9 @@ local function snapshotStream(source: Stream, what: string): {string: any}
         local bytes <const> = backing as ByteStream
         saved.kind = "buffer"
         saved.bytes = loader.toBytes(bytes._pointer, bytes._length)
+    elseif mt == (ViewStreamMT as any) then
+        saved.kind = "buffer"
+        saved.bytes = (backing as ViewStream)._view:getString()
     elseif mt == (FileStreamMT as any) then
         saved.kind = "file"
         saved.path = (backing as FileStream)._path
@@ -451,13 +503,14 @@ local function close(self: Backing)
 end
 
 local function newMemoryReader(
-    text: string, sourceBuffer: IOBuffer, pointer: loader.CValue, length: integer
+    text: string, sourceBuffer: IOBuffer, pointer: loader.CValue, length: integer, sourceView?: ByteView
 ): MemoryReader
     return rawSetMetatable(
         {
             _text = text,
             _buffer = sourceBuffer,
             _pointer = pointer,
+            _view = sourceView,
             _length = length,
             _at = 0,
             _closed = false,
@@ -480,7 +533,9 @@ function MemoryReader:read(count: integer): string, string
         result = self._text:sub(self._at + 1, self._at + taking)
     else
         local pointer = loader.bytePointer(self._pointer)
-        if self._buffer ~= nil then
+        if self._view ~= nil then
+            pointer = self._view:getFFIPointer()
+        elseif self._buffer ~= nil then
             if self._buffer:isReleased() then
                 return nil, "stream buffer is released"
             end
@@ -508,6 +563,8 @@ function MemoryReader:readInto(destination: IOBuffer, count: integer, offset?: i
     local source: loader.BytePointer
     if self._text ~= nil then
         source = ffi.cast("uint8_t *", self._text) as loader.BytePointer
+    elseif self._view ~= nil then
+        source = self._view:getFFIPointer()
     elseif self._buffer ~= nil then
         if self._buffer:isReleased() then
             return nil, "stream buffer is released"
@@ -524,6 +581,10 @@ function MemoryReader:readInto(destination: IOBuffer, count: integer, offset?: i
 end
 
 function MemoryReader:close()
+    if self._view ~= nil then
+        self._view:release()
+        self._view = nil
+    end
     self._closed = true
 end
 
@@ -550,6 +611,24 @@ function MemoryWriter:writeFrom(source: IOBuffer, offset?: integer, count?: inte
         return nil, "cannot write a buffer into itself"
     end
     offset, count = bufferRange(source, offset, count, 2)
+    if count == 0 then
+        return 0
+    end
+    local output <const>, previousLength = buffer.prepareWrite(self._buffer, self._at, count)
+    ffi.copy(output as ffi.CData, (source:getFFIPointer() + offset) as ffi.CData, count)
+    buffer.commitWrite(self._buffer, self._at, count, previousLength)
+    self._at = self._at + count
+    return count
+end
+
+function MemoryWriter:writeView(source: ByteView, offset?: integer, count?: integer): integer, string
+    if self._closed then
+        return nil, "the writer is closed"
+    end
+    if self._buffer:isReleased() then
+        return nil, "stream buffer is released"
+    end
+    offset, count = viewRange(source, offset, count, 2)
     if count == 0 then
         return 0
     end
@@ -633,6 +712,16 @@ function HandleWriter:writeFrom(sourceBuffer: IOBuffer, offset?: integer, count?
     return count
 end
 
+function HandleWriter:writeView(source: ByteView, offset?: integer, count?: integer): integer, string
+    offset, count = viewRange(source, offset, count, 2)
+    local bytes <const> = loader.toBytes((source:getFFIPointer() + offset) as loader.CValue, count)
+    local ok <const>, reason = self:write(bytes)
+    if not ok then
+        return nil, reason
+    end
+    return count
+end
+
 function HandleWriter:flush(): boolean, string
     if self._closed then
         return false, "the writer is closed"
@@ -706,10 +795,18 @@ local function releaseScratch(transfer: Transfer)
     end
 end
 
+local function releaseView(transfer: Transfer)
+    if transfer.view ~= nil then
+        transfer.view:release()
+        transfer.view = nil
+    end
+end
+
 local function fail(transfer: Transfer, reason: string)
     remove(transfer)
     closeEndpoints(transfer)
     releaseScratch(transfer)
+    releaseView(transfer)
     if transfer.kind == "transferToBuffer" and transfer.buffer ~= nil then
         transfer.buffer:release()
         transfer.buffer = nil
@@ -721,6 +818,7 @@ local function finish(transfer: Transfer)
     remove(transfer)
     local closed <const>, reason = closeEndpoints(transfer)
     releaseScratch(transfer)
+    releaseView(transfer)
     if not closed then
         if transfer.kind == "transferToBuffer" and transfer.buffer ~= nil then
             transfer.buffer:release()
@@ -828,7 +926,25 @@ local function writeStep(transfer: Transfer)
         return
     end
     local requested <const> = min(CHUNK, transfer.sourceFinish - transfer.sourceOffset)
-    local wrote <const>, reason = transfer.writer:writeFrom(transfer.buffer, transfer.sourceOffset, requested)
+    local wrote: integer
+    local reason: string
+    if transfer.kind == "writeView" then
+        local dynamic <const> = transfer.writer as {string: any}
+        if type(dynamic.writeView) == "function" then
+            wrote, reason = transfer.writer:writeView(transfer.view, transfer.sourceOffset, requested)
+        else
+            local piece <const> = loader.toBytes(
+                (transfer.view:getFFIPointer() + transfer.sourceOffset) as loader.CValue, requested
+            )
+            local ok <const>, writeReason = transfer.writer:write(piece)
+            reason = writeReason
+            if ok then
+                wrote = requested
+            end
+        end
+    else
+        wrote, reason = transfer.writer:writeFrom(transfer.buffer, transfer.sourceOffset, requested)
+    end
     if wrote == nil then
         fail(transfer, reason)
         return
@@ -891,6 +1007,7 @@ function Transfer:cancel(future: Future<any>)
     remove(self)
     closeEndpoints(self)
     releaseScratch(self)
+    releaseView(self)
     if self.kind == "transferToBuffer" and self.buffer ~= nil then
         self.buffer:release()
         self.buffer = nil
@@ -1044,6 +1161,24 @@ local function writeBuffer(
     transfer.buffer = sourceBuffer
     transfer.sourceOffset = offset
     transfer.sourceFinish = offset + count
+    return transfer.future as Future<integer>
+end
+
+local function writeView(
+    destination: WritableStream, sourceView: ByteView, offset: integer, count: integer
+): Future<integer>
+    offset, count = viewRange(sourceView, offset, count, 3)
+    local retained <const> = sourceView:view(offset, count)
+    local writer <const>, reason = destination:newWriter()
+    if writer == nil then
+        retained:release()
+        return failed(reason)
+    end
+    local transfer <const> = newTransfer("writeView")
+    transfer.writer = writer
+    transfer.view = retained
+    transfer.sourceOffset = 0
+    transfer.sourceFinish = count
     return transfer.future as Future<integer>
 end
 
@@ -1220,6 +1355,9 @@ function BufferStream:writeBuffer(sourceBuffer: IOBuffer, offset?: integer, coun
     end
     return writeBuffer(self, sourceBuffer, offset, count)
 end
+function BufferStream:writeView(sourceView: ByteView, offset?: integer, count?: integer): Future<integer>
+    return writeView(self, sourceView, offset, count)
+end
 
 -- Borrowed byte stream
 
@@ -1288,6 +1426,74 @@ function ByteStream:discard(): Future<integer>
     return Future.settled(self._length)
 end
 
+-- Retained view stream
+
+function ViewStream:contentLength(): integer | nil
+    return self:isAvailable() and self._view:length() or nil
+end
+function ViewStream:contentType(): string | nil
+    return contentType(self)
+end
+function ViewStream:isReadable(): boolean
+    return true
+end
+function ViewStream:isWritable(): boolean
+    return false
+end
+function ViewStream:isReplayable(): boolean
+    return true
+end
+function ViewStream:isAvailable(): boolean
+    return not unavailable(self) and self._view ~= nil and not self._view:isReleased()
+end
+function ViewStream:close()
+    if self._view ~= nil then
+        self._view:release()
+        self._view = nil
+    end
+    close(self)
+end
+function ViewStream:hasBuffer(): boolean
+    return false
+end
+function ViewStream:newReader(): Reader, string
+    if not self:isAvailable() then
+        return nil, "stream is closed"
+    end
+    local retained <const> = self._view:view()
+    return newMemoryReader(nil, nil, nil, retained:length(), retained)
+end
+function ViewStream:readAll(maxBytes?: integer): Future<string>
+    maxBytes = maximum(maxBytes, 2)
+    local length <const> = self:contentLength()
+    if length == nil then
+        return failed("stream is closed")
+    end
+    if maxBytes ~= nil and length > maxBytes then
+        return failed(("stream exceeds the %d byte limit"):format(maxBytes))
+    end
+    return Future.settled(self._view:getString())
+end
+function ViewStream:transferToBuffer(maxBytes?: integer): Future<IOBuffer>
+    return transferToBuffer(self, maxBytes)
+end
+function ViewStream:transferTo(destination: WritableStream): Future<integer>
+    if not self:isAvailable() then
+        return failed("stream is closed")
+    end
+    return destination:writeView(self._view)
+end
+function ViewStream:transferToFile(path: string): Future<integer>
+    return transferToFile(self, path)
+end
+function ViewStream:discard(): Future<integer>
+    local length <const> = self:contentLength()
+    if length == nil then
+        return failed("stream is closed")
+    end
+    return Future.settled(length)
+end
+
 -- File stream
 
 function FileStream:contentLength(): integer | nil
@@ -1350,6 +1556,9 @@ function FileStream:writeAll(text: string): Future<integer>
 end
 function FileStream:writeBuffer(sourceBuffer: IOBuffer, offset?: integer, count?: integer): Future<integer>
     return writeBuffer(self, sourceBuffer, offset, count)
+end
+function FileStream:writeView(sourceView: ByteView, offset?: integer, count?: integer): Future<integer>
+    return writeView(self, sourceView, offset, count)
 end
 
 -- Handle stream
@@ -1428,6 +1637,9 @@ end
 function HandleStream:writeBuffer(sourceBuffer: IOBuffer, offset?: integer, count?: integer): Future<integer>
     return writeBuffer(self, sourceBuffer, offset, count)
 end
+function HandleStream:writeView(sourceView: ByteView, offset?: integer, count?: integer): Future<integer>
+    return writeView(self, sourceView, offset, count)
+end
 
 --- Creates a replayable readable empty source.
 local function newEmptyStream(contentTypeValue?: string): ReadableStream
@@ -1470,6 +1682,19 @@ newBufferStream = function(sourceBuffer: IOBuffer, contentTypeValue?: string): R
         } as BufferStream,
         BufferStreamMT
     ) as ReadWriteStream
+end
+
+--- Creates a read-only stream retaining an immutable byte view.
+newViewStream = function(sourceView: ByteView, contentTypeValue?: string): ReadableStream
+    viewRange(sourceView, 0, nil, 2)
+    return rawSetMetatable(
+        {
+            _view = sourceView:view(),
+            _contentType = contentTypeValue,
+            _closed = false,
+        } as ViewStream,
+        ViewStreamMT
+    ) as ReadableStream
 end
 
 --- Creates a read-only stream borrowing FFI bytes.
@@ -1598,6 +1823,12 @@ local function metadataWriteBuffer(
     return (self._source as WritableStream):writeBuffer(source, offset, count)
 end
 
+local function metadataWriteView(
+    self: MetadataState, source: ByteView, offset?: integer, count?: integer
+): Future<integer>
+    return (self._source as WritableStream):writeView(source, offset, count)
+end
+
 MetadataStream.contentType = metadataContentType
 MetadataStream.contentLength = metadataContentLength
 MetadataStream.isReadable = metadataIsReadable
@@ -1631,6 +1862,7 @@ MetadataWritableStream.close = metadataClose
 MetadataWritableStream.newWriter = metadataNewWriter
 MetadataWritableStream.writeAll = metadataWriteAll
 MetadataWritableStream.writeBuffer = metadataWriteBuffer
+MetadataWritableStream.writeView = metadataWriteView
 
 MetadataReadWriteStream.contentType = metadataContentType
 MetadataReadWriteStream.contentLength = metadataContentLength
@@ -1649,6 +1881,7 @@ MetadataReadWriteStream.discard = metadataDiscard
 MetadataReadWriteStream.newWriter = metadataNewWriter
 MetadataReadWriteStream.writeAll = metadataWriteAll
 MetadataReadWriteStream.writeBuffer = metadataWriteBuffer
+MetadataReadWriteStream.writeView = metadataWriteView
 
 --- Returns a lazy metadata view preserving the source's concrete interface.
 withMetadata = function<T is Stream>(
@@ -1734,6 +1967,7 @@ local record stream
     newEmptyStream: function(contentType?: string): ReadableStream
     newStringStream: function(text: string, contentType?: string): ReadableStream
     newBufferStream: function(buffer: IOBuffer, contentType?: string): ReadWriteStream
+    newViewStream: function(view: ByteView, contentType?: string): ReadableStream
     newByteStream: function(pointer: loader.CValue, length: integer, contentType?: string): ReadableStream
     newFileStream: function(path: string, contentType?: string): ReadWriteStream
     newHandleStream: function(handle: FILE, length?: integer, contentType?: string): ReadWriteStream
@@ -1753,6 +1987,7 @@ return {
     newEmptyStream = newEmptyStream,
     newStringStream = newStringStream,
     newBufferStream = newBufferStream,
+    newViewStream = newViewStream,
     newByteStream = newByteStream,
     newFileStream = newFileStream,
     newHandleStream = newHandleStream,
