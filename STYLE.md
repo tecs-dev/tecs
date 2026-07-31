@@ -28,6 +28,12 @@ code; migrate old code opportunistically.
 - Package roots use `init.tl`; public leaf modules may be named `.tl` files
   (`tecs.log`, `tecs.data`, `tecs.utils.pool`). Internal helpers
   live under `internal/` and are not part of the supported surface.
+- Documentation example files under `docs/examples/` are the exception:
+  name each file after its complete public namespace, with dots preserved,
+  such as `tecs.math.vec2.tl` or `tecs.io.files.tl`.
+- Every public method has at least one discovered example. Each example region
+  starts with a short `--[=[ ... ]=]` Markdown comment that says what the
+  example demonstrates.
 
 ## Layout, which the formatter owns
 
