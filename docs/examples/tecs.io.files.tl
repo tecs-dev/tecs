@@ -15,6 +15,34 @@ assert(writer:write("checkpoint"))
 assert(writer:close())
 -- #endregion tecs.io.files.openWrite
 
+-- #region tecs.io.files.openSeekableWrite
+local writer, reason = tecs.io.files.openSeekableWrite("world.pack")
+if writer == nil then
+    error(reason)
+end
+
+local wrote, writeReason = writer:write("HEADpayload bytes")
+if not wrote then
+    writer:close()
+    error(writeReason)
+end
+local position, seekReason = writer:seek("start", 0)
+if position == nil then
+    writer:close()
+    error(seekReason)
+end
+wrote, writeReason = writer:write("PACK")
+if not wrote then
+    writer:close()
+    error(writeReason)
+end
+
+local closed, closeReason = writer:close()
+if not closed then
+    error(closeReason)
+end
+-- #endregion tecs.io.files.openSeekableWrite
+
 -- #region tecs.io.files.openRead
 local files <const> = require("tecs.io.files")
 local reader <const> = assert(files.openRead("world.pack"))

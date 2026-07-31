@@ -26,9 +26,9 @@ keeps a headless ECS program independent of every native service it did not
 ask for, and lets another asynchronous facility join without adding a reverse
 dependency from the runtime to it.
 
-The pump covers process-wide completion sources: asset loads, child processes,
-native dialogs, generic asynchronous I/O, open HTTP clients, and the installed
-content watcher. It deliberately has no `pending` operation. An installed file
+The pump covers process-wide completion sources: process signals, asset loads,
+child processes, native dialogs, generic asynchronous I/O, open HTTP clients,
+and the installed content watcher. It deliberately has no `pending` operation. An installed file
 watcher and an idle reusable HTTP client remain active without work that can
 finish, so one process-wide count could not mean either "futures pending" or
 "safe to exit". Inspect the future or the facility-specific pending count.
@@ -47,8 +47,9 @@ local record runtime
     --- Advances every active process-wide asynchronous completion source.
     ---
     --- The call never waits. It drains work already ready at the time each
-    --- source is reached, in this order: assets, child processes and dialogs,
-    --- generic I/O, HTTP clients, then the content watcher. A listener may
+    --- source is reached, in this order: process signals, assets, child
+    --- processes and dialogs, generic I/O, HTTP clients, then the content
+    --- watcher. A listener may
     --- start later work, which a later call advances.
     ---
     --- An [`Application`](tealdoc:tecs.Application) calls this automatically
@@ -56,8 +57,9 @@ local record runtime
     --- systems and plugins must not call it. Only a program without an
     --- application drives it manually.
     ---
-    --- @return Returns how many futures settled or watcher handlers ran. Zero
-    ---     also means that no supported facility is active.
+    --- @return Returns how many completions, signal deliveries, or watcher
+    ---     handlers ran. Zero means no work was delivered, not necessarily
+    ---     that every source is inactive.
     poll: function(): integer
 end
 

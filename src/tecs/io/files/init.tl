@@ -72,6 +72,9 @@ local record files
     --- `WriteMode` selects replacement or append behavior.
     type WriteMode = storagebackend.WriteMode
 
+    --- `SeekableWriteMode` selects replacement or in-place update behavior.
+    type SeekableWriteMode = storagebackend.SeekableWriteMode
+
     --- `ByteInput` supplies a string or open
     --- [`Buffer`](/modules/io/#tecs.io.Buffer) or
     --- [`ByteView`](/modules/io/#tecs.io.ByteView).
@@ -85,6 +88,10 @@ local record files
     --- through a repositionable cursor.
     type SeekableReader = types.SeekableReader
 
+    --- A [`SeekableWriter`](tealdoc:tecs.io.SeekableWriter) patches a file
+    --- through a repositionable cursor.
+    type SeekableWriter = types.SeekableWriter
+
     --- `LineIterator` yields each line in a file and returns nil at the end.
     type LineIterator = function(): string
 end
@@ -93,9 +100,11 @@ local type Info = files.Info
 local type UserFolder = files.UserFolder
 local type GlobOptions = files.GlobOptions
 local type WriteMode = files.WriteMode
+local type SeekableWriteMode = files.SeekableWriteMode
 local type ByteInput = files.ByteInput
 local type LineIterator = files.LineIterator
 local type Writer = types.Writer
+local type SeekableWriter = types.SeekableWriter
 local type Reader = types.Reader
 local type SeekOrigin = types.SeekOrigin
 local type SeekableReader = types.SeekableReader
@@ -545,6 +554,84 @@ local function bufferedWriter(backend: storagebackend.Backend, path: string, mod
     return basicWriter
 end
 
+--- Builds random-access output over memory for a backend without a cursor.
+local function bufferedSeekableWriter(
+    backend: storagebackend.Backend, path: string, mode: SeekableWriteMode
+): SeekableWriter, string
+    local initial = ""
+    if mode == "update" then
+        initial = backend.read(path)
+        if initial == nil then
+            return nil, ("cannot open %s for update"):format(path)
+        end
+    end
+    local bytes = buffer.new(initial)
+    local at = 0
+    local closed = false
+
+    local writer <const> = {} as {string: any}
+    writer.write = function(_self: Writer, piece: string): boolean, string
+        if closed then
+            return false, "the writer is closed"
+        end
+        bytes:setString(piece, at)
+        at = at + #piece
+        return true
+    end
+    writer.flush = function(_self: Writer): boolean, string
+        if closed then
+            return false, "the writer is closed"
+        end
+        return backend.write(path, bytes:getString())
+    end
+    writer.size = function(_self: SeekableWriter): integer, string
+        if closed then
+            return nil, "the writer is closed"
+        end
+        return bytes:length()
+    end
+    writer.tell = function(_self: SeekableWriter): integer, string
+        if closed then
+            return nil, "the writer is closed"
+        end
+        return at
+    end
+    writer.seek = function(_self: SeekableWriter, origin: SeekOrigin, offset?: integer): integer, string
+        if closed then
+            return nil, "the writer is closed"
+        end
+        if origin ~= "start" and origin ~= "current" and origin ~= "end" then
+            error("tecs: SeekableWriter:seek origin must be 'start', 'current', or 'end'", 2)
+        end
+        offset = offset or 0
+        if type(offset) ~= "number" or offset ~= floor(offset) then
+            error("tecs: SeekableWriter:seek offset must be an integer", 2)
+        end
+        local base = 0
+        if origin == "current" then
+            base = at
+        elseif origin == "end" then
+            base = bytes:length()
+        end
+        local target <const> = base + offset
+        if target < 0 or target > bytes:length() then
+            return nil, "seek position is outside the destination"
+        end
+        at = target
+        return at
+    end
+    writer.close = function(_self: Writer): boolean, string
+        if closed then
+            return true
+        end
+        local ok <const>, reason = (writer as Writer):flush()
+        closed = true
+        bytes:close()
+        return ok, reason
+    end
+    return writer as SeekableWriter
+end
+
 local record SlicingReaderState
     bytes: string | nil
     at: integer
@@ -743,6 +830,40 @@ function files.openWrite(path: string, mode?: WriteMode): Writer, string
         return backend.openWrite(path, mode)
     end
     return bufferedWriter(backend, path, mode)
+end
+
+--- Opens `path` for writing through a repositionable cursor.
+---
+--- `"replace"` creates or truncates the file and starts at byte zero.
+--- `"update"` requires an existing file, preserves its bytes, and also starts
+--- at byte zero. Writes replace bytes at the cursor and extend the file when
+--- they reach its end. Seek positions stay within the current file, so this
+--- operation does not create sparse holes.
+---
+--- Close the writer even after the last write succeeds. The close flushes
+--- buffered bytes and is where a delayed full-disk failure may be reported.
+--- The SDL backend writes and seeks the file directly. A platform backend
+--- without random-access output uses an in-memory fallback and writes the
+--- complete result on `flush` or `close`.
+---
+--- @param path The caller supplies the destination file.
+--- @param mode The caller selects `"replace"` or `"update"`, or omits it to
+---     replace the destination.
+--- @return Returns a caller-owned
+---     [`SeekableWriter`](tealdoc:tecs.io.SeekableWriter), or nil when it
+---     cannot open the file.
+--- @return Returns the platform reason when the first return is nil.
+function files.openSeekableWrite(path: string, mode?: SeekableWriteMode): SeekableWriter, string
+    required(path, "openSeekableWrite")
+    mode = mode or "replace"
+    if mode ~= "replace" and mode ~= "update" then
+        error("tecs: io.files.openSeekableWrite mode must be 'replace' or 'update'", 2)
+    end
+    local backend <const> = adapter.storage()
+    if backend.openSeekableWrite ~= nil then
+        return backend.openSeekableWrite(path, mode)
+    end
+    return bufferedSeekableWriter(backend, path, mode)
 end
 
 --- Opens `path` for reading in pieces through a repositionable cursor.

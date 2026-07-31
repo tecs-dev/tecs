@@ -266,7 +266,7 @@ local interface Reader is Closeable
     close: function(self: Reader)
 end
 
---- The origin used to position a [`SeekableReader`](tealdoc:tecs.io.SeekableReader).
+--- The origin used to position a seekable reader or writer.
 local enum SeekOrigin
     "start"
     "current"
@@ -333,7 +333,7 @@ end
 --- provide direct-buffer accelerators which `tecs.io.transfer` selects without
 --- making them part of this basic protocol.
 local interface Writer is Closeable
-    --- Caller-writable. Supplies the operation that appends bytes.
+    --- Caller-writable. Supplies the operation that writes the next bytes.
     ---
     --- @param self The writer receiving the bytes.
     --- @param bytes The binary string to append, including any embedded NUL
@@ -361,6 +361,45 @@ local interface Writer is Closeable
     --- @return Returns the destination's reason when the first return is
     ---     false.
     close: function(self: Writer): boolean, string
+end
+
+--- A writer with a random-access cursor.
+---
+--- The writer can patch bytes it has already written without reopening or
+--- copying the file. Offsets and returned positions are zero-based byte
+--- counts. A seek must land from byte zero through the current end position,
+--- inclusive; this interface does not create sparse holes. The inherited
+--- `write` replaces bytes at the cursor and advances it, extending the
+--- destination when it starts at or reaches the end.
+local interface SeekableWriter is Writer
+    --- Returns the destination's current byte length.
+    ---
+    --- @param self The open writer to inspect.
+    --- @return Returns the current byte length.
+    --- @return Returns the destination's reason when the first return is nil.
+    size: function(self: SeekableWriter): integer, string
+
+    --- Returns the current zero-based cursor position.
+    ---
+    --- @param self The open writer to inspect.
+    --- @return Returns the cursor's byte position.
+    --- @return Returns the destination's reason when the first return is nil.
+    tell: function(self: SeekableWriter): integer, string
+
+    --- Repositions the cursor and returns its new absolute position.
+    ---
+    --- `"start"` measures `offset` from byte zero, `"current"` measures it
+    --- from the cursor, and `"end"` measures it from the current byte length.
+    --- The offset defaults to zero and may be negative for the latter two
+    --- origins. A result before byte zero or past the current end fails
+    --- without moving the cursor.
+    --- @param self The open writer whose cursor moves.
+    --- @param origin The caller selects the unambiguous reference point.
+    --- @param offset The caller supplies a signed integer byte offset or omits
+    ---     it for zero.
+    --- @return Returns the new zero-based cursor position.
+    --- @return Returns the destination's reason when the first return is nil.
+    seek: function(self: SeekableWriter, origin: SeekOrigin, offset?: integer): integer, string
 end
 
 --- Describes reopenable or one-shot binary storage.
@@ -882,6 +921,7 @@ local record types
     type SeekOrigin = SeekOrigin
     type SeekableReader = SeekableReader
     type Writer = Writer
+    type SeekableWriter = SeekableWriter
     type Stream = Stream
     type ReadableStream = ReadableStream
     type WritableStream = WritableStream

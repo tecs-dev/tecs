@@ -379,6 +379,28 @@ describe("platform contract", function()
         assert.are.same({ "read " .. path }, platform.storage.calls)
     end)
 
+    it("provides seekable writes over a backend with only whole-file access", function()
+        local platform = fakePlatform()
+        platform.storage = fakeStorage()
+        adapter.install(platform)
+
+        local path = "/dev/content/levels/1.json"
+        local writer = assert(files.openSeekableWrite(path, "update"))
+
+        assert.are.equal(15, writer:size())
+        assert.are.equal(9, writer:seek("end", -6))
+        assert.is_true(writer:write("keep"))
+
+        assert.is_true(writer:close())
+
+        assert.are.equal('{"room":"keep"}', files.read(path))
+        assert.are.same({
+            "read " .. path,
+            "write " .. path,
+            "read " .. path,
+        }, platform.storage.calls)
+    end)
+
     it("records what the platform opened, so a watcher sees it", function()
         -- The bookkeeping stays above the seam. A port supplies bytes; what
         -- was read and what it was read as is the engine's own record, and is

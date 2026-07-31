@@ -49,15 +49,15 @@ readiness wait included, in a module the engine never sees.
 
 ## Port contract
 
-Ten functions that take a path, two that open one for streaming, and two that
+Ten functions that take a path, three that open one for streaming, and two that
 ask about the host. The ten are required and are called without
 checking. `currentDirectory` and `userFolder` are optional and answer nil
 with a reason when the platform has no such notion, which is already what
 SDL answers for a folder a desktop does not have, so a caller that handled
 SDL's nil handles a port's. `openWrite` and `openRead` are optional in a
-different sense: `tecs.io.files` builds both out of `write` and `read` when a
-backend leaves them out, using `append` for an appending writer, so every
-caller has them and only the memory a large file costs differs.
+different sense: `tecs.io.files` builds them and `openSeekableWrite` out of
+`write`, `append`, and `read` when a backend leaves them out. Every caller has
+all three, and only the memory a large file costs differs.
 
 `writeAtomic` is optional without a fallback. A title storage may have a
 transaction or commit operation that provides the same guarantee, but
@@ -85,6 +85,7 @@ local type Reader = types.Reader
 local type SeekableReader = types.SeekableReader
 local type SeekOrigin = types.SeekOrigin
 local type Writer = types.Writer
+local type SeekableWriter = types.SeekableWriter
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
 -- Buffer structurally satisfies ByteView's read-only byte-range operations.
@@ -136,6 +137,12 @@ local enum WriteMode
     "append"
 end
 
+--- How a seekable writer opens its destination.
+local enum SeekableWriteMode
+    "replace"
+    "update"
+end
+
 --- How a pattern is matched.
 local record GlobOptions
     --- Caller-writable. Matches without regard to case when true. Defaults to
@@ -170,6 +177,11 @@ local record Backend
     --- builds out of `write` or `append`, so the interface is the same
     --- everywhere and only the memory differs.
     openWrite: function(path: string, mode: WriteMode): Writer, string
+    --- Opens `path` for writing through a repositionable cursor.
+    ---
+    --- Optional. `tecs.io.files` supplies an in-memory fallback that writes
+    --- the complete result on flush or close.
+    openSeekableWrite: function(path: string, mode: SeekableWriteMode): SeekableWriter, string
     --- Opens `path` for reading in pieces through a repositionable cursor.
     ---
     --- Optional. A platform that leaves it nil gets an in-memory seekable
@@ -226,6 +238,8 @@ local record storagebackend
     GlobOptions: GlobOptions
     --- How `Backend.openWrite` opens its destination.
     WriteMode: WriteMode
+    --- How `Backend.openSeekableWrite` opens its destination.
+    SeekableWriteMode: SeekableWriteMode
     --- Complete bytes accepted by an atomic write without an intermediate copy.
     ByteInput: ByteInput
     --- The seam a port implements.
@@ -305,7 +319,7 @@ end
 --- The stream is a closed-over local rather than a field, so a closed writer
 --- has nothing left to call SDL with and says so instead of handing a freed
 --- pointer back to the library.
-local function sdlWriter(path: string, mode: string): Writer, string
+local function sdlWriter(path: string, mode: string): SeekableWriter, string
     local stream = C.SDL_IOFromFile(path, mode) as loader.CPtr
     if stream == nil then
         return nil, sdl.error()
@@ -380,6 +394,61 @@ local function sdlWriter(path: string, mode: string): Writer, string
         end
         return written
     end
+    writer.size = function(_self: SeekableWriter): integer, string
+        if stream == nil then
+            return nil, "the writer is closed"
+        end
+        local length <const> = tonumber(C.SDL_GetIOSize(stream)) as integer
+        if length < 0 then
+            return nil, sdl.error()
+        end
+        return length
+    end
+    writer.tell = function(_self: SeekableWriter): integer, string
+        if stream == nil then
+            return nil, "the writer is closed"
+        end
+        local position <const> = tonumber(C.SDL_TellIO(stream)) as integer
+        if position < 0 then
+            return nil, sdl.error()
+        end
+        return position
+    end
+    writer.seek = function(_self: SeekableWriter, origin: SeekOrigin, offset?: integer): integer, string
+        if stream == nil then
+            return nil, "the writer is closed"
+        end
+        local whence <const> = SEEK_ORIGINS[origin]
+        if whence == nil then
+            error("tecs: SeekableWriter:seek origin must be 'start', 'current', or 'end'", 2)
+        end
+        offset = offset or 0
+        if type(offset) ~= "number" or offset ~= floor(offset) then
+            error("tecs: SeekableWriter:seek offset must be an integer", 2)
+        end
+        local length <const> = tonumber(C.SDL_GetIOSize(stream)) as integer
+        if length < 0 then
+            return nil, sdl.error()
+        end
+        local base = 0
+        if origin == "current" then
+            base = tonumber(C.SDL_TellIO(stream)) as integer
+            if base < 0 then
+                return nil, sdl.error()
+            end
+        elseif origin == "end" then
+            base = length
+        end
+        local target <const> = base + offset
+        if target < 0 or target > length then
+            return nil, "seek position is outside the destination"
+        end
+        local position <const> = tonumber(C.SDL_SeekIO(stream, target, SEEK_ORIGINS.start)) as integer
+        if position < 0 then
+            return nil, sdl.error()
+        end
+        return position
+    end
     writer.flush = function(_self: Writer): boolean, string
         if stream == nil then
             return false, "the writer is closed"
@@ -403,7 +472,7 @@ local function sdlWriter(path: string, mode: string): Writer, string
         end
         return true
     end
-    return writer as Writer
+    return writer as SeekableWriter
 end
 
 --- Opens an `SDL_IOStream` and wraps it as a `Reader`.
@@ -583,6 +652,9 @@ local sdlBackend <const>: Backend = {
 
     openWrite = function(path: string, mode: WriteMode): Writer, string
         return sdlWriter(path, mode == "append" and "ab" or "wb")
+    end,
+    openSeekableWrite = function(path: string, mode: SeekableWriteMode): SeekableWriter, string
+        return sdlWriter(path, mode == "update" and "r+b" or "wb")
     end,
     openRead = sdlSeekableReader,
 

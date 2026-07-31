@@ -19,6 +19,11 @@ The application drains platform events before `world:update`. Observers run
 outside every phase and fixed step. The application updates input state before
 it emits an event, so an observer sees the new state.
 
+SDL converts `SIGINT` and `SIGTERM` into `events.on.quit`, so an application
+uses the same normal shutdown path for a terminal interrupt and a window
+close. A headless program without an application uses
+`tecs.platform.os.newSignalListener` and drives `tecs.runtime.poll` itself.
+
 ## Borrowed records
 
 The converter reuses one wide [`Event`](tealdoc:tecs.platform.events.Event) record. `kind` determines which payload
@@ -254,7 +259,8 @@ end
 --- the one this module states everywhere: read it, or copy it with
 --- `events.copy`, but do not keep it.
 local record KindTypes
-    --- Read-only. Exposes the `"quit"` event type.
+    --- Read-only. Exposes the `"quit"` event type for a requested application
+    --- shutdown, including a window close, `SIGINT`, or `SIGTERM`.
     quit: Event
     --- Read-only. Exposes the `"terminating"` event type.
     terminating: Event
