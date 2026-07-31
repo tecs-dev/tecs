@@ -9,6 +9,7 @@ local components = require("tecs.components")
 
 local ChildOf = tecs.ecs.ChildOf
 local RelativeTransform = tecs.ecs.RelativeTransform
+local Transform = tecs.Transform
 local Clip = components.Clip
 
 local function fakeRenderer()
@@ -151,9 +152,41 @@ describe("tecs.ui", function()
         world:update(1 / 60)
         assert.are.equal(calls, renderer.camera.calls)
 
+        local unrelated = world:spawn(Transform())
+        world:getMut(unrelated, Transform).x = 20
+        world:update(1 / 60)
+        assert.are.equal(calls, renderer.camera.calls)
+
         renderer.camera.x = 10
         world:update(1 / 60)
         assert.is_true(renderer.camera.calls > calls)
+    end)
+
+    it("updates changed boxes across independent retained roots", function()
+        local renderer = fakeRenderer()
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer }))
+
+        local firstRoot = world:spawn(ui.Style({ width = 100, height = 80 }), ui.Root("screen", 100, 80, 1))
+        local secondRoot = world:spawn(ui.Style({ width = 120, height = 90 }), ui.Root("screen", 120, 90, 1))
+        local first = world:spawn(ui.Style({ width = 20, height = 10 }), RelativeTransform(), ChildOf(firstRoot))
+        local second = world:spawn(ui.Style({ width = 40, height = 15 }), RelativeTransform(), ChildOf(secondRoot))
+
+        world:update(1 / 60)
+        assert.are.equal(20, world:get(first, ui.Layout).width)
+        assert.are.equal(40, world:get(second, ui.Layout).width)
+
+        world:getMut(first, ui.Style).style.width = 35
+        world:update(1 / 60)
+        assert.are.equal(35, world:get(first, ui.Layout).width)
+        assert.are.equal(40, world:get(second, ui.Layout).width)
+
+        world:despawn(first)
+        world:update(1 / 60)
+        local replacement = world:spawn(ui.Style({ width = 25, height = 12 }), RelativeTransform(), ChildOf(firstRoot))
+        world:update(1 / 60)
+        assert.are.equal(25, world:get(replacement, ui.Layout).width)
+        assert.are.equal(40, world:get(second, ui.Layout).width)
     end)
 
     it("scrolls descendants without recomputing their Taffy layout", function()

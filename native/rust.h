@@ -78,6 +78,14 @@ typedef struct TecsUiLayout {
     uint8_t _padding[3];
 } TecsUiLayout;
 
+typedef struct TecsUiLayoutChange {
+    uint64_t entity;
+    float x;
+    float y;
+    float width;
+    float height;
+} TecsUiLayoutChange;
+
 typedef struct TecsRegexSpan {
     size_t start;
     size_t end;
@@ -102,9 +110,11 @@ bool tecsUiTreeInsert(TecsUiTree *tree, uint64_t entity, const TecsUiStyle *styl
 bool tecsUiTreeRemove(TecsUiTree *tree, uint64_t entity);
 bool tecsUiTreeSetStyle(TecsUiTree *tree, uint64_t entity, const TecsUiStyle *style);
 bool tecsUiTreeSetChildren(TecsUiTree *tree, uint64_t entity, const uint64_t *children, size_t count);
+bool tecsUiTreeInvalidateRoot(TecsUiTree *tree, uint64_t entity);
 bool tecsUiTreeBegin(TecsUiTree *tree);
 bool tecsUiTreeCompute(TecsUiTree *tree, uint64_t root, float width, float height);
 bool tecsUiTreeLayout(const TecsUiTree *tree, uint64_t entity, TecsUiLayout *layout);
+const TecsUiLayoutChange *tecsUiTreeChanges(const TecsUiTree *tree, size_t *count);
 
 /* RFC 9562 UUIDs. Each output holds 36 lowercase characters and a NUL. */
 bool tecsUuid4(char output[37]);
