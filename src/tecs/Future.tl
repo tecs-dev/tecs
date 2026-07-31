@@ -93,7 +93,6 @@ local log <const> = require("tecs.log")
 local time <const> = require("tecs.platform.time")
 local type types = require("tecs.types")
 local storekeys <const> = require("tecs.internal.storekeys")
-local coroutines <const> = require("tecs.internal.coroutines")
 local seqawaitables <const> = require("tecs.sequence.internal.awaitables")
 
 local type World = types.World
@@ -283,42 +282,6 @@ local record Future<T>
     ---     `defaultWaitMs`, or 5000. Running out leaves it "pending".
     --- @return This future.
     wait: function(self: Future<T>, timeoutMs?: number): Future<T>
-
-    --- Parks the running coroutine system until this future settles, and returns its value.
-    ---
-    --- The frame-safe counterpart of `wait`, and the only one of the two a
-    --- system may call. `wait` blocks the thread, which inside a frame is a
-    --- stalled frame; this gives up the rest of the system's slot instead and
-    --- resumes on the frame the future settles, so the rest of the pipeline
-    --- keeps running meanwhile.
-    ---
-    ---     coroutine = function(world: tecs.World)
-    ---         local document <const> = tecs.assets.loadString("levels/1.json", "level")
-    ---             :yield(world, 30000)
-    ---         spawnLevel(world, document)
-    ---     end
-    ---
-    --- The world is the argument rather than the receiver because this way the
-    --- answer carries this future's own value type, so nothing at the call site
-    --- casts.
-    ---
-    --- A future that settles without a value raises here rather than returning
-    --- something to inspect, which is what keeps the line after a wait holding
-    --- the value. `"failed"`, `"canceled"` and an expired `timeoutMs` all raise,
-    --- each naming the system and the reason. A body that wants the outcome
-    --- instead of the value wraps the call in `pcall`.
-    ---
-    --- A future that has already settled does not park at all, so a run of
-    --- cached loads finishes in the frame that asked for them.
-    ---
-    --- @param self The future to park on.
-    --- @param world The world whose pipeline is dispatching the calling body. Raises
-    ---     when the caller is not a coroutine system, or is inside query iteration.
-    --- @param timeoutMs Milliseconds before the park gives up and raises, or nil to
-    ---     wait indefinitely. A body with no timeout that never wakes is reported to
-    ---     the `tecs.coroutines` logger rather than left silent.
-    --- @return This future's value, once it is ready.
-    yield: function(self: Future<T>, world: World, timeoutMs?: number): T
 
     --- Gives up this consumer's interest in the work.
     ---
@@ -836,33 +799,6 @@ function Future:wait(timeoutMs?: number): Future<T>
         source:advance(slice)
     end
     return self
-end
-
-function Future:yield(world: World, timeoutMs?: number): T
-    if world == nil then
-        error("tecs: yielding on a future needs the world dispatching the system", 2)
-    end
-    coroutines.parkOn(world, self as any, timeoutMs)
-
-    local status <const> = self.status
-    if status == "ready" then
-        return storedValue(self as Future<any>) as T
-    end
-    -- Raised here rather than in the scheduler, because what a status means is
-    -- this module's to say and the scheduler holds no opinion about futures.
-    -- The system name is asked for rather than known, so the message says whose
-    -- wait this was: without it, every system waiting on a failed load reports
-    -- the same sentence.
-    local name <const> = coroutines.runningName()
-    error(
-        "tecs: coroutine system '"
-            .. (name or "?")
-            .. "' yielded on a future that "
-            .. status
-            .. ": "
-            .. (self.error or status),
-        2
-    )
 end
 
 -------------------------------------------------------------------------------

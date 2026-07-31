@@ -1,7 +1,6 @@
 local types <const> = require("tecs.types")
 local phases <const> = require("tecs.internal.phases")
 local fixedtracking <const> = require("tecs.internal.fixedtracking")
-local coroutines <const> = require("tecs.internal.coroutines")
 local EMPTY <const> = require("tecs.utils.pool").EMPTY
 
 local table_new <const> = require("table.new") as function(integer, integer): {any}
@@ -106,51 +105,6 @@ local DEFAULT_MAX_STEPS <const> = 10
 local DEFAULT_OVERLOAD <const>: FixedOverload = "drop"
 
 local DEFAULT_TIMESTEP <const> = 1 / 60
-
--- Phases a coroutine system may not run in, and the reason each is refused.
---
--- The rule is one line: a body that parks needs a slot every frame to be
--- resumed from, so it is legal only in the phases that run exactly once per
--- frame. Everything below is a way of not running exactly once per frame, and
--- each says so at the registration that gets rejected, because a list of legal
--- phases in a docblock is not where somebody looks when their system will not
--- register.
-local COROUTINE_DENIED: {integer: string} = {}
-
-local function denyCoroutine(group: Phase, reason: string)
-    local children <const> = group.children
-    for i = 1, #children do
-        local child <const> = children[i]
-        if child.children then
-            denyCoroutine(child, reason)
-        else
-            COROUTINE_DENIED[child.position] = reason
-        end
-    end
-end
-
-denyCoroutine(
-    phases.StartupGroup,
-    "startup phases run once, so a body that parks there never gets a second slot. "
-        .. "Register it in First and let it unregister itself when it finishes"
-)
-denyCoroutine(
-    phases.FixedUpdateGroup,
-    "fixed phases run between zero and fixedMaxSteps times per frame, so a body there "
-        .. "does more catch-up work on frames that are already late, and a wait on "
-        .. "anything settling would resume on a step chosen by wall time, inside the part "
-        .. "of the loop that has to be deterministic"
-)
-denyCoroutine(
-    phases.RenderGroup,
-    "render phases build the frame packet, so a body suspended halfway through one "
-        .. "produces a wrong frame rather than a late one"
-)
-denyCoroutine(
-    phases.ShutdownGroup,
-    "shutdown phases run once, while the process is leaving, so a body that parks there "
-        .. "never finishes what it was shutting down"
-)
 
 -- Empty flat group singleton for phases with no systems.
 local EMPTY_GROUP <const>: FlatGroup = {
@@ -594,14 +548,7 @@ function PipelineImpl:removeSystem(systemName: string)
 end
 
 function PipelineImpl:addSystem(config: SystemConfig)
-    assert(config, "Missing system config")
-    local body <const> = config.coroutine
-    if config.run ~= nil and body ~= nil then
-        error("tecs: a system declares either run or coroutine, not both")
-    end
-    if config.run == nil and body == nil then
-        error("tecs: a system needs a run function or a coroutine body")
-    end
+    assert(config.run, "Missing system in phase system")
     local phase <const> = assert(config.phase, "Missing phase in phase system")
     if not phase.position then
         error("Phase does not have a position: " .. (phase.name or tostring(phase)))
@@ -627,18 +574,6 @@ function PipelineImpl:addSystem(config: SystemConfig)
     local phaseName = phase.name or "Unknown"
     local registered = config as RegisteredSystem
     registered.id = phaseName .. ":" .. name
-
-    -- A coroutine body becomes an ordinary run closure here, once, so the dispatch
-    -- loop below stays a flat array of calls and a world with no coroutine system in
-    -- it pays nothing for the feature existing.
-    if body ~= nil then
-        local denied <const> = COROUTINE_DENIED[phase.position]
-        if denied ~= nil then
-            self.systemNameRegistry[name] = nil
-            error("tecs: coroutine system '" .. name .. "' cannot run in " .. phaseName .. ": " .. denied)
-        end
-        registered.run = coroutines.newSystem(name, body)
-    end
     -- runIf left nil when absent; dispatch loops use a nil check instead of calling ALWAYS_RUN
     config.before = config.before or EMPTY as {string}
     config.after = config.after or EMPTY as {string}

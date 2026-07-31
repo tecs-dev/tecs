@@ -754,39 +754,9 @@ local record types
         --- one.
         phase: Phase
 
-        --- Caller-writable. Receives `(dt, world)`, where `dt` is seconds and, in a
-        --- fixed phase, is the fixed timestep rather than frame time. Exactly
-        --- one of `run` and `coroutine` is required, and supplying both errors.
+        --- Caller-writable. Required. Receives `(dt, world)`, where `dt` is seconds and, in a
+        --- fixed phase, is the fixed timestep rather than frame time.
         run: System
-
-        --- Caller-writable. Makes this a coroutine system, whose body keeps its place across
-        --- frames instead of returning at the end of every one.
-        ---
-        --- Dispatched in phase order in its own slot, behind its `runIf`, like
-        --- any other system. What differs is that the body may call
-        --- `World.yield` to give up the rest of its slot and carry on from the
-        --- same line next frame, with its locals intact, so the stage counter
-        --- and cursor index a `run` system keeps in a table are ordinary
-        --- variables here.
-        ---
-        --- Receives the world and no `dt`, because a `dt` captured before a
-        --- park is stale everywhere after it. `World.yield` returns the dt of
-        --- the frame it resumes on, which is the only one that is current.
-        ---
-        --- Returning from the body unregisters the system, so a body that runs
-        --- a series of steps and stops is as ordinary as one that loops
-        --- forever. Raising unregisters it too, and then raises onward with the
-        --- body's own traceback attached, so it stops the frame and reaches the
-        --- crash guard as a `run` system's failure does. Neither is restarted.
-        ---
-        --- Legal only in phases that run exactly once per frame: `First`,
-        --- `PreUpdate`, `Update`, `PostUpdate`, `Last`, and any custom phase.
-        --- `addSystem` rejects the startup, fixed, render and shutdown phases
-        --- and says why.
-        ---
-        --- @param world The world dispatching this body, and what it calls `yield` on.
-        ---     The same world for the life of the system.
-        coroutine: function(world: World)
 
         --- Caller-writable. Names of systems this one must run before. A name that no system
         --- in the SAME phase carries is ignored silently: ordering is solved
@@ -1066,41 +1036,6 @@ local record types
         ---
         --- @param systemName The name of the system to remove.
         removeSystem: function(self, systemName: string)
-
-        --- Parks the running coroutine system for a moment, and returns the delta time
-        --- of the frame it resumes on.
-        ---
-        --- Callable only from inside a `SystemConfig.coroutine` body, and raising
-        --- with the system's name from anywhere else. The body gives up the
-        --- rest of its slot and carries on from the next line when its next
-        --- slot comes round, keeping every local it holds.
-        ---
-        --- Always take the delta time from here rather than from a variable set
-        --- before the park, which is a frame older every time round:
-        ---
-        ---     coroutine = function(world: tecs.World)
-        ---         while true do
-        ---             local dt <const> = world:yield()
-        ---             advance(dt)
-        ---         end
-        ---     end
-        ---
-        --- This waits for a moment. To wait for a value, park on the thing
-        --- producing it: `Future.yield` takes the world and answers with the
-        --- future's own value, already typed.
-        ---
-        --- Parking during query iteration raises. Iteration holds a world-wide
-        --- scope, and a body suspended inside one leaves every later system's
-        --- mutations staged rather than applied for the rest of the frame,
-        --- which nothing else would report. Finish the loop first, or take a
-        --- `QueryCursor` and close it before yielding.
-        ---
-        --- @param seconds Nil parks until the next slot. A number sleeps for that many
-        ---     seconds, counted in the delta time this system's phase receives, so it
-        ---     is that much of the time the game is running and a `runIf` that gates
-        ---     the system off freezes it. Negative raises.
-        --- @return The delta time of the frame this body resumed on, in seconds.
-        yield: function(self, seconds?: number): number
 
         --- Update the world.
         ---

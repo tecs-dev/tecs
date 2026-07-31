@@ -12,7 +12,6 @@ local internal <const> = require("tecs.internal.types")
 local ArchetypeIndex <const> = require("tecs.internal.ArchetypeIndex")
 local RelationshipStore <const> = require("tecs.internal.RelationshipStore")
 local pipeline <const> = require("tecs.internal.pipeline")
-local coroutines <const> = require("tecs.internal.coroutines")
 local pool <const> = require("tecs.utils.pool")
 local builtins <const> = require("tecs.internal.builtins")
 local components <const> = require("tecs.internal.components")
@@ -1085,10 +1084,6 @@ end
 
 function WorldImpl:removeSystem(systemName: string)
     self.pipeline:removeSystem(systemName)
-end
-
-function WorldImpl:yield(seconds?: number): number
-    return coroutines.yield(self as types.World, seconds)
 end
 
 -------------------------------------------------------------------------------

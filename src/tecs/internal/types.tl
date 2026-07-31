@@ -485,7 +485,6 @@ local record internal
         traverse: function(self: WorldImpl, root: integer, relationship: Relationship): function(): (integer, integer)
         addSystem: function(self: WorldImpl, config: SystemConfig)
         removeSystem: function(self: WorldImpl, systemName: string)
-        yield: function(self: WorldImpl, seconds?: number): number
         newQuery: function(self: WorldImpl, descriptor: QueryDescriptor): Query
         findArchetypes: function(
             self: WorldImpl, component: Component
