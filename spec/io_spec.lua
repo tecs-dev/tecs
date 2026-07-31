@@ -341,6 +341,29 @@ describe("tecs.io", function()
         assert.is_true(tecsIO.init())
     end)
 
+    it("reclaims abandoned owned network handles", function()
+        local address = resolved()
+        local listener, port = listen()
+        local connecting = tecsIO.connect(address, port)
+        connecting:wait(2000)
+        assert.are.equal("ready", connecting.status, connecting.error)
+        local client = connecting.value
+        assert.is_true(listener:wait(2000))
+        local accepted = assert(listener:accept())
+        local datagram = assert(tecsIO.bind(0))
+
+        address = nil
+        listener = nil
+        connecting = nil
+        client = nil
+        accepted = nil
+        datagram = nil
+        collectgarbage("collect")
+
+        assert.is_true(tecsIO.shutdown())
+        assert.is_true(tecsIO.init())
+    end)
+
     it("validates ports, bounds and timeouts before native calls", function()
         local address = resolved()
         local socket = assert(tecsIO.bind(0))

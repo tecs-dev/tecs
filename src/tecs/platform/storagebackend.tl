@@ -63,6 +63,7 @@ Nothing here validates its arguments. `tecs.io.files` does that before it
 delegates, so a port inherits it rather than repeating it.
 ]=]
 
+local ffi <const> = require("ffi")
 local sdl <const> = require("tecs.ffi.sdl3")
 local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
@@ -263,6 +264,7 @@ local function sdlWriter(path: string, mode: string): Writer, string
     if stream == nil then
         return nil, sdl.error()
     end
+    stream = ffi.gc(stream as ffi.CData, C.SDL_CloseIO as function(ffi.CData)) as loader.CPtr
 
     local writer <const>: Writer = {}
     writer.write = function(_self: Writer, bytes: string): boolean, string
@@ -347,6 +349,7 @@ local function sdlWriter(path: string, mode: string): Writer, string
         end
         local held <const> = stream
         stream = nil
+        ffi.gc(held as ffi.CData, nil)
         -- SDL flushes here, so a full disk is reported by this call and by
         -- nothing before it.
         if not C.SDL_CloseIO(held) then
@@ -363,6 +366,7 @@ local function sdlReader(path: string): Reader, string
     if stream == nil then
         return nil, sdl.error()
     end
+    stream = ffi.gc(stream as ffi.CData, C.SDL_CloseIO as function(ffi.CData)) as loader.CPtr
 
     -- Grown to the largest read asked for and kept, so a reader driven in
     -- equal chunks allocates once rather than once a chunk.
@@ -423,6 +427,7 @@ local function sdlReader(path: string): Reader, string
         end
         local held <const> = stream
         stream = nil
+        ffi.gc(held as ffi.CData, nil)
         C.SDL_CloseIO(held)
     end
     return reader
