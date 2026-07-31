@@ -29,9 +29,12 @@ function runtime.register(name: string, order: integer, poll: function(): intege
     local entry: Entry = {name = name, order = order, poll = poll}
     byName[name] = entry
     entries[#entries + 1] = entry
-    table.sort(entries, function(left: Entry, right: Entry): boolean
-        return left.order < right.order or left.order == right.order and left.name < right.name
-    end)
+    table.sort(
+        entries,
+        function(left: Entry, right: Entry): boolean
+            return left.order < right.order or left.order == right.order and left.name < right.name
+        end
+    )
 end
 
 function runtime.unregister(name: string)

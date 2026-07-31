@@ -37,7 +37,7 @@ describe("tecs.runtime", function()
         end)
 
         assert.are.equal(3, runtime.poll())
-        assert.are.same({"first", "second"}, called)
+        assert.are.same({ "first", "second" }, called)
     end)
 
     it("uses a stable turn when a listener changes registration", function()
@@ -58,17 +58,21 @@ describe("tecs.runtime", function()
         end)
 
         assert.are.equal(1, runtime.poll())
-        assert.are.same({"first"}, called)
+        assert.are.same({ "first" }, called)
 
         assert.are.equal(1, runtime.poll())
-        assert.are.same({"first", "new"}, called)
+        assert.are.same({ "first", "new" }, called)
     end)
 
     it("rejects two active sources with the same name", function()
-        process.register("spec.runtime.first", 10, function() return 0 end)
+        process.register("spec.runtime.first", 10, function()
+            return 0
+        end)
 
         assert.has_error(function()
-            process.register("spec.runtime.first", 20, function() return 0 end)
+            process.register("spec.runtime.first", 20, function()
+                return 0
+            end)
         end, "tecs: runtime source spec.runtime.first is already registered")
     end)
 end)
