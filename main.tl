@@ -372,52 +372,132 @@ return tecs.newApplication({
         spawnCompactButton("Inspect", 2)
         spawnCompactButton("Ship", 3)
 
-        local viewport <const> = world:spawn(
+        local viewportFrame <const> = world:spawn(
             ui.Style({
                 width = "100%",
                 flexGrow = 1,
                 minHeight = 120,
             }),
-            ui.Scroll(),
             RelativeTransform(),
             ChildOf(panel)
+        )
+        local viewport <const> = world:spawn(
+            ui.Style({position = "absolute", inset = 0}), ui.Scroll(), RelativeTransform(), ChildOf(viewportFrame)
         )
         local content <const> = world:spawn(
             ui.Style({
                 width = "100%",
-                height = 508,
+                height = 920,
                 flexDirection = "column",
+                padding = {right = 22},
                 gap = 8,
             }),
             RelativeTransform(),
             ChildOf(viewport)
         )
+
+        -- Taffy lays out the viewport and its content. The rail, end blocks,
+        -- and thumb remain ordinary composed rectangle instances, so their
+        -- appearance is entirely ours rather than a built-in widget skin.
         world:spawn(
-            ui.Scrollbar("vertical", 6, 2, 18),
+            ui.Style({position = "absolute", width = 16, inset = {right = 0, top = 0, bottom = 0}}),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 7),
+            Tint(0.025, 0.045, 0.075, 1.0),
+            tecs.gfx.Material(materials.id("rounded"), 0),
+            Renderable(),
+            ChildOf(viewportFrame)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", width = 4, inset = {right = 6, top = 16, bottom = 16}}),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 8),
+            Tint(0.08, 0.18, 0.25, 1.0),
+            tecs.gfx.Material(materials.id("rounded"), 0),
+            Renderable(),
+            ChildOf(viewportFrame)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", width = 16, height = 16, inset = {right = 0, top = 0}}),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 11),
+            Tint(0.22, 0.56, 0.68, 1.0),
+            tecs.gfx.Material(materials.id("rounded"), 0),
+            Renderable(),
+            ChildOf(viewportFrame)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", width = 16, height = 16, inset = {right = 0, bottom = 0}}),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 11),
+            Tint(0.22, 0.56, 0.68, 1.0),
+            tecs.gfx.Material(materials.id("rounded"), 0),
+            Renderable(),
+            ChildOf(viewportFrame)
+        )
+        world:spawn(
+            ui.Scrollbar("vertical", 12, 2, 28),
             ui.Interaction({focusable = false, draggable = true, order = 100}),
             RelativeTransform(0, 0, 10),
-            Tint(0.32, 0.82, 1.0, 0.85),
-            tecs.gfx.Material(materials.id("rounded"), 0.5),
+            Tint(0.32, 0.82, 1.0, 1.0),
+            tecs.gfx.Material(materials.id("rounded"), 0),
             Renderable(),
             ChildOf(viewport)
+        )
+
+        local imageCard <const> = world:spawn(
+            ui.Style({width = "100%", height = 96}), RelativeTransform(), ChildOf(content)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", inset = 0}),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 1),
+            Tint(0.08, 0.15, 0.23, 1.0),
+            tecs.gfx.Material(materials.id("rounded"), 0.08),
+            Renderable(),
+            ChildOf(imageCard)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", inset = {left = 92, top = 20}}),
+            ui.Intrinsic("text"),
+            RelativeTransform(0, 0, 3),
+            Tint(0.9, 0.95, 1.0, 1.0),
+            tecs.gfx.Text.new({text = "Image leaf", font = font, size = 17}),
+            ChildOf(imageCard)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", inset = {left = 92, top = 49}}),
+            ui.Intrinsic("text"),
+            RelativeTransform(0, 0, 3),
+            Tint(0.48, 0.66, 0.78, 1.0),
+            tecs.gfx.Text.new({text = "Sprite + intrinsic ratio", font = font, size = 12}),
+            ChildOf(imageCard)
         )
         local labels <const> = {
             "Rectangle instance",
             "Circle material",
             "Text producer",
-            "Image sprite",
+            "Intrinsic text sizing",
+            "Image aspect ratio",
+            "Camera-sized roots",
             "Nested clipping",
+            "Nested wheel handoff",
             "Dirty transforms",
             "Focus navigation",
+            "Focus scopes",
             "Bubbling events",
+            "Stable ordering",
             "Pointer capture",
+            "Multi-touch pointers",
+            "Drag lifecycle",
         }
         for index = 1, #labels do
             spawnButton(content, ("%02d  %s"):format(index, labels[index]), index + 3)
         end
 
-        -- Images remain sprites. Loading and residency are asynchronous; once
-        -- ready, this leaf simply joins the same retained hierarchy.
+        -- Images remain sprites. Loading and residency are asynchronous. The
+        -- card reserves its place, then the natural 64x64 image supplies the
+        -- missing width from its intrinsic ratio when it becomes ready.
         tecs.assets.loadImage(tecs.io.files.assetPath("demo/ui-badge.svg")):map(function(image: Image): Sprite
             local sprite <const> = app.renderer:registerImage(image)
             return sprite
@@ -426,16 +506,16 @@ return tecs.newApplication({
                 world:spawn(
                     ui.Style({
                         position = "absolute",
-                        width = 32,
-                        height = 32,
-                        inset = {right = 8, top = 6},
+                        height = 64,
+                        inset = {left = 14, top = 16},
                     }),
+                    ui.Intrinsic("image"),
                     ui.Paint(true),
                     RelativeTransform(0, 0, 3),
                     sprite.value,
                     Tint(1, 1, 1, 1),
                     Renderable(),
-                    ChildOf(panel)
+                    ChildOf(imageCard)
                 )
             end
         end)

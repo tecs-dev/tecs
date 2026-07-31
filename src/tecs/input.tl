@@ -186,6 +186,14 @@ local record input
         --- Read-only. Input accumulates vertical wheel motion under the sign
         --- convention above and clears it in `beginFrame`.
         wheelY: number
+        --- Read-only. Input accumulates horizontal wheel motion after applying
+        --- the platform's configured scroll direction. Scrolling interfaces
+        --- should use this pair; directional gameplay bindings should use
+        --- `wheelX` and `wheelY` for their stable sign convention.
+        wheelPreferredX: number
+        --- Read-only. Input accumulates vertical wheel motion under the user's
+        --- configured scroll direction and clears it with `wheelPreferredX`.
+        wheelPreferredY: number
         --- Read-only. Input accumulates horizontal whole-notch wheel motion
         --- during a frame and clears it in `beginFrame`.
         wheelTicksX: integer
@@ -627,6 +635,7 @@ function input.newInput(options?: InputOptions): Input
     self.mouseX, self.mouseY = 0.0, 0.0
     self.mouseDeltaX, self.mouseDeltaY = 0.0, 0.0
     self.wheelX, self.wheelY = 0.0, 0.0
+    self.wheelPreferredX, self.wheelPreferredY = 0.0, 0.0
     self.wheelTicksX, self.wheelTicksY = 0, 0
     self.mouseWhich = 0
     self.mouseSynthetic = false
@@ -668,6 +677,7 @@ local function clearEdges(self: Input)
     self.text = ""
     self.mouseDeltaX, self.mouseDeltaY = 0.0, 0.0
     self.wheelX, self.wheelY = 0.0, 0.0
+    self.wheelPreferredX, self.wheelPreferredY = 0.0, 0.0
     self.wheelTicksX, self.wheelTicksY = 0, 0
 end
 
@@ -710,6 +720,7 @@ function Input:beginFrame()
     end
     self.mouseDeltaX, self.mouseDeltaY = 0.0, 0.0
     self.wheelX, self.wheelY = 0.0, 0.0
+    self.wheelPreferredX, self.wheelPreferredY = 0.0, 0.0
     self.wheelTicksX, self.wheelTicksY = 0, 0
     self.text = ""
 end
@@ -871,6 +882,9 @@ function Input:handleEvent(event: eventStream.Event)
         self.mouseSynthetic = event.synthetic == true
         self.wheelX = self.wheelX + event.wheelX
         self.wheelY = self.wheelY + event.wheelY
+        local preferred = event.flipped == true and -1 or 1
+        self.wheelPreferredX = self.wheelPreferredX + event.wheelX * preferred
+        self.wheelPreferredY = self.wheelPreferredY + event.wheelY * preferred
         -- A replay event carries only the recorded values, so a stream from
         -- before the whole-notch pair existed adds nothing rather than
         -- failing.

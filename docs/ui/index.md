@@ -291,13 +291,17 @@ absolute descendants. `contentX`, `contentY`, `contentWidth`, and
 the derived content fields are rebuilt after load.
 
 Wheel movement starts at the deepest viewport and hands any unused distance
-to its ancestors. Shift converts a vertical wheel into horizontal movement
-when the device reports no horizontal axis. Call `ui.reveal(world, entity)`
-to expose a descendant through every ancestor viewport. Focusing an entity
-does this automatically.
+to its ancestors. It follows the platform's configured scroll direction while
+leaving `Input.wheelX` and `Input.wheelY` available to directional gameplay
+bindings with their stable sign convention. Shift converts a vertical wheel
+into horizontal movement when the device reports no horizontal axis. Call
+`ui.reveal(world, entity)` to expose a descendant through every ancestor
+viewport. Focusing an entity does this automatically.
 
-Compose a draggable vertical thumb from the same ordinary material and
-instance components used elsewhere:
+Taffy does not create or draw a scrollbar. It lays out the viewport and
+content. The UI system turns those retained measurements and `Scroll.y` into
+the thumb's `RelativeTransform`; the thumb itself uses the same ordinary
+material and instance components used elsewhere:
 
 ```teal
 world:spawn(
@@ -312,7 +316,10 @@ world:spawn(
 ```
 
 The thumb receives a zero length when its axis has no overflow. Horizontal
-scrollbars use the same component with `"horizontal"`.
+scrollbars use the same component with `"horizontal"`. A rail, border, end
+blocks, arrow controls, or grip marks are optional composed entities. The
+repository demo uses squared rectangles for a chunky retro skin; none of that
+appearance lives in Taffy or in the scrollbar component.
 
 ## Observe clicks and keyboard activation
 
@@ -320,8 +327,8 @@ scrollbars use the same component with `"horizontal"`.
 `InteractionState`. Every mouse or touch identity captures independently.
 Releasing over the same target emits `click` followed by `activate`. A
 draggable interaction emits `dragStart`, `dragMove`, and `dragEnd`; losing its
-input layer emits `dragCancel`. Tab and Shift-Tab move focus; Return and Space
-activate the focused control.
+input layer emits `dragCancel`. Tab and Shift-Tab move focus and repeat after a
+short hold; Return and Space activate the focused control.
 
 ```teal
 local type uiTypes = require("tecs.ui")
