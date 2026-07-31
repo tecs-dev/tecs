@@ -1529,6 +1529,16 @@ not a composition: a console backend may map it to its own transaction, and a
 backend with no equivalent reports unsupported rather than quietly falling back
 to `write` plus `rename` and claiming a guarantee it cannot make.
 
+`openRead` returns a `SeekableReader`, not merely the basic directional
+`Reader`. Files have an addressable byte space even when a platform's storage
+API can only return their complete contents, so a backend with a real seek
+opens one and a backend without it gets an in-memory cursor over its required
+whole-file `read`. Seeking therefore stays off `Reader`: a transform, socket,
+or pipe cannot implement it honestly, while the common file constructor needs
+no parallel random-access variant. The specialized result also types
+`readInto`; direct buffer reads are a file capability rather than a dynamic
+transfer optimization once the caller has asked for this kind of reader.
+
 Nothing here reaches the operating system, because `adapter` names storage as a
 seam and a seam that covered only _where_ content is would leave every read of a
 path under that root going to the host's own file API anyway. So the calls are

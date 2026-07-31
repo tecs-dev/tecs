@@ -82,6 +82,8 @@ local floor <const> = math.floor
 local max <const> = math.max
 
 local type Reader = types.Reader
+local type SeekableReader = types.SeekableReader
+local type SeekOrigin = types.SeekOrigin
 local type Writer = types.Writer
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
@@ -168,10 +170,13 @@ local record Backend
     --- builds out of `write` or `append`, so the interface is the same
     --- everywhere and only the memory differs.
     openWrite: function(path: string, mode: WriteMode): Writer, string
-    --- Opens `path` for reading in pieces.
+    --- Opens `path` for reading in pieces through a repositionable cursor.
     ---
-    --- Optional, with the same fallback in terms of `read`.
-    openRead: function(path: string): Reader, string
+    --- Optional. A platform that leaves it nil gets an in-memory seekable
+    --- reader built from `read`, so every backend supports the public
+    --- operation while a backend with real random access avoids the whole-file
+    --- allocation.
+    openRead: function(path: string): SeekableReader, string
     --- What is at `path`, or nil and the reason there is nothing to describe.
     info: function(path: string): Info, string
     --- Whether the final path itself is a symbolic link. Parent links are
@@ -242,6 +247,12 @@ local PATH_TYPES <const>: {integer: PathType} = {
     [tonumber(C.SDL_PATHTYPE_FILE) as integer] = "file",
     [tonumber(C.SDL_PATHTYPE_DIRECTORY) as integer] = "directory",
     [tonumber(C.SDL_PATHTYPE_OTHER) as integer] = "other",
+}
+
+local SEEK_ORIGINS <const>: {SeekOrigin: loader.CValue} = {
+    start = C.SDL_IO_SEEK_SET,
+    current = C.SDL_IO_SEEK_CUR,
+    ["end"] = C.SDL_IO_SEEK_END,
 }
 
 local FOLDERS <const>: {UserFolder: loader.CValue} = {
@@ -396,7 +407,7 @@ local function sdlWriter(path: string, mode: string): Writer, string
 end
 
 --- Opens an `SDL_IOStream` and wraps it as a `Reader`.
-local function sdlReader(path: string): Reader, string
+local function sdlSeekableReader(path: string): SeekableReader, string
     local stream = C.SDL_IOFromFile(path, "rb") as loader.CPtr
     if stream == nil then
         return nil, sdl.error()
@@ -456,6 +467,61 @@ local function sdlReader(path: string): Reader, string
         buffer.commitWrite(destination, offset, got, previousLength)
         return got
     end
+    reader.size = function(_self: SeekableReader): integer, string
+        if stream == nil then
+            return nil, "the reader is closed"
+        end
+        local length <const> = tonumber(C.SDL_GetIOSize(stream)) as integer
+        if length < 0 then
+            return nil, sdl.error()
+        end
+        return length
+    end
+    reader.tell = function(_self: SeekableReader): integer, string
+        if stream == nil then
+            return nil, "the reader is closed"
+        end
+        local position <const> = tonumber(C.SDL_TellIO(stream)) as integer
+        if position < 0 then
+            return nil, sdl.error()
+        end
+        return position
+    end
+    reader.seek = function(_self: SeekableReader, origin: SeekOrigin, offset?: integer): integer, string
+        if stream == nil then
+            return nil, "the reader is closed"
+        end
+        local whence <const> = SEEK_ORIGINS[origin]
+        if whence == nil then
+            error("tecs: SeekableReader:seek origin must be 'start', 'current', or 'end'", 2)
+        end
+        offset = offset or 0
+        if type(offset) ~= "number" or offset ~= floor(offset) then
+            error("tecs: SeekableReader:seek offset must be an integer", 2)
+        end
+        local length <const> = tonumber(C.SDL_GetIOSize(stream)) as integer
+        if length < 0 then
+            return nil, sdl.error()
+        end
+        local base = 0
+        if origin == "current" then
+            base = tonumber(C.SDL_TellIO(stream)) as integer
+            if base < 0 then
+                return nil, sdl.error()
+            end
+        elseif origin == "end" then
+            base = length
+        end
+        local target <const> = base + offset
+        if target < 0 or target > length then
+            return nil, "seek position is outside the source"
+        end
+        local position <const> = tonumber(C.SDL_SeekIO(stream, target, SEEK_ORIGINS.start)) as integer
+        if position < 0 then
+            return nil, sdl.error()
+        end
+        return position
+    end
     reader.close = function(_self: Reader)
         if stream == nil then
             return
@@ -465,7 +531,7 @@ local function sdlReader(path: string): Reader, string
         ffi.gc(held as ffi.CData, nil)
         C.SDL_CloseIO(held)
     end
-    return reader as Reader
+    return reader as SeekableReader
 end
 
 --- One SDL call each, and nothing composed out of several.
@@ -518,7 +584,7 @@ local sdlBackend <const>: Backend = {
     openWrite = function(path: string, mode: WriteMode): Writer, string
         return sdlWriter(path, mode == "append" and "ab" or "wb")
     end,
-    openRead = sdlReader,
+    openRead = sdlSeekableReader,
 
     info = function(path: string): Info, string
         if not C.SDL_GetPathInfo(path, INFO) then

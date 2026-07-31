@@ -31,6 +31,12 @@ Every operation runs synchronously. Send large tree walks to
 
 `tecs.io.watcher` polls paths recorded by `read` and the built-in asset
 loaders. It does not walk the whole asset tree.
+
+`openRead` returns a seekable reader without adding cursor operations to the
+basic `tecs.io.Reader` contract used by transforms, sockets, and pipes. The
+SDL backend seeks the file directly. A storage backend without random access
+falls back to its required whole-file read, retaining those bytes until the
+reader closes.
 ]=]
 
 local ffi <const> = require("ffi")
@@ -71,6 +77,14 @@ local record files
     --- [`ByteView`](/modules/io/#tecs.io.ByteView).
     type ByteInput = storagebackend.ByteInput
 
+    --- [`SeekOrigin`](tealdoc:tecs.io.SeekOrigin) selects the reference point
+    --- for a seek.
+    type SeekOrigin = types.SeekOrigin
+
+    --- A [`SeekableReader`](tealdoc:tecs.io.SeekableReader) reads a file
+    --- through a repositionable cursor.
+    type SeekableReader = types.SeekableReader
+
     --- `LineIterator` yields each line in a file and returns nil at the end.
     type LineIterator = function(): string
 end
@@ -83,6 +97,8 @@ local type ByteInput = files.ByteInput
 local type LineIterator = files.LineIterator
 local type Writer = types.Writer
 local type Reader = types.Reader
+local type SeekOrigin = types.SeekOrigin
+local type SeekableReader = types.SeekableReader
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
 
@@ -529,22 +545,35 @@ local function bufferedWriter(backend: storagebackend.Backend, path: string, mod
     return basicWriter
 end
 
+local record SlicingReaderState
+    bytes: string | nil
+    at: integer
+    closed: boolean
+end
+
 --- A `Reader` over bytes already in memory, for the same reason.
-local function slicingReader(bytes: string): Reader
-    local at = 1
+local function slicingReader(bytes: string): SeekableReader
+    local state <const>: SlicingReaderState = {bytes = bytes, at = 1, closed = false}
     local pointer <const> = ffi.cast("const uint8_t *", bytes) as loader.BytePointer
 
     local reader <const> = {} as {string: any}
     reader.read = function(_self: Reader, count: integer): string, string
-        if at > #bytes then
+        if state.closed then
+            return nil, "the reader is closed"
+        end
+        local source <const> = state.bytes as string
+        if state.at > #source then
             return ""
         end
-        local last <const> = min(#bytes, at + max(1, count) - 1)
-        local piece <const> = bytes:sub(at, last)
-        at = last + 1
+        local last <const> = min(#source, state.at + max(1, count) - 1)
+        local piece <const> = source:sub(state.at, last)
+        state.at = last + 1
         return piece
     end
     reader.readInto = function(_self: Reader, destination: IOBuffer, count: integer, offset?: integer): integer, string
+        if state.closed then
+            return nil, "the reader is closed"
+        end
         if type(count) ~= "number" or count ~= floor(count) or count < 0 then
             error("tecs: Reader:readInto count must be a non-negative integer", 2)
         end
@@ -552,18 +581,55 @@ local function slicingReader(bytes: string): Reader
         if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 then
             error("tecs: Reader:readInto offset must be a non-negative integer", 2)
         end
-        if count == 0 or at > #bytes then
+        local source <const> = state.bytes as string
+        if count == 0 or state.at > #source then
             return 0
         end
-        local taking <const> = min(count, #bytes - at + 1)
+        local taking <const> = min(count, #source - state.at + 1)
         local output <const>, previousLength = buffer.prepareWrite(destination, offset, taking)
-        ffi.copy(output as ffi.CData, (pointer + (at - 1)) as ffi.CData, taking)
+        ffi.copy(output as ffi.CData, (pointer + (state.at - 1)) as ffi.CData, taking)
         buffer.commitWrite(destination, offset, taking, previousLength)
-        at = at + taking
+        state.at = state.at + taking
         return taking
     end
-    reader.close = function(_self: Reader) at = #bytes + 1 end
-    return reader as Reader
+    reader.size = function(_self: SeekableReader): integer, string
+        if state.closed then
+            return nil, "the reader is closed"
+        end
+        return #(state.bytes as string)
+    end
+    reader.tell = function(_self: SeekableReader): integer, string
+        if state.closed then
+            return nil, "the reader is closed"
+        end
+        return state.at - 1
+    end
+    reader.seek = function(_self: SeekableReader, origin: SeekOrigin, offset?: integer): integer, string
+        if state.closed then
+            return nil, "the reader is closed"
+        end
+        if origin ~= "start" and origin ~= "current" and origin ~= "end" then
+            error("tecs: SeekableReader:seek origin must be 'start', 'current', or 'end'", 2)
+        end
+        offset = offset or 0
+        if type(offset) ~= "number" or offset ~= floor(offset) then
+            error("tecs: SeekableReader:seek offset must be an integer", 2)
+        end
+        local base = 0
+        if origin == "current" then
+            base = state.at - 1
+        elseif origin == "end" then
+            base = #(state.bytes as string)
+        end
+        local position <const> = base + offset
+        if position < 0 or position > #(state.bytes as string) then
+            return nil, "seek position is outside the source"
+        end
+        state.at = position + 1
+        return position
+    end
+    reader.close = function(_self: Reader) state.closed = true; state.bytes = nil end
+    return reader as SeekableReader
 end
 
 --- Writes `bytes` to `path`, replacing whatever was there.
@@ -679,16 +745,20 @@ function files.openWrite(path: string, mode?: WriteMode): Writer, string
     return bufferedWriter(backend, path, mode)
 end
 
---- Opens `path` for reading in pieces. The mirror of `openWrite`.
+--- Opens `path` for reading in pieces through a repositionable cursor.
 ---
 --- `read` is the right call for a file a program wants whole. This is for one
 --- it wants to consume incrementally without first asking the filesystem for
---- one string containing the whole file.
+--- one string containing the whole file. The SDL backend reads and seeks the
+--- file directly. A platform backend without `openRead` falls back to its
+--- whole-file `read` and retains that string until this reader closes.
 ---
 --- @param path The caller supplies the source file.
---- @return Returns a caller-owned reader, or nil when it cannot open.
+--- @return Returns a caller-owned
+---     [`SeekableReader`](tealdoc:tecs.io.SeekableReader) at byte zero, or nil
+---     when the platform cannot open the file.
 --- @return Returns the platform reason when the first return is nil.
-function files.openRead(path: string): Reader, string
+function files.openRead(path: string): SeekableReader, string
     required(path, "openRead")
     local backend <const> = adapter.storage()
     if backend.openRead ~= nil then

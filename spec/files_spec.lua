@@ -13,6 +13,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local ffi = require("ffi")
 local sdl = require("tecs.ffi.sdl3")
+local tecsIO = require("tecs.io")
 local files = require("tecs.io.files")
 local buffer = require("tecs.io.buffer")
 local content = require("tecs.platform.content")
@@ -573,6 +574,84 @@ describe("io.files", function()
             assert.are.equal("f", reader:read(3))
             assert.are.equal("", reader:read(3))
             reader:close()
+        end)
+
+        it("reports and repositions the file cursor from every origin", function()
+            assert.is_true(files.write(at("seek.bin"), "0123456789"))
+            local reader = assert(files.openRead(at("seek.bin")))
+
+            assert.are.equal(10, reader:size())
+            assert.are.equal(0, reader:tell())
+            assert.are.equal(4, reader:seek("start", 4))
+            assert.are.equal("45", reader:read(2))
+            assert.are.equal(4, reader:seek("current", -2))
+            assert.are.equal("456", reader:read(3))
+            assert.are.equal(8, reader:seek("end", -2))
+            assert.are.equal("89", reader:read(8))
+            assert.are.equal(10, reader:tell())
+
+            reader:close()
+        end)
+
+        it("allows the EOF position and rejects positions outside the file", function()
+            assert.is_true(files.write(at("bounds.bin"), "abcd"))
+            local reader = assert(files.openRead(at("bounds.bin")))
+
+            assert.are.equal(4, reader:seek("end"))
+            assert.are.equal("", reader:read(1))
+            assert.are.equal(4, reader:tell())
+            local position, reason = reader:seek("start", 9)
+
+            assert.is_nil(position)
+            assert.is_string(reason)
+            assert.is_true(#reason > 0)
+            assert.are.equal(4, reader:tell())
+
+            position, reason = reader:seek("current", -5)
+            assert.is_nil(position)
+            assert.is_string(reason)
+            assert.are.equal(4, reader:tell())
+
+            reader:close()
+        end)
+
+        it("reads directly into a buffer at a caller-selected offset", function()
+            assert.is_true(files.write(at("direct.bin"), "abcdefgh"))
+            local reader = assert(files.openRead(at("direct.bin")))
+            local destination = tecsIO.newBuffer("prefix")
+
+            assert.are.equal(3, reader:seek("start", 3))
+            assert.are.equal(4, reader:readInto(destination, 4, 6))
+            assert.are.equal("prefixdefg", destination:getString())
+            assert.are.equal(7, reader:tell())
+
+            destination:close()
+            reader:close()
+        end)
+
+        it("raises for invalid seeks and closes idempotently", function()
+            assert.is_true(files.write(at("closed.bin"), "abc"))
+            local reader = assert(files.openRead(at("closed.bin")))
+
+            assert.has_error(function()
+                reader:seek("middle", 0)
+            end, "tecs: SeekableReader:seek origin must be 'start', 'current', or 'end'")
+            assert.has_error(function()
+                reader:seek("start", 0.5)
+            end, "tecs: SeekableReader:seek offset must be an integer")
+
+            reader:close()
+            reader:close()
+            local bytes, readReason = reader:read(1)
+            local size, sizeReason = reader:size()
+            local position, seekReason = reader:seek("start")
+
+            assert.is_nil(bytes)
+            assert.are.equal("the reader is closed", readReason)
+            assert.is_nil(size)
+            assert.are.equal("the reader is closed", sizeReason)
+            assert.is_nil(position)
+            assert.are.equal("the reader is closed", seekReason)
         end)
     end)
 

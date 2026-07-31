@@ -265,6 +265,64 @@ local interface Reader is Closeable
     close: function(self: Reader)
 end
 
+--- The origin used to position a [`SeekableReader`](tealdoc:tecs.io.SeekableReader).
+local enum SeekOrigin
+    "start"
+    "current"
+    "end"
+end
+
+--- A reader with a random-access cursor.
+---
+--- Unlike the basic `Reader` contract, this capability is limited to sources
+--- that can determine and reposition their cursor. Offsets and returned
+--- positions are zero-based byte counts. A seek must land from byte zero
+--- through the current end position, inclusive.
+local interface SeekableReader is Reader
+    --- Reads bytes directly into a buffer and advances the cursor.
+    ---
+    --- The operation grows the destination as needed and preserves bytes
+    --- outside the written range. It returns zero at the end of the file.
+    --- @param self The open reader whose cursor advances.
+    --- @param destination The caller supplies an open destination buffer and
+    ---     keeps ownership of it.
+    --- @param count The caller supplies the maximum non-negative byte count.
+    --- @param offset The caller supplies a non-negative zero-based destination
+    ---     offset or omits it for zero.
+    --- @return Returns the number of bytes written into the destination.
+    --- @return Returns the source's reason when the first return is nil.
+    readInto: function(self: SeekableReader, destination: Buffer, count: integer, offset?: integer): integer, string
+
+    --- Returns the source's current byte length.
+    ---
+    --- @param self The open reader to inspect.
+    --- @return Returns the current byte length.
+    --- @return Returns the source's reason when the first return is nil.
+    size: function(self: SeekableReader): integer, string
+
+    --- Returns the current zero-based cursor position.
+    ---
+    --- @param self The open reader to inspect.
+    --- @return Returns the cursor's byte position.
+    --- @return Returns the source's reason when the first return is nil.
+    tell: function(self: SeekableReader): integer, string
+
+    --- Repositions the cursor and returns its new absolute position.
+    ---
+    --- `"start"` measures `offset` from byte zero, `"current"` measures it
+    --- from the cursor, and `"end"` measures it from the current byte length.
+    --- The offset defaults to zero and may be negative for the latter two
+    --- origins. A result before byte zero or past the current end fails
+    --- without moving the cursor.
+    --- @param self The open reader whose cursor moves.
+    --- @param origin The caller selects the unambiguous reference point.
+    --- @param offset The caller supplies a signed integer byte offset or omits
+    ---     it for zero.
+    --- @return Returns the new zero-based cursor position.
+    --- @return Returns the source's reason when the first return is nil.
+    seek: function(self: SeekableReader, origin: SeekOrigin, offset?: integer): integer, string
+end
+
 --- A caller-owned destination for binary strings.
 ---
 --- A consumer writes pieces in order and closes the writer even after the last
@@ -500,6 +558,8 @@ local record types
     type ByteView = ByteView
     type WriteRange = WriteRange
     type Reader = Reader
+    type SeekOrigin = SeekOrigin
+    type SeekableReader = SeekableReader
     type Writer = Writer
     type Stream = Stream
     type ReadableStream = ReadableStream

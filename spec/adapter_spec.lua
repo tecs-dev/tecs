@@ -360,6 +360,25 @@ describe("platform contract", function()
         assert.are.same({ "writeAtomic /dev/save/checkpoint complete" }, platform.storage.calls)
     end)
 
+    it("provides seekable reads over a backend with only whole-file access", function()
+        local platform = fakePlatform()
+        platform.storage = fakeStorage()
+        adapter.install(platform)
+
+        local path = "/dev/content/levels/1.json"
+        local reader = assert(files.openRead(path))
+
+        assert.are.equal(15, reader:size())
+        assert.are.equal(9, reader:seek("end", -6))
+        assert.are.equal("hold", reader:read(4))
+        assert.are.equal(2, reader:seek("current", -11))
+        assert.are.equal("room", reader:read(4))
+
+        reader:close()
+
+        assert.are.same({ "read " .. path }, platform.storage.calls)
+    end)
+
     it("records what the platform opened, so a watcher sees it", function()
         -- The bookkeeping stays above the seam. A port supplies bytes; what
         -- was read and what it was read as is the engine's own record, and is

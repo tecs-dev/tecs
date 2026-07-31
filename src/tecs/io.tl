@@ -161,6 +161,14 @@ local record binaryIO
     --- A `Reader` supplies bytes in order and releases its owned state on `close`.
     type Reader = types.Reader
 
+    --- [`SeekOrigin`](tealdoc:tecs.io.SeekOrigin) selects the reference point
+    --- for a seekable reader.
+    type SeekOrigin = types.SeekOrigin
+
+    --- A [`SeekableReader`](tealdoc:tecs.io.SeekableReader) supplies bytes
+    --- through a repositionable cursor.
+    type SeekableReader = types.SeekableReader
+
     --- A `Writer` accepts bytes in order and finishes its destination on `close`.
     type Writer = types.Writer
 
