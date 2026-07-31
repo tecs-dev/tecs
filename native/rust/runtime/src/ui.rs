@@ -68,11 +68,25 @@ pub struct TecsUiLayout {
     pub _padding: [u8; 3],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TecsUiLayoutChange {
+    pub entity: u64,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 pub struct TecsUiTree {
     tree: TaffyTree<()>,
     nodes: HashMap<u64, NodeId>,
     entities: HashMap<NodeId, u64>,
     layouts: HashMap<u64, (f32, f32, f32, f32)>,
+    root_spaces: HashMap<u64, (f32, f32)>,
+    changes: Vec<TecsUiLayoutChange>,
+    #[cfg(test)]
+    computed_roots: usize,
 }
 
 fn dimension(value: TecsUiDimension) -> Dimension {
@@ -203,6 +217,10 @@ pub extern "C" fn tecsUiTreeCreate() -> *mut TecsUiTree {
         nodes: HashMap::new(),
         entities: HashMap::new(),
         layouts: HashMap::new(),
+        root_spaces: HashMap::new(),
+        changes: Vec::new(),
+        #[cfg(test)]
+        computed_roots: 0,
     }))
 }
 
@@ -248,6 +266,7 @@ pub unsafe extern "C" fn tecsUiTreeRemove(tree: *mut TecsUiTree, entity: u64) ->
     };
     tree.entities.remove(&node);
     tree.layouts.remove(&entity);
+    tree.root_spaces.remove(&entity);
     tree.tree.remove(node).map(|_| true).unwrap_or_else(fail)
 }
 
@@ -266,8 +285,12 @@ pub unsafe extern "C" fn tecsUiTreeSetStyle(
     let Some(node) = tree.nodes.get(&entity).copied() else {
         return fail("UI entity has no Taffy node");
     };
+    let next = style(value);
+    if tree.tree.style(node).is_ok_and(|current| current == &next) {
+        return true;
+    }
     tree.tree
-        .set_style(node, style(value))
+        .set_style(node, next)
         .map(|_| true)
         .unwrap_or_else(fail)
 }
@@ -306,11 +329,24 @@ pub unsafe extern "C" fn tecsUiTreeSetChildren(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn tecsUiTreeInvalidateRoot(tree: *mut TecsUiTree, entity: u64) -> bool {
+    let Some(tree) = (unsafe { tree.as_mut() }) else {
+        return fail("UI tree is null");
+    };
+    tree.root_spaces.remove(&entity);
+    true
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn tecsUiTreeBegin(tree: *mut TecsUiTree) -> bool {
     let Some(tree) = (unsafe { tree.as_mut() }) else {
         return fail("UI tree is null");
     };
-    tree.layouts.clear();
+    tree.changes.clear();
+    #[cfg(test)]
+    {
+        tree.computed_roots = 0;
+    }
     true
 }
 
@@ -327,6 +363,20 @@ pub unsafe extern "C" fn tecsUiTreeCompute(
     let Some(node) = tree.nodes.get(&root).copied() else {
         return fail("UI root has no Taffy node");
     };
+    let next_space = (width, height);
+    let space_changed = tree.root_spaces.get(&root).copied() != Some(next_space);
+    let dirty = match tree.tree.dirty(node) {
+        Ok(dirty) => dirty,
+        Err(error) => return fail(error),
+    };
+    if !space_changed && !dirty {
+        return true;
+    }
+    tree.root_spaces.insert(root, next_space);
+    #[cfg(test)]
+    {
+        tree.computed_roots += 1;
+    }
     let space = Size {
         width: AvailableSpace::Definite(width),
         height: AvailableSpace::Definite(height),
@@ -337,15 +387,22 @@ pub unsafe extern "C" fn tecsUiTreeCompute(
     let mut pending = vec![node];
     while let Some(node) = pending.pop() {
         if let (Some(entity), Ok(layout)) = (tree.entities.get(&node), tree.tree.layout(node)) {
-            tree.layouts.insert(
-                *entity,
-                (
-                    layout.location.x,
-                    layout.location.y,
-                    layout.size.width,
-                    layout.size.height,
-                ),
+            let next = (
+                layout.location.x,
+                layout.location.y,
+                layout.size.width,
+                layout.size.height,
             );
+            if tree.layouts.get(entity).copied() != Some(next) {
+                tree.changes.push(TecsUiLayoutChange {
+                    entity: *entity,
+                    x: next.0,
+                    y: next.1,
+                    width: next.2,
+                    height: next.3,
+                });
+                tree.layouts.insert(*entity, next);
+            }
         }
         match tree.tree.children(node) {
             Ok(children) => pending.extend(children),
@@ -353,6 +410,28 @@ pub unsafe extern "C" fn tecsUiTreeCompute(
         }
     }
     true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsUiTreeChanges(
+    tree: *const TecsUiTree,
+    count: *mut usize,
+) -> *const TecsUiLayoutChange {
+    let Some(count) = (unsafe { count.as_mut() }) else {
+        set_error("UI change count is null");
+        return std::ptr::null();
+    };
+    let Some(tree) = (unsafe { tree.as_ref() }) else {
+        set_error("UI tree is null");
+        *count = 0;
+        return std::ptr::null();
+    };
+    *count = tree.changes.len();
+    if tree.changes.is_empty() {
+        std::ptr::null()
+    } else {
+        tree.changes.as_ptr()
+    }
 }
 
 #[no_mangle]
@@ -443,10 +522,23 @@ mod tests {
         assert!(!tree.is_null());
         assert!(unsafe { tecsUiTreeInsert(tree, 1, &root) });
         assert!(unsafe { tecsUiTreeInsert(tree, 2, &child) });
+        assert!(unsafe { tecsUiTreeInsert(tree, 3, &root) });
+        assert!(unsafe { tecsUiTreeInsert(tree, 4, &child) });
         let children = [2_u64];
         assert!(unsafe { tecsUiTreeSetChildren(tree, 1, children.as_ptr(), children.len()) });
+        let other_children = [4_u64];
+        assert!(unsafe {
+            tecsUiTreeSetChildren(tree, 3, other_children.as_ptr(), other_children.len())
+        });
         assert!(unsafe { tecsUiTreeBegin(tree) });
         assert!(unsafe { tecsUiTreeCompute(tree, 1, 100.0, 50.0) });
+        assert!(unsafe { tecsUiTreeCompute(tree, 3, 100.0, 50.0) });
+        assert_eq!(unsafe { (*tree).computed_roots }, 2);
+
+        let mut count = 0;
+        let changes = unsafe { tecsUiTreeChanges(tree, &mut count) };
+        assert!(!changes.is_null());
+        assert_eq!(count, 4);
 
         let mut output = TecsUiLayout {
             x: 0.0,
@@ -465,10 +557,44 @@ mod tests {
         assert!(unsafe { tecsUiTreeLayout(tree, 2, &mut output) });
         assert_eq!(output.changed, 0);
 
-        assert!(unsafe { tecsUiTreeSetChildren(tree, 1, std::ptr::null(), 0) });
         assert!(unsafe { tecsUiTreeBegin(tree) });
         assert!(unsafe { tecsUiTreeCompute(tree, 1, 100.0, 50.0) });
-        assert!(!unsafe { tecsUiTreeLayout(tree, 2, &mut output) });
+        assert!(unsafe { tecsUiTreeCompute(tree, 3, 100.0, 50.0) });
+        assert_eq!(unsafe { (*tree).computed_roots }, 0);
+        let changes = unsafe { tecsUiTreeChanges(tree, &mut count) };
+        assert!(changes.is_null());
+        assert_eq!(count, 0);
+
+        assert!(unsafe { tecsUiTreeSetStyle(tree, 2, &child) });
+        assert!(unsafe { tecsUiTreeBegin(tree) });
+        assert!(unsafe { tecsUiTreeCompute(tree, 1, 100.0, 50.0) });
+        assert!(unsafe { tecsUiTreeCompute(tree, 3, 100.0, 50.0) });
+        assert_eq!(unsafe { (*tree).computed_roots }, 0);
+
+        let wider = style(points(30.0), points(10.0));
+        assert!(unsafe { tecsUiTreeSetStyle(tree, 2, &wider) });
+        assert!(unsafe { tecsUiTreeBegin(tree) });
+        assert!(unsafe { tecsUiTreeCompute(tree, 1, 100.0, 50.0) });
+        assert!(unsafe { tecsUiTreeCompute(tree, 3, 100.0, 50.0) });
+        assert_eq!(unsafe { (*tree).computed_roots }, 1);
+        let changes = unsafe { tecsUiTreeChanges(tree, &mut count) };
+        let changed = unsafe { slice::from_raw_parts(changes, count) };
+        assert_eq!(count, 2);
+        assert!(changed.iter().any(|change| change.entity == 2));
+        assert!(changed
+            .iter()
+            .all(|change| change.entity == 1 || change.entity == 2));
+
+        assert!(unsafe { tecsUiTreeBegin(tree) });
+        assert!(unsafe { tecsUiTreeCompute(tree, 1, 100.0, 50.0) });
+        assert!(unsafe { tecsUiTreeCompute(tree, 3, 120.0, 50.0) });
+        assert_eq!(unsafe { (*tree).computed_roots }, 1);
+
+        assert!(unsafe { tecsUiTreeInvalidateRoot(tree, 1) });
+        assert!(unsafe { tecsUiTreeBegin(tree) });
+        assert!(unsafe { tecsUiTreeCompute(tree, 1, 100.0, 50.0) });
+        assert!(unsafe { tecsUiTreeCompute(tree, 3, 120.0, 50.0) });
+        assert_eq!(unsafe { (*tree).computed_roots }, 1);
         unsafe { tecsUiTreeDestroy(tree) };
     }
 }

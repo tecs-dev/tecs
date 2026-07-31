@@ -10,7 +10,10 @@ instanced producers and shaders.
 The plugin retains one native layout tree keyed by ECS entity ID. `ChildOf` is the
 layout hierarchy as well as the transform hierarchy. The layout system writes
 `Layout` only when the box changes and writes `RelativeTransform` only when
-layout or scrolling changes its result.
+layout or scrolling changes its result. Query membership observers retain
+structural invalidation, the ECS dirty-archetype set gates value updates, and
+the native tree computes only dirty roots before returning a compact list of
+changed boxes.
 
 `px`, `%`, and `auto` dimension strings are parsed only when a `Style` enters or dirties the
 retained tree. Unchanged frames skip layout computation, layout export, clip
@@ -115,6 +118,7 @@ return tecs.newApplication({plugin = gamePlugin})
 local ecs <const> = require("tecs.ecs")
 local events <const> = require("tecs.events")
 local type types = require("tecs.types")
+local type internal = require("tecs.internal.types")
 local rust <const> = require("tecs.ffi.rust")
 local type loader = require("tecs.ffi.loader")
 local components <const> = require("tecs.components")
@@ -454,7 +458,7 @@ end
 
 local record Install
     tree: loader.CPtr
-    output: loader.CStruct
+    changeCount: loader.CArray
     known: {integer: boolean}
     live: {integer: boolean}
     childKeys: {integer: string}
@@ -488,6 +492,11 @@ local record Install
     cameraY: number
     cameraZoom: number
     cameraRotation: number
+    screenWidth: number
+    screenHeight: number
+    screenDensity: number
+    nodeMembershipDirty: boolean
+    rootMembershipDirty: boolean
 end
 
 local function unit(value: any, output: any)
@@ -621,6 +630,36 @@ local function collectBounds(entity: integer, context: BoundsContext)
     end
 end
 
+local function applyLayoutTransform(world: World, entity: integer, x: number, y: number, width: number, height: number)
+    local relative = world:get(entity, RelativeTransform)
+    if relative == nil then
+        return
+    end
+    local parent = world:getFirstRelationship(entity, ChildOf)
+    local scroll = parent ~= nil and world:get(parent.target, Scroll) or nil
+    local relativeX = x - (scroll ~= nil and scroll.x or 0)
+    local relativeY = y - (scroll ~= nil and scroll.y or 0)
+    local paint = world:get(entity, Paint)
+    if paint ~= nil and paint.stretch then
+        relativeX = relativeX + width * 0.5
+        relativeY = relativeY + height * 0.5
+    end
+    local scaleX = paint ~= nil and paint.stretch and width or relative.scaleX
+    local scaleY = paint ~= nil and paint.stretch and height or relative.scaleY
+    if relative.x ~= relativeX or relative.y ~= relativeY or relative.scaleX ~= scaleX or relative.scaleY ~= scaleY then
+        relative = world:getMut(entity, RelativeTransform)
+        relative.x, relative.y = relativeX, relativeY
+        relative.scaleX, relative.scaleY = scaleX, scaleY
+    end
+end
+
+local function applyCurrentLayout(entity: integer, world: World)
+    local layout = world:get(entity, Layout)
+    if layout ~= nil then
+        applyLayoutTransform(world, entity, layout.x, layout.y, layout.width, layout.height)
+    end
+end
+
 local record ui
     --- Read-only. Exposes the tag that marks an entity as participating in UI
     --- layout. `Style`, `Root`, and `Scroll` add it automatically.
@@ -716,7 +755,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
         tree = ffi.gc(tree as ffi.CData, C.tecsUiTreeDestroy as function(ffi.CData)) as loader.CPtr
         local install: Install = {
             tree = tree,
-            output = ffi.new("TecsUiLayout") as loader.CStruct,
+            changeCount = ffi.new("size_t[1]") as loader.CArray,
             known = {},
             live = {},
             childKeys = {},
@@ -750,14 +789,48 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             cameraY = math.huge,
             cameraZoom = math.huge,
             cameraRotation = math.huge,
+            screenWidth = math.huge,
+            screenHeight = math.huge,
+            screenDensity = math.huge,
+            nodeMembershipDirty = true,
+            rootMembershipDirty = true,
         }
+        local worldImpl <const> = world as internal.WorldImpl
         -- These names are compatibility surfaces exposed by the debugger.
-        local nodes = world:newQuery({name = "tecs.UiLayout", include = {NodeComponent, Style, Layout}})
-        local roots = world:newQuery({name = "tecs.UiRoots", include = {NodeComponent, Root}})
-        local scrolls = world:newQuery({name = "tecs.UiScrolls", include = {Scroll, Layout}})
+        local function invalidateNodes()
+            install.nodeMembershipDirty = true
+            install.geometryDirty = true
+        end
+        local function invalidateRoots()
+            install.rootMembershipDirty = true
+            install.geometryDirty = true
+        end
+        local function invalidateGeometry()
+            install.geometryDirty = true
+        end
+        local nodes = world:newQuery({
+            name = "tecs.UiLayout",
+            include = {NodeComponent, Style, Layout},
+            onEntitiesAdded = invalidateNodes,
+            onEntitiesRemoved = invalidateNodes,
+        })
+        local roots = world:newQuery({
+            name = "tecs.UiRoots",
+            include = {NodeComponent, Root},
+            onEntitiesAdded = invalidateRoots,
+            onEntitiesRemoved = invalidateRoots,
+        })
+        local scrolls = world:newQuery({
+            name = "tecs.UiScrolls",
+            include = {Scroll, Layout},
+            onEntitiesAdded = invalidateGeometry,
+            onEntitiesRemoved = invalidateGeometry,
+        })
         local interactions = world:newQuery({
             name = "tecs.UiInteractions",
             include = {Interaction, InteractionState, Layout, Transform},
+            onEntitiesAdded = invalidateGeometry,
+            onEntitiesRemoved = invalidateGeometry,
         })
         -- This system name is a compatibility surface exposed by the debugger.
         world:addSystem({
@@ -765,9 +838,34 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             phase = ecs.phases.PostUpdate,
             before = {"RelativeTransform"},
             run = function()
-                local layoutDirty = false
-                local hierarchyDirty = false
+                local layoutDirty = install.nodeMembershipDirty or install.rootMembershipDirty
+                local hierarchyDirty = install.nodeMembershipDirty
                 local transformDirty = false
+                local nodeStateDirty = install.nodeMembershipDirty
+                local rootStateDirty = install.rootMembershipDirty
+                local scrollDirty = false
+
+                -- Query observers carry structural membership changes even
+                -- when an empty ephemeral archetype is destroyed and leaves
+                -- the dirty set. Value changes cost a walk over dirty
+                -- archetypes, not a walk over every UI archetype.
+                for archetype in pairs(worldImpl._dirtyArchetypes) do
+                    local columns = archetype.columns
+                    if columns[Style] then
+                        local styleDirty = archetype:isComponentDirty(Style)
+                        local childDirty = archetype:isComponentDirty(ChildOf)
+                        local rootDirty = archetype:isComponentDirty(Root)
+                        local relativeDirty = archetype:isComponentDirty(RelativeTransform)
+                        local paintDirty = archetype:isComponentDirty(Paint)
+                        local viewportDirty = archetype:isComponentDirty(Scroll)
+                        nodeStateDirty = nodeStateDirty or styleDirty or childDirty
+                        rootStateDirty = rootStateDirty or rootDirty
+                        hierarchyDirty = hierarchyDirty or childDirty
+                        layoutDirty = layoutDirty or styleDirty or childDirty or rootDirty
+                        transformDirty = transformDirty or relativeDirty or paintDirty
+                        scrollDirty = scrollDirty or viewportDirty
+                    end
+                end
 
                 local screenWidth: number = 0
                 local screenHeight: number = 0
@@ -777,97 +875,108 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                     screenWidth, screenHeight = activeWindow:getSize()
                     screenDensity = activeWindow:pixelDensity()
                 end
-                install.hasWorldRoots = false
-                for archetype, length, entities in roots:iter() do
-                    local values = archetype:get(Root)
-                    layoutDirty = layoutDirty or archetype:isComponentDirty(Root)
-                    for row = 1, length do
-                        local value = values[row]
-                        if value.space == "world" then
-                            install.hasWorldRoots = true
-                        elseif
-                            install.window ~= nil
-                            and (
-                                value.width ~= screenWidth
-                                or value.height ~= screenHeight
-                                or value.pixelDensity ~= screenDensity
-                            )
-                        then
-                            local changed = world:getMut(entities[row], Root)
-                            changed.width, changed.height = screenWidth, screenHeight
-                            changed.pixelDensity = screenDensity
-                            layoutDirty = true
-                        end
-                    end
+                local windowDirty = activeWindow ~= nil
+                    and (
+                        install.screenWidth ~= screenWidth
+                        or install.screenHeight ~= screenHeight
+                        or install.screenDensity ~= screenDensity
+                    )
+                if activeWindow ~= nil then
+                    install.screenWidth, install.screenHeight = screenWidth, screenHeight
+                    install.screenDensity = screenDensity
                 end
-
-                for entity in pairs(install.live) do
-                    install.live[entity] = nil
-                end
-                for archetype, length, entities in nodes:iter() do
-                    local styles = archetype:get(Style)
-                    local styleDirty = archetype:isComponentDirty(Style)
-                    local childDirty = archetype:isComponentDirty(ChildOf)
-                    layoutDirty = layoutDirty or styleDirty or childDirty
-                    hierarchyDirty = hierarchyDirty or childDirty
-                    transformDirty = transformDirty
-                        or archetype:isComponentDirty(RelativeTransform)
-                        or archetype:isComponentDirty(Paint)
-                    for row = 1, length do
-                        local entity = entities[row]
-                        install.live[entity] = true
-                        local style = styles[row].style
-                        if not install.known[entity] then
-                            if not (C.tecsUiTreeInsert(install.tree, entity, nativeStyle(style)) as boolean) then
-                                error("tecs: UI node creation failed: " .. loader.toString(C.tecsRustError()), 2)
-                            end
-                            install.known[entity] = true
-                            layoutDirty = true
-                            hierarchyDirty = true
-                        elseif
-                            styleDirty
-                            and not (C.tecsUiTreeSetStyle(install.tree, entity, nativeStyle(style)) as boolean)
-                        then
-                            error("tecs: UI style synchronization failed: " .. loader.toString(C.tecsRustError()), 2)
-                        end
-                    end
-                end
-                local removed = install.removed
-                for index = #removed, 1, -1 do
-                    removed[index] = nil
-                end
-                for entity in pairs(install.known) do
-                    if not install.live[entity] then
-                        removed[#removed + 1] = entity
-                    end
-                end
-                for index = 1, #removed do
-                    local entity = removed[index]
-                    if not (C.tecsUiTreeRemove(install.tree, entity) as boolean) then
-                        error("tecs: UI node removal failed: " .. loader.toString(C.tecsRustError()), 2)
-                    end
-                    install.known[entity] = nil
-                    install.childKeys[entity] = nil
-                    layoutDirty = true
-                    hierarchyDirty = true
-                end
-                if hierarchyDirty then
-                    for _archetype, length, entities in nodes:iter() do
-                        for row = 1, length do
-                            syncChildren(world, install, entities[row])
-                        end
-                    end
-                end
-
-                for archetype in scrolls:iter() do
-                    if archetype:isComponentDirty(Scroll) then
-                        transformDirty = true
-                    end
-                end
-
-                if not layoutDirty and not transformDirty then
+                if not layoutDirty and not transformDirty and not scrollDirty and not windowDirty then
                     return
                 end
+
+                if rootStateDirty or windowDirty then
+                    install.hasWorldRoots = false
+                    for _archetype, length, entities in roots:iter() do
+                        local values = _archetype:get(Root)
+                        for row = 1, length do
+                            if
+                                install.rootMembershipDirty
+                                and not (C.tecsUiTreeInvalidateRoot(install.tree, entities[row]) as boolean)
+                            then
+                                error("tecs: UI root invalidation failed: " .. loader.toString(C.tecsRustError()), 2)
+                            end
+                            local value = values[row]
+                            if value.space == "world" then
+                                install.hasWorldRoots = true
+                            elseif
+                                activeWindow ~= nil
+                                and (
+                                    value.width ~= screenWidth
+                                    or value.height ~= screenHeight
+                                    or value.pixelDensity ~= screenDensity
+                                )
+                            then
+                                local changed = world:getMut(entities[row], Root)
+                                changed.width, changed.height = screenWidth, screenHeight
+                                changed.pixelDensity = screenDensity
+                                layoutDirty = true
+                            end
+                        end
+                    end
+                end
+
+                if nodeStateDirty then
+                    for entity in pairs(install.live) do
+                        install.live[entity] = nil
+                    end
+                    for archetype, length, entities in nodes:iter() do
+                        local styles = archetype:get(Style)
+                        local styleDirty = archetype:isComponentDirty(Style)
+                        for row = 1, length do
+                            local entity = entities[row]
+                            install.live[entity] = true
+                            local style = styles[row].style
+                            if not install.known[entity] then
+                                if not (C.tecsUiTreeInsert(install.tree, entity, nativeStyle(style)) as boolean) then
+                                    error("tecs: UI node creation failed: " .. loader.toString(C.tecsRustError()), 2)
+                                end
+                                install.known[entity] = true
+                                layoutDirty = true
+                                hierarchyDirty = true
+                            elseif
+                                styleDirty
+                                and not (C.tecsUiTreeSetStyle(install.tree, entity, nativeStyle(style)) as boolean)
+                            then
+                                error(
+                                    "tecs: UI style synchronization failed: " .. loader.toString(C.tecsRustError()), 2
+                                )
+                            end
+                        end
+                    end
+                    local removed = install.removed
+                    for index = #removed, 1, -1 do
+                        removed[index] = nil
+                    end
+                    for entity in pairs(install.known) do
+                        if not install.live[entity] then
+                            removed[#removed + 1] = entity
+                        end
+                    end
+                    for index = 1, #removed do
+                        local entity = removed[index]
+                        if not (C.tecsUiTreeRemove(install.tree, entity) as boolean) then
+                            error("tecs: UI node removal failed: " .. loader.toString(C.tecsRustError()), 2)
+                        end
+                        install.known[entity] = nil
+                        install.childKeys[entity] = nil
+                        layoutDirty = true
+                        hierarchyDirty = true
+                    end
+                    if hierarchyDirty then
+                        for _archetype, length, entities in nodes:iter() do
+                            for row = 1, length do
+                                syncChildren(world, install, entities[row])
+                            end
+                        end
+                    end
+                    install.nodeMembershipDirty = false
+                end
+                install.rootMembershipDirty = false
 
                 -- The native tree retains its last boxes. Scrolling and paint
                 -- changes can reuse those boxes without recomputing layout.
@@ -890,45 +999,47 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                             end
                         end
                     end
+                    local changes = C.tecsUiTreeChanges(install.tree, install.changeCount) as loader.CArray
+                    local changeCount = tonumber(install.changeCount[0]) as integer
+                    if changeCount > 0 and changes == nil then
+                        error("tecs: UI layout export failed: " .. loader.toString(C.tecsRustError()), 2)
+                    end
+                    for index = 0, changeCount - 1 do
+                        local output = changes[index] as loader.CStruct
+                        local entity = tonumber(output.entity) as integer
+                        local x, y = output.x as number, output.y as number
+                        local width, height = output.width as number, output.height as number
+                        local current = world:get(entity, Layout)
+                        if
+                            current ~= nil
+                            and (current.x ~= x or current.y ~= y or current.width ~= width or current.height ~= height)
+                        then
+                            local changed = world:getMut(entity, Layout)
+                            changed.x, changed.y, changed.width, changed.height = x, y, width, height
+                        end
+                        applyLayoutTransform(world, entity, x, y, width, height)
+                    end
                 end
-                for archetype, length, entities in nodes:iter() do
-                    local layouts = archetype:get(Layout)
-                    for row = 1, length do
-                        local entity = entities[row]
-                        local output = install.output
-                        if C.tecsUiTreeLayout(install.tree, entity, output) as boolean then
-                            local current = layouts[row]
-                            local x, y = output.x as number, output.y as number
-                            local width, height = output.width as number, output.height as number
-                            if
-                                current.x ~= x or current.y ~= y or current.width ~= width or current.height ~= height
-                            then
-                                local changed = world:getMut(entity, Layout)
-                                changed.x, changed.y, changed.width, changed.height = x, y, width, height
-                            end
-                            local relative = world:get(entity, RelativeTransform)
-                            if relative ~= nil then
-                                local parent = world:getFirstRelationship(entity, ChildOf)
-                                local scroll = parent ~= nil and world:get(parent.target, Scroll) or nil
-                                local relativeX = x - (scroll ~= nil and scroll.x or 0)
-                                local relativeY = y - (scroll ~= nil and scroll.y or 0)
-                                local paint = world:get(entity, Paint)
-                                if paint ~= nil and paint.stretch then
-                                    relativeX = relativeX + width * 0.5
-                                    relativeY = relativeY + height * 0.5
-                                end
-                                local scaleX = paint ~= nil and paint.stretch and width or relative.scaleX
-                                local scaleY = paint ~= nil and paint.stretch and height or relative.scaleY
-                                if
-                                    relative.x ~= relativeX
-                                    or relative.y ~= relativeY
-                                    or relative.scaleX ~= scaleX
-                                    or relative.scaleY ~= scaleY
-                                then
-                                    relative = world:getMut(entity, RelativeTransform)
-                                    relative.x, relative.y = relativeX, relativeY
-                                    relative.scaleX, relative.scaleY = scaleX, scaleY
-                                end
+
+                -- Paint and direct RelativeTransform writes are uncommon and
+                -- may affect any row in their dirty archetype. They reuse ECS
+                -- layout boxes and never enter Taffy.
+                if transformDirty then
+                    for _archetype, length, entities in nodes:iter() do
+                        for row = 1, length do
+                            applyCurrentLayout(entities[row], world)
+                        end
+                    end
+                end
+
+                -- A viewport offset affects only its direct children's local
+                -- transforms. Descendant world transforms follow through the
+                -- ordinary ChildOf hierarchy.
+                if scrollDirty then
+                    for archetype, length, entities in scrolls:iter() do
+                        if archetype:isComponentDirty(Scroll) then
+                            for row = 1, length do
+                                world:targets(entities[row], ChildOf, applyCurrentLayout, world)
                             end
                         end
                     end
@@ -1179,20 +1290,24 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             after = {"RelativeTransform", "tecs.UiLayout"},
             before = {"tecs.TextLayout"},
             run = function()
-                -- The queries are cheap dirty gates over archetypes. The tree
-                -- walks and coordinate projection below run only when their
-                -- retained geometry can have changed.
+                -- Keep the static-frame gate proportional to changed
+                -- archetypes. The query walks below are the work this gate
+                -- protects, not part of deciding whether to do it.
                 local geometryDirty = install.geometryDirty
-                for archetype in nodes:iter() do
-                    geometryDirty = geometryDirty
-                        or archetype:isComponentDirty(Transform)
-                        or archetype:isComponentDirty(ChildOf)
-                        or archetype:isComponentDirty(Root)
-                        or archetype:isComponentDirty(Scroll)
-                        or archetype:isComponentDirty(Paint)
-                end
-                for archetype in interactions:iter() do
-                    geometryDirty = geometryDirty or archetype:isComponentDirty(Interaction)
+                if not geometryDirty then
+                    for archetype in pairs(worldImpl._dirtyArchetypes) do
+                        if archetype.columns[Style] then
+                            geometryDirty = archetype:isComponentDirty(Transform)
+                                or archetype:isComponentDirty(ChildOf)
+                                or archetype:isComponentDirty(Root)
+                                or archetype:isComponentDirty(Scroll)
+                                or archetype:isComponentDirty(Paint)
+                                or archetype:isComponentDirty(Interaction)
+                            if geometryDirty then
+                                break
+                            end
+                        end
+                    end
                 end
 
                 local camera = renderer.camera
