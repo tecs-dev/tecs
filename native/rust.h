@@ -36,6 +36,9 @@ const char *tecsRustError(void);
 bool tecsUuid4(char output[37]);
 bool tecsUuid7(char output[37]);
 
+/* SHA-256 as 64 lowercase hexadecimal characters and a NUL. */
+bool tecsSha256(const uint8_t *bytes, size_t length, char output[65]);
+
 TecsBytes *tecsCliHelp(void);
 TecsBytes *tecsCliParse(size_t count, const char *const *arguments);
 TecsBytes *tecsCliDocs(const char *directory, const char *query);

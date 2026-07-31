@@ -28,6 +28,7 @@ mod payload;
 mod physics;
 mod regex;
 mod registry;
+mod sha256;
 mod uuid;
 mod worker;
 

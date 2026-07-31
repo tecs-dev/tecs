@@ -867,7 +867,11 @@ establishing that an asset is the asset that was published is a different
 question with a different answer. The algorithm is in the name because the
 values are written into files that outlive the process, so changing it has to
 be a rename that every caller is rechecked against rather than a silent change
-of meaning. `data.adler32` is there for the format that specifies it.
+of meaning. `data.sha256` answers the separate integrity question when the
+expected digest comes from a trusted channel or signed manifest. It crosses
+the Rust ABI because the runtime's pinned `sha2` implementation is shared with
+the build that stamps embedded payloads. `data.adler32` is there for the format
+that specifies it.
 
 `data.inflate` reads zlib streams and `data.inflateRaw` reads the
 DEFLATE inside them. zlib decodes both: it is pinned, bound, and carried

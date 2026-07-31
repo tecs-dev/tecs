@@ -74,6 +74,26 @@ describe("data.fnv1a64", function()
     end)
 end)
 
+describe("data.sha256", function()
+    it("matches the published reference vectors", function()
+        assert.are.equal("e3b0c44298fc1c149afbf4c8996fb924" .. "27ae41e4649b934ca495991b7852b855", data.sha256(""))
+        assert.are.equal("ba7816bf8f01cfea414140de5dae2223" .. "b00361a396177a9cb410ff61f20015ad", data.sha256("abc"))
+    end)
+
+    it("hashes bytes rather than characters", function()
+        assert.are.equal(
+            "a37cc3026aae4d519e0b19c298fa913b" .. "4dccfdf0658cbccbb7deaa0226d5acdb",
+            data.sha256("a\0b\255")
+        )
+    end)
+
+    it("returns sixty-four lowercase hexadecimal digits", function()
+        local digest = data.sha256("#version 450\nvoid main() {}\n")
+        assert.are.equal(64, #digest)
+        assert.matches("^[0-9a-f]+$", digest)
+    end)
+end)
+
 describe("data.adler32", function()
     it("matches the values RFC 1950's definition produces", function()
         assert.are.equal(0x00000001, data.adler32(""))
