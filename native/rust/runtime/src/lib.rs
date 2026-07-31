@@ -12,6 +12,7 @@ use std::slice;
 use image::codecs::png::PngEncoder;
 use image::{ImageEncoder, ImageError};
 
+mod cache;
 mod cli;
 mod cli_docs;
 mod cli_mcp;
@@ -28,6 +29,7 @@ mod payload;
 mod physics;
 mod regex;
 mod registry;
+mod window;
 mod worker;
 
 thread_local! {

@@ -152,6 +152,9 @@ local function fakePlatform(queued)
         prefPath = function(organization, application)
             return "/dev/save/" .. organization .. "/" .. application .. "/"
         end,
+        cachePath = function(organization, application)
+            return "/dev/cache/" .. organization .. "/" .. application .. "/"
+        end,
         -- A licensed backend's bytecode has no public format name, which is
         -- what the private format is for.
         shaderFormat = function()
@@ -226,6 +229,7 @@ describe("platform contract", function()
 
         assert.are.equal("/dev/content/", files.basePath())
         assert.are.equal("/dev/save/tecs/tecs/", files.preferencePath())
+        assert.are.equal("/dev/cache/tecs/tecs/", files.cachePath())
         assert.are.equal("/dev/save/tecs/tecs/save.json", files.writablePath("save.json"))
 
         -- A development run has TECS_ASSETS set and it outranks everything,
@@ -246,6 +250,11 @@ describe("platform contract", function()
             "/dev/save/tecs/tecs/",
             files.preferencePath(),
             "the writable root is the platform's and is not overridable"
+        )
+        assert.are.equal(
+            "/dev/cache/tecs/tecs/",
+            files.cachePath(),
+            "the disposable root is the platform's and is not overridable"
         )
     end)
 

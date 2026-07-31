@@ -3601,8 +3601,8 @@ and a port supplies these and touches nothing above them:
  input       Devices, rumble, cursor modes, text input  adapter.input
  audio       A mixer, tracks, gain, tags                adapter.audio
  static FFI  Function pointers taken at build time      Rust registry installer
- storage     Content and writable roots, and how a      adapter.basePath/prefPath
-             file under one is reached                  and adapter.storage
+ storage     Content, persistent and cache roots, and   adapter.basePath/prefPath/
+             how a file under one is reached            cachePath and adapter.storage
  shaders     A pack in the platform's own format        adapter.shaderFormat
 ```
 
@@ -3619,10 +3619,11 @@ whether a voice is still sounding, which is asked rather than delivered. A
 target that forbids `dlopen` reaches its libraries through a table of pointers
 taken at build time, and nothing calls `ffi.load` when one is present. Storage
 is two halves and neither is useful alone, which is why it is one seam and not
-two: a platform that says its content lives at a root it invented is not served
-by the engine then reading that root with the host's own file calls, so the seam
-carries operations and not just paths. The pack layout does not change for a
-platform with private bytecode; only the declared format does.
+two: a platform names its content, persistent-state and disposable-cache roots,
+and also supplies the operations that reach a file under them. A platform that
+invents a root is not served by the engine then reading that root with the
+host's own file calls. The pack layout does not change for a platform with
+private bytecode; only the declared format does.
 
 `tecs.platform.adapter` holds the SDL implementation of all seven, which doubles
 as the worked example. `spec/adapter_spec.lua` installs a platform that is not

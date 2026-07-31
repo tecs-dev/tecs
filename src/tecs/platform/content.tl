@@ -30,6 +30,9 @@ local baseCache: string = nil
 local prefCache: string = nil
 local prefOrganization: string = nil
 local prefApplication: string = nil
+local cacheCache: string = nil
+local cacheOrganization: string = nil
+local cacheApplication: string = nil
 local assetsCache: string = nil
 
 --- Every path read or decoded this process, by the kind it was read as.
@@ -46,6 +49,9 @@ local function fresh()
     prefCache = nil
     prefOrganization = nil
     prefApplication = nil
+    cacheCache = nil
+    cacheOrganization = nil
+    cacheApplication = nil
     assetsCache = nil
 end
 
@@ -72,6 +78,19 @@ function content.prefPath(organization: string, application: string): string
     prefOrganization = organization
     prefApplication = application
     return prefCache
+end
+
+--- Disposable directory for `organization` and `application`, created if
+--- absent.
+function content.cachePath(organization: string, application: string): string
+    fresh()
+    if cacheCache ~= nil and cacheOrganization == organization and cacheApplication == application then
+        return cacheCache
+    end
+    cacheCache = adapter.current().cachePath(organization, application)
+    cacheOrganization = organization
+    cacheApplication = application
+    return cacheCache
 end
 
 --- Root the engine reads content from.
@@ -120,6 +139,9 @@ function content.reset()
     prefCache = nil
     prefOrganization = nil
     prefApplication = nil
+    cacheCache = nil
+    cacheOrganization = nil
+    cacheApplication = nil
     assetsCache = nil
 end
 
