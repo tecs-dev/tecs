@@ -79,26 +79,11 @@ local record regex
 
         --- Reports whether any part of a subject matches.
         ---
-        --- ```teal
-        --- local imageName <const> = tecs.regex.compile([[\.(png|jpg)$]])
-        --- if imageName:isMatch(path) then
-        ---     loadImage(path)
-        --- end
-        --- ```
-        ---
         --- @param subject Arbitrary bytes. Unlike the pattern, these need not be UTF-8.
         --- @return True when the expression matches at least once.
         isMatch: function(self: Regex, subject: string): boolean
 
         --- Finds the first match at or after a byte position.
-        ---
-        --- ```teal
-        --- local number <const> = tecs.regex.compile([[\d+]])
-        --- local found <const> = number:find("hp=100")
-        --- if found ~= nil then
-        ---     print(found.value, found.first, found.last) -- "100", 4, 6
-        --- end
-        --- ```
         ---
         --- @param subject Arbitrary bytes.
         --- @param init First byte considered, under `string.find`'s rules: 1 by default, a negative
@@ -123,12 +108,6 @@ local record regex
         ---     first group, `$name` and `${name}` select a named group, and `$$` writes one dollar
         ---     sign. A reference the pattern does not declare expands to an empty string.
         ---
-        --- ```teal
-        --- local assignment <const> = tecs.regex.compile([[(\w+)=(\d+)]])
-        --- local text <const> = assignment:replace("hp=100 mp=50", "$1: $2")
-        --- -- text is "hp: 100 mp=50"
-        --- ```
-        ---
         --- @param subject Arbitrary bytes.
         --- @param replacement Arbitrary bytes, with capture references interpreted as described above.
         --- @return A new string when something matched, or the original string unchanged when nothing
@@ -136,12 +115,6 @@ local record regex
         replace: function(self: Regex, subject: string, replacement: string): string
 
         --- Replaces every non-overlapping match.
-        ---
-        --- ```teal
-        --- local digits <const> = tecs.regex.compile([[\d+]])
-        --- local redacted <const> = digits:replaceAll("room 12, floor 3", "#")
-        --- -- redacted is "room #, floor #"
-        --- ```
         ---
         --- @param subject Arbitrary bytes.
         --- @param replacement The same capture-reference syntax as `replace`.

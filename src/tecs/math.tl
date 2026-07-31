@@ -37,20 +37,12 @@ local record angleMath
 
     --- Wraps an angle to one turn centered on zero.
     ---
-    --- ```teal
-    --- angle = tecs.math.wrapAngle(angle)
-    --- ```
-    ---
     --- @param radians A finite angle in radians.
     --- @return The equivalent angle in `[-pi, pi)`, so positive pi becomes
     ---     negative pi.
     wrapAngle: function(radians: number): number
 
     --- Computes the shortest signed turn from one angle to another.
-    ---
-    --- ```teal
-    --- angle = angle + tecs.math.deltaAngle(angle, targetAngle) * response
-    --- ```
     ---
     --- @param from Starting angle in radians.
     --- @param to Destination angle in radians.

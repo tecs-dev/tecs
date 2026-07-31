@@ -87,10 +87,6 @@ local PI <const> = math.pi
 local record vec2Module
     --- Adds two vectors.
     ---
-    --- ```teal
-    --- x, y = tecs.math.vec2.add(x, y, velocityX * dt, velocityY * dt)
-    --- ```
-    ---
     --- @param ax First vector's x coordinate.
     --- @param ay First vector's y coordinate.
     --- @param bx Second vector's x coordinate.
@@ -100,10 +96,6 @@ local record vec2Module
     add: function(ax: number, ay: number, bx: number, by: number): number, number
 
     --- Subtracts the second vector from the first.
-    ---
-    --- ```teal
-    --- local offsetX, offsetY = tecs.math.vec2.subtract(targetX, targetY, x, y)
-    --- ```
     ---
     --- @param ax First vector's x coordinate.
     --- @param ay First vector's y coordinate.
@@ -115,10 +107,6 @@ local record vec2Module
 
     --- Multiplies both coordinates by a scalar.
     ---
-    --- ```teal
-    --- local stepX, stepY = tecs.math.vec2.scale(directionX, directionY, speed * dt)
-    --- ```
-    ---
     --- @param x Vector's x coordinate.
     --- @param y Vector's y coordinate.
     --- @param factor Multiplier applied to both coordinates.
@@ -128,10 +116,6 @@ local record vec2Module
 
     --- Computes the dot product of two vectors.
     ---
-    --- ```teal
-    --- local approaching <const> = tecs.math.vec2.dot(velocityX, velocityY, normalX, normalY) < 0
-    --- ```
-    ---
     --- @param ax First vector's x coordinate.
     --- @param ay First vector's y coordinate.
     --- @param bx Second vector's x coordinate.
@@ -140,11 +124,6 @@ local record vec2Module
     dot: function(ax: number, ay: number, bx: number, by: number): number
 
     --- Computes the scalar two-dimensional cross product.
-    ---
-    --- ```teal
-    --- local side <const> = tecs.math.vec2.cross(facingX, facingY, targetX, targetY)
-    --- -- side is positive in the same rotation direction as tecs.math.vec2.rotate
-    --- ```
     ---
     --- @param ax First vector's x coordinate.
     --- @param ay First vector's y coordinate.
@@ -159,20 +138,12 @@ local record vec2Module
     --- Prefer this to `length` when comparing magnitudes: compare the answer
     --- with the other distance squared, such as `radius * radius`.
     ---
-    --- ```teal
-    --- local moving <const> = tecs.math.vec2.lengthSquared(velocityX, velocityY) > 0
-    --- ```
-    ---
     --- @param x Vector's x coordinate.
     --- @param y Vector's y coordinate.
     --- @return `x * x + y * y`.
     lengthSquared: function(x: number, y: number): number
 
     --- Computes vector length.
-    ---
-    --- ```teal
-    --- local speed <const> = tecs.math.vec2.length(velocityX, velocityY)
-    --- ```
     ---
     --- @param x Vector's x coordinate.
     --- @param y Vector's y coordinate.
@@ -183,10 +154,6 @@ local record vec2Module
     ---
     --- Prefer this to `distance` for radius tests.
     ---
-    --- ```teal
-    --- local inRange <const> = tecs.math.vec2.distanceSquared(x, y, targetX, targetY) <= range * range
-    --- ```
-    ---
     --- @param ax First point's x coordinate.
     --- @param ay First point's y coordinate.
     --- @param bx Second point's x coordinate.
@@ -195,10 +162,6 @@ local record vec2Module
     distanceSquared: function(ax: number, ay: number, bx: number, by: number): number
 
     --- Computes the distance between two points.
-    ---
-    --- ```teal
-    --- local remaining <const> = tecs.math.vec2.distance(x, y, targetX, targetY)
-    --- ```
     ---
     --- @param ax First point's x coordinate.
     --- @param ay First point's y coordinate.
@@ -209,10 +172,6 @@ local record vec2Module
 
     --- Produces a unit vector in the same direction.
     ---
-    --- ```teal
-    --- local directionX, directionY = tecs.math.vec2.normalize(targetX - x, targetY - y)
-    --- ```
-    ---
     --- @param x Vector's x coordinate.
     --- @param y Vector's y coordinate.
     --- @return The normalized x coordinate. A zero vector returns zero
@@ -221,10 +180,6 @@ local record vec2Module
     normalize: function(x: number, y: number): number, number
 
     --- Interpolates linearly between two points.
-    ---
-    --- ```teal
-    --- local x, y = tecs.math.vec2.lerp(startX, startY, finishX, finishY, elapsed / duration)
-    --- ```
     ---
     --- @param ax Starting point's x coordinate.
     --- @param ay Starting point's y coordinate.
@@ -240,10 +195,6 @@ local record vec2Module
     ---
     --- A frame-rate-independent chase passes the speed for this frame:
     ---
-    --- ```teal
-    --- x, y = tecs.math.vec2.moveTowards(x, y, targetX, targetY, speed * dt)
-    --- ```
-    ---
     --- @param x Starting point's x coordinate.
     --- @param y Starting point's y coordinate.
     --- @param targetX Destination point's x coordinate.
@@ -257,11 +208,6 @@ local record vec2Module
 
     --- Rotates a vector around the origin.
     ---
-    --- ```teal
-    --- local facingX, facingY = tecs.math.vec2.rotate(1, 0, math.pi / 2)
-    --- -- facingX is approximately 0 and facingY is 1
-    --- ```
-    ---
     --- @param x Vector's x coordinate.
     --- @param y Vector's y coordinate.
     --- @param radians Rotation in radians. A positive quarter turn maps
@@ -272,20 +218,12 @@ local record vec2Module
 
     --- Computes a vector's direction.
     ---
-    --- ```teal
-    --- local facing <const> = tecs.math.vec2.angle(targetX - x, targetY - y)
-    --- ```
-    ---
     --- @param x Vector's x coordinate.
     --- @param y Vector's y coordinate.
     --- @return `atan2(y, x)` in `[-pi, pi]`. A zero vector returns zero.
     angle: function(x: number, y: number): number
 
     --- Computes the smaller unsigned angle between two vectors.
-    ---
-    --- ```teal
-    --- local separation <const> = tecs.math.vec2.angleBetween(facingX, facingY, targetX, targetY)
-    --- ```
     ---
     --- @param ax First vector's x coordinate.
     --- @param ay First vector's y coordinate.
@@ -297,10 +235,6 @@ local record vec2Module
     --- Computes the smaller signed angle from one vector to another.
     ---
     --- Use the answer directly as the shortest directional correction:
-    ---
-    --- ```teal
-    --- local turn <const> = tecs.math.vec2.signedAngleBetween(facingX, facingY, targetX, targetY)
-    --- ```
     ---
     --- @param ax Starting vector's x coordinate.
     --- @param ay Starting vector's y coordinate.
@@ -315,10 +249,6 @@ local record vec2Module
     ---
     --- The projection axis may have any length:
     ---
-    --- ```teal
-    --- local alongX, alongY = tecs.math.vec2.project(velocityX, velocityY, axisX, axisY)
-    --- ```
-    ---
     --- @param x The vector's x coordinate.
     --- @param y The vector's y coordinate.
     --- @param ontoX Projection axis's x coordinate.
@@ -331,10 +261,6 @@ local record vec2Module
     --- Reflects a vector across the line perpendicular to a normal.
     ---
     --- The normal may have any length:
-    ---
-    --- ```teal
-    --- velocityX, velocityY = tecs.math.vec2.reflect(velocityX, velocityY, normalX, normalY)
-    --- ```
     ---
     --- @param x The vector's x coordinate.
     --- @param y The vector's y coordinate.
