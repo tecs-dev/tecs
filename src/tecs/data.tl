@@ -1,5 +1,5 @@
 --[=[
-JSON, DEFLATE, hashes, and checksums over Lua byte strings.
+Typed stores, JSON, DEFLATE, UUIDs, hashes, and checksums.
 
 ## JSON
 
@@ -56,6 +56,23 @@ hint may cost a copy but does not weaken validation.
 Inflation raises on malformed, truncated, or dictionary-dependent streams.
 Treat zlib error text as a diagnostic, not a string-matching interface.
 
+## UUIDs
+
+Generate RFC 9562 identifiers without a central allocator:
+
+```teal
+local objectId <const> = tecs.data.uuid4()
+local eventId <const> = tecs.data.uuid7()
+```
+
+`uuid4` draws its random bits from the operating system. `uuid7` starts with
+the current Unix timestamp in milliseconds and orders calls made by this
+process, which makes it suitable for identifiers stored in an ordered index.
+Both return the canonical lowercase 8-4-4-4-12 representation.
+
+UUIDs identify values; they do not authenticate a player or make an
+unguessable credential.
+
 ## Hashes and checksums
 
 `fnv1a64` supplies fast process and build identity as 16 lowercase hexadecimal
@@ -84,6 +101,7 @@ value again.
 local ffi <const> = require("ffi")
 local bit <const> = require("bit")
 local loader <const> = require("tecs.ffi.loader")
+local binding <const> = require("tecs.ffi.rust")
 local zlib <const> = require("tecs.ffi.zlib")
 local type TypedStore = require("tecs.data.Store")
 local storekeys <const> = require("tecs.internal.storekeys")
@@ -360,6 +378,20 @@ local record data is JSON
     ---
     --- @return Returns a fresh caller-owned process-wide table.
     listKeys: function(): {string: integer}
+
+    --- Generates a random RFC 9562 UUID version 4.
+    ---
+    --- @return Returns a fresh UUID in canonical lowercase 8-4-4-4-12 form.
+    uuid4: function(): string
+
+    --- Generates a time-ordered RFC 9562 UUID version 7.
+    ---
+    --- Calls made by this process remain ordered even when more than one falls
+    --- in the same millisecond. The timestamp makes the result unsuitable for
+    --- hiding when an identifier was created.
+    ---
+    --- @return Returns a fresh UUID in canonical lowercase 8-4-4-4-12 form.
+    uuid7: function(): string
 end
 
 function data.newStore(): TypedStore
@@ -372,6 +404,26 @@ data.listKeys = storekeys.listKeys
 
 local C <const> = zlib.C
 local K <const> = zlib.K
+local R <const> = binding.C
+
+local uuidText <const> = loader.newArray("char[37]")
+local generateUUID4 <const> = R.tecsUuid4 as function(loader.CArray): boolean
+local generateUUID7 <const> = R.tecsUuid7 as function(loader.CArray): boolean
+
+local function generateUUID(generate: function(loader.CArray): boolean): string
+    if not generate(uuidText) then
+        error("UUID output buffer is unavailable", 2)
+    end
+    return loader.toString(uuidText as loader.CValue)
+end
+
+function data.uuid4(): string
+    return generateUUID(generateUUID4)
+end
+
+function data.uuid7(): string
+    return generateUUID(generateUUID7)
+end
 
 -- The bindings are open namespaces, so these declarations type the entry
 -- points explicitly.

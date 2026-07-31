@@ -228,7 +228,7 @@ The host loads `tecs` before the entry file. A game can use these names without 
 
 - [`tecs.assets`](/modules/assets) - loading bytes, images and sounds off the main thread
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
-- [`tecs.data`](/modules/data) - typed stores, JSON, DEFLATE and hashes over byte strings
+- [`tecs.data`](/modules/data) - typed stores, JSON, DEFLATE, UUIDs, hashes and checksums
 - [`tecs.ecs`](/modules/ecs/) - worlds, components, queries, systems, events and resources
 - [`tecs.events`](/modules/events) - typed events and address-based message buses
 - [`tecs.gfx`](/modules/gfx/) - the camera, the components, the renderer, text, and the vocabularies below
@@ -256,7 +256,7 @@ Inside one of those, one level and no deeper:
 - [`tecs.math.vec2`](/modules/math/vec2) - allocation-free two-dimensional vector and point math
 - [`tecs.platform.events`](/modules/platform/events) - typed platform events routed through the world
 - [`tecs.platform.os`](/modules/platform/os) - capabilities, the clipboard, child processes, and what the desktop offers
-- [`tecs.platform.time`](/modules/platform/time) - monotonic time
+- [`tecs.platform.time`](/modules/platform/time) - clocks, calendar time, delays and frame timing
 - [`tecs.platform.window`](/modules/platform/window) - the window, its size, its display and its mode
 
 On `tecs` itself, because no one module owns them:

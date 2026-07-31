@@ -1,5 +1,5 @@
 ---
-description: "Monotonic frame timing with an injectable replay source"
+description: "Platform clocks, calendar conversion, delays, and frame timing"
 outline: [2, 3]
 ---
 

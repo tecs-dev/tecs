@@ -380,6 +380,20 @@ _when_ it ran, not what it could see. A system that captured the application
 when the plugin registered it gets phase order, the fixed step, pause and state
 gating, and the guard, and reaches everything a callback did.
 
+### Timer callbacks stay out of Lua
+
+`tecs.platform.time` exposes SDL's realtime and monotonic clocks, calendar
+conversion, unit conversion, and blocking delays, but not `SDL_AddTimer`.
+SDL runs a timer callback on a separate thread, so entering the main LuaJIT
+state from it is undefined. Moving the callback through Rust and a queue would
+make it safe, but it would duplicate scheduling that a system already expresses
+in Lua.
+
+A real-time deadline compares `time.now()` in a system. Work tied to simulated
+time belongs in the sequence clock or the fixed-step pipeline. Both keep
+execution on the main state and retain phase order, pause behavior, and the
+application's crash guard, which an SDL timer callback would bypass.
+
 ### When the fixed step cannot keep up
 
 A frame hands the pipeline however long the last one took, and the fixed step
@@ -813,9 +827,9 @@ call would be opaque to the trace around it. Native vector math starts making
 sense when one call walks a contiguous array; this API is for one vector in the
 game code already touching it.
 
-Hashes and checksums remain under `tecs.data`. They operate on byte strings,
-their exact algorithms are part of stored formats, and none is numeric geometry
-merely because its implementation contains arithmetic.
+UUIDs, hashes and checksums remain under `tecs.data`. They are persisted
+identities or operate on byte strings, and none is numeric geometry merely
+because its implementation contains arithmetic or randomness.
 
 ## Data transforms and typed stores
 
@@ -823,6 +837,13 @@ Encoding, hashing and decompression share the public `tecs.data` module because
 a save is encoded, compressed and stamped as one task. Their implementations
 remain in three files, and the surface resolves them lazily, so asking for a
 hash loads neither encoder nor decompressor.
+
+UUID generation shares that module because its result is an identifier stored
+in data, not a mathematical operation. `uuid4` uses operating-system randomness
+for independent allocation, while `uuid7` combines that randomness with time
+and process-local ordering for database and protocol identifiers. Both cross
+the existing Rust ABI because the runtime already depends on the implementation
+and entropy provider.
 
 Sharing the module qualifies the verbs. `encode` on a module that also
 compresses would name two things at once, so JSON is `encodeJSON` and `decodeJSON`
@@ -3788,7 +3809,7 @@ src/tecs/Future.tl        the value everything asynchronous settles into
 src/tecs/io.tl            binary contracts plus nonblocking TCP and UDP
 src/tecs/io/http/         requests, and the clients the loop turns
 src/tecs/random.tl        seeded streams and Perlin noise
-src/tecs/data.tl          JSON, zlib and raw DEFLATE, and three hashes
+src/tecs/data.tl          stores, JSON, DEFLATE, UUIDs, hashes and checksums
 src/tecs/regex.tl         compiled Rust regular expressions over byte strings
 assets/                   shaders, materials and fonts, globbed at build time
 spec/                     busted suite
