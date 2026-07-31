@@ -271,7 +271,7 @@ local record platform
     --- event bus.
     events: platformEvents
     --- Read-only. Exposes operating-system capabilities, clipboard access,
-    --- and child processes.
+    --- process signals, and desktop services.
     os: platformOS
     --- Read-only. Exposes monotonic time and an override for deterministic
     --- replay.

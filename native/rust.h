@@ -146,6 +146,10 @@ TecsBytes *tecsSystemCachePath(const uint8_t *organization, size_t organization_
 int tecsPathIsSymlink(const uint8_t *path, size_t path_length);
 bool tecsFileWriteAtomic(const uint8_t *path, size_t path_length, const uint8_t *bytes, size_t length);
 
+bool tecsSignalsInstall(void);
+uint32_t tecsSignalsPoll(void);
+void tecsSignalsUninstall(void);
+
 TecsImage *tecsImageDecode(const uint8_t *bytes, size_t length);
 const uint8_t *tecsImagePixels(const TecsImage *image);
 uint32_t tecsImageWidth(const TecsImage *image);

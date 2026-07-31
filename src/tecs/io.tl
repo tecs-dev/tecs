@@ -274,6 +274,10 @@ local record binaryIO
     --- A `Writer` accepts bytes in order and finishes its destination on `close`.
     type Writer = types.Writer
 
+    --- A [`SeekableWriter`](tealdoc:tecs.io.SeekableWriter) patches a
+    --- destination through a repositionable cursor.
+    type SeekableWriter = types.SeekableWriter
+
     --- A `Stream` describes binary storage without retaining a cursor.
     type Stream = types.Stream
 

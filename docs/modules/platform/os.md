@@ -1,5 +1,5 @@
 ---
-description: "Runtime capabilities, clipboard access, child processes, and desktop services"
+description: "Runtime capabilities, process signals, clipboard access, and desktop services"
 outline: deep
 ---
 

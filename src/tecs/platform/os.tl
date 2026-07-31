@@ -20,6 +20,41 @@ Headless builds report the clipboard as unavailable. Primary selection remains
 independent of the clipboard. On platforms without a shared primary selection,
 reads may return only the value this process wrote.
 
+## Process signals
+
+SDL applications already receive `SIGINT` and `SIGTERM` as the public
+`tecs.platform.events.on.quit` event and then run their normal shutdown
+lifecycle. A headless loop can retain a [`SignalListener`](tealdoc:tecs.platform.os.SignalListener)
+instead. `tecs.runtime.poll` transfers signals out of the native handler, and
+`next` drains them without waiting:
+
+```teal
+tecs.scoped(function(scope: tecs.Scope)
+    local signals, reason = tecs.platform.os.newSignalListener()
+    if signals == nil then
+        error(reason)
+    end
+    scope:own(signals)
+
+    local running = true
+    while running do
+        tecs.runtime.poll()
+        local signal <const> = signals:next()
+        if signal == "interrupt" or signal == "terminate" then
+            running = false
+        end
+    end
+end)
+```
+
+The native handler only sets atomic flags. It never calls Lua, allocates, or
+locks. Repeated instances of one signal may coalesce before the next runtime
+poll, as operating-system signals ordinarily may. When different signals are
+pending in one poll, `next` returns them in the enum order rather than claiming
+an arrival order the operating system did not preserve. Closing the last
+listener stops interception, so a later signal follows the platform's
+termination behavior again.
+
 ]=]
 -- Implementation details:
 -- Clipboard reads copy SDL allocations before freeing them. Arbitrary MIME
@@ -27,7 +62,9 @@ reads may return only the value this process wrote.
 -- callback and may invoke it from a thread LuaJIT did not create. Headless
 -- checks avoid calling clipboard entry points before SDL video starts.
 
+local bit <const> = require("bit")
 local ffi <const> = require("ffi")
+local rust <const> = require("tecs.ffi.rust")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local adapter <const> = require("tecs.platform.adapter")
@@ -48,9 +85,15 @@ end
 loader.declare("dialogs")
 
 local C <const> = sdl.C
+local R <const> = rust.C
 local K <const> = sdl.K
 local D <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "dialogs")
 local VIDEO <const> = sdl.K.SDL_INIT_VIDEO
+
+local signalRuntimePoll: function(): integer
+local function pollSignals(): integer
+    return signalRuntimePoll()
+end
 
 --- Describes one preferred language and country.
 local record Locale
@@ -105,6 +148,51 @@ local record DialogResult
     filter: integer
     --- Read-only. Reports whether the user canceled the dialog.
     canceled: boolean
+end
+
+--- Names one process signal delivered outside a native handler.
+local enum ProcessSignal
+    "interrupt"
+    "terminate"
+    "hangup"
+    "quit"
+end
+
+--- A caller-owned queue of process signals for a headless loop.
+---
+--- [`runtime.poll`](/modules/runtime/#tecs.runtime.poll) fills the queue. The
+--- listener owns no thread and invokes no callback. Close it to stop
+--- interception after the last listener closes.
+local interface SignalListener
+    --- Returns whether this listener has been closed.
+    ---
+    --- @param self The listener to inspect.
+    --- @return Returns true after `close`.
+    isClosed: function(self: SignalListener): boolean
+
+    --- Returns the number of signals waiting to be read.
+    ---
+    --- Signals of the same kind may coalesce before a runtime poll. The count
+    --- covers deliveries already transferred to this listener.
+    --- @param self The open listener to inspect.
+    --- @return Returns the queued delivery count.
+    pending: function(self: SignalListener): integer
+
+    --- Removes and returns one queued signal without waiting.
+    ---
+    --- The call returns nil when no selected signal has arrived since the
+    --- listener was created or last drained. Signals transferred by the same
+    --- runtime poll are returned in enum order, not arrival order.
+    --- @param self The open listener whose queue advances.
+    --- @return Returns one selected signal, or nil when none is pending.
+    next: function(self: SignalListener): ProcessSignal
+
+    --- Stops this listener and discards its queued signals.
+    ---
+    --- Repeated calls are safe. Closing the final listener unregisters the
+    --- runtime source and re-enables the platform's termination behavior.
+    --- @param self The listener to close.
+    close: function(self: SignalListener)
 end
 
 --- Describes what this build can do on the current target.
@@ -186,12 +274,14 @@ local record platformOS
 
     --- Describes a completed dialog.
     type DialogResult = DialogResult
-end
 
---- Runs on the worker. Creates children, polls them, answers when they end.
----
---- Written against `tecs.ffi.sdl3` directly: a worker shares no heap with the
---- state that spawned it, so this is a whole program rather than a closure.
+    --- `ProcessSignal` identifies an interrupt, termination, hangup, or quit
+    --- request sent to this process.
+    type ProcessSignal = ProcessSignal
+
+    --- A `SignalListener` receives process signals in a headless loop.
+    type SignalListener = SignalListener
+end
 
 local countOut <const> = loader.newArray("int[1]")
 local secondsOut <const> = loader.newArray("int[1]")
@@ -273,6 +363,155 @@ function platformOS.power(): Power
         seconds = secondsOut[0] as integer,
         percent = percentOut[0] as integer,
     }
+end
+
+-------------------------------------------------------------------------------
+-- Process signals
+-------------------------------------------------------------------------------
+
+local SIGNALS <const>: {ProcessSignal} = {"interrupt", "terminate", "hangup", "quit"}
+local SIGNAL_INDEX <const>: {string: integer} = {
+    interrupt = 1,
+    terminate = 2,
+    hangup = 3,
+    quit = 4,
+}
+local SIGNAL_BITS <const>: {integer} = {1, 2, 4, 8}
+
+local record SignalListenerImpl is SignalListener
+    _closed: boolean
+    _selected: {boolean}
+    _pending: {integer}
+end
+
+local listeners <const>: {SignalListenerImpl: boolean} = {}
+local listenerCount = 0
+
+function SignalListenerImpl:isClosed(): boolean
+    return self._closed
+end
+
+local function openListener(self: SignalListenerImpl, method: string)
+    if self._closed then
+        error("tecs: SignalListener:" .. method .. " called after close", 3)
+    end
+end
+
+function SignalListenerImpl:pending(): integer
+    openListener(self, "pending")
+    local count = 0
+    for index = 1, #SIGNALS do
+        count = count + self._pending[index]
+    end
+    return count
+end
+
+function SignalListenerImpl:next(): ProcessSignal
+    openListener(self, "next")
+    for index = 1, #SIGNALS do
+        if self._pending[index] > 0 then
+            self._pending[index] = self._pending[index] - 1
+            return SIGNALS[index]
+        end
+    end
+    return nil
+end
+
+function SignalListenerImpl:close()
+    if self._closed then
+        return
+    end
+    self._closed = true
+    listeners[self] = nil
+    listenerCount = listenerCount - 1
+    if listenerCount == 0 then
+        runtime.unregister("signals")
+        R.tecsSignalsUninstall()
+    end
+end
+
+local function updateSignals(): integer
+    local mask <const> = tonumber(R.tecsSignalsPoll()) as integer
+    if mask == 0 then
+        return 0
+    end
+    local delivered = 0
+    for listener in pairs(listeners) do
+        for index = 1, #SIGNALS do
+            if listener._selected[index] and bit.band(mask, SIGNAL_BITS[index]) ~= 0 then
+                listener._pending[index] = listener._pending[index] + 1
+                delivered = delivered + 1
+            end
+        end
+    end
+    return delivered
+end
+
+signalRuntimePoll = updateSignals
+
+--- Creates a listener for process signals in a headless loop.
+---
+--- The listener receives `"interrupt"` for `SIGINT`, `"terminate"` for
+--- `SIGTERM`, `"hangup"` for `SIGHUP`, and `"quit"` for `SIGQUIT` on POSIX.
+--- Windows maps Ctrl-C and Ctrl-Break to `"interrupt"`, and console close,
+--- logoff, and shutdown to `"terminate"`. Unsupported signals simply never
+--- arrive on that platform.
+---
+--- SDL applications normally observe `tecs.platform.events.on.quit` instead.
+--- SDL converts SIGINT and SIGTERM to that event and the application performs
+--- its normal shutdown lifecycle before the process-wide runtime pump.
+---
+--- @param selected The caller supplies the signal names to retain, or omits
+---     the list to retain every supported name. An empty list and duplicate or
+---     unknown names raise as programmer errors.
+--- @return Returns a caller-owned listener.
+--- @return Returns the platform reason when native signal handling cannot be
+---     installed.
+function platformOS.newSignalListener(selected?: {ProcessSignal}): SignalListener, string
+    local retained <const>: {boolean} = {}
+    if selected == nil then
+        for index = 1, #SIGNALS do
+            retained[index] = true
+        end
+    else
+        if #selected == 0 then
+            error("tecs: platform.os.newSignalListener needs at least one signal", 2)
+        end
+        for index = 1, #selected do
+            local name <const> = selected[index]
+            local signalIndex <const> = SIGNAL_INDEX[name]
+            if signalIndex == nil then
+                error(("tecs: unknown process signal %q"):format(tostring(name)), 2)
+            end
+            if retained[signalIndex] then
+                error(("tecs: duplicate process signal %q"):format(name), 2)
+            end
+            retained[signalIndex] = true
+        end
+    end
+
+    if listenerCount == 0 and not R.tecsSignalsInstall() then
+        return nil, loader.toString(R.tecsRustError())
+    end
+
+    local pending: {integer} = {}
+    for index = 1, #SIGNALS do
+        pending[index] = 0
+    end
+    local listener <const> = setmetatable(
+        {
+            _closed = false,
+            _selected = retained,
+            _pending = pending,
+        } as SignalListenerImpl,
+        {__index = SignalListenerImpl}
+    )
+    listeners[listener] = true
+    listenerCount = listenerCount + 1
+    if listenerCount == 1 then
+        runtime.register("signals", 5, pollSignals)
+    end
+    return listener as SignalListener
 end
 
 --- Shows a native informational, warning or error dialog.

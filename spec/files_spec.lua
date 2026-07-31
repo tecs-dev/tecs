@@ -679,6 +679,70 @@ describe("io.files", function()
                 files.openWrite(at("mode.txt"), "unknown")
             end, "tecs: io.files.openWrite mode must be 'replace' or 'append'")
         end)
+
+        it("patches a replacement file through a seekable writer", function()
+            local path = at("seek-write.bin")
+            local writer = assert(files.openSeekableWrite(path))
+
+            assert.are.equal(0, writer:size())
+            assert.are.equal(0, writer:tell())
+            assert.is_true(writer:write("HEADpayload"))
+            assert.are.equal(11, writer:size())
+            assert.are.equal(11, writer:tell())
+            assert.are.equal(0, writer:seek("start"))
+            assert.is_true(writer:write("PACK"))
+            assert.are.equal(7, writer:seek("end", -4))
+            assert.is_true(writer:write("data"))
+
+            assert.is_true(writer:close())
+
+            assert.are.equal("PACKpaydata", files.read(path))
+        end)
+
+        it("updates an existing file without truncating it", function()
+            local path = at("seek-update.bin")
+            assert.is_true(files.write(path, "0123456789"))
+            local writer = assert(files.openSeekableWrite(path, "update"))
+
+            assert.are.equal(10, writer:size())
+            assert.are.equal(4, writer:seek("start", 4))
+            assert.is_true(writer:write("AB"))
+            assert.are.equal(6, writer:tell())
+
+            assert.is_true(writer:close())
+
+            assert.are.equal("0123AB6789", files.read(path))
+        end)
+
+        it("keeps seekable writes inside the current destination", function()
+            local writer = assert(files.openSeekableWrite(at("seek-bounds.bin")))
+            assert.is_true(writer:write("abcd"))
+
+            local position, reason = writer:seek("start", 5)
+
+            assert.is_nil(position)
+            assert.is_string(reason)
+            assert.are.equal(4, writer:tell())
+            assert.has_error(function()
+                writer:seek("middle", 0)
+            end, "tecs: SeekableWriter:seek origin must be 'start', 'current', or 'end'")
+            assert.has_error(function()
+                writer:seek("start", 0.5)
+            end, "tecs: SeekableWriter:seek offset must be an integer")
+
+            assert.is_true(writer:close())
+            assert.is_true(writer:close())
+
+            position, reason = writer:seek("start")
+            assert.is_nil(position)
+            assert.are.equal("the writer is closed", reason)
+        end)
+
+        it("rejects an unknown seekable write mode", function()
+            assert.has_error(function()
+                files.openSeekableWrite(at("seek-mode.txt"), "append")
+            end, "tecs: io.files.openSeekableWrite mode must be 'replace' or 'update'")
+        end)
     end)
 
     describe("where the process and the user are", function()

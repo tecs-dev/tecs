@@ -1373,7 +1373,7 @@ through an intermediate Lua string. The caller releases that buffer.
 
 The smaller operating-system services are one module rather than an
 `Application` grab bag, and rather than one name each. `tecs.platform.os` holds what
-this build can do here, the clipboard, running another program, URLs, locale
+this build can do here, process signals, the clipboard, URLs, locale
 preference, power, the simple blocking message box and asynchronous file and
 folder selection. The `os` name distinguishes these host facilities from
 `tecs.System`, which remains the ECS system type. None of them is a subsystem a
@@ -1388,6 +1388,16 @@ The process sandbox is reported separately from the target. The same Linux or
 macOS build can run without one or inside Flatpak, Snap, an unknown container,
 or the macOS app sandbox, and those environments change filesystem and child
 process expectations without changing what executable was built.
+
+Applications keep SDL's signal contract: SIGINT and SIGTERM become the same
+public quit event as a window close and therefore take the normal shutdown
+path. A headless loop has no application event drain, so `newSignalListener`
+installs native handlers that only set atomic flags. `tecs.runtime.poll`
+transfers those flags into each listener, and game code drains them without a
+callback or a thread entering LuaJIT. Closing the last listener stops
+interception, so later signals follow the platform's termination behavior.
+POSIX additionally names hangup and quit; Windows maps
+its console control events into interrupt and terminate.
 
 Standalone sensor handles sit under `tecs.input` instead, beside the pads and
 the keyboard, because a game asking what a device can sense is asking one
@@ -1511,10 +1521,11 @@ filesystem and no invented path scheme, so a failure is the platform's failure
 and the name says which call to read about. Like the process half it initializes
 no subsystem and is more useful with no window than with one.
 
-`openWrite` and `openRead` are the pair that is not one call, and they are the
-exception the streaming body needed: a backend that can open a file is asked
-to, and one that cannot is buffered over, so a download that ends in a file and
-an upload read out of one both work whatever a port supplied.
+`openWrite`, `openSeekableWrite`, and `openRead` are the operations that are not
+one call, and they are the exception the streaming body needed: a backend that
+can open a file is asked to, and one that cannot is buffered over, so a
+download that ends in a file and an upload read out of one both work whatever
+a port supplied.
 
 `writeAtomic` is the operation ordinary `write` deliberately is not. The SDL
 filesystem backend creates an exclusive neighboring temporary file, writes and
@@ -1539,6 +1550,15 @@ or pipe cannot implement it honestly, while the common file constructor needs
 no parallel random-access variant. The specialized result also types
 `readInto`; direct buffer reads are a file capability rather than a dynamic
 transfer optimization once the caller has asked for this kind of reader.
+
+`openSeekableWrite` is the symmetric patching operation. Replacement starts
+with an empty file, while update preserves an existing file; both start at byte
+zero and can revisit any position through the current end. The SDL backend
+writes through one `SDL_IOStream`, so patching a length or table offset neither
+copies the file nor reopens it. A backend without a cursor retains the bytes and
+writes the complete result on flush or close. Append remains on `openWrite`,
+because an append handle whose operating system forces every write to the end
+cannot also promise that a seek controls where the next write lands.
 
 Nothing here reaches the operating system, because `adapter` names storage as a
 seam and a seam that covered only _where_ content is would leave every read of a

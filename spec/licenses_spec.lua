@@ -168,7 +168,6 @@ local NOTICE_NAMES = {
 -- a shipped dependency whose notice nothing asks for.
 local BUILD_ONLY_CRATES = {
     anyhow = true,
-    errno = true,
     fastrand = true,
     ["linux-raw-sys"] = true,
     rustix = true,

@@ -1,9 +1,33 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
+local ffi = require("ffi")
 local platformOS = require("tecs.platform.os")
+local runtime = require("tecs.runtime")
+
+if ffi.os ~= "Windows" then
+    ffi.cdef([[
+        int getpid(void);
+        int kill(int, int);
+    ]])
+end
 
 describe("platform.os", function()
+    local opened = {}
+
+    local function ownSignals(selected)
+        local listener = assert(platformOS.newSignalListener(selected))
+        opened[#opened + 1] = listener
+        return listener
+    end
+
+    after_each(function()
+        for _, listener in ipairs(opened) do
+            listener:close()
+        end
+        opened = {}
+    end)
+
     it("returns preferred locales as owned strings", function()
         local locales = platformOS.preferredLocales()
         assert.are.equal("table", type(locales))
@@ -39,4 +63,65 @@ describe("platform.os", function()
         assert.is_false(ok)
         assert.matches("unknown", err)
     end)
+
+    it("validates signal selections before installing a handler", function()
+        assert.has_error(function()
+            platformOS.newSignalListener({})
+        end, "tecs: platform.os.newSignalListener needs at least one signal")
+        assert.has_error(function()
+            platformOS.newSignalListener({ "interrupt", "interrupt" })
+        end, 'tecs: duplicate process signal "interrupt"')
+        assert.has_error(function()
+            platformOS.newSignalListener({ "unknown" })
+        end, 'tecs: unknown process signal "unknown"')
+    end)
+
+    if ffi.os ~= "Windows" then
+        it("delivers selected process signals through the runtime pump", function()
+            local signals = ownSignals({ "hangup", "terminate" })
+
+            assert.are.equal(0, signals:pending())
+            assert.is_nil(signals:next())
+            assert.are.equal(0, ffi.C.kill(ffi.C.getpid(), 1))
+            assert.are.equal(1, runtime.poll())
+            assert.are.equal(1, signals:pending())
+            assert.are.equal("hangup", signals:next())
+            assert.is_nil(signals:next())
+
+            signals:close()
+
+            assert.is_true(signals:isClosed())
+        end)
+
+        it("broadcasts one signal to every interested listener", function()
+            local first = ownSignals({ "quit" })
+            local second = ownSignals({ "quit" })
+
+            assert.are.equal(0, ffi.C.kill(ffi.C.getpid(), 3))
+            assert.are.equal(2, runtime.poll())
+            assert.are.equal("quit", first:next())
+            assert.are.equal("quit", second:next())
+
+            first:close()
+            second:close()
+        end)
+
+        it("filters signals independently and closes idempotently", function()
+            local signals = ownSignals({ "terminate" })
+
+            assert.are.equal(0, ffi.C.kill(ffi.C.getpid(), 1))
+            assert.are.equal(0, runtime.poll())
+            assert.is_nil(signals:next())
+            assert.are.equal(0, ffi.C.kill(ffi.C.getpid(), 15))
+            assert.are.equal(1, runtime.poll())
+            assert.are.equal("terminate", signals:next())
+
+            signals:close()
+            signals:close()
+
+            assert.has_error(function()
+                signals:pending()
+            end, "tecs: SignalListener:pending called after close")
+        end)
+    end
 end)
