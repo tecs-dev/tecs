@@ -794,36 +794,6 @@ for _, page in ipairs(pages) do
 end
 table.sort(sources)
 
---- Derives attached examples from canonical API names in source regions.
----
---- A region such as `-- #region tecs.io.Reader.read` names both the code to
---- check and the declaration that receives it. Tealdoc rejects a region whose
---- target is not public, so the source marker is the single relationship to
---- maintain.
-local function attachedExamples(source)
-    local examples, seen = {}, {}
-    for line in (readTree(source) .. "\n"):gmatch("(.-)\n") do
-        local target = line:match("^%s*%-%-%s*#region%s+(tecs%.io%.[%w%.]+)%s*$")
-        if target then
-            if seen[target] then
-                error(source .. " repeats example region " .. target, 0)
-            end
-            seen[target] = true
-            table.insert(examples, {
-                source = source,
-                region = target,
-                attach_to = target,
-            })
-        end
-    end
-    if #examples == 0 then
-        error(source .. " contains no canonical tecs.io example regions", 0)
-    end
-    return examples
-end
-
-local examples = attachedExamples("docs/examples/io.tl")
-
 return {
     build_dir = "build",
     source_dir = "src",
@@ -901,7 +871,6 @@ return {
             },
             sources = sources,
             pages = pages,
-            examples = examples,
             sidebar = SIDEBAR,
             sidebar_open = SIDEBAR_OPEN,
             before_build = function(context)

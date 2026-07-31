@@ -1,6 +1,5 @@
 -- Checked examples attached to the tecs.io reference. Each region's canonical
--- API name is also its attachment target; tlconfig.lua derives the Tealdoc
--- configuration from these markers.
+-- API name is its attachment target; Tealdoc discovers these source regions.
 
 -- #region tecs.io.newBuffer
 local tecsIO <const> = require("tecs.io")
