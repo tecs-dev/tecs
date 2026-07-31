@@ -5,7 +5,7 @@ WARNING: This is an internal module and should not be required directly.
 Instead, import the `tecs` module and use the methods provided there.
 ]]
 
-local type Store = require("tecs.data.Store")
+local type Store = require("tecs.data.store")
 local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
 

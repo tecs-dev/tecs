@@ -1,4 +1,4 @@
-local type Store = require("tecs.data.Store")
+local type Store = require("tecs.data.store")
 
 -- Internal implementation shape. Public documentation lives on `tecs.data`.
 local record storekeys

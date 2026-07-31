@@ -11,7 +11,7 @@ describe(
                 local store = tecs.data.newStore()
                 luassert.is_not_nil(store, "newStore() should return a non-nil value")
 
-                local key: tecs.data.Key<integer> = tecs.data.newKey("spec.context.create")
+                local key: tecs.data.Key<integer> = tecs.data.Store.newKey("spec.context.create")
                 luassert.is_not_nil(key, "newKey() should return a non-nil value")
             end
         )
@@ -20,15 +20,15 @@ describe(
             "stores and retrieves values using keys",
             function()
                 local store = tecs.data.newStore()
-                local STRING_KEY: tecs.data.Key<string> = tecs.data.newKey("spec.context.string")
-                local NUMBER_KEY: tecs.data.Key<number> = tecs.data.newKey("spec.context.number")
+                local STRING_KEY: tecs.data.Key<string> = tecs.data.Store.newKey("spec.context.string")
+                local NUMBER_KEY: tecs.data.Key<number> = tecs.data.Store.newKey("spec.context.number")
 
                 store[STRING_KEY] = "test"
                 store[NUMBER_KEY] = 42
 
                 luassert.is_equal("test", store[STRING_KEY], "String value should be retrievable with its key")
                 luassert.is_equal(42, store[NUMBER_KEY], "Number value should be retrievable with its key")
-                luassert.is_equal(nil, store[tecs.data.newKey("spec.context.unset")], "Unset key should return nil")
+                luassert.is_equal(nil, store[tecs.data.Store.newKey("spec.context.unset")], "Unset key should return nil")
             end
         )
 
@@ -37,7 +37,7 @@ describe(
             function()
                 local first = tecs.data.newStore()
                 local second = tecs.data.newStore()
-                local SHARED_KEY: tecs.data.Key<string> = tecs.data.newKey("spec.context.shared")
+                local SHARED_KEY: tecs.data.Key<string> = tecs.data.Store.newKey("spec.context.shared")
 
                 first[SHARED_KEY] = "first"
                 second[SHARED_KEY] = "second"
@@ -51,7 +51,7 @@ describe(
             "updates and removes values",
             function()
                 local store = tecs.data.newStore()
-                local KEY: tecs.data.Key<string> = tecs.data.newKey("spec.context.updates")
+                local KEY: tecs.data.Key<string> = tecs.data.Store.newKey("spec.context.updates")
 
                 store[KEY] = "original"
                 luassert.is_equal("original", store[KEY], "Initial value should be set")
@@ -67,8 +67,8 @@ describe(
         it(
             "still creates distinct keys without a name",
             function()
-                local a: tecs.data.Key<string> = tecs.data.newKey()
-                local b: tecs.data.Key<string> = tecs.data.newKey()
+                local a: tecs.data.Key<string> = tecs.data.Store.newKey()
+                local b: tecs.data.Key<string> = tecs.data.Store.newKey()
                 luassert.is_not_nil(a)
                 luassert.is_not_nil(b)
                 luassert.is_not_equal(a, b, "Unnamed keys are fresh identities")
@@ -78,25 +78,25 @@ describe(
         it(
             "finds named keys and returns the same identity on re-creation",
             function()
-                local KEY: tecs.data.Key<string> = tecs.data.newKey("spec.context.findable")
+                local KEY: tecs.data.Key<string> = tecs.data.Store.newKey("spec.context.findable")
                 luassert.is_equal(
                     KEY,
-                    tecs.data.findKey("spec.context.findable"),
+                    tecs.data.Store.findKey("spec.context.findable"),
                     "findKey should return the key created under that name"
                 )
                 luassert.is_equal(
                     KEY,
-                    tecs.data.newKey("spec.context.findable"),
+                    tecs.data.Store.newKey("spec.context.findable"),
                     "newKey with a known name is idempotent (hot-reload safe)"
                 )
                 luassert.is_equal(
-                    nil, tecs.data.findKey("spec.context.no-such-key"), "findKey on an unknown name returns nil"
+                    nil, tecs.data.Store.findKey("spec.context.no-such-key"), "findKey on an unknown name returns nil"
                 )
 
                 -- The stored value is reachable through the re-created key.
                 local store = tecs.data.newStore()
                 store[KEY] = "kept"
-                local again: tecs.data.Key<string> = tecs.data.newKey("spec.context.findable")
+                local again: tecs.data.Key<string> = tecs.data.Store.newKey("spec.context.findable")
                 luassert.is_equal(
                     "kept", store[again], "values survive module re-execution because the identity is stable"
                 )
@@ -106,14 +106,14 @@ describe(
         it(
             "lists named keys with their ids",
             function()
-                tecs.data.newKey("spec.context.listed")
-                local listed = tecs.data.Key.listKeys()
+                tecs.data.Store.newKey("spec.context.listed")
+                local listed = tecs.data.Store.listKeys()
                 luassert.is_not_nil(listed["spec.context.listed"], "listKeys maps the name to the key id")
 
                 -- The returned table is a copy: mutating it does not affect the registry.
                 listed["spec.context.listed"] = nil
                 luassert.is_not_nil(
-                    tecs.data.findKey("spec.context.listed"), "mutating the listKeys result must not unregister the key"
+                    tecs.data.Store.findKey("spec.context.listed"), "mutating the listKeys result must not unregister the key"
                 )
             end
         )

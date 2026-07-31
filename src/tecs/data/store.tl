@@ -5,7 +5,7 @@ Keys carry the value type while remaining small process-wide identities:
 
 ```teal
 local SPEED <const>: tecs.data.Key<number> =
-    tecs.data.newKey("game.speed")
+    tecs.data.Store.newKey("game.speed")
 
 local store <const> = tecs.data.newStore()
 store[SPEED] = 120

@@ -160,14 +160,14 @@ Create typed keys once and use them with independent stores:
 
 ```teal
 local SPEED <const>: tecs.data.Key<number> =
-    tecs.data.newKey("game.speed")
+    tecs.data.Store.newKey("game.speed")
 local store <const> = tecs.data.newStore()
 store[SPEED] = 120
 ```
 
 `world.resources` is a `Store`. Stores are in-memory and independent; a named
 key is the process-wide identity that lets hot reload and tooling find the same
-value again. `Key.listKeys` reports the named keys registered by the process.
+value again. `Store.listKeys` reports the named keys registered by the process.
 ]=]
 
 local ffi <const> = require("ffi")
@@ -177,7 +177,6 @@ local binding <const> = require("tecs.ffi.rust")
 local zlib <const> = require("tecs.ffi.zlib")
 local buffer <const> = require("tecs.io.buffer")
 local type ioTypes = require("tecs.io.types")
-local type TypedStore = require("tecs.data.Store")
 local transcoder <const> = require("tecs.data.transcode")
 local type utf8Module = require("tecs.data.utf8")
 local storekeys <const> = require("tecs.internal.storekeys")
@@ -217,8 +216,7 @@ package.cpath = table.concat(candidates, ";")
 ---
 --- An interface rather than a record, because `newJSON` answers with a table
 --- carrying exactly these while the module carries them and compression and
---- hashing besides. One declaration, two things held to it, and no way for the
---- two to drift.
+--- hashing besides. One declaration, two things held to it, and no way for the two to drift.
 local interface JSON
     --- Represents `null` and `empty_array`, which Lua tables cannot express.
     ---
@@ -258,7 +256,7 @@ local interface JSON
     --- The decoder keeps a key whose JSON value equals null and gives it this,
     --- so an absent key and a null one stay apart: `value.name == nil` is
     --- absent and `value.name == data.null` is null. Encoding it writes
-    --- `null` back, which says the caller included the field with no value:
+    --- `null` back, which says the field is present with no value:
     ---
     ---     return {world = worldContext() or data.null}
     null: Sentinel
@@ -287,7 +285,7 @@ local interface JSON
     ---
     --- The encoder reaches this only after finding no entries at `1..n`, so
     --- it settles the empty case and changes nothing else. Set it rather than
-    --- `array_mt` on a table the caller may fill when keeping the sparse-array
+    --- `array_mt` on a table you may fill when keeping the sparse-array
     --- check matters.
     empty_array_mt: metatable<{any}>
 
@@ -427,14 +425,36 @@ local record data is JSON
     --- strings.
     utf8: utf8Module
 
-    --- `Store` holds typed values under process-wide keys.
-    type Store = TypedStore
+    --- `Key` identifies one typed store value across every store in the
+    --- process.
+    interface Key<T>
+    end
 
-    --- `Key` identifies one typed store value and exposes key discovery.
-    record Key<T> is TypedStore.Key<T>
+    --- `Store` holds typed values under process-wide keys and exposes their
+    --- process-wide registry.
+    record Store
+        --- Creates a typed key.
+        ---
+        --- Always pass a name. Named keys are discoverable through `findKey`
+        --- and `listKeys`, and repeating a name returns the same key so values
+        --- remain reachable when a module reloads.
+        ---
+        --- @param name The namespaced identity, such as
+        ---     `"game.state"`. Omitting it creates an anonymous key and warns.
+        --- @param forType Pass `nil as T` when Teal needs the value type
+        ---     carried explicitly. The function does not read it.
+        --- @return Returns the stable key for a name or a fresh anonymous key.
+        newKey: function<T>(name?: string, forType?: T): Key<T>
+
+        --- Returns a named key created by `newKey`.
+        ---
+        --- @param name The name used during key creation.
+        --- @return Returns the existing key, or nil before any module creates it.
+        findKey: function<T>(name: string): Key<T> | nil
+
         --- Returns all named keys as name-to-id entries.
         ---
-        --- @return Returns a fresh caller-owned process-wide table.
+        --- @return Returns a fresh process-wide table.
         listKeys: function(): {string: integer}
     end
 
@@ -443,36 +463,10 @@ local record data is JSON
 
     --- Creates an independent typed store.
     ---
-    --- @return Returns an empty store. The caller owns it and its values.
-    newStore: function(): TypedStore
+    --- @return Returns an empty store. You own it and its values.
+    newStore: function(): Store
 
-    --- Creates a typed key.
-    ---
-    --- Always pass a name. Named keys are discoverable through `findKey` and
-    --- `Key.listKeys`, and repeating a name returns the same key so values
-    --- remain reachable when a module reloads.
-    ---
-    --- @param name The caller supplies a namespaced identity such as
-    ---     `"game.state"`. Omitting it creates an anonymous key and warns.
-    --- @param forType The caller passes `nil as T` when Teal needs the value
-    ---     type carried explicitly. The function does not read it.
-    --- @return Returns the stable key for a name or a fresh anonymous key.
-    newKey: function<T>(name?: string, forType?: T): Key<T>
-
-    --- Returns a named key created by `newKey`.
-    ---
-    --- @param name The caller supplies the name used during key creation.
-    --- @return Returns the existing key, or nil before any module creates it.
-    findKey: function<T>(name: string): Key<T> | nil
-
-    --- Encodes bytes as lowercase hexadecimal text.
-    ---
-    --- @param bytes The caller supplies a byte string or an open
-    ---     [`ByteView`](tealdoc:tecs.io.ByteView), including NUL.
-    --- @return Returns two lowercase ASCII hex digits for every input byte.
-    hexEncode: function(bytes: ByteInput): string
-
-    --- Encodes bytes as lowercase hexadecimal text in a reusable buffer.
+    --- Encodes bytes as lowercase hexadecimal text in a buffer.
     ---
     --- The function clears `destination` before writing and retains its
     --- allocation for later calls.
@@ -604,9 +598,9 @@ function data.newStore(): TypedStore
     return {} as TypedStore
 end
 
-data.newKey = storekeys.newKey as function<T>(name?: string, forType?: T): data.Key<T>
-data.findKey = storekeys.findKey as function<T>(name: string): data.Key<T> | nil
-data.Key.listKeys = storekeys.listKeys
+data.Store.newKey = storekeys.newKey as function<T>(name?: string, forType?: T): data.Key<T>
+data.Store.findKey = storekeys.findKey as function<T>(name: string): data.Key<T> | nil
+data.Store.listKeys = storekeys.listKeys
 data.transcode = transcoder.convert as function(ByteInput, string, string): string
 data.transcodeInto = transcoder.convertInto as function(ByteInput, string, string, IOBuffer): integer
 

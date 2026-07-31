@@ -49,8 +49,8 @@ describe("ecs.physics world scoping", function()
     -- names to ids: that is what lets a debug tool answer what is installed
     -- into a world without every module exporting its key.
     it("names its resource key", function()
-        assert.is_not_nil(tecs.data.findKey("tecs.physics"))
-        assert.is_not_nil(tecs.data.Key.listKeys()["tecs.physics"])
+        assert.is_not_nil(tecs.data.Store.findKey("tecs.physics"))
+        assert.is_not_nil(tecs.data.Store.listKeys()["tecs.physics"])
     end)
 
     -- Each world owns an independent simulation.

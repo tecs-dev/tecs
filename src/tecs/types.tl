@@ -8,7 +8,7 @@ The declarations behind the public ECS types.
 -- cycle. The public API publishes them under `tecs` and `tecs.ecs`.
 
 local StringBuffer <const> = require("string.buffer")
-local type Store = require("tecs.data.Store")
+local type Store = require("tecs.data.store")
 
 --- An owned value that releases its active lifetime explicitly.
 ---
