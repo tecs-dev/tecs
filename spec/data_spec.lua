@@ -23,8 +23,7 @@ describe("tecs.data", function()
     end)
 
     it("carries byte transforms beside the JSON one", function()
-        -- Four modules resolved through one name, which is the whole point of
-        -- the merge: a save is encoded, compressed and stamped in one place.
+        -- A save can be encoded, compressed and stamped in one place.
         assert.are.equal("function", type(data.deflate))
         assert.are.equal("function", type(data.inflate))
         assert.are.equal("function", type(data.deflateRaw))
@@ -36,6 +35,7 @@ describe("tecs.data", function()
         assert.are.equal("function", type(data.hexDecode))
         assert.are.equal("function", type(data.base64Encode))
         assert.are.equal("function", type(data.base64Decode))
+        assert.are.equal("function", type(data.transcode))
         assert.are.equal("function", type(data.uuid4))
         assert.are.equal("function", type(data.uuid7))
     end)
