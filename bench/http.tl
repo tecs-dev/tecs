@@ -131,9 +131,6 @@ end
 function ChunkSource:contentType(): string | nil
     return "application/octet-stream"
 end
-function ChunkSource:hasKnownLength(): boolean
-    return true
-end
 function ChunkSource:isReadable(): boolean
     return true
 end
@@ -161,8 +158,8 @@ end
 function ChunkSource:readAll(maxBytes?: integer): Future<string>
     return tecsIO.newBufferStream(self.buffer):readAll(maxBytes)
 end
-function ChunkSource:readBuffer(maxBytes?: integer): Future<Buffer>
-    return tecsIO.newBufferStream(self.buffer):readBuffer(maxBytes)
+function ChunkSource:transferToBuffer(maxBytes?: integer): Future<Buffer>
+    return tecsIO.newBufferStream(self.buffer):transferToBuffer(maxBytes)
 end
 function ChunkSource:transferTo(destination: WritableStream): Future<integer>
     return tecsIO.newBufferStream(self.buffer):transferTo(destination)
@@ -223,9 +220,6 @@ end
 function BufferSink:contentType(): string | nil
     return "application/octet-stream"
 end
-function BufferSink:hasKnownLength(): boolean
-    return true
-end
 function BufferSink:isReadable(): boolean
     return false
 end
@@ -253,8 +247,8 @@ function BufferSink:writeBuffer(source: Buffer, offset?: integer, count?: intege
 end
 
 local record Server
-    listener: tecs.io.Server
-    connection: tecs.io.Connection
+    listener: tecs.io.TCPListener
+    connection: tecs.io.TCPSocket
     pending: Buffer
     bodyOffset: integer
     bodyLength: integer
@@ -363,7 +357,7 @@ local function begin()
     end
     local name <const> = MODES[mode]
     local request: tecs.io.http.Request = {
-        url = ("http://127.0.0.1:%d/%s"):format(port, name),
+        url = tecs.io.http.newURI(("http://127.0.0.1:%d/%s"):format(port, name)),
         method = "POST",
     }
     if name == "upload-string" then

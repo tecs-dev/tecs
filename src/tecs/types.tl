@@ -10,8 +10,23 @@ The declarations behind the public ECS types.
 local StringBuffer <const> = require("string.buffer")
 local type Store = require("tecs.data.Store")
 
+--- An owned value that releases its active lifetime explicitly.
+---
+--- `close` may be called through this structural interface when the caller
+--- does not need a more specific result. Implementations may return additional
+--- status values, and their own contracts define whether repeated calls are
+--- safe.
+local interface Closeable
+    --- Releases the value's active lifetime.
+    ---
+    --- @param self The value to close.
+    close: function(self: Closeable)
+end
+
 --- Public type definitions for Tecs.
 local record types
+    type Closeable = Closeable
+
     --- A plugin configures a world with systems, resources, observers, and
     --- initial entities.
     type Plugin = function(world: World)
@@ -514,7 +529,7 @@ local record types
         --- `break` or return early. Call `close()` after leaving the loop.
         --- Natural exhaustion closes the cursor automatically, and repeated
         --- `close()` calls are safe.
-        interface Cursor
+        interface Cursor is Closeable
             --- The step function `cursor:iter()` returns. Yields the
             --- archetype, its live row count, and its entity id column; the
             --- entity column is the archetype's own, not a copy.

@@ -254,7 +254,7 @@ describe("mcp over a socket", function()
         if server then
             server:destroy()
         end
-        assert(tecsIO.quit())
+        assert(tecsIO.shutdown())
         C.SDL_Quit()
     end)
 

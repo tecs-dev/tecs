@@ -240,8 +240,9 @@ table `require("tecs.io")` answers with, and `files`, `http`, `mcp`, and
 `watcher` are hung off it when each name is first read. A separate proxy table
 would need a second record that restates every member's type and documentation,
 and writes would need routing to the module that owns each name. Using the
-principal module avoids both copies, while `tecs.io.files.organization` still
-lands directly on the files module that `preferencePath` reads.
+principal module avoids both copies, while
+`tecs.io.files.setPreferenceIdentity` still lands directly on the files module
+that `preferencePath` reads.
 
 What that costs is a direction in the module graph. The parent has to name the
 type of every name below it, and Teal refuses a require cycle even when one
@@ -778,11 +779,11 @@ nothing in flight waits on nobody, and `destroy` gives up whatever the drain ran
 out of time on rather than freeing the mixer under it.
 
 All three entry points record what they touched, and they record it in one
-place: `files.loaded` answers every path this process has read or decoded
-and the kind it was read as, which is what the file watcher polls instead of
-walking the content tree. The two loads call `files.note` rather than
-keeping a list of their own, because the decode they are recording happens on a
-worker and a second list is a second answer to the same question.
+place: `files.loaded` answers every path this process has read or decoded and
+the kind it was read as, which is what the file watcher polls instead of
+walking the content tree. Asset loads update the internal content registry
+rather than keeping a list of their own, because the decode they are recording
+happens on a worker and a second list is a second answer to the same question.
 
 ## Vector math stays in Lua
 
@@ -1359,9 +1360,9 @@ Text is UTF-8 and passes through byte for byte. Line endings are not
 normalized, so text copied on Windows arrives as CRLF and stays CRLF, and
 nothing is trimmed from either end. Text stops at the first NUL, because that
 is what terminates the C string SDL returns and what every producer of
-clipboard text intends; `clipboardData` uses the length SDL reports instead, so
-a blob
-keeps its NULs.
+clipboard text intends; `clipboardData` copies the length SDL reports directly
+into an owned `tecs.io.Buffer`, so a blob keeps its NULs without passing
+through an intermediate Lua string. The caller releases that buffer.
 
 ## Native platform utilities
 
@@ -1416,11 +1417,13 @@ memory or a path do not move one another. A borrowed handle reports that it is
 not replayable and lets only its first endpoint claim the handle's cursor.
 
 `Buffer` is the reusable native-memory boundary beneath those interfaces. It
-separates logical length from capacity, grows geometrically, and exposes a
-borrowed FFI pointer whose lifetime ends at growth or release. `Reader:readInto`
-and `Writer:writeFrom` let SDL fill and drain that allocation directly. A
-generic `write(any)` lost both the cdata length and the right to check a range,
-so the explicit buffer and offset contract won.
+separates logical length from capacity, grows geometrically through
+`ensureCapacity`, and exposes a borrowed FFI pointer whose lifetime ends at
+growth or release. `resize` changes the logical length instead, zero-filling
+bytes it exposes. `Reader:readInto` and `Writer:writeFrom` let SDL fill and
+drain that allocation directly. A generic `write(any)` lost both the cdata
+length and the right to check a range, so the explicit buffer and offset
+contract won.
 
 Whole-source operations return `Future` values. On streaming backends, such as
 the direct SDL filesystem backend, one application poll shares sixteen 64 KiB
@@ -1432,14 +1435,25 @@ accumulates chunks, then `close` concatenates and writes the complete payload
 in one operation. That compatibility path is not covered by the per-poll byte
 bound. A blocking wait drains streaming transfers against its actual time
 budget. Stable buffer sources bypass the scratch copy, strings retain their
-immutable Lua storage, and `hasBuffer` says exactly when `readBuffer` returns
-the retained object instead of materializing a new one.
+immutable Lua storage, and `hasBuffer` says exactly when `transferToBuffer`
+returns the retained object instead of materializing a new one.
 
 The descriptor owns no cursor and does not take policy away from its backing:
 paths still open through `tecs.io.files`, TCP and UDP handles are constructed
 by `tecs.io`, and media type and length are lazy metadata methods.
+`contentLength() ~= nil` is the one known-length test; a mirrored
+`hasKnownLength` method lost because it could only repeat that answer and add
+another operation every structural implementation had to keep consistent.
 `withMetadata` wraps those methods without eagerly opening or reading the
 source.
+
+`tecs.Closeable` is the root structural lifetime contract because cursors,
+network handles, streams, and clients cross subsystem boundaries. It contains
+only `close`; a concrete close may still return a status that generic cleanup
+ignores. A worker `Channel` does not implement it because its `close` signals
+end-of-input while `destroy` releases the queue, and a `Buffer` uses `release`.
+Calling either through a generic ownership contract would promise the wrong
+lifetime.
 
 Sockets, files, protocol transfers and external tool traffic are all I/O, so
 transport, HTTP and MCP live under `tecs.io`. The operation carries the useful
@@ -1615,7 +1629,7 @@ decode that finished has finished, a child that exited has exited, a transfer
 that completed has completed, and nothing else in a frame is obliged to ask.
 `assets` and `proc` are module singletons, while a game may construct several
 HTTP clients. The clients therefore register with the loop: building one puts it on the
-list `tecs.io.http.pumpClients` turns, `close` takes it off, and the
+private application registry turns, `close` takes it off, and the
 application turns whatever is on the list. Native workers send bounded chunk,
 completion and error messages to a queue; the frame pump drains it without any
 Rust callback entering Lua. The list holds its clients strongly, so a request whose
@@ -1768,13 +1782,13 @@ another.
 Resolution and client connection are `Future` sources because both settle once,
 can fail before producing a usable object. Rust workers perform those two
 operations and the SDL thread polls ordinary results through the checked native
-boundary. The owned TCP object is a `Connection`: `connect` and `accept`
+boundary. The owned TCP object is a `TCPSocket`: `connect` and `accept`
 produce a connection, while byte stream describes TCP's ordering rather than
-the resource's identity. Servers, connections, addresses
-and datagram sockets are not futures: they remain useful across many frames and
-own a native lifetime, so each is closed explicitly. A received packet refs its
-source address before Rust's packet is destroyed, which makes the ownership
-visible rather than leaving a borrowed pointer in a Lua record.
+the resource's identity. TCP listeners, TCP sockets, addresses, and UDP sockets
+are not futures: they remain useful across many frames and own a native
+lifetime, so each is closed explicitly. A received UDP packet takes ownership
+of its source address and copies the native packet into an owned `Buffer`;
+closing the packet releases both.
 
 The application polls `tecs.io` once per iteration, beside the other services
 whose finite asynchronous work has to settle without a system remembering to

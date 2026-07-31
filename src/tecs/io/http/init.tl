@@ -2,8 +2,11 @@
 Asynchronous HTTP and HTTPS.
 
 ```teal no-format
+local endpoint <const> = tecs.io.http.newURI(
+    "https://example.com/manifest.json"
+)
 tecs.io.http.newClient({userAgent = "mygame/1.0"})
-    :send({url = "https://example.com/manifest.json"})
+    :send({url = endpoint})
     :map(function(response: tecs.io.http.Response): string
         local body <const> = response.body
         if body is tecs.io.ReadableStream then
@@ -24,8 +27,8 @@ that DNS, connection, TLS, timeout, or streaming produced no response.
 
 Call `Client:close` when you no longer need its connection pool. Losing the
 last Lua reference does not cancel its requests. A headless tool calls
-`pumpClients`; [`Application`](tealdoc:tecs.Application) does this once per
-frame.
+`Client:pump`; [`Application`](tealdoc:tecs.Application) pumps the private
+client registry once per frame.
 ]=]
 
 -- Implementation details:
@@ -35,17 +38,35 @@ frame.
 local client <const> = require("tecs.io.http.client")
 local clients <const> = require("tecs.io.http.clients")
 local plugin <const> = require("tecs.io.http.plugin")
-
-local type Options = client.Options
+local uri <const> = require("tecs.io.http.uri")
 
 local record http
+    --- One parsed absolute URI.
+    ---
+    --- `text` contains the normalized URI. `scheme`, `authority`, `username`,
+    --- `password`, `host`, `port`, `path`, `query`, and `fragment` expose its
+    --- parsed parts without reparsing. Optional parts are nil. `tostring`
+    --- returns `text`.
+    type URI = uri.URI
+
+    --- Settings copied when an HTTP client is built.
+    ---
+    --- `userAgent` and `headers` set request defaults. `timeoutMs` defaults to
+    --- 30000, `connectTimeoutMs` to 10000, and `stallTimeoutMs` to zero, which
+    --- disables the no-progress timeout. `maxRedirects` defaults to five,
+    --- `maxConnections` to 16, and `maxConnectionsPerHost` to six. `maxBytes`
+    --- defaults to zero for no response limit. `compressed` defaults to true.
+    ---
+    --- `insecureHosts` disables certificate verification for named hosts and
+    --- logs a warning for each. `proxy` follows environment variables when
+    --- nil, forces a direct connection when empty, or supplies a proxy URI.
+    --- `noProxy` uses Reqwest's exclusion syntax, and `proxyCredentials` uses
+    --- `user:password`.
+    type ClientOptions = client.Options
+
     --- `Client` names a connection pool and its request
     --- futures.
     type Client = client.Client
-
-    --- `ClientOptions` configures every request sent
-    --- through a client.
-    type ClientOptions = client.Options
 
     --- `Request` describes one request and requires only
     --- `url`.
@@ -58,31 +79,33 @@ local record http
     --- Read-only. `plugin` exposes requests and responses as ECS components.
     plugin: plugin
 
+    --- Parses and normalizes an absolute URI.
+    ---
+    --- This uses Rust's `url::Url`, the same parser Reqwest uses. It accepts
+    --- non-HTTP schemes too; `Client:send` separately requires `http` or
+    --- `https`.
+    --- @param text The caller supplies an absolute UTF-8 URI.
+    --- @return Returns a parsed URI, or nil when the text is invalid or
+    ---     relative.
+    --- @return Returns the parser's reason when the first return is nil.
+    newURI: function(text: string): URI, string
+
     --- Builds a client.
     ---
     --- @param options The caller supplies client defaults or omits this record
     ---     to use every default. Each `insecureHosts` entry logs a warning.
     --- @return Returns an open client that remains active until `close`.
-    newClient: function(options?: Options): client.Client
-
-    --- Turns every open client once.
-    ---
-    --- An application calls this each iteration. Headless tools and tests call
-    --- it directly.
-    ---
-    --- @return Returns how many transfers settled across every open client
-    ---     during this turn, or zero without an open client.
-    pumpClients: function(): integer
+    newClient: function(options?: ClientOptions): client.Client
 
     --- Returns the open-client count.
     ---
     --- @return Returns the process-wide count of clients not yet closed.
-    openClients: function(): integer
+    getOpenClientCount: function(): integer
 end
 
 http.plugin = plugin
+http.newURI = uri.new
 http.newClient = client.newClient
-http.pumpClients = clients.pump
-http.openClients = clients.count
+http.getOpenClientCount = clients.count
 
 return http

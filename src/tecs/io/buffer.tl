@@ -4,7 +4,7 @@ Owned, reusable binary memory.
 A `Buffer` keeps bytes in FFI memory so an SDL reader can fill it and an SDL
 writer can drain it without constructing an intermediate Lua string. Its
 logical length is separate from its capacity. `clear` keeps the allocation,
-and `reserve` grows geometrically so a loop can reuse one buffer.
+and `ensureCapacity` grows geometrically so a loop can reuse one buffer.
 
 Offsets are zero-based. A pointer returned by `getFFIPointer` is borrowed from
 the buffer. It remains valid only until a later operation grows the capacity
@@ -65,9 +65,9 @@ function OwnedBuffer:clear()
     self._length = 0
 end
 
-function OwnedBuffer:reserve(minimum: integer)
+function OwnedBuffer:ensureCapacity(minimum: integer)
     open(self, 2)
-    minimum = integer(minimum, "io.Buffer:reserve minimum", 2)
+    minimum = integer(minimum, "io.Buffer:ensureCapacity minimum", 2)
     if minimum <= self._capacity then
         return
     end
@@ -95,7 +95,7 @@ function OwnedBuffer:resize(length: integer)
     length = integer(length, "io.Buffer:resize length", 2)
     local oldLength <const> = self._length
     if length > oldLength then
-        self:reserve(length)
+        self:ensureCapacity(length)
         ffi.fill((loader.bytePointer(self._bytes as loader.CValue) + oldLength) as ffi.CData, length - oldLength, 0)
     end
     self._length = length
@@ -112,7 +112,7 @@ local function prepareWrite(self: OwnedBuffer, offset: integer, count: integer):
     if finish > MAX_INTEGER then
         error("tecs: io.Buffer write range is too large", 3)
     end
-    self:reserve(finish)
+    self:ensureCapacity(finish)
     return loader.bytePointer(self._bytes as loader.CValue) + offset
 end
 

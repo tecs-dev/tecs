@@ -125,17 +125,24 @@ describe("io.files on the public surface", function()
         assert.is_true(rawequal(files, tecs.io.files))
     end)
 
-    it("takes a write on the value that reads it back", function()
-        -- `organization` is a value a game assigns and `preferencePath` reads
-        -- back. Being the module is what makes that plain: the write lands
-        -- where the read looks, with nothing in between to route it.
+    it("configures the preference identity through the public module", function()
         local tecs = require("tecs")
-        local previous = files.organization
-        tecs.io.files.organization = "Ex Nihilo"
-        assert.are.equal("Ex Nihilo", files.organization)
-        assert.are.equal("Ex Nihilo", tecs.io.files.organization)
-        tecs.io.files.organization = previous
-        assert.are.equal(previous, files.organization)
+        tecs.io.files.setPreferenceIdentity("Ex Nihilo", "Starfarer")
+        local configured = tecs.io.files.preferencePath()
+        assert.are.equal(files.preferencePath(), configured)
+        tecs.io.files.setPreferenceIdentity("tecs", "tecs")
+        assert.are_not.equal(configured, files.preferencePath())
+        assert.is_nil(tecs.io.files.organization)
+        assert.is_nil(tecs.io.files.application)
+    end)
+
+    it("rejects an empty preference identity", function()
+        assert.has_error(function()
+            files.setPreferenceIdentity("", "Starfarer")
+        end)
+        assert.has_error(function()
+            files.setPreferenceIdentity("Ex Nihilo", "")
+        end)
     end)
 
     it("does not carry the sibling watcher", function()

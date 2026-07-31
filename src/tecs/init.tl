@@ -51,6 +51,7 @@ local type angleMath = require("tecs.math")
 local type data = require("tecs.data")
 local type regex = require("tecs.regex")
 local type loader = require("tecs.ffi.loader")
+local type Closeable = types.Closeable
 
 -- The two records below are written for one reason: a public name that no
 -- single module answers. `tecs.gfx` is the modules one level down and the
@@ -289,6 +290,9 @@ local type System = types.System
 local type Plugin = types.Plugin
 
 local record tecs
+    --- An owned value that releases its active lifetime through `close`.
+    type Closeable = Closeable
+
     type World = World
     type Query = Query
     type System = System

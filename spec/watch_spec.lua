@@ -17,6 +17,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local assets = require("tecs.assets")
 local adapter = require("tecs.platform.adapter")
+local content = require("tecs.platform.content")
 local files = require("tecs.io.files")
 local storagebackend = require("tecs.platform.storagebackend")
 local watcher = require("tecs.io.watcher")
@@ -132,7 +133,7 @@ describe("the file watcher", function()
             storage = storage,
         }, { __index = adapter.current() })
         adapter.install(platform)
-        files.note(path, "shader")
+        content.note(path, "shader")
         local seen = 0
         watcher.on("shader", function()
             seen = seen + 1

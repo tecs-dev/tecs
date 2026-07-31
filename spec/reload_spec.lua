@@ -421,7 +421,7 @@ describe("reload_shaders against a running application", function()
     it("runs the watcher an application was configured with", function()
         local app = Application.newApplication({
             window = { title = "watch", width = 64, height = 64 },
-            watch = { interval = 0 },
+            watch = { intervalSeconds = 0 },
         })
         assert.is_true(app:_init())
 

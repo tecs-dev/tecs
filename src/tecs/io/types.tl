@@ -9,6 +9,8 @@ requiring their public parent.
 
 local type Future = require("tecs.Future")
 local type loader = require("tecs.ffi.loader")
+local type coretypes = require("tecs.types")
+local type Closeable = coretypes.Closeable
 
 --- An owned, growable sequence of bytes.
 ---
@@ -38,7 +40,7 @@ local interface Buffer
     --- pointers returned by `getFFIPointer` valid.
     --- @param self The buffer to grow.
     --- @param minimum The caller supplies a non-negative byte count.
-    reserve: function(self: Buffer, minimum: integer)
+    ensureCapacity: function(self: Buffer, minimum: integer)
 
     --- Changes the logical length.
     ---
@@ -96,7 +98,7 @@ end
 --- `close` releases it. A consumer reads forward until `read` returns an empty
 --- string, then closes the reader. A failure returns nil and a reason instead
 --- of raising.
-local interface Reader
+local interface Reader is Closeable
     --- Caller-writable. Supplies the operation that reads the next bytes.
     ---
     --- @param self The reader whose cursor advances.
@@ -136,7 +138,7 @@ end
 --- A consumer writes pieces in order and closes the writer even after the last
 --- `write` succeeds. The close can report a delayed flush failure that no
 --- individual write observed.
-local interface Writer
+local interface Writer is Closeable
     --- Caller-writable. Supplies the operation that appends bytes.
     ---
     --- @param self The writer receiving the bytes.
@@ -188,7 +190,7 @@ end
 --- A stream carries no cursor. `newReader` and `newWriter` create directional
 --- endpoints that own their cursor and must be closed. Metadata is queried
 --- through methods because a file may change between calls.
-local interface Stream
+local interface Stream is Closeable
     --- Returns the byte length when it is known.
     ---
     --- @param self The descriptor to inspect.
@@ -201,12 +203,6 @@ local interface Stream
     --- @param self The descriptor to inspect.
     --- @return Returns the media type, or nil when none was supplied.
     contentType: function(self: Stream): string | nil
-
-    --- Returns whether `contentLength` can answer.
-    ---
-    --- @param self The descriptor to inspect.
-    --- @return Returns true when the byte length is known.
-    hasKnownLength: function(self: Stream): boolean
 
     --- Returns whether the descriptor can open a reader.
     ---
@@ -244,11 +240,11 @@ end
 
 --- Describes binary storage that can create readers.
 local interface ReadableStream is Stream
-    --- Returns whether `readBuffer` can return stable backing storage.
+    --- Returns whether `transferToBuffer` can return stable backing storage.
     ---
-    --- True is a zero-copy guarantee: `readBuffer` returns the same retained
-    --- buffer supplied to `newBufferStream`. The stream and caller share that
-    --- object, so releasing or mutating it affects both.
+    --- True is a zero-copy guarantee: `transferToBuffer` returns the same
+    --- retained buffer supplied to `newBufferStream`. The stream and caller
+    --- share that object, so releasing or mutating it affects both.
     --- @param self The readable descriptor.
     --- @return Returns true only for a buffer-backed stream.
     hasBuffer: function(self: ReadableStream): boolean
@@ -270,7 +266,7 @@ local interface ReadableStream is Stream
     --- @return Returns a future carrying the bytes.
     readAll: function(self: ReadableStream, maxBytes?: integer): Future<string>
 
-    --- Reads the complete source into an owned buffer.
+    --- Transfers the complete source into an owned buffer.
     ---
     --- When `hasBuffer` is true, the future carries the same retained buffer
     --- rather than a copy. Otherwise it carries a newly allocated buffer owned
@@ -279,7 +275,7 @@ local interface ReadableStream is Stream
     --- @param maxBytes The caller supplies a non-negative limit or omits it
     ---     for no explicit limit.
     --- @return Returns a future carrying a caller-owned buffer.
-    readBuffer: function(self: ReadableStream, maxBytes?: integer): Future<Buffer>
+    transferToBuffer: function(self: ReadableStream, maxBytes?: integer): Future<Buffer>
 
     --- Copies every source byte into `destination`.
     ---

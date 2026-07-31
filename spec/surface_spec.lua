@@ -364,12 +364,10 @@ describe("the public surface", function()
             assert.is_nil(tecs.io.mcp.world)
         end)
 
-        it("takes a write on the module that reads it back", function()
-            local files = require("tecs.io.files")
-            local previous = files.organization
-            tecs.io.files.organization = "Ex Nihilo"
-            assert.are.equal("Ex Nihilo", files.organization)
-            tecs.io.files.organization = previous
+        it("exposes preference configuration on the principal module", function()
+            assert.is_function(tecs.io.files.setPreferenceIdentity)
+            assert.is_nil(tecs.io.files.organization)
+            assert.is_nil(tecs.io.files.application)
         end)
 
         it("answers nil for a name neither it nor the names below it carry", function()

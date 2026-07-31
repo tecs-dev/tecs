@@ -138,7 +138,7 @@ end
 --- The compiler is loaded on first use and its absence is a condition rather
 --- than a load failure, so a release that links neither shaderc nor
 --- SPIRV-Cross still requires this module and serves every shader from a pack.
---- `available` reports which of the two this build is.
+--- `isSupported` reports which of the two this build is.
 local record shadercompiler
     --- A built pack, re-exported so a caller loading one need not also require
     --- `shaderpack`.
@@ -516,7 +516,7 @@ end
 --- found in a pack. Nothing degrades quietly on that path: a shader the pack
 --- does not contain raises, because the alternative is a window that opens and
 --- then draws nothing.
-function shadercompiler.available(): boolean
+function shadercompiler.isSupported(): boolean
     return loadCompiler()
 end
 
@@ -630,7 +630,7 @@ function shadercompiler.load(name: string, defines?: {string: string}): Compiled
     -- materials and renders everything as the unknown-id color.
     require("tecs.gpu.materials").install()
     local entry = shaders.get(name)
-    if shadercompiler.plan(name, defines, shadercompiler.available()) == "pack" then
+    if shadercompiler.plan(name, defines, shadercompiler.isSupported()) == "pack" then
         return fromPack(loadedPack.shaders[shaders.key(name, defines)])
     end
     return shadercompiler.compile(

@@ -69,7 +69,7 @@ describe("platform.Window", function()
     end)
 
     it("reports that there is a video subsystem to ask", function()
-        assert.is_true(Window.available())
+        assert.is_true(Window.isSupported())
     end)
 
     it("names itself with the id events carry", function()
@@ -739,7 +739,7 @@ describe("platform.Window with no video", function()
     it("reports that there is nothing to ask", function()
         -- The answer that separates "no displays" from "no video", which no
         -- other return value here can.
-        assert.is_false(Window.available())
+        assert.is_false(Window.isSupported())
     end)
 
     it("answers empty instead of failing", function()

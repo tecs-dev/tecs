@@ -3,8 +3,8 @@
 --- This benchmark holds one client/server connection pair open and measures
 --- only complete queue, drain, and consume operations:
 ---
----   string  `Connection:write` and `Connection:read`.
----   buffer  `Connection:writeFrom` and `Connection:readInto`.
+---   string  `TCPSocket:write` and `TCPSocket:read`.
+---   buffer  `TCPSocket:writeFrom` and `TCPSocket:readInto`.
 ---
 --- The Buffer row allocates its source and destination once, reserves the
 --- destination once, and reuses both through warmup and measured samples.
@@ -23,7 +23,7 @@
 --- p05 use the nearest-rank rule. Native queue and socket allocations are not
 --- part of the Lua heap delta, and writes do not force durable media.
 ---
---- Connection setup, asynchronous numeric resolution, port selection, accept,
+--- TCP socket setup, asynchronous numeric resolution, port selection, accept,
 --- teardown, and Buffer allocation are outside all warmup and measured
 --- operations. The listener tries ports 27140 through 27239 and fails
 --- actionably if another process owns the whole private range.
@@ -73,7 +73,7 @@ local time <const> = tecs.platform.time
 local now <const> = time.now
 
 local type IOBuffer = iotypes.Buffer
-local type Connection = binaryIO.Connection
+local type TCPSocket = binaryIO.TCPSocket
 
 local VALIDATE <const> = getenv("BENCH_TCP_VALIDATE") == "1"
 local MIB <const> = 1024.0 * 1024.0
@@ -173,7 +173,7 @@ local function checkHash(label: string, bytes: string, expected: string)
     end
 end
 
-local function listen(): binaryIO.Server, integer
+local function listen(): binaryIO.TCPListener, integer
     for offset = 0, PORT_COUNT - 1 do
         local port <const> = FIRST_PORT + offset
         local server <const> = ioModule.listen(port)
@@ -196,7 +196,7 @@ local function resolved(): binaryIO.Address
     return future.value
 end
 
-local function connected(address: binaryIO.Address, server: binaryIO.Server, port: integer): Connection, Connection
+local function connected(address: binaryIO.Address, server: binaryIO.TCPListener, port: integer): TCPSocket, TCPSocket
     local future <const> = ioModule.connect(address, port)
     future:wait(TIMEOUT_MS)
     if future.status ~= "ready" then
@@ -213,21 +213,21 @@ local function connected(address: binaryIO.Address, server: binaryIO.Server, por
     return future.value, peer
 end
 
-local function drain(connection: Connection)
+local function drain(connection: TCPSocket)
     local drained <const>, reason = connection:drain(TIMEOUT_MS)
     if not drained then
         error("bench: loopback send did not drain: " .. (reason or "timeout"), 0)
     end
 end
 
-local function waitReadable(connection: Connection)
+local function waitReadable(connection: TCPSocket)
     local ready <const>, reason = connection:wait(TIMEOUT_MS)
     if not ready then
         error("bench: loopback receive timed out: " .. (reason or "timeout"), 0)
     end
 end
 
-local function consumeStrings(connection: Connection, count: integer, pieces?: {string}): integer
+local function consumeStrings(connection: TCPSocket, count: integer, pieces?: {string}): integer
     local consumed = 0
     while consumed < count do
         waitReadable(connection)
@@ -246,7 +246,7 @@ local function consumeStrings(connection: Connection, count: integer, pieces?: {
     return consumed
 end
 
-local function consumeBuffer(connection: Connection, destination: IOBuffer, count: integer): integer
+local function consumeBuffer(connection: TCPSocket, destination: IOBuffer, count: integer): integer
     destination:clear()
     local consumed = 0
     while consumed < count do
@@ -329,9 +329,9 @@ local function run()
     local sdlStarted = false
     local ioStarted = false
     local address: binaryIO.Address
-    local server: binaryIO.Server
-    local client: Connection
-    local peer: Connection
+    local server: binaryIO.TCPListener
+    local client: TCPSocket
+    local peer: TCPSocket
     local sourceBuffer: IOBuffer
     local destinationBuffer: IOBuffer
 
@@ -356,7 +356,7 @@ local function run()
         local expectedHash <const> = crc32(expectedBytes)
         sourceBuffer = ioModule.newBuffer(chunk)
         destinationBuffer = ioModule.newBuffer()
-        destinationBuffer:reserve(CHUNK)
+        destinationBuffer:ensureCapacity(CHUNK)
 
         local cases <const>: {Case} = {
             {
@@ -500,7 +500,7 @@ local function run()
     local cleaned = true
     local cleanupReason: string
     if ioStarted then
-        cleaned, cleanupReason = ioModule.quit()
+        cleaned, cleanupReason = ioModule.shutdown()
     end
     if sdlStarted then
         C.SDL_Quit()

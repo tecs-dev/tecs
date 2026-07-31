@@ -23,7 +23,11 @@ local Future <const> = require("tecs.Future")
 local buffer <const> = require("tecs.io.buffer")
 local stream <const> = require("tecs.io.stream")
 local clients <const> = require("tecs.io.http.clients")
+local uri <const> = require("tecs.io.http.uri")
 local type iotypes = require("tecs.io.types")
+local type coretypes = require("tecs.types")
+local type Closeable = coretypes.Closeable
+local type URI = uri.URI
 
 loader.declare("http")
 
@@ -106,7 +110,7 @@ local record client
     record Request
         --- Caller-writable. Sets an absolute URL with an `http` or `https`
         --- scheme.
-        url: string
+        url: URI
         --- Caller-writable. Sets the method. Defaults to GET.
         method: string
         --- Caller-writable. Sets headers merged over the client's defaults.
@@ -138,7 +142,7 @@ local record client
         --- destination.
         body: iotypes.Stream
         --- Read-only. Reports the effective URL after redirects.
-        url: string
+        url: URI
 
         --- Whether the status is in the 2xx range.
         ok: function(self: Response): boolean
@@ -160,7 +164,7 @@ local record client
     end
 
     --- A reqwest connection pool and `Future.Source`.
-    record Client
+    record Client is Closeable
         --- Maximum duration of one blocking future-wait slice.
         sliceMs: number
         --- Default budget for a future wait without an explicit timeout.
@@ -217,28 +221,6 @@ function Response:ok(): boolean
 end
 
 local nextId = 1
-
-local function schemeOf(url: string): string
-    local scheme = url:match("^(%a[%w+.%-]*)://")
-    return scheme ~= nil and scheme:lower() or nil
-end
-
-local function hostOf(url: string): string
-    local authority = url:match("^%a[%w+.%-]*://([^/?#]*)")
-    if authority == nil or authority == "" then
-        return nil
-    end
-    local at = authority:find("@", 1, true)
-    if at ~= nil then
-        authority = authority:sub(at + 1)
-    end
-    if authority:sub(1, 1) == "[" then
-        local literal = authority:match("^%[([^%]]*)%]")
-        return literal ~= nil and literal:lower() or nil
-    end
-    local host = authority:match("^([^:]*)")
-    return host ~= nil and host ~= "" and host:lower() or nil
-end
 
 local function sourceOf(given: string | ReadableStream): ReadableStream
     if given == nil then
@@ -416,7 +398,13 @@ local function completeTransfer(
     local response <const> = transfer.response
     response.status = status
     response.headers = parseHeaders(rawHeaders)
-    response.url = effectiveUrl ~= "" and effectiveUrl or transfer.url
+    local responseURI <const>, uriFailure = uri.new(effectiveUrl ~= "" and effectiveUrl or transfer.url)
+    if responseURI == nil then
+        releaseResponseBuffers(transfer)
+        transfer.future:fail(("tecs: %s: invalid effective URI: %s"):format(transfer.url, uriFailure))
+        return
+    end
+    response.url = responseURI
     local prepared <const>, body = protect(function(): Stream
         if transfer.sink ~= nil then
             return stream.withMetadata(transfer.sink, response.headers["content-type"], transfer.transferred) as Stream
@@ -719,12 +707,13 @@ function Client:send(request: Request): Future<Response>
     if self._handle == nil then
         error("tecs: this http client is closed", 2)
     end
-    if request == nil or type(request.url) ~= "string" or request.url == "" then
-        error("tecs: http send needs a request with a url", 2)
+    if request == nil or not uri.isURI(request.url) then
+        error("tecs: http send needs a request with a URI from tecs.io.http.newURI", 2)
     end
 
-    local url <const> = request.url
-    local scheme <const> = schemeOf(url)
+    local requestURI <const> = request.url
+    local url <const> = requestURI.text
+    local scheme <const> = requestURI.scheme
     if scheme ~= "http" and scheme ~= "https" then
         return Future.failed(("tecs: %s is not an http or https url"):format(url)) as Future<Response>
     end
@@ -744,7 +733,7 @@ function Client:send(request: Request): Future<Response>
     local transfer <const>: Transfer = {
         id = id,
         future = future,
-        response = setmetatable({status = 0, headers = {}, url = url} as Response, ResponseMT),
+        response = setmetatable({status = 0, headers = {}, url = requestURI} as Response, ResponseMT),
         sink = sink,
         sourcePending = 0,
         transferred = 0,
@@ -827,7 +816,7 @@ function Client:send(request: Request): Future<Response>
     native.timeoutMs = request.timeoutMs or self._options.timeoutMs
     native.stallTimeoutMs = request.stallTimeoutMs or self._options.stallTimeoutMs
     native.maxBytes = request.maxBytes ~= nil and request.maxBytes or self._options.maxBytes
-    local host <const> = hostOf(url)
+    local host <const> = requestURI.host
     native.insecure = host ~= nil and self._insecure[host] and 1 or 0
 
     if (tonumber(H.tecsHttpClientSend(self._handle, nativeArray)) or 0) == 0 then

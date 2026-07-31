@@ -38,11 +38,11 @@ describe("tecs.io buffers", function()
         local address = tonumber(ffi.cast("uintptr_t", first))
 
         buffer:clear()
-        buffer:reserve(4)
+        buffer:ensureCapacity(4)
         buffer:resize(4)
         assert.are.equal(address, tonumber(ffi.cast("uintptr_t", buffer:getFFIPointer())))
 
-        buffer:reserve(128)
+        buffer:ensureCapacity(128)
         assert.is_true(buffer:capacity() >= 128)
         assert.are_not.equal(address, tonumber(ffi.cast("uintptr_t", buffer:getFFIPointer())))
 
@@ -72,7 +72,7 @@ describe("tecs.io buffers", function()
             buffer:getString(2, 3)
         end)
         assert.has_error(function()
-            buffer:reserve(-1)
+            buffer:ensureCapacity(-1)
         end)
         assert.has_error(function()
             buffer:resize(1.5)
@@ -88,6 +88,7 @@ end)
 describe("tecs.io stream endpoints", function()
     it("keeps independent reader cursors and reports partial reads", function()
         local stream = ioModule.newStringStream("abcd", "application/octet-stream")
+        assert.is_nil(stream.hasKnownLength)
         local first = assert(stream:newReader())
         local second = assert(stream:newReader())
         local buffer = ioModule.newBuffer()
@@ -142,8 +143,8 @@ describe("tecs.io stream endpoints", function()
             clear = function()
                 owned:clear()
             end,
-            reserve = function(_, minimum)
-                owned:reserve(minimum)
+            ensureCapacity = function(_, minimum)
+                owned:ensureCapacity(minimum)
             end,
             resize = function(_, length)
                 owned:resize(length)
@@ -206,7 +207,7 @@ describe("tecs.io stream endpoints", function()
         local buffer = ioModule.newBuffer("owned")
         local buffered = ioModule.newBufferStream(buffer)
         assert.is_true(buffered:hasBuffer())
-        assert.is_true(rawequal(buffer, buffered:readBuffer().value))
+        assert.is_true(rawequal(buffer, buffered:transferToBuffer().value))
 
         local empty = ioModule.newEmptyStream()
         assert.is_false(empty:hasBuffer())
@@ -264,10 +265,6 @@ describe("tecs.io stream endpoints", function()
                 assert.is_true(rawequal(source, self))
                 return "text/plain"
             end,
-            hasKnownLength = function(self)
-                assert.is_true(rawequal(source, self))
-                return true
-            end,
             isReadable = function(self)
                 assert.is_true(rawequal(source, self))
                 return false
@@ -289,6 +286,7 @@ describe("tecs.io stream endpoints", function()
             end,
         }
         local view = ioModule.withMetadata(source, "custom/type")
+        assert.is_nil(view.hasKnownLength)
         assert.are.equal("custom/type", view:contentType())
         assert.are.equal(4, view:contentLength())
         assert.is_true(view:isAvailable())
@@ -304,9 +302,6 @@ describe("tecs.io stream endpoints", function()
             end,
             contentType = function()
                 return nil
-            end,
-            hasKnownLength = function()
-                return false
             end,
             isReadable = function()
                 return true
@@ -505,7 +500,7 @@ describe("tecs.io transfers", function()
         end
         local before = ioModule.pending()
         local started, reading = pcall(function()
-            return ioModule.newFileStream("/virtual/huge"):readBuffer()
+            return ioModule.newFileStream("/virtual/huge"):transferToBuffer()
         end)
         files.info = originalInfo
         files.openRead = originalOpenRead
@@ -538,9 +533,6 @@ describe("tecs.io transfers", function()
             end,
             contentType = function()
                 return nil
-            end,
-            hasKnownLength = function()
-                return false
             end,
             isReadable = function()
                 return false
@@ -618,8 +610,8 @@ describe("tecs.io transfers", function()
 
     it("shares its bounded poll budget fairly across transfers", function()
         local payload = string.rep("x", 1024 * 1024)
-        local first = ioModule.newStringStream(payload):readBuffer()
-        local second = ioModule.newStringStream(payload):readBuffer()
+        local first = ioModule.newStringStream(payload):transferToBuffer()
+        local second = ioModule.newStringStream(payload):transferToBuffer()
         assert.are.equal("pending", first.status)
         assert.are.equal("pending", second.status)
 

@@ -4,11 +4,11 @@ Polls loaded content and dispatches changes to reload handlers.
 ```teal
 local watcher <const> = tecs.io.watcher
 
-if watcher.available() then
+if watcher.isSupported() then
     watcher.on("document", function(change: watcher.Change)
         print("reload " .. change.path)
     end)
-    watcher.install({interval = 0.25})
+    watcher.install({intervalSeconds = 0.25})
 end
 
 -- Once an iteration. An application with `watch` in its config does this and
@@ -16,13 +16,13 @@ end
 watcher.poll()
 ```
 
-The watcher scans only paths recorded by `tecs.io.files.read`,
-`tecs.io.files.note`, and the asset loaders. It waits for a changed file's
+The watcher scans only paths recorded by `tecs.io.files.read` and the asset
+loaders. It waits for a changed file's
 size and modification time to settle before dispatching it. Empty, missing,
 and directory paths do not dispatch.
 
 Handlers run between frames. A handler error reaches the log and does not
-replace the current resource. Release builds report `available() == false`
+replace the current resource. Release builds report `isSupported() == false`
 and do not poll.
 ]=]
 
@@ -87,15 +87,15 @@ end
 local record watcher
     --- `Config` controls polling frequency, settling and path scope.
     record Config
-        --- Caller-writable. The caller sets `interval` in seconds before
-        --- `install` reads it. It defaults to 0.5.
-        interval: number
-        --- Caller-writable. The caller sets `settle` before `install` reads it.
-        --- It defaults to 1, so two matching polls dispatch a change. Zero
-        --- dispatches the first changed poll.
+        --- Caller-writable. Sets the delay between automatic polls in seconds.
+        --- It defaults to 0.5. Direct calls to `scan` ignore this delay.
+        intervalSeconds: number
+        --- Caller-writable. Requires this many additional matching scans after
+        --- a change is first observed. It defaults to 1, so one scan observes
+        --- the change and the next confirms it. Zero dispatches immediately.
         settle: integer
-        --- Caller-writable. The caller sets `root` before `install` reads it.
-        --- It defaults to the content root.
+        --- Caller-writable. Limits watched paths to this root. It defaults to
+        --- the content root.
         root: string
     end
 
@@ -106,13 +106,13 @@ local record watcher
         path: string
         --- Read-only. The watcher sets `kind` to the content kind recorded by
         --- the original load. Built-in loaders use `"image"`, `"sound"`,
-        --- `"font"`, `"shader"` or `"document"`; `tecs.io.files.note` may
-        --- register another name.
+        --- `"font"`, `"shader"` or `"document"`; a custom loader supplies its
+        --- own kind to `tecs.io.files.read`.
         kind: string
     end
 
-    --- `Handler` receives one settled change.
-    type Handler = function(change: Change)
+    --- `ChangeHandler` receives one settled change.
+    type ChangeHandler = function(change: Change)
 
     --- Looks at every watched path once, whatever the interval says.
     ---
@@ -122,7 +122,7 @@ local record watcher
     scan: function(): integer
 end
 
-local handlers <const>: {string: watcher.Handler} = {}
+local handlers <const>: {string: watcher.ChangeHandler} = {}
 local entries: {string: Entry} = {}
 local running = false
 local interval = DEFAULT_INTERVAL
@@ -161,7 +161,7 @@ end
 --- Returns whether this build supports hot reload.
 ---
 --- @return Returns true when this build can install the watcher.
-function watcher.available(): boolean
+function watcher.isSupported(): boolean
     return platformOS.capabilities().hotReload
 end
 
@@ -173,12 +173,12 @@ end
 --- @param config The caller supplies polling options or omits them for the
 ---     documented defaults.
 function watcher.install(config?: watcher.Config)
-    if not watcher.available() then
+    if not watcher.isSupported() then
         error("this build has no hot-reload support, so it has no business polling the filesystem", 0)
     end
 
     local given = config or {} as watcher.Config
-    interval = given.interval or DEFAULT_INTERVAL
+    interval = given.intervalSeconds or DEFAULT_INTERVAL
     settleCount = given.settle or DEFAULT_SETTLE
     if settleCount < 0 then
         error("tecs: settle counts polls, so it cannot be negative", 2)
@@ -213,7 +213,7 @@ end
 --- @param kind The caller supplies the content kind to register.
 --- @param handler The caller supplies the replacement handler or nil to remove
 ---     the current one.
-function watcher.on(kind: string, handler: watcher.Handler)
+function watcher.on(kind: string, handler: watcher.ChangeHandler)
     if kind == nil or kind == "" then
         error("tecs: a handler needs a kind to be registered under", 2)
     end

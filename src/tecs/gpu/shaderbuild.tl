@@ -38,7 +38,7 @@ end
 ---     key. Raises without a compiler, and raises again if any variant came
 ---     back in a format other than the pack's.
 function shaderbuild.build(): shaderpack.Pack
-    if not shadercompiler.available() then
+    if not shadercompiler.isSupported() then
         error("tecs: building a shader pack needs a shader compiler", 2)
     end
 
