@@ -23,5 +23,5 @@ default.
 
 `tlconfig.lua` is still written by `tecs new`, because `tl` needs it, but it is not the project marker.
 
-The `tecs dist` command compiles the entry to `build/main.lua`; every entry must return an application. See
+The entry file compiles to `build/main.lua` and must return an application. See
 [getting started](/getting-started#entry-file).

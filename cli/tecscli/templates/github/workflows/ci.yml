@@ -33,5 +33,5 @@ jobs:
             - name: Test
               run: tecs test
 
-            - name: Dist
-              run: tecs dist
+            - name: Build
+              run: tecs build

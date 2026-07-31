@@ -17,9 +17,8 @@ without LuaRocks or a compiler on the player's machine.
 | `tecs check [paths]`            | Type-check against the engine's installed Teal types                  |
 | `tecs format [--check] [paths]` | Format, or report files that are not formatted                        |
 | `tecs test`                     | Compile and run the project's specs                                   |
-| `tecs build`                    | Stage development assets without compiling source                     |
-| `tecs dist`                     | Type-check, precompile, and stage the distributable build directory   |
-| `tecs run [entry] [-- args...]` | Replace the CLI process with the selected source entry                |
+| `tecs build`                    | Compile sources and stage assets in the project's build directory     |
+| `tecs run [entry] [-- args...]` | Build, then replace the CLI process with the selected game entry      |
 | `tecs clean`                    | Remove the project's build directory                                  |
 | `tecs info`                     | Print versions, pinned revisions, project details and package targets |
 | `tecs docs [query]`             | Browse or search the offline reference carried with the tool          |
@@ -44,27 +43,10 @@ tecs run tools/asset-preview.lua
 tecs run src/main.tl -- --debug "save slot 2"
 ```
 
-`tecs run` loads a Teal entry in memory. A Lua entry runs directly. Both receive the `tecs` global, can require source
-or precompiled project modules, and must return `tecs.newApplication(...)`. Use `tecs dist` to type-check and compile
-the project into `build/` for distribution.
+The build type-checks and compiles a Teal entry. A Lua entry runs after the project build. Both receive the `tecs`
+global, can require compiled project modules, and must return `tecs.newApplication(...)`.
 
 Only operands after `--` become game arguments. The application receives them in `arg[1]` through `arg[#arg]`.
-
-## Runtime Teal
-
-The host can also load a `.tl` entry directly. It compiles the file in memory using the Teal toolchain carried with
-Tecs, then makes required `.tl` modules available to the same Lua state. A `.lua` module still takes precedence, so
-precompiled games keep their normal load path.
-
-Invoke the host with `--entry` and set `TECS_TL_PATH` when module names are relative to a source root other than the
-entry file's directory:
-
-```sh
-TECS_TL_PATH=src tecs --entry src/main.tl
-```
-
-`TECS_TL_PATH` accepts semicolon-separated roots. Runtime compilation does not type-check, so use `tecs check` as the
-development gate and `tecs dist` for the usual precompiled release.
 
 ## Shell completion
 

@@ -5,7 +5,7 @@
 -- the previous command line tool from running anywhere but a project's root.
 --
 -- The engine's own type information is not named here. `tecs check` and
--- `tecs dist` pass it, because only the running binary knows where it was
+-- `tecs build` pass it, because only the running binary knows where it was
 -- installed.
 return {
     build_dir = "build",

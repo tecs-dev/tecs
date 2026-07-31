@@ -123,8 +123,8 @@ impl Paths {
 
     fn prepare(&self) -> Result<()> {
         fs::create_dir_all(&self.out)?;
+        fs::create_dir_all(&self.lua)?;
         for path in [
-            &self.lua,
             &self.teal,
             &self.spec,
             &self.generated,
@@ -1616,36 +1616,40 @@ fn stage_content(
         );
     }
 
-    let mut engine = Command::new(&tl);
-    engine
-        .args(["-q", "gen", "-I"])
-        .arg(root.join("vendor/share/lua/5.1"))
-        .arg("-I")
-        .arg(root.join("vendor/tl"))
-        .arg("--root")
-        .arg(root.join("src"))
-        .arg("--output-dir")
-        .arg(&paths.lua)
-        .args(&sources)
-        .current_dir(root);
-    run(&mut engine, "Teal engine compilation")?;
+    if !teal_outputs_are_current(root, &tl, &root.join("src"), &paths.lua, &sources)? {
+        let mut engine = Command::new(&tl);
+        engine
+            .args(["-q", "gen", "-I"])
+            .arg(root.join("vendor/share/lua/5.1"))
+            .arg("-I")
+            .arg(root.join("vendor/tl"))
+            .arg("--root")
+            .arg(root.join("src"))
+            .arg("--output-dir")
+            .arg(&paths.lua)
+            .args(&sources)
+            .current_dir(root);
+        run(&mut engine, "Teal engine compilation")?;
+    }
 
-    let mut cli = Command::new(&tl);
-    cli.args(["-q", "gen", "-I"])
-        .arg(root.join("vendor/share/lua/5.1"))
-        .arg("-I")
-        .arg(root.join("vendor/tl"))
-        .arg("-I")
-        .arg(root.join("src"))
-        .arg("-I")
-        .arg(root.join("cli"))
-        .arg("--root")
-        .arg(root.join("cli"))
-        .arg("--output-dir")
-        .arg(&paths.lua)
-        .args(&cli_sources)
-        .current_dir(root);
-    run(&mut cli, "Teal CLI compilation")?;
+    if !teal_outputs_are_current(root, &tl, &root.join("cli"), &paths.lua, &cli_sources)? {
+        let mut cli = Command::new(&tl);
+        cli.args(["-q", "gen", "-I"])
+            .arg(root.join("vendor/share/lua/5.1"))
+            .arg("-I")
+            .arg(root.join("vendor/tl"))
+            .arg("-I")
+            .arg(root.join("src"))
+            .arg("-I")
+            .arg(root.join("cli"))
+            .arg("--root")
+            .arg(root.join("cli"))
+            .arg("--output-dir")
+            .arg(&paths.lua)
+            .args(&cli_sources)
+            .current_dir(root);
+        run(&mut cli, "Teal CLI compilation")?;
+    }
 
     copy_tree(&root.join("assets"), &paths.lua, false)?;
     stage_offline_docs(root, &paths.lua.join("tecsdocs"))?;
@@ -1678,6 +1682,44 @@ fn stage_content(
     }
     compile_specs(root, paths)?;
     Ok(())
+}
+
+/// Whether every generated Lua file is newer than its Teal input, the active
+/// project configuration, and the compiler itself.
+fn teal_outputs_are_current(
+    root: &Path,
+    compiler: &Path,
+    source_root: &Path,
+    output_root: &Path,
+    sources: &[PathBuf],
+) -> Result<bool> {
+    let configuration = root.join("tlconfig.lua");
+    let configuration_modified = fs::metadata(&configuration)
+        .with_context(|| format!("reading {}", configuration.display()))?
+        .modified()?;
+    let compiler_modified = fs::metadata(compiler)
+        .with_context(|| format!("reading {}", compiler.display()))?
+        .modified()?;
+
+    for source in sources {
+        let relative = source.strip_prefix(source_root)?;
+        let output = output_root.join(relative).with_extension("lua");
+        let output_modified = match fs::metadata(&output) {
+            Ok(metadata) => metadata.modified()?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(error).with_context(|| format!("reading {}", output.display()))
+            }
+        };
+        let source_modified = fs::metadata(source)?.modified()?;
+        if output_modified < source_modified
+            || output_modified < configuration_modified
+            || output_modified < compiler_modified
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn teal_sources(directory: &Path) -> Result<Vec<PathBuf>> {
@@ -3008,7 +3050,7 @@ mod tests {
         );
     }
     #[test]
-    fn preparing_a_build_removes_outputs_but_preserves_caches() {
+    fn preparing_a_build_preserves_compiled_lua_and_caches() {
         let root = tempdir().unwrap();
         let preset = "macos-arm64-dev".parse().unwrap();
         let paths = Paths::new(root.path(), preset);
@@ -3032,8 +3074,9 @@ mod tests {
 
         paths.prepare().unwrap();
 
+        assert!(paths.lua.is_dir());
+        assert!(paths.lua.join("stale").is_file());
         for path in [
-            &paths.lua,
             &paths.teal,
             &paths.spec,
             &paths.generated,

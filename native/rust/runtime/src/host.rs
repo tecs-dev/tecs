@@ -5,7 +5,6 @@
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::path::Path;
 use std::ptr;
 use std::slice;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
@@ -45,41 +44,10 @@ const CONTENT: &str = match option_env!("TECS_CONTENT") {
     Some(value) => value,
     None => "",
 };
-// This stays Lua rather than Rust so Teal owns generated Lua and diagnostics.
-// The loader lets either kind of source entry require a Teal project module.
-const SOURCE_ENTRY: &[u8] = br#"
-local entry = assert(__tecsSourceEntry)
-require("tl")
-require("teal.package_loader").install_loader()
--- Teal installs ahead of Lua by default. Tecs keeps generated Lua as the
--- production path, with Teal only answering modules Lua did not find.
-local searchers = package.searchers or package.loaders
-local tealSearcher = table.remove(searchers, 2)
-table.insert(searchers, 3, tealSearcher)
-local chunk, loadError
-if entry:sub(-3) == ".tl" then
-    local file, openError = io.open(entry, "rb")
-    if file == nil then error(openError, 0) end
-    local source = file:read("*a")
-    file:close()
-    chunk, loadError = require("teal.loader").load(source, "@" .. entry)
-else
-    chunk, loadError = loadfile(entry)
-end
-if chunk == nil then error(loadError, 0) end
-return chunk()
-"#;
-
 unsafe extern "C" {
     fn luaL_newstate() -> *mut LuaState;
     fn luaL_openlibs(state: *mut LuaState);
     fn luaL_loadfile(state: *mut LuaState, path: *const c_char) -> c_int;
-    fn luaL_loadbuffer(
-        state: *mut LuaState,
-        buffer: *const c_char,
-        size: usize,
-        name: *const c_char,
-    ) -> c_int;
     fn luaL_ref(state: *mut LuaState, table: c_int) -> c_int;
     fn luaL_traceback(
         state: *mut LuaState,
@@ -112,33 +80,6 @@ unsafe extern "C" {
     fn tecsPayloadInstall(state: *mut LuaState);
     #[cfg(feature = "payload")]
     fn tecsPayloadLoadChunk(state: *mut LuaState, name: *const c_char) -> c_int;
-}
-
-fn source_paths(entry: &CStr, configured: Option<&str>) -> String {
-    let mut roots = Vec::new();
-    if let Some(parent) = Path::new(entry.to_string_lossy().as_ref()).parent() {
-        let parent = parent.to_string_lossy();
-        if !parent.is_empty() {
-            roots.push(parent.into_owned());
-        }
-    }
-    if let Some(configured) = configured {
-        roots.extend(
-            configured
-                .split(';')
-                .filter(|root| !root.is_empty())
-                .map(ToOwned::to_owned),
-        );
-    }
-    roots
-        .into_iter()
-        .flat_map(|root| [format!("{root}/?.lua"), format!("{root}/?/init.lua")])
-        .collect::<Vec<_>>()
-        .join(";")
-}
-
-fn is_teal_entry(entry: &CStr) -> bool {
-    entry.to_bytes().ends_with(b".tl")
 }
 
 struct EventBatch {
@@ -585,12 +526,7 @@ unsafe fn initialize(
                 .to_string_lossy()
                 .into_owned()
         };
-        // `tecstools` is staged with every runtime. It stays behind the engine
-        // itself, so a game's manifest cannot answer `require("tecs")`, while
-        // a Teal entry can load the compiler on demand.
-        let path = clean_cstring(format!(
-            "{root}/?.lua;{root}/?/init.lua;{root}/tecstools/?.lua;{root}/tecstools/?/init.lua;{had}"
-        ));
+        let path = clean_cstring(format!("{root}/?.lua;{root}/?/init.lua;{had}"));
         unsafe {
             lua_settop(lua, -2);
             lua_pushstring(lua, path.as_ptr());
@@ -608,35 +544,6 @@ unsafe fn initialize(
                 .map_or_else(|| ENTRY.to_owned(), |root| format!("{root}{ENTRY}")),
         )
     });
-    let teal_entry = is_teal_entry(resolved.as_c_str());
-    let configured_sources = std::env::var("TECS_TL_PATH").ok();
-    let source_loader = teal_entry
-        || configured_sources
-            .as_deref()
-            .is_some_and(|value| !value.is_empty());
-    let sources = source_paths(resolved.as_c_str(), configured_sources.as_deref());
-    if !sources.is_empty() {
-        unsafe {
-            lua_getfield(lua, LUA_GLOBALS_INDEX, c"package".as_ptr());
-            lua_getfield(lua, -1, c"path".as_ptr());
-        }
-        let had = unsafe { lua_tolstring(lua, -1, ptr::null_mut()) };
-        let had = if had.is_null() {
-            String::new()
-        } else {
-            unsafe { CStr::from_ptr(had) }
-                .to_string_lossy()
-                .into_owned()
-        };
-        let path = clean_cstring(format!("{had};{sources}"));
-        unsafe {
-            lua_settop(lua, -2);
-            lua_pushstring(lua, path.as_ptr());
-            lua_setfield(lua, -2, c"path".as_ptr());
-            lua_settop(lua, -2);
-        }
-    }
-
     #[cfg(feature = "payload")]
     let mut compiled = unsafe { tecsPayloadLoadChunk(lua, carried.as_ptr()) };
     #[cfg(not(feature = "payload"))]
@@ -644,21 +551,6 @@ unsafe fn initialize(
         let _ = carried;
         -1
     };
-    if compiled < 0 && source_loader {
-        unsafe {
-            lua_pushstring(lua, resolved.as_ptr());
-            lua_setfield(lua, LUA_GLOBALS_INDEX, c"__tecsSourceEntry".as_ptr());
-        }
-        let name = c"@tecs:source-entry";
-        compiled = unsafe {
-            luaL_loadbuffer(
-                lua,
-                SOURCE_ENTRY.as_ptr().cast(),
-                SOURCE_ENTRY.len(),
-                name.as_ptr(),
-            )
-        };
-    }
     if compiled < 0 {
         compiled = unsafe { luaL_loadfile(lua, resolved.as_ptr()) };
     }
@@ -804,35 +696,4 @@ pub unsafe extern "C" fn SDL_AppQuit(appstate: *mut c_void, _result: SDL_AppResu
         }
     }))
     .map_err(|_| log_message("tecs: Rust panic in SDL_AppQuit"));
-}
-
-#[cfg(test)]
-mod tests {
-    use std::ffi::CString;
-
-    use super::{is_teal_entry, source_paths};
-
-    #[test]
-    fn entries_add_their_parent_and_configured_source_roots() {
-        // The configured source root lets an entry below `src/` require a
-        // sibling by its project module name rather than its directory.
-        let entry = CString::new("src/game/main.tl").unwrap();
-
-        assert!(is_teal_entry(&entry));
-        assert_eq!(
-            source_paths(&entry, Some("src;mods")),
-            "src/game/?.lua;src/game/?/init.lua;src/?.lua;src/?/init.lua;mods/?.lua;mods/?/init.lua"
-        );
-
-        let lua_entry = CString::new("tools/alternate.lua").unwrap();
-        assert_eq!(
-            source_paths(&lua_entry, Some("src")),
-            "tools/?.lua;tools/?/init.lua;src/?.lua;src/?/init.lua"
-        );
-    }
-
-    #[test]
-    fn identifies_teal_entries_by_extension() {
-        assert!(!is_teal_entry(&CString::new("main.lua").unwrap()));
-    }
 }
