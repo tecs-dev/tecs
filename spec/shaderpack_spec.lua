@@ -461,7 +461,7 @@ describe("rendering from a pack", function()
 
         -- This host has a compiler, so a stale entry is a recompile and the
         -- frame is still correct.
-        assert.is_true(shadercompiler.available())
+        assert.is_true(shadercompiler.isSupported())
         assert.are.equal(255, renderQuad().r)
     end)
 end)

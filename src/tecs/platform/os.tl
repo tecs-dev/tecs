@@ -64,7 +64,10 @@ local shaderpack <const> = require("tecs.gpu.shaderpack")
 local workers <const> = require("tecs.workers")
 local time <const> = require("tecs.platform.time")
 local Future <const> = require("tecs.Future")
+local buffer <const> = require("tecs.io.buffer")
+local type iotypes = require("tecs.io.types")
 local type Window = require("tecs.platform.window").Window
+local type IOBuffer = iotypes.Buffer
 
 loader.declare("dialogs")
 
@@ -600,7 +603,19 @@ local MESSAGE_FLAGS <const>: {string: integer} = {
     info = K.SDL_MESSAGEBOX_INFORMATION,
 }
 
---- Opens a URL with the operating system's preferred handler.
+--- Opens an absolute URI with the operating system's preferred application.
+---
+--- This is not limited to web URLs. The operating system may route `https:`
+--- to a browser, `mailto:` to a mail client, and application-specific schemes
+--- such as `steam:` to their registered handler. Tecs passes the string to SDL
+--- without parsing it, so the platform decides which schemes it accepts and
+--- which application handles them.
+---
+--- @param url The caller supplies a non-empty absolute URI. Embedded NUL bytes
+---     are not supported by SDL's C-string boundary.
+--- @return Returns true after the operating system accepts the launch request.
+--- @return Returns SDL's reason when the URI is empty, unsupported, malformed,
+---     or cannot be opened.
 function platformOS.openURL(url: string): boolean, string
     if url == nil or url == "" then
         return false, "a URL is required"
@@ -864,7 +879,7 @@ function platformOS.capabilities(): Capabilities
     local pack = shadercompiler.pack()
     local formats: {string} = {shaderpack.formatName(shadercompiler.format())}
 
-    local runtimeShaders <const> = shadercompiler.available()
+    local runtimeShaders <const> = shadercompiler.isSupported()
     resolved = {
         target = platform,
         architecture = ffi.arch,
@@ -1011,9 +1026,11 @@ end
 
 --- Returns the clipboard bytes for `mimeType`, or nil when it offers none.
 ---
---- Returns nil rather than an empty string because the clipboard can offer a
+--- The caller releases the returned
+--- [`Buffer`](/modules/io/#tecs.io.Buffer).
+--- Returns nil rather than an empty buffer because the clipboard can offer a
 --- MIME type with no bytes, which differs from not offering that type.
-function platformOS.clipboardData(mimeType: string): string
+function platformOS.clipboardData(mimeType: string): IOBuffer
     required(mimeType, "clipboardData")
     if not platformOS.clipboardAvailable() then
         return nil
@@ -1023,12 +1040,25 @@ function platformOS.clipboardData(mimeType: string): string
     if bytes == nil then
         return nil
     end
-    local blob = loader.toBytes(bytes, tonumber(sizeOut[0]) as integer)
+    local length <const> = tonumber(sizeOut[0]) as integer
+    local blob <const> = buffer.new(length)
+    if length > 0 then
+        ffi.copy(blob:getFFIPointer() as ffi.CData, bytes as ffi.CData, length)
+    end
     C.SDL_free(bytes)
     return blob
 end
 
---- Returns the primary selection text, or an empty string when it holds none.
+--- Returns text from the platform's primary selection.
+---
+--- On X11 and Wayland, selecting text places it in a clipboard separate from
+--- the ordinary copy-and-paste clipboard, commonly pasted with the middle
+--- mouse button. Platforms without that concept expose only the value this
+--- process last supplied through `setPrimarySelection`; other applications do
+--- not see it. This function does not read `clipboardText`.
+---
+--- @return Returns UTF-8 text, or an empty string when the selection is empty
+---     or no video subsystem is available.
 function platformOS.primarySelection(): string
     if not platformOS.clipboardAvailable() then
         return ""

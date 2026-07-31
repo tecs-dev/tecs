@@ -2,13 +2,11 @@
 Resolves game paths and performs synchronous file operations.
 
 Use `assetPath` for shipped content and `writablePath` for mutable state.
-Set `organization` and `application` before resolving the first writable
-path:
+Set the publisher and game names before resolving the first writable path:
 
 ```teal
 local files <const> = tecs.io.files
-files.organization = "Ex Nihilo"
-files.application = "Starfarer"
+files.setPreferenceIdentity("Ex Nihilo", "Starfarer")
 
 local directory <const> = files.writablePath("saves")
 local ok, reason = files.createDirectory(directory)
@@ -30,8 +28,8 @@ arguments raise because they indicate a defect in the calling program.
 Every operation runs synchronously. Send large tree walks to
 `tecs.workers`, and decode images or sounds through `tecs.assets`.
 
-`tecs.io.watcher` polls paths recorded by `read` and `note`. It does not walk
-the whole asset tree.
+`tecs.io.watcher` polls paths recorded by `read` and the built-in asset
+loaders. It does not walk the whole asset tree.
 ]=]
 
 local ffi <const> = require("ffi")
@@ -47,13 +45,6 @@ local max <const> = math.max
 local min <const> = math.min
 
 local record files
-    --- Caller-writable. The caller sets `organization` before
-    --- `preferencePath` resolves the writable directory.
-    organization: string
-    --- Caller-writable. The caller sets `application` before `preferencePath`
-    --- resolves the writable directory.
-    application: string
-
     --- `PathType` identifies a file, directory or other
     --- platform object after following symbolic links.
     type PathType = storagebackend.PathType
@@ -90,8 +81,8 @@ local function required(value: string, what: string)
     end
 end
 
-files.organization = "tecs"
-files.application = "tecs"
+local preferenceOrganization = "tecs"
+local preferenceApplication = "tecs"
 
 --- Returns the directory that contains the executable.
 ---
@@ -103,16 +94,36 @@ function files.basePath(): string
     return content.basePath()
 end
 
+--- Sets the publisher and game names used for writable user data.
+---
+--- SDL combines these values with the current user and platform conventions
+--- to choose the directory returned by `preferencePath`. The defaults are
+--- `"tecs"` and `"tecs"`. Later calls change which directory the next
+--- `preferencePath` or `writablePath` resolves.
+---
+--- @param organization The caller supplies a non-empty publisher, studio, or
+---     organization name.
+--- @param application The caller supplies a non-empty game or application
+---     name.
+function files.setPreferenceIdentity(organization: string, application: string)
+    if type(organization) ~= "string" or organization == "" then
+        error("tecs: a preference organization is required", 2)
+    end
+    if type(application) ~= "string" or application == "" then
+        error("tecs: a preference application is required", 2)
+    end
+    preferenceOrganization = organization
+    preferenceApplication = application
+end
+
 --- Returns the writable directory for this application and creates it if
 --- absent.
 ---
---- @return Returns the directory with a trailing separator, named from
----     `organization`
----     and `application`. The only place a build may write: everything else is
----     read-only on at least one target, and finding that out at run time on a
----     device is expensive.
+--- @return Returns the directory with a trailing separator, named from the
+---     preference identity. This is the only place a build may write:
+---     everything else is read-only on at least one target.
 function files.preferencePath(): string
-    return content.prefPath(files.organization, files.application)
+    return content.prefPath(preferenceOrganization, preferenceApplication)
 end
 
 --- Returns the root from which the engine reads content.
@@ -300,20 +311,6 @@ function files.copy(from: string, to: string): boolean, string
     return adapter.storage().copy(from, to)
 end
 
---- Records a path under the kind it was first read as.
----
---- A named kind supersedes "document". `read` answers bytes and cannot know
---- what asked for them, so whatever did is the only thing that can say what the
---- file is, and it says so by naming a kind. The two can arrive in either
---- order, since a game is free to read a font's metrics as a document before
---- anything loads them as a font.
----
---- @param path The caller supplies the path that content loading attempted.
---- @param kind The caller supplies the content kind that owns the path.
-function files.note(path: string, kind: string)
-    content.note(path, kind)
-end
-
 --- Reads a whole file and returns its bytes, or nil when there is none there.
 ---
 --- The binary string retains embedded NUL bytes. The synchronous call suits
@@ -334,8 +331,10 @@ end
 --- Kinds include
 --- "image", "sound", "font", or "document" for bytes nothing named.
 ---
---- A path that failed to load is here too. Whatever asked for it named it, and
---- a file that would not decode is exactly the one worth noticing a change to.
+--- A path that an asset loader failed to load is here too. Whatever asked for
+--- it named it, and a file that would not decode is exactly the one worth
+--- noticing a change to. A failed direct `read` is absent because it produced
+--- no loaded document to reload.
 --- @return Returns a live read-only table shared with the content system.
 function files.loaded(): {string: string}
     return content.loaded()

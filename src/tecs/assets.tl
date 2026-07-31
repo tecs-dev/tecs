@@ -59,7 +59,7 @@ local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
 local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local workers <const> = require("tecs.workers")
-local files <const> = require("tecs.io.files")
+local content <const> = require("tecs.platform.content")
 local Future <const> = require("tecs.Future")
 
 local MIX <const> = sdl3mixer.C
@@ -647,7 +647,7 @@ end
 ---     is a future that fails once the worker has looked. Canceling it gives up this
 ---     caller's interest in the decode, and the last caller to do so abandons it.
 function assets.loadImage(path: string): Future<Image>
-    files.note(path, "image")
+    content.note(path, "image")
     local shared = imagesInFlight[path]
     if shared == nil then
         local root, id = queue("image", path)
@@ -676,7 +676,7 @@ end
 --- @return Returns a pending [`Future`](tealdoc:tecs.Future). A missing or
 ---     unreadable file settles it as failed.
 function assets.loadString(path: string, kind?: string): Future<string>
-    files.note(path, kind or "document")
+    content.note(path, kind or "document")
     local shared = bytesInFlight[path]
     if shared == nil then
         local root, id = queue("bytes", path)
@@ -711,7 +711,7 @@ end
 --- @return A pending future, or a failed future when mixer initialization
 ---     fails. This is the only failure reported without waiting for the worker.
 function assets.loadSound(path: string, mode: string, streamMs: integer): Future<Sound>
-    files.note(path, "sound")
+    content.note(path, "sound")
     if not sdl3mixer.init() then
         return Future.failed("cannot load " .. path)
     end

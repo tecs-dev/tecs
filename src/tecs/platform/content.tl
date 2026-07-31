@@ -28,6 +28,8 @@ end
 local cachedGeneration = -1
 local baseCache: string = nil
 local prefCache: string = nil
+local prefOrganization: string = nil
+local prefApplication: string = nil
 local assetsCache: string = nil
 
 --- Every path read or decoded this process, by the kind it was read as.
@@ -42,6 +44,8 @@ local function fresh()
     cachedGeneration = generation
     baseCache = nil
     prefCache = nil
+    prefOrganization = nil
+    prefApplication = nil
     assetsCache = nil
 end
 
@@ -61,10 +65,12 @@ end
 --- value a game assigns and the place it assigns them is the public module.
 function content.prefPath(organization: string, application: string): string
     fresh()
-    if prefCache ~= nil then
+    if prefCache ~= nil and prefOrganization == organization and prefApplication == application then
         return prefCache
     end
     prefCache = adapter.current().prefPath(organization, application)
+    prefOrganization = organization
+    prefApplication = application
     return prefCache
 end
 
@@ -112,6 +118,8 @@ function content.reset()
     cachedGeneration = adapter.generation()
     baseCache = nil
     prefCache = nil
+    prefOrganization = nil
+    prefApplication = nil
     assetsCache = nil
 end
 

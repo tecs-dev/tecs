@@ -705,7 +705,7 @@ function Application:_init(): boolean
     local pack = shaderpack.read(packPath)
     if pack ~= nil then
         shadercompiler.usePack(pack)
-    elseif not shadercompiler.available() then
+    elseif not shadercompiler.isSupported() then
         error(("tecs: this build links no shader compiler and there is no " .. "pack at %s"):format(packPath))
     end
 

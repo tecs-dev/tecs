@@ -266,7 +266,7 @@ local record window
         --- answer harmless defaults there, while `newWindow` raises.
         ---
         --- @return Returns true when this process can create and inspect windows.
-        available: function(): boolean
+        isSupported: function(): boolean
 
         --- Releases the window. Safe to call more than once.
         ---
@@ -872,7 +872,7 @@ for name, value in pairs(PROGRESS_STATES) do
     PROGRESS_NAMES[value] = name
 end
 
-function Window.available(): boolean
+function Window.isSupported(): boolean
     return tonumber(C.SDL_WasInit(VIDEO)) ~= 0
 end
 
@@ -1492,7 +1492,7 @@ end
 
 function Window.displays(): {integer}
     local found: {integer} = {}
-    if not Window.available() then
+    if not Window.isSupported() then
         return found
     end
 
@@ -1509,21 +1509,21 @@ function Window.displays(): {integer}
 end
 
 function Window.primaryDisplay(): integer
-    if not Window.available() then
+    if not Window.isSupported() then
         return 0
     end
     return tonumber(C.SDL_GetPrimaryDisplay()) as integer
 end
 
 function Window.displayName(displayId?: integer): string
-    if not Window.available() then
+    if not Window.isSupported() then
         return ""
     end
     return loader.toString(C.SDL_GetDisplayName(display(displayId)))
 end
 
 function Window.displayBounds(displayId?: integer): integer, integer, integer, integer
-    if not Window.available() then
+    if not Window.isSupported() then
         return 0, 0, 0, 0
     end
     if not (C.SDL_GetDisplayBounds(display(displayId), rectOut) as boolean) then
@@ -1536,7 +1536,7 @@ function Window.displayBounds(displayId?: integer): integer, integer, integer, i
 end
 
 function Window.usableBounds(displayId?: integer): integer, integer, integer, integer
-    if not Window.available() then
+    if not Window.isSupported() then
         return 0, 0, 0, 0
     end
     if not (C.SDL_GetDisplayUsableBounds(display(displayId), rectOut) as boolean) then
@@ -1549,14 +1549,14 @@ function Window.usableBounds(displayId?: integer): integer, integer, integer, in
 end
 
 function Window.contentScale(displayId?: integer): number
-    if not Window.available() then
+    if not Window.isSupported() then
         return 0
     end
     return tonumber(C.SDL_GetDisplayContentScale(display(displayId))) as number
 end
 
 function Window.orientation(displayId?: integer): Window.Orientation
-    if not Window.available() then
+    if not Window.isSupported() then
         return "unknown"
     end
     local value = tonumber(C.SDL_GetCurrentDisplayOrientation(display(displayId))) as integer
@@ -1564,7 +1564,7 @@ function Window.orientation(displayId?: integer): Window.Orientation
 end
 
 function Window.naturalOrientation(displayId?: integer): Window.Orientation
-    if not Window.available() then
+    if not Window.isSupported() then
         return "unknown"
     end
     local value = tonumber(C.SDL_GetNaturalDisplayOrientation(display(displayId))) as integer
@@ -1572,14 +1572,14 @@ function Window.naturalOrientation(displayId?: integer): Window.Orientation
 end
 
 function Window.desktopMode(displayId?: integer): Window.DisplayMode
-    if not Window.available() then
+    if not Window.isSupported() then
         return nil
     end
     return toMode(C.SDL_GetDesktopDisplayMode(display(displayId)))
 end
 
 function Window.currentMode(displayId?: integer): Window.DisplayMode
-    if not Window.available() then
+    if not Window.isSupported() then
         return nil
     end
     return toMode(C.SDL_GetCurrentDisplayMode(display(displayId)))
@@ -1587,7 +1587,7 @@ end
 
 function Window.fullscreenModes(displayId?: integer): {Window.DisplayMode}
     local found: {Window.DisplayMode} = {}
-    if not Window.available() then
+    if not Window.isSupported() then
         return found
     end
 
@@ -1608,7 +1608,7 @@ end
 function Window.closestFullscreenMode(
     width: integer, height: integer, refreshRate?: number, highDensity?: boolean, displayId?: integer
 ): Window.DisplayMode
-    if not Window.available() then
+    if not Window.isSupported() then
         return nil
     end
     -- Allocated per call rather than shared, because the record keeps it and
@@ -1628,21 +1628,21 @@ end
 -------------------------------------------------------------------------------
 
 function Window.theme(): Window.Theme
-    if not Window.available() then
+    if not Window.isSupported() then
         return "unknown"
     end
     return THEMES[tonumber(C.SDL_GetSystemTheme()) as integer] or "unknown"
 end
 
 function Window.screenSaverEnabled(): boolean
-    if not Window.available() then
+    if not Window.isSupported() then
         return false
     end
     return C.SDL_ScreenSaverEnabled() as boolean
 end
 
 function Window.setScreenSaverEnabled(enabled: boolean): boolean
-    if not Window.available() then
+    if not Window.isSupported() then
         return false
     end
     if enabled ~= false then

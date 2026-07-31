@@ -556,7 +556,7 @@ function tools.reloadShaders(): {string}
     -- A pack decides the shader format the device claimed at creation, so a
     -- build without a compiler has nothing to put in its place and no way to
     -- change what it draws with while it is running.
-    if not shadercompiler.available() then
+    if not shadercompiler.isSupported() then
         error("this build links no shader compiler, so its shaders are " .. "fixed at the pack it was built against", 0)
     end
     if boundReload == nil then
@@ -730,7 +730,7 @@ mcp.register({
         },
     },
     handler = function(args: {string: any}): {string: any}
-        if not watcher.available() then
+        if not watcher.isSupported() then
             error("this build has no hot-reload support, so it has no business polling the filesystem", 0)
         end
 

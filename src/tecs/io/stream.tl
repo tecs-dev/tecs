@@ -157,7 +157,7 @@ local rawSetMetatable <const> = setmetatable as function(any, any): any
 
 local enum TransferKind
     "readString"
-    "readBuffer"
+    "transferToBuffer"
     "copy"
     "discard"
     "writeBuffer"
@@ -250,7 +250,6 @@ local function checkedStream<T is Stream>(value: T, what: string, level: integer
         type(value) ~= "table"
         or type(dynamic.contentLength) ~= "function"
         or type(dynamic.contentType) ~= "function"
-        or type(dynamic.hasKnownLength) ~= "function"
         or type(dynamic.isReadable) ~= "function"
         or type(dynamic.isWritable) ~= "function"
         or type(dynamic.isReplayable) ~= "function"
@@ -265,7 +264,7 @@ local function checkedStream<T is Stream>(value: T, what: string, level: integer
             type(dynamic.hasBuffer) ~= "function"
             or type(dynamic.newReader) ~= "function"
             or type(dynamic.readAll) ~= "function"
-            or type(dynamic.readBuffer) ~= "function"
+            or type(dynamic.transferToBuffer) ~= "function"
             or type(dynamic.transferTo) ~= "function"
             or type(dynamic.transferToFile) ~= "function"
             or type(dynamic.discard) ~= "function"
@@ -445,10 +444,6 @@ end
 
 local function contentType(self: Backing): string | nil
     return self._contentType
-end
-
-local function hasKnownLength(stream: Stream): boolean
-    return stream:contentLength() ~= nil
 end
 
 local function close(self: Backing)
@@ -715,7 +710,7 @@ local function fail(transfer: Transfer, reason: string)
     remove(transfer)
     closeEndpoints(transfer)
     releaseScratch(transfer)
-    if transfer.kind == "readBuffer" and transfer.buffer ~= nil then
+    if transfer.kind == "transferToBuffer" and transfer.buffer ~= nil then
         transfer.buffer:release()
         transfer.buffer = nil
     end
@@ -727,7 +722,7 @@ local function finish(transfer: Transfer)
     local closed <const>, reason = closeEndpoints(transfer)
     releaseScratch(transfer)
     if not closed then
-        if transfer.kind == "readBuffer" and transfer.buffer ~= nil then
+        if transfer.kind == "transferToBuffer" and transfer.buffer ~= nil then
             transfer.buffer:release()
             transfer.buffer = nil
         end
@@ -739,7 +734,7 @@ local function finish(transfer: Transfer)
         transfer.buffer:release()
         transfer.buffer = nil
         transfer.future:complete(result)
-    elseif transfer.kind == "readBuffer" then
+    elseif transfer.kind == "transferToBuffer" then
         local result <const> = transfer.buffer
         transfer.buffer = nil
         transfer.future:complete(result)
@@ -850,7 +845,7 @@ local function writeStep(transfer: Transfer)
 end
 
 local function step(transfer: Transfer)
-    if transfer.kind == "readString" or transfer.kind == "readBuffer" then
+    if transfer.kind == "readString" or transfer.kind == "transferToBuffer" then
         readStep(transfer)
     elseif transfer.kind == "copy" or transfer.kind == "discard" then
         copyStep(transfer)
@@ -896,7 +891,7 @@ function Transfer:cancel(future: Future<any>)
     remove(self)
     closeEndpoints(self)
     releaseScratch(self)
-    if self.kind == "readBuffer" and self.buffer ~= nil then
+    if self.kind == "transferToBuffer" and self.buffer ~= nil then
         self.buffer:release()
         self.buffer = nil
     end
@@ -941,7 +936,9 @@ local function beginRead(source: ReadableStream, kind: TransferKind, maxBytes: i
     end
     local outputBuffer <const> = bufferOrReason as IOBuffer
     if known ~= nil and known > 0 then
-        local reserved <const>, reserveReason = pcall(outputBuffer.reserve, outputBuffer, known) as (boolean, any)
+        local reserved <const>, reserveReason = pcall(
+            outputBuffer.ensureCapacity, outputBuffer, known
+        ) as (boolean, any)
         if not reserved then
             outputBuffer:release()
             return failed(tostring(reserveReason))
@@ -963,8 +960,8 @@ local function readAll(source: ReadableStream, maxBytes: integer): Future<string
     return beginRead(source, "readString", maxBytes) as Future<string>
 end
 
-local function readBuffer(source: ReadableStream, maxBytes: integer): Future<IOBuffer>
-    return beginRead(source, "readBuffer", maxBytes) as Future<IOBuffer>
+local function transferToBuffer(source: ReadableStream, maxBytes: integer): Future<IOBuffer>
+    return beginRead(source, "transferToBuffer", maxBytes) as Future<IOBuffer>
 end
 
 local function transferTo(source: ReadableStream, destination: WritableStream): Future<integer>
@@ -1058,9 +1055,6 @@ end
 function StringStream:contentType(): string | nil
     return contentType(self)
 end
-function StringStream:hasKnownLength(): boolean
-    return true
-end
 function StringStream:isReadable(): boolean
     return true
 end
@@ -1098,8 +1092,8 @@ function StringStream:readAll(maxBytes?: integer): Future<string>
     return Future.settled(self._text)
 end
 
-function StringStream:readBuffer(maxBytes?: integer): Future<IOBuffer>
-    return readBuffer(self, maxBytes)
+function StringStream:transferToBuffer(maxBytes?: integer): Future<IOBuffer>
+    return transferToBuffer(self, maxBytes)
 end
 
 function StringStream:transferTo(destination: WritableStream): Future<integer>
@@ -1127,9 +1121,6 @@ function BufferStream:contentLength(): integer | nil
 end
 function BufferStream:contentType(): string | nil
     return contentType(self)
-end
-function BufferStream:hasKnownLength(): boolean
-    return self:contentLength() ~= nil
 end
 function BufferStream:isReadable(): boolean
     return true
@@ -1184,7 +1175,7 @@ function BufferStream:readAll(maxBytes?: integer): Future<string>
     return Future.settled(self._buffer:getString())
 end
 
-function BufferStream:readBuffer(maxBytes?: integer): Future<IOBuffer>
+function BufferStream:transferToBuffer(maxBytes?: integer): Future<IOBuffer>
     maxBytes = maximum(maxBytes, 2)
     local length <const> = self:contentLength()
     if length == nil then
@@ -1238,9 +1229,6 @@ end
 function ByteStream:contentType(): string | nil
     return contentType(self)
 end
-function ByteStream:hasKnownLength(): boolean
-    return true
-end
 function ByteStream:isReadable(): boolean
     return true
 end
@@ -1278,8 +1266,8 @@ function ByteStream:readAll(maxBytes?: integer): Future<string>
     return Future.settled(loader.toBytes(self._pointer, self._length))
 end
 
-function ByteStream:readBuffer(maxBytes?: integer): Future<IOBuffer>
-    return readBuffer(self, maxBytes)
+function ByteStream:transferToBuffer(maxBytes?: integer): Future<IOBuffer>
+    return transferToBuffer(self, maxBytes)
 end
 
 function ByteStream:transferTo(destination: WritableStream): Future<integer>
@@ -1308,9 +1296,6 @@ function FileStream:contentLength(): integer | nil
 end
 function FileStream:contentType(): string | nil
     return contentType(self)
-end
-function FileStream:hasKnownLength(): boolean
-    return hasKnownLength(self)
 end
 function FileStream:isReadable(): boolean
     return true
@@ -1348,8 +1333,8 @@ end
 function FileStream:readAll(maxBytes?: integer): Future<string>
     return readAll(self, maxBytes)
 end
-function FileStream:readBuffer(maxBytes?: integer): Future<IOBuffer>
-    return readBuffer(self, maxBytes)
+function FileStream:transferToBuffer(maxBytes?: integer): Future<IOBuffer>
+    return transferToBuffer(self, maxBytes)
 end
 function FileStream:transferTo(destination: WritableStream): Future<integer>
     return transferTo(self, destination)
@@ -1374,9 +1359,6 @@ function HandleStream:contentLength(): integer | nil
 end
 function HandleStream:contentType(): string | nil
     return contentType(self)
-end
-function HandleStream:hasKnownLength(): boolean
-    return self._state.length ~= nil
 end
 function HandleStream:isReadable(): boolean
     return true
@@ -1428,8 +1410,8 @@ end
 function HandleStream:readAll(maxBytes?: integer): Future<string>
     return readAll(self, maxBytes)
 end
-function HandleStream:readBuffer(maxBytes?: integer): Future<IOBuffer>
-    return readBuffer(self, maxBytes)
+function HandleStream:transferToBuffer(maxBytes?: integer): Future<IOBuffer>
+    return transferToBuffer(self, maxBytes)
 end
 function HandleStream:transferTo(destination: WritableStream): Future<integer>
     return transferTo(self, destination)
@@ -1551,10 +1533,6 @@ local function metadataContentLength(self: MetadataState): integer | nil
     return self._metadataLength ~= nil and self._metadataLength or self._source:contentLength()
 end
 
-local function metadataHasKnownLength(self: MetadataState): boolean
-    return metadataContentLength(self) ~= nil
-end
-
 local function metadataIsReadable(self: MetadataState): boolean
     return self._source:isReadable()
 end
@@ -1590,8 +1568,8 @@ local function metadataReadAll(self: MetadataState, maxBytes?: integer): Future<
     return (self._source as ReadableStream):readAll(maxBytes)
 end
 
-local function metadataReadBuffer(self: MetadataState, maxBytes?: integer): Future<IOBuffer>
-    return (self._source as ReadableStream):readBuffer(maxBytes)
+local function metadataTransferToBuffer(self: MetadataState, maxBytes?: integer): Future<IOBuffer>
+    return (self._source as ReadableStream):transferToBuffer(maxBytes)
 end
 
 local function metadataTransferTo(self: MetadataState, destination: WritableStream): Future<integer>
@@ -1622,7 +1600,6 @@ end
 
 MetadataStream.contentType = metadataContentType
 MetadataStream.contentLength = metadataContentLength
-MetadataStream.hasKnownLength = metadataHasKnownLength
 MetadataStream.isReadable = metadataIsReadable
 MetadataStream.isWritable = metadataIsWritable
 MetadataStream.isReplayable = metadataIsReplayable
@@ -1631,7 +1608,6 @@ MetadataStream.close = metadataClose
 
 MetadataReadableStream.contentType = metadataContentType
 MetadataReadableStream.contentLength = metadataContentLength
-MetadataReadableStream.hasKnownLength = metadataHasKnownLength
 MetadataReadableStream.isReadable = metadataIsReadable
 MetadataReadableStream.isWritable = metadataIsWritable
 MetadataReadableStream.isReplayable = metadataIsReplayable
@@ -1640,14 +1616,13 @@ MetadataReadableStream.close = metadataClose
 MetadataReadableStream.hasBuffer = metadataHasBuffer
 MetadataReadableStream.newReader = metadataNewReader
 MetadataReadableStream.readAll = metadataReadAll
-MetadataReadableStream.readBuffer = metadataReadBuffer
+MetadataReadableStream.transferToBuffer = metadataTransferToBuffer
 MetadataReadableStream.transferTo = metadataTransferTo
 MetadataReadableStream.transferToFile = metadataTransferToFile
 MetadataReadableStream.discard = metadataDiscard
 
 MetadataWritableStream.contentType = metadataContentType
 MetadataWritableStream.contentLength = metadataContentLength
-MetadataWritableStream.hasKnownLength = metadataHasKnownLength
 MetadataWritableStream.isReadable = metadataIsReadable
 MetadataWritableStream.isWritable = metadataIsWritable
 MetadataWritableStream.isReplayable = metadataIsReplayable
@@ -1659,7 +1634,6 @@ MetadataWritableStream.writeBuffer = metadataWriteBuffer
 
 MetadataReadWriteStream.contentType = metadataContentType
 MetadataReadWriteStream.contentLength = metadataContentLength
-MetadataReadWriteStream.hasKnownLength = metadataHasKnownLength
 MetadataReadWriteStream.isReadable = metadataIsReadable
 MetadataReadWriteStream.isWritable = metadataIsWritable
 MetadataReadWriteStream.isReplayable = metadataIsReplayable
@@ -1668,7 +1642,7 @@ MetadataReadWriteStream.close = metadataClose
 MetadataReadWriteStream.hasBuffer = metadataHasBuffer
 MetadataReadWriteStream.newReader = metadataNewReader
 MetadataReadWriteStream.readAll = metadataReadAll
-MetadataReadWriteStream.readBuffer = metadataReadBuffer
+MetadataReadWriteStream.transferToBuffer = metadataTransferToBuffer
 MetadataReadWriteStream.transferTo = metadataTransferTo
 MetadataReadWriteStream.transferToFile = metadataTransferToFile
 MetadataReadWriteStream.discard = metadataDiscard

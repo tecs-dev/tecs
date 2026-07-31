@@ -11,9 +11,11 @@ Whole-source operations return futures. A caller outside a frame can use
 `value` to wait, raise a transfer error, and take the result:
 
 ```teal
-local bytes <const> = tecs.io.newFileStream("save.bin"):readBuffer().value
+local save <const> = tecs.io.newFileStream("save.bin")
+local bytes <const> = save:transferToBuffer().value
 print(bytes:length())
 bytes:release()
+save:close()
 ```
 
 TCP is an ordered byte stream: one write may take several reads to receive,
@@ -22,8 +24,8 @@ caller. UDP preserves one send as one datagram, but the network may lose,
 duplicate, or reorder it. HTTP and HTTPS live under `tecs.io.http`; the MCP
 debug server lives under `tecs.io.mcp`.
 
-Hot TCP loops can reuse a `Buffer`. `Connection:readInto` lets the native
-socket fill its FFI allocation directly, and `Connection:writeFrom` queues a
+Hot TCP loops can reuse a `Buffer`. `TCPSocket:readInto` lets the native
+socket fill its FFI allocation directly, and `TCPSocket:writeFrom` queues a
 buffer range without constructing an intermediate Lua string.
 
 Resolution and client connection return asynchronous
@@ -41,13 +43,16 @@ local function update()
 end
 ```
 
-A headless program without an application calls `poll` once per loop, or uses
-a future's bounded `wait` when blocking is the honest operation. Stream
+An `Application` calls `poll` automatically once per host iteration. Game
+systems and update functions must not call it themselves. Only a headless
+program without an application calls `poll` once per manual loop; it can use a
+future's bounded `wait` instead when blocking is the honest operation. Stream
 transfers are cooperative futures too. Listening, accepting, reading, writing,
 and receiving are nonblocking.
 
-Every address, TCP connection, server, and datagram socket owns a resource. Close
-it explicitly. Closing is idempotent; using a closed value returns a failure.
+Every address, TCP socket, listener, UDP socket, and UDP packet owns a
+resource. Close it explicitly. Closing is idempotent; using a closed value
+returns a failure.
 
 Naming `tecs.io` loads none of its children. Reading `files`, `http`, `mcp`, or
 `watcher` loads only that child.
@@ -67,6 +72,7 @@ local Future <const> = require("tecs.Future")
 local buffer <const> = require("tecs.io.buffer")
 local stream <const> = require("tecs.io.stream")
 local type types = require("tecs.io.types")
+local type coretypes = require("tecs.types")
 local type IOBuffer = types.Buffer
 
 -- Type-only, so nothing loads here and HTTP is not initialized by a program
@@ -81,6 +87,7 @@ local type watcher = require("tecs.io.watcher")
 
 local type FutureType<T> = Future<T>
 local type Source = Future.Source
+local type Closeable = coretypes.Closeable
 
 local C <const> = binding.C
 local floor <const> = math.floor
@@ -160,7 +167,7 @@ local record binaryIO
 
     --- Creates a stream sharing an owned growable buffer.
     ---
-    --- `readBuffer` returns the same retained object. Releasing or mutating it
+    --- `transferToBuffer` returns the same retained object. Releasing or mutating it
     --- affects both caller and stream.
     --- @param buffer The caller supplies an open buffer.
     --- @param contentType The caller supplies optional media type metadata.
@@ -214,7 +221,7 @@ local record binaryIO
     ): T
 
     --- An `Address` owns one resolved network address.
-    record Address
+    record Address is Closeable
         --- Read-only. Networking sets `host` at resolution or peer lookup. It
         --- contains the requested hostname or numeric peer address.
         host: string
@@ -232,8 +239,8 @@ local record binaryIO
         close: function(self: Address)
     end
 
-    --- A `Connection` owns one connected TCP byte stream.
-    record Connection
+    --- A `TCPSocket` owns one connected TCP byte stream.
+    record TCPSocket is Closeable
         _handle: loader.CPtr
         _buffer: loader.CArray
         _closed: boolean
@@ -241,14 +248,14 @@ local record binaryIO
         --- Returns whether `close` has released this connection.
         ---
         --- @return Returns true after `close`.
-        isClosed: function(self: Connection): boolean
+        isClosed: function(self: TCPSocket): boolean
         --- Returns a newly owned address for the remote peer.
         ---
         --- The caller closes the returned address.
         --- @return Returns a caller-owned address that outlives the connection, or
         ---     nil on failure.
         --- @return Returns the reason when the first return is nil.
-        peer: function(self: Connection): Address, string
+        peer: function(self: TCPSocket): Address, string
         --- Reads up to `maxBytes` without waiting.
         ---
         --- Returns nil with no error when no bytes are ready. Returns nil with
@@ -260,7 +267,7 @@ local record binaryIO
         ---     bytes arrived or the read failed.
         --- @return Returns the reason only when reading fails or the peer
         ---     disconnects.
-        read: function(self: Connection, maxBytes?: integer): string, string
+        read: function(self: TCPSocket, maxBytes?: integer): string, string
         --- Reads available bytes directly into reusable FFI memory.
         ---
         --- The call writes at a zero-based offset and extends the buffer
@@ -279,7 +286,7 @@ local record binaryIO
         --- @return Returns the reason only when reading fails or the peer
         ---     disconnects.
         readInto: function(
-            self: Connection, destination: IOBuffer, maxBytes?: integer, offset?: integer
+            self: TCPSocket, destination: IOBuffer, maxBytes?: integer, offset?: integer
         ): integer, string
         --- Queues one chunk for reliable ordered delivery.
         ---
@@ -289,7 +296,7 @@ local record binaryIO
         ---     values raise; an empty string succeeds without queuing data.
         --- @return Returns true only when the connection accepts the whole chunk.
         --- @return Returns the reason when the first return is false.
-        write: function(self: Connection, bytes: string): boolean, string
+        write: function(self: TCPSocket, bytes: string): boolean, string
         --- Queues a buffer range for reliable ordered delivery.
         ---
         --- The native send queue copies the range before this call returns, so
@@ -304,13 +311,13 @@ local record binaryIO
         ---     for the remainder. Invalid ranges raise.
         --- @return Returns the number of bytes accepted.
         --- @return Returns the reason when the first return is nil.
-        writeFrom: function(self: Connection, source: IOBuffer, offset?: integer, count?: integer): integer, string
+        writeFrom: function(self: TCPSocket, source: IOBuffer, offset?: integer, count?: integer): integer, string
         --- Returns bytes accepted but not yet sent.
         ---
         --- @return Returns the queued byte count, zero after sending, or nil on
         ---     failure.
         --- @return Returns the reason when the first return is nil.
-        pendingWrites: function(self: Connection): integer, string
+        pendingWrites: function(self: TCPSocket): integer, string
         --- Waits up to `timeoutMs` for queued writes to be sent.
         ---
         --- Returns false without an error on timeout.
@@ -320,7 +327,7 @@ local record binaryIO
         ---     timeout.
         --- @return Returns the reason on failure. Timeout returns false without
         ---     a reason.
-        drain: function(self: Connection, timeoutMs?: integer): boolean, string
+        drain: function(self: TCPSocket, timeoutMs?: integer): boolean, string
         --- Waits up to `timeoutMs` for input or disconnection.
         ---
         --- Returns false without an error on timeout. This does not consume
@@ -330,14 +337,14 @@ local record binaryIO
         --- @return Returns true when input arrives or the peer disconnects.
         --- @return Returns the reason on failure. Timeout returns false without
         ---     a reason.
-        wait: function(self: Connection, timeoutMs?: integer): boolean, string
+        wait: function(self: TCPSocket, timeoutMs?: integer): boolean, string
         --- Releases the connection. `close` may discard queued writes, so call
         --- `drain` first when delivery matters. Repeated calls remain safe.
-        close: function(self: Connection)
+        close: function(self: TCPSocket)
     end
 
-    --- A `Server` listens for TCP clients.
-    record Server
+    --- A `TCPListener` listens for TCP clients.
+    record TCPListener is Closeable
         --- Read-only. Networking sets `port` from the value passed to `listen`
         --- and never changes it. Zero remains zero.
         port: integer
@@ -347,7 +354,7 @@ local record binaryIO
         --- Returns whether `close` has released this listener.
         ---
         --- @return Returns true after `close`.
-        isClosed: function(self: Server): boolean
+        isClosed: function(self: TCPListener): boolean
         --- Takes one pending client without waiting.
         ---
         --- Returns nil with no error when nobody waits. The caller owns the
@@ -355,7 +362,7 @@ local record binaryIO
         --- @return Returns one caller-owned client, or nil when none waits or
         ---     acceptance fails.
         --- @return Returns the reason only when acceptance fails.
-        accept: function(self: Server): Connection, string
+        accept: function(self: TCPListener): TCPSocket, string
         --- Waits up to `timeoutMs` for a client to become ready to accept.
         ---
         --- Returns false without an error on timeout. This does not accept the
@@ -365,30 +372,33 @@ local record binaryIO
         --- @return Returns true when at least one client waits.
         --- @return Returns the reason on failure. Timeout returns false without
         ---     a reason.
-        wait: function(self: Server, timeoutMs?: integer): boolean, string
+        wait: function(self: TCPListener, timeoutMs?: integer): boolean, string
         --- Stops listening and leaves accepted streams open. Repeated calls
         --- remain safe.
-        close: function(self: Server)
+        close: function(self: TCPListener)
     end
 
-    --- A `Packet` owns one received UDP datagram and its source address.
-    record Packet
+    --- A `UDPPacket` owns one received UDP datagram and its source address.
+    record UDPPacket is Closeable
         --- Read-only. Networking sets `address` when receiving the packet. The
         --- packet owns it until `close`.
         address: Address
         --- Read-only. Networking sets `port` to the remote source port when
         --- receiving the packet.
         port: integer
-        --- Read-only. Networking sets `bytes` to one complete datagram when
-        --- receiving the packet. A zero-length datagram uses an empty string.
-        bytes: string
+        --- Read-only. Networking sets `bytes` to one caller-owned
+        --- [`Buffer`](tealdoc:tecs.io.Buffer) containing the complete
+        --- datagram. A zero-length datagram uses an empty buffer. `close`
+        --- releases it.
+        bytes: IOBuffer
 
-        --- Releases the packet's source address. Safe to call repeatedly.
-        close: function(self: Packet)
+        --- Releases the packet's source address and byte buffer. Safe to call
+        --- repeatedly.
+        close: function(self: UDPPacket)
     end
 
-    --- A `DatagramSocket` sends and receives UDP packets.
-    record DatagramSocket
+    --- A `UDPSocket` sends and receives UDP packets.
+    record UDPSocket is Closeable
         --- Read-only. Networking sets `port` from the value passed to `bind`
         --- and never changes it. Zero remains zero.
         port: integer
@@ -398,14 +408,14 @@ local record binaryIO
         --- Returns whether `close` has released this socket.
         ---
         --- @return Returns true after `close`.
-        isClosed: function(self: DatagramSocket): boolean
+        isClosed: function(self: UDPSocket): boolean
         --- Sends one packet without waiting.
         --- @param address The caller supplies an open address from this module.
         --- @param port The caller supplies a remote port from 1 to 65535.
         --- @param bytes The caller supplies one datagram of at most 65507 bytes.
         --- @return Returns true when the network accepts the complete datagram.
         --- @return Returns the reason when the first return is false.
-        send: function(self: DatagramSocket, address: Address, port: integer, bytes: string): boolean, string
+        send: function(self: UDPSocket, address: Address, port: integer, bytes: string): boolean, string
         --- Takes one packet without waiting.
         ---
         --- Returns nil with no error when no packet is ready. The packet owns
@@ -413,7 +423,7 @@ local record binaryIO
         --- @return Returns one caller-owned complete packet, or nil when none
         ---     waits or reception fails.
         --- @return Returns the reason only when reception fails.
-        receive: function(self: DatagramSocket): Packet, string
+        receive: function(self: UDPSocket): UDPPacket, string
         --- Waits up to `timeoutMs` for a packet.
         ---
         --- Returns false without an error on timeout. This does not consume a
@@ -423,9 +433,9 @@ local record binaryIO
         --- @return Returns true when at least one packet waits.
         --- @return Returns the reason on failure. Timeout returns false without
         ---     a reason.
-        wait: function(self: DatagramSocket, timeoutMs?: integer): boolean, string
+        wait: function(self: UDPSocket, timeoutMs?: integer): boolean, string
         --- Releases the socket. Safe to call repeatedly.
-        close: function(self: DatagramSocket)
+        close: function(self: UDPSocket)
     end
 
     --- Starts networking for this module. Safe to call repeatedly.
@@ -437,44 +447,48 @@ local record binaryIO
     init: function(): boolean, string
     --- Stops this module's networking instance.
     ---
-    --- It refuses while an address, stream, server, socket, packet or
+    --- It refuses while an address, TCP socket, listener, UDP socket, packet or
     --- asynchronous operation remains live.
     ---
     --- @return Returns true after shutdown or when networking never started.
     --- @return Returns the live-resource reason when shutdown refuses.
-    quit: function(): boolean, string
+    shutdown: function(): boolean, string
     --- Begins resolving a hostname.
     --- @param host The caller supplies a DNS name or numeric address of at most
     ---     253 bytes. Empty strings and embedded NUL bytes raise.
-    --- @return Returns a future over a caller-owned address. `binaryIO.poll` or
+    --- @return Returns a future over a caller-owned address. `tecs.io.poll` or
     ---     `Future:wait` settles it.
     resolve: function(host: string): FutureType<Address>
     --- Begins connecting to a resolved address.
     --- @param address The caller supplies an address from this module. A closed
     ---     address returns an already-failed future.
     --- @param port The caller supplies a remote port from 1 to 65535.
-    --- @return Returns a future over a caller-owned connection. `binaryIO.poll` or
+    --- @return Returns a future over a caller-owned connection. `tecs.io.poll` or
     ---     `Future:wait` settles it.
-    connect: function(address: Address, port: integer): FutureType<Connection>
+    connect: function(address: Address, port: integer): FutureType<TCPSocket>
     --- Binds a TCP listener. A nil address listens on all local interfaces.
     --- @param port The caller supplies a local port from 0 to 65535. Zero lets
-    ---     the platform choose one but leaves `Server.port` at zero.
+    ---     the platform choose one but leaves `TCPListener.port` at zero.
     --- @param address The caller supplies a local address or omits it for all
     ---     interfaces.
     --- @return Returns a caller-owned listener, or nil on failure.
     --- @return Returns the reason when the first return is nil.
-    listen: function(port: integer, address?: Address): Server, string
+    listen: function(port: integer, address?: Address): TCPListener, string
     --- Binds a UDP socket. A nil address listens on all local interfaces.
     --- @param port The caller supplies a local port from 0 to 65535. Zero lets
-    ---     the platform choose one but leaves `DatagramSocket.port` at zero.
+    ---     the platform choose one but leaves `UDPSocket.port` at zero.
     --- @param address The caller supplies a local address or omits it for all
     ---     interfaces.
     --- @return Returns a caller-owned socket, or nil on failure.
     --- @return Returns the reason when the first return is nil.
-    bind: function(port: integer, address?: Address): DatagramSocket, string
-    --- Advances every pending stream transfer, resolution, and client
-    --- connection without waiting. Call once per frame while asynchronous I/O
-    --- work exists.
+    bind: function(port: integer, address?: Address): UDPSocket, string
+    --- Advances pending I/O in a headless loop without waiting.
+    ---
+    --- [`Application`](tealdoc:tecs.Application) calls this automatically once
+    --- per host iteration, including while suspended or crashed. A game system,
+    --- plugin, or update function must not call it. Only a headless program
+    --- without an application owns a manual call, normally once per loop while
+    --- `pending()` is greater than zero.
     --- @return Returns how many futures settled during this call, including
     ---     failures.
     poll: function(): integer
@@ -495,10 +509,10 @@ binaryIO.newHandleStream = stream.newHandleStream
 binaryIO.withMetadata = stream.withMetadata
 
 local AddressMT <const>: metatable<binaryIO.Address> = {__index = binaryIO.Address}
-local ConnectionMT <const>: metatable<binaryIO.Connection> = {__index = binaryIO.Connection}
-local ServerMT <const>: metatable<binaryIO.Server> = {__index = binaryIO.Server}
-local PacketMT <const>: metatable<binaryIO.Packet> = {__index = binaryIO.Packet}
-local DatagramSocketMT <const>: metatable<binaryIO.DatagramSocket> = {__index = binaryIO.DatagramSocket}
+local TCPSocketMT <const>: metatable<binaryIO.TCPSocket> = {__index = binaryIO.TCPSocket}
+local TCPListenerMT <const>: metatable<binaryIO.TCPListener> = {__index = binaryIO.TCPListener}
+local UDPPacketMT <const>: metatable<binaryIO.UDPPacket> = {__index = binaryIO.UDPPacket}
+local UDPSocketMT <const>: metatable<binaryIO.UDPSocket> = {__index = binaryIO.UDPSocket}
 
 local enum OperationKind
     "resolve"
@@ -557,7 +571,7 @@ local function validAddress(address: binaryIO.Address, optional: boolean, level:
         error("tecs: an address is required", level)
     end
     if getmetatable(address) ~= AddressMT then
-        error("tecs: expected an address returned by tecs.io.resolve or Connection:peer", level)
+        error("tecs: expected an address returned by tecs.io.resolve or TCPSocket:peer", level)
     end
     if address._closed then
         return false, "address is closed"
@@ -611,8 +625,8 @@ function binaryIO.Address:close()
     closed()
 end
 
-local function connectionFrom(handle: loader.CPtr): binaryIO.Connection
-    local connection = setmetatable({} as binaryIO.Connection, ConnectionMT)
+local function tcpSocketFrom(handle: loader.CPtr): binaryIO.TCPSocket
+    local connection = setmetatable({} as binaryIO.TCPSocket, TCPSocketMT)
     connection._handle = handle
     connection._buffer = loader.newArray("uint8_t[?]", MAX_READ_BYTES)
     connection._closed = false
@@ -620,11 +634,11 @@ local function connectionFrom(handle: loader.CPtr): binaryIO.Connection
     return connection
 end
 
-function binaryIO.Connection:isClosed(): boolean
+function binaryIO.TCPSocket:isClosed(): boolean
     return self._closed
 end
 
-function binaryIO.Connection:peer(): binaryIO.Address, string
+function binaryIO.TCPSocket:peer(): binaryIO.Address, string
     if self._closed then
         return nil, "connection is closed"
     end
@@ -638,7 +652,7 @@ function binaryIO.Connection:peer(): binaryIO.Address, string
     return addressFrom(handle, host)
 end
 
-function binaryIO.Connection:read(maxBytes?: integer): string, string
+function binaryIO.TCPSocket:read(maxBytes?: integer): string, string
     if self._closed then
         return nil, "connection is closed"
     end
@@ -656,7 +670,7 @@ function binaryIO.Connection:read(maxBytes?: integer): string, string
     return loader.toBytes(self._buffer as loader.CValue, read)
 end
 
-function binaryIO.Connection:readInto(destination: IOBuffer, maxBytes?: integer, offset?: integer): integer, string
+function binaryIO.TCPSocket:readInto(destination: IOBuffer, maxBytes?: integer, offset?: integer): integer, string
     if self._closed then
         return nil, "connection is closed"
     end
@@ -666,7 +680,7 @@ function binaryIO.Connection:readInto(destination: IOBuffer, maxBytes?: integer,
     end
     local at <const> = offset or 0
     if type(at) ~= "number" or at ~= floor(at) or at < 0 then
-        error("tecs: Connection:readInto offset must be a non-negative integer", 2)
+        error("tecs: TCPSocket:readInto offset must be a non-negative integer", 2)
     end
     if count == 0 then
         return 0
@@ -685,11 +699,11 @@ function binaryIO.Connection:readInto(destination: IOBuffer, maxBytes?: integer,
     return read
 end
 
-function binaryIO.Connection:write(bytes: string): boolean, string
+function binaryIO.TCPSocket:write(bytes: string): boolean, string
     if self._closed then
         return false, "connection is closed"
     end
-    validBytes(bytes, MAX_WRITE_BYTES, "Connection:write", 2)
+    validBytes(bytes, MAX_WRITE_BYTES, "TCPSocket:write", 2)
     if #bytes == 0 then
         return true
     end
@@ -699,21 +713,21 @@ function binaryIO.Connection:write(bytes: string): boolean, string
     return true
 end
 
-function binaryIO.Connection:writeFrom(source: IOBuffer, offset?: integer, count?: integer): integer, string
+function binaryIO.TCPSocket:writeFrom(source: IOBuffer, offset?: integer, count?: integer): integer, string
     if self._closed then
         return nil, "connection is closed"
     end
     local length <const> = source:length()
     local at <const> = offset or 0
     if type(at) ~= "number" or at ~= floor(at) or at < 0 or at > length then
-        error("tecs: Connection:writeFrom offset is outside the buffer", 2)
+        error("tecs: TCPSocket:writeFrom offset is outside the buffer", 2)
     end
     local size <const> = count == nil and length - at or count
     if type(size) ~= "number" or size ~= floor(size) or size < 0 or size > length - at then
-        error("tecs: Connection:writeFrom count is outside the buffer", 2)
+        error("tecs: TCPSocket:writeFrom count is outside the buffer", 2)
     end
     if size > MAX_WRITE_BYTES then
-        error(("tecs: Connection:writeFrom accepts at most %d bytes, not %d"):format(MAX_WRITE_BYTES, size), 2)
+        error(("tecs: TCPSocket:writeFrom accepts at most %d bytes, not %d"):format(MAX_WRITE_BYTES, size), 2)
     end
     if size == 0 then
         return 0
@@ -724,7 +738,7 @@ function binaryIO.Connection:writeFrom(source: IOBuffer, offset?: integer, count
     return size
 end
 
-function binaryIO.Connection:pendingWrites(): integer, string
+function binaryIO.TCPSocket:pendingWrites(): integer, string
     if self._closed then
         return nil, "connection is closed"
     end
@@ -735,7 +749,7 @@ function binaryIO.Connection:pendingWrites(): integer, string
     return pending
 end
 
-function binaryIO.Connection:drain(timeoutMs?: integer): boolean, string
+function binaryIO.TCPSocket:drain(timeoutMs?: integer): boolean, string
     if self._closed then
         return false, "connection is closed"
     end
@@ -747,7 +761,7 @@ function binaryIO.Connection:drain(timeoutMs?: integer): boolean, string
     return status > 0
 end
 
-function binaryIO.Connection:wait(timeoutMs?: integer): boolean, string
+function binaryIO.TCPSocket:wait(timeoutMs?: integer): boolean, string
     if self._closed then
         return false, "connection is closed"
     end
@@ -758,7 +772,7 @@ function binaryIO.Connection:wait(timeoutMs?: integer): boolean, string
     return status > 0
 end
 
-function binaryIO.Connection:close()
+function binaryIO.TCPSocket:close()
     if self._closed then
         return
     end
@@ -768,11 +782,11 @@ function binaryIO.Connection:close()
     closed()
 end
 
-function binaryIO.Server:isClosed(): boolean
+function binaryIO.TCPListener:isClosed(): boolean
     return self._closed
 end
 
-function binaryIO.Server:accept(): binaryIO.Connection, string
+function binaryIO.TCPListener:accept(): binaryIO.TCPSocket, string
     if self._closed then
         return nil, "server is closed"
     end
@@ -780,10 +794,10 @@ function binaryIO.Server:accept(): binaryIO.Connection, string
     if handle == nil then
         return nil
     end
-    return connectionFrom(handle)
+    return tcpSocketFrom(handle)
 end
 
-function binaryIO.Server:wait(timeoutMs?: integer): boolean, string
+function binaryIO.TCPListener:wait(timeoutMs?: integer): boolean, string
     if self._closed then
         return false, "server is closed"
     end
@@ -794,7 +808,7 @@ function binaryIO.Server:wait(timeoutMs?: integer): boolean, string
     return status > 0
 end
 
-function binaryIO.Server:close()
+function binaryIO.TCPListener:close()
     if self._closed then
         return
     end
@@ -804,15 +818,16 @@ function binaryIO.Server:close()
     closed()
 end
 
-function binaryIO.DatagramSocket:isClosed(): boolean
+function binaryIO.UDPSocket:isClosed(): boolean
     return self._closed
 end
 
-function binaryIO.Packet:close()
+function binaryIO.UDPPacket:close()
     self.address:close()
+    self.bytes:release()
 end
 
-function binaryIO.DatagramSocket:send(address: binaryIO.Address, port: integer, bytes: string): boolean, string
+function binaryIO.UDPSocket:send(address: binaryIO.Address, port: integer, bytes: string): boolean, string
     if self._closed then
         return false, "datagram socket is closed"
     end
@@ -821,14 +836,14 @@ function binaryIO.DatagramSocket:send(address: binaryIO.Address, port: integer, 
         return false, reason
     end
     validPort(port, false, 2)
-    validBytes(bytes, MAX_DATAGRAM_BYTES, "DatagramSocket:send", 2)
+    validBytes(bytes, MAX_DATAGRAM_BYTES, "UDPSocket:send", 2)
     if tonumber(C.tecsNetDatagramSend(self._handle, address._handle, port, bytes, #bytes)) == 0 then
         return false, loader.toString(C.tecsRustError())
     end
     return true
 end
 
-function binaryIO.DatagramSocket:receive(): binaryIO.Packet, string
+function binaryIO.UDPSocket:receive(): binaryIO.UDPPacket, string
     if self._closed then
         return nil, "datagram socket is closed"
     end
@@ -847,19 +862,24 @@ function binaryIO.DatagramSocket:receive(): binaryIO.Packet, string
     local host <const> = text ~= nil and loader.toBytes(text, tonumber(addressLength[0]) as integer) or ""
     local bytesLength <const> = loader.newArray("size_t[1]")
     local bytes <const> = C.tecsNetPacketBytes(datagram, bytesLength)
+    local length <const> = tonumber(bytesLength[0]) as integer
+    local payload <const> = buffer.new(length)
+    if length > 0 then
+        loader.copyTo(payload:getFFIPointer(), bytes, length)
+    end
     local packet <const> = setmetatable(
         {
             address = addressFrom(source, host),
             port = tonumber(C.tecsNetPacketPort(datagram)) as integer,
-            bytes = loader.toBytes(bytes, tonumber(bytesLength[0]) as integer),
-        } as binaryIO.Packet,
-        PacketMT
+            bytes = payload,
+        } as binaryIO.UDPPacket,
+        UDPPacketMT
     )
     C.tecsNetPacketDestroy(datagram)
     return packet
 end
 
-function binaryIO.DatagramSocket:wait(timeoutMs?: integer): boolean, string
+function binaryIO.UDPSocket:wait(timeoutMs?: integer): boolean, string
     if self._closed then
         return false, "datagram socket is closed"
     end
@@ -870,7 +890,7 @@ function binaryIO.DatagramSocket:wait(timeoutMs?: integer): boolean, string
     return status > 0
 end
 
-function binaryIO.DatagramSocket:close()
+function binaryIO.UDPSocket:close()
     if self._closed then
         return
     end
@@ -915,7 +935,7 @@ local function finish(operation: Operation, waitMs: integer): integer
         operation.future:complete(addressFrom(handle, operation.host))
     else
         local handle <const> = C.tecsNetOperationTakeStream(operation.handle)
-        operation.future:complete(connectionFrom(handle))
+        operation.future:complete(tcpSocketFrom(handle))
     end
     C.tecsNetOperationDestroy(operation.handle)
     operation.handle = nil
@@ -979,24 +999,24 @@ function binaryIO.resolve(host: string): FutureType<binaryIO.Address>
     return operation("resolve", host, handle).future as FutureType<binaryIO.Address>
 end
 
-function binaryIO.connect(address: binaryIO.Address, port: integer): FutureType<binaryIO.Connection>
+function binaryIO.connect(address: binaryIO.Address, port: integer): FutureType<binaryIO.TCPSocket>
     validPort(port, false, 2)
     local valid, addressReason <const> = validAddress(address, false, 2)
     if not valid then
-        return Future.failed(addressReason) as FutureType<binaryIO.Connection>
+        return Future.failed(addressReason) as FutureType<binaryIO.TCPSocket>
     end
     local ok, reason <const> = ensure()
     if not ok then
-        return Future.failed(reason) as FutureType<binaryIO.Connection>
+        return Future.failed(reason) as FutureType<binaryIO.TCPSocket>
     end
     local handle = C.tecsNetConnect(address._handle, port)
     if handle == nil then
-        return Future.failed(loader.toString(C.tecsRustError())) as FutureType<binaryIO.Connection>
+        return Future.failed(loader.toString(C.tecsRustError())) as FutureType<binaryIO.TCPSocket>
     end
-    return operation("connect", address.host, handle).future as FutureType<binaryIO.Connection>
+    return operation("connect", address.host, handle).future as FutureType<binaryIO.TCPSocket>
 end
 
-function binaryIO.listen(port: integer, address?: binaryIO.Address): binaryIO.Server, string
+function binaryIO.listen(port: integer, address?: binaryIO.Address): binaryIO.TCPListener, string
     validPort(port, true, 2)
     local valid, addressReason <const> = validAddress(address, true, 2)
     if not valid then
@@ -1010,7 +1030,7 @@ function binaryIO.listen(port: integer, address?: binaryIO.Address): binaryIO.Se
     if handle == nil then
         return nil, loader.toString(C.tecsRustError())
     end
-    local server = setmetatable({} as binaryIO.Server, ServerMT)
+    local server = setmetatable({} as binaryIO.TCPListener, TCPListenerMT)
     server.port = port
     server._handle = handle
     server._closed = false
@@ -1018,7 +1038,7 @@ function binaryIO.listen(port: integer, address?: binaryIO.Address): binaryIO.Se
     return server
 end
 
-function binaryIO.bind(port: integer, address?: binaryIO.Address): binaryIO.DatagramSocket, string
+function binaryIO.bind(port: integer, address?: binaryIO.Address): binaryIO.UDPSocket, string
     validPort(port, true, 2)
     local valid, addressReason <const> = validAddress(address, true, 2)
     if not valid then
@@ -1032,7 +1052,7 @@ function binaryIO.bind(port: integer, address?: binaryIO.Address): binaryIO.Data
     if handle == nil then
         return nil, loader.toString(C.tecsRustError())
     end
-    local socket = setmetatable({} as binaryIO.DatagramSocket, DatagramSocketMT)
+    local socket = setmetatable({} as binaryIO.UDPSocket, UDPSocketMT)
     socket.port = port
     socket._handle = handle
     socket._closed = false
@@ -1057,7 +1077,7 @@ function binaryIO.pending(): integer
     return #operations + stream.pending()
 end
 
-function binaryIO.quit(): boolean, string
+function binaryIO.shutdown(): boolean, string
     if not started then
         return true
     end

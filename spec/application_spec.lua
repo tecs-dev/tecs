@@ -111,7 +111,7 @@ describe("Application", function()
         assert.are.equal("ready", address.status, address.error)
         assert.are.equal(0, tecsIO.pending())
         address.value:close()
-        local stopped, reason = tecsIO.quit()
+        local stopped, reason = tecsIO.shutdown()
         assert.is_true(stopped, reason)
 
         app:_shutdown()
@@ -633,7 +633,7 @@ describe("Application", function()
         -- running one is being edited, and reloading the file that threw is
         -- exactly the way back. It counted for neither gate until it did.
         it("resumes a build that only runs the file watcher", function()
-            local app, ran, stop = crashing({ watch = { interval = 0 } })
+            local app, ran, stop = crashing({ watch = { intervalSeconds = 0 } })
             assert.is_true(app:_init())
 
             app:_iterate(nil, 0, nil)

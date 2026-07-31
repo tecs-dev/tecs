@@ -8,10 +8,10 @@
 ---   write-whole      `files.write`, receiving one Lua string.
 ---   writer-string    `Writer:write`, receiving sliced Lua strings.
 ---   writer-from      `Writer:writeFrom`, reading an existing Buffer.
----   string-buffer    `newStringStream(...):readBuffer()`.
----   buffer-alias     BufferStream's stable zero-copy `readBuffer`.
+---   string-buffer    `newStringStream(...):transferToBuffer()`.
+---   buffer-alias     BufferStream's stable zero-copy `transferToBuffer`.
 ---   byte-buffer      Borrowed ByteStream to a new owned Buffer.
----   file-buffer      `newFileStream(...):readBuffer()`.
+---   file-buffer      `newFileStream(...):transferToBuffer()`.
 ---   string-transfer  StringStream to BufferStream.
 ---   file-transfer    FileStream to BufferStream.
 ---   buffer-file      BufferStream to FileStream.
@@ -281,7 +281,7 @@ local function readInto(path: string, materialize: boolean): string, integer, in
     end
 
     local scratch <const> = ioModule.newBuffer()
-    scratch:reserve(CHUNK)
+    scratch:ensureCapacity(CHUNK)
     local pieces: {string}
     if materialize then
         pieces = {}
@@ -588,7 +588,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
             streams = 1,
             validate = function(hash: string)
                 local source <const> = ioModule.newStringStream(fixture)
-                local output <const> = source:readBuffer().value
+                local output <const> = source:transferToBuffer().value
                 checkBuffer("string-buffer", output, hash)
                 output:release()
                 source:close()
@@ -596,7 +596,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
             operation = function(): Observation
                 local source <const> = ioModule.newStringStream(fixture)
                 local started <const> = now()
-                local future <const> = source:readBuffer()
+                local future <const> = source:transferToBuffer()
                 local result <const> = asyncObservation(
                     started,
                     future,
@@ -613,7 +613,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
             streams = 1,
             validate = function(hash: string)
                 local source <const> = ioModule.newBufferStream(sourceBuffer)
-                local output <const> = source:readBuffer().value
+                local output <const> = source:transferToBuffer().value
                 if output ~= sourceBuffer then
                     error("bench: buffer-alias did not retain the source Buffer", 0)
                 end
@@ -623,7 +623,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
             operation = function(): Observation
                 local source <const> = ioModule.newBufferStream(sourceBuffer)
                 local started <const> = now()
-                local future <const> = source:readBuffer()
+                local future <const> = source:transferToBuffer()
                 local result <const> = asyncObservation(
                     started,
                     future,
@@ -642,7 +642,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
             streams = 1,
             validate = function(hash: string)
                 local source <const> = ioModule.newByteStream(sourceBuffer:getFFIPointer() as loader.CValue, size)
-                local output <const> = source:readBuffer().value
+                local output <const> = source:transferToBuffer().value
                 checkBuffer("byte-buffer", output, hash)
                 output:release()
                 source:close()
@@ -650,7 +650,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
             operation = function(): Observation
                 local source <const> = ioModule.newByteStream(sourceBuffer:getFFIPointer() as loader.CValue, size)
                 local started <const> = now()
-                local future <const> = source:readBuffer()
+                local future <const> = source:transferToBuffer()
                 local result <const> = asyncObservation(
                     started,
                     future,
@@ -667,7 +667,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
             streams = 1,
             validate = function(hash: string)
                 local source <const> = ioModule.newFileStream(sourcePath)
-                local output <const> = source:readBuffer().value
+                local output <const> = source:transferToBuffer().value
                 checkBuffer("file-buffer", output, hash)
                 output:release()
                 source:close()
@@ -675,7 +675,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
             operation = function(): Observation
                 local source <const> = ioModule.newFileStream(sourcePath)
                 local started <const> = now()
-                local future <const> = source:readBuffer()
+                local future <const> = source:transferToBuffer()
                 local result <const> = asyncObservation(
                     started,
                     future,
