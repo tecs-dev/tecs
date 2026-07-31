@@ -12,6 +12,10 @@ local type types = require("tecs.io.types")
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
 local type WriteRange = types.WriteRange
+local type Reader = types.Reader
+local type Writer = types.Writer
+local type ReadableStream = types.ReadableStream
+local type ReadWriteStream = types.ReadWriteStream
 
 local floor <const> = math.floor
 local max <const> = math.max
@@ -41,10 +45,30 @@ local record OwnedWriteRange is WriteRange
     _capacity: integer
     _released: boolean
 end
+local record BufferReader is Reader
+    _view: ByteView
+    _at: integer
+    _closed: boolean
+    _readPointer: function(self: BufferReader, count: integer): loader.BytePointer, integer, string
+end
+local record BufferWriter is Writer
+    _buffer: IOBuffer
+    _at: integer
+    _closed: boolean
+    _reservedCapacity: integer
+    _reservedPrevious: integer
+    _reserve: function(self: BufferWriter, count: integer): loader.BytePointer, string
+    _commit: function(self: BufferWriter, used: integer)
+    _writePointer: function(self: BufferWriter, pointer: loader.BytePointer, length: integer): boolean, string
+end
 local OwnedBufferMT <const>: metatable<OwnedBuffer> = {__index = OwnedBuffer}
 local OwnedViewMT <const>: metatable<OwnedView> = {__index = OwnedView}
 local OwnedWriteRangeMT <const>: metatable<OwnedWriteRange> = {__index = OwnedWriteRange}
+local BufferReaderMT <const>: metatable<BufferReader> = {__index = BufferReader}
+local BufferWriterMT <const>: metatable<BufferWriter> = {__index = BufferWriter}
 local rawSetMetatable <const> = setmetatable as function(any, any): any
+local makeBufferStream: function(source: IOBuffer, contentType?: string): ReadWriteStream
+local makeViewStream: function(source: ByteView, contentType?: string): ReadableStream
 
 local function integer(value: integer, what: string, level: integer): integer
     if type(value) ~= "number" or value ~= floor(value) or value < 0 or value > MAX_INTEGER then
@@ -113,6 +137,47 @@ local function commitWrite(self: OwnedBuffer, offset: integer, count: integer)
         )
     end
     self._length = max(self._length, finish)
+end
+local function prepareBufferWrite(destination: IOBuffer, offset: integer, count: integer): loader.BytePointer, integer
+    local previous <const> = destination:length()
+    if (getmetatable(destination as any) as any) == (OwnedBufferMT as any) then
+        return prepareWrite(destination as OwnedBuffer, offset, count), previous
+    end
+    destination:resize(max(previous, offset + count))
+    return destination:getFFIPointer() + offset, previous
+end
+local function commitBufferWrite(destination: IOBuffer, offset: integer, count: integer, previous: integer)
+    if (getmetatable(destination as any) as any) == (OwnedBufferMT as any) then
+        if count == 0 then
+            (destination as OwnedBuffer)._length = previous
+        else
+            commitWrite(destination as OwnedBuffer, offset, count)
+        end
+        return
+    end
+    destination:resize(count == 0 and previous or max(previous, offset + count))
+end
+function OwnedBuffer:newReader(): Reader
+    open(self, 2)
+    return rawSetMetatable({_view = self:view(), _at = 0, _closed = false} as BufferReader, BufferReaderMT) as Reader
+end
+function OwnedBuffer:newStream(contentType?: string): ReadWriteStream
+    open(self, 2)
+    return makeBufferStream(self, contentType)
+end
+function OwnedBuffer:newWriter(): Writer
+    open(self, 2)
+    self:clear()
+    return rawSetMetatable(
+        {
+            _buffer = self,
+            _at = 0,
+            _closed = false,
+            _reservedCapacity = 0,
+            _reservedPrevious = 0,
+        } as BufferWriter,
+        BufferWriterMT
+    ) as Writer
 end
 function OwnedBuffer:length(): integer
     open(self, 2)
@@ -208,6 +273,18 @@ function OwnedView:length(): integer
     end
     return self._length
 end
+function OwnedView:newReader(): Reader
+    if self._released then
+        error("tecs: io.ByteView is released", 2)
+    end
+    return rawSetMetatable({_view = self:view(), _at = 0, _closed = false} as BufferReader, BufferReaderMT) as Reader
+end
+function OwnedView:newStream(contentType?: string): ReadableStream
+    if self._released then
+        error("tecs: io.ByteView is released", 2)
+    end
+    return makeViewStream(self, contentType)
+end
 function OwnedView:getString(): string
     if self._released then
         error("tecs: io.ByteView is released", 2)
@@ -273,10 +350,191 @@ function OwnedWriteRange:close()
     self._released = true
     self._pointer = nil
 end
+function BufferReader:read(count: integer): string, string
+    if self._closed then
+        return nil, "the reader is closed"
+    end
+    if self._at >= self._view:length() then
+        return ""
+    end
+    local taking <const> = math.min(math.max(1, count), self._view:length() - self._at)
+    local result <const> = loader.toBytes((self._view:getFFIPointer() + self._at) as loader.CValue, taking)
+    self._at = self._at + taking
+    return result
+end
+function BufferReader:_readPointer(count: integer): loader.BytePointer, integer, string
+    if self._closed then
+        return nil, nil, "the reader is closed"
+    end
+    if self._at >= self._view:length() then
+        return nil, 0
+    end
+    local taking <const> = math.min(math.max(1, count), self._view:length() - self._at)
+    local pointer <const> = self._view:getFFIPointer() + self._at
+    self._at = self._at + taking
+    return pointer, taking
+end
+function BufferReader:readInto(destination: IOBuffer, count: integer, offset?: integer): integer, string
+    if self._closed then
+        return nil, "the reader is closed"
+    end
+    count = integer(count, "Reader:readInto count", 2)
+    offset = integer(offset or 0, "Reader:readInto offset", 2)
+    if count == 0 or self._at >= self._view:length() then
+        return 0
+    end
+    local taking <const> = math.min(count, self._view:length() - self._at)
+    local output <const>, previous = prepareBufferWrite(destination, offset, taking)
+    ffi.copy(output as ffi.CData, (self._view:getFFIPointer() + self._at) as ffi.CData, taking)
+    commitBufferWrite(destination, offset, taking, previous)
+    self._at = self._at + taking
+    return taking
+end
+function BufferReader:transferTo(destination: Writer): integer, string
+    if self._closed then
+        return nil, "the reader is closed"
+    end
+    local remaining = self._view:length() - self._at
+    if remaining == 0 then
+        return 0
+    end
+    local dynamic <const> = destination as {string: any}
+    if type(dynamic._writePointer) == "function" then
+        local wrote <const>, reason = (
+            dynamic._writePointer as function(any, loader.BytePointer, integer): boolean, string
+        )(destination, self._view:getFFIPointer() + self._at, remaining)
+        if not wrote then
+            return nil, reason
+        end
+        self._at = self._at + remaining
+        return remaining
+    end
+    local total = 0
+    while remaining > 0 do
+        local wrote <const>, reason = destination:writeView(self._view, self._at, remaining)
+        if wrote == nil then
+            return nil, reason
+        end
+        if wrote <= 0 then
+            return nil, "stream writer made no progress"
+        end
+        self._at = self._at + wrote
+        total = total + wrote
+        remaining = remaining - wrote
+    end
+    return total
+end
+function BufferReader:close()
+    if not self._closed then
+        self._closed = true
+        self._view:close()
+    end
+end
+function BufferWriter:write(bytes: string): boolean, string
+    if self._closed then
+        return false, "the writer is closed"
+    end
+    if self._buffer:isReleased() then
+        return false, "stream buffer is released"
+    end
+    self._buffer:setString(bytes, self._at)
+    self._at = self._at + #bytes
+    return true
+end
+function BufferWriter:_reserve(count: integer): loader.BytePointer, string
+    if self._closed then
+        return nil, "the writer is closed"
+    end
+    if self._buffer:isReleased() then
+        return nil, "stream buffer is released"
+    end
+    local output <const>, previous = prepareBufferWrite(self._buffer, self._at, count)
+    self._reservedCapacity = count
+    self._reservedPrevious = previous
+    return output
+end
+function BufferWriter:_commit(used: integer)
+    if used < 0 or used > self._reservedCapacity then
+        error("tecs: stream writer committed outside its reserved output", 2)
+    end
+    commitBufferWrite(self._buffer, self._at, used, self._reservedPrevious)
+    self._at = self._at + used
+    self._reservedCapacity = 0
+    self._reservedPrevious = 0
+end
+function BufferWriter:_writePointer(pointer: loader.BytePointer, length: integer): boolean, string
+    local output <const>, reason = self:_reserve(length)
+    if output == nil then
+        return false, reason
+    end
+    ffi.copy(output as ffi.CData, pointer as ffi.CData, length)
+    self:_commit(length)
+    return true
+end
+function BufferWriter:writeFrom(source: IOBuffer, offset?: integer, count?: integer): integer, string
+    if self._closed then
+        return nil, "the writer is closed"
+    end
+    if self._buffer:isReleased() then
+        return nil, "stream buffer is released"
+    end
+    if source == self._buffer then
+        return nil, "cannot write a buffer into itself"
+    end
+    offset, count = range(source:length(), offset, count, "io.Buffer", 2)
+    if count == 0 then
+        return 0
+    end
+    local output <const>, previous = prepareBufferWrite(self._buffer, self._at, count)
+    ffi.copy(output as ffi.CData, (source:getFFIPointer() + offset) as ffi.CData, count)
+    commitBufferWrite(self._buffer, self._at, count, previous)
+    self._at = self._at + count
+    return count
+end
+function BufferWriter:writeView(source: ByteView, offset?: integer, count?: integer): integer, string
+    if self._closed then
+        return nil, "the writer is closed"
+    end
+    if self._buffer:isReleased() then
+        return nil, "stream buffer is released"
+    end
+    offset, count = range(source:length(), offset, count, "io.ByteView", 2)
+    if count == 0 then
+        return 0
+    end
+    local output <const>, previous = prepareBufferWrite(self._buffer, self._at, count)
+    ffi.copy(output as ffi.CData, (source:getFFIPointer() + offset) as ffi.CData, count)
+    commitBufferWrite(self._buffer, self._at, count, previous)
+    self._at = self._at + count
+    return count
+end
+function BufferWriter:flush(): boolean, string
+    if self._closed then
+        return false, "the writer is closed"
+    end
+    if self._buffer:isReleased() then
+        return false, "stream buffer is released"
+    end
+    return true
+end
+function BufferWriter:close(): boolean, string
+    if self._closed then
+        return true
+    end
+    self._closed = true
+    if self._buffer:isReleased() then
+        return false, "stream buffer is released"
+    end
+    return true
+end
 local record buffer
     new: function(initial?: integer | string): IOBuffer
     prepareWrite: function(destination: IOBuffer, offset: integer, count: integer): loader.BytePointer, integer
     commitWrite: function(destination: IOBuffer, offset: integer, count: integer, previousLength: integer)
+    setStreamFactories: function(
+        bufferFactory: function(IOBuffer, string): ReadWriteStream,
+        viewFactory: function(ByteView, string): ReadableStream
+    )
 end
 function buffer.new(initial?: integer | string): IOBuffer
     local length = type(initial) == "string" and #(initial as string)
@@ -290,22 +548,15 @@ function buffer.new(initial?: integer | string): IOBuffer
     return self
 end
 function buffer.prepareWrite(destination: IOBuffer, offset: integer, count: integer): loader.BytePointer, integer
-    local previous <const> = destination:length()
-    if (getmetatable(destination as any) as any) == (OwnedBufferMT as any) then
-        return prepareWrite(destination as OwnedBuffer, offset, count), previous
-    end
-    destination:resize(max(previous, offset + count))
-    return destination:getFFIPointer() + offset, previous
+    return prepareBufferWrite(destination, offset, count)
 end
 function buffer.commitWrite(destination: IOBuffer, offset: integer, count: integer, previous: integer)
-    if (getmetatable(destination as any) as any) == (OwnedBufferMT as any) then
-        if count == 0 then
-            (destination as OwnedBuffer)._length = previous
-        else
-            commitWrite(destination as OwnedBuffer, offset, count)
-        end
-        return
-    end
-    destination:resize(count == 0 and previous or max(previous, offset + count))
+    commitBufferWrite(destination, offset, count, previous)
+end
+function buffer.setStreamFactories(
+    bufferFactory: function(IOBuffer, string): ReadWriteStream, viewFactory: function(ByteView, string): ReadableStream
+)
+    makeBufferStream = bufferFactory
+    makeViewStream = viewFactory
 end
 return buffer

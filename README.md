@@ -842,10 +842,7 @@ UUIDs, hashes and checksums remain under `tecs.data`. They are persisted
 identities or operate on byte strings, and none is numeric geometry merely
 because its implementation contains arithmetic or randomness.
 
-## Data transforms and typed stores
-
-Encoding, hashing and decompression share the public `tecs.data` module because
-a save is encoded, compressed and stamped as one task.
+## Data identities and typed stores
 
 UUID generation shares that module because its result is an identifier stored
 in data, not a mathematical operation. `uuid4` uses operating-system randomness
@@ -854,12 +851,10 @@ and process-local ordering for database and protocol identifiers. Both cross
 the existing Rust ABI because the runtime already depends on the implementation
 and entropy provider.
 
-Sharing the module qualifies the verbs. `encode` on a module that also
-compresses would name two things at once, so JSON is `encodeJSON` and `decodeJSON`
-while the compressors keep `deflate` and `inflate`, which already say their
-format. lua-cjson's own names come through unchanged, sentinels and settings
-alike, for the reason `STYLE.md` gives: renaming them would leave that
-library's documentation describing names that do not exist here.
+JSON uses `encodeJSON` and `decodeJSON` so a call site names the representation
+it crosses. lua-cjson's own names come through unchanged, sentinels and
+settings alike, for the reason `STYLE.md` gives: renaming them would leave
+that library's documentation describing names that do not exist here.
 
 Typed stores live under `tecs.data` too, rather than under `tecs.ecs`.
 `tecs.data.Store` is an independent in-memory value bag, and a world merely
@@ -882,41 +877,16 @@ the Rust ABI because the runtime's pinned `sha2` implementation is shared with
 the build that stamps embedded payloads. `data.adler32` is there for the format
 that specifies it.
 
-`data.inflate` reads zlib streams and `data.inflateRaw` reads the
-DEFLATE inside them. zlib decodes both: it is pinned, bound, and carried
-through the ABI check, so a decoder written in Lua beside it would be a second
-implementation of the format to keep correct, and the slower one. Both entry
-points go through `inflate` over a `z_stream` rather than `uncompress`, because
-`uncompress` wants the decompressed size up front and treats a wrong one as a
-failure while `sizeHint` is a hint whose whole contract is that being wrong
-costs a copy, and because `inflateInit2_` takes the window size, so negating it
-selects the raw form and one loop answers both.
-
-Writing uses the same whole-buffer shape. `data.deflate` produces a zlib
-stream and `data.deflateRaw` the RFC 1951 bytes inside one, both from a
-single output allocation sized by `deflateBound`. The optional level is zlib's
-own `-1` through 9 rather than a second vocabulary the engine would have to
-translate and document. CRC-32 joins Adler-32 there, for the formats such as
-PNG, gzip and ZIP that specify it; neither checksum is presented as content
-identity or integrity.
-
-A malformed stream raises rather than returning: an over-subscribed code table,
-a copy reaching before the start of the output, a stored block whose length
-disagrees with its complement, a truncated stream, and a trailer that does not
-match what came out. zlib decides all of those but the truncation, which
-the engine decides by handing over the whole input at once and reading a call
-that stopped with output room to spare as a stream that ended early. The
-messages are zlib's own, so `spec/compress_spec.lua` asserts that each of those
-raises and never which sentence it raised; pinning a suite to one
-implementation's strings is what makes the next swap expensive.
+CRC-32 joins Adler-32 for formats such as PNG, gzip and ZIP that specify it;
+neither checksum is presented as content identity or integrity.
 
 ## Compiled regular expressions
 
 Regular expressions are `tecs.regex`, their own public module rather than a
-section of `tecs.data`. The distinction is lifetime: a data transform consumes
-one whole byte string and answers another, while a regex is compiled state a
-caller deliberately keeps and applies many times. Filing it under data would
-make a stateful text matcher read like another encoder.
+section of `tecs.data`. The distinction is lifetime: a regex is compiled state
+a caller deliberately keeps and applies many times, while data identities are
+immediate values. Filing it under data would make a stateful text matcher read
+like another checksum.
 
 Rust's `regex::bytes::Regex` is the implementation because a Lua string is a
 byte string, not a promise of UTF-8. Patterns are still UTF-8 Rust regex syntax,
@@ -1463,18 +1433,18 @@ drain that allocation directly. A generic `write(any)` lost both the cdata
 length and the right to check a range, so the explicit buffer and offset
 contract won.
 
-Whole-source operations return `Future` values. On streaming backends, such as
-the direct SDL filesystem backend, one application poll shares sixteen 64 KiB
-read or write steps round-robin across every pending transfer. That caps
-aggregate streaming I/O work at about one MiB; a generic read-and-write copy
-advances about 512 KiB of payload when it is the only transfer. A platform
-backend without `openWrite` uses the whole-file fallback instead: it
-accumulates chunks, then `close` concatenates and writes the complete payload
-in one operation. That compatibility path is not covered by the per-poll byte
-bound. A blocking wait drains streaming transfers against its actual time
-budget. Stable buffer sources bypass the scratch copy, strings retain their
-immutable Lua storage, and `hasBuffer` says exactly when `transferToBuffer`
-returns the retained object instead of materializing a new one.
+Whole-source operations are synchronous. Generic copies and discards open the
+required endpoints, borrow a 64 KiB buffer from a bounded scratch pool, move
+chunks until completion, close both endpoints, and return the buffer. The call
+site therefore owns the honest cost of moving the bytes without allocating
+transfer storage each time. Code that must overlap a large transfer with the
+main loop can run the same operation in a worker instead of turning every
+stream transfer into scheduled main-thread state. A platform backend without
+`openWrite` uses the whole-file fallback: it accumulates chunks, then `close`
+concatenates and writes the complete payload in one operation. Stable buffer
+sources bypass the scratch copy, strings retain their immutable Lua storage,
+and `hasBuffer` says exactly when `transferToBuffer` returns the retained
+object instead of materializing a new one.
 
 The descriptor owns no cursor and does not take policy away from its backing:
 paths still open through `tecs.io.files`, TCP and UDP handles are constructed
@@ -1484,6 +1454,18 @@ by `tecs.io`, and media type and length are lazy metadata methods.
 another operation every structural implementation had to keep consistent.
 `newStreamWithMetadata` wraps those methods without eagerly opening or reading
 the source.
+
+Byte transforms compose at the endpoint layer. An `InflateReader` pulls
+compressed input only when its consumer reads, while a `DeflateWriter` pushes
+compressed output as its caller writes; Base64, hexadecimal and character
+encoding conversion use the same directional split. The wrapper owns and
+closes the endpoint beneath it, so a chain still has one lifetime. Partial
+DEFLATE blocks, encoding quanta and multibyte characters are bounded state,
+not a reason to retain a whole asset. Memory readers lend retained byte
+pointers to filters, memory writers reserve their destination range directly,
+and other endpoints borrow bounded buffers from the shared pool. After those
+buffers have warmed, a transfer allocates no intermediate payload storage even
+when it crosses a codec that must copy or expand the bytes.
 
 `tecs.Closeable` is the root structural lifetime contract because cursors,
 network handles, streams, and clients cross subsystem boundaries. It contains
@@ -1843,8 +1825,8 @@ closing the packet releases both.
 The application polls `tecs.io` once per iteration, beside the other services
 whose finite asynchronous work has to settle without a system remembering to
 drive it. The empty path is one list-length check. Keeping that check out of a
-game with no pending work was not worth the failure mode where a resolution,
-connection or transfer stays pending forever because the game forgot a pump.
+game with no pending work was not worth the failure mode where a resolution or
+connection stays pending forever because the game forgot a pump.
 The poll remains public because a headless server using the ECS drives the same
 module without an `Application`, and `Future:wait` drives the same source when
 blocking outside a frame is the honest operation.

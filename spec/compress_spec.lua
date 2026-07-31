@@ -33,8 +33,85 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local ffi = require("ffi")
-local data = require("tecs.data")
 local zlib = require("tecs.ffi.zlib")
+local ioModule = require("tecs").io
+
+local function bufferWriter(destination)
+    return destination:newWriter()
+end
+
+local function sourceReader(bytes)
+    if type(bytes) == "string" then
+        return ioModule.newStringReader(bytes)
+    end
+    return bytes:newReader()
+end
+
+local function deflateInto(bytes, destination, level, raw)
+    destination:clear()
+    local writer = ioModule.newDeflateWriter(bufferWriter(destination), { level = level, raw = raw })
+    local wrote, reason
+    if type(bytes) == "string" then
+        wrote, reason = writer:write(bytes)
+    else
+        wrote, reason = writer:writeView(bytes)
+    end
+    if not wrote then
+        writer:close()
+        error(reason, 0)
+    end
+    local closed, closeReason = writer:close()
+    if not closed then
+        error(closeReason, 0)
+    end
+    return destination
+end
+
+local function deflate(bytes, level)
+    local destination = ioModule.newBuffer()
+    deflateInto(bytes, destination, level, false)
+    local result = destination:getString()
+    destination:close()
+    return result
+end
+
+local function deflateRaw(bytes, level)
+    local destination = ioModule.newBuffer()
+    deflateInto(bytes, destination, level, true)
+    local result = destination:getString()
+    destination:close()
+    return result
+end
+
+local function inflateInto(bytes, destination, maxBytes, raw)
+    destination:clear()
+    local reader = ioModule.newInflateReader(sourceReader(bytes), { maxBytes = maxBytes, raw = raw })
+    local writer = bufferWriter(destination)
+    local copied, reason = reader:transferTo(writer)
+    reader:close()
+    writer:close()
+    if copied == nil then
+        destination:clear()
+        error(reason, 0)
+    end
+    return destination
+end
+
+local function inflate(bytes, _sizeHint, maxBytes)
+    local destination = ioModule.newBuffer()
+    inflateInto(bytes, destination, maxBytes, false)
+    local result = destination:getString()
+    destination:close()
+    return result
+end
+
+local function inflateRaw(bytes, _sizeHint, maxBytes)
+    local destination = ioModule.newBuffer()
+    inflateInto(bytes, destination, maxBytes, true)
+    local result = destination:getString()
+    destination:close()
+    return result
+end
 
 -- Streams are carried as hex so this file stays text and diffs like text.
 local function bytes(hex)
@@ -146,12 +223,12 @@ local function mixture(size)
     return table.concat(pieces):sub(1, size)
 end
 
-describe("data.inflate", function()
+describe("io.newInflateReader", function()
     it("reads a zlib stream this tree did not produce", function()
         local stream = idatOf("spec/fixtures/split.png")
         assert.is_not_nil(stream, "the fixture has an IDAT chunk")
 
-        local pixels = data.inflate(stream)
+        local pixels = inflate(stream)
 
         assert.are.equal(4 * (1 + 4 * 4), #pixels)
         -- Every row of that image carries filter type zero, which is the byte
@@ -162,11 +239,11 @@ describe("data.inflate", function()
     end)
 
     it("reads a stored block", function()
-        assert.are.equal(STORED_TEXT, data.inflate(STORED))
+        assert.are.equal(STORED_TEXT, inflate(STORED))
     end)
 
     it("reads a dynamic block", function()
-        assert.are.equal(DYNAMIC_TEXT, data.inflate(DYNAMIC))
+        assert.are.equal(DYNAMIC_TEXT, inflate(DYNAMIC))
     end)
 
     it("grows its output rather than truncating it", function()
@@ -176,7 +253,7 @@ describe("data.inflate", function()
         end
         local expected = string.rep(table.concat(unit), 512)
         assert.are.equal(32768, #expected)
-        assert.are.equal(expected, data.inflate(GROW))
+        assert.are.equal(expected, inflate(GROW))
     end)
 
     it("returns the original bytes at every size around its buffer", function()
@@ -187,7 +264,7 @@ describe("data.inflate", function()
         for _, size in ipairs({ 0, 1, 2, 4095, 4096, 4097, 8192, 100000 }) do
             local text = mixture(size)
             assert.are.equal(size, #text)
-            assert.are.equal(text, data.inflate(deflated(text, 6)))
+            assert.are.equal(text, inflate(deflated(text, 6)))
         end
     end)
 
@@ -208,26 +285,9 @@ describe("data.inflate", function()
             string.rep(DYNAMIC_TEXT, 40),
         }) do
             for _, level in ipairs({ 0, 1, 6, 9 }) do
-                assert.are.equal(text, data.inflate(deflated(text, level)))
+                assert.are.equal(text, inflate(deflated(text, level)))
             end
         end
-    end)
-
-    it("gets the same answer whatever the size hint says", function()
-        -- The hint is an allocation and never a limit: too small still grows,
-        -- and too large still stops where the stream does.
-        assert.are.equal(STORED_TEXT, data.inflate(STORED, 1))
-        assert.are.equal(STORED_TEXT, data.inflate(STORED, #STORED_TEXT))
-        assert.are.equal(STORED_TEXT, data.inflate(STORED, 1000000))
-
-        -- And the same at a size that fills the hint exactly rather than
-        -- stopping inside it, which is the case an exact hint gets wrong by
-        -- deciding the stream ended when only the buffer did.
-        local text = mixture(9000)
-        local stream = deflated(text, 6)
-        assert.are.equal(text, data.inflate(stream, #text))
-        assert.are.equal(text, data.inflate(stream, #text - 1))
-        assert.are.equal(text, data.inflate(stream, #text + 1))
     end)
 
     it("refuses a stored block whose two lengths disagree", function()
@@ -236,29 +296,29 @@ describe("data.inflate", function()
         -- the inverted copy is a corrupt block that would otherwise be copied
         -- out at whatever length the first copy claimed.
         local broken = STORED:sub(1, 5) .. "\214" .. STORED:sub(7)
-        assert.is_false(pcall(data.inflate, broken))
+        assert.is_false(pcall(inflate, broken))
     end)
 
     it("refuses bytes that are not a zlib stream", function()
-        assert.is_false(pcall(data.inflate, "not compressed at all"))
+        assert.is_false(pcall(inflate, "not compressed at all"))
     end)
 
     it("refuses a stream too short to be one", function()
-        assert.is_false(pcall(data.inflate, "\1\2\3"))
-        assert.is_false(pcall(data.inflate, ""))
+        assert.is_false(pcall(inflate, "\1\2\3"))
+        assert.is_false(pcall(inflate, ""))
     end)
 
     it("refuses a header whose check word does not add up", function()
         -- Compression method still 8, flag byte adjusted so the two together
         -- are no longer a multiple of thirty-one.
-        assert.is_false(pcall(data.inflate, "\120\2" .. STORED:sub(3)))
+        assert.is_false(pcall(inflate, "\120\2" .. STORED:sub(3)))
     end)
 
     it("does not return output the checksum disagrees with", function()
         -- The last four bytes are the Adler-32 of what was compressed. A
         -- stream that decodes cleanly but came from different bytes is what
         -- the trailer exists to catch, so a mismatch must not return.
-        assert.is_false(pcall(data.inflate, STORED:sub(1, #STORED - 1) .. "\0"))
+        assert.is_false(pcall(inflate, STORED:sub(1, #STORED - 1) .. "\0"))
     end)
 
     it("refuses a preset dictionary rather than decoding without it", function()
@@ -266,20 +326,19 @@ describe("data.inflate", function()
         -- anyway produces wrong output that looks like output.
         local stream = withPresetDictionary()
         assert.is_not_nil(stream, "a valid header with FDICT set exists")
-        assert.is_false(pcall(data.inflate, stream))
+        assert.is_false(pcall(inflate, stream))
     end)
 
     it("stops on a truncated stream instead of returning what it has", function()
-        assert.is_false(pcall(data.inflate, DYNAMIC:sub(1, 40)))
+        assert.is_false(pcall(inflate, DYNAMIC:sub(1, 40)))
         -- And at the other end: a whole stream missing only its trailer, which
         -- is the truncation a decoder is likeliest to accept by accident.
-        assert.is_false(pcall(data.inflate, STORED:sub(1, #STORED - 4)))
+        assert.is_false(pcall(inflate, STORED:sub(1, #STORED - 4)))
     end)
 end)
 
-describe("data.deflate", function()
+describe("io.newDeflateWriter", function()
     it("compresses and inflates retained views after their buffers close", function()
-        local ioModule = require("tecs").io
         local source = ioModule.newBuffer("payload")
         local sourceView = source:view()
         sourceView.getString = function()
@@ -287,8 +346,8 @@ describe("data.deflate", function()
         end
         source:close()
 
-        local wrapped = data.deflate(sourceView)
-        local raw = data.deflateRaw(sourceView)
+        local wrapped = deflate(sourceView)
+        local raw = deflateRaw(sourceView)
         local wrappedBuffer = ioModule.newBuffer(wrapped)
         local rawBuffer = ioModule.newBuffer(raw)
         local wrappedView = wrappedBuffer:view()
@@ -296,8 +355,8 @@ describe("data.deflate", function()
         wrappedBuffer:close()
         rawBuffer:close()
 
-        assert.are.equal("payload", data.inflate(wrappedView))
-        assert.are.equal("payload", data.inflateRaw(rawView))
+        assert.are.equal("payload", inflate(wrappedView))
+        assert.are.equal("payload", inflateRaw(rawView))
 
         sourceView:close()
         wrappedView:close()
@@ -306,32 +365,31 @@ describe("data.deflate", function()
 
     it("round trips zlib and raw streams", function()
         local text = mixture(32768)
-        assert.are.equal(text, data.inflate(data.deflate(text)))
-        assert.are.equal(text, data.inflateRaw(data.deflateRaw(text)))
+        assert.are.equal(text, inflate(deflate(text)))
+        assert.are.equal(text, inflateRaw(deflateRaw(text)))
     end)
 
     it("writes a valid empty stream", function()
-        assert.are.equal("", data.inflate(data.deflate("")))
-        assert.are.equal("", data.inflateRaw(data.deflateRaw("")))
+        assert.are.equal("", inflate(deflate("")))
+        assert.are.equal("", inflateRaw(deflateRaw("")))
     end)
 
-    it("reuses caller-owned buffers for wrapped and raw streams", function()
-        local ioModule = require("tecs").io
+    it("pipelines caller-owned buffers for wrapped and raw streams", function()
         local text = mixture(32768)
         local compressed = ioModule.newBuffer("discarded")
         local restored = ioModule.newBuffer("discarded")
 
-        assert.are.equal(#data.deflate(text), data.deflateInto(text, compressed))
+        assert.are.equal(compressed, deflateInto(text, compressed, nil, false))
         local capacity = compressed:capacity()
         local compressedView = compressed:view()
-        assert.are.equal(#text, data.inflateInto(compressedView, restored, #text))
+        assert.are.equal(restored, inflateInto(compressedView, restored, nil, false))
         compressedView:close()
         assert.are.equal(text, restored:getString())
 
-        assert.are.equal(#data.deflateRaw(text), data.deflateRawInto(text, compressed))
+        assert.are.equal(compressed, deflateInto(text, compressed, nil, true))
         assert.are.equal(capacity, compressed:capacity())
         compressedView = compressed:view()
-        assert.are.equal(#text, data.inflateRawInto(compressedView, restored, #text))
+        assert.are.equal(restored, inflateInto(compressedView, restored, nil, true))
         compressedView:close()
         assert.are.equal(text, restored:getString())
 
@@ -340,39 +398,41 @@ describe("data.deflate", function()
     end)
 
     it("enforces a hard decompressed-output ceiling", function()
-        local ioModule = require("tecs").io
         local text = string.rep("expands", 100)
-        local compressed = data.deflate(text)
+        local compressed = deflate(text)
         local destination = ioModule.newBuffer("old bytes")
 
         assert.has_error(function()
-            data.inflate(compressed, nil, #text - 1)
+            inflate(compressed, nil, #text - 1)
         end)
         assert.has_error(function()
-            data.inflateInto(compressed, destination, nil, #text - 1)
+            inflateInto(compressed, destination, #text - 1, false)
         end)
         assert.are.equal(0, destination:length())
-        assert.are.equal(text, data.inflate(compressed, #text, #text))
+        assert.are.equal(text, inflate(compressed, #text, #text))
         destination:close()
     end)
 
     it("accepts every compression level and rejects invalid ones", function()
         local text = string.rep("compress me", 100)
         for level = 0, 9 do
-            assert.are.equal(text, data.inflate(data.deflate(text, level)))
+            assert.are.equal(text, inflate(deflate(text, level)))
         end
-        assert.has_error(function()
-            data.deflate(text, 10)
-        end)
-        assert.has_error(function()
-            data.deflate(text, 1.5)
-        end)
+        for _, level in ipairs({ 10, 1.5 }) do
+            local destination = ioModule.newBuffer()
+            local writer = bufferWriter(destination)
+            assert.has_error(function()
+                ioModule.newDeflateWriter(writer, { level = level })
+            end)
+            writer:close()
+            destination:close()
+        end
     end)
 end)
 
-describe("data.inflateRaw", function()
+describe("io.newInflateReader raw mode", function()
     it("reads a stream with no wrapper", function()
-        assert.are.equal(RAW_TEXT, data.inflateRaw(RAW))
+        assert.are.equal(RAW_TEXT, inflateRaw(RAW))
     end)
 
     it("reads the DEFLATE inside a zlib stream", function()
@@ -383,15 +443,15 @@ describe("data.inflateRaw", function()
             local text = mixture(size)
             local stream = deflated(text, 6)
             local raw = stream:sub(3, #stream - 4)
-            assert.are.equal(text, data.inflateRaw(raw))
-            assert.are.equal(text, data.inflateRaw(raw, #text))
+            assert.are.equal(text, inflateRaw(raw))
+            assert.are.equal(text, inflateRaw(raw, #text))
         end
     end)
 
     it("does not read a wrapped stream as a raw one", function()
         -- The two header bytes are not a block header, so this fails inside
         -- the first block rather than producing something.
-        assert.is_false(pcall(data.inflateRaw, STORED))
+        assert.is_false(pcall(inflateRaw, STORED))
     end)
 
     it("refuses a code table with more codes than it has room for", function()
@@ -400,14 +460,14 @@ describe("data.inflateRaw", function()
         -- distance counts, and a code-length alphabet declaring four one-bit
         -- codes, which is two more than one bit can distinguish. Decoding
         -- against it would return whichever symbol the walk reached first.
-        assert.is_false(pcall(data.inflateRaw, "\5\0\146\4"))
+        assert.is_false(pcall(inflateRaw, "\5\0\146\4"))
     end)
 
     it("refuses a copy reaching before the start of the output", function()
-        assert.is_false(pcall(data.inflateRaw, TOO_FAR))
+        assert.is_false(pcall(inflateRaw, TOO_FAR))
     end)
 
     it("refuses an empty string", function()
-        assert.is_false(pcall(data.inflateRaw, ""))
+        assert.is_false(pcall(inflateRaw, ""))
     end)
 end)

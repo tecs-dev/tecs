@@ -165,7 +165,13 @@ describe("http.newClient", function()
 
     it("uses the shared io stream surface", function()
         assert.is_function(tecsIO.newStringStream)
-        assert.is_function(tecsIO.newBufferStream)
+
+        local buffer = tecsIO.newBuffer()
+
+        assert.is_function(buffer.newStream)
+
+        buffer:close()
+
         assert.is_function(tecsIO.newByteStream)
         assert.is_function(tecsIO.newFileStream)
         assert.is_function(tecsIO.newHandleStream)
@@ -410,7 +416,7 @@ describe("http.newClient", function()
 
         drive(pending, nil)
         assert.are.equal("ready", pending.status)
-        assert.are.equal(BODY, pending.value.body:readAll().value)
+        assert.are.equal(BODY, pending.value.body:readAll())
     end)
 
     it("settles a completed body, its status and its headers", function()
@@ -426,8 +432,8 @@ describe("http.newClient", function()
         -- One field holding the body whatever it is, rather than a `body` and
         -- a `path` where exactly one is meaningful.
         assert.is_true(response.body:isReadable())
-        assert.is_true(response.body:hasBuffer())
-        assert.are.equal(BODY, response.body:readAll().value)
+        assert.is_false(response.body:hasBuffer())
+        assert.are.equal(BODY, response.body:readAll())
         assert.are.equal(#BODY, response.body:contentLength())
         assert.are.equal("text/plain", response.body:contentType())
         assert.are.equal("text/plain", response.headers["content-type"])
@@ -481,7 +487,7 @@ describe("http.newClient", function()
         local pending = client:send({
             url = url("/buffer-upload"),
             method = "PUT",
-            body = tecsIO.newBufferStream(body, "application/octet-stream"),
+            body = body:newStream("application/octet-stream"),
         })
         local seen = drive(pending, function()
             server:respond(204, "No Content", "", "text/plain")
@@ -554,7 +560,7 @@ describe("http.newClient", function()
         local owned = tecsIO.newBuffer(BODY)
         local bodies = {
             BODY,
-            tecsIO.newBufferStream(owned),
+            owned:newStream(),
             tecsIO.newByteStream(owned:getFFIPointer(), owned:length()),
             chunkSource(BODY, 5),
         }
@@ -865,7 +871,7 @@ describe("http.newClient", function()
         assert.is_true(body:isReadable())
         assert.is_true(body:isWritable())
         assert.are.equal(#BODY, body:contentLength())
-        assert.are.equal(BODY, body:readAll().value)
+        assert.are.equal(BODY, body:readAll())
 
         local file = assert(io.open(path, "rb"))
         local written = file:read("*a")
@@ -1137,7 +1143,7 @@ describe("http.newClient", function()
         end)
 
         assert.are.equal("ready", pending.status)
-        assert.are.equal(BODY, pending.value.body:readAll().value)
+        assert.are.equal(BODY, pending.value.body:readAll())
     end)
 
     it("takes a per-host list to skip TLS on, and nothing broader", function()
@@ -1165,7 +1171,7 @@ describe("http.newClient", function()
             drive(pending, function()
                 server:respond(200, "OK", BODY, "text/plain")
             end, 400)
-            if pending.status == "ready" and pending.value.body:readAll().value == BODY then
+            if pending.status == "ready" and pending.value.body:readAll() == BODY then
                 completed = completed + 1
             end
         end
@@ -1211,7 +1217,7 @@ describe("http.newClient", function()
             end
 
             assert.are.equal("ready", pending.status)
-            assert.are.equal(BODY, pending.value.body:readAll().value)
+            assert.are.equal(BODY, pending.value.body:readAll())
         end)
 
         it("stops turning a client once it is closed", function()
@@ -1271,7 +1277,7 @@ describe("http.newClient", function()
 
             assert.is_not_nil(response)
             assert.are.equal(200, response.status)
-            assert.are.equal(BODY, response.body:readAll().value)
+            assert.are.equal(BODY, response.body:readAll())
             assert.is_nil(response.error)
             -- The request is gone, so a system that reacts to one does not see
             -- the same one twice.
@@ -1293,7 +1299,7 @@ describe("http.newClient", function()
             assert.is_string(response.error)
             assert.is_true(response.body:isReadable())
             assert.are.equal(0, response.body:contentLength())
-            assert.are.equal("", response.body:readAll().value)
+            assert.are.equal("", response.body:readAll())
             assert.are.equal("http://127.0.0.1:1/", response.url.text)
         end)
 
@@ -1361,7 +1367,7 @@ describe("http.newClient", function()
                 local response = turn(entity, http.plugin.Response)
                 assert.is_not_nil(response)
                 assert.are.equal(200, response.status)
-                assert.are.equal(BODY, response.body:readAll().value)
+                assert.are.equal(BODY, response.body:readAll())
             end)
 
             it("stops a transfer the load left nothing to receive", function()
@@ -1453,14 +1459,14 @@ describe("http.plugin snapshots", function()
             local request = only(restored, http.plugin.Request)
             assert.is_not_nil(request)
             assert.are.equal("before-save", request.headers.authorization)
-            assert.are.equal(BODY, request.body:readAll().value)
+            assert.are.equal(BODY, request.body:readAll())
             assert.are.equal("text/plain", request.body:contentType())
             assert.are.equal(#BODY, request.body:contentLength())
 
             local response = only(restored, http.plugin.Response)
             assert.are.equal("before-save", response.headers["x-state"])
             assert.are.equal(0, response.body:contentLength())
-            assert.are.equal("", response.body:readAll().value)
+            assert.are.equal("", response.body:readAll())
             assert.are.equal("saved failure", response.error)
 
             request.headers.authorization = "after-load"

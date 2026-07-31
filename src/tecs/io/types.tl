@@ -7,7 +7,6 @@ re-exports the contracts, while resource modules require them without
 requiring their public parent.
 ]=]
 
-local type Future = require("tecs.Future")
 local type loader = require("tecs.ffi.loader")
 local type coretypes = require("tecs.types")
 local type Closeable = coretypes.Closeable
@@ -18,6 +17,24 @@ local type Closeable = coretypes.Closeable
 --- buffer's allocation, so the view keeps seeing the bytes it was created
 --- from. `getString` is the explicit copying boundary.
 local interface ByteView is Closeable
+    --- Creates a replayable read-only stream retaining this view.
+    ---
+    --- The stream retains its own view, so the caller may close this view
+    --- immediately after construction. Closing the stream closes its retained
+    --- view after already-open readers close theirs.
+    --- @param self The open immutable byte view.
+    --- @param contentType The caller supplies optional media type metadata.
+    --- @return Returns a caller-owned readable stream.
+    newStream: function(self: ByteView, contentType?: string): ReadableStream
+
+    --- Opens a reader over this immutable range.
+    ---
+    --- The reader retains the allocation independently, so the caller may
+    --- close this view immediately after the call. Its cursor starts at zero.
+    --- @param self The open source view.
+    --- @return Returns a caller-owned reader.
+    newReader: function(self: ByteView): Reader
+
     --- Returns the retained range's byte length.
     ---
     --- @param self The open view to inspect.
@@ -93,10 +110,38 @@ end
 --- An owned, growable sequence of bytes.
 ---
 --- Its logical length is separate from capacity. Offsets are zero-based, and
---- `clear` retains the allocation for reuse.
+--- `clear` retains the allocation for reuse. Readers retain immutable
+--- snapshots independently. Writers borrow the buffer and never close it.
 local interface Buffer is Closeable
-    type ByteView = ByteView
     type WriteRange = WriteRange
+
+    --- Creates a stream sharing this buffer.
+    ---
+    --- The stream borrows this buffer. The caller keeps it open while using
+    --- the stream and closes it separately. Closing the stream never closes
+    --- the buffer. `transferToBuffer` returns this same borrowed object
+    --- without transferring ownership.
+    --- @param self The open buffer the stream borrows.
+    --- @param contentType The caller supplies optional media type metadata.
+    --- @return Returns a caller-owned readable and writable stream.
+    newStream: function(self: Buffer, contentType?: string): ReadWriteStream
+
+    --- Opens a reader over an immutable snapshot of the current bytes.
+    ---
+    --- The reader retains the allocation independently, so the caller may
+    --- close or mutate the buffer after this call. Its cursor starts at zero.
+    --- @param self The open source buffer.
+    --- @return Returns a caller-owned reader.
+    newReader: function(self: Buffer): Reader
+
+    --- Opens a writer that replaces the current bytes.
+    ---
+    --- The call clears the logical length while retaining capacity. The
+    --- caller keeps the buffer open until the writer closes.
+    --- @param self The open destination buffer.
+    --- @return Returns a caller-owned writer.
+    newWriter: function(self: Buffer): Writer
+
     --- Returns the number of logical bytes.
     ---
     --- @param self The buffer to inspect.
@@ -194,10 +239,10 @@ end
 
 --- A caller-owned source of binary strings.
 ---
---- The module that constructs a reader owns its backing resource until
---- `close` releases it. A consumer reads forward until `read` returns an empty
---- string, then closes the reader. A failure returns nil and a reason instead
---- of raising.
+--- The constructor documents whether the reader owns retained state or
+--- borrows externally owned storage. A consumer reads forward until `read`
+--- returns an empty string, then closes the reader. A failure returns nil and
+--- a reason instead of raising.
 local interface Reader is Closeable
     --- Caller-writable. Supplies the operation that reads the next bytes.
     ---
@@ -225,6 +270,17 @@ local interface Reader is Closeable
     --- @return Returns the source's reason when the first return is nil.
     readInto: function(self: Reader, buffer: Buffer, count: integer, offset?: integer): integer, string
 
+    --- Copies every remaining byte into a writer synchronously.
+    ---
+    --- The call does not close either endpoint. It borrows reusable transfer
+    --- storage and drains short writes before reading again.
+    --- @param self The reader whose cursor advances to its end.
+    --- @param destination The caller supplies an open writer.
+    --- @return Returns the bytes written.
+    --- @return Returns the source or destination reason when the first return
+    ---     is nil.
+    transferTo: function(self: Reader, destination: Writer): integer, string
+
     --- Caller-writable. Supplies the operation that releases the source.
     ---
     --- Closing more than once must be a no-op.
@@ -237,7 +293,8 @@ end
 ---
 --- A consumer writes pieces in order and closes the writer even after the last
 --- `write` succeeds. The close can report a delayed flush failure that no
---- individual write observed.
+--- individual write observed. The constructor documents whether closing the
+--- writer also closes or merely releases its destination.
 local interface Writer is Closeable
     --- Caller-writable. Supplies the operation that appends bytes.
     ---
@@ -346,8 +403,9 @@ local interface Stream is Closeable
 
     --- Closes the descriptor.
     ---
-    --- Endpoints already opened from it keep their own resources. Closing a
-    --- borrowed handle descriptor does not close the caller's handle.
+    --- Closing a descriptor never closes endpoints already opened from it.
+    --- Each constructor documents whether those endpoints retain or borrow
+    --- separately owned backing storage.
     --- Repeated calls are safe.
     --- @param self The descriptor to close.
     close: function(self: Stream)
@@ -358,8 +416,9 @@ local interface ReadableStream is Stream
     --- Returns whether `transferToBuffer` can return stable backing storage.
     ---
     --- True is a zero-copy guarantee: `transferToBuffer` returns the same
-    --- retained buffer supplied to `newBufferStream`. The stream and caller
-    --- share that object, so releasing or mutating it affects both.
+    --- borrowed buffer whose `newStream` method created the stream. The
+    --- stream and caller share that object; the caller retains ownership and
+    --- closes it.
     --- @param self The readable descriptor.
     --- @return Returns true only for a buffer-backed stream.
     hasBuffer: function(self: ReadableStream): boolean
@@ -373,44 +432,48 @@ local interface ReadableStream is Stream
 
     --- Reads the complete source into a Lua string.
     ---
-    --- The cooperative transfer advances through `tecs.io.poll` or a wait on
-    --- the returned future.
     --- @param self The readable descriptor.
     --- @param maxBytes The caller supplies a non-negative limit or omits it
     ---     for no explicit limit.
-    --- @return Returns a future carrying the bytes.
-    readAll: function(self: ReadableStream, maxBytes?: integer): Future<string>
+    --- @return Returns the complete bytes.
+    --- @return Returns the source's reason when the first return is nil.
+    readAll: function(self: ReadableStream, maxBytes?: integer): string, string
 
     --- Transfers the complete source into an owned buffer.
     ---
-    --- When `hasBuffer` is true, the future carries the same retained buffer
-    --- rather than a copy. Otherwise it carries a newly allocated buffer owned
-    --- by the caller.
+    --- When `hasBuffer` is true, this returns the same borrowed buffer rather
+    --- than a copy and does not transfer ownership. Otherwise it returns a
+    --- newly allocated buffer owned by the caller.
     --- @param self The readable descriptor.
     --- @param maxBytes The caller supplies a non-negative limit or omits it
     ---     for no explicit limit.
-    --- @return Returns a future carrying a caller-owned buffer.
-    transferToBuffer: function(self: ReadableStream, maxBytes?: integer): Future<Buffer>
+    --- @return Returns a caller-owned buffer.
+    --- @return Returns the source's reason when the first return is nil.
+    transferToBuffer: function(self: ReadableStream, maxBytes?: integer): Buffer, string
 
     --- Copies every source byte into `destination`.
     ---
     --- @param self The readable descriptor.
     --- @param destination The caller supplies an available writable stream.
-    --- @return Returns a future carrying the bytes written.
-    transferTo: function(self: ReadableStream, destination: WritableStream): Future<integer>
+    --- @return Returns the bytes written.
+    --- @return Returns the source or destination reason when the first return
+    ---     is nil.
+    transferTo: function(self: ReadableStream, destination: WritableStream): integer, string
 
     --- Copies every source byte into a file.
     ---
     --- @param self The readable descriptor.
     --- @param path The caller supplies the destination path to replace.
-    --- @return Returns a future carrying the bytes written.
-    transferToFile: function(self: ReadableStream, path: string): Future<integer>
+    --- @return Returns the bytes written.
+    --- @return Returns the source or file reason when the first return is nil.
+    transferToFile: function(self: ReadableStream, path: string): integer, string
 
     --- Reads and discards every source byte.
     ---
     --- @param self The readable descriptor.
-    --- @return Returns a future carrying the bytes discarded.
-    discard: function(self: ReadableStream): Future<integer>
+    --- @return Returns the bytes discarded.
+    --- @return Returns the source's reason when the first return is nil.
+    discard: function(self: ReadableStream): integer, string
 end
 
 --- Describes binary storage that can create writers.
@@ -427,25 +490,26 @@ local interface WritableStream is Stream
     ---
     --- @param self The writable descriptor.
     --- @param bytes The caller supplies the complete binary contents.
-    --- @return Returns a future carrying the bytes written.
-    writeAll: function(self: WritableStream, bytes: string): Future<integer>
+    --- @return Returns the bytes written.
+    --- @return Returns the destination's reason when the first return is nil.
+    writeAll: function(self: WritableStream, bytes: string): integer, string
 
     --- Replaces the destination with a buffer range.
     ---
     --- @param self The writable descriptor.
     --- @param buffer The caller keeps the source buffer open and unchanged
-    ---     until the returned future settles.
+    ---     through the call.
     --- @param offset The caller supplies a zero-based offset or omits it for
     ---     zero.
     --- @param count The caller supplies a byte count or omits it for the
     ---     remainder.
-    --- @return Returns a future carrying the bytes written.
-    writeBuffer: function(self: WritableStream, buffer: Buffer, offset?: integer, count?: integer): Future<integer>
+    --- @return Returns the bytes written.
+    --- @return Returns the destination's reason when the first return is nil.
+    writeBuffer: function(self: WritableStream, buffer: Buffer, offset?: integer, count?: integer): integer, string
 
     --- Replaces the destination with a retained immutable byte range.
     ---
-    --- The operation retains its own view until the future settles, so the
-    --- caller may close `view` immediately after this call.
+    --- The caller keeps `view` open through the call.
     --- @param self The writable descriptor.
     --- @param view The caller supplies an open
     ---     [`ByteView`](tealdoc:tecs.io.ByteView).
@@ -453,12 +517,35 @@ local interface WritableStream is Stream
     ---     zero.
     --- @param count The caller supplies a byte count or omits it for the
     ---     remainder.
-    --- @return Returns a future carrying the bytes written.
-    writeView: function(self: WritableStream, view: ByteView, offset?: integer, count?: integer): Future<integer>
+    --- @return Returns the bytes written.
+    --- @return Returns the destination's reason when the first return is nil.
+    writeView: function(self: WritableStream, view: ByteView, offset?: integer, count?: integer): integer, string
 end
 
 --- Describes storage that supports both directions.
 local interface ReadWriteStream is ReadableStream, WritableStream
+end
+
+--- Options controlling an incremental inflate reader.
+local record InflateReaderOptions
+    --- Caller-writable. Selects raw DEFLATE when true and zlib framing when
+    --- false or omitted.
+    raw: boolean
+
+    --- Caller-writable. Sets the hard decompressed-byte ceiling or uses
+    --- 268,435,456 bytes when omitted.
+    maxBytes: integer
+end
+
+--- Options controlling an incremental deflate writer.
+local record DeflateWriterOptions
+    --- Caller-writable. Selects raw DEFLATE when true and zlib framing when
+    --- false or omitted.
+    raw: boolean
+
+    --- Caller-writable. Sets zlib's compression level from minus one through
+    --- nine or uses its default when omitted.
+    level: integer
 end
 
 local record types
@@ -471,6 +558,8 @@ local record types
     type ReadableStream = ReadableStream
     type WritableStream = WritableStream
     type ReadWriteStream = ReadWriteStream
+    type InflateReaderOptions = InflateReaderOptions
+    type DeflateWriterOptions = DeflateWriterOptions
 end
 
 return types

@@ -1,4 +1,4 @@
--- Owned buffers, directional stream descriptors, and cooperative transfers.
+-- Owned buffers, directional stream descriptors, and synchronous transfers.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
@@ -110,6 +110,36 @@ describe("tecs.io buffers", function()
         assert.are.equal("\0\0ok", buffer:getString())
         buffer:close()
     end)
+
+    it("opens readers that retain immutable snapshots", function()
+        local buffer = ioModule.newBuffer("before")
+        local view = buffer:view(1, 4)
+        local bufferReader = buffer:newReader()
+        local viewReader = view:newReader()
+
+        buffer:setString("after!")
+        buffer:close()
+        view:close()
+
+        assert.are.equal("before", bufferReader:read(64))
+        assert.are.equal("efor", viewReader:read(64))
+
+        bufferReader:close()
+        viewReader:close()
+    end)
+
+    it("opens a writer that replaces bytes and reuses capacity", function()
+        local buffer = ioModule.newBuffer("before")
+        local capacity = buffer:capacity()
+        local writer = buffer:newWriter()
+
+        assert.is_true(writer:write("after"))
+        assert.is_true(writer:close())
+        assert.are.equal("after", buffer:getString())
+        assert.are.equal(capacity, buffer:capacity())
+
+        buffer:close()
+    end)
 end)
 
 describe("tecs.io stream endpoints", function()
@@ -131,27 +161,26 @@ describe("tecs.io stream endpoints", function()
         buffer:close()
     end)
 
-    it("rejects reading a retained buffer into itself", function()
+    it("reads a retained snapshot back into its source buffer", function()
         local buffer = ioModule.newBuffer("same")
-        local reader = assert(ioModule.newBufferStream(buffer):newReader())
-        local count, reason = reader:readInto(buffer, 4)
-        assert.is_nil(count)
-        assert.are.equal("cannot read a buffer into itself", reason)
+        local reader = buffer:newReader()
+
+        assert.are.equal(4, reader:readInto(buffer, 4))
+        assert.are.equal("same", buffer:getString())
+
         reader:close()
         buffer:close()
     end)
 
-    it("does not prepare a destination after its source is released", function()
+    it("keeps a buffer reader alive after its source handle closes", function()
         local source = ioModule.newBuffer("gone")
-        local reader = assert(ioModule.newBufferStream(source):newReader())
+        local reader = source:newReader()
         local destination = ioModule.newBuffer("kept")
         source:close()
 
-        local count, reason = reader:readInto(destination, 4, 20)
-        assert.is_nil(count)
-        assert.are.equal("stream buffer is released", reason)
-        assert.are.equal("kept", destination:getString())
-        assert.are.equal(4, destination:capacity())
+        assert.are.equal(4, reader:readInto(destination, 4, 4))
+        assert.are.equal("keptgone", destination:getString())
+
         reader:close()
         destination:close()
     end)
@@ -205,7 +234,7 @@ describe("tecs.io stream endpoints", function()
 
     it("rejects aliased and closed memory writers", function()
         local buffer = ioModule.newBuffer("same")
-        local writer = assert(ioModule.newBufferStream(buffer):newWriter())
+        local writer = buffer:newWriter()
         local wrote, aliasReason = writer:writeFrom(buffer)
         assert.is_nil(wrote)
         assert.are.equal("cannot write a buffer into itself", aliasReason)
@@ -223,24 +252,26 @@ describe("tecs.io stream endpoints", function()
 
     it("rejects a BufferStream writing its own backing", function()
         local buffer = ioModule.newBuffer("same")
-        local wrote = ioModule.newBufferStream(buffer):writeBuffer(buffer)
-        assert.are.equal("failed", wrote.status)
-        assert.are.equal("cannot write a buffer into itself", wrote.error)
+        local wrote, reason = buffer:newStream():writeBuffer(buffer)
+
+        assert.is_nil(wrote)
+        assert.are.equal("cannot write a buffer into itself", reason)
         assert.are.equal("same", buffer:getString())
+
         buffer:close()
     end)
 
     it("distinguishes zero-copy buffers and source-only empty streams", function()
         local buffer = ioModule.newBuffer("owned")
-        local buffered = ioModule.newBufferStream(buffer)
+        local buffered = buffer:newStream()
         assert.is_true(buffered:hasBuffer())
-        assert.is_true(rawequal(buffer, buffered:transferToBuffer().value))
+        assert.is_true(rawequal(buffer, buffered:transferToBuffer()))
 
         local empty = ioModule.newEmptyStream()
         assert.is_false(empty:hasBuffer())
         assert.is_false(empty:isWritable())
         assert.is_nil(rawget(empty, "newWriter"))
-        assert.are.equal("", empty:readAll().value)
+        assert.are.equal("", empty:readAll())
         buffer:close()
     end)
 
@@ -352,29 +383,33 @@ describe("tecs.io stream endpoints", function()
 
     it("rejects transfers between metadata views of one shared buffer", function()
         local buffer = ioModule.newBuffer("shared")
-        local source = ioModule.newStreamWithMetadata(ioModule.newBufferStream(buffer), "application/source")
-        local destination = ioModule.newStreamWithMetadata(ioModule.newBufferStream(buffer), "application/destination")
-        local copied = source:transferTo(destination)
+        local source = ioModule.newStreamWithMetadata(buffer:newStream(), "application/source")
+        local destination = ioModule.newStreamWithMetadata(buffer:newStream(), "application/destination")
+        local copied, reason = source:transferTo(destination)
 
-        assert.are.equal("failed", copied.status)
-        assert.are.equal("cannot transfer between streams sharing one backing", copied.error)
+        assert.is_nil(copied)
+        assert.are.equal("cannot transfer between streams sharing one backing", reason)
         assert.are.equal("shared", buffer:getString())
+
         buffer:close()
     end)
 
     it("rejects exact file paths and borrowed handles sharing one backing", function()
         local path = temporary()
         assert.is_true(tecs.io.files.write(path, "kept"))
-        local fileCopy = ioModule.newFileStream(path):transferTo(ioModule.newFileStream(path))
-        assert.are.equal("failed", fileCopy.status)
-        assert.are.equal("cannot transfer between streams sharing one backing", fileCopy.error)
+        local fileCopy, fileReason = ioModule.newFileStream(path):transferTo(ioModule.newFileStream(path))
+
+        assert.is_nil(fileCopy)
+        assert.are.equal("cannot transfer between streams sharing one backing", fileReason)
         assert.are.equal("kept", tecs.io.files.read(path))
 
         local handle = assert(io.open(path, "r+b"))
-        local handleCopy = ioModule.newHandleStream(handle):transferTo(ioModule.newHandleStream(handle))
-        assert.are.equal("failed", handleCopy.status)
-        assert.are.equal("cannot transfer between streams sharing one backing", handleCopy.error)
+        local handleCopy, handleReason = ioModule.newHandleStream(handle):transferTo(ioModule.newHandleStream(handle))
+
+        assert.is_nil(handleCopy)
+        assert.are.equal("cannot transfer between streams sharing one backing", handleReason)
         assert.are.equal(0, assert(handle:seek()))
+
         handle:close()
     end)
 end)
@@ -424,6 +459,17 @@ describe("tecs.io transfers", function()
                     buffer:setString("x")
                     return 1
                 end,
+                transferTo = function(self, destination)
+                    local scratch = ioModule.newBuffer()
+                    local got, readReason = self:readInto(scratch, 1)
+                    if got == nil then
+                        scratch:close()
+                        return nil, readReason
+                    end
+                    local wrote, writeReason = destination:writeFrom(scratch, 0, got)
+                    scratch:close()
+                    return wrote, writeReason
+                end,
                 close = function()
                     readerClosed = true
                     error("reader close exploded")
@@ -450,20 +496,16 @@ describe("tecs.io transfers", function()
             end,
         }
 
-        local opened, copied = pcall(function()
-            return ioModule.newFileStream("/virtual/source"):transferTo(destination)
-        end)
+        local copied, reason = ioModule.newFileStream("/virtual/source"):transferTo(destination)
         files.openRead = originalOpenRead
-        assert.is_true(opened, copied)
-        copied:wait(1000)
-        assert.are.equal("failed", copied.status)
-        assert.matches("reader close exploded", copied.error, 1, true)
+
+        assert.is_nil(copied)
+        assert.matches("reader close exploded", reason, 1, true)
         assert.is_true(readerClosed)
         assert.is_true(writerClosed)
-        assert.are.equal(0, ioModule.pending())
     end)
 
-    it("preserves transfer failure through throwing cleanup and cancellation", function()
+    it("preserves transfer failure through throwing cleanup", function()
         local payload = ffi.new("uint8_t[1]", 1)
         local closed = 0
         local destination = {
@@ -486,21 +528,14 @@ describe("tecs.io transfers", function()
             end,
         }
 
-        local failed = ioModule.newByteStream(payload, 1):transferTo(destination)
-        failed:wait(1000)
-        assert.are.equal("failed", failed.status)
-        assert.are.equal("write failed", failed.error)
-        assert.are.equal(0, ioModule.pending())
+        local copied, reason = ioModule.newByteStream(payload, 1):transferTo(destination)
 
-        local canceled = ioModule.newByteStream(payload, 1):transferTo(destination)
-        assert.has_no.errors(function()
-            canceled:cancel()
-        end)
-        assert.are.equal("canceled", canceled.status)
-        assert.are.equal(2, closed)
+        assert.is_nil(copied)
+        assert.are.equal("write failed", reason)
+        assert.are.equal(1, closed)
     end)
 
-    it("cleans up read setup failures before registering work", function()
+    it("rejects oversized known sources before opening them", function()
         local files = tecs.io.files
         local originalInfo = files.info
         local originalOpenRead = files.openRead
@@ -526,29 +561,24 @@ describe("tecs.io transfers", function()
                 close = function() end,
             }
         end
-        local before = ioModule.pending()
-        local started, reading = pcall(function()
-            return ioModule.newFileStream("/virtual/huge"):transferToBuffer()
-        end)
+        local reading, reason = ioModule.newFileStream("/virtual/huge"):transferToBuffer()
         files.info = originalInfo
         files.openRead = originalOpenRead
 
-        assert.is_true(started, reading)
-        assert.are.equal("failed", reading.status)
+        assert.is_nil(reading)
+        assert.is_string(reason)
         assert.is_false(opened)
-        assert.are.equal(before, ioModule.pending())
     end)
 
     it("writes direct buffer ranges and returns exact byte counts", function()
         local source = ioModule.newBuffer("0123456789")
         local destination = ioModule.newBuffer()
-        local stream = ioModule.newBufferStream(destination)
-        local wrote = stream:writeBuffer(source, 2, 5)
-        wrote:wait(1000)
+        local stream = destination:newStream()
+        local wrote, reason = stream:writeBuffer(source, 2, 5)
 
-        assert.are.equal("ready", wrote.status, wrote.error)
-        assert.are.equal(5, wrote.value)
+        assert.are.equal(5, wrote, reason)
         assert.are.equal("23456", destination:getString())
+
         source:close()
         destination:close()
     end)
@@ -606,18 +636,47 @@ describe("tecs.io transfers", function()
                     total = total + writer:writeFrom(buffer, offset + total, count - total)
                 end
                 writer:close()
-                return require("tecs.Future").settled(total)
+                return total
             end,
         }
         local payload = "partial-write"
         local source = ffi.new("uint8_t[?]", #payload)
         ffi.copy(source, payload, #payload)
-        local result = ioModule.newByteStream(source, #payload):transferTo(destination)
-        result:wait(1000)
+        local result, reason = ioModule.newByteStream(source, #payload):transferTo(destination)
 
-        assert.are.equal("ready", result.status, result.error)
-        assert.are.equal(#payload, result.value)
+        assert.are.equal(#payload, result, reason)
         assert.are.equal(payload, table.concat(pieces))
+    end)
+
+    it("reuses bounded scratch storage between synchronous transfers", function()
+        local payload = ffi.new("uint8_t[4]", { 1, 2, 3, 4 })
+        local source = ioModule.newByteStream(payload, 4)
+        local seen = {}
+        local destination = {
+            newWriter = function()
+                return {
+                    write = function()
+                        return true
+                    end,
+                    writeFrom = function(_, bytes, _, count)
+                        seen[#seen + 1] = bytes
+                        return count
+                    end,
+                    flush = function()
+                        return true
+                    end,
+                    close = function()
+                        return true
+                    end,
+                }
+            end,
+        }
+
+        assert.are.equal(4, source:transferTo(destination))
+        assert.are.equal(4, source:transferTo(destination))
+        assert.is_true(rawequal(seen[1], seen[2]))
+
+        source:close()
     end)
 
     it("copies files with matching byte counts and hashes", function()
@@ -626,61 +685,42 @@ describe("tecs.io transfers", function()
         local payload = string.rep("a\0bc", 300000)
         assert.is_true(tecs.io.files.write(sourcePath, payload))
 
-        local copied = ioModule.newFileStream(sourcePath):transferTo(ioModule.newBufferStream(destination))
-        copied:wait(5000)
+        local copied, reason = ioModule.newFileStream(sourcePath):transferTo(destination:newStream())
 
-        assert.are.equal("ready", copied.status, copied.error)
-        assert.are.equal(#payload, copied.value)
+        assert.are.equal(#payload, copied, reason)
         local actual = destination:getString()
         assert.are.equal(tecs.data.fnv1a64(payload), tecs.data.fnv1a64(actual))
+
         destination:close()
     end)
 
-    it("shares its bounded poll budget fairly across transfers", function()
+    it("completes whole-source transfers before returning", function()
         local payload = string.rep("x", 1024 * 1024)
         local first = ioModule.newStringStream(payload):transferToBuffer()
         local second = ioModule.newStringStream(payload):transferToBuffer()
-        assert.are.equal("pending", first.status)
-        assert.are.equal("pending", second.status)
 
-        ioModule.poll()
-        assert.are.equal("pending", first.status)
-        assert.are.equal("pending", second.status)
+        assert.are.equal(#payload, first:length())
+        assert.are.equal(#payload, second:length())
 
-        ioModule.poll()
-        assert.are.equal("pending", first.status)
-        assert.are.equal("pending", second.status)
-
-        ioModule.poll()
-        assert.are.equal("ready", first.status, first.error)
-        assert.are.equal("ready", second.status, second.error)
-        assert.are.equal(#payload, first.value:length())
-        assert.are.equal(#payload, second.value:length())
-        first.value:close()
-        second.value:close()
+        first:close()
+        second:close()
     end)
 
-    it("bounds oversized string and buffer writes by bytes", function()
+    it("writes complete strings and buffers before returning", function()
         local payload = string.rep("w", 2 * 1024 * 1024)
         local destination = ioModule.newBuffer()
-        local stream = ioModule.newBufferStream(destination)
+        local stream = destination:newStream()
 
-        local stringWrite = stream:writeAll(payload)
-        ioModule.poll()
-        assert.are.equal("pending", stringWrite.status)
-        assert.are.equal(1024 * 1024, destination:length())
-        ioModule.poll()
-        assert.are.equal("ready", stringWrite.status, stringWrite.error)
-        assert.are.equal(#payload, stringWrite.value)
+        local stringWrite, stringReason = stream:writeAll(payload)
+
+        assert.are.equal(#payload, stringWrite, stringReason)
+        assert.are.equal(#payload, destination:length())
 
         local source = ioModule.newBuffer(payload)
-        local bufferWrite = stream:writeBuffer(source)
-        ioModule.poll()
-        assert.are.equal("pending", bufferWrite.status)
-        assert.are.equal(1024 * 1024, destination:length())
-        ioModule.poll()
-        assert.are.equal("ready", bufferWrite.status, bufferWrite.error)
-        assert.are.equal(#payload, bufferWrite.value)
+        local bufferWrite, bufferReason = stream:writeBuffer(source)
+
+        assert.are.equal(#payload, bufferWrite, bufferReason)
+        assert.are.equal(#payload, destination:length())
 
         source:close()
         destination:close()
@@ -690,31 +730,27 @@ describe("tecs.io transfers", function()
         local source = ioModule.newBuffer("before:payload:after")
         local view = source:view(7, 7)
         local directDestination = ioModule.newBuffer()
-        local direct = ioModule.newBufferStream(directDestination):writeView(view)
+        local direct, directReason = directDestination:newStream():writeView(view)
 
         source:setString("changed", 7)
         view:close()
         source:close()
-        ioModule.poll()
 
-        assert.are.equal("ready", direct.status, direct.error)
-        assert.are.equal(7, direct.value)
+        assert.are.equal(7, direct, directReason)
         assert.are.equal("payload", directDestination:getString())
 
         local streamSource = ioModule.newBuffer("streamed")
         local streamView = streamSource:view()
-        local retained = ioModule.newViewStream(streamView, "application/octet-stream")
+        local retained = streamView:newStream("application/octet-stream")
         local streamDestination = ioModule.newBuffer()
-        local transferred = retained:transferTo(ioModule.newBufferStream(streamDestination))
+        local transferred, transferReason = retained:transferTo(streamDestination:newStream())
 
         streamView:close()
         streamSource:setString("changed")
         streamSource:close()
         retained:close()
-        ioModule.poll()
 
-        assert.are.equal("ready", transferred.status, transferred.error)
-        assert.are.equal(8, transferred.value)
+        assert.are.equal(8, transferred, transferReason)
         assert.are.equal("streamed", streamDestination:getString())
 
         directDestination:close()

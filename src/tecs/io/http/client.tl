@@ -414,9 +414,12 @@ local function completeTransfer(
         if transfer.responseBuffer == nil then
             transfer.responseBuffer = stream.newBuffer()
         end
-        local buffered <const> = stream.newBufferStream(
-            transfer.responseBuffer, response.headers["content-type"]
-        ) as Stream
+        local responseBuffer <const> = transfer.responseBuffer
+        local view <const> = responseBuffer:view()
+        local buffered <const> = view:newStream(response.headers["content-type"]) as Stream
+
+        view:close()
+        responseBuffer:close()
         transfer.responseBuffer = nil
         return buffered
     end) as (boolean, any)

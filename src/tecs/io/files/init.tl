@@ -40,6 +40,7 @@ local loader <const> = require("tecs.ffi.loader")
 local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
 local type types = require("tecs.io.types")
+local pump <const> = require("tecs.io.pump")
 
 local floor <const> = math.floor
 local max <const> = math.max
@@ -537,6 +538,7 @@ local function slicingReader(bytes: string): Reader
         at = at + taking
         return taking
     end
+    reader.transferTo = pump.transfer
     reader.close = function(_self: Reader) at = #bytes + 1 end
     return reader
 end

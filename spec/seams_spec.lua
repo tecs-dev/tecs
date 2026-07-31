@@ -215,20 +215,18 @@ local REACH = {
         modules = {
             "tecs/audio.lua",
             "tecs/assets.lua",
-            "tecs/data/transcode.lua",
-            "tecs/data/utf8/init.lua",
             "tecs/gfx/screenshot.lua",
             "tecs/io/mcp/tools.lua",
         },
     },
     {
         bucket = "direct",
-        reason = "Character decoding and transcoding are SDL library calls "
-            .. "over caller-owned bytes rather than platform services. No "
-            .. "storage or input seam decides their answers.",
+        reason = "Character decoding, transcoding, and byte compression are "
+            .. "library calls over caller-owned bytes rather than platform "
+            .. "services. No storage or input seam decides their answers.",
         modules = {
-            "tecs/data/transcode.lua",
             "tecs/data/utf8/init.lua",
+            "tecs/io/filters.lua",
         },
     },
     {

@@ -69,6 +69,7 @@ local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local buffer <const> = require("tecs.io.buffer")
 local type types = require("tecs.io.types")
+local pump <const> = require("tecs.io.pump")
 
 local C <const> = sdl.C
 local R <const> = rust.C
@@ -421,6 +422,7 @@ local function sdlReader(path: string): Reader, string
         buffer.commitWrite(destination, offset, got, previousLength)
         return got
     end
+    reader.transferTo = pump.transfer
     reader.close = function(_self: Reader)
         if stream == nil then
             return

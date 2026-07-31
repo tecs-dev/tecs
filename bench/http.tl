@@ -155,20 +155,20 @@ function ChunkSource:newReader(): Reader, string
     end
     return setMeta({source = self.buffer, at = 0, closed = false} as ChunkReader, ChunkReaderMT) as ChunkReader
 end
-function ChunkSource:readAll(maxBytes?: integer): Future<string>
-    return tecsIO.newBufferStream(self.buffer):readAll(maxBytes)
+function ChunkSource:readAll(maxBytes?: integer): string, string
+    return self.buffer:newStream():readAll(maxBytes)
 end
-function ChunkSource:transferToBuffer(maxBytes?: integer): Future<Buffer>
-    return tecsIO.newBufferStream(self.buffer):transferToBuffer(maxBytes)
+function ChunkSource:transferToBuffer(maxBytes?: integer): Buffer, string
+    return self.buffer:newStream():transferToBuffer(maxBytes)
 end
-function ChunkSource:transferTo(destination: WritableStream): Future<integer>
-    return tecsIO.newBufferStream(self.buffer):transferTo(destination)
+function ChunkSource:transferTo(destination: WritableStream): integer, string
+    return self.buffer:newStream():transferTo(destination)
 end
-function ChunkSource:transferToFile(path: string): Future<integer>
-    return tecsIO.newBufferStream(self.buffer):transferToFile(path)
+function ChunkSource:transferToFile(path: string): integer, string
+    return self.buffer:newStream():transferToFile(path)
 end
-function ChunkSource:discard(): Future<integer>
-    return tecsIO.newBufferStream(self.buffer):discard()
+function ChunkSource:discard(): integer, string
+    return self.buffer:newStream():discard()
 end
 
 local record BufferWriter is Writer
@@ -239,11 +239,11 @@ function BufferSink:newWriter(): Writer, string
     self.buffer:clear()
     return setMeta({destination = self.buffer, at = 0, closed = false} as BufferWriter, BufferWriterMT) as BufferWriter
 end
-function BufferSink:writeAll(bytes: string): Future<integer>
-    return tecsIO.newBufferStream(self.buffer):writeAll(bytes)
+function BufferSink:writeAll(bytes: string): integer, string
+    return self.buffer:newStream():writeAll(bytes)
 end
-function BufferSink:writeBuffer(source: Buffer, offset?: integer, count?: integer): Future<integer>
-    return tecsIO.newBufferStream(self.buffer):writeBuffer(source, offset, count)
+function BufferSink:writeBuffer(source: Buffer, offset?: integer, count?: integer): integer, string
+    return self.buffer:newStream():writeBuffer(source, offset, count)
 end
 
 local record Server
@@ -364,7 +364,7 @@ local function begin()
         request.body = payload
         expectedServerHash = PAYLOAD_HASH
     elseif name == "upload-buffer" then
-        request.body = tecsIO.newBufferStream(uploadBuffer)
+        request.body = uploadBuffer:newStream()
         expectedServerHash = PAYLOAD_HASH
     elseif name == "upload-file" then
         request.body = tecsIO.newFileStream(uploadPath)
@@ -426,7 +426,7 @@ return tecs.newApplication({
                         error(("tecs: %s upload hash mismatch"):format(name), 0)
                     end
                     if name == "download-buffer" then
-                        local body <const> = (pending.value.body as ReadableStream):readAll().value
+                        local body <const> = (pending.value.body as ReadableStream):readAll()
                         if crc32(body) ~= PAYLOAD_HASH then
                             error("tecs: default Buffer download hash mismatch", 0)
                         end

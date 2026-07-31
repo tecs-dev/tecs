@@ -1,25 +1,20 @@
---- String results against reusable Buffer destinations in `tecs.data`.
+--- Streaming byte transforms into reusable `Buffer` destinations.
 ---
---- Every paired row performs the same transform:
+--- Every row writes its result directly into one retained Buffer:
 ---
----   hex-string        `hexEncode`, returning a Lua string.
----   hex-buffer        `hexEncodeInto`, reusing one Buffer.
----   base64-string     `base64Encode`, returning a Lua string.
----   base64-buffer     `base64EncodeInto`, reusing one Buffer.
----   deflate-string    `deflate`, returning a Lua string.
----   deflate-buffer    `deflateInto`, reusing one Buffer.
----   inflate-string    `inflate`, returning a Lua string.
----   inflate-buffer    `inflateInto`, reusing one Buffer.
----   transcode-string  `transcode`, returning a Lua string.
----   transcode-buffer  `transcodeInto`, reusing one Buffer.
+---   hex        `newHexEncodeWriter`.
+---   base64     `newBase64EncodeWriter`.
+---   deflate    `newDeflateWriter`.
+---   inflate    `newInflateReader`.
+---   transcode  `newTranscodeWriter`.
 ---   utf8-string       `utf8.length` over a Lua string.
 ---   utf8-view         `utf8.length` over a retained ByteView.
 ---
 --- Input construction, expected-result construction, hashing, Buffer
 --- allocation, and retained-view allocation stay outside measured windows.
---- The Buffer rows measure steady-state reuse after warmup. Lua heap growth
---- does not include native Buffer allocations, so compare it only within a
---- string/Buffer pair and use latency and throughput as the primary result.
+--- Each row measures steady-state reuse after warmup. Lua heap growth does
+--- not include native Buffer allocations, so use latency and throughput as
+--- the primary result.
 ---
 ---   BENCH_DATA_SIZES     Comma-separated input byte counts. Defaults to
 ---                        4096,65536,1048576.
@@ -53,6 +48,8 @@ local data <const> = tecs.data
 local ioModule <const> = tecs.io
 local now <const> = tecs.platform.time.now
 local type IOBuffer = iotypes.Buffer
+local type Reader = iotypes.Reader
+local type Writer = iotypes.Writer
 
 local MAX_INTEGER <const> = 9007199254740991
 local MIB <const> = 1024.0 * 1024.0
@@ -101,16 +98,11 @@ local function sizesFromEnvironment(): {integer}
 end
 
 local CASE_NAMES <const>: {string: boolean} = {
-    ["hex-string"] = true,
-    ["hex-buffer"] = true,
-    ["base64-string"] = true,
-    ["base64-buffer"] = true,
-    ["deflate-string"] = true,
-    ["deflate-buffer"] = true,
-    ["inflate-string"] = true,
-    ["inflate-buffer"] = true,
-    ["transcode-string"] = true,
-    ["transcode-buffer"] = true,
+    hex = true,
+    base64 = true,
+    deflate = true,
+    inflate = true,
+    transcode = true,
     ["utf8-string"] = true,
     ["utf8-view"] = true,
 }
@@ -150,29 +142,29 @@ local function digest(bytes: string): integer
     return data.crc32(bytes)
 end
 
+local function writeTransform(source: string, destination: IOBuffer, constructor: function(Writer): Writer): IOBuffer
+    destination:clear()
+    local writer <const> = constructor(destination:newWriter())
+    assert(writer:write(source))
+    assert(writer:close())
+    return destination
+end
+
+local function readTransform(source: string, destination: IOBuffer, constructor: function(Reader): Reader): IOBuffer
+    destination:clear()
+    local reader <const> = constructor(ioModule.newStringReader(source))
+    local writer <const> = destination:newWriter()
+    assert(reader:transferTo(writer))
+    reader:close()
+    assert(writer:close())
+    return destination
+end
+
 local function pairedCases(size: integer): {Case}
     local source <const> = fixtureOf(size)
     local cases: {Case} = {}
 
-    local function addString(label: string, operation: function(): string, expected: string)
-        if not SELECTED[label] then
-            return
-        end
-        local latest = ""
-        cases[#cases + 1] = {
-            label = label,
-            bytes = size,
-            run = function(): integer latest = operation(); return #latest end,
-            verify = function()
-                if digest(latest) ~= digest(expected) then
-                    error("bench: " .. label .. " produced the wrong bytes", 0)
-                end
-            end,
-            close = function() end,
-        }
-    end
-
-    local function addBuffer(label: string, operation: function(IOBuffer): integer, expected: string)
+    local function addBuffer(label: string, operation: function(IOBuffer): IOBuffer, expected: string)
         if not SELECTED[label] then
             return
         end
@@ -180,7 +172,7 @@ local function pairedCases(size: integer): {Case}
         cases[#cases + 1] = {
             label = label,
             bytes = size,
-            run = function(): integer return operation(destination) end,
+            run = function(): integer return operation(destination):length() end,
             verify = function()
                 if digest(destination:getString()) ~= digest(expected) then
                     error("bench: " .. label .. " produced the wrong bytes", 0)
@@ -190,28 +182,40 @@ local function pairedCases(size: integer): {Case}
         }
     end
 
-    local hex <const> = data.hexEncode(source)
-    addString("hex-string", function(): string return data.hexEncode(source) end, hex)
-    addBuffer("hex-buffer", function(out: IOBuffer): integer return data.hexEncodeInto(source, out) end, hex)
-
-    local base64 <const> = data.base64Encode(source)
-    addString("base64-string", function(): string return data.base64Encode(source) end, base64)
-    addBuffer("base64-buffer", function(out: IOBuffer): integer return data.base64EncodeInto(source, out) end, base64)
-
-    local compressed <const> = data.deflate(source)
-    addString("deflate-string", function(): string return data.deflate(source) end, compressed)
-    addBuffer("deflate-buffer", function(out: IOBuffer): integer return data.deflateInto(source, out) end, compressed)
-    addString("inflate-string", function(): string return data.inflate(compressed, size) end, source)
+    local expected = ioModule.newBuffer()
+    local hex <const> = writeTransform(source, expected, ioModule.newHexEncodeWriter):getString()
     addBuffer(
-        "inflate-buffer", function(out: IOBuffer): integer return data.inflateInto(compressed, out, size) end, source
+        "hex",
+        function(out: IOBuffer): IOBuffer return writeTransform(source, out, ioModule.newHexEncodeWriter) end,
+        hex
     )
 
-    local utf16 <const> = data.transcode(source, "UTF-8", "UTF-16LE")
-    addString("transcode-string", function(): string return data.transcode(source, "UTF-8", "UTF-16LE") end, utf16)
+    local base64 <const> = writeTransform(source, expected, ioModule.newBase64EncodeWriter):getString()
     addBuffer(
-        "transcode-buffer",
-        function(out: IOBuffer): integer return data.transcodeInto(source, "UTF-8", "UTF-16LE", out) end,
-        utf16
+        "base64",
+        function(out: IOBuffer): IOBuffer return writeTransform(source, out, ioModule.newBase64EncodeWriter) end,
+        base64
+    )
+
+    local compressed <const> = writeTransform(source, expected, ioModule.newDeflateWriter):getString()
+    addBuffer(
+        "deflate",
+        function(out: IOBuffer): IOBuffer return writeTransform(source, out, ioModule.newDeflateWriter) end,
+        compressed
+    )
+    addBuffer(
+        "inflate",
+        function(out: IOBuffer): IOBuffer return readTransform(compressed, out, ioModule.newInflateReader) end,
+        source
+    )
+
+    local transcodeWriter <const> = function(destination: Writer): Writer
+        return ioModule.newTranscodeWriter(destination, "UTF-8", "UTF-16LE")
+    end
+    local utf16 <const> = writeTransform(source, expected, transcodeWriter):getString()
+    expected:close()
+    addBuffer(
+        "transcode", function(out: IOBuffer): IOBuffer return writeTransform(source, out, transcodeWriter) end, utf16
     )
 
     if SELECTED["utf8-string"] then

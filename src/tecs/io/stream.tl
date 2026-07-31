@@ -1,20 +1,20 @@
 --[=[
-Binary storage descriptors and cooperative transfers.
+Binary storage descriptors and synchronous transfers.
 
 A stream carries the recipe for opening bytes, not a cursor. Every reader and
 writer owns its position. Replayable memory and file streams can therefore
 open independent readers; a borrowed handle deliberately cannot.
 
-High-level operations return [`Future`](tealdoc:tecs.Future) values. They move
-bounded chunks when `tecs.io.poll` runs or when a wait advances the future.
-No native callback enters LuaJIT.
+High-level operations synchronously pump bounded chunks through directional
+endpoints. A caller that wants asynchronous transfer runs the operation in a
+worker rather than making every stream carry scheduling state.
 ]=]
 
 local ffi <const> = require("ffi")
-local Future <const> = require("tecs.Future")
 local buffer <const> = require("tecs.io.buffer")
+local bufferpool <const> = require("tecs.io.bufferpool")
+local pump <const> = require("tecs.io.pump")
 local loader <const> = require("tecs.ffi.loader")
-local time <const> = require("tecs.platform.time")
 local type types = require("tecs.io.types")
 local type Files = require("tecs.io.files")
 
@@ -26,7 +26,6 @@ local type Stream = types.Stream
 local type ReadableStream = types.ReadableStream
 local type WritableStream = types.WritableStream
 local type ReadWriteStream = types.ReadWriteStream
-local type Source = Future.Source
 
 local floor <const> = math.floor
 local max <const> = math.max
@@ -39,20 +38,22 @@ local record BorrowedBytes
 end
 
 local newStringStream: function(text: string, contentType?: string): ReadableStream
-local newBufferStream: function(sourceBuffer: IOBuffer, contentType?: string): ReadWriteStream
-local newViewStream: function(sourceView: ByteView, contentType?: string): ReadableStream
+local makeBufferStream: function(sourceBuffer: IOBuffer, contentType?: string, ownsBuffer?: boolean): ReadWriteStream
+local makeViewStream: function(sourceView: ByteView, contentType?: string): ReadableStream
 local newFileStream: function(path: string, contentType?: string): ReadWriteStream
 local newStreamWithMetadata: function<T is Stream>(
     source: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
 ): T
 local CHUNK <const> = 64 * 1024
--- Application polling shares this operation budget across every transfer.
--- A step reads or writes at most CHUNK bytes, so one call performs at most
--- about one MiB of aggregate copying regardless of the pending count.
-local POLL_STEPS <const> = 16
-local DEFAULT_WAIT_MS <const> = 5000
-local WAIT_SLICE_MS <const> = 1
 local MAX_INTEGER <const> = 9007199254740991
+
+local function acquireScratch(): IOBuffer
+    return bufferpool.acquire(CHUNK)
+end
+
+local function releaseScratch(scratch: IOBuffer)
+    bufferpool.release(scratch)
+end
 
 --- Fields shared by concrete descriptors.
 local interface Backing
@@ -65,9 +66,10 @@ local record StringStream is Backing, ReadableStream
     _text: string
 end
 
---- A retained caller-owned growable buffer.
+--- A borrowed growable buffer, except for storage reconstructed internally.
 local record BufferStream is Backing, ReadWriteStream
     _buffer: IOBuffer
+    _ownsBuffer: boolean
 end
 
 --- Borrowed FFI memory whose owner stays with the caller.
@@ -108,19 +110,12 @@ local HandleStreamMT <const>: metatable<HandleStream> = {__index = HandleStream}
 --- A cursor over a string, buffer, or borrowed pointer.
 local record MemoryReader is Reader
     _text: string
-    _buffer: IOBuffer
     _pointer: loader.CValue
     _view: ByteView
     _length: integer
     _at: integer
     _closed: boolean
-end
-
---- A cursor replacing a growable memory destination.
-local record MemoryWriter is Writer
-    _buffer: IOBuffer
-    _at: integer
-    _closed: boolean
+    _readPointer: function(self: MemoryReader, count: integer): loader.BytePointer, integer, string
 end
 
 --- A cursor over a borrowed Lua file handle.
@@ -155,7 +150,6 @@ local record MetadataReadWriteStream is MetadataState, ReadWriteStream
 end
 
 local MemoryReaderMT <const>: metatable<MemoryReader> = {__index = MemoryReader}
-local MemoryWriterMT <const>: metatable<MemoryWriter> = {__index = MemoryWriter}
 local HandleReaderMT <const>: metatable<HandleReader> = {__index = HandleReader}
 local HandleWriterMT <const>: metatable<HandleWriter> = {__index = HandleWriter}
 local MetadataStreamMT <const>: metatable<MetadataStream> = {__index = MetadataStream}
@@ -164,44 +158,6 @@ local MetadataWritableStreamMT <const>: metatable<MetadataWritableStream> = {__i
 local MetadataReadWriteStreamMT <const>: metatable<MetadataReadWriteStream> = {__index = MetadataReadWriteStream}
 local rawSetMetatable <const> = setmetatable as function(any, any): any
 
-local enum TransferKind
-    "readString"
-    "transferToBuffer"
-    "copy"
-    "discard"
-    "writeBuffer"
-    "writeView"
-    "writeString"
-end
-
---- One cooperative transfer and its Future source.
-local record Transfer
-    kind: TransferKind
-    reader: Reader
-    writer: Writer
-    buffer: IOBuffer
-    view: ByteView
-    scratch: IOBuffer
-    text: string
-    future: Future<any>
-    maximum: integer
-    total: integer
-    sourceOffset: integer
-    sourceFinish: integer
-    pendingOffset: integer
-    pendingCount: integer
-    at: integer
-    sliceMs: number
-    defaultWaitMs: number
-
-    poll: function(self: Transfer): integer
-    advance: function(self: Transfer, ms: number): integer
-    cancel: function(self: Transfer, future: Future<any>)
-end
-
-local TransferMT <const>: metatable<Transfer> = {__index = Transfer}
-local transfers: {Transfer} = {}
-local pollCursor = 1
 local loadedFiles: Files
 
 local function getFiles(): Files
@@ -460,7 +416,7 @@ local function restoreStream(saved: {string: any}, what: string): Stream
         if type(bytes) ~= "string" then
             error(("tecs: cannot restore %s: buffer stream has no bytes"):format(what), 0)
         end
-        return restoredMetadata(newBufferStream(buffer.new(bytes), saved.contentType as string), saved)
+        return restoredMetadata(makeBufferStream(buffer.new(bytes), saved.contentType as string, true), saved)
     elseif kind == "file" then
         local path <const> = saved.path as string
         if type(path) ~= "string" or path == "" then
@@ -505,12 +461,11 @@ local function close(self: Backing)
 end
 
 local function newMemoryReader(
-    text: string, sourceBuffer: IOBuffer, pointer: loader.CValue, length: integer, sourceView?: ByteView
+    text: string, pointer: loader.CValue, length: integer, sourceView?: ByteView
 ): MemoryReader
     return rawSetMetatable(
         {
             _text = text,
-            _buffer = sourceBuffer,
             _pointer = pointer,
             _view = sourceView,
             _length = length,
@@ -537,16 +492,32 @@ function MemoryReader:read(count: integer): string, string
         local pointer = loader.bytePointer(self._pointer)
         if self._view ~= nil then
             pointer = self._view:getFFIPointer()
-        elseif self._buffer ~= nil then
-            if self._buffer:isReleased() then
-                return nil, "stream buffer is released"
-            end
-            pointer = self._buffer:getFFIPointer()
         end
         result = loader.toBytes((pointer + self._at) as loader.CValue, taking)
     end
     self._at = self._at + taking
     return result
+end
+
+function MemoryReader:_readPointer(count: integer): loader.BytePointer, integer, string
+    if self._closed then
+        return nil, nil, "the reader is closed"
+    end
+    if self._at >= self._length then
+        return nil, 0
+    end
+    local taking <const> = min(max(1, count), self._length - self._at)
+    local pointer: loader.BytePointer
+    if self._text ~= nil then
+        pointer = ffi.cast("uint8_t *", self._text) as loader.BytePointer
+    elseif self._view ~= nil then
+        pointer = self._view:getFFIPointer()
+    else
+        pointer = loader.bytePointer(self._pointer)
+    end
+    pointer = pointer + self._at
+    self._at = self._at + taking
+    return pointer, taking
 end
 
 function MemoryReader:readInto(destination: IOBuffer, count: integer, offset?: integer): integer, string
@@ -555,9 +526,6 @@ function MemoryReader:readInto(destination: IOBuffer, count: integer, offset?: i
     end
     count = nonNegative(count, "Reader:readInto count", 2)
     offset = nonNegative(offset or 0, "Reader:readInto offset", 2)
-    if self._buffer ~= nil and self._buffer == destination then
-        return nil, "cannot read a buffer into itself"
-    end
     if count == 0 or self._at >= self._length then
         return 0
     end
@@ -567,11 +535,6 @@ function MemoryReader:readInto(destination: IOBuffer, count: integer, offset?: i
         source = ffi.cast("uint8_t *", self._text) as loader.BytePointer
     elseif self._view ~= nil then
         source = self._view:getFFIPointer()
-    elseif self._buffer ~= nil then
-        if self._buffer:isReleased() then
-            return nil, "stream buffer is released"
-        end
-        source = self._buffer:getFFIPointer()
     else
         source = loader.bytePointer(self._pointer)
     end
@@ -582,84 +545,33 @@ function MemoryReader:readInto(destination: IOBuffer, count: integer, offset?: i
     return taking
 end
 
+function MemoryReader:transferTo(destination: Writer): integer, string
+    if self._closed then
+        return nil, "the reader is closed"
+    end
+    local dynamic <const> = destination as {string: any}
+    if type(dynamic._writePointer) == "function" then
+        local pointer <const>, count, reason = self:_readPointer(self._length - self._at)
+        if count == nil then
+            return nil, reason
+        end
+        if count == 0 then
+            return 0
+        end
+        local wrote <const>, writeReason = (
+            dynamic._writePointer as function(any, loader.BytePointer, integer): boolean, string
+        )(destination, pointer, count)
+        return wrote and count or nil, writeReason
+    end
+    return pump.transfer(self, destination)
+end
+
 function MemoryReader:close()
     if self._view ~= nil then
         self._view:close()
         self._view = nil
     end
     self._closed = true
-end
-
-function MemoryWriter:write(bytes: string): boolean, string
-    if self._closed then
-        return false, "the writer is closed"
-    end
-    if self._buffer:isReleased() then
-        return false, "stream buffer is released"
-    end
-    self._buffer:setString(bytes, self._at)
-    self._at = self._at + #bytes
-    return true
-end
-
-function MemoryWriter:writeFrom(source: IOBuffer, offset?: integer, count?: integer): integer, string
-    if self._closed then
-        return nil, "the writer is closed"
-    end
-    if self._buffer:isReleased() then
-        return nil, "stream buffer is released"
-    end
-    if source == self._buffer then
-        return nil, "cannot write a buffer into itself"
-    end
-    offset, count = bufferRange(source, offset, count, 2)
-    if count == 0 then
-        return 0
-    end
-    local output <const>, previousLength = buffer.prepareWrite(self._buffer, self._at, count)
-    ffi.copy(output as ffi.CData, (source:getFFIPointer() + offset) as ffi.CData, count)
-    buffer.commitWrite(self._buffer, self._at, count, previousLength)
-    self._at = self._at + count
-    return count
-end
-
-function MemoryWriter:writeView(source: ByteView, offset?: integer, count?: integer): integer, string
-    if self._closed then
-        return nil, "the writer is closed"
-    end
-    if self._buffer:isReleased() then
-        return nil, "stream buffer is released"
-    end
-    offset, count = viewRange(source, offset, count, 2)
-    if count == 0 then
-        return 0
-    end
-    local output <const>, previousLength = buffer.prepareWrite(self._buffer, self._at, count)
-    ffi.copy(output as ffi.CData, (source:getFFIPointer() + offset) as ffi.CData, count)
-    buffer.commitWrite(self._buffer, self._at, count, previousLength)
-    self._at = self._at + count
-    return count
-end
-
-function MemoryWriter:flush(): boolean, string
-    if self._closed then
-        return false, "the writer is closed"
-    end
-    if self._buffer:isReleased() then
-        return false, "stream buffer is released"
-    end
-    return true
-end
-
-function MemoryWriter:close(): boolean, string
-    if self._closed then
-        return true
-    end
-    self._closed = true
-    if self._buffer:isReleased() then
-        return false, "stream buffer is released"
-    end
-    return true
 end
 
 function HandleReader:read(count: integer): string, string
@@ -688,6 +600,10 @@ function HandleReader:readInto(destination: IOBuffer, count: integer, offset?: i
     end
     destination:setString(piece, offset)
     return #piece
+end
+
+function HandleReader:transferTo(destination: Writer): integer, string
+    return pump.transfer(self, destination)
 end
 
 function HandleReader:close()
@@ -744,444 +660,239 @@ function HandleWriter:close(): boolean, string
     return ok, reason
 end
 
-local function remove(transfer: Transfer)
-    if transfer.at == 0 then
-        return
+local function closeReader(reader: Reader): string
+    local called <const>, reason = pcall(reader.close, reader) as (boolean, any)
+    if not called then
+        return tostring(reason)
     end
-    local at <const> = transfer.at
-    local last <const> = #transfers
-    local moved <const> = transfers[last]
-    transfers[last] = nil
-    if at < last then
-        transfers[at] = moved
-        moved.at = at
-    end
-    transfer.at = 0
+    return nil
 end
 
-local function closeEndpoints(transfer: Transfer): boolean, string
-    local closed = true
-    local reason: string
-    if transfer.reader ~= nil then
-        local reader <const> = transfer.reader
-        transfer.reader = nil
-        local called <const>, closeReason = pcall(reader.close, reader) as (boolean, any)
-        if not called then
-            closed = false
-            reason = tostring(closeReason)
-        end
+local function closeWriter(writer: Writer): string
+    local called <const>, closed, reason = pcall(writer.close, writer) as (boolean, boolean, string)
+    if not called then
+        return tostring(closed)
     end
-    if transfer.writer ~= nil then
-        local writer <const> = transfer.writer
-        transfer.writer = nil
-        local called <const>, writerClosed, closeReason = pcall(writer.close, writer) as (boolean, boolean, string)
-        if not called then
-            if closed then
-                reason = tostring(writerClosed)
-            end
-            closed = false
-        elseif not writerClosed then
-            if closed then
-                reason = closeReason or "stream writer could not close"
-            end
-            closed = false
-        end
-    end
-    return closed, reason
-end
-
-local function releaseScratch(transfer: Transfer)
-    if transfer.scratch ~= nil then
-        transfer.scratch:close()
-        transfer.scratch = nil
-    end
-end
-
-local function releaseView(transfer: Transfer)
-    if transfer.view ~= nil then
-        transfer.view:close()
-        transfer.view = nil
-    end
-end
-
-local function fail(transfer: Transfer, reason: string)
-    remove(transfer)
-    closeEndpoints(transfer)
-    releaseScratch(transfer)
-    releaseView(transfer)
-    if transfer.kind == "transferToBuffer" and transfer.buffer ~= nil then
-        transfer.buffer:close()
-        transfer.buffer = nil
-    end
-    transfer.future:fail(reason or "stream transfer failed")
-end
-
-local function finish(transfer: Transfer)
-    remove(transfer)
-    local closed <const>, reason = closeEndpoints(transfer)
-    releaseScratch(transfer)
-    releaseView(transfer)
     if not closed then
-        if transfer.kind == "transferToBuffer" and transfer.buffer ~= nil then
-            transfer.buffer:close()
-            transfer.buffer = nil
+        return reason or "stream writer could not close"
+    end
+    return nil
+end
+
+local function readIntoBuffer(source: ReadableStream, maxBytes: integer): IOBuffer, string
+    maxBytes = maximum(maxBytes, 3)
+    local metadataOK <const>, known = pcall(source.contentLength, source) as (boolean, integer)
+    if not metadataOK then
+        return nil, tostring(known)
+    end
+    if maxBytes ~= nil and known ~= nil and known > maxBytes then
+        return nil, ("stream exceeds the %d byte limit"):format(maxBytes)
+    end
+
+    local allocated <const>, bufferOrReason = pcall(buffer.new) as (boolean, any)
+    if not allocated then
+        return nil, tostring(bufferOrReason)
+    end
+    local output <const> = bufferOrReason as IOBuffer
+    if known ~= nil and known > 0 then
+        local reserved <const>, reserveReason = pcall(output.ensureCapacity, output, known) as (boolean, any)
+        if not reserved then
+            output:close()
+            return nil, tostring(reserveReason)
         end
-        transfer.future:fail(reason)
-        return
     end
-    if transfer.kind == "readString" then
-        local result <const> = transfer.buffer:getString()
-        transfer.buffer:close()
-        transfer.buffer = nil
-        transfer.future:complete(result)
-    elseif transfer.kind == "transferToBuffer" then
-        local result <const> = transfer.buffer
-        transfer.buffer = nil
-        transfer.future:complete(result)
-    else
-        transfer.future:complete(transfer.total)
+    local reader <const>, openReason = source:newReader()
+    if reader == nil then
+        output:close()
+        return nil, openReason
+    end
+
+    local total = 0
+    while true do
+        local count = CHUNK
+        if maxBytes ~= nil then
+            count = min(count, maxBytes - total + 1)
+        end
+        output:resize(total)
+        local got <const>, reason = reader:readInto(output, count, total)
+        if got == nil then
+            closeReader(reader)
+            output:close()
+            return nil, reason
+        end
+        if got == 0 then
+            local closeReason <const> = closeReader(reader)
+            if closeReason ~= nil then
+                output:close()
+                return nil, closeReason
+            end
+            return output
+        end
+        total = total + got
+        if maxBytes ~= nil and total > maxBytes then
+            closeReader(reader)
+            output:close()
+            return nil, ("stream exceeds the %d byte limit"):format(maxBytes)
+        end
     end
 end
 
-local function readStep(transfer: Transfer)
-    local count = CHUNK
-    if transfer.maximum ~= nil then
-        count = min(count, transfer.maximum - transfer.total + 1)
+local function readAll(source: ReadableStream, maxBytes: integer): string, string
+    local output <const>, reason = readIntoBuffer(source, maxBytes)
+    if output == nil then
+        return nil, reason
     end
-    transfer.buffer:resize(transfer.total)
-    local got <const>, reason = transfer.reader:readInto(transfer.buffer, count, transfer.total)
-    if got == nil then
-        fail(transfer, reason)
-        return
-    end
-    if got == 0 then
-        finish(transfer)
-        return
-    end
-    transfer.total = transfer.total + got
-    if transfer.maximum ~= nil and transfer.total > transfer.maximum then
-        fail(transfer, ("stream exceeds the %d byte limit"):format(transfer.maximum))
-    end
+    local result <const> = output:getString()
+    output:close()
+    return result
 end
 
-local function copyStep(transfer: Transfer)
-    if transfer.pendingOffset < transfer.pendingCount then
-        local wrote <const>, reason = transfer.writer:writeFrom(
-            transfer.scratch, transfer.pendingOffset, transfer.pendingCount - transfer.pendingOffset
-        )
+local function transferToBuffer(source: ReadableStream, maxBytes: integer): IOBuffer, string
+    return readIntoBuffer(source, maxBytes)
+end
+
+local function transferTo(source: ReadableStream, destination: WritableStream): integer, string
+    if sharesBacking(source, destination) then
+        return nil, "cannot transfer between streams sharing one backing"
+    end
+    local reader <const>, readReason = source:newReader()
+    if reader == nil then
+        return nil, readReason
+    end
+    local writer <const>, writeReason = destination:newWriter()
+    if writer == nil then
+        closeReader(reader)
+        return nil, writeReason
+    end
+
+    local total <const>, failure = reader:transferTo(writer)
+
+    local readerClose <const> = closeReader(reader)
+    local writerClose <const> = closeWriter(writer)
+    return failure == nil and readerClose == nil and writerClose == nil and total or nil,
+        failure or readerClose or writerClose
+end
+
+local function transferToFile(source: ReadableStream, path: string): integer, string
+    if type(path) ~= "string" or path == "" then
+        error("tecs: transferToFile needs a path", 3)
+    end
+    local destination <const> = newFileStream(path)
+    local total <const>, reason = source:transferTo(destination)
+    destination:close()
+    return total, reason
+end
+
+local function discard(source: ReadableStream): integer, string
+    local scratch <const> = acquireScratch()
+    local reader <const>, openReason = source:newReader()
+    if reader == nil then
+        releaseScratch(scratch)
+        return nil, openReason
+    end
+    local total = 0
+    local failure: string
+    while failure == nil do
+        scratch:clear()
+        local got <const>, reason = reader:readInto(scratch, CHUNK)
+        if got == nil then
+            failure = reason
+        elseif got == 0 then
+            break
+        else
+            total = total + got
+        end
+    end
+    local closeReason <const> = closeReader(reader)
+    releaseScratch(scratch)
+    return failure == nil and closeReason == nil and total or nil, failure or closeReason
+end
+
+local function writeString(destination: WritableStream, text: string): integer, string
+    if type(text) ~= "string" then
+        error("tecs: writeAll needs a byte string", 3)
+    end
+    local writer <const>, openReason = destination:newWriter()
+    if writer == nil then
+        return nil, openReason
+    end
+    local ok <const>, reason = writer:write(text)
+    local closeReason <const> = closeWriter(writer)
+    if not ok then
+        return nil, reason
+    end
+    if closeReason ~= nil then
+        return nil, closeReason
+    end
+    return #text
+end
+
+local function writeBuffer(
+    destination: WritableStream, sourceBuffer: IOBuffer, offset: integer, count: integer
+): integer, string
+    sourceBuffer = checkedBuffer(sourceBuffer, "writeBuffer", 3)
+    offset, count = bufferRange(sourceBuffer, offset, count, 3)
+    local writer <const>, openReason = destination:newWriter()
+    if writer == nil then
+        return nil, openReason
+    end
+    local finish <const> = offset + count
+    local at = offset
+    local failure: string
+    while at < finish do
+        local wrote <const>, reason = writer:writeFrom(sourceBuffer, at, min(CHUNK, finish - at))
         if wrote == nil then
-            fail(transfer, reason)
-            return
+            failure = reason
+            break
         end
         if wrote <= 0 then
-            fail(transfer, "stream writer made no progress")
-            return
+            failure = "stream writer made no progress"
+            break
         end
-        transfer.pendingOffset = transfer.pendingOffset + wrote
-        transfer.total = transfer.total + wrote
-        return
+        at = at + wrote
     end
-
-    transfer.scratch:clear()
-    local got <const>, reason = transfer.reader:readInto(transfer.scratch, CHUNK)
-    if got == nil then
-        fail(transfer, reason)
-        return
-    end
-    if got == 0 then
-        finish(transfer)
-        return
-    end
-    if transfer.kind == "discard" then
-        transfer.total = transfer.total + got
-    else
-        transfer.pendingOffset = 0
-        transfer.pendingCount = got
-    end
+    local closeReason <const> = closeWriter(writer)
+    return failure == nil and closeReason == nil and count or nil, failure or closeReason
 end
 
-local function writeStep(transfer: Transfer)
-    if transfer.kind == "writeString" then
-        if transfer.sourceOffset >= transfer.sourceFinish then
-            finish(transfer)
-            return
-        end
-        local nextOffset <const> = min(transfer.sourceOffset + CHUNK, transfer.sourceFinish)
-        local piece = transfer.text
-        if transfer.sourceOffset ~= 0 or nextOffset ~= transfer.sourceFinish then
-            piece = transfer.text:sub(transfer.sourceOffset + 1, nextOffset)
-        end
-        local ok <const>, reason = transfer.writer:write(piece)
-        if not ok then
-            fail(transfer, reason)
-            return
-        end
-        transfer.sourceOffset = nextOffset
-        transfer.total = nextOffset
-        if transfer.sourceOffset >= transfer.sourceFinish then
-            finish(transfer)
-        end
-        return
+local function writeView(
+    destination: WritableStream, sourceView: ByteView, offset: integer, count: integer
+): integer, string
+    offset, count = viewRange(sourceView, offset, count, 3)
+    local writer <const>, openReason = destination:newWriter()
+    if writer == nil then
+        return nil, openReason
     end
-    if transfer.sourceOffset >= transfer.sourceFinish then
-        finish(transfer)
-        return
-    end
-    local requested <const> = min(CHUNK, transfer.sourceFinish - transfer.sourceOffset)
-    local wrote: integer
-    local reason: string
-    if transfer.kind == "writeView" then
-        local dynamic <const> = transfer.writer as {string: any}
+    local finish <const> = offset + count
+    local at = offset
+    local failure: string
+    while at < finish do
+        local requested <const> = min(CHUNK, finish - at)
+        local wrote: integer
+        local reason: string
+        local dynamic <const> = writer as {string: any}
         if type(dynamic.writeView) == "function" then
-            wrote, reason = transfer.writer:writeView(transfer.view, transfer.sourceOffset, requested)
+            wrote, reason = writer:writeView(sourceView, at, requested)
         else
-            local piece <const> = loader.toBytes(
-                (transfer.view:getFFIPointer() + transfer.sourceOffset) as loader.CValue, requested
-            )
-            local ok <const>, writeReason = transfer.writer:write(piece)
+            local piece <const> = loader.toBytes((sourceView:getFFIPointer() + at) as loader.CValue, requested)
+            local ok <const>, writeReason = writer:write(piece)
             reason = writeReason
             if ok then
                 wrote = requested
             end
         end
-    else
-        wrote, reason = transfer.writer:writeFrom(transfer.buffer, transfer.sourceOffset, requested)
-    end
-    if wrote == nil then
-        fail(transfer, reason)
-        return
-    end
-    if wrote <= 0 then
-        fail(transfer, "stream writer made no progress")
-        return
-    end
-    transfer.sourceOffset = transfer.sourceOffset + wrote
-    transfer.total = transfer.total + wrote
-    if transfer.sourceOffset >= transfer.sourceFinish then
-        finish(transfer)
-    end
-end
-
-local function step(transfer: Transfer)
-    if transfer.kind == "readString" or transfer.kind == "transferToBuffer" then
-        readStep(transfer)
-    elseif transfer.kind == "copy" or transfer.kind == "discard" then
-        copyStep(transfer)
-    else
-        writeStep(transfer)
-    end
-end
-
-local function safelyStep(transfer: Transfer): integer
-    if transfer.at == 0 then
-        return 0
-    end
-    local ok <const>, reason = pcall(step, transfer) as (boolean, any)
-    if not ok and transfer.at ~= 0 then
-        fail(transfer, tostring(reason))
-    end
-    return transfer.at == 0 and 1 or 0
-end
-
-function Transfer:poll(): integer
-    local settled = 0
-    local stepCount = 0
-    while self.at ~= 0 and stepCount < POLL_STEPS do
-        settled = settled + safelyStep(self)
-        stepCount = stepCount + 1
-    end
-    return settled
-end
-
-function Transfer:advance(ms: number): integer
-    local deadline <const> = time.now() * 1000.0 + max(0, ms)
-    local settled = safelyStep(self)
-    while self.at ~= 0 and time.now() * 1000.0 < deadline do
-        settled = settled + safelyStep(self)
-    end
-    return settled
-end
-
-function Transfer:cancel(future: Future<any>)
-    if self.at == 0 or self.future ~= future then
-        return
-    end
-    remove(self)
-    closeEndpoints(self)
-    releaseScratch(self)
-    releaseView(self)
-    if self.kind == "transferToBuffer" and self.buffer ~= nil then
-        self.buffer:close()
-        self.buffer = nil
-    end
-end
-
-local function newTransfer(kind: TransferKind): Transfer
-    local transfer = setmetatable(
-        {
-            kind = kind,
-            total = 0,
-            sourceOffset = 0,
-            sourceFinish = 0,
-            pendingOffset = 0,
-            pendingCount = 0,
-            at = #transfers + 1,
-            sliceMs = WAIT_SLICE_MS,
-            defaultWaitMs = DEFAULT_WAIT_MS,
-        } as Transfer,
-        TransferMT
-    )
-    transfer.future = Future.pending(transfer as Source)
-    transfers[transfer.at] = transfer
-    return transfer
-end
-
-local function failed<T>(reason: string): Future<T>
-    return Future.failed(reason)
-end
-
-local function beginRead(source: ReadableStream, kind: TransferKind, maxBytes: integer): Future<any>
-    maxBytes = maximum(maxBytes, 3)
-    local metadataOK <const>, known = pcall(source.contentLength, source) as (boolean, integer)
-    if not metadataOK then
-        return failed(tostring(known))
-    end
-    if maxBytes ~= nil and known ~= nil and known > maxBytes then
-        return failed(("stream exceeds the %d byte limit"):format(maxBytes))
-    end
-    local allocated <const>, bufferOrReason = pcall(buffer.new) as (boolean, any)
-    if not allocated then
-        return failed(tostring(bufferOrReason))
-    end
-    local outputBuffer <const> = bufferOrReason as IOBuffer
-    if known ~= nil and known > 0 then
-        local reserved <const>, reserveReason = pcall(
-            outputBuffer.ensureCapacity, outputBuffer, known
-        ) as (boolean, any)
-        if not reserved then
-            outputBuffer:close()
-            return failed(tostring(reserveReason))
+        if wrote == nil then
+            failure = reason
+            break
         end
+        if wrote <= 0 then
+            failure = "stream writer made no progress"
+            break
+        end
+        at = at + wrote
     end
-    local reader <const>, reason = source:newReader()
-    if reader == nil then
-        outputBuffer:close()
-        return failed(reason)
-    end
-    local transfer <const> = newTransfer(kind)
-    transfer.reader = reader
-    transfer.buffer = outputBuffer
-    transfer.maximum = maxBytes
-    return transfer.future
-end
-
-local function readAll(source: ReadableStream, maxBytes: integer): Future<string>
-    return beginRead(source, "readString", maxBytes) as Future<string>
-end
-
-local function transferToBuffer(source: ReadableStream, maxBytes: integer): Future<IOBuffer>
-    return beginRead(source, "transferToBuffer", maxBytes) as Future<IOBuffer>
-end
-
-local function transferTo(source: ReadableStream, destination: WritableStream): Future<integer>
-    if sharesBacking(source, destination) then
-        return failed("cannot transfer between streams sharing one backing")
-    end
-    local allocated <const>, scratchOrReason = pcall(buffer.new) as (boolean, any)
-    if not allocated then
-        return failed(tostring(scratchOrReason))
-    end
-    local scratch <const> = scratchOrReason as IOBuffer
-    local reader <const>, readReason = source:newReader()
-    if reader == nil then
-        scratch:close()
-        return failed(readReason)
-    end
-    local writer <const>, writeReason = destination:newWriter()
-    if writer == nil then
-        scratch:close()
-        pcall(reader.close, reader)
-        return failed(writeReason)
-    end
-    local transfer <const> = newTransfer("copy")
-    transfer.reader = reader
-    transfer.writer = writer
-    transfer.scratch = scratch
-    return transfer.future as Future<integer>
-end
-
-local function transferToFile(source: ReadableStream, path: string): Future<integer>
-    if type(path) ~= "string" or path == "" then
-        error("tecs: transferToFile needs a path", 3)
-    end
-    return source:transferTo(newFileStream(path))
-end
-
-local function discard(source: ReadableStream): Future<integer>
-    local allocated <const>, scratchOrReason = pcall(buffer.new) as (boolean, any)
-    if not allocated then
-        return failed(tostring(scratchOrReason))
-    end
-    local scratch <const> = scratchOrReason as IOBuffer
-    local reader <const>, reason = source:newReader()
-    if reader == nil then
-        scratch:close()
-        return failed(reason)
-    end
-    local transfer <const> = newTransfer("discard")
-    transfer.reader = reader
-    transfer.scratch = scratch
-    return transfer.future as Future<integer>
-end
-
-local function writeString(destination: WritableStream, text: string): Future<integer>
-    if type(text) ~= "string" then
-        error("tecs: writeAll needs a byte string", 3)
-    end
-    local writer <const>, reason = destination:newWriter()
-    if writer == nil then
-        return failed(reason)
-    end
-    local transfer <const> = newTransfer("writeString")
-    transfer.writer = writer
-    transfer.text = text
-    transfer.sourceFinish = #text
-    return transfer.future as Future<integer>
-end
-
-local function writeBuffer(
-    destination: WritableStream, sourceBuffer: IOBuffer, offset: integer, count: integer
-): Future<integer>
-    sourceBuffer = checkedBuffer(sourceBuffer, "writeBuffer", 3)
-    offset, count = bufferRange(sourceBuffer, offset, count, 3)
-    local writer <const>, reason = destination:newWriter()
-    if writer == nil then
-        return failed(reason)
-    end
-    local transfer <const> = newTransfer("writeBuffer")
-    transfer.writer = writer
-    transfer.buffer = sourceBuffer
-    transfer.sourceOffset = offset
-    transfer.sourceFinish = offset + count
-    return transfer.future as Future<integer>
-end
-
-local function writeView(
-    destination: WritableStream, sourceView: ByteView, offset: integer, count: integer
-): Future<integer>
-    offset, count = viewRange(sourceView, offset, count, 3)
-    local retained <const> = sourceView:view(offset, count)
-    local writer <const>, reason = destination:newWriter()
-    if writer == nil then
-        retained:close()
-        return failed(reason)
-    end
-    local transfer <const> = newTransfer("writeView")
-    transfer.writer = writer
-    transfer.view = retained
-    transfer.sourceOffset = 0
-    transfer.sourceFinish = count
-    return transfer.future as Future<integer>
+    local closeReason <const> = closeWriter(writer)
+    return failure == nil and closeReason == nil and count or nil, failure or closeReason
 end
 
 -- String stream
@@ -1215,40 +926,40 @@ function StringStream:newReader(): Reader, string
     if unavailable(self) then
         return nil, "stream is closed"
     end
-    return newMemoryReader(self._text, nil, nil, #self._text)
+    return newMemoryReader(self._text, nil, #self._text)
 end
 
-function StringStream:readAll(maxBytes?: integer): Future<string>
+function StringStream:readAll(maxBytes?: integer): string, string
     maxBytes = maximum(maxBytes, 2)
     if unavailable(self) then
-        return failed("stream is closed")
+        return nil, "stream is closed"
     end
     if maxBytes ~= nil and #self._text > maxBytes then
-        return failed(("stream exceeds the %d byte limit"):format(maxBytes))
+        return nil, ("stream exceeds the %d byte limit"):format(maxBytes)
     end
-    return Future.settled(self._text)
+    return self._text
 end
 
-function StringStream:transferToBuffer(maxBytes?: integer): Future<IOBuffer>
+function StringStream:transferToBuffer(maxBytes?: integer): IOBuffer, string
     return transferToBuffer(self, maxBytes)
 end
 
-function StringStream:transferTo(destination: WritableStream): Future<integer>
+function StringStream:transferTo(destination: WritableStream): integer, string
     if unavailable(self) then
-        return failed("stream is closed")
+        return nil, "stream is closed"
     end
     return destination:writeAll(self._text)
 end
 
-function StringStream:transferToFile(path: string): Future<integer>
+function StringStream:transferToFile(path: string): integer, string
     return transferToFile(self, path)
 end
 
-function StringStream:discard(): Future<integer>
+function StringStream:discard(): integer, string
     if unavailable(self) then
-        return failed("stream is closed")
+        return nil, "stream is closed"
     end
-    return Future.settled(#self._text)
+    return #self._text
 end
 
 -- Buffer stream
@@ -1272,7 +983,12 @@ function BufferStream:isAvailable(): boolean
     return not unavailable(self) and not self._buffer:isReleased()
 end
 function BufferStream:close()
-    close(self)
+    if not self._closed then
+        self._closed = true
+        if self._ownsBuffer then
+            self._buffer:close()
+        end
+    end
 end
 function BufferStream:hasBuffer(): boolean
     return self:isAvailable()
@@ -1282,82 +998,74 @@ function BufferStream:newReader(): Reader, string
     if not self:isAvailable() then
         return nil, "stream is closed or its buffer is released"
     end
-    return newMemoryReader(nil, self._buffer, nil, self._buffer:length())
+    return self._buffer:newReader()
 end
 
 function BufferStream:newWriter(): Writer, string
     if not self:isAvailable() then
         return nil, "stream is closed or its buffer is released"
     end
-    self._buffer:clear()
-    return rawSetMetatable(
-        {
-            _buffer = self._buffer,
-            _at = 0,
-            _closed = false,
-        } as MemoryWriter,
-        MemoryWriterMT
-    ) as Writer
+    return self._buffer:newWriter()
 end
 
-function BufferStream:readAll(maxBytes?: integer): Future<string>
+function BufferStream:readAll(maxBytes?: integer): string, string
     maxBytes = maximum(maxBytes, 2)
     local length <const> = self:contentLength()
     if length == nil then
-        return failed("stream is closed or its buffer is released")
+        return nil, "stream is closed or its buffer is released"
     end
     if maxBytes ~= nil and length > maxBytes then
-        return failed(("stream exceeds the %d byte limit"):format(maxBytes))
+        return nil, ("stream exceeds the %d byte limit"):format(maxBytes)
     end
-    return Future.settled(self._buffer:getString())
+    return self._buffer:getString()
 end
 
-function BufferStream:transferToBuffer(maxBytes?: integer): Future<IOBuffer>
+function BufferStream:transferToBuffer(maxBytes?: integer): IOBuffer, string
     maxBytes = maximum(maxBytes, 2)
     local length <const> = self:contentLength()
     if length == nil then
-        return failed("stream is closed or its buffer is released")
+        return nil, "stream is closed or its buffer is released"
     end
     if maxBytes ~= nil and length > maxBytes then
-        return failed(("stream exceeds the %d byte limit"):format(maxBytes))
+        return nil, ("stream exceeds the %d byte limit"):format(maxBytes)
     end
-    return Future.settled(self._buffer)
+    return self._buffer
 end
 
-function BufferStream:transferTo(destination: WritableStream): Future<integer>
+function BufferStream:transferTo(destination: WritableStream): integer, string
     if not self:isAvailable() then
-        return failed("stream is closed or its buffer is released")
+        return nil, "stream is closed or its buffer is released"
     end
     if sharesBacking(self, destination) then
-        return failed("cannot transfer between streams sharing one backing")
+        return nil, "cannot transfer between streams sharing one backing"
     end
     return destination:writeBuffer(self._buffer)
 end
 
-function BufferStream:transferToFile(path: string): Future<integer>
+function BufferStream:transferToFile(path: string): integer, string
     return transferToFile(self, path)
 end
 
-function BufferStream:discard(): Future<integer>
+function BufferStream:discard(): integer, string
     local length <const> = self:contentLength()
     if length == nil then
-        return failed("stream is closed or its buffer is released")
+        return nil, "stream is closed or its buffer is released"
     end
-    return Future.settled(length)
+    return length
 end
 
-function BufferStream:writeAll(text: string): Future<integer>
+function BufferStream:writeAll(text: string): integer, string
     return writeString(self, text)
 end
 
-function BufferStream:writeBuffer(sourceBuffer: IOBuffer, offset?: integer, count?: integer): Future<integer>
+function BufferStream:writeBuffer(sourceBuffer: IOBuffer, offset?: integer, count?: integer): integer, string
     sourceBuffer = checkedBuffer(sourceBuffer, "writeBuffer", 2)
     if sourceBuffer == self._buffer then
-        return failed("cannot write a buffer into itself")
+        return nil, "cannot write a buffer into itself"
     end
     return writeBuffer(self, sourceBuffer, offset, count)
 end
-function BufferStream:writeView(sourceView: ByteView, offset?: integer, count?: integer): Future<integer>
+function BufferStream:writeView(sourceView: ByteView, offset?: integer, count?: integer): integer, string
     return writeView(self, sourceView, offset, count)
 end
 
@@ -1392,40 +1100,40 @@ function ByteStream:newReader(): Reader, string
     if unavailable(self) then
         return nil, "stream is closed"
     end
-    return newMemoryReader(nil, nil, self._pointer, self._length)
+    return newMemoryReader(nil, self._pointer, self._length)
 end
 
-function ByteStream:readAll(maxBytes?: integer): Future<string>
+function ByteStream:readAll(maxBytes?: integer): string, string
     maxBytes = maximum(maxBytes, 2)
     if unavailable(self) then
-        return failed("stream is closed")
+        return nil, "stream is closed"
     end
     if maxBytes ~= nil and self._length > maxBytes then
-        return failed(("stream exceeds the %d byte limit"):format(maxBytes))
+        return nil, ("stream exceeds the %d byte limit"):format(maxBytes)
     end
-    return Future.settled(loader.toBytes(self._pointer, self._length))
+    return loader.toBytes(self._pointer, self._length)
 end
 
-function ByteStream:transferToBuffer(maxBytes?: integer): Future<IOBuffer>
+function ByteStream:transferToBuffer(maxBytes?: integer): IOBuffer, string
     return transferToBuffer(self, maxBytes)
 end
 
-function ByteStream:transferTo(destination: WritableStream): Future<integer>
+function ByteStream:transferTo(destination: WritableStream): integer, string
     if unavailable(self) then
-        return failed("stream is closed")
+        return nil, "stream is closed"
     end
     return transferTo(self, destination)
 end
 
-function ByteStream:transferToFile(path: string): Future<integer>
+function ByteStream:transferToFile(path: string): integer, string
     return transferToFile(self, path)
 end
 
-function ByteStream:discard(): Future<integer>
+function ByteStream:discard(): integer, string
     if unavailable(self) then
-        return failed("stream is closed")
+        return nil, "stream is closed"
     end
-    return Future.settled(self._length)
+    return self._length
 end
 
 -- Retained view stream
@@ -1463,37 +1171,37 @@ function ViewStream:newReader(): Reader, string
         return nil, "stream is closed"
     end
     local retained <const> = self._view:view()
-    return newMemoryReader(nil, nil, nil, retained:length(), retained)
+    return newMemoryReader(nil, nil, retained:length(), retained)
 end
-function ViewStream:readAll(maxBytes?: integer): Future<string>
+function ViewStream:readAll(maxBytes?: integer): string, string
     maxBytes = maximum(maxBytes, 2)
     local length <const> = self:contentLength()
     if length == nil then
-        return failed("stream is closed")
+        return nil, "stream is closed"
     end
     if maxBytes ~= nil and length > maxBytes then
-        return failed(("stream exceeds the %d byte limit"):format(maxBytes))
+        return nil, ("stream exceeds the %d byte limit"):format(maxBytes)
     end
-    return Future.settled(self._view:getString())
+    return self._view:getString()
 end
-function ViewStream:transferToBuffer(maxBytes?: integer): Future<IOBuffer>
+function ViewStream:transferToBuffer(maxBytes?: integer): IOBuffer, string
     return transferToBuffer(self, maxBytes)
 end
-function ViewStream:transferTo(destination: WritableStream): Future<integer>
+function ViewStream:transferTo(destination: WritableStream): integer, string
     if not self:isAvailable() then
-        return failed("stream is closed")
+        return nil, "stream is closed"
     end
     return destination:writeView(self._view)
 end
-function ViewStream:transferToFile(path: string): Future<integer>
+function ViewStream:transferToFile(path: string): integer, string
     return transferToFile(self, path)
 end
-function ViewStream:discard(): Future<integer>
+function ViewStream:discard(): integer, string
     local length <const> = self:contentLength()
     if length == nil then
-        return failed("stream is closed")
+        return nil, "stream is closed"
     end
-    return Future.settled(length)
+    return length
 end
 
 -- File stream
@@ -1538,28 +1246,28 @@ function FileStream:newWriter(): Writer, string
     return getFiles().openWrite(self._path)
 end
 
-function FileStream:readAll(maxBytes?: integer): Future<string>
+function FileStream:readAll(maxBytes?: integer): string, string
     return readAll(self, maxBytes)
 end
-function FileStream:transferToBuffer(maxBytes?: integer): Future<IOBuffer>
+function FileStream:transferToBuffer(maxBytes?: integer): IOBuffer, string
     return transferToBuffer(self, maxBytes)
 end
-function FileStream:transferTo(destination: WritableStream): Future<integer>
+function FileStream:transferTo(destination: WritableStream): integer, string
     return transferTo(self, destination)
 end
-function FileStream:transferToFile(path: string): Future<integer>
+function FileStream:transferToFile(path: string): integer, string
     return transferToFile(self, path)
 end
-function FileStream:discard(): Future<integer>
+function FileStream:discard(): integer, string
     return discard(self)
 end
-function FileStream:writeAll(text: string): Future<integer>
+function FileStream:writeAll(text: string): integer, string
     return writeString(self, text)
 end
-function FileStream:writeBuffer(sourceBuffer: IOBuffer, offset?: integer, count?: integer): Future<integer>
+function FileStream:writeBuffer(sourceBuffer: IOBuffer, offset?: integer, count?: integer): integer, string
     return writeBuffer(self, sourceBuffer, offset, count)
 end
-function FileStream:writeView(sourceView: ByteView, offset?: integer, count?: integer): Future<integer>
+function FileStream:writeView(sourceView: ByteView, offset?: integer, count?: integer): integer, string
     return writeView(self, sourceView, offset, count)
 end
 
@@ -1618,28 +1326,28 @@ function HandleStream:newWriter(): Writer, string
     ) as Writer
 end
 
-function HandleStream:readAll(maxBytes?: integer): Future<string>
+function HandleStream:readAll(maxBytes?: integer): string, string
     return readAll(self, maxBytes)
 end
-function HandleStream:transferToBuffer(maxBytes?: integer): Future<IOBuffer>
+function HandleStream:transferToBuffer(maxBytes?: integer): IOBuffer, string
     return transferToBuffer(self, maxBytes)
 end
-function HandleStream:transferTo(destination: WritableStream): Future<integer>
+function HandleStream:transferTo(destination: WritableStream): integer, string
     return transferTo(self, destination)
 end
-function HandleStream:transferToFile(path: string): Future<integer>
+function HandleStream:transferToFile(path: string): integer, string
     return transferToFile(self, path)
 end
-function HandleStream:discard(): Future<integer>
+function HandleStream:discard(): integer, string
     return discard(self)
 end
-function HandleStream:writeAll(text: string): Future<integer>
+function HandleStream:writeAll(text: string): integer, string
     return writeString(self, text)
 end
-function HandleStream:writeBuffer(sourceBuffer: IOBuffer, offset?: integer, count?: integer): Future<integer>
+function HandleStream:writeBuffer(sourceBuffer: IOBuffer, offset?: integer, count?: integer): integer, string
     return writeBuffer(self, sourceBuffer, offset, count)
 end
-function HandleStream:writeView(sourceView: ByteView, offset?: integer, count?: integer): Future<integer>
+function HandleStream:writeView(sourceView: ByteView, offset?: integer, count?: integer): integer, string
     return writeView(self, sourceView, offset, count)
 end
 
@@ -1653,6 +1361,23 @@ local function newEmptyStream(contentTypeValue?: string): ReadableStream
         } as StringStream,
         StringStreamMT
     ) as ReadableStream
+end
+
+--- Creates a reader retaining `text` without copying it.
+local function newStringReader(text: string): Reader
+    if type(text) ~= "string" then
+        error("tecs: io.newStringReader needs a byte string", 2)
+    end
+    return newMemoryReader(text, nil, #text)
+end
+
+--- Creates a reader borrowing FFI bytes.
+local function newByteReader(pointer: loader.CValue, length: integer): Reader
+    if pointer == nil then
+        error("tecs: io.newByteReader needs an FFI pointer", 2)
+    end
+    length = nonNegative(length, "io.newByteReader length", 2)
+    return newMemoryReader(nil, pointer, length)
 end
 
 --- Creates a read-only stream retaining `text` without copying it.
@@ -1671,14 +1396,15 @@ newStringStream = function(text: string, contentTypeValue?: string): ReadableStr
 end
 
 --- Creates a stream retaining the caller's buffer.
-newBufferStream = function(sourceBuffer: IOBuffer, contentTypeValue?: string): ReadWriteStream
-    sourceBuffer = checkedBuffer(sourceBuffer, "io.newBufferStream", 2)
+makeBufferStream = function(sourceBuffer: IOBuffer, contentTypeValue?: string, ownsBuffer?: boolean): ReadWriteStream
+    sourceBuffer = checkedBuffer(sourceBuffer, "io.Buffer:newStream", 2)
     if sourceBuffer:isReleased() then
-        error("tecs: io.newBufferStream needs an open buffer", 2)
+        error("tecs: io.Buffer:newStream needs an open buffer", 2)
     end
     return rawSetMetatable(
         {
             _buffer = sourceBuffer,
+            _ownsBuffer = ownsBuffer or false,
             _contentType = contentTypeValue,
             _closed = false,
         } as BufferStream,
@@ -1687,7 +1413,7 @@ newBufferStream = function(sourceBuffer: IOBuffer, contentTypeValue?: string): R
 end
 
 --- Creates a read-only stream retaining an immutable byte view.
-newViewStream = function(sourceView: ByteView, contentTypeValue?: string): ReadableStream
+makeViewStream = function(sourceView: ByteView, contentTypeValue?: string): ReadableStream
     viewRange(sourceView, 0, nil, 2)
     return rawSetMetatable(
         {
@@ -1698,6 +1424,8 @@ newViewStream = function(sourceView: ByteView, contentTypeValue?: string): Reada
         ViewStreamMT
     ) as ReadableStream
 end
+
+buffer.setStreamFactories(makeBufferStream, makeViewStream)
 
 --- Creates a read-only stream borrowing FFI bytes.
 local function newByteStream(pointer: loader.CValue, length: integer, contentTypeValue?: string): ReadableStream
@@ -1791,23 +1519,23 @@ local function metadataNewReader(self: MetadataState): Reader, string
     return (self._source as ReadableStream):newReader()
 end
 
-local function metadataReadAll(self: MetadataState, maxBytes?: integer): Future<string>
+local function metadataReadAll(self: MetadataState, maxBytes?: integer): string, string
     return (self._source as ReadableStream):readAll(maxBytes)
 end
 
-local function metadataTransferToBuffer(self: MetadataState, maxBytes?: integer): Future<IOBuffer>
+local function metadataTransferToBuffer(self: MetadataState, maxBytes?: integer): IOBuffer, string
     return (self._source as ReadableStream):transferToBuffer(maxBytes)
 end
 
-local function metadataTransferTo(self: MetadataState, destination: WritableStream): Future<integer>
+local function metadataTransferTo(self: MetadataState, destination: WritableStream): integer, string
     return (self._source as ReadableStream):transferTo(destination)
 end
 
-local function metadataTransferToFile(self: MetadataState, path: string): Future<integer>
+local function metadataTransferToFile(self: MetadataState, path: string): integer, string
     return (self._source as ReadableStream):transferToFile(path)
 end
 
-local function metadataDiscard(self: MetadataState): Future<integer>
+local function metadataDiscard(self: MetadataState): integer, string
     return (self._source as ReadableStream):discard()
 end
 
@@ -1815,19 +1543,19 @@ local function metadataNewWriter(self: MetadataState): Writer, string
     return (self._source as WritableStream):newWriter()
 end
 
-local function metadataWriteAll(self: MetadataState, text: string): Future<integer>
+local function metadataWriteAll(self: MetadataState, text: string): integer, string
     return (self._source as WritableStream):writeAll(text)
 end
 
 local function metadataWriteBuffer(
     self: MetadataState, source: IOBuffer, offset?: integer, count?: integer
-): Future<integer>
+): integer, string
     return (self._source as WritableStream):writeBuffer(source, offset, count)
 end
 
 local function metadataWriteView(
     self: MetadataState, source: ByteView, offset?: integer, count?: integer
-): Future<integer>
+): integer, string
     return (self._source as WritableStream):writeView(source, offset, count)
 end
 
@@ -1934,29 +1662,6 @@ newStreamWithMetadata = function<T is Stream>(
     return view as T
 end
 
---- Advances pending stream transfers within one shared bounded budget.
-local function poll(): integer
-    local settled = 0
-    local stepCount = 0
-    while #transfers > 0 and stepCount < POLL_STEPS do
-        if pollCursor > #transfers then
-            pollCursor = 1
-        end
-        local transfer <const> = transfers[pollCursor]
-        settled = settled + safelyStep(transfer)
-        stepCount = stepCount + 1
-        if transfer.at ~= 0 then
-            pollCursor = pollCursor + 1
-        end
-    end
-    return settled
-end
-
---- Returns the number of pending stream transfers.
-local function pending(): integer
-    return #transfers
-end
-
 local record stream
     type Reader = Reader
     type Writer = Writer
@@ -1966,18 +1671,16 @@ local record stream
     type ReadWriteStream = ReadWriteStream
 
     newBuffer: function(initial?: integer | string): IOBuffer
+    newStringReader: function(text: string): Reader
+    newByteReader: function(pointer: loader.CValue, length: integer): Reader
     newEmptyStream: function(contentType?: string): ReadableStream
     newStringStream: function(text: string, contentType?: string): ReadableStream
-    newBufferStream: function(buffer: IOBuffer, contentType?: string): ReadWriteStream
-    newViewStream: function(view: ByteView, contentType?: string): ReadableStream
     newByteStream: function(pointer: loader.CValue, length: integer, contentType?: string): ReadableStream
     newFileStream: function(path: string, contentType?: string): ReadWriteStream
     newHandleStream: function(handle: FILE, length?: integer, contentType?: string): ReadWriteStream
     newStreamWithMetadata: function<T is Stream>(
         source: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
     ): T
-    poll: function(): integer
-    pending: function(): integer
     _check: function<T is Stream>(value: T, what: string, level: integer): T
     _borrowBytes: function(source: ReadableStream): BorrowedBytes
     _snapshot: function(source: Stream, what: string): {string: any}
@@ -1986,16 +1689,14 @@ end
 
 return {
     newBuffer = buffer.new,
+    newStringReader = newStringReader,
+    newByteReader = newByteReader,
     newEmptyStream = newEmptyStream,
     newStringStream = newStringStream,
-    newBufferStream = newBufferStream,
-    newViewStream = newViewStream,
     newByteStream = newByteStream,
     newFileStream = newFileStream,
     newHandleStream = newHandleStream,
     newStreamWithMetadata = newStreamWithMetadata,
-    poll = poll,
-    pending = pending,
     _check = checkedStream,
     _borrowBytes = borrowedBytes,
     _snapshot = snapshotStream,

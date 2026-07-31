@@ -17,32 +17,17 @@ local cjson = require("cjson")
 
 describe("tecs.data", function()
     it("carries lua-cjson's own functions rather than wrapping them", function()
-        -- The names are qualified because `tecs.data` also compresses and
-        -- hashes; nothing stands between a caller and the library.
+        -- The names are qualified because `tecs.data` also hashes; nothing
+        -- stands between a caller and the library.
         assert.are.equal(cjson.encode, data.encodeJSON)
         assert.are.equal(cjson.decode, data.decodeJSON)
     end)
 
-    it("carries byte transforms beside the JSON one", function()
-        -- A save can be encoded, compressed and stamped in one place.
-        assert.are.equal("function", type(data.deflate))
-        assert.are.equal("function", type(data.inflate))
-        assert.are.equal("function", type(data.deflateRaw))
-        assert.are.equal("function", type(data.inflateRaw))
+    it("carries byte identities beside JSON", function()
         assert.are.equal("function", type(data.fnv1a64))
         assert.are.equal("function", type(data.sha256))
         assert.are.equal("function", type(data.crc32))
         assert.are.equal("function", type(data.adler32))
-        assert.are.equal("function", type(data.hexEncode))
-        assert.are.equal("function", type(data.hexEncodeInto))
-        assert.are.equal("function", type(data.hexDecode))
-        assert.are.equal("function", type(data.hexDecodeInto))
-        assert.are.equal("function", type(data.base64Encode))
-        assert.are.equal("function", type(data.base64EncodeInto))
-        assert.are.equal("function", type(data.base64Decode))
-        assert.are.equal("function", type(data.base64DecodeInto))
-        assert.are.equal("function", type(data.transcode))
-        assert.are.equal("function", type(data.transcodeInto))
         assert.are.equal("function", type(data.uuid4))
         assert.are.equal("function", type(data.uuid7))
     end)
@@ -54,101 +39,22 @@ describe("tecs.data", function()
         assert.is_nil(data.newKey)
     end)
 
-    it("round-trips arbitrary bytes through hexadecimal", function()
-        local bytes = "\0Tecs\255\n"
-        assert.are.equal("0054656373ff0a", data.hexEncode(bytes))
-        assert.are.equal(bytes, data.hexDecode("0054656373FF0a"))
-    end)
-
-    it("reuses caller-owned buffers for hexadecimal and Base64", function()
-        local destination = tecs.io.newBuffer("discarded")
-
-        assert.are.equal(14, data.hexEncodeInto("\0Tecs\255\n", destination))
-        assert.are.equal("0054656373ff0a", destination:getString())
-        local capacity = destination:capacity()
-
-        assert.are.equal(7, data.hexDecodeInto("0054656373FF0a", destination))
-        assert.are.equal("\0Tecs\255\n", destination:getString())
-        assert.are.equal(capacity, destination:capacity())
-
-        assert.are.equal(12, data.base64EncodeInto("\0Tecs\255\n", destination))
-        assert.are.equal("AFRlY3P/Cg==", destination:getString())
-        assert.are.equal(7, data.base64DecodeInto("AFRlY3P/Cg==", destination))
-        assert.are.equal("\0Tecs\255\n", destination:getString())
-        destination:close()
-    end)
-
-    it("leaves byte-transform destinations empty after invalid input", function()
-        local destination = tecs.io.newBuffer("old bytes")
-        assert.has_error(function()
-            data.hexDecodeInto("zz", destination)
-        end)
-        assert.are.equal(0, destination:length())
-
-        destination:setString("old bytes")
-        assert.has_error(function()
-            data.base64DecodeInto("Zg=A", destination)
-        end)
-        assert.are.equal(0, destination:length())
-        destination:close()
-    end)
-
-    it("rejects malformed hexadecimal text", function()
-        assert.has_error(function()
-            data.hexDecode("0")
-        end)
-        assert.has_error(function()
-            data.hexDecode("zz")
-        end)
-    end)
-
-    it("round-trips arbitrary bytes through canonical Base64", function()
-        assert.are.equal("", data.base64Encode(""))
-        assert.are.equal("Zg==", data.base64Encode("f"))
-        assert.are.equal("Zm8=", data.base64Encode("fo"))
-        assert.are.equal("Zm9v", data.base64Encode("foo"))
-        assert.are.equal("/wA=", data.base64Encode("\255\0"))
-        assert.are.equal("\255\0", data.base64Decode("/wA="))
-    end)
-
     it("consumes retained byte views without crossing through strings", function()
         local source = tecs.io.newBuffer("before:payload:after")
         local view = source:view(7, 7)
         view.getString = function()
-            error("a byte transform copied its input")
+            error("a hash copied its input")
         end
 
         source:setString("changed", 7)
         source:close()
 
-        assert.are.equal("7061796c6f6164", data.hexEncode(view))
-        assert.are.equal("cGF5bG9hZA==", data.base64Encode(view))
         assert.are.equal(data.fnv1a64("payload"), data.fnv1a64(view))
         assert.are.equal(data.sha256("payload"), data.sha256(view))
         assert.are.equal(data.adler32("payload"), data.adler32(view))
         assert.are.equal(data.crc32("payload"), data.crc32(view))
-        assert.are.equal("payload", data.transcode(view, "UTF-8", "UTF-8"))
 
-        local hex = tecs.io.newBuffer("7061796c6f6164")
-        local base64 = tecs.io.newBuffer("cGF5bG9hZA==")
-        local hexView = hex:view()
-        local base64View = base64:view()
-        hex:close()
-        base64:close()
-        assert.are.equal("payload", data.hexDecode(hexView))
-        assert.are.equal("payload", data.base64Decode(base64View))
-
-        hexView:close()
-        base64View:close()
         view:close()
-    end)
-
-    it("rejects non-canonical or malformed Base64 text", function()
-        for _, text in ipairs({ "Zg", "Zg=", "=g==", "Zg=A", "Zh==", "Zm9=" }) do
-            assert.has_error(function()
-                data.base64Decode(text)
-            end)
-        end
     end)
 
     it("answers an independent settings table from newJSON", function()

@@ -10,7 +10,7 @@ tecs.io.http.newClient({userAgent = "mygame/1.0"})
     :map(function(response: tecs.io.http.Response): string
         local body <const> = response.body
         if body is tecs.io.ReadableStream then
-            return body:readAll().value
+            return body:readAll()
         end
         error("the response destination is not readable")
     end)

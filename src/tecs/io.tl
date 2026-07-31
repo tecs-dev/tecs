@@ -7,15 +7,17 @@ a cursor. A [`Reader`](tealdoc:tecs.io.Reader) and
 opened from it. Strings, buffers, borrowed bytes, paths, and handles all use
 that one descriptor contract.
 
-Whole-source operations return futures. A caller outside a frame can use
-`value` to wait, raise a transfer error, and take the result:
+Whole-source operations run synchronously and return their result directly.
+They return nil and a reason when an endpoint cannot be opened, read, written,
+flushed, or closed:
 
 ```teal
-local save <const> = tecs.io.newFileStream("save.bin")
-local bytes <const> = save:transferToBuffer().value
-print(bytes:length())
-bytes:close()
-save:close()
+tecs.scoped(function(scope: tecs.Scope)
+    local save <const> = scope:own(tecs.io.newFileStream("save.bin"))
+    local bytes <const> = scope:own(assert(save:transferToBuffer()))
+
+    print(bytes:length())
+end)
 ```
 
 TCP is an ordered byte stream: one write may take several reads to receive,
@@ -29,8 +31,26 @@ socket fill its FFI allocation directly, and `TCPSocket:writeFrom` queues a
 buffer range without constructing an intermediate Lua string.
 `Buffer:view` retains an immutable zero-copy snapshot. `writeView` on sockets,
 writers, and writable streams consumes that retained range directly, while
-`newViewStream` gives it replayable stream behavior without copying payload
-bytes.
+`ByteView:newStream` gives it replayable stream behavior without copying
+payload bytes.
+
+Transform readers and writers compose those endpoints without materializing a
+whole source. `newInflateReader`, `newBase64DecodeReader`,
+`newHexDecodeReader`, and `newTranscodeReader` pull transformed bytes as their
+consumer asks. The corresponding deflate, encode, and transcode writers push
+transformed chunks toward a destination and finish format trailers or partial
+character state on `close`. Each wrapper owns the endpoint it wraps. Memory
+endpoints lend source pointers and reserve destination ranges directly; other
+endpoints reuse pooled chunks, so a warmed transfer allocates no intermediate
+payload storage.
+
+Ownership is explicit at construction boundaries. A stream over a buffer or
+Lua file handle borrows that resource and never closes it. A stream over a
+byte view retains its own immutable view. Transform readers and writers take
+ownership of the endpoint they wrap and close it with themselves. Opening a
+buffer or byte-view reader retains an immutable snapshot that outlives later
+closure; opening a buffer writer borrows the mutable buffer, clears its
+logical length, and requires it to remain open through the writer's close.
 
 Resolution and client connection return asynchronous
 [`Future`](tealdoc:tecs.Future) values. An
@@ -51,8 +71,8 @@ An `Application` calls `poll` automatically once per host iteration. Game
 systems and update functions must not call it themselves. Only a headless
 program without an application calls `poll` once per manual loop; it can use a
 future's bounded `wait` instead when blocking is the honest operation. Stream
-transfers are cooperative futures too. Listening, accepting, reading, writing,
-and receiving are nonblocking.
+transfers already block until their bytes have moved. Listening, accepting,
+reading, writing, and receiving are nonblocking.
 
 Every address, TCP socket, listener, UDP socket, and UDP packet owns a
 resource. Close it explicitly. A GC finalizer releases an abandoned network
@@ -76,6 +96,7 @@ local binding <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local Future <const> = require("tecs.Future")
 local buffer <const> = require("tecs.io.buffer")
+local filters <const> = require("tecs.io.filters")
 local stream <const> = require("tecs.io.stream")
 local type types = require("tecs.io.types")
 local type coretypes = require("tecs.types")
@@ -127,11 +148,10 @@ local record binaryIO
     --- notifications.
     watcher: watcher
 
-    --- A `Reader` supplies bytes in order and releases its source on `close`.
+    --- A `Reader` supplies bytes in order and releases its owned state on `close`.
     type Reader = types.Reader
 
-    --- A `Writer` accepts bytes in order and finishes its destination on
-    --- `close`.
+    --- A `Writer` accepts bytes in order and finishes its destination on `close`.
     type Writer = types.Writer
 
     --- A `Stream` describes binary storage without retaining a cursor.
@@ -156,12 +176,35 @@ local record binaryIO
     --- A `WriteRange` reserves an exclusive zero-copy buffer range for a native writer.
     type WriteRange = types.WriteRange
 
+    --- Options control an incremental inflate reader.
+    type InflateReaderOptions = types.InflateReaderOptions
+
+    --- Options control an incremental deflate writer.
+    type DeflateWriterOptions = types.DeflateWriterOptions
+
     --- Creates an owned growable byte buffer.
     ---
     --- @param initial The caller supplies a non-negative zero-filled logical
     ---     length, a string to copy, or nil for an empty buffer.
     --- @return Returns a caller-owned buffer.
     newBuffer: function(initial?: integer | string): IOBuffer
+
+    --- Creates a reader over an immutable Lua string.
+    ---
+    --- The reader retains `bytes` without copying it. Closing the reader drops
+    --- that retained reference; there is no separate resource to close.
+    --- @param bytes The caller supplies complete binary contents.
+    --- @return Returns a caller-owned reader whose cursor starts at zero.
+    newStringReader: function(bytes: string): types.Reader
+
+    --- Creates a reader over borrowed FFI memory.
+    ---
+    --- The reader never frees or modifies the allocation. The caller keeps
+    --- its owner reachable and the bytes unchanged until the reader closes.
+    --- @param pointer The caller supplies the first readable byte.
+    --- @param length The caller supplies the non-negative readable byte count.
+    --- @return Returns a caller-owned reader whose cursor starts at zero.
+    newByteReader: function(pointer: loader.CValue, length: integer): types.Reader
 
     --- Creates a replayable readable empty stream.
     ---
@@ -177,29 +220,11 @@ local record binaryIO
     --- @return Returns a readable stream.
     newStringStream: function(bytes: string, contentType?: string): types.ReadableStream
 
-    --- Creates a stream sharing an owned growable buffer.
-    ---
-    --- `transferToBuffer` returns the same retained object. Closing or mutating it
-    --- affects both caller and stream.
-    --- @param buffer The caller supplies an open buffer.
-    --- @param contentType The caller supplies optional media type metadata.
-    --- @return Returns a readable and writable stream.
-    newBufferStream: function(buffer: IOBuffer, contentType?: string): types.ReadWriteStream
-
-    --- Creates a replayable read-only stream retaining a byte view.
-    ---
-    --- The stream retains its own view, so the caller may close `view`
-    --- immediately after construction. Closing the stream closes its retained
-    --- view after already-open readers close theirs.
-    --- @param view The caller supplies an open immutable byte view.
-    --- @param contentType The caller supplies optional media type metadata.
-    --- @return Returns a readable stream.
-    newViewStream: function(view: types.ByteView, contentType?: string): types.ReadableStream
-
     --- Creates a replayable read-only stream over borrowed FFI bytes.
     ---
+    --- Closing the stream or its readers never frees the allocation.
     --- @param pointer The caller keeps the backing allocation alive and
-    ---     unchanged until every reader and transfer future settles.
+    ---     unchanged until every reader closes and every transfer returns.
     --- @param length The caller supplies the non-negative byte count.
     --- @param contentType The caller supplies optional media type metadata.
     --- @return Returns a readable stream.
@@ -224,6 +249,90 @@ local record binaryIO
     --- @param contentType The caller supplies optional media type metadata.
     --- @return Returns a non-replayable readable and writable stream.
     newHandleStream: function(handle: FILE, length?: integer, contentType?: string): types.ReadWriteStream
+
+    --- Creates a reader that incrementally inflates a compressed source.
+    ---
+    --- The reader owns `source` and closes it when the wrapper closes. Reads
+    --- retain only bounded compressed and decompressed chunks. A raw stream
+    --- has no zlib header, trailer, or checksum.
+    --- @param source The caller supplies the reader of compressed bytes.
+    --- @param options The caller selects raw framing and an output ceiling or
+    ---     omits it for a zlib stream and the default ceiling.
+    --- @return Returns a caller-owned reader of decompressed bytes.
+    newInflateReader: function(source: types.Reader, options?: types.InflateReaderOptions): types.Reader
+
+    --- Creates a writer that incrementally deflates bytes into a destination.
+    ---
+    --- The writer owns `destination`. `flush` emits a synchronization point
+    --- without ending the compressed stream, and `close` emits its trailer
+    --- before closing the destination.
+    --- @param destination The caller supplies the writer receiving compressed
+    ---     bytes.
+    --- @param options The caller selects raw framing and a compression level
+    ---     or omits it for zlib framing and zlib's default level.
+    --- @return Returns a caller-owned writer that accepts uncompressed bytes.
+    newDeflateWriter: function(destination: types.Writer, options?: types.DeflateWriterOptions): types.Writer
+
+    --- Creates a reader that incrementally decodes RFC 4648 Base64 text.
+    ---
+    --- The reader owns `source` and retains at most one undecoded quantum
+    --- between source reads.
+    --- @param source The caller supplies the reader of Base64 text.
+    --- @return Returns a caller-owned reader of decoded bytes.
+    newBase64DecodeReader: function(source: types.Reader): types.Reader
+
+    --- Creates a writer that incrementally encodes bytes as RFC 4648 Base64.
+    ---
+    --- The writer owns `destination`. `close` emits padding for the final
+    --- partial quantum before closing the destination.
+    --- @param destination The caller supplies the writer receiving Base64
+    ---     text.
+    --- @return Returns a caller-owned writer that accepts unencoded bytes.
+    newBase64EncodeWriter: function(destination: types.Writer): types.Writer
+
+    --- Creates a reader that incrementally decodes hexadecimal text.
+    ---
+    --- The reader owns `source` and carries one unmatched nibble across
+    --- source reads.
+    --- @param source The caller supplies the reader of hexadecimal text.
+    --- @return Returns a caller-owned reader of decoded bytes.
+    newHexDecodeReader: function(source: types.Reader): types.Reader
+
+    --- Creates a writer that incrementally encodes bytes as lowercase hexadecimal text.
+    ---
+    --- The writer owns `destination` and forwards each encoded chunk without
+    --- retaining input bytes.
+    --- @param destination The caller supplies the writer receiving hexadecimal
+    ---     text.
+    --- @return Returns a caller-owned writer that accepts unencoded bytes.
+    newHexEncodeWriter: function(destination: types.Writer): types.Writer
+
+    --- Creates a reader that incrementally converts character encodings.
+    ---
+    --- The reader owns `source`. It preserves conversion state and carries an
+    --- incomplete multibyte character across source reads.
+    --- @param source The caller supplies the reader of encoded text.
+    --- @param fromEncoding The caller supplies an SDL iconv source encoding
+    ---     name such as `UTF-8`.
+    --- @param toEncoding The caller supplies an SDL iconv destination encoding
+    ---     name such as `UTF-16LE`.
+    --- @return Returns a caller-owned reader of converted text.
+    newTranscodeReader: function(source: types.Reader, fromEncoding: string, toEncoding: string): types.Reader
+
+    --- Creates a writer that incrementally converts character encodings.
+    ---
+    --- The writer owns `destination`. It preserves conversion state and
+    --- carries an incomplete multibyte character across writes; `close`
+    --- rejects a truncated final character and emits any target shift state.
+    --- @param destination The caller supplies the writer receiving converted
+    ---     text.
+    --- @param fromEncoding The caller supplies an SDL iconv source encoding
+    ---     name such as `UTF-8`.
+    --- @param toEncoding The caller supplies an SDL iconv destination encoding
+    ---     name such as `UTF-16LE`.
+    --- @return Returns a caller-owned writer that accepts bytes in
+    ---     `fromEncoding`.
+    newTranscodeWriter: function(destination: types.Writer, fromEncoding: string, toEncoding: string): types.Writer
 
     --- Creates a lazy metadata view over a stream.
     ---
@@ -518,25 +627,32 @@ local record binaryIO
     --- plugin, or update function must not call it. Only a headless program
     --- without an application owns a manual call, normally once per loop while
     --- `pending()` is greater than zero.
-    --- @return Returns how many futures settled during this call, including
-    ---     failures.
+    --- @return Returns how many resolution or connection futures settled
+    ---     during this call, including failures.
     poll: function(): integer
-    --- Returns the number of pending stream, resolution, or connection
-    --- futures.
+    --- Returns the number of pending resolution or connection futures.
     ---
     --- @return Returns zero after every operation settles or cancels.
     pending: function(): integer
 end
 
 binaryIO.newBuffer = stream.newBuffer
+binaryIO.newStringReader = stream.newStringReader
+binaryIO.newByteReader = stream.newByteReader
 binaryIO.newEmptyStream = stream.newEmptyStream
 binaryIO.newStringStream = stream.newStringStream
-binaryIO.newBufferStream = stream.newBufferStream
-binaryIO.newViewStream = stream.newViewStream
 binaryIO.newByteStream = stream.newByteStream
 binaryIO.newFileStream = stream.newFileStream
 binaryIO.newHandleStream = stream.newHandleStream
 binaryIO.newStreamWithMetadata = stream.newStreamWithMetadata
+binaryIO.newInflateReader = filters.newInflateReader
+binaryIO.newDeflateWriter = filters.newDeflateWriter
+binaryIO.newBase64DecodeReader = filters.newBase64DecodeReader
+binaryIO.newBase64EncodeWriter = filters.newBase64EncodeWriter
+binaryIO.newHexDecodeReader = filters.newHexDecodeReader
+binaryIO.newHexEncodeWriter = filters.newHexEncodeWriter
+binaryIO.newTranscodeReader = filters.newTranscodeReader
+binaryIO.newTranscodeWriter = filters.newTranscodeWriter
 
 local AddressMT <const>: metatable<binaryIO.Address> = {__index = binaryIO.Address}
 local TCPSocketMT <const>: metatable<binaryIO.TCPSocket> = {__index = binaryIO.TCPSocket}
@@ -1128,7 +1244,7 @@ function binaryIO.bind(port: integer, address?: binaryIO.Address): binaryIO.UDPS
 end
 
 function binaryIO.poll(): integer
-    local settled = stream.poll()
+    local settled = 0
     local at = 1
     while at <= #operations do
         local current <const> = operations[at]
@@ -1141,7 +1257,7 @@ function binaryIO.poll(): integer
 end
 
 function binaryIO.pending(): integer
-    return #operations + stream.pending()
+    return #operations
 end
 
 function binaryIO.shutdown(): boolean, string

@@ -2,217 +2,409 @@
 -- API name is its attachment target; Tealdoc discovers these source regions.
 
 -- #region tecs.io.newBuffer
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("save data")
+local bytes <const> = tecs.io.newBuffer("save data")
 print(bytes:length())
+
 bytes:close()
 -- #endregion tecs.io.newBuffer
 
+-- #region tecs.io.newStringReader
+local reader <const> = tecs.io.newStringReader("snapshot bytes")
+
+assert(reader:read(1024) == "snapshot bytes")
+
+reader:close()
+-- #endregion tecs.io.newStringReader
+
+-- #region tecs.io.newByteReader
+local ffi <const> = require("ffi")
+
+local bytes <const> = "borrowed bytes"
+local pointer <const> = ffi.cast("const uint8_t *", bytes)
+local reader <const> = tecs.io.newByteReader(pointer as any, #bytes)
+
+assert(reader:read(1024) == bytes)
+
+reader:close()
+-- #endregion tecs.io.newByteReader
+
 -- #region tecs.io.Buffer.length
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("four")
+local bytes <const> = tecs.io.newBuffer("four")
 print(bytes:length())
+
 bytes:close()
 -- #endregion tecs.io.Buffer.length
 
 -- #region tecs.io.Buffer.capacity
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("data")
+local bytes <const> = tecs.io.newBuffer("data")
+
 assert(bytes:capacity() >= bytes:length())
+
 bytes:close()
 -- #endregion tecs.io.Buffer.capacity
 
 -- #region tecs.io.Buffer.clear
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("reusable")
+local bytes <const> = tecs.io.newBuffer("reusable")
 local capacity <const> = bytes:capacity()
 bytes:clear()
+
 assert(bytes:length() == 0)
 assert(bytes:capacity() == capacity)
+
 bytes:close()
 -- #endregion tecs.io.Buffer.clear
 
 -- #region tecs.io.Buffer.ensureCapacity
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("data")
+local bytes <const> = tecs.io.newBuffer("data")
 bytes:ensureCapacity(1024)
+
 assert(bytes:capacity() >= 1024)
 assert(bytes:length() == 4)
+
 bytes:close()
 -- #endregion tecs.io.Buffer.ensureCapacity
 
 -- #region tecs.io.Buffer.resize
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("data")
+local bytes <const> = tecs.io.newBuffer("data")
 bytes:resize(6)
+
 assert(bytes:getString() == "data\0\0")
 bytes:resize(2)
+
 assert(bytes:getString() == "da")
+
 bytes:close()
 -- #endregion tecs.io.Buffer.resize
 
 -- #region tecs.io.Buffer.getString
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("headerpayload")
+local bytes <const> = tecs.io.newBuffer("headerpayload")
 print(bytes:getString(6, 7))
+
 bytes:close()
 -- #endregion tecs.io.Buffer.getString
 
 -- #region tecs.io.Buffer.setString
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("abcdefgh")
+local bytes <const> = tecs.io.newBuffer("abcdefgh")
 bytes:setString("XY", 3)
+
 assert(bytes:getString() == "abcXYfgh")
 bytes:setString("!", 10)
+
 assert(bytes:getString(8, 3) == "\0\0!")
+
 bytes:close()
 -- #endregion tecs.io.Buffer.setString
 
 -- #region tecs.io.Buffer.getFFIPointer
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("native bytes")
+local bytes <const> = tecs.io.newBuffer("native bytes")
 local pointer <const> = bytes:getFFIPointer()
 print(pointer)
+
 bytes:close()
 -- #endregion tecs.io.Buffer.getFFIPointer
 
 -- #region tecs.io.Buffer.isReleased
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer()
+local bytes <const> = tecs.io.newBuffer()
+
 assert(not bytes:isReleased())
+
 bytes:close()
+
 assert(bytes:isReleased())
 -- #endregion tecs.io.Buffer.isReleased
 
 -- #region tecs.io.Buffer.close
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("secret")
+local bytes <const> = tecs.io.newBuffer("secret")
+
 bytes:close()
 bytes:close()
 -- #endregion tecs.io.Buffer.close
 
+-- #region tecs.io.Buffer.newReader
+local bytes <const> = tecs.io.newBuffer("snapshot")
+local reader <const> = bytes:newReader()
+
+bytes:close()
+
+assert(reader:read(1024) == "snapshot")
+
+reader:close()
+-- #endregion tecs.io.Buffer.newReader
+
+-- #region tecs.io.Buffer.newWriter
+local bytes <const> = tecs.io.newBuffer("old")
+local writer <const> = bytes:newWriter()
+
+assert(writer:write("new"))
+assert(writer:close())
+assert(bytes:getString() == "new")
+
+bytes:close()
+-- #endregion tecs.io.Buffer.newWriter
+
+-- #region tecs.io.ByteView.newReader
+local bytes <const> = tecs.io.newBuffer("headerpayload")
+local payload <const> = bytes:view(6)
+local reader <const> = payload:newReader()
+
+payload:close()
+bytes:close()
+
+assert(reader:read(1024) == "payload")
+
+reader:close()
+-- #endregion tecs.io.ByteView.newReader
+
+-- #region tecs.io.ByteView.newStream
+local bytes <const> = tecs.io.newBuffer("headerpayload")
+local payload <const> = bytes:view(6)
+local source <const> = payload:newStream("application/octet-stream")
+
+payload:close()
+bytes:close()
+
+assert(source:readAll() == "payload")
+
+source:close()
+-- #endregion tecs.io.ByteView.newStream
+
 -- #region tecs.io.newEmptyStream
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newEmptyStream("application/octet-stream")
-print(source:readAll().value)
+local source <const> = tecs.io.newEmptyStream("application/octet-stream")
+print(source:readAll())
+
 source:close()
 -- #endregion tecs.io.newEmptyStream
 
 -- #region tecs.io.newStringStream
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("hello", "text/plain")
-print(source:readAll().value)
+local source <const> = tecs.io.newStringStream("hello", "text/plain")
+print(source:readAll())
+
 source:close()
 -- #endregion tecs.io.newStringStream
 
--- #region tecs.io.newBufferStream
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("old")
-local stream <const> = tecsIO.newBufferStream(bytes)
-assert(stream:writeAll("new").value)
+-- #region tecs.io.Buffer.newStream
+local bytes <const> = tecs.io.newBuffer("old")
+local stream <const> = bytes:newStream()
+
+assert(stream:writeAll("new"))
 print(bytes:getString())
+
 stream:close()
 bytes:close()
--- #endregion tecs.io.newBufferStream
+-- #endregion tecs.io.Buffer.newStream
 
 -- #region tecs.io.newByteStream
 local ffi <const> = require("ffi")
-local tecsIO <const> = require("tecs.io")
+
 local bytes <const> = "borrowed bytes"
 local pointer <const> = ffi.cast("const uint8_t *", bytes)
-local source <const> = tecsIO.newByteStream(pointer as any, #bytes)
-print(source:readAll().value)
+local source <const> = tecs.io.newByteStream(pointer as any, #bytes)
+print(source:readAll())
+
 source:close()
 -- #endregion tecs.io.newByteStream
 
 -- #region tecs.io.newFileStream
-local tecsIO <const> = require("tecs.io")
-local save <const> = tecsIO.newFileStream("save.bin", "application/octet-stream")
-assert(save:writeAll("save data").value)
-print(save:readAll().value)
+local save <const> = tecs.io.newFileStream("save.bin", "application/octet-stream")
+
+assert(save:writeAll("save data"))
+print(save:readAll())
+
 save:close()
 -- #endregion tecs.io.newFileStream
 
 -- #region tecs.io.newHandleStream
-local tecsIO <const> = require("tecs.io")
 local handle <const> = assert(io.open("save.bin", "rb"))
-local source <const> = tecsIO.newHandleStream(handle)
-print(source:readAll().value)
+local source <const> = tecs.io.newHandleStream(handle)
+print(source:readAll())
+
 source:close()
 handle:close()
 -- #endregion tecs.io.newHandleStream
 
+-- #region tecs.io.newInflateReader
+tecs.scoped(function(scope: tecs.Scope)
+    local compressed <const> = scope:own(tecs.io.newBuffer())
+    local restored <const> = scope:own(tecs.io.newBuffer())
+    local compressor <const> = scope:own(tecs.io.newDeflateWriter(compressed:newWriter()))
+
+    assert(compressor:write("snapshot bytes"))
+    assert(compressor:close())
+
+    local reader <const> = scope:own(tecs.io.newInflateReader(compressed:newReader()))
+    local sink <const> = scope:own(restored:newWriter())
+    local count <const>, reason = reader:transferTo(sink)
+
+    assert(count, reason)
+    assert(restored:getString() == "snapshot bytes")
+end)
+-- #endregion tecs.io.newInflateReader
+
+-- #region tecs.io.newDeflateWriter
+tecs.scoped(function(scope: tecs.Scope)
+    local compressed <const> = scope:own(tecs.io.newBuffer())
+    local writer <const> = scope:own(tecs.io.newDeflateWriter(compressed:newWriter()))
+
+    assert(writer:write("snapshot "))
+    assert(writer:write("bytes"))
+    assert(writer:close())
+    assert(compressed:length() > 0)
+end)
+-- #endregion tecs.io.newDeflateWriter
+
+-- #region tecs.io.newBase64DecodeReader
+tecs.scoped(function(scope: tecs.Scope)
+    local reader <const> = scope:own(tecs.io.newBase64DecodeReader(tecs.io.newStringReader("c25hcHNob3QgYnl0ZXM=")))
+    local decoded <const>, reason = reader:read(1024)
+
+    assert(decoded, reason)
+    assert(decoded == "snapshot bytes")
+end)
+-- #endregion tecs.io.newBase64DecodeReader
+
+-- #region tecs.io.newBase64EncodeWriter
+tecs.scoped(function(scope: tecs.Scope)
+    local encoded <const> = scope:own(tecs.io.newBuffer())
+    local writer <const> = scope:own(tecs.io.newBase64EncodeWriter(encoded:newWriter()))
+
+    assert(writer:write("snapshot bytes"))
+    assert(writer:close())
+    assert(encoded:getString() == "c25hcHNob3QgYnl0ZXM=")
+end)
+-- #endregion tecs.io.newBase64EncodeWriter
+
+-- #region tecs.io.newHexDecodeReader
+tecs.scoped(function(scope: tecs.Scope)
+    local reader <const> = scope:own(tecs.io.newHexDecodeReader(tecs.io.newStringReader("73617665")))
+    local decoded <const>, reason = reader:read(1024)
+
+    assert(decoded, reason)
+    assert(decoded == "save")
+end)
+-- #endregion tecs.io.newHexDecodeReader
+
+-- #region tecs.io.newHexEncodeWriter
+tecs.scoped(function(scope: tecs.Scope)
+    local encoded <const> = scope:own(tecs.io.newBuffer())
+    local writer <const> = scope:own(tecs.io.newHexEncodeWriter(encoded:newWriter()))
+
+    assert(writer:write("save"))
+    assert(writer:close())
+    assert(encoded:getString() == "73617665")
+end)
+-- #endregion tecs.io.newHexEncodeWriter
+
+-- #region tecs.io.newTranscodeReader
+tecs.scoped(function(scope: tecs.Scope)
+    local reader <const> = scope:own(
+        tecs.io.newTranscodeReader(tecs.io.newStringReader("A\0\233\0"), "UTF-16LE", "UTF-8")
+    )
+    local utf8 <const>, reason = reader:read(1024)
+
+    assert(utf8, reason)
+    assert(utf8 == "A\195\169")
+end)
+-- #endregion tecs.io.newTranscodeReader
+
+-- #region tecs.io.newTranscodeWriter
+tecs.scoped(function(scope: tecs.Scope)
+    local utf16 <const> = scope:own(tecs.io.newBuffer())
+    local writer <const> = scope:own(tecs.io.newTranscodeWriter(utf16:newWriter(), "UTF-8", "UTF-16LE"))
+
+    assert(writer:write("A\195"))
+    assert(writer:write("\169"))
+    assert(writer:close())
+    assert(utf16:getString() == "A\0\233\0")
+end)
+-- #endregion tecs.io.newTranscodeWriter
+
 -- #region tecs.io.newStreamWithMetadata
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("{}")
-local json <const> = tecsIO.newStreamWithMetadata(source, "application/json")
+local source <const> = tecs.io.newStringStream("{}")
+local json <const> = tecs.io.newStreamWithMetadata(source, "application/json")
 print(json:contentType())
+
 json:close()
 -- #endregion tecs.io.newStreamWithMetadata
 
 -- #region tecs.io.Reader.read
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("abcdefgh")
+local source <const> = tecs.io.newStringStream("abcdefgh")
 local reader <const> = assert(source:newReader())
 local chunk <const>, reason = reader:read(4)
+
 assert(chunk, reason)
 print(chunk)
+
 reader:close()
 source:close()
 -- #endregion tecs.io.Reader.read
 
 -- #region tecs.io.Reader.readInto
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("abcdefgh")
+local source <const> = tecs.io.newStringStream("abcdefgh")
 local reader <const> = assert(source:newReader())
-local bytes <const> = tecsIO.newBuffer()
+local bytes <const> = tecs.io.newBuffer()
 local count <const>, reason = reader:readInto(bytes, 4)
+
 assert(count, reason)
 print(bytes:getString())
+
 reader:close()
 source:close()
 bytes:close()
 -- #endregion tecs.io.Reader.readInto
 
+-- #region tecs.io.Reader.transferTo
+local sourceStream <const> = tecs.io.newStringStream("save data")
+local reader <const> = assert(sourceStream:newReader())
+local bytes <const> = tecs.io.newBuffer()
+local writer <const> = bytes:newWriter()
+local count <const>, reason = reader:transferTo(writer)
+
+assert(count == 9, reason)
+assert(bytes:getString() == "save data")
+
+reader:close()
+writer:close()
+sourceStream:close()
+bytes:close()
+-- #endregion tecs.io.Reader.transferTo
+
 -- #region tecs.io.Reader.close
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("data")
+local source <const> = tecs.io.newStringStream("data")
 local reader <const> = assert(source:newReader())
+
 reader:close()
 source:close()
 -- #endregion tecs.io.Reader.close
 
 -- #region tecs.io.Writer.write
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer()
-local destination <const> = tecsIO.newBufferStream(bytes)
-local writer <const> = assert(destination:newWriter())
+local bytes <const> = tecs.io.newBuffer()
+local writer <const> = bytes:newWriter()
 local wrote <const>, reason = writer:write("data")
+
 assert(wrote, reason)
 assert(writer:close())
 print(bytes:getString())
-destination:close()
+
 bytes:close()
 -- #endregion tecs.io.Writer.write
 
 -- #region tecs.io.Writer.writeFrom
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newBuffer("data")
-local output <const> = tecsIO.newBuffer()
-local destination <const> = tecsIO.newBufferStream(output)
-local writer <const> = assert(destination:newWriter())
+local source <const> = tecs.io.newBuffer("data")
+local output <const> = tecs.io.newBuffer()
+local writer <const> = output:newWriter()
 local count <const>, reason = writer:writeFrom(source)
+
 assert(count, reason)
 assert(writer:close())
-destination:close()
+
 source:close()
 output:close()
 -- #endregion tecs.io.Writer.writeFrom
 
 -- #region tecs.io.Writer.flush
-local tecsIO <const> = require("tecs.io")
-local destination <const> = tecsIO.newFileStream("save.bin")
+local destination <const> = tecs.io.newFileStream("save.bin")
 local writer <const> = assert(destination:newWriter())
+
 assert(writer:write("checkpoint"))
 assert(writer:flush())
 assert(writer:close())
@@ -220,134 +412,134 @@ destination:close()
 -- #endregion tecs.io.Writer.flush
 
 -- #region tecs.io.Writer.close
-local tecsIO <const> = require("tecs.io")
-local destination <const> = tecsIO.newFileStream("save.bin")
+local destination <const> = tecs.io.newFileStream("save.bin")
 local writer <const> = assert(destination:newWriter())
+
 assert(writer:write("complete"))
 assert(writer:close())
 destination:close()
 -- #endregion tecs.io.Writer.close
 
 -- #region tecs.io.Stream.contentLength
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("four")
+local source <const> = tecs.io.newStringStream("four")
 local length <const> = source:contentLength()
 if length ~= nil then
     print(length)
 end
+
 source:close()
 -- #endregion tecs.io.Stream.contentLength
 
 -- #region tecs.io.Stream.contentType
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("{}", "application/json")
+local source <const> = tecs.io.newStringStream("{}", "application/json")
 print(source:contentType())
+
 source:close()
 -- #endregion tecs.io.Stream.contentType
 
 -- #region tecs.io.Stream.isReadable
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("data")
+local source <const> = tecs.io.newStringStream("data")
 print(source:isReadable())
+
 source:close()
 -- #endregion tecs.io.Stream.isReadable
 
 -- #region tecs.io.Stream.isWritable
-local tecsIO <const> = require("tecs.io")
-local save <const> = tecsIO.newFileStream("save.bin")
+local save <const> = tecs.io.newFileStream("save.bin")
 print(save:isWritable())
+
 save:close()
 -- #endregion tecs.io.Stream.isWritable
 
 -- #region tecs.io.Stream.isReplayable
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("data")
+local source <const> = tecs.io.newStringStream("data")
 print(source:isReplayable())
+
 source:close()
 -- #endregion tecs.io.Stream.isReplayable
 
 -- #region tecs.io.Stream.isAvailable
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("data")
+local source <const> = tecs.io.newStringStream("data")
 print(source:isAvailable())
+
 source:close()
 print(source:isAvailable())
 -- #endregion tecs.io.Stream.isAvailable
 
 -- #region tecs.io.Stream.close
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("data")
+local source <const> = tecs.io.newStringStream("data")
+
 source:close()
 -- #endregion tecs.io.Stream.close
 
 -- #region tecs.io.ReadableStream.hasBuffer
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("data")
-local source <const> = tecsIO.newBufferStream(bytes)
+local bytes <const> = tecs.io.newBuffer("data")
+local source <const> = bytes:newStream()
 print(source:hasBuffer())
+
 source:close()
 bytes:close()
 -- #endregion tecs.io.ReadableStream.hasBuffer
 
 -- #region tecs.io.ReadableStream.newReader
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("data")
+local source <const> = tecs.io.newStringStream("data")
 local reader <const> = assert(source:newReader())
 print(reader:read(4))
+
 reader:close()
 source:close()
 -- #endregion tecs.io.ReadableStream.newReader
 
 -- #region tecs.io.ReadableStream.readAll
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("data")
-local bytes <const> = source:readAll(1024).value
+local source <const> = tecs.io.newStringStream("data")
+local bytes <const> = source:readAll(1024)
 print(bytes)
+
 source:close()
 -- #endregion tecs.io.ReadableStream.readAll
 
 -- #region tecs.io.ReadableStream.transferToBuffer
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newFileStream("save.bin")
-local bytes <const> = source:transferToBuffer(1024 * 1024).value
+local source <const> = tecs.io.newFileStream("save.bin")
+local bytes <const> = source:transferToBuffer(1024 * 1024)
 print(bytes:length())
+
 bytes:close()
 source:close()
 -- #endregion tecs.io.ReadableStream.transferToBuffer
 
 -- #region tecs.io.ReadableStream.transferTo
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("data")
-local output <const> = tecsIO.newBuffer()
-local destination <const> = tecsIO.newBufferStream(output)
-local count <const> = source:transferTo(destination).value
+local source <const> = tecs.io.newStringStream("data")
+local output <const> = tecs.io.newBuffer()
+local destination <const> = output:newStream()
+local count <const> = source:transferTo(destination)
 print(count, output:getString())
+
 source:close()
 destination:close()
 output:close()
 -- #endregion tecs.io.ReadableStream.transferTo
 
 -- #region tecs.io.ReadableStream.transferToFile
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newStringStream("save data")
-local count <const> = source:transferToFile("save.bin").value
+local source <const> = tecs.io.newStringStream("save data")
+local count <const> = source:transferToFile("save.bin")
 print(count)
+
 source:close()
 -- #endregion tecs.io.ReadableStream.transferToFile
 
 -- #region tecs.io.ReadableStream.discard
-local tecsIO <const> = require("tecs.io")
-local source <const> = tecsIO.newFileStream("download.tmp")
-local count <const> = source:discard().value
+local source <const> = tecs.io.newFileStream("download.tmp")
+local count <const> = source:discard()
 print(count)
+
 source:close()
 -- #endregion tecs.io.ReadableStream.discard
 
 -- #region tecs.io.WritableStream.newWriter
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer()
-local destination <const> = tecsIO.newBufferStream(bytes)
+local bytes <const> = tecs.io.newBuffer()
+local destination <const> = bytes:newStream()
 local writer <const> = assert(destination:newWriter())
+
 assert(writer:write("data"))
 assert(writer:close())
 destination:close()
@@ -355,33 +547,32 @@ bytes:close()
 -- #endregion tecs.io.WritableStream.newWriter
 
 -- #region tecs.io.WritableStream.writeAll
-local tecsIO <const> = require("tecs.io")
-local destination <const> = tecsIO.newFileStream("save.bin")
-local count <const> = destination:writeAll("save data").value
+local destination <const> = tecs.io.newFileStream("save.bin")
+local count <const> = destination:writeAll("save data")
 print(count)
+
 destination:close()
 -- #endregion tecs.io.WritableStream.writeAll
 
 -- #region tecs.io.WritableStream.writeBuffer
-local tecsIO <const> = require("tecs.io")
-local bytes <const> = tecsIO.newBuffer("save data")
-local destination <const> = tecsIO.newFileStream("save.bin")
-local count <const> = destination:writeBuffer(bytes).value
+local bytes <const> = tecs.io.newBuffer("save data")
+local destination <const> = tecs.io.newFileStream("save.bin")
+local count <const> = destination:writeBuffer(bytes)
 print(count)
+
 destination:close()
 bytes:close()
 -- #endregion tecs.io.WritableStream.writeBuffer
 
 -- #region tecs.io.poll
-local tecsIO <const> = require("tecs.io")
-while tecsIO.pending() > 0 do
-    tecsIO.poll()
+while tecs.io.pending() > 0 do
+    tecs.io.poll()
 end
 -- #endregion tecs.io.poll
 
 -- #region tecs.io.listen
-local tecsIO <const> = require("tecs.io")
-local listener <const>, listenReason = tecsIO.listen(8080)
+local listener <const>, listenReason = tecs.io.listen(8080)
+
 assert(listener, listenReason)
 local client: tecs.io.TCPSocket = nil
 local request = ""
@@ -422,19 +613,21 @@ local function pollWebServer()
 end
 
 pollWebServer()
+
 listener:close()
 -- #endregion tecs.io.listen
 
 -- #region tecs.io.http.newURI
-local http <const> = require("tecs.io.http")
+local http <const> = tecs.io.http
 local endpoint <const>, reason = http.newURI("https://user@example.com:8443/assets/list.json?page=2")
+
 assert(endpoint, reason)
 print(endpoint.scheme, endpoint.host, endpoint.port)
 print(endpoint.path, endpoint.query)
 -- #endregion tecs.io.http.newURI
 
 -- #region tecs.io.http.newClient
-local http <const> = require("tecs.io.http")
+local http <const> = tecs.io.http
 local endpoint <const> = assert(http.newURI("https://example.com/status"))
 local client <const> = http.newClient({
     userAgent = "mygame/1.0",
@@ -448,7 +641,7 @@ client:close()
 -- #endregion tecs.io.http.newClient
 
 -- #region tecs.io.watcher.poll
-local watcher <const> = require("tecs.io.watcher")
+local watcher <const> = tecs.io.watcher
 
 local function runHeadlessWatcher(keepRunning: function(): boolean)
     watcher.install({intervalSeconds = 0.25})
