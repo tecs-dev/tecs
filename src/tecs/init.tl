@@ -437,7 +437,12 @@ local SURFACE <const>: {string: Namespace} = {
     assets = {module = "tecs.assets"},
     audio = {module = "tecs.audio"},
     physics = {module = "tecs.physics"},
-    data = {module = "tecs.data"},
+    data = {
+        module = "tecs.data",
+        within = {
+            utf8 = {module = "tecs.data.utf8"},
+        },
+    },
     events = {module = "tecs.events"},
     input = {module = "tecs.input"},
     gfx = {

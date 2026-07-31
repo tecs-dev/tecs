@@ -1,6 +1,6 @@
 --[=[
-Typed stores, JSON, byte encodings, DEFLATE, text transcoding, UUIDs, hashes,
-and checksums.
+Typed stores, JSON, byte encodings, DEFLATE, text transcoding, UTF-8, UUIDs,
+hashes, and checksums.
 
 ## JSON
 
@@ -103,6 +103,21 @@ Both return the canonical lowercase 8-4-4-4-12 representation.
 UUIDs identify values; they do not authenticate a player or make an
 unguessable credential.
 
+## UTF-8
+
+Codepoint operations live under `tecs.data.utf8`:
+
+```teal
+local utf8 <const> = tecs.data.utf8
+local codepoint, nextOffset = utf8.decodeAt("A€", 2)
+assert(codepoint == 0x20ac)
+assert(nextOffset == 5)
+```
+
+The child works over explicit Lua string lengths, so embedded NUL is U+0000
+rather than a terminator. Malformed bytes decode as U+FFFD and remain
+traversable. These are codepoint operations, not grapheme segmentation.
+
 ## Hashes and checksums
 
 `fnv1a64` supplies fast process and build identity as 16 lowercase hexadecimal
@@ -141,6 +156,7 @@ local binding <const> = require("tecs.ffi.rust")
 local zlib <const> = require("tecs.ffi.zlib")
 local type TypedStore = require("tecs.data.Store")
 local transcode <const> = require("tecs.data.transcode")
+local type utf8Module = require("tecs.data.utf8")
 local storekeys <const> = require("tecs.internal.storekeys")
 
 -- Implementation details: The parser and encoder are C, from `vendor/cjson`,
@@ -381,6 +397,10 @@ end
 -- Implementation details: `adopt` adds lua-cjson's JSON interface to the
 -- compression and hashing functions defined here.
 local record data is JSON
+    --- Read-only. `utf8` provides UTF-8 codepoint operations over Lua byte
+    --- strings.
+    utf8: utf8Module
+
     --- `Store` holds typed values under process-wide keys.
     type Store = TypedStore
 
