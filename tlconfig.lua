@@ -223,8 +223,8 @@ local PAGES = {
                 title = "Batteries included",
                 details = "[Physics](/modules/physics), [audio](/modules/audio),"
                     .. " [particles](/modules/gfx/particles), [text](/modules/gfx/),"
-                    .. " [sequences](/modules/sequence), [sprite sheets](/modules/gfx/animation), and hot reload"
-                    .. " share the ECS.",
+                    .. " [retained UI](/ui/), [sequences](/modules/sequence),"
+                    .. " [sprite sheets](/modules/gfx/animation), and hot reload share the ECS.",
                 icon = "🔋",
             },
             {
@@ -236,6 +236,7 @@ local PAGES = {
         },
     },
     { route = "getting-started", title = "Getting started" },
+    { route = "ui/", title = "Building interfaces" },
     {
         route = "modules/",
         title = "tecs",
@@ -328,6 +329,13 @@ local SIDEBAR = {
         text = "Introduction",
         items = {
             { text = "Getting started", path = "getting-started" },
+        },
+    },
+    {
+        text = "UI",
+        items = {
+            { text = "Building interfaces", path = "ui" },
+            { text = "API reference", path = "modules/ui" },
         },
     },
     {
@@ -446,6 +454,7 @@ local SIDEBAR = {
             },
             { text = "tecs.regex", path = "modules/regex" },
             { text = "tecs.sequence", path = "modules/sequence" },
+            { text = "tecs.ui", path = "modules/ui" },
             { text = "tecs.workers", path = "modules/workers" },
         },
     },

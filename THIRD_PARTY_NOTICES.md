@@ -153,10 +153,10 @@ The static native archive includes `clap` for CLI parsing and `clap_complete`
 for shell completion generation, `image` for PNG and JPEG decoding and PNG
 encoding, `resvg` for static SVG rasterization, `reqwest` with Rustls for HTTP,
 `rmcp` for the official MCP protocol and Streamable HTTP server, `rapier2d` for
-physics, and `regex` for compiled regular expressions. It also owns the host
-lifecycle, worker channels, logging, dialogs, Lua module registration, LuaJIT's
-machine-code arena, and the single-file payload loader. SDL still owns the
-application loop and LuaJIT still owns game execution.
+physics, `regex` for compiled regular expressions, and `taffy` for UI layout.
+It also owns the host lifecycle, worker channels, logging, dialogs, Lua module
+registration, LuaJIT's machine-code arena, and the single-file payload loader.
+SDL still owns the application loop and LuaJIT still owns game execution.
 
 The exact versions and declared SPDX expressions are pinned in
 the root `Cargo.lock` and Cargo metadata. The graph is permissive: MIT,
@@ -185,7 +185,7 @@ release for that target compiles them:
 `form_urlencoded`,
 `futures-channel`, `futures-core`, `futures-io`, `futures-macro`,
 `futures-sink`, `futures-task`, `futures-util`, `generic-array`, `getrandom`,
-`glam`, `glamx`,
+`glam`, `glamx`, `grid`,
 `hashbrown`, `heck`, `http`, `http-body`, `http-body-util`, `httparse`,
 `hyper`, `hyper-rustls`, `hyper-util`, `icu_collections`, `icu_locale_core`,
 `icu_normalizer`, `icu_normalizer_data`, `icu_properties`,
@@ -208,6 +208,7 @@ release for that target compiles them:
 `simd-adler32`, `simd_cesu8`, `simdutf8`, `simplecss`, `siphasher`,
 `slab`, `slotmap`, `smallvec`, `socket2`, `spade`, `stable_deref_trait`,
 `static_assertions`, `strict-num`, `subtle`, `svgtypes`, `syn`, `sync_wrapper`,
+`taffy`,
 `synstructure`, `thiserror`, `thiserror-impl`, `tiny-skia`, `tiny-skia-path`,
 `tinystr`, `tinyvec`, `tinyvec_macros`,
 `tokio`, `tokio-rustls`, `tokio-util`, `tower`, `tower-http`, `tower-layer`,

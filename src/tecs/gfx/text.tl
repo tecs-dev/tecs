@@ -750,6 +750,17 @@ local ALIGNMENTS <const>: {string: number} = {
     right = 1.0,
 }
 
+--- Returns whether one shaped operation begins at ASCII whitespace.
+---
+--- SDL_ttf may emit a drawable copy operation for a space even though the
+--- glyph has no ink. Its tiny empty SDF region can sample a neighboring atlas
+--- texel, so whitespace advances through native layout but never becomes an
+--- instance.
+local function whitespaceAt(value: string, offset: integer): boolean
+    local byte <const> = value:byte(offset + 1)
+    return byte == 32 or (byte ~= nil and byte >= 9 and byte <= 13)
+end
+
 --- Creates or updates SDL_ttf's reusable shaped text.
 local function updateNative(item: Text): loader.CPtr
     local native = item._native
@@ -814,7 +825,11 @@ local function layout(item: Text): integer, number, number
         if op.cmd == 2 then
             local copy <const> = op.copy as loader.CStruct
             local dst <const> = copy.dst as loader.CStruct
-            if (dst.w as number) > 0 and (dst.h as number) > 0 then
+            if
+                not whitespaceAt(item.text, copy.text_offset as integer)
+                and (dst.w as number) > 0
+                and (dst.h as number) > 0
+            then
                 local line <const> = lineByOffset[copy.text_offset as integer] or 0
                 local shift <const> = lineShift[line] or 0.0
                 local base <const> = count * 4

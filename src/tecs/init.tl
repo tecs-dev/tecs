@@ -43,6 +43,7 @@ local type particles = require("tecs.gfx.particles")
 local type materials = require("tecs.gpu.materials")
 local type assets = require("tecs.assets")
 local type workers = require("tecs.workers")
+local type ui = require("tecs.ui")
 local type physics = require("tecs.physics")
 local type log = require("tecs.log")
 -- `math` is the standard library global, and shadowing it makes a clean
@@ -370,6 +371,7 @@ local record tecs
     platform: platform
     regex: regex
     sequence: sequence
+    ui: ui
     workers: workers
 
     --- Read-only. Version of this build.
@@ -482,6 +484,7 @@ local SURFACE <const>: {string: Namespace} = {
     },
     regex = {module = "tecs.regex"},
     sequence = {module = "tecs.sequence"},
+    ui = {module = "tecs.ui"},
     workers = {module = "tecs.workers"},
 }
 
