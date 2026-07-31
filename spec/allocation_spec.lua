@@ -160,8 +160,7 @@ local LOAD_FLOOR = 4096
 -- Extraction allocates nothing: it walks archetype columns, writes into mapped
 -- staging, and holds every list it needs across frames. The reading is a few
 -- bytes and the bar is not a budget but a margin, set below the smallest thing
--- that could regress it. The query cursor this loop used to allocate every
--- frame reads as 160 here.
+-- that could regress it.
 local EXTRACT_BAR = 64
 
 -- Bytes the hierarchy dirty sampler may allocate per run.

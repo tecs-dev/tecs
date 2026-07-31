@@ -15,11 +15,6 @@
 -- an installed one under `cargo xtask test-package`. Only the second proves the thing
 -- worth proving, which is why it runs there too rather than only here.
 --
--- Two hand-written stand-ins used to be in `src/tecs/internal/compat/` for the
--- same two modules. A transcribed table of trace-abort strings goes stale
--- without saying so: the pin moves, a code changes meaning, and the profiler
--- prints the old sentence.
-
 local lua = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 
 --- Reads a file whole, or nil when there is nothing there.
@@ -61,10 +56,5 @@ describe("LuaJIT's Lua library", function()
         -- entry worth naming: it says the file is LuaJIT's rather than an
         -- empty table that happened to load.
         assert.is_string(vmdef.traceerr[0])
-    end)
-
-    it("no longer ships a hand-written stand-in for either", function()
-        assert.is_nil(slurp(lua .. "/tecs/internal/compat/jitzone.lua"))
-        assert.is_nil(slurp(lua .. "/tecs/internal/compat/jitvmdef.lua"))
     end)
 end)

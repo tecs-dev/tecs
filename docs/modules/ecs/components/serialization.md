@@ -102,18 +102,17 @@ serializer.
 Binary snapshots store an FFI schema fingerprint. Matching schemas use the
 bulk path. A mismatch maps saved fields into a new current instance by name.
 
-| Schema change                   | Result for an old save                                        |
+| Schema change                   | Result for saved data                                         |
 | ------------------------------- | ------------------------------------------------------------- |
 | Add a field                     | The field receives its current default.                       |
-| Remove a field                  | Load drops the old field.                                     |
+| Remove a field                  | Load drops the saved field.                                   |
 | Reorder fields                  | Values continue by name.                                      |
 | Change a numeric type           | LuaJIT converts the value. Narrowing may truncate.            |
-| Rename a field                  | The old value disappears and the new field takes its default. |
+| Rename a field                  | The saved value is ignored and the new field takes its default. |
 | Change array or aggregate shape | Load raises.                                                  |
 
-For a rename, keep both fields during a transition release and copy the old
-value after load, or provide a custom codec that accepts the old durable
-shape.
+For a rename, include both fields and copy the saved value after load, or
+provide a custom codec that accepts the saved durable shape.
 
 Table-format snapshots and non-FFI components always use their structured
 codec. They tolerate add, remove, and reorder changes by field name, with the

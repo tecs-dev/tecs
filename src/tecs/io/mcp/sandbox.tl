@@ -71,8 +71,8 @@ end
 
 local G <const> = _G as {string: any}
 
--- Reached through _G because Teal targets 5.4's standard library, where these
--- were removed; LuaJIT is 5.1 and has both.
+-- Reached through _G because Teal's standard library declarations do not
+-- expose these LuaJIT 5.1 functions.
 local loadstring <const> = G["loadstring"] as function(string, string): function(any): any..., string
 local setfenv <const> = G["setfenv"] as function(any, {string: any})
 

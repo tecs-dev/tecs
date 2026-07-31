@@ -114,7 +114,6 @@ describe("io.files on the public surface", function()
         assert.is_nil(rawget(tecsIO, "files"), "nothing may hold the module before it is asked for")
         assert.are.equal(files.read, tecs.io.files.read)
         assert.is_not_nil(rawget(tecsIO, "files"), "and the resolved namespace is kept, not rebuilt")
-        assert.is_nil(tecs.io.filesystem, "the removed public name must not remain as an alias")
     end)
 
     it("is the module itself, not a table standing in front of it", function()

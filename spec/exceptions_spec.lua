@@ -8,11 +8,10 @@
 -- none of that is released by the code that took it when the code between the
 -- two lines throws.
 --
--- So these tests inject the throw rather than wait for one, and assert the
--- invariant each case used to break: the pass was ended, the frame was
--- resolved the one way SDL allows, the world is applying mutations again, and
--- a frame after the failure still draws. "It did not crash" is not one of the
--- assertions here; a leak does not crash, which is the whole problem.
+-- These tests inject the throw and assert the required recovery state: the
+-- pass is ended, the frame is resolved the one way SDL allows, the world is
+-- applying mutations again, and a frame after the failure still draws. "It
+-- did not crash" is not one of the assertions here; a leak does not crash.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
@@ -97,9 +96,8 @@ describe("exception safety", function()
     it("refuses to cancel a frame that acquired a swapchain texture", function()
         local frame = newFrame()
 
-        -- SDL documents canceling after an acquisition as an error, so the
-        -- old spelling of "put this frame back" was invalid on essentially
-        -- every frame that existed. It raises rather than making the call.
+        -- SDL rejects cancellation after swapchain acquisition, so this
+        -- raises without making the native call.
         local ok, reason = pcall(frame.cancel, frame)
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("cannot be canceled", 1, true))

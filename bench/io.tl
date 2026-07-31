@@ -1,7 +1,6 @@
 --- Whole-file, endpoint, buffer, and cooperative Stream I/O.
 ---
---- The rows compare the old whole-string calls with both layers of the new
---- binary API:
+--- The rows compare whole-string calls with endpoint and Stream paths:
 ---
 ---   read-whole       `files.read`, returning one Lua string.
 ---   reader-string    `Reader:read`, returning one string per chunk.

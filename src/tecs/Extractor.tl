@@ -105,8 +105,8 @@ local MIN_RECLAIM <const> = 512
 --- producers that come after this one. Past their ceiling a list collapses to
 --- one span covering every entry in it, including the gaps between runs, which
 --- is worse than the covering span of a single run: the fallback here is
---- exactly what a whole-run rewrite marks, so a partial rewrite can never mark
---- more bytes than the rewrite it replaced.
+--- exactly what a whole-run rewrite marks, so a partial rewrite never marks
+--- more bytes than that fallback.
 local MARK_BUDGET <const> = 32
 
 --- Reservations, widest first, as a compaction tries them against what the

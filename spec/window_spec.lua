@@ -521,7 +521,7 @@ describe("platform.Window once it is destroyed", function()
         window:destroy()
     end)
 
-    it("answers zero rather than the size it used to be", function()
+    it("answers zero-valued geometry", function()
         -- SDL leaves an out-parameter untouched on failure and the buffers are
         -- reused, so a getter that did not check would report whatever the last
         -- window left there.
@@ -541,7 +541,7 @@ describe("platform.Window once it is destroyed", function()
         assert.are.equal(0, window:opacity())
     end)
 
-    it("answers false rather than claiming a state it no longer has", function()
+    it("answers false for every state", function()
         assert.is_false(window:isVisible())
         assert.is_false(window:isFullscreen())
         assert.is_false(window:isMinimized())

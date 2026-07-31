@@ -81,8 +81,7 @@ describe(
                     function()
                         local allocator = IdAllocator.new()
                         assert.equals(IdAllocator.DEFAULT_MAX_SLOT_COUNT, allocator.maxSlotCount)
-                        -- Allocate well past any old incremental-growth boundary; no grow
-                        -- path exists so this must simply succeed.
+                        -- Every configured slot is available without growing.
                         for _ = 1, 10000 do
                             IdAllocator.allocSlot(allocator)
                         end

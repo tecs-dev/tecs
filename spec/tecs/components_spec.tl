@@ -137,8 +137,7 @@ describe(
                         local pos = (comp as any)(42) as {string: any}
                         luassert.is_equal(pos.radius, 42)
                         luassert.is_equal(pos.cookie, 0)
-                        -- Table form: .new preserves both fields -- regression for the
-                        -- nparams-introspection bug that silently dropped `cookie`.
+                        -- Table form preserves every supplied field.
                         local tab = (comp as any).new({radius = 50, cookie = 7}) as {string: any}
                         luassert.is_equal(tab.radius, 50)
                         luassert.is_equal(tab.cookie, 7)

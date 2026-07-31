@@ -10,7 +10,7 @@ local ROW_CAPACITY <const> = 2 ^ ROW_BITS
 local PAGE_CAPACITY <const> = 2 ^ ROW_BITS
 local DEFAULT_PAGE_SIZE <const> = 4096
 
---- Arena used to manage FFI memory for elements of type `T`.
+--- Manages FFI memory for elements of type `T`.
 --- Pages never move within the arena; `clear()` rewinds allocation state
 --- so the same backing pages can be reused for the next epoch.
 local record EpochArena<T>

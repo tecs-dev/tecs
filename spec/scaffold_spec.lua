@@ -137,9 +137,8 @@ describe("a scaffolded project", function()
         manifest:close()
     end)
 
-    -- The regression this file exists for. No `--global-env-def` anywhere on
-    -- the command line, so the only thing that can supply it is the project's
-    -- own tlconfig.lua.
+    -- No `--global-env-def` appears on the command line, so the project's own
+    -- tlconfig.lua must supply it.
     it("type-checks the way an editor checks it, with no argument from tecs", function()
         local checked = tecs({ "__teal", "-I", teal, "-I", project .. "/src", "check", "src/main.tl" }, project)
         assert.is_not_nil(checked, "the compiler never ran")

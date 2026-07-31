@@ -1619,9 +1619,8 @@ local record types
         --- snapshot events when you need lower-level behavior such as
         --- excluding derived entities.
         ---
-        --- @param handler Its `name` keys the data in the snapshot, so it has to
-        ---     be stable across builds: a renamed handler no longer finds what
-        ---     an older save wrote under the old name.
+        --- @param handler Its `name` is an externally typed snapshot key and
+        ---     must remain stable across builds.
         addSnapshotHandler: function(self, handler: SnapshotHandler)
 
         -------------------------------------------------------------------------------

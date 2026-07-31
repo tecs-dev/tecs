@@ -1,9 +1,9 @@
 --[=[
-Compatibility view of Rapier's process-wide parallel executor.
+View of Rapier's process-wide parallel executor.
 
 Rapier owns its Rayon workers in Rust. The Lua object keeps the requested
-worker count stable across worlds, matching the old first-acquire-wins
-contract without exposing native callbacks.
+worker count stable across worlds and exposes lifecycle accounting without
+native callbacks.
 ]=]
 
 local rust <const> = require("tecs.ffi.rust")

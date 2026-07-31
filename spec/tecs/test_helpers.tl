@@ -172,8 +172,6 @@ function TestHelpers.createArchetypeWithMockObservers(comps: {tecs.ecs.Component
     local spy <const> = require("luassert.spy")
     local archetype = Archetype.new(comps, id or 1)
 
-    -- Note: changeObservers was removed from Archetype since it was unused
-
     return archetype
 end
 

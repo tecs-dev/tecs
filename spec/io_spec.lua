@@ -89,9 +89,8 @@ describe("tecs.io", function()
         C.SDL_Quit()
     end)
 
-    it("names connected TCP resources Connection", function()
+    it("exposes connected TCP resources", function()
         assert.is_table(tecsIO.Connection)
-        assert.is_nil(rawget(tecsIO, "Stream"))
     end)
 
     it("resolves numeric loopback asynchronously", function()

@@ -51,9 +51,7 @@ describe(
                 it(
                     "should isolate dense reverse-index data between worlds reusing the same relationship",
                     function()
-                        -- Same regression as the sparse case: dense reverse indexes used to live on the
-                        -- relationship container as a module-level singleton, leaking entity links across
-                        -- worlds. The unified RelationshipStore makes both sparse and dense per-world.
+                        -- Dense reverse indexes belong to each world.
                         local Follows = tecs.ecs.newRelationship({
                             name = "DenseRevIdxIsolation",
                             exclusive = true,
@@ -383,12 +381,8 @@ describe(
                 it(
                     "exclusive replace on STATE_SPAWN entity in same deferred scope",
                     function()
-                        -- Regression guard for a bug that existed before Phase 4.
-                        -- Before exclusive-sibling-eviction moved to the `deferSet` hook,
-                        -- `_deferSetSlow`'s eviction loop lived in the relationship-side
-                        -- -effects block and was unreachable when the entity was still
-                        -- in STATE_SPAWN. Phase 4 fires the hook at the dispatcher
-                        -- regardless of state, so both paths work.
+                        -- Exclusive sibling eviction runs for staged entities
+                        -- before they leave STATE_SPAWN.
                         local Follows = tecs.ecs.newRelationship({
                             name = "RevIdx_SpawnReparent",
                             exclusive = true,
@@ -464,9 +458,8 @@ describe(
         describe(
             "ordering invariant",
             function()
-                -- If the reverse-index unlink hook fires AFTER row teardown, it reads
-                -- nil for the old target and skips the unlink -- leaving stale entries
-                -- in the inverse. This test catches that regression directly.
+                -- The reverse-index unlink hook must read the target before row
+                -- teardown, or it sees nil and leaves a stale inverse entry.
                 it(
                     "onDespawn hook reads old column value before row teardown",
                     function()

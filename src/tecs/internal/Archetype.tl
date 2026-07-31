@@ -791,9 +791,8 @@ function Archetype:isComponentDirty(component: Component): boolean
 end
 
 function Archetype:anyComponentDirty(): boolean
-    -- The column count guards the flag because an archetype with no
-    -- columns has nothing to report dirty, which is the answer the bitset
-    -- loop this replaced gave.
+    -- The column count guards the flag because an archetype with no columns
+    -- has nothing to report dirty.
     if self._allDirty and self.columnsCount > 0 then
         return true
     end

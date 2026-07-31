@@ -160,18 +160,10 @@ return tecs.newApplication({
             end,
         })
 
-        -- Injection is a system like any other. It writes to SDL's queue
-        -- rather than to the world, which is the case the callbacks existed
-        -- for, and it turns out to need nothing a callback had: the queue is
-        -- process state and a system can reach it from anywhere in the frame.
-        --
-        -- `First` rather than `Update`, so it stays where the loop used to
-        -- call it from and the press still lands one iteration ahead of the
-        -- step that reacts to it. The one behavioral difference is that the
-        -- warmup reset now happens after this iteration's arrival stamp was
-        -- taken rather than before, so the sample straddling the cut is
-        -- dropped instead of being counted against a cleared table. One of a
-        -- hundred and fifty, and dropping it is the more honest of the two.
+        -- Injection writes to SDL's process-wide queue from `First`, so the
+        -- press lands one iteration ahead of the step that reacts to it. The
+        -- warmup reset drops the sample that straddles the cut because its
+        -- arrival stamp precedes the measured interval.
         world:addSystem({
             name = "bench.Inject",
             phase = tecs.ecs.phases.First,

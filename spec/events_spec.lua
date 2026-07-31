@@ -68,7 +68,7 @@ describe("platform.events", function()
         assert.is_true(kinds.penMotion)
         assert.is_true(kinds.gamepadTouchpadDown)
 
-        -- Named after the device rather than after the interface SDL retired.
+        -- Public names follow SDL's device vocabulary.
         assert.is_nil(kinds.controllerAxis)
     end)
 
@@ -493,8 +493,7 @@ describe("platform.events", function()
     end)
 
     it("reports an audio device the system reformatted", function()
-        -- The third member of the family, and the one a mixer holding a stream
-        -- against the old format has to hear about.
+        -- A mixer holding a stream must hear when the device format changes.
         local queue, count = queueOf(function(q)
             q[0].type = C.SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED
             q[0].adevice.which = 8

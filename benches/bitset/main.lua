@@ -34,7 +34,7 @@ end
 local bench = require("lib.bench")
 
 local sink = 0
-local benchParamsEnv = os.getenv("PARAMS") or os.getenv("BENCH_PARAMS") or ""
+local benchParamsEnv = os.getenv("PARAMS") or ""
 
 local implementations = {
     { name = "current", module = "tecs.utils.Bitset" },

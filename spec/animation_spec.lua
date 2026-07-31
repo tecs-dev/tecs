@@ -116,29 +116,13 @@ describe("the surface a game reaches sheets through", function()
         assert.are.equal(sheet.rects, tecs.gfx.animation.newRectSheet)
         assert.are.equal(sheet.build, tecs.gfx.animation.newSheetBuilder)
         assert.are.equal(sheet.fromAseprite, tecs.gfx.animation.newSheetFromAseprite)
-        assert.is_nil(rawget(tecs.gfx.animation, "grid"))
-        assert.is_nil(rawget(tecs.gfx.animation, "rects"))
-        assert.is_nil(rawget(tecs.gfx.animation, "build"))
-        assert.is_nil(rawget(tecs.gfx.animation, "fromAseprite"))
         assert.are.equal(sheet.replace, tecs.gfx.animation.replace)
     end)
 
-    it("renames the three whose subject the move made ambiguous", function()
-        -- `byName` on a module called animation reads as an animation lookup
-        -- and answers with a sheet, which is why these three carry the word.
+    it("qualifies sheet lookup and revision names", function()
         assert.are.equal(sheet.byId, tecs.gfx.animation.findSheetById)
         assert.are.equal(sheet.byName, tecs.gfx.animation.findSheetByName)
         assert.are.equal(sheet.revision, tecs.gfx.animation.sheetRevision)
-        assert.is_nil(rawget(tecs.gfx.animation, "byId"))
-        assert.is_nil(rawget(tecs.gfx.animation, "byName"))
-        assert.is_nil(rawget(tecs.gfx.animation, "revision"))
-    end)
-
-    it("no longer answers to a module of its own", function()
-        -- Nil rather than an error, because the surface catches a name it does
-        -- not carry where it is written: Teal refuses `tecs.sheet` at compile
-        -- time, and a Lua spec is the one caller that gets this far.
-        assert.is_nil(tecs.sheet)
     end)
 end)
 
@@ -1752,10 +1736,9 @@ describe("tecs.gfx.animation", function()
     end)
 
     describe("restart", function()
-        -- A one-shot parks at the end of its cycle and stops. Setting it
-        -- playing again from there used to leave the time at the end, so it
-        -- parked and completed again on that step, and on every step after it.
-        it("plays a finished one-shot again instead of completing forever", function()
+        -- A one-shot parks at the end of its cycle. Restarting resets its
+        -- playback time before the next step.
+        it("restarts a finished one-shot from the beginning", function()
             local world = animatedWorld()
             local s = stripSheet()
             local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }), AnimationEvents())

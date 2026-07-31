@@ -1,8 +1,7 @@
 # tecs
 
-A typed entity component system and the game engine built around it, in Teal
-for LuaJIT, on SDL3, SDL_GPU and Rapier. The two were separate projects and
-are now one: the ECS knows what the GPU reads. Entities are the interface,
+A typed entity component system and game engine in Teal for LuaJIT, built on
+SDL3, SDL_GPU and Rapier. The ECS knows what the GPU reads. Entities are the interface,
 so anything that renders or updates per frame is an entity in a world.
 
 SDL owns the loop. An entry file returns an application and a Rust host drives it
@@ -78,9 +77,8 @@ Working today:
 - The platform lifecycle answered where it arrives, including a checkpoint the
   game prepares during ordinary frames and the engine flushes on being
   backgrounded or terminated
-- Per-stage frame timing with percentiles, which is how any of the numbers in
-  this file were arrived at, and event-to-photon latency reported through the
-  same stages
+- Per-stage frame timing with percentiles, which supplies the measurements in
+  this file, and event-to-photon latency reported through the same stages
 - Text from a signed distance field, laid out into one entity per glyph so it
   goes through the same cull and the same draw as everything else
 - Deterministic sequencing with tweening merged into it: programs compiled to
@@ -211,9 +209,8 @@ here rather than a cycle later.
 ### A module may sit inside a module, one level and no deeper
 
 `tecs.gfx.layers` is a module reached through a name that is only a namespace.
-The alternative was a flat surface where every module is one segment, which is
-what this was until layers moved, and it fails on the count rather than on any
-one name: a root holding several dozen unrelated names is looked up by
+A flat surface where every module is one segment fails on the count rather
+than on any one name: a root holding several dozen unrelated names is looked up by
 scrolling, and grouping the ones that share a subject is what makes a name
 guessable from what a game is doing.
 
@@ -240,17 +237,11 @@ game, and two tables would mean a write through one that nothing reads.
 
 **A namespace with one principal module is that module.** `tecs.io` is the
 table `require("tecs.io")` answers with, and `files`, `http`, `mcp`, and
-`watcher` are hung off it when each name is first read. The alternative was a
-table built for the name, standing in front of the module and filling a member
-at a time, and it cost two things. Teal has to type what a game writes, and no
-module types a table like that, so `init.tl` had to declare a record restating
-every member's signature and every member's docblock: `init.tl` reached twelve
-hundred lines, two thirds of which were a second copy of documentation that
-already existed on the declaration it described, and nothing checked the
-copies against each other. And a write to a name on it had to be routed to
-whichever module below owned the name. Being the parent module removes that
-proxy, while `tecs.io.files.organization` still lands directly on the files
-module that `preferencePath` reads.
+`watcher` are hung off it when each name is first read. A separate proxy table
+would need a second record that restates every member's type and documentation,
+and writes would need routing to the module that owns each name. Using the
+principal module avoids both copies, while `tecs.io.files.organization` still
+lands directly on the files module that `preferencePath` reads.
 
 What that costs is a direction in the module graph. The parent has to name the
 type of every name below it, and Teal refuses a require cycle even when one
@@ -265,53 +256,37 @@ keeps the record with it. `tecs.gfx` and `tecs.platform` are the two left:
 graphics joins modules that answer one scene vocabulary, while platform groups
 four independent host facilities without choosing one as the parent.
 
-`tecs.audio` and `tecs.platform.window` were two of those until their
-constructors moved. Each was a class file reached through a namespace named for
-it, and a class file cannot be a principal module because the path has to end
-in the public name and the case does not match. Once `Audio.create` became
-`tecs.audio.newAudio`, and the same happened for input and window, each file
-was a module that contains one class, which `STYLE.md` names luacase. Input
-then moved from `tecs.platform.input` to `tecs.input`, because games reach it
-continually rather than occasionally reaching a host facility. The files are
-therefore `src/tecs/audio.tl`, `src/tecs/input.tl` and
-`src/tecs/platform/window.tl`, each returning a module record with the class
-nested inside it, and the records `init.tl` wrote for them are gone.
-
-The `class` field in the descriptor went with them. It existed to make one
-member of a namespace answer with the namespace's own module, which is how
-`tecs.platform.window.Window` used to resolve, and a class nested in the module it is
-named for needs nothing: `tecs.platform.window` is the module and `Window` is a field on
-it like any other.
+`tecs.audio`, `tecs.input` and `tecs.platform.window` are principal modules
+that each contain one class. Their files are `src/tecs/audio.tl`,
+`src/tecs/input.tl` and `src/tecs/platform/window.tl`, and each returns a
+module record with its class nested inside it. Input sits at the root because
+games reach it continually; window remains under platform because it is a host
+facility.
 
 Nesting the class inside the module record rather than hanging it off as a
 field is not a style choice. tealdoc documents a module's returned record and
 one level below it, so a class held as a field renders as a single line and its
-methods vanish from the generated reference: the audio page went from ninety
-entries to seventeen when it was written the other way. Nested, the class's
-methods and its option records are the module's own members and all of them
-render. What it costs is that `Audio` is then a type name rather than a field,
-so `record audio` cannot also declare `Audio: Audio`, which is the same
-one-namespace rule that turned the `Key` builtin into `EntityKey`.
+methods vanish from the generated reference. Nested, the class's methods and
+its option records are the module's own members and all of them render. What it
+costs is that `Audio` is then a type name rather than a field,
+so `record audio` cannot also declare `Audio: Audio`. The same one-namespace
+rule gives the builtin component `EntityKey` a name distinct from
+`tecs.data.Key`.
 
-`tecs.gfx` is the one that had a choice and declined it, and the reason is the
-laziness above rather than the shape. It answers four things a scene reaches
-for directly, the camera, the components, the renderer and text, and four
-modules below it. Any of the four could have been made its principal, or a new
-`gfx/init.tl` written to be one, and a principal is loaded the moment its name
-is read: every candidate reaches SDL through the FFI to load, so
-`tecs.gfx.layers` would have demanded a graphics stack to answer a question
-about layer bands. A `gfx/init.tl` lazy in its own members would have been the
-resolver again, one directory down, with the same record in it. So the record
-stays where the resolver is, and it is the cost this shape is worth paying.
+`tecs.gfx` deliberately has no principal module because laziness matters more
+there than the shape. It answers four things a scene reaches for directly, the
+camera, the components, the renderer and text, and four modules below it. A
+principal loads when its name is read, and every suitable candidate reaches
+SDL through the FFI. Making one principal would require a graphics stack merely
+to read `tecs.gfx.layers`. A separate lazy `gfx/init.tl` would duplicate the
+resolver one directory down, so the namespace record stays with the resolver.
 
 What `tecs.gfx` does not carry is `Transform`. Grouping by the task a game is
 doing puts a name where it is used, and a transform is used by the hierarchy,
 by physics, by the sequencer and by the extractor, so filing it under drawing
 would tell three of those four that they were moving a graphics component. It
 is written `tecs.Transform`, at the root, because it is the one component
-every subsystem moves and so belongs to none of them; the component module
-used to re-export it, which was a second spelling of one thing, and a second
-spelling is the alias this tree does not keep.
+every subsystem moves and so belongs to none of them.
 
 The root carries what crosses subsystems, and nothing else. `Transform` is one
 of them; the others are `Application` and its `ApplicationConfig`, `Future`,
@@ -321,9 +296,7 @@ not a subsystem, since it owns one of each of them, and a future is what every
 subsystem that answers later hands back, so neither has an owner to be filed
 under. The rest of the ECS vocabulary is `tecs.ecs`: `Component`, `Archetype`,
 `Bundle`, `SystemConfig` and the snapshot records are named while configuring
-the ECS rather than while reaching across it, and each of them had been
-reachable at the root as well, which is thirty-four aliases the root no longer
-carries.
+the ECS rather than while reaching across it.
 
 The line between them is what a name is written next to. A game annotating a
 plugin writes `function(world: tecs.World, app: tecs.Application)`, and the
@@ -339,16 +312,14 @@ name resolves through, nothing in Teal connects the two, and a descriptor
 pointing at the wrong module resolves to a table full of functions that are not
 the ones promised. So the spec reads the record, resolves every name it
 declares, and holds each to the module whose path ends in the name it was
-reached by, along with every name the descriptor puts one level down. It found
-six declarations claiming a value that was never assigned the first time it ran.
+reached by, along with every name the descriptor puts one level down.
 
 ## One way in
 
 Because the host reaches into an object rather than being handed a loop,
 something has to run after the device and the world exist, once per iteration,
 once per event, and once at teardown. That much follows from the entry point.
-What does not follow is that a game should be handed four callbacks for it, and
-it no longer is. `Application.Config` carries `plugin`, one
+`Application.Config` carries `plugin`, one
 `function(world, app)`, and nothing else a game supplies is called by the loop.
 
 The reason is that the ECS already answers all four questions, and answers them
@@ -358,30 +329,21 @@ system and an observer are both registered on the world, so the world can count
 them and the debug server reports the count; a field of a config table is
 reachable from nowhere. And both run inside the crash guard, so the line that
 fails leaves a traceback and a live process rather than unwinding to the host.
-That last one used to cut the other way: the same line of gameplay was
-inspectable after it failed in a system and fatal after it failed in `update`,
-which was reason enough on its own.
 
-So the four map onto machinery that was already there:
+The lifecycle maps directly onto ECS machinery:
 
 ```
- Was          Is now                        Run by
- ───────────  ────────────────────────────  ────────────────
- load         PreStartup, Startup,          world:startup
+ Concern      Representation                  Run by
+ ───────────  ──────────────────────────────  ────────────────
+ startup      PreStartup, Startup,            world:startup
               PostStartup
- update       First … Last, fixed or not    world:update
- event        world:observe(0, on.<kind>)   the drain
- quit         PreShutdown, Shutdown,        world:shutdown
+ iteration    First … Last, fixed or not      world:update
+ event        world:observe(0, on.<kind>)     the drain
+ shutdown     PreShutdown, Shutdown,          world:shutdown
               PostShutdown
 ```
 
-Two of those four rows were built and never invoked. `world:startup` and
-`world:shutdown` existed, all twenty-one phases existed, and `Application`
-called neither, so a game registering a `Startup` system got one that was
-accepted, counted, and silently never run. That is presumably why the callbacks
-existed at all: they filled a gap that was only ever a missing pair of calls.
-`spec/phases_spec.lua` is the guard against it happening again, and it is
-deliberately not a list of the six phases that were dead. It takes
+`spec/phases_spec.lua` takes
 `phases.index` from the phases module, registers a marker in every phase in it,
 drives a real application through the whole lifecycle and names the ones that
 never fired, so a phase added later is covered the day it is added.
@@ -514,11 +476,9 @@ application tells it, because the ECS already knows: every component enters
 `components.registeredComponents` when it is registered, whoever declared it,
 and `ecs.declaredComponents` is the read-only view of that. So the eight world
 tools name a game's own components on the same terms as the engine's, with no
-registration step a game has to find. The alternative the tools used to have was
-a second name-to-component map filled by scanning the engine's own module tables
-for anything that looked like a component, which meant the tools were wrong by
-default for every game: `query`, `set` and the rest answered "no component named
-X" for exactly the components a debugging session is about.
+registration step a game has to find. A second name-to-component map assembled
+from engine module tables would omit game-defined components, which are exactly
+the components a debugging session is about.
 
 That registry is process-wide and a world is not, which is a distinction the
 tools report rather than hide. A component's id is allocated once at
@@ -558,10 +518,10 @@ state and not emitted on the bus, so quit still closes the window and `Input`
 still tracks what is held while nothing reaches the game. A game whose systems
 are not running is not in a state to handle an event either.
 
-The staging slot rotates before the frame is recorded rather than after. A
-throw inside the recording used to skip the rotation, and recovery submits
-whatever copy passes were already encoded, so the next extraction would write
-into the slot the GPU was copying out of. Which slot a frame uploads from is
+The staging slot rotates before the frame is recorded. Recovery submits
+whatever copy passes recording encoded before a throw, so rotating later could
+make the next extraction write into the slot the GPU is copying out of. Which
+slot a frame uploads from is
 carried on the packet rather than read from the renderer, so moving the
 rotation earlier changes nothing about what is drawn.
 
@@ -573,11 +533,11 @@ records its own passes from.
 
 How a broken frame is resolved is SDL's decision, not a preference.
 `SDL_CancelGPUCommandBuffer` is documented as an error once a swapchain texture
-has been acquired, and `Device:beginFrame` returns only after acquiring one, so
-canceling was invalid on essentially every frame that existed. `Frame:cancel`
-now refuses in that state and `Frame:abandon` is the recovery path: it ends the
-open pass and then submits when a texture was acquired and cancels when none
-was. What reaches the screen is what the frame drew before it threw, which for a
+has been acquired, and `Device:beginFrame` returns only after acquiring one.
+`Frame:cancel` therefore refuses in that state. `Frame:abandon` is the recovery
+path: it ends the open pass and then submits when a texture was acquired and
+cancels when none was. What reaches the screen is what the frame drew before it
+threw, which for a
 throw ahead of present is whatever the swapchain texture last held.
 Clearing it would be a decision about what the game looks like, and recovery is
 not the place that makes those.
@@ -598,12 +558,10 @@ traceback is the point.
 
 ### Picking the loop back up
 
-A crash used to latch for the life of the process, so one nil index in a
-gameplay system stopped simulation permanently even though the world, the device
-and the renderer are demonstrably healthy afterwards, which is what
-`spec/exceptions_spec.lua` exists to show. `app:clearCrash()` lifts it, and its
-own documentation is the contract: another frame to look at and a chance to
-reload; the world may be inconsistent, reload before trusting it.
+`app:clearCrash()` resumes a development application after a guarded failure.
+It provides another frame to inspect and a chance to reload; the world may be
+inconsistent, so reload before trusting it. `spec/exceptions_spec.lua` verifies
+that the world, device and renderer remain usable after recovery.
 
 The name is chosen against being mistaken for fault tolerance. What the guard
 restored are the engine's invariants, which are the ones it can name. A game's
@@ -715,14 +673,9 @@ One subsystem drains the same queue itself, and it is `Audio:update`, which is
 not a world system because reaping voices has to continue through a world pause;
 an `Audio` outside an application would otherwise never see its clips arrive.
 
-Nothing else does, and the text plugin is why that sentence is worth writing
-down. It used to drain the queue from inside its layout system, because it kept a
-residency record per font that only moved when something looked at it, and the
-pass that looked was the pass that needed the answer. Registering the atlas is
-now the load's own transform, so it happens from the drain the application
-already turns, and a subsystem with no state machine of its own has nothing to
-nudge. A pass that pumps the loader is reporting that its work is arranged the
-wrong way round, which is the useful reading of the smell.
+Nothing else drains the queue. Atlas registration is the load's own transform,
+so it happens from the application drain. A subsystem with no state machine of
+its own has nothing to pump.
 
 A load is not a cache. Two image loads of one path that overlap share the decode
 and the surface, because decoding the same file twice at once produces nothing
@@ -734,24 +687,12 @@ overlapping sound loads of one path each get their own clip. And a payload that
 has been given back must not read as available: an `Image` whose last holder
 released it reports nil pixels rather than pointing at a freed allocation, which
 is the difference between a clear error at the upload and a null dereference
-inside it. That guard used to live on a status word and now lives on the pixels,
-which is the same property with one fewer thing to keep true.
+inside it. Availability therefore follows the pixels themselves.
 
-A load answers with a `Future`, and it did not always. It used to answer with an
-`assets.Handle`: a settle-once cell with four words of its own, read as a field
-and freed with `Handle:release`. The argument for that was real, and part of it
-survives: a load does settle once, and a subsystem owning its own wait was
-cheaper than a general one at the time. What broke it was that `Handle._shares`
-was two counters wearing one hat. Before settlement it meant "callers who might
-still want this decode"; after settlement it meant "holders of these pixels".
-`release` was likewise two unrelated operations chosen by which side of the
-status line it was called on. Split at that line, the pending half is exactly a
-future and the settled half is exactly a refcounted value, and nothing is left
-over, which is why the handle was deleted rather than extended. So the rule is
-one sentence: before it lands you cancel the future, after it lands you release
-the payload. `"released"` was the one word with nowhere to go, and losing it is a
-gain: a released image is a load that _succeeded_ and then had its memory given
-back, and erasing the success was less truthful than keeping it.
+A load answers with a `Future`, while its settled payload owns its own
+lifetime. Before the load lands, cancel the future. After it lands, release the
+payload. This keeps interest in pending work separate from ownership of decoded
+memory.
 
 `Audio:load` returns a `Future<Clip>` for the same reason an asset load returns
 a future: the answer does not exist until the worker has read it. `Audio.Clip`
@@ -763,8 +704,7 @@ three states are therefore spelled the way `Future` spells them, `"pending"`,
 not `"canceled"` either: nothing gives up the cache's load but `destroy`, which
 has written `"released"` by the time the cancel reaches it. Those four words go
 out over JSON-RPC in the `audio` debug tool's clip list, so the declaration says
-so. They moved in one commit because an agent reads them and nothing persists
-them, which is the whole of what separates them from a snapshot key.
+so. They are an externally typed compatibility surface.
 
 Audio owns the cache's interest in that load. Concurrent callers receive
 distinct derived futures whose ready values are the same `Clip`, so one caller
@@ -813,39 +753,15 @@ to use the font on each renderer starts that image decode and upload, so one
 process-wide font can remain useful to headless measurement and to several
 renderers.
 
-Waiting on several loads at once is `Future.all`, and there is no set type here.
-There used to be one, `assets.newBatch`, and the observation behind it was
-correct: sound held a clip per load and text held an atlas per load, each had
-grown the same list separately, and each wanted the same three things, which are
-how many are still in flight, one callback per load that finished with the
-caller's own value beside it, and a blocking form for startup and tests. What it
-got wrong is that those are one type. Unbundled they are a listener, a counter
-and a wait, and each has a smaller home: the listener is `onSettle`, attached
-where the work starts rather than added to a list something else drains; the
-counter is three lines the subsystem keeps, which is what `tecs.platform.os.pendingProcesses`
-already does; and the wait is a drain on the loader. The batch's own selling
-point was compacting in place so a frame with loads outstanding allocated
-nothing, and the unified path allocates strictly less, because a batch walked
-every outstanding load on every call where a drain walks only what settled.
+Waiting on a fixed collection of loads is `Future.all`. It fails on the first
+failed input and takes one hold on every input until the join settles or is
+canceled. A caller that needs every outcome can recover each input before
+joining it.
 
-The wait was meant to be `Future.all(...):wait` and it cannot be. That is worth
-recording, because the reason is about joins rather than about assets, and it is
-three defects rather than one. `Future.all` fails the join on its first
-failed input, and a sound file that is missing fails as fast as the worker can
-look, so the join answers with the caller's other loads still in flight. A join
-reads its inputs once and says so, so a load that a settle listener starts while
-the wait is running is not among them, and the caller cannot see that it is about
-to free something under a decode. And joining takes a hold on every input which
-only canceling the join gives back, so a join dropped after a timeout leaves the
-starter's own `cancel` decrementing to one rather than to zero, abandoning
-nothing. A combinator that settled once every input had settled rather than
-failing fast would fix the first of those and neither of the other two, and the
-one thing it fixes is already expressible: `Future.all` over inputs that each
-carry a `recover` does not fail fast, which is the shape an optional sidecar map
-already uses. So there is no `allSettled` here, and a name for a composition that
-exists would have bought nothing on either of the parts that are hard. What a
-subsystem is asking is not about a set it holds. It is "is anything of mine
-outstanding", and that is a count and a drain.
+Waiting for a subsystem to become idle is a different operation. A fixed join
+does not include work started by settlement listeners, while an idle barrier
+asks whether anything remains outstanding after those listeners run. That is a
+count and a drain rather than a collection combinator.
 
 So `assets.waitAll` is the barrier, and it is the one wait here that is not a
 join: its body is a `Future:wait` on a future the loader settles when its own
@@ -889,9 +805,7 @@ stay directly on `tecs.math` because neither takes a vector. Keeping all twenty
 functions flat made an angle-to-angle operation look like part of the vector
 vocabulary and left no place for another geometric subject without adding more
 unqualified names. The subordinate module pays one segment only where a caller
-is actually doing two-dimensional geometry. There are no aliases at the old
-flat spellings, so the surface has one answer rather than a compatibility layer
-that would make both layouts permanent.
+is actually doing two-dimensional geometry.
 
 That is also why these operations are Teal rather than Rust. A dot product,
 normalization or rotation does too little work to repay an FFI call, and the
@@ -905,18 +819,13 @@ merely because its implementation contains arithmetic.
 
 ## Data transforms and typed stores
 
-Encoding, hashing and decompression are one public module, `tecs.data`, and
-three files behind it. An earlier reading had them separate on the grounds that
-"operations over bytes" is a category rather than a concern, and that a tool
-wanting a shader's identity has no reason to load a decompressor. The second
-half of that still holds and is why the files stayed apart: the surface
-descriptor reads the members off three modules in order, so asking for a hash
-loads the hash module and neither of the others. What did not hold is the
-first half. A save is encoded, compressed and stamped in one place, and a
-caller doing that had to know three module names to do one job.
+Encoding, hashing and decompression share the public `tecs.data` module because
+a save is encoded, compressed and stamped as one task. Their implementations
+remain in three files, and the surface resolves them lazily, so asking for a
+hash loads neither encoder nor decompressor.
 
-The merge is also what qualifies the verbs. `encode` on a module that also
-compresses names two things at once, so JSON is `encodeJSON` and `decodeJSON`
+Sharing the module qualifies the verbs. `encode` on a module that also
+compresses would name two things at once, so JSON is `encodeJSON` and `decodeJSON`
 while the compressors keep `deflate` and `inflate`, which already say their
 format. lua-cjson's own names come through unchanged, sentinels and settings
 alike, for the reason `STYLE.md` gives: renaming them would leave that
@@ -1345,9 +1254,9 @@ offers the checkpoint one last time, since a termination out of the foreground
 never went through a backgrounding.
 
 Suspension is set and cleared in the hooks rather than folded out of the queued
-events, which is where it used to be. On Android the process blocks as soon as
-the backgrounding has been dispatched, so the drain that would have folded it is
-after the resume: acting on the event is acting a whole suspension too late.
+events. On Android the process blocks as soon as backgrounding is dispatched,
+so the drain runs after resume: acting on the event would be a whole suspension
+too late.
 
 `_willEnterForeground` is deliberately unanswered. It says the application is
 about to be visible again and the engine has nothing to do before the platform
@@ -1464,7 +1373,7 @@ folder selection. The `os` name distinguishes these host facilities from
 `tecs.System`, which remains the ECS system type. None of them is a subsystem a
 game builds on. Each is a handful of calls made when a player asks for
 something, and four names for that
-meant a game copying a path and then opening its folder reached three modules
+would make a game copying a path and then opening its folder reach three modules
 to do one thing. Names are qualified by what they act on, because a bare `text`,
 `data`, `clear`, `run` or `update` means nothing on a module that does all of
 it.
@@ -1474,17 +1383,13 @@ the keyboard, because a game asking what a device can sense is asking one
 question. Standard cursor shapes stay on `Input`, because cursor choice is an
 outbound input command on the same seam as visibility and relative mode.
 
-Device enumeration and microphone capture went the other way and are inside
-`tecs.audio`, beside the mixer, rather than being a module of their own. They
-were briefly two modules that differed only in the case of one letter, which is
-the worst spelling a distinction can have. The mixer and the device it opens
-are one subject at two levels: a game that wants a particular output names a
+Device enumeration and microphone capture live inside `tecs.audio`, beside the
+mixer. The mixer and the device it opens are one subject at two levels: a game
+that wants a particular output names a
 device from `tecs.audio.playbackDevices` and passes its id to
-`tecs.audio.newAudio`, and having to know which of two modules each half
-came from bought nothing. `src/tecs/platform/audio.tl` is still its own file
-and still reaches only SDL, and `tecs.audio` publishes what it holds under its
-own names, the way `tecs.io.files` publishes `platform/content.tl`. The
-module is the seam and the public name is the surface.
+`tecs.audio.newAudio`. `src/tecs/platform/audio.tl` remains the SDL-only seam,
+and `tecs.audio` publishes its operations under the game-facing names, the way
+`tecs.io.files` publishes `platform/content.tl`.
 
 File and folder dialogs are the exception to "one SDL call and return". SDL
 retains a callback and may enter it from a thread the VM did not create, so
@@ -1534,23 +1439,17 @@ The descriptor owns no cursor and does not take policy away from its backing:
 paths still open through `tecs.io.files`, TCP and UDP handles are constructed
 by `tecs.io`, and media type and length are lazy metadata methods.
 `withMetadata` wraps those methods without eagerly opening or reading the
-source. `tecs.io.files.Reader` and `tecs.io.files.Writer` remain aliases, so
-code can name a directional endpoint either on the parent or where the file was
-opened.
+source.
 
-Networking once occupied a separate `tecs.net` root with HTTP and MCP below
-it. That root bought no distinction the operation did not already carry:
-sockets, files, protocol transfers, and external tool traffic are all I/O, and
-the extra root made a caller choose between two organizational names before it
-could choose an operation. Moving the transport and both protocols under
-`tecs.io` removes that choice without putting a third level below any module.
+Sockets, files, protocol transfers and external tool traffic are all I/O, so
+transport, HTTP and MCP live under `tecs.io`. The operation carries the useful
+distinction without adding another organizational root or a third module level.
 
 ## Touching the filesystem
 
 `tecs.io.files` answers both halves: where a path is, and what to do once
-you have one. They are one module because they were never two questions. Every
-path a game touches is resolved and then acted on in the same breath, and a
-caller holding one half had to name the other module to do anything with it.
+you have one. They are one module because they are one task. Every path a game
+touches is resolved and then acted on in the same breath.
 `platform/content.tl` sits below it and its watcher sibling. It holds the roots
 the shader and material loaders read and the loaded-path set the watcher polls,
 so neither public child has to require the other. It is one backend call per
@@ -1621,10 +1520,8 @@ above resolves a path.
 ## A value that settles once
 
 Several things in this tree are work in flight: an asset decode, a child
-process, a request. Each of them used to own a private cell with four states, a
-failure string, a registry keyed by a worker correlation id, and a blocking wait
-that pumped, and each of them had a different word for the same four states.
-[`Future.tl`](src/tecs/Future.tl) is the shape they share, written once.
+process, a request. [`Future.tl`](src/tecs/Future.tl) gives all of them one
+settle-once state, failure, cancellation, listener and wait vocabulary.
 
 ```lua
 local Future = require("tecs.Future")
@@ -1661,11 +1558,10 @@ answer to work that cannot be stopped: a source with no hook leaves it running
 and stops caring, rather than the interface pretending every source can be told
 to stop.
 
-**The budget is wall clock.** Every wait this replaces subtracted the nominal
-slice size whatever the slice actually cost, and a source returns as soon as one
-message arrives, so a "5000 ms" wait was really "at most 312 messages". The
-default and the slice size live on the source, which is what lets a subprocess
-keep a longer default than a decode without a second convention.
+**The budget is wall clock.** A wait measures the time its source actually
+spends pumping rather than counting messages or nominal slices. The default and
+the slice size live on the source, which lets a subprocess keep a longer default
+than a decode without a second convention.
 
 **Settling drains iteratively.** A dependent that settles another future extends
 a loop instead of the stack. `flatMap` is what makes that necessary rather than
@@ -1717,9 +1613,8 @@ and it is the same work
 `assets.update` and `proc.update` already do in the loop for the same reason: a
 decode that finished has finished, a child that exited has exited, a transfer
 that completed has completed, and nothing else in a frame is obliged to ask.
-The reason it was not simply a third line in `Application` is that `assets` and
-`proc` are module singletons and a client is an object a game constructs, maybe
-several of. So the clients come to the loop: building one registers it on the
+`assets` and `proc` are module singletons, while a game may construct several
+HTTP clients. The clients therefore register with the loop: building one puts it on the
 list `tecs.io.http.pumpClients` turns, `close` takes it off, and the
 application turns whatever is on the list. Native workers send bounded chunk,
 completion and error messages to a queue; the frame pump drains it without any
@@ -2191,19 +2086,18 @@ affords none, so `dropped` trips at the same population it trips at packed.
 
 Reserving stops a spawn moving the archetypes around it and does nothing about
 the one it landed in. Moving a row into an archetype marks every one of that
-archetype's columns dirty, so a spawn rewrote the destination's whole run
-whatever the runs were laid out like, and a scene holding everything in one
-archetype got nothing from either the dirty gate or the reservation.
+archetype's columns dirty, while the structural residue lets extraction narrow
+that broad signal to the rows whose storage changed.
 
-The mark is not gratuitous, and stating why decides the shape of the fix. A
+The broad component mark is necessary. A
 placement's row is storage no consumer has seen: capacity grows without
 initializing and a removal shrinks the run by decrementing a count, so the slot
 at `length + 1` holds whatever its last tenant left there. And a swap-pop
 genuinely moves a row: the surviving row at the removed index now belongs to a
 different entity, in every column. So the **component set** the mark names is
 exact. What is an over-approximation is the **row set**, and the rows are a
-contiguous suffix plus a bounded set of swap-pop destinations, which is what the
-structural path already receives as arguments and used to throw away.
+contiguous suffix plus a bounded set of swap-pop destinations already known to
+the structural path.
 
 `partialRewrites` keeps them. `markAllComponentsDirty` sets one flag rather than
 every bit, and `isComponentDirty` composes the flag in, so every consumer reads
@@ -2213,21 +2107,18 @@ swap-pop rows. Extraction records the count each run was last written at and
 writes the rows the residue names. One spawn into a 200,000-row archetype then
 costs one row.
 
-This is not the row-dirty bitmap that was removed. That put a row signal on the
-**value-write** path, where every write site was a place to get it wrong, and
-`getMut` declaring intent at the access site is what replaced it. Nothing on the
-value-write path changes here: a column a value write dirtied still rewrites the
-whole run, because naming a column says nothing about which rows moved. The
-residue reads a signal the structural path already computes.
+The residue belongs only to the structural path. Value writes declare intent
+through `getMut`; a dirtied column still rewrites the whole run because naming
+a column says nothing about which rows changed.
 
 Writing and marking are separated, and only writing has to be exact. A byte
 range list tracks 64 spans and then collapses to one covering everything in it,
 gaps between runs included, so a frame of scattered rows marked one span apiece
-would upload more than the whole-run rewrite it replaced. Extraction therefore
+could upload more than one covering span. Extraction therefore
 names spans individually while the frame's lists are under half their ceiling
 and names the run's covering span past it, which is exactly what a whole-run
-rewrite marks. So the upload is provably never worse than before, and better
-whenever the changed rows are few or clustered.
+rewrite marks. The upload is therefore bounded by the covering span and shrinks
+when the changed rows are few or clustered.
 
 Two regimes get nothing from it, both because something wider is genuinely
 dirty. An archetype carrying `PreviousTransform` is interpolated, so its drawn
@@ -2262,7 +2153,7 @@ an opaque scene is and what this option exists for. A run that did hold a blende
 row is recounted, one float per row, because a swap-pop may have written over
 that row or the run may have given it up off its end and neither is anything the
 residue names. That is a row walk on structural-change frames for archetypes that
-blend, against the twenty floats per row the rewrite it replaced wrote, and
+blend, against twenty floats per row for a whole-run rewrite, and
 nothing at all for the archetypes the option was built for. The differential
 compares the count beside the bytes, and a third of the churn stream's spawns are
 translucent so that there is a count to disagree about.
@@ -2998,9 +2889,8 @@ which replaces the lighting with the albedo instead of adding to it. A lamp can
 therefore be lit and glowing at once, and a glowing sign is as bright in the
 dark as under a light, which is the whole of what makes it a sign.
 
-What says a thing emits is its material, not a component. That is what the
-previous engine did, and it costs nothing here: the instance record is four
-vec4s with no spare lane, and a component would have widened it for every
+What says a thing emits is its material, not a component. The instance record
+is four vec4s with no spare lane, and a component would widen it for every
 entity in the world to carry something almost none of them have anything to say
 about. A material reads `frag.param` and `frag.color` for per-entity strength
 and color, and `materials.addRoot` and `materials.define` are how a game brings
@@ -3186,15 +3076,14 @@ exactly: the shader takes the layer with a modulo, the region with a division
 and a modulo, and the height with a division. That keeps the instance at four
 vec4s, which is the point. `instancelayout.packSlot` owns the packing and
 `assets/shaders/include/slot.glsl` owns the recovery, so the renderer's sync,
-the text producer and the particle pool state it once between them.
+the text producer and the particle pool share one definition.
 
 Not clipping costs nothing. An archetype with no `Clip` column is written by a
-loop that never mentions a region, and the float it writes is the layer as it
-always was. In the fragment shader the index is a flat varying, so an unclipped
+loop that never mentions a region, and the float it writes is the layer. In the
+fragment shader the index is a flat varying, so an unclipped
 instance takes a branch its whole primitive agrees on and never reads the
 region table; and the test lands on the coverage the material already returned,
-leaving through the `discard` that was there for distance fields rather than
-adding one.
+using the same `discard` path as distance fields.
 
 The cull knows nothing about regions. An instance entirely outside its region is
 drawn and thrown away a fragment at a time, which is correct and wasteful, and
@@ -3438,7 +3327,7 @@ what almost every "has the explosion ended" question is actually asking;
 name carries the caveat. Neither reads anything back, because a readback here
 is a pipeline stall.
 
-**Particles blend by default, and the default was chosen rather than inherited.**
+**Particles blend by default.**
 Routing into the forward lane is negating the first half extent of a cull bound,
 and a particle's bound is written by the simulate pass rather than by extraction,
 so the pass reads one float off the effect record and negates or does not. That
@@ -3446,16 +3335,13 @@ is the whole of the mechanism, which is the point: nothing downstream of the
 bound had to learn what a particle is.
 
 `render.blend` names `"alpha"`, `"additive"` or `"opaque"` and defaults to
-`"alpha"`. Defaulting to opaque would have kept a worse bug as the default: the
-G-buffer is written with replace and has nowhere to put partial coverage, so a
-gradient ending at transparent black wrote opaque black over what was behind it,
-which is worse than not fading at all. It is also nearly free to change, because
-alpha over at an alpha of one is the same image the G-buffer produced. What does
-change for an effect that was already opaque and stays at full alpha is what the
-G-buffer no longer holds: a blended particle is not in the occluder mask, is not
-shadowed by one, and carries no normal into the resolve. An effect that wanted any
-of those asks for `"opaque"` and gives up alpha in exchange, which is the trade
-the two names now make explicit.
+`"alpha"`. The G-buffer writes with replace and has nowhere to put partial
+coverage, so an opaque gradient ending at transparent black would cover what is
+behind it with black. Alpha over at an alpha of one is the same image the
+G-buffer produces. A blended particle is not in the occluder mask, is not
+shadowed by one, and carries no normal into the resolve. An effect that needs
+any of those asks for `"opaque"` and gives up alpha in exchange, which is the
+trade the two names make explicit.
 
 Additive is not a second pipeline. The forward pipeline blends premultiplied, so
 the fragment shader chooses between covering and adding by what it writes into
@@ -3586,8 +3472,8 @@ their names in sorted order, an `Animation` holds a tag index and a `Pivot`
 holds a slice index, so a re-export that adds, removes or renames either is
 refused by name, exactly as a material file appearing is.
 
-Fonts follow SDL_ttf's ownership model rather than exposing Tecs' old atlas
-model. `newTTF` asynchronously reads source bytes, opens one immutable
+Fonts follow SDL_ttf's ownership model. `newTTF` asynchronously reads source
+bytes, opens one immutable
 `TTF_Font`, enables SDF rasterization, and returns it only after those steps
 succeed. SDL_ttf and HarfBuzz own shaping and line layout. Tecs deliberately
 does not use SDL_ttf's GPU text engine: that engine emits four vertices and six
@@ -3754,8 +3640,7 @@ not error" is not evidence that it drew.
 
 ## Locked decisions
 
-These shape the seam and are effectively impossible to retrofit, so they were
-settled before anything was written.
+These shape the seam and constrain everything built on it.
 
 **Deferred only, no immediate mode.** SDL_GPU bakes blend, depth, and cull into
 immutable pipeline objects and has no global state to set. An immediate-mode API
@@ -3791,12 +3676,10 @@ and devices are released by an explicit `destroy`. Tying GPU-adjacent lifetimes
 to finalizers makes hot reload either leak or double-free depending on
 collection order.
 
-**The ECS and the engine are one project.** They were separate while this
-replaced the previous rendering layer and the ECS stayed renderer-agnostic.
-The renderer's whole job
-is reading archetype columns, and the ECS's storage layout decides whether that
-is fast, so the boundary stopped paying for itself. Storage that a GPU can read
-directly is the reason to merge, and it is not expressible with the two apart.
+**The ECS and the engine are one project.** The renderer reads archetype
+columns, and the ECS's storage layout decides whether that is fast. Keeping both
+in one project makes GPU-readable storage a property of the component model
+rather than an integration boundary.
 Headless worlds keep working: GPU-backed storage is opt-in per component.
 
 **Workers are the only threading path.** LuaJIT FFI callbacks invoked from
@@ -3978,32 +3861,18 @@ a real window to completion.
 
 ## One program owns both halves of a documentation page
 
-The site and the thing that knows the API used to be different programs, and
-every documentation defect came out of that gap. A reference generator that
-held one module path per page could not see a module nested inside another. A
-page checker learned what a subordinate module is three separate times. A link
-checker resolved routes the site rejected. A dedented example inside a docblock
-became an unclosed tag and broke the build forty lines from where it was
-written. Four scripts, about a thousand lines, existed to hold two programs in
-step.
-
 Tealdoc renders the site from `tealdoc.site` in `tlconfig.lua`. A module page
 contains frontmatter and its title, then Tealdoc appends the reference rendered
 from the modules that page names. The module's leading long doc comment carries
 its introduction and examples, and declaration docblocks carry symbol
-contracts. Guides under `docs/` remain Markdown because they span modules. The
-four scripts are gone, along with seventeen thousand lines of committed
-reference Markdown: a signature cannot drift from its page when no second copy
-exists.
+contracts. Guides under `docs/` remain Markdown because they span modules. A
+signature cannot drift from its page because no second copy exists.
 
-What the retired checker held is a `before_build` hook in the same file. Every
-public name in `src/tecs/init.tl` has a page, no page outlives the module it
-documents, both listings of the modules agree with the declaration and with
-each other, and the sidebar has one row per page. It fails the build rather
-than a separate command, because a page lost to a rename is exactly what that
-check has caught before. The pages themselves are derived from `SURFACE` rather
-than transcribed beside it, so a renamed module is a failure where the rename
-is rather than a page that quietly stops describing anything.
+A `before_build` hook in the same file requires every public name in
+`src/tecs/init.tl` to have a page, rejects a page with no module, keeps both
+module listings aligned with the declaration, and gives the sidebar one row per
+page. The pages are derived from `SURFACE` rather than transcribed beside it, so
+a renamed module fails at its declaration instead of leaving an orphaned page.
 
 A page's reference comes from a list of modules rather than one, because a
 public name is a namespace and a module is a file and the two do not have to
@@ -4013,29 +3882,19 @@ principal module or combined reference; its children each keep their own page.
 Every entry in that list goes away the day its namespace is one module, which
 is what `AGENTS.md` already asks for.
 
-The cost is paid by the offline reference. `tecs docs` carries the pages, and
-the source pages no longer carry their signatures or module prose. Product
-builds therefore stage the composed Markdown from the rendered site. They
-rebuild it only when a Markdown or Teal input is newer than the last render,
-so an unchanged build does not pay the render cost.
+`tecs docs` carries the composed pages. Product builds stage that Markdown from
+the rendered site and rebuild it only when a Markdown or Teal input is newer
+than the last render, so an unchanged build does not pay the render cost.
 
-Type is sized in `rem`, and the root size is one value at every width. What
-lost was sizing the page against the viewport, which is what tealdoc's hero
-did in `vw` and what Pico's root size does in five steps between 576 and 1536
-pixels. Browser zoom is a change in the viewport, so a page written that way
-gets laid out again rather than scaled: the heading and the line under it went
-from 1.8 to 2.5 times apart across the range, and every rem-sized margin
-stepped as the reader crossed 1280 or 1536. A reader who zooms is asking for
-the same page at a different size. The hero is fixed in tealdoc, and the root
-size is pinned here, because the base text size is the site's call rather than
-the generator's.
+Type is sized in `rem`, and the root size is one value at every width. Browser
+zoom therefore scales the same layout rather than changing spacing at viewport
+breakpoints. The hero and root size are pinned because base text size belongs
+to the site rather than the generator.
 
 The sidebar opens the section holding the page being read, and nothing else.
 Open at once it is a hundred and fifty rows, and a reader scrolls past the
-whole surface to reach the part they are in. What argued for leaving it open
-is that a closed group hides the names inside it from someone scanning, and
-that loses to the one property these groups have: a group's name is the prefix
-of every name under it, so a closed `tecs.gfx` still tells a reader looking for
+whole surface to reach the part they are in. A group's name is the prefix of
+every name under it, so a closed `tecs.gfx` still tells a reader looking for
 `tecs.gfx.layers` whether to open it.
 
 ## Requirements
@@ -4063,9 +3922,7 @@ through `brew`, and installing them is a way out of the pin. The alternative
 would be for `deps` to skip them, which trades a command that reports what it did
 for a command that cannot set a machine up at all. So it installs and then says
 so, where whoever ran it is still reading the output, rather than leaving the
-next build to fail on a version nobody chose. This is not hypothetical: it
-happened, and it took a `TECS_ALLOW_VERSION_DRIFT=1` prefix on every command
-until the pin was raised.
+next build to fail on a version nobody chose.
 
 A development build takes SDL_mixer from the system, and a system build is
 whatever the packager configured: Homebrew's loads its optional decoders by
@@ -4089,17 +3946,10 @@ and a reason for each. Neither of those two checks reads a license out of a
 binary, because that is not something a binary carries; what they prove is that
 nothing gets linked without somebody having written down what it is.
 
-The spec asks both directions, and the second one is the one that was missing.
-Reading the pins and asking the notices about each catches a dependency arriving
-without a notice, which is the compliance failure; it cannot catch a notice for
-a dependency that left, because nothing ever looks at the notice again. That
-direction costs nothing to get wrong and reads as current for as long as it
-survives, and the exception tables are where it turns harmful: each entry turns
-a check off, so an entry that has stopped being true suppresses the check it was
-written to skip rather than merely describing something absent. So the pins are
-read out of the notices as well as into them, and the Cargo exceptions are held
-to the lockfile: an excused package the runtime crate reaches is a failure, which
-is what four crates in that table had quietly become.
+The spec asks both directions. Reading the pins and asking the notices about
+each catches a dependency without a notice. Reading the notices back against
+the pins catches stale notices, and holding Cargo exceptions to the lockfile
+prevents an obsolete exception from suppressing a check for a live package.
 
 `THIRD_PARTY_NOTICES.md` is the list, and it installs to `share/tecs` with the
 binaries it describes. A package that carried the code and not the notice would

@@ -340,11 +340,8 @@ describe("proc", function()
         assert.are.equal("again", trimmed(after.value.output))
     end)
 
-    -- The defect the duplicated shutdown carried: `pending` was cleared
-    -- whatever state it was in, so a child the kernel had not reaped left its
-    -- handle reading "running" for the rest of the process, against a runner
-    -- that no longer existed and would never answer. Nothing in flight may
-    -- outlive shutdown unsettled, by whichever branch it got there.
+    -- Shutdown settles every in-flight handle, including children that the
+    -- kernel has not reaped yet.
     it("leaves nothing pending after shutdown", function()
         local runs = {}
         for index = 1, 3 do

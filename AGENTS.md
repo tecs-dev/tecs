@@ -400,9 +400,9 @@ validation that finds state written under it, and neither is in scope for a name
 - `cargo xtask bench latency` measures what neither of those can see: the wait from an event arriving to the frame that
   reacted to it being submitted. Anything that pipelines the frame buys throughput and pays for it there.
 
-## History
+## Related repositories
 
-`main` holds the previous engine, which this branch replaces rather than migrates. Use a git worktree to read from
-it or to A/B a measurement; do not carry a second copy of it here.
+Use `main` only as a parity and measurement reference. Read it through a git
+worktree and do not copy it into this tree.
 
-Design notes live in `../tecs-plans`, outside this repository, so plans and code have separate histories.
+Design notes live in the separate `../tecs-plans` repository.

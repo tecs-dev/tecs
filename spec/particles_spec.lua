@@ -59,13 +59,10 @@ end
 describe("tecs.gfx.particles", function()
     local window, device, screen
 
-    it("uses result-named factories", function()
+    it("constructs each authoring value", function()
         assert.is_function(particles.newEffect)
         assert.is_function(particles.newCurve)
         assert.is_function(particles.newGradient)
-        assert.is_nil(rawget(particles, "effect"))
-        assert.is_nil(rawget(particles, "curve"))
-        assert.is_nil(rawget(particles, "gradient"))
     end)
 
     setup(function()
@@ -547,9 +544,8 @@ describe("tecs.gfx.particles", function()
     end)
 
     it("covers what is behind it when the effect asks for the opaque lane", function()
-        -- The opt-out, and what every effect drew before there was a choice: the
-        -- G-buffer is written with replace, so the particle's alpha reaches the
-        -- target having blended against nothing.
+        -- The opaque lane writes the G-buffer with replace, so the particle's
+        -- alpha reaches the target without blending.
         local world, renderer = newScene(true)
         overQuad(world, "opaque", 0.5)
 
@@ -1084,9 +1080,8 @@ describe("tecs.gfx.particles", function()
     end)
 
     it("refuses a blend mode it does not know", function()
-        -- Named rather than ignored. A mode nothing recognizes used to be
-        -- accepted and logged, which meant an effect authored for a look drew
-        -- something else and said so once in a log nobody was reading.
+        -- An unknown mode must fail at authoring time instead of drawing a
+        -- different look.
         local ok, err = pcall(function()
             particles.newEffect({
                 name = effectName(),

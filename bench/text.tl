@@ -136,8 +136,8 @@ return tecs.newApplication({
             )
         )
 
-        -- In `First`, which is where the loop used to call this from: a text
-        -- spawned here is laid out and extracted by the frame that spawned it.
+        -- `First` lets a text spawned here be laid out and extracted in the
+        -- same frame.
         local frame = 0
         world:addSystem({
             name = "bench.Churn",

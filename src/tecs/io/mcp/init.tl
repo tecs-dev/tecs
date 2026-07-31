@@ -53,11 +53,11 @@ local data <const> = require("tecs.data")
 local log <const> = require("tecs.log")
 local transport <const> = require("tecs.io.mcp.transport")
 
--- `tecs.mcp` is an externally typed logger name and remains unchanged when
--- the Lua module moves.
+-- The externally typed logger name is `tecs.mcp`, independent of the Lua
+-- module path.
 local LOGGER <const> = log.get("tecs.mcp")
 
---- JSON-RPC error codes used by the socket-free compatibility dispatcher.
+--- JSON-RPC error codes used by the in-process dispatcher.
 local PARSE_ERROR <const> = -32700
 local INVALID_REQUEST <const> = -32600
 local METHOD_NOT_FOUND <const> = -32601

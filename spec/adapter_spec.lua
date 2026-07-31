@@ -206,7 +206,7 @@ describe("platform contract", function()
     end)
 
     it("refuses a storage backend that is missing an operation", function()
-        -- A backend is optional and a partial one is not. `filesystem` calls
+        -- A backend is optional and a partial one is not. `tecs.io.files` calls
         -- these without checking, so a missing `copy` would surface as
         -- whichever file the game happened to reach first, on the target where
         -- nobody here can attach a debugger.

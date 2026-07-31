@@ -163,8 +163,8 @@ describe(
                 it(
                     "should reuse destroyed archetype ids for new archetypes",
                     function()
-                        -- Freelist regression: after destroy, the next archetype
-                        -- creation should grab the freed id before bumping maxId.
+                        -- The next archetype must take the freed id before
+                        -- increasing maxId.
                         local t1 = world:spawn()
                         local _f1 = world:spawn(Follows(t1) as tecs.ecs.Component)
                         world:commit()

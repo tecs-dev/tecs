@@ -102,7 +102,7 @@ describe(
                 end
                 w:commit()
 
-                -- Verify new values - this is where the bug manifests
+                -- Reused storage must contain only the new values.
                 for _, e in ipairs(newEntities) do
                     local t = w:get(e, TransformComp)
                     luassert.is_not_nil(t, "New entity should have Transform")
@@ -239,7 +239,7 @@ describe(
 
                 w:commit()
 
-                -- Verify new text entities - this is where the bug from UI example manifests
+                -- New text entities must not inherit despawned values.
                 for _, e in ipairs(newTextEntities) do
                     local t = w:get(e, TransformComp)
                     luassert.is_not_nil(t, "New text entity should have Transform")

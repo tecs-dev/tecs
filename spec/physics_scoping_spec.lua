@@ -53,8 +53,7 @@ describe("ecs.physics world scoping", function()
         assert.is_not_nil(tecs.data.listKeys()["tecs.physics"])
     end)
 
-    -- The module used to keep one simulation on itself, so a second install
-    -- replaced the first and both worlds created bodies in the second's.
+    -- Each world owns an independent simulation.
     it("gives two worlds a simulation each", function()
         local first = newWorld()
         local second = newWorld()

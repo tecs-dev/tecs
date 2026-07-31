@@ -452,12 +452,9 @@ return tecs.newApplication({
         else
             print(("sprites: %d sprites over %.0fx%.0f, %d animating"):format(COUNT, AREA_W, AREA_H, PLAYING))
         end
-        -- The churn and the sampling both sit in `First`, which is where the
-        -- loop used to call this from: ahead of every system in the frame, so a
-        -- sprite spawned here is extracted by the frame that spawned it. The
-        -- one thing that is not the same is that a spawn from inside the step
-        -- is applied at the next phase boundary rather than at once, which is
-        -- what every other spawn in a world already does.
+        -- Churn and sampling both sit in `First`, ahead of every other system
+        -- in the frame. A sprite spawned here is applied at the next phase
+        -- boundary and extracted in the frame that spawned it.
         local frame = 0
         world:addSystem({
             name = "bench.Churn",

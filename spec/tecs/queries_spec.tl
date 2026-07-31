@@ -1535,7 +1535,7 @@ describe(
                             end,
                         })
 
-                        -- Pre-existing entity without Velocity: doesn't match yet.
+                        -- An existing entity without Velocity does not match yet.
                         local id = world:spawn(Position(1, 1))
                         world:commit()
                         luassert.equals(0, #calls)
@@ -1692,12 +1692,10 @@ describe(
                 it(
                     "observer-cascade add does not leave stale entries in the source arch",
                     function()
-                        -- Regression: when an observer on arch{A} fires and stages
-                        -- `world:set(e, B)` during the drain, the entity must end
-                        -- up PHYSICALLY only in arch{A,B}, not in both arch{A} and
-                        -- arch{A,B}. Tracks the bug where observer-driven staging
-                        -- appended a new spawn record on the destination without
-                        -- marking the source arch for `pendingMoveOut`.
+                        -- When an observer on arch{A} stages `world:set(e, B)`
+                        -- during the drain, the entity must physically end in
+                        -- arch{A,B} only. The source archetype must be marked for
+                        -- `pendingMoveOut`.
                         local TagA = tecs.ecs.newTagComponent({name = "CascadeTagA"})
                         local TagB = tecs.ecs.newTagComponent({name = "CascadeTagB"})
                         local TagC = tecs.ecs.newTagComponent({name = "CascadeTagC"})

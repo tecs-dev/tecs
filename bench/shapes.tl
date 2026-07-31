@@ -1,4 +1,4 @@
---- Steady-state shape field, matching the previous engine's `shapes` bench.
+--- Steady-state shape field.
 ---
 --- The point is comparability, so the scene is copied rather than invented: a
 --- 4000x2400 area viewed through a 1280x720 window, so roughly a tenth of the

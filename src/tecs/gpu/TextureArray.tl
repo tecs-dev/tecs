@@ -223,8 +223,7 @@ end
 
 --- Finds somewhere for an image of the given padded size, unpacked.
 ---
---- One image a layer, at its origin, which is what the array did before there
---- was a packer and what it still does unless asked otherwise.
+--- Reserves one layer per image and places it at that layer's origin.
 local function placeUnpacked(
     self: TextureArray, width: integer, height: integer, level: integer
 ): integer, integer, integer

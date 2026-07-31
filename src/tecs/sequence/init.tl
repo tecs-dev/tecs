@@ -99,8 +99,8 @@ local type World = types.World
 -- Who holds a pause when the caller does not say.
 local DEFAULT_HOLDER <const> = "user"
 
--- The runtime records live in the leaf types module; bind them so the body
--- below reads the same as when they were declared here.
+-- Bind the runtime records from the leaf types module for the implementation
+-- below.
 local type ProgramImpl = seqtypes.ProgramImpl
 
 local record sequence

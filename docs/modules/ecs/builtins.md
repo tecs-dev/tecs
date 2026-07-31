@@ -10,8 +10,8 @@ systems. Games use them directly from `tecs.ecs`, except for `tecs.Transform`,
 which sits at the root because every subsystem moves it.
 
 The durable entity-key component uses the public name `EntityKey` and the
-registered name `"Key"`. Snapshots persist the registered name for
-compatibility. `tecs.data.Key` instead names the typed resource-key type.
+externally typed registered name `"Key"`. `tecs.data.Key` names the typed
+store-key type.
 
 ## Name {#name}
 

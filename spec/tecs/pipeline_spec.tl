@@ -609,9 +609,8 @@ describe(
 
                 p:update(total, world)
 
-                -- Every second handed in is either simulated, dropped and counted, or
-                -- still owed. There is no fourth destination, and the old clamp to
-                -- twice the timestep was one.
+                -- Every second handed in is either simulated, dropped and
+                -- counted, or still owed. There is no fourth destination.
                 local accounted = steps * (1 / 60) + p.fixedTimeDropped + p.fixedAccumulator
                 luassert.is_true(
                     math.abs(accounted - total) < 1e-9, "time went somewhere unaccounted: " .. tostring(accounted)

@@ -1,9 +1,8 @@
 --[=[
 Saving and restoring a world's playbacks.
 
-A snapshot payload is versioned: a save written by a build whose
-cursor layout this one does not understand is refused rather than
-restored field by field into a half-cursor.
+The payload carries its layout version so incompatible data is rejected
+before cursor state is restored.
 
 A snapshot carries the exact program versions its live cursors are
 running, so a load resumes the instructions each playback started with
@@ -33,17 +32,7 @@ local floor <const> = math.floor
 
 local DEFAULT_BUDGET <const> = seqcursors.DEFAULT_BUDGET
 
--- Layout version of this module's snapshot payload. Bumped whenever a cursor
--- gains state an older reader would silently ignore, so a save written by a
--- newer build is rejected rather than restored as a half-cursor.
---   1: cursor, program, and signal state
---   2: branch tree (parent link and join state)
---   3: query waits
---   4: tween playback waits
---   5: named clocks
---   6: evaluator working state
---   7: awaitable waits
-local SNAPSHOT_VERSION <const> = 7
+local SNAPSHOT_VERSION <const> = 1
 
 local record snapshot
     --- The payload layout this build writes and accepts.

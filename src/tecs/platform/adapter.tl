@@ -82,7 +82,7 @@ local record adapter
         --- Reaching a file once one of the two roots above has named it.
         --- Leave nil to keep SDL's, which is right for any target where the
         --- roots are directories. A target where they are not supplies this
-        --- and `filesystem` is unchanged above it.
+        --- and `tecs.io.files` works unchanged above it.
         storage: storagebackend.Backend
 
         --- SDL shader format the platform's own bytecode is declared as. A
@@ -170,7 +170,7 @@ function adapter.install(platform: adapter.Platform)
             error(("tecs: a platform must supply %s"):format(required), 2)
         end
     end
-    -- A storage backend is optional, and a partial one is not. `filesystem`
+    -- A storage backend is optional, and a partial one is not. `tecs.io.files`
     -- calls these without checking, so a missing operation would surface as
     -- whichever file the game happened to open first rather than here. The two
     -- that are left out are `currentDirectory` and `userFolder`, which have no
@@ -196,7 +196,7 @@ end
 
 --- How the installed platform reaches a file.
 ---
---- Resolved per call rather than cached, because `filesystem` is the only
+--- Resolved per call rather than cached, because `tecs.io.files` is the only
 --- caller and every one of its functions is already a syscall wrapped in a
 --- table lookup. A platform that left this nil gets SDL's, which is the same
 --- fallback `Input` and `Audio` make for their own backends.

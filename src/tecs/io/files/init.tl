@@ -67,21 +67,13 @@ local record files
 
     --- `GlobOptions` controls pattern matching.
     type GlobOptions = storagebackend.GlobOptions
-
-    --- `Writer` accepts a write in pieces. This compatibility alias names
-    --- [`tecs.io.Writer`](tealdoc:tecs.io.Writer).
-    type Writer = types.Writer
-
-    --- `Reader` returns a read in pieces. This compatibility alias names
-    --- [`tecs.io.Reader`](tealdoc:tecs.io.Reader).
-    type Reader = types.Reader
 end
 
 local type Info = files.Info
 local type UserFolder = files.UserFolder
 local type GlobOptions = files.GlobOptions
-local type Writer = files.Writer
-local type Reader = files.Reader
+local type Writer = types.Writer
+local type Reader = types.Reader
 local type IOBuffer = types.Buffer
 
 --- Raises when a required string argument is missing.

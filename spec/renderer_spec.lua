@@ -2920,10 +2920,9 @@ describe("ecs.Renderer", function()
         end)
 
         it("keeps the array layer a sprite named when a region rides with it", function()
-            -- This is the regression the packing risks. `origin.z` carries the
-            -- texture-array layer and the clip index in one float, so a shader
-            -- reading it as a bare layer would sample layer 7 * 64 + n, which
-            -- nothing was ever uploaded into.
+            -- `origin.z` carries the texture-array layer and clip index in one
+            -- float. Reading it as a bare layer would sample layer 7 * 64 + n,
+            -- where nothing is uploaded.
             local world, renderer = newScene()
             renderer:registerImage(solid("spec://clipred", 255, 0, 0))
             renderer:registerImage(solid("spec://clipgreen", 0, 255, 0))

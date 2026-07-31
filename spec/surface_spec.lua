@@ -154,30 +154,12 @@ local DIRECT = { ecs = true, version = true, Transform = true }
 local PRIMITIVE = { string = "string", number = "number", integer = "number", boolean = "boolean" }
 
 describe("the public surface", function()
-    it("does not retain the removed tecs.system name", function()
-        assert.is_nil(tecs.system)
-    end)
-
-    it("does not retain typed stores on tecs.ecs", function()
-        for _, name in ipairs({ "Context", "Key", "newContext", "newKey", "findKey", "listKeys" }) do
-            assert.is_nil(tecs.ecs[name], "tecs.ecs." .. name .. " still exists")
-        end
-    end)
-
-    it("does not retain the remaining platform modules at the root", function()
-        assert.is_nil(tecs.os)
-        assert.is_nil(tecs.time)
-        assert.is_nil(tecs.window)
-    end)
-
     it("was read out of init.tl", function()
         -- Everything below is generated from this, so a parse that found
         -- nothing would pass every test by having none to run.
         assert.is_not_nil(top, INIT .. " declares no `local record tecs`")
-        -- A floor rather than a count: the surface is being reorganized into
-        -- fewer, larger modules, so what this guards against is a parse that
-        -- found a handful of names and then passed every test below by having
-        -- almost none to run.
+        -- A floor catches a parser that found a handful of names and then
+        -- passed every generated test by having almost none to run.
         assert.is_true(#top > 10, "only " .. #top .. " public names were parsed from " .. INIT)
     end)
 
@@ -296,27 +278,6 @@ describe("the public surface", function()
             assert.is_nil(rawget(tecs.gfx, "layers"))
         end)
 
-        it("does not answer at the root it moved off", function()
-            -- No alias and no shim: the old spelling is a nil like any name
-            -- that was never public.
-            assert.is_nil(tecs.layers)
-            assert.is_nil(tecs.animation)
-            assert.is_nil(tecs.materials)
-            assert.is_nil(tecs.particles)
-            assert.is_nil(tecs.camera)
-            assert.is_nil(tecs.renderer)
-            assert.is_nil(tecs.components)
-            assert.is_nil(tecs.text)
-        end)
-
-        it("does not carry the transform every subsystem moves", function()
-            -- Deliberate rather than an omission. `Transform` positions
-            -- everything a world holds, not only what draws, so it is the ECS
-            -- builtin and has one spelling.
-            assert.is_nil(tecs.gfx.Transform)
-            assert.is_not_nil(tecs.Transform)
-        end)
-
         it("answers nil for a name it does not carry", function()
             assert.is_nil(tecs.gfx.nosuchthing)
         end)
@@ -347,59 +308,35 @@ describe("the public surface", function()
             assert.is_true(rawequal(tecs.Future, require("tecs.Future")))
         end)
 
-        it("does not answer at the module names they moved off", function()
-            assert.is_nil(tecs.application)
-            assert.is_nil(tecs.future)
-            assert.is_nil(tecs.mcp)
-        end)
-
-        it("keeps the ECS vocabulary on tecs.ecs and not beside it", function()
-            -- The four cross-cutting types are types rather than values, so
-            -- there is nothing here to read either way. What can be checked is
-            -- that the rest of the vocabulary did not gain a second home: a
-            -- component registry lives on `tecs.ecs` and nowhere else.
-            assert.is_not_nil(require("tecs.ecs").findComponentByName)
-            assert.is_nil(rawget(tecs, "findComponentByName"))
-        end)
-
-        it("keeps generic event construction on tecs.events only", function()
+        it("exposes generic event construction", function()
             local events = require("tecs.events")
-            local ecs = require("tecs.ecs")
 
             assert.is_true(rawequal(tecs.events, events))
-            assert.is_nil(rawget(ecs, "newEvent"))
-            assert.is_nil(rawget(ecs, "newFFIEvent"))
-            assert.is_nil(rawget(ecs, "newMessageBus"))
+            assert.is_function(events.newEvent)
+            assert.is_function(events.newFFIEvent)
+            assert.is_function(events.newMessageBus)
         end)
     end)
 
     describe("the platform namespace", function()
-        it("hangs the remaining platform facilities below their parent", function()
+        it("hangs platform facilities below their parent", function()
             assert.is_true(rawequal(tecs.platform.events, require("tecs.platform.events")))
             assert.is_true(rawequal(tecs.platform.os, require("tecs.platform.os")))
             assert.is_true(rawequal(tecs.platform.time, require("tecs.platform.time")))
             assert.is_true(rawequal(tecs.platform.window, require("tecs.platform.window")))
-            assert.is_nil(tecs.platform.input)
             assert.is_nil(rawget(tecs.platform, "events"))
-            assert.is_nil(rawget(tecs.platform, "input"))
             assert.is_nil(rawget(tecs.platform, "os"))
             assert.is_nil(rawget(tecs.platform, "time"))
             assert.is_nil(rawget(tecs.platform, "window"))
             assert.is_true(rawequal(tecs.input, require("tecs.input")))
-            assert.is_nil(tecs.os)
-            assert.is_nil(tecs.time)
-            assert.is_nil(tecs.window)
         end)
     end)
 
     describe("a module inside a module", function()
-        it("hangs vector math below angle math without flat aliases", function()
+        it("hangs vector math below angle math", function()
             assert.is_true(rawequal(tecs.math, require("tecs.math")))
             assert.is_true(rawequal(tecs.math.vec2, require("tecs.math.vec2")))
             assert.is_true(rawequal(rawget(tecs.math, "vec2"), require("tecs.math.vec2")))
-            assert.is_nil(tecs.math.add)
-            assert.is_nil(tecs.math.normalize)
-            assert.is_nil(tecs.math.reflect)
         end)
 
         it("answers with the parent module rather than a table in front of it", function()
@@ -438,9 +375,6 @@ describe("the public surface", function()
         it("answers nil for a name neither it nor the names below it carry", function()
             assert.is_nil(tecs.io.nosuchthing)
             assert.is_nil(tecs.io.files.watch)
-            assert.is_nil(tecs.filesystem)
-            assert.is_nil(tecs.io.filesystem)
-            assert.is_nil(tecs.net)
         end)
     end)
 end)

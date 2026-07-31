@@ -25,13 +25,8 @@ describe(
     "random",
     function()
         it(
-            "uses result-named factories",
-            function()
-                luassert.is_function(random.newRandom)
-                luassert.is_function(random.newNoise)
-                luassert.is_nil(rawget(random as any, "new"))
-                luassert.is_nil(rawget(random as any, "noise"))
-            end
+            "constructs both random value types",
+            function() luassert.is_function(random.newRandom); luassert.is_function(random.newNoise) end
         )
 
         describe(

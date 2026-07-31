@@ -431,8 +431,8 @@ end
 --- fails is post-mortem debuggable wherever it was written. The loop keeps
 --- draining events so the window still closes, and keeps answering the debug
 --- server so an agent that was watching gets the traceback rather than a
---- refused connection. That was already true of a system, and it is the
---- moment the tooling is most useful and the worst one to lose.
+--- refused connection. A guarded system has the same behavior, especially
+--- when the tooling is most useful.
 ---
 --- Engine code is deliberately not guarded. An engine that throws is a bug
 --- here rather than in the game, and swallowing it would hide it.
@@ -1209,8 +1209,7 @@ end
 ---
 --- So this states the gap rather than half closing it. A game shipping to
 --- mobile today loses its device on backgrounding and the process does not
---- come back; the checkpoint above is what makes that survivable, which is why
---- it landed first.
+--- come back; the checkpoint above makes that survivable.
 function Application:_didEnterBackground()
     if self.device ~= nil then
         self.device:waitForIdle()

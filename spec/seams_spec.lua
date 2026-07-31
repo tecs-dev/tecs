@@ -15,7 +15,7 @@
 --  * A module that starts calling SDL fails this until someone adds it to the
 --    declaration, which means writing down which bucket it is in and why.
 --  * A module that stops calling SDL fails it too, because a declaration
---    describing code that no longer exists is worse than none.
+--    describing no current FFI use is invalid.
 --
 -- The compiled tree is read rather than the Teal source because `tl` strips
 -- comments, and this module's own prose names half of SDL's file API. A string

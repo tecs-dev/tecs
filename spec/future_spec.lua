@@ -601,9 +601,8 @@ describe("tecs.Future", function()
             assert.are.equal(0, #source.canceled)
         end)
 
-        -- The pending half of what `assets.Handle._shares` counted. Two loads
-        -- of one path that overlap get the same future, so one of them giving
-        -- up must not break the other.
+        -- Two overlapping loads of one path share a future, so one caller
+        -- giving up must not break the other.
         it("counts watchers, and only the last one stops the work", function()
             local source = newSource()
             local future = Future.pending(source)
@@ -735,10 +734,8 @@ describe("tecs.Future", function()
 
         -- The join promises an array indexed as its inputs are, and nil is a
         -- legal value that an array cannot hold: storing one leaves the slot
-        -- reading as absent and every index past it past a hole. Counting
-        -- settlements rather than filled slots is what used to let that through
-        -- as a "ready" join over a short array, which is silent and is worse
-        -- than any error.
+        -- reading as absent and every index past it past a hole. The join must
+        -- reject that value instead of reporting a short array as ready.
         it("fails rather than leaving a hole where an input settled with nothing", function()
             local first, second, third = Future.pending(), Future.pending(), Future.pending()
             local joined = Future.all({ first, second, third })

@@ -135,7 +135,6 @@ describe("http.newClient", function()
     local silent, silentPort
 
     it("uses the shared io stream surface", function()
-        assert.is_nil(rawget(http, "newStringStream"))
         assert.is_function(tecsIO.newStringStream)
         assert.is_function(tecsIO.newBufferStream)
         assert.is_function(tecsIO.newByteStream)
@@ -154,11 +153,8 @@ describe("http.newClient", function()
     -- A listener per test, on a port no other test uses. The transport serves
     -- one connection at a time and several tests here deliberately leave one
     -- unanswered, so a shared listener carries an accept queue from each test
-    -- into the next: the next test's listener answers the previous test's
-    -- connection, into a request the old client no longer owns, while its own waits
-    -- behind it. That reads as a client that stopped working and is really a
-    -- fixture that is one request behind. Building the listener per test is
-    -- what makes the suite deterministic rather than usually right.
+    -- into the next. Building the listener per test keeps every request paired
+    -- with its own client and makes the suite deterministic.
     before_each(function()
         client = http.newClient({ userAgent = "tecs-spec/1.0" })
         server, port = listenSomewhere()

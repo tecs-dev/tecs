@@ -339,9 +339,8 @@ local record Backend
     --- Survivors of the shadow lane per block, allocated whatever the pipeline
     --- was configured with, because the mark pass writes it for every world.
     _castBlocks: Buffer
-    --- The shadow list: an instance and a light per entry, four bytes each,
-    --- against the hundred and twenty-eight byte record the previous engine
-    --- wrote per shadow. Nil while shadows are off.
+    --- The shadow list: an instance and a light per entry, four bytes each.
+    --- Nil while shadows are off.
     _castList: Buffer
     --- Its draw arguments, shared by all three shadow draws: each walks the
     --- whole list and rejects what is not its own, so all three have the same

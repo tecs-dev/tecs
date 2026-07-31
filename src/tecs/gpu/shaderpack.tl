@@ -94,14 +94,9 @@ local record shaderpack
         shaders: {string: Shader}
     end
 
-    --- Layout this build writes and the only one it reads. Bumping it is what
-    --- makes an older pack fail loudly instead of decoding into the wrong
-    --- fields.
-    ---
-    --- Version 2 is version 1's fields with `sourceHash` computed differently.
-    --- Version 3 replaces LuaJIT's architecture-dependent table serializer
-    --- with an explicitly little-endian layout, so a host may build a pack
-    --- for another architecture of the same shader backend.
+    --- Layout this build writes and the only one it reads. The layout is
+    --- explicitly little-endian so a host can build a pack for another
+    --- architecture using the same shader backend.
     VERSION: integer
 end
 

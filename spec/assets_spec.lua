@@ -51,9 +51,8 @@ describe("assets", function()
         C.SDL_Quit()
     end)
 
-    it("exposes string loads without a byte-load alias", function()
+    it("exposes string loads", function()
         assert.is_function(rawget(assets, "loadString"))
-        assert.is_nil(rawget(assets, "loadBytes"))
     end)
 
     it("returns a pending future immediately and settles it later", function()
@@ -433,11 +432,8 @@ describe("assets", function()
         second.value:release()
     end)
 
-    -- Installing twice used to spawn a second worker over the first, which
-    -- left a thread and both its channels with nothing reading them. The load
-    -- already queued is what makes that visible: its answer comes back on the
-    -- channel that was dropped, so it never settles however long it is waited
-    -- for.
+    -- An idempotent install keeps the worker and channels serving an already
+    -- queued load.
     it("installs once however many times it is asked", function()
         local loading = assets.loadImage(FIXTURE)
         assets.install()

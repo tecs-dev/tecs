@@ -122,7 +122,7 @@ local type SnapshotOptions = types.World.SnapshotOptions
 local type SnapshotOutput = types.World.SnapshotOutput
 local table_move <const> = table.move
 
-local SNAPSHOT_VERSION <const> = 2
+local SNAPSHOT_VERSION <const> = 1
 
 -- Row-major presence masks use exact double arithmetic (LuaJIT's bit
 -- library is 32-bit); powers of two up to 2^51 keep every mask integral.

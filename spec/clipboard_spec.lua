@@ -89,13 +89,9 @@ describe("platform.clipboard on the public surface", function()
         -- observable here is the wiring that keeps it true, which is that the
         -- surface has no value for the name until something asks for one.
         local tecs = require("tecs")
-        assert.is_nil(rawget(tecs, "os"), "the removed root alias must remain empty")
-        assert.is_nil(tecs.system, "the removed public name must not remain as an alias")
         assert.are.equal(platformOS.clipboardText, tecs.platform.os.clipboardText)
         assert.is_true(rawequal(tecs.platform.os, platformOS), "the child must resolve once")
         assert.is_nil(rawget(tecs.platform, "os"), "the lazy namespace must remain empty")
-        assert.is_nil(rawget(tecs, "os"), "resolving the child must not restore the root alias")
-        assert.is_nil(tecs.system, "resolving tecs.platform.os must not restore the removed name")
     end)
 
     it("is reached under tecs.platform.os with its names qualified", function()

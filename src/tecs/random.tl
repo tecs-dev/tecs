@@ -718,11 +718,9 @@ local function ensure(world: types.World): Registry
     registries[world] = registry
 
     world:addSnapshotHandler({
-        -- A save format rather than a module path, and it does not follow this
-        -- module if the module moves. A renamed key does not fail a load: the
-        -- restore below finds no state under the new name and reseeds from the
-        -- world seed, so an old save opens and the run diverges from what it
-        -- recorded. Moving it is a migration with validation, not a rename.
+        -- This persisted handler key is an externally typed string. It remains
+        -- `tecs.random` across module layout changes because a missing value
+        -- makes restore reseed silently from the world seed.
         name = "tecs.random",
         save = function(_world: types.World): any
             local streams: {string: {integer}} = {}

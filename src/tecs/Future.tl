@@ -99,7 +99,7 @@ local type World = types.World
 
 -- A logger name is what `SDL_SetLogPriority` filters on, so it is configuration
 -- a developer types into a shell rather than a name this tree can rename in one
--- commit. It stays `"tecs.future"` now that the public name is `tecs.Future`.
+-- commit. The externally typed name is `"tecs.future"`.
 local LOGGER <const> = log.get("tecs.future")
 
 --- Reads the monotonic counter, in milliseconds.
@@ -1038,9 +1038,8 @@ function Future.track<U>(world: World, entity: integer, key: string, future: Fut
     end)
 end
 
--- The provider name a program writes into `sequence.await`, so it is reached
--- from a saved program rather than from code this tree can see. It stays
--- `"tecs.future"` now that the public name is `tecs.Future`.
+-- The externally typed provider name is stored in saved programs and therefore
+-- stays `"tecs.future"`.
 seqawaitables.register(
     "tecs.future",
     {

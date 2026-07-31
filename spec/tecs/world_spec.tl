@@ -1836,7 +1836,7 @@ describe(
                         w:spawn(PosComponent(4, 4), VelComponent() as tecs.ecs.Component)
                         luassert.equals(2, queryCount(q), "query must match a new archetype after clearEntities")
 
-                        -- The pre-existing Pos-only archetype keeps working too.
+                        -- The existing Pos-only archetype keeps working too.
                         w:spawn(PosComponent(5, 5))
                         luassert.equals(3, queryCount(q))
                     end

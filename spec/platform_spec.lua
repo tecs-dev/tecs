@@ -12,7 +12,7 @@ local sdl = require("tecs.ffi.sdl3")
 local platformOS = require("tecs.platform.os")
 local files = require("tecs.io.files")
 
-describe("platform.filesystem paths", function()
+describe("tecs.io.files paths", function()
     setup(function()
         assert(sdl.C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
     end)

@@ -138,14 +138,10 @@ end
 --- them before it returns: a packet that reported zero drawn between being reset
 --- and being filled would be a state no consumer should be able to observe.
 ---
---- That every count is assigned rather than added to is load bearing, and one
---- packet is created per renderer and reused for the life of it, so a count that
---- accumulated would describe every frame there has ever been rather than this
---- one. `blendCount` did, and the backend's forward lane read it as "anything has
---- ever blended" and ran on every later frame including the ones with nothing to
---- blend. So a count that has to survive a frame which rewrote nothing is kept
---- where that frame can find it again, which for an archetype's blended rows is
---- its `Run`, and never by leaving it here to grow.
+--- Every count is assigned rather than added because one packet is reused for
+--- the renderer's lifetime. A count that must survive a frame that rewrote
+--- nothing lives with its source state, such as an archetype's blended rows on
+--- its `Run`, rather than accumulating here.
 ---
 --- @param slot The staging slot this frame's bytes are going into, zero-based
 ---     and below `Buffer.slotCount`. Recorded rather than checked.

@@ -259,7 +259,7 @@ function bench.suite(config)
     -- defer = {false, true}}` expands into 4 runtime cases; param-free cases
     -- pass through as a single expansion with `case.params = {}`. Expansion
     -- is deterministic: parent and child processes derive the same list, so
-    -- BENCH_CASE is the index into this expanded list.
+    -- BENCH_CHILD_CASE can select one expansion.
     --
     -- `case.params` is the per-expansion combo visible to scenarios; `case.data`
     -- is preserved as-is (scenarios that read `case.data.count` still work).
@@ -346,7 +346,6 @@ function bench.suite(config)
     --   CASE=3                    -- run every expansion of base case #3 (all variants, all params)
     --   PARAMS='k=v,k=v'          -- run only expansions whose params match all given values
     --   VARIANTS=a,b              -- run only the named variants (CSV, whitespace-trimmed)
-    -- BENCH_CASE / BENCH_VARIANTS / BENCH_PARAMS are accepted as legacy aliases.
     -- Values are coerced: "true"/"false" → boolean, numeric → number, else string.
     -- A case that lacks a requested param is excluded (filter is "must have param=value").
     --
@@ -355,7 +354,7 @@ function bench.suite(config)
     -- `parameters = {count = {1000, 2000}}` is still just CASE=N; both its
     -- expansions run. Output tables show the base index in the `#` column,
     -- so the value you see matches what you'd pass back in as CASE.
-    local caseFilterEnv = os.getenv("CASE") or os.getenv("BENCH_CASE")
+    local caseFilterEnv = os.getenv("CASE")
     local caseFilter
     if caseFilterEnv ~= nil and caseFilterEnv ~= "" then
         caseFilter = tonumber(caseFilterEnv)
@@ -367,7 +366,7 @@ function bench.suite(config)
     end
 
     local paramsFilter
-    local paramsFilterEnv = os.getenv("PARAMS") or os.getenv("BENCH_PARAMS")
+    local paramsFilterEnv = os.getenv("PARAMS")
     if paramsFilterEnv ~= nil and paramsFilterEnv ~= "" then
         paramsFilter = {}
         -- Tolerate surrounding braces/quotes: `PARAMS='{count=1000,defer=true}'`.
@@ -380,7 +379,10 @@ function bench.suite(config)
     end
 
     local variantFilter
-    local variantFilterEnv = os.getenv("VARIANTS") or os.getenv("BENCH_VARIANTS")
+    local variantFilterEnv = os.getenv("VARIANTS")
+    if os.getenv("BENCH_CHILD") == "1" then
+        variantFilterEnv = os.getenv("BENCH_CHILD_VARIANT")
+    end
     if variantFilterEnv ~= nil and variantFilterEnv ~= "" then
         variantFilter = {}
         for name in variantFilterEnv:gmatch("[^,]+") do
@@ -435,7 +437,7 @@ function bench.suite(config)
             variants[#variants + 1] = variant
         end
     end
-    assert(#variants > 0, "no variants to run after BENCH_VARIANTS filter")
+    assert(#variants > 0, "no variants to run after VARIANTS filter")
     if variantFilter then
         for name in pairs(variantFilter) do
             local found = false
@@ -445,7 +447,7 @@ function bench.suite(config)
                     break
                 end
             end
-            assert(found, "BENCH_VARIANTS includes unknown variant: " .. name)
+            assert(found, "VARIANTS includes unknown variant: " .. name)
         end
     end
 
@@ -459,7 +461,7 @@ function bench.suite(config)
     local maxDuration = config.maxDuration or math.max(minDuration * 20, 30)
     local microIterations = config.microIterations or 1
 
-    -- Profiling: if SAMPLE=<path> (or legacy BENCH_PROFILE_DIR) is set,
+    -- Profiling: if SAMPLE=<path> is set,
     -- sample only during run() (not setup/GC) and write collapsed-stack
     -- output. Uses tecs.utils.profile.sample() which tags samples with the
     -- active zone path.
@@ -472,7 +474,7 @@ function bench.suite(config)
     -- parameter combinations schedules 4 pairs per variant, so file mode adds
     -- a per-permutation suffix (the slug of the expanded case name, which
     -- includes the `[k=v, k=v]` param stamp).
-    local sampleRaw = os.getenv("SAMPLE") or os.getenv("BENCH_PROFILE_DIR")
+    local sampleRaw = os.getenv("SAMPLE")
     if sampleRaw == "" then
         sampleRaw = nil
     end
@@ -524,12 +526,12 @@ function bench.suite(config)
     -- process so that JIT traces, GC heap growth, and internal pool state from
     -- earlier pairs can't pollute later measurements. BENCH_CHILD=1 selects the
     -- one-shot child path below; the parent re-execs this same script with
-    -- BENCH_CHILD / BENCH_CASE / BENCH_VARIANTS set once per pair.
+    -- BENCH_CHILD / BENCH_CHILD_CASE / BENCH_CHILD_VARIANT select one pair.
     local isChild = os.getenv("BENCH_CHILD") == "1"
 
     if isChild then
         assert(#cases == 1, "BENCH_CHILD=1 requires BENCH_CHILD_CASE to resolve to exactly one case")
-        assert(#variants == 1, "BENCH_CHILD=1 requires BENCH_VARIANTS to resolve to exactly one variant")
+        assert(#variants == 1, "BENCH_CHILD=1 requires BENCH_CHILD_VARIANT to resolve to one variant")
 
         local case = cases[1]
         local variant = variants[1]
@@ -745,8 +747,8 @@ function bench.suite(config)
 
         local first = true
         for _, variant in ipairs(variants) do
-            -- Children inherit the parent env (so BENCH_PROFILE_DIR, EVOLVED_PATH,
-            -- TRACE, etc. carry through); we only override the selection vars
+            -- Children inherit the parent env (so SAMPLE, EVOLVED_PATH, TRACE,
+            -- etc. carry through); we only override the selection vars
             -- and hand off a result path via BENCH_RESULT_FILE. BENCH_CHILD_CASE
             -- (the position in the expanded list) is the authoritative selector
             -- for the child -- the child uses it to pick one expanded case and
@@ -754,7 +756,7 @@ function bench.suite(config)
             local resultFile = os.tmpname()
             local totalPairs = #cases * #variants
             local cmd = string.format(
-                "BENCH_CHILD=1 BENCH_CHILD_SUITE=%s BENCH_CHILD_CASE=%d BENCH_VARIANTS=%s BENCH_RESULT_FILE=%s BENCH_TOTAL_PAIRS=%d %s %s",
+                "BENCH_CHILD=1 BENCH_CHILD_SUITE=%s BENCH_CHILD_CASE=%d BENCH_CHILD_VARIANT=%s BENCH_RESULT_FILE=%s BENCH_TOTAL_PAIRS=%d %s %s",
                 shellEscape(config.name),
                 expandedIdx,
                 shellEscape(variant.name),

@@ -122,8 +122,8 @@ Custom codecs must turn process-local numbers into durable names:
 An FFI component also stores a schema fingerprint. When the saved and current
 fingerprints match, load copies the column in bulk. Otherwise load maps fields
 by name into the current schema. New fields start at zero, removed fields
-disappear, and LuaJIT converts numeric types. Renaming a field loses its old
-value.
+disappear, and LuaJIT converts numeric types. Renaming a field discards the
+saved value.
 
 ### Transient components
 
@@ -223,8 +223,8 @@ player = world:requireKey("player")
 
 Global observers registered at address `0` survive a same-world load because
 the world keeps its systems and event bus. A fresh process must register those
-observers during setup. Load clears entity-address observers with the old
-entity set.
+observers during setup. Load clears entity-address observers with the
+discarded entity set.
 
 Store durable per-entity behavior as component data. Let a query or global
 observer interpret that data and install any runtime callbacks.
@@ -372,7 +372,7 @@ The table writer produces this general shape:
 
 ```teal
 {
-    version = 2,
+    version = 1,
     nextEntityId = 42,
     componentTable = {
         {name = "Position"},

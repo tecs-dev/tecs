@@ -213,12 +213,9 @@ fn reply(connection: &mut TcpStream, code: u16, kind: &str, body: &[u8]) -> Resu
 
 /// The documentation gate.
 ///
-/// Two things, and the second is the render itself. Every page carries a
-/// one-line `description:`, which nothing else can see because it is
-/// frontmatter rather than content. Everything else the gate used to hold is
-/// the generator's now and fails the build it runs in: the site's
-/// `before_build` hook holds the pages to `src/tecs/init.tl`, and tealdoc
-/// validates every link and anchor over the HTML it just wrote.
+/// Every page carries a one-line `description:`. The site's `before_build`
+/// hook holds the pages to `src/tecs/init.tl`, and Tealdoc validates every
+/// link and anchor over the rendered HTML.
 pub fn check(root: &Path) -> Result<()> {
     check_descriptions(root)?;
     let scratch = tempfile::Builder::new().prefix("tecs-docs.").tempdir()?;
@@ -382,7 +379,7 @@ fn check_module_intro(root: &Path, site: &Path) -> Result<()> {
         .lines()
         .find(|line| !line.trim().is_empty())
         .map(str::trim)
-        .context("the filesystem module doc comment has no prose")?;
+        .context("the io.files module doc comment has no prose")?;
 
     let output_path = site.join("modules/io/files.md");
     let output = fs::read_to_string(&output_path)?;

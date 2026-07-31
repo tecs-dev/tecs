@@ -2446,10 +2446,10 @@ end
 --- would carry it.
 ---
 --- Keyed limits are not here, and neither is what a bucket holds. A limit is a
---- rule the build states at startup beside the clip it governs, so restoring
---- one from a file would let an old save override a rule the build has since
---- changed. Voices determine each bucket, and a snapshot restores no voices:
---- a `Sound` comes back with its voice cleared and starts again.
+--- rule the build states at startup beside the clip it governs, so persisted
+--- data must not override it. Voices determine each bucket, and a snapshot
+--- restores no voices: a `Sound` comes back with its voice cleared and starts
+--- again.
 local function saveMixer(self: Audio): {string: any}
     local groups: {string: any} = {}
     for _, name in ipairs(self:groups()) do
@@ -2475,12 +2475,11 @@ end
 
 --- Puts saved mixer state back, through the ordinary setters.
 ---
---- This function visits every group this instance knows about, not only the ones the
---- snapshot names, so loading a save made before a group was ever touched puts
---- that group back to its defaults rather than leaving this run's settings on
---- it. Going through the setters is what makes the voices already sounding
---- follow, since each one recomposes its gain and the tags are told about a
---- pause.
+--- This function visits every group this instance knows about, not only the
+--- ones the snapshot names, so omitted groups return to their defaults rather
+--- than keeping this run's settings. Going through the setters makes sounding
+--- voices follow, since each one recomposes its gain and the tags are told
+--- about a pause.
 local function loadMixer(self: Audio, value: {string: any})
     local saved = (value ~= nil and value.groups or nil) as {string: any}
 

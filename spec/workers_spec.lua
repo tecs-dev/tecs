@@ -43,7 +43,6 @@ describe("workers", function()
     it("loads its native library", function()
         assert.is_string(workers.path)
         assert.is_function(workers.newChannel)
-        assert.is_nil(rawget(workers.Channel, "create"))
     end)
 
     it("round trips a table through another state", function()

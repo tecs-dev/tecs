@@ -179,8 +179,8 @@ local record ecs
     --- unique lookup key for `world:byKey`. It supports hot reload, authored
     --- references, tooling, and save-compatible lookup.
     ---
-    --- The snapshot-compatible registration name remains `"Key"`;
-    --- `ecs.Key` names typed context keys.
+    --- The registered component name is the externally typed string `"Key"`.
+    --- [`tecs.data.Key`](/modules/data/#tecs.data.Key) names typed store keys.
     EntityKey: ScalarComponent<string>
 
     --- Read-only. [`TTL`](/modules/ecs/#tecs.ecs.TTL) despawns an entity when its time

@@ -68,7 +68,7 @@ describe(
                 world:commit()
 
                 local snap = saveTableSnapshot(world)
-                luassert.equals(2, snap.version)
+                luassert.equals(1, snap.version)
                 luassert.is_table(snap.archetypes)
 
                 world:loadSnapshot(snap)
@@ -334,10 +334,8 @@ describe(
         it(
             "filters entities via opts.filterQuery",
             function()
-                -- The previous "decorate writer to filter" pattern doesn't fit the
-                -- column-major data layout cleanly (writeEntity isn't called for
-                -- dense archetypes). Use opts.filterQuery instead -- it builds
-                -- a temp query that limits which archetypes get walked at all.
+                -- The filter builds a temporary query that limits which
+                -- archetypes are walked, including dense column-major data.
                 local world = tecs.ecs.newWorld()
                 local keeper = world:spawn(PositionComp(1, 1), HealthComp(10))
                 local skipper = world:spawn(PositionComp(2, 2))
@@ -756,7 +754,7 @@ describe(
                 luassert.equals("load", order[2])
                 luassert.equals("finish", order[3])
                 luassert.is_not_nil(finishPrelude)
-                luassert.equals(2, (finishPrelude as tecs.ecs.SnapshotPrelude).version)
+                luassert.equals(1, (finishPrelude as tecs.ecs.SnapshotPrelude).version)
             end
         )
 
@@ -1118,7 +1116,7 @@ describe(
                 world:loadSnapshot(buf)
                 luassert.equals(1, fired)
                 luassert.is_not_nil(seenPrelude)
-                luassert.equals(2, (seenPrelude as {string: integer}).version)
+                luassert.equals(1, (seenPrelude as {string: integer}).version)
             end
         )
 
@@ -1142,7 +1140,7 @@ describe(
 
                 local prelude = world:loadSnapshot(buf)
                 luassert.equals(0, fired, "no data entries should fire any onData callback")
-                luassert.equals(2, prelude.version)
+                luassert.equals(1, prelude.version)
             end
         )
 
@@ -1196,7 +1194,7 @@ describe(
                 local buffer = require("string.buffer")
                 local ffi = require("ffi")
                 local buf = buffer.new()
-                buf:encode(2) -- version
+                buf:encode(1) -- version
                 buf:encode(2) -- nextEntityId
                 buf:encode(1) -- entityCount
                 buf:encode(1) -- archetypeCount
@@ -1256,7 +1254,7 @@ describe(
                 local buffer = require("string.buffer")
                 local ffi = require("ffi")
                 local buf = buffer.new()
-                buf:encode(2)
+                buf:encode(1)
                 buf:encode(2)
                 buf:encode(1)
                 buf:encode(1)
@@ -1320,7 +1318,7 @@ describe(
                 local buffer = require("string.buffer")
                 local ffi = require("ffi")
                 local buf = buffer.new()
-                buf:encode(2) -- version
+                buf:encode(1) -- version
                 buf:encode(2) -- nextEntityId
                 buf:encode(1) -- entityCount
                 buf:encode(1) -- archetypeCount

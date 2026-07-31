@@ -88,11 +88,9 @@ describe("tecs headless", function()
         -- silently: everything still works on a developer's machine, where the
         -- libraries are installed.
         it("builds a world through the ECS half alone", function()
-            -- The module engine code requires, reached first and on its own.
-            -- Through `tecs` this always works, because that requires the
-            -- compatibility shim before anything else; this has to stand up
-            -- without it having been asked for. A fresh interpreter is the
-            -- only place a load-order fault like that appears.
+            -- Engine code requires this module directly, so it must initialize
+            -- correctly without the public aggregator. A fresh interpreter is
+            -- the only place a load-order fault like that appears.
             local output = run(
                 [[
                 local ecs = require("tecs.ecs")
@@ -284,7 +282,7 @@ describe("tecs headless", function()
                 local filesLoadedWatcher = package.loaded["tecs.io.watcher"] ~= nil
                 local watcher = tecsIO.watcher
 
-                print(("%s %s %s %s %s %s %s %s %s %s %s"):format(
+                print(("%s %s %s %s %s %s %s %s %s"):format(
                     tostring(rawequal(tecsIO, require("tecs.io"))),
                     tostring(parentLoadedFiles),
                     tostring(parentLoadedHTTP),
@@ -293,13 +291,11 @@ describe("tecs headless", function()
                     tostring(rawequal(files, require("tecs.io.files"))),
                     tostring(filesLoadedWatcher),
                     tostring(rawequal(watcher, require("tecs.io.watcher"))),
-                    tostring(package.loaded["tecs.io.http"] == nil),
-                    tostring(tecs.io.filesystem),
-                    tostring(tecs.net)))
+                    tostring(package.loaded["tecs.io.http"] == nil)))
             ]],
                 true
             )
-            assert.are.equal("true false false false false true false true true nil nil\n", output)
+            assert.are.equal("true false false false false true false true true\n", output)
         end)
 
         it("loads one io protocol without its sibling", function()

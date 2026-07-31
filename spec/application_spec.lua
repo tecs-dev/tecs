@@ -522,11 +522,8 @@ describe("Application", function()
     -- Resuming after a crash
     ---------------------------------------------------------------------------
 
-    -- `_crashed` used to latch for the life of the process, so one nil index in
-    -- a gameplay system stopped simulation permanently even though the world,
-    -- the device and the renderer are provably healthy afterwards, which is
-    -- what `exceptions_spec` demonstrates. Resumption is a debugging
-    -- affordance and is gated as one.
+    -- Resumption is a debugging affordance. It is allowed only while the
+    -- world, device, and renderer remain healthy.
     describe("clearCrash", function()
         --- An application whose Update system throws until `stop` is called,
         --- and which counts the frames it ran to completion.
@@ -700,10 +697,8 @@ describe("Application", function()
             app:_shutdown()
         end)
 
-        -- The other path that used to overwrite the traceback, and the one the
-        -- delivery gate above does not cover: teardown runs `world:shutdown`
-        -- on a crashed world deliberately, so a `Shutdown` system reaching for
-        -- what the crash left half built throws in its turn.
+        -- Teardown deliberately runs `world:shutdown` on a crashed world. A
+        -- second error there must not replace the gameplay traceback.
         it("keeps the first traceback through a teardown that throws as well", function()
             local app = build({
                 plugin = function(world)
@@ -787,10 +782,9 @@ describe("Application", function()
             app:_shutdown()
         end)
 
-        -- The suspension used to be folded out of the queued event. On Android
-        -- the process blocks as soon as the backgrounding has been dispatched,
-        -- so the drain that would have folded it is after the resume: acting on
-        -- the event is acting a whole suspension too late.
+        -- On Android the process blocks as soon as backgrounding is
+        -- dispatched. Lifecycle hooks therefore update suspension before the
+        -- queued events are drained.
         it("does not fold the queued lifecycle events into suspension", function()
             local app = build({})
             assert.is_true(app:_init())
@@ -1027,9 +1021,7 @@ describe("Application", function()
             log.setLevel(log.INFO)
         end)
 
-        -- The old default was 0.08, which renders a nearly black screen for a
-        -- game that has not set up lighting. White shows sprites at their own
-        -- color and lets lights add on top of them.
+        -- White preserves each sprite's authored color before lights add to it.
         it("lights an unlit scene at full ambient", function()
             local app = build({})
             assert.is_true(app:_init())

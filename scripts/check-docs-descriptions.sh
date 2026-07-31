@@ -5,12 +5,6 @@
 # in a search result, so a missing one leaves a page unlabeled wherever it is
 # listed rather than read.
 #
-# It used to say the descriptions also fed an offline `tecs docs` command. There
-# is no such command and there will not be: the CLI ships a type checker, a
-# formatter, a test runner and a build, and a documentation mirror inside a
-# binary is a second copy of the site to keep in step. The site is the one copy.
-# The check stays, because the frontmatter still does the job above.
-#
 # Run from the repository root: bash scripts/check-docs-descriptions.sh
 set -euo pipefail
 

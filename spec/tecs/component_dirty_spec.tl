@@ -1,16 +1,12 @@
--- Component-dirty contract for the post-row-dirty model.
+-- Component-dirty contract.
 --
--- Replaces row-level `_dirtyBits` / `_allDirty` / `markDirty(row)` with
--- a per-archetype, per-component dirty bitset. The signal is set by:
+-- Each archetype carries a per-component dirty bitset. The signal is set by:
 --   1. `archetype:getMut(Foo)` -- explicit intent at access site
 --   2. spawn / archetype move-in / swap-pop -- structural changes
 --   3. `world:set` / `archetype:set` -- value writes
 --   4. `archetype:markComponentDirty(Foo)` / `markAllComponentsDirty()` -- explicit
 --
 -- And cleared by `world:update` at end of frame.
---
--- This file IS the migration's contract. Phase 1 makes every assertion
--- pass; phase 3's API removals must not break any of them.
 
 local tecs <const> = require("tecs")
 local internal <const> = require("tecs.internal.types")

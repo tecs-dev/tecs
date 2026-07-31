@@ -84,9 +84,7 @@ describe(
                 it(
                     "should isolate sparse data between worlds reusing the same relationship",
                     function()
-                        -- Regression: previously the SparseStore lived on the relationship container
-                        -- (module-level), so creating a fresh world after using one would inherit the
-                        -- prior world's sparse entries. With per-world stores, each world starts empty.
+                        -- Sparse relationship data belongs to each world.
                         local ChildOf = tecs.ecs.newRelationship({
                             name = "SparseWorldIsolation",
                             exclusive = true,
@@ -102,9 +100,8 @@ describe(
 
                         -- Fresh world reusing the same component definition
                         local worldB = tecs.ecs.newWorld()
-                        -- An entity ID from worldB that matches a worldA entity ID -- this is the
-                        -- exact case that previously corrupted: reused IDs across worlds inherited
-                        -- the leftover sparse mapping.
+                        -- Reused entity IDs cannot expose another world's
+                        -- sparse mapping.
                         local probe = worldB:spawn()
                         luassert.is_nil(
                             worldB:get(probe, ChildOf), "fresh worldB should not see sparse entries from worldA"

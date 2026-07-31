@@ -2,13 +2,11 @@
 The storage half of the platform seam: reaching a file, not finding one.
 
 `adapter` names storage as a seam because a console's content is not a
-directory tree. Half of that seam was already here, as `basePath` and
-`prefPath`, which answer *where*. This is the other half, which answers
-*how*, and without it the first half is a promise the engine cannot keep: a
-platform can say its content lives at `/host0/title/` and every read of a
-path under it still goes through `SDL_LoadFile`.
+directory tree. `basePath` and `prefPath` answer *where*, while this backend
+answers *how*. A platform can therefore place content at `/host0/title/`
+without forcing every read through `SDL_LoadFile`.
 
-`filesystem` holds one of these and never reaches the FFI itself. A port
+`tecs.io.files` holds one of these and never reaches the FFI itself. A port
 supplies one and touches nothing above it; the SDL implementation below is
 the worked example, and the only thing in the storage layer that names an
 SDL symbol.
@@ -54,11 +52,11 @@ checking. `currentDirectory` and `userFolder` are optional and answer nil
 with a reason when the platform has no such notion, which is already what
 SDL answers for a folder a desktop does not have, so a caller that handled
 SDL's nil handles a port's. `openWrite` and `openRead` are optional in a
-different sense: `filesystem` builds both out of `write` and `read` when a
+different sense: `tecs.io.files` builds both out of `write` and `read` when a
 backend leaves them out, so every caller has them and only the memory a
 large file costs differs.
 
-Nothing here validates its arguments. `filesystem` does that before it
+Nothing here validates its arguments. `tecs.io.files` does that before it
 delegates, so a port inherits it rather than repeating it.
 ]=]
 
@@ -135,7 +133,7 @@ local record Backend
     write: function(path: string, bytes: string): boolean, string
     --- Opens `path` for writing in pieces, replacing whatever was there.
     ---
-    --- Optional. A platform that leaves it nil gets a writer `filesystem`
+    --- Optional. A platform that leaves it nil gets a writer `tecs.io.files`
     --- builds out of `write`, which holds the pieces and writes once, so the
     --- interface is the same everywhere and only the memory differs.
     openWrite: function(path: string): Writer, string
@@ -181,18 +179,12 @@ local record storagebackend
     --- Which well-known folder `Backend.userFolder` is asked for.
     UserFolder: UserFolder
     --- Every folder name there is. An enum is gone by the time a caller names
-    --- one, so this is what `filesystem` checks a name against before it
+    --- one, so this is what `tecs.io.files` checks a name against before it
     --- reaches a backend. Derived from the one table of them below, so there
     --- is no second list to drift.
     folders: {UserFolder: boolean}
     --- How `Backend.glob` matches.
     GlobOptions: GlobOptions
-    --- A write taking its bytes in pieces. Kept as an alias of
-    --- [`tecs.io.Writer`](tealdoc:tecs.io.Writer) for backend compatibility.
-    Writer: Writer
-    --- A read handing its bytes over in pieces. Kept as an alias of
-    --- [`tecs.io.Reader`](tealdoc:tecs.io.Reader) for backend compatibility.
-    Reader: Reader
     --- The seam a port implements.
     Backend: Backend
     --- The SDL backend, and the default everywhere.
