@@ -121,17 +121,18 @@ traversable. These are codepoint operations, not grapheme segmentation.
 ## Hashes and checksums
 
 `fnv1a64` supplies fast process and build identity as 16 lowercase hexadecimal
-digits. `adler32` and `crc32` implement checksums required by formats that name
-them. Pass the checksum from one call as the second argument to continue over
-the next chunk without joining the chunks into one string:
+digits. `sha256` supplies a cryptographic digest as 64 lowercase hexadecimal
+digits. `adler32` and `crc32` implement checksums required by formats that
+name them. Pass the checksum from one call as the second argument to continue
+over the next chunk without joining the chunks into one string:
 
 ```teal
 local checksum = tecs.data.crc32(header)
 checksum = tecs.data.crc32(body, checksum)
 ```
 
-None provides cryptographic integrity. Verify downloaded artifacts with a
-cryptographic digest and a signed manifest.
+SHA-256 authenticates nothing by itself. Verify downloaded artifacts against a
+digest obtained through a trusted channel or a signed manifest.
 
 ## Typed stores
 
@@ -958,6 +959,9 @@ local function checksumSeed(previous: integer, algorithm: string): integer
     return previous
 end
 
+local sha256Text <const> = loader.newArray("char[65]")
+local sha256 <const> = R.tecsSha256 as function(bytes: string, length: integer, output: loader.CArray): boolean
+
 --- FNV-1a over the bytes of `text`, 64-bit, as sixteen lowercase hex digits.
 ---
 --- @param text Any string. NUL and bytes above 127 hash like any other.
@@ -969,6 +973,21 @@ function data.fnv1a64(text: string): string
         state = bxor(state, sbyte(text, index)) * PRIME
     end
     return tohex(state, 16)
+end
+
+--- Computes SHA-256 over the bytes of `text`.
+---
+--- SHA-256 detects whether bytes match a trusted digest. It does not prove who
+--- supplied either value, so artifact verification obtains the expected
+--- digest through a trusted channel or a signed manifest.
+---
+--- @param text Any string. NUL and bytes above 127 hash like any other.
+--- @return Sixty-four lowercase hexadecimal digits, high byte first.
+function data.sha256(text: string): string
+    if not sha256(text, #text, sha256Text) then
+        error("SHA-256 output buffer is unavailable", 2)
+    end
+    return loader.toString(sha256Text as loader.CValue)
 end
 
 --- Computes Adler-32 over the bytes of `text` as a number in [0, 2^32).
