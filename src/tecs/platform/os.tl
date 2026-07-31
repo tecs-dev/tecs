@@ -180,9 +180,10 @@ local record Capabilities
     --- Read-only. Reports the number of logical cores for sizing a worker pool.
     cores: integer
 
-    --- Read-only. Reports true because every target has somewhere to write, and
-    --- `tecs.io.files.preferencePath` is where: the field exists so a caller can
-    --- ask rather than assume, not because a target answers no.
+    --- Read-only. Reports true because every target has somewhere to write,
+    --- and `tecs.io.files.preferencePath` and `tecs.io.files.cachePath` answer
+    --- where: the field exists so a caller can ask rather than assume, not
+    --- because a target answers no.
     writableStorage: boolean
 end
 

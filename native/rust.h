@@ -14,6 +14,7 @@
 
 typedef struct TecsImage TecsImage;
 typedef struct TecsBytes TecsBytes;
+typedef struct TecsWindowHitRegions TecsWindowHitRegions;
 typedef struct TecsMcpServer TecsMcpServer;
 typedef struct TecsMcpRequest TecsMcpRequest;
 typedef struct TecsNetAddress TecsNetAddress;
@@ -30,6 +31,16 @@ typedef struct TecsRegexSpan {
     bool matched;
 } TecsRegexSpan;
 
+typedef struct TecsWindowHitRegion {
+    int32_t x;
+    int32_t y;
+    int32_t width;
+    int32_t height;
+    int32_t result;
+} TecsWindowHitRegion;
+
+typedef struct SDL_Window SDL_Window;
+
 const char *tecsRustError(void);
 
 /* RFC 9562 UUIDs. Each output holds 36 lowercase characters and a NUL. */
@@ -41,6 +52,9 @@ TecsBytes *tecsCliParse(size_t count, const char *const *arguments);
 TecsBytes *tecsCliDocs(const char *directory, const char *query);
 int tecsCliMcp(void);
 
+TecsBytes *tecsSystemCachePath(const uint8_t *organization, size_t organization_length, const uint8_t *application,
+                               size_t application_length);
+
 TecsImage *tecsImageDecode(const uint8_t *bytes, size_t length);
 const uint8_t *tecsImagePixels(const TecsImage *image);
 uint32_t tecsImageWidth(const TecsImage *image);
@@ -51,6 +65,13 @@ TecsBytes *tecsImageEncodePngRgbx(const uint8_t *pixels, size_t length, uint32_t
 const uint8_t *tecsBytesData(const TecsBytes *bytes);
 size_t tecsBytesLength(const TecsBytes *bytes);
 void tecsBytesDestroy(TecsBytes *bytes);
+
+/* Declarative window hit testing. SDL retains this callback, so Rust owns it
+ * and the copied region list instead of allowing SDL to enter Lua. */
+TecsWindowHitRegions *tecsWindowHitRegionsCreate(SDL_Window *window, const TecsWindowHitRegion *regions, size_t count);
+bool tecsWindowHitRegionsUpdate(TecsWindowHitRegions *state, const TecsWindowHitRegion *regions, size_t count);
+bool tecsWindowHitRegionsClear(SDL_Window *window, TecsWindowHitRegions *state);
+void tecsWindowHitRegionsDestroy(TecsWindowHitRegions *state);
 
 /* Streamable HTTP MCP. Rust owns HTTP and the protocol; Lua drains only tool
  * calls from the SDL thread and submits their completed results. */

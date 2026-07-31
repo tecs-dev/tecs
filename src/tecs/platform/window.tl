@@ -86,6 +86,23 @@ Display and window events report changes. Getters report current state,
 including state that existed before the first event. Use `Window:id` to match a
 window event's `which` field.
 
+## Custom window chrome
+
+A borderless window can return selected regions to the desktop for dragging
+and edge resizing. `setHitRegions` copies the complete list, so UI layout may
+reuse or change its records as soon as the call returns. The first region that
+contains a point wins.
+
+```teal
+window:setHitRegions({
+    {kind = "draggable", x = 0, y = 0, width = 800, height = 40},
+    {kind = "resizeBottom", x = 0, y = 596, width = 800, height = 4},
+})
+```
+
+Hit testing runs inside the native window manager callback. Rust reads the
+copied regions there; SDL never calls a Lua function.
+
 ## Pointer ownership
 
 The window API owns mouse and keyboard confinement. `tecs.input` owns relative
@@ -120,6 +137,7 @@ local record window
         --- `setTitle`.
         title: string
         _destroyed: boolean
+        _hitRegions: loader.CPtr
 
         --- `Orientation` describes a display's current or natural rotation.
         enum Orientation
@@ -167,6 +185,46 @@ local record window
             "paused"
             --- `"error"` reports work that stopped because it failed.
             "error"
+        end
+
+        --- `HitRegionKind` selects how the desktop treats a window region.
+        enum HitRegionKind
+            --- `"draggable"` makes the region move the whole window.
+            "draggable"
+            --- `"resizeTopLeft"` resizes from the top-left corner.
+            "resizeTopLeft"
+            --- `"resizeTop"` resizes from the top edge.
+            "resizeTop"
+            --- `"resizeTopRight"` resizes from the top-right corner.
+            "resizeTopRight"
+            --- `"resizeRight"` resizes from the right edge.
+            "resizeRight"
+            --- `"resizeBottomRight"` resizes from the bottom-right corner.
+            "resizeBottomRight"
+            --- `"resizeBottom"` resizes from the bottom edge.
+            "resizeBottom"
+            --- `"resizeBottomLeft"` resizes from the bottom-left corner.
+            "resizeBottomLeft"
+            --- `"resizeLeft"` resizes from the left edge.
+            "resizeLeft"
+        end
+
+        --- `HitRegion` gives part of a borderless window desktop behavior.
+        record HitRegion
+            --- Caller-writable. Selects dragging or one resize direction.
+            kind: HitRegionKind
+            --- Caller-writable. Sets the left edge in window client
+            --- coordinates. It must be a non-negative integer.
+            x: integer
+            --- Caller-writable. Sets the top edge in window client
+            --- coordinates. It must be a non-negative integer.
+            y: integer
+            --- Caller-writable. Sets a positive width in window client
+            --- coordinates.
+            width: integer
+            --- Caller-writable. Sets a positive height in window client
+            --- coordinates.
+            height: integer
         end
 
         --- `DisplayMode` describes one video mode returned by the platform.
@@ -621,6 +679,36 @@ local record window
         --- @return Returns whether the desktop accepted the state and value.
         setProgress: function(self: Window, state: Window.Progress, value?: number): boolean
 
+        --- Opens the desktop's standard menu for this window.
+        ---
+        --- This supplies the platform menu used for operations such as moving
+        --- the window between displays or workspaces. Unsupported desktops
+        --- ignore the request.
+        ---
+        --- @param x The caller supplies the horizontal position relative to the
+        ---     top-left of the window's client area.
+        --- @param y The caller supplies the vertical position relative to the
+        ---     top-left of the window's client area.
+        --- @return Returns whether the desktop accepted the request.
+        showSystemMenu: function(self: Window, x: integer, y: integer): boolean
+
+        --- Replaces the regions used for native window hit testing.
+        ---
+        --- The first region containing a point wins. Left and top edges are
+        --- included; right and bottom edges are excluded. SDL copies no Lua
+        --- state: Rust copies every record before this call returns and answers
+        --- the native callback without entering LuaJIT.
+        ---
+        --- Pass nil or an empty list to restore ordinary desktop hit testing.
+        --- Regions normally accompany a borderless window and must be updated
+        --- after layout changes that move a title bar or resize border.
+        ---
+        --- @param regions The caller supplies special regions in priority
+        ---     order, or nil to clear every region.
+        --- @return Returns whether the platform installed, replaced or cleared
+        ---     the regions.
+        setHitRegions: function(self: Window, regions?: {Window.HitRegion}): boolean
+
         --- Returns whether pointer confinement applies to the focused window.
         ---
         --- @return Returns false when the window lacks focus or after `destroy`.
@@ -810,6 +898,10 @@ local record window
     type Flash = Window.Flash
     --- Selects what a taskbar progress indicator shows.
     type Progress = Window.Progress
+    --- Selects how the desktop treats a custom window region.
+    type HitRegionKind = Window.HitRegionKind
+    --- Describes one custom window region.
+    type HitRegion = Window.HitRegion
 
     --- Opens a window and raises when it cannot create a usable one.
     ---
@@ -871,6 +963,20 @@ local PROGRESS_NAMES <const>: {integer: Window.Progress} = {}
 for name, value in pairs(PROGRESS_STATES) do
     PROGRESS_NAMES[value] = name
 end
+
+local HIT_RESULTS <const>: {Window.HitRegionKind: integer} = {
+    draggable = tonumber(C.SDL_HITTEST_DRAGGABLE) as integer,
+    resizeTopLeft = tonumber(C.SDL_HITTEST_RESIZE_TOPLEFT) as integer,
+    resizeTop = tonumber(C.SDL_HITTEST_RESIZE_TOP) as integer,
+    resizeTopRight = tonumber(C.SDL_HITTEST_RESIZE_TOPRIGHT) as integer,
+    resizeRight = tonumber(C.SDL_HITTEST_RESIZE_RIGHT) as integer,
+    resizeBottomRight = tonumber(C.SDL_HITTEST_RESIZE_BOTTOMRIGHT) as integer,
+    resizeBottom = tonumber(C.SDL_HITTEST_RESIZE_BOTTOM) as integer,
+    resizeBottomLeft = tonumber(C.SDL_HITTEST_RESIZE_BOTTOMLEFT) as integer,
+    resizeLeft = tonumber(C.SDL_HITTEST_RESIZE_LEFT) as integer,
+}
+
+local MAX_C_INT <const> = 2147483647
 
 function Window.isSupported(): boolean
     return tonumber(C.SDL_WasInit(VIDEO)) ~= 0
@@ -996,6 +1102,7 @@ function window.newWindow(options: Window.Options): Window
     self.handle = handle
     self.title = title
     self._destroyed = false
+    self._hitRegions = nil
 
     if options.minWidth ~= nil and options.minHeight ~= nil then
         C.SDL_SetWindowMinimumSize(handle, options.minWidth, options.minHeight)
@@ -1017,7 +1124,13 @@ function Window:destroy()
         return
     end
     self._destroyed = true
+    local hitRegions <const> = self._hitRegions
     C.SDL_DestroyWindow(self.handle)
+    if hitRegions ~= nil then
+        local rust <const> = require("tecs.ffi.rust")
+        rust.C.tecsWindowHitRegionsDestroy(hitRegions)
+        self._hitRegions = nil
+    end
     self.handle = nil
 end
 
@@ -1415,6 +1528,73 @@ function Window:setProgress(state: Window.Progress, value?: number): boolean
         return true
     end
     return C.SDL_SetWindowProgressValue(self.handle, value) as boolean
+end
+
+-------------------------------------------------------------------------------
+-- Custom window chrome
+-------------------------------------------------------------------------------
+
+function Window:showSystemMenu(x: integer, y: integer): boolean
+    if self.handle == nil then
+        return false
+    end
+    return C.SDL_ShowWindowSystemMenu(self.handle, x, y) as boolean
+end
+
+--- Validates a region coordinate before narrowing it into a C int.
+local function hitRegionInteger(value: integer, field: string, positive: boolean): integer
+    local minimum <const> = positive and 1 or 0
+    if type(value) ~= "number" or value ~= math.floor(value) or value < minimum or value > MAX_C_INT then
+        error(("tecs: hit region %s must be an integer from %d to %d"):format(field, minimum, MAX_C_INT), 4)
+    end
+    return value
+end
+
+function Window:setHitRegions(regions?: {Window.HitRegion}): boolean
+    if self.handle == nil then
+        return false
+    end
+
+    local rust <const> = require("tecs.ffi.rust")
+    local count <const> = regions and #regions or 0
+    if count == 0 then
+        if self._hitRegions == nil then
+            return true
+        end
+        if not (rust.C.tecsWindowHitRegionsClear(self.handle, self._hitRegions) as boolean) then
+            return false
+        end
+        self._hitRegions = nil
+        return true
+    end
+
+    local copied <const> = loader.newArray("TecsWindowHitRegion[?]", count)
+    for index = 1, count do
+        local region <const> = regions[index]
+        if type(region) ~= "table" then
+            error(("tecs: hit region %d must be a record"):format(index), 2)
+        end
+        local result <const> = HIT_RESULTS[region.kind]
+        if result == nil then
+            error(("tecs: unknown hit region kind '%s'"):format(tostring(region.kind)), 2)
+        end
+        local native <const> = copied[index - 1] as loader.CStruct
+        native.x = hitRegionInteger(region.x, "x", false)
+        native.y = hitRegionInteger(region.y, "y", false)
+        native.width = hitRegionInteger(region.width, "width", true)
+        native.height = hitRegionInteger(region.height, "height", true)
+        native.result = result
+    end
+
+    if self._hitRegions ~= nil then
+        return rust.C.tecsWindowHitRegionsUpdate(self._hitRegions, copied, count) as boolean
+    end
+    local state <const> = rust.C.tecsWindowHitRegionsCreate(self.handle, copied, count)
+    if state == nil then
+        return false
+    end
+    self._hitRegions = state as loader.CPtr
+    return true
 end
 
 -------------------------------------------------------------------------------

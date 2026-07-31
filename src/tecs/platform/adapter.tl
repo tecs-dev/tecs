@@ -37,8 +37,9 @@ that everything else in the engine is already indifferent to the answer:
               installed as a table. Nothing calls `ffi.load` when one is
               present.
 
-  storage     Where content is read from and state is written to, and how
-              it is reached once it is found. Never the working directory,
+  storage     Where content is read from, persistent state and disposable
+              caches are written to, and how it is reached once it is found.
+              Never the working directory,
               which on a console does not exist in any useful sense. Both
               halves are the seam and neither is useful alone: a platform
               that says its content lives at a root it invented is not
@@ -79,7 +80,12 @@ local record adapter
         --- that cannot save should fail where that is discovered.
         prefPath: function(organization: string, application: string): string
 
-        --- Reaching a file once one of the two roots above has named it.
+        --- Directory this application may use for reconstructable data, ending
+        --- in a separator. Created if absent. The operating system may empty
+        --- it between any two runs.
+        cachePath: function(organization: string, application: string): string
+
+        --- Reaching a file once one of the three roots above has named it.
         --- Leave nil to keep SDL's, which is right for any target where the
         --- roots are directories. A target where they are not supplies this
         --- and `tecs.io.files` works unchanged above it.
@@ -125,6 +131,19 @@ local sdlPlatform <const>: adapter.Platform = {
         return path
     end,
 
+    cachePath = function(organization: string, application: string): string
+        local rust <const> = require("tecs.ffi.rust")
+        local result <const> = rust.C.tecsSystemCachePath(organization, #organization, application, #application)
+        if result == nil then
+            error(("tecs: no system cache directory: %s"):format(loader.toString(rust.C.tecsRustError())), 2)
+        end
+        local path <const> = loader.toBytes(
+            rust.C.tecsBytesData(result), tonumber(rust.C.tecsBytesLength(result)) as integer
+        )
+        rust.C.tecsBytesDestroy(result)
+        return path
+    end,
+
     storage = storagebackend.sdl,
 
     shaderFormat = function(): integer
@@ -165,7 +184,7 @@ function adapter.install(platform: adapter.Platform)
     if platform == nil then
         error("tecs: a platform is required", 2)
     end
-    for _, required in ipairs({"basePath", "prefPath", "shaderFormat"}) do
+    for _, required in ipairs({"basePath", "prefPath", "cachePath", "shaderFormat"}) do
         if (platform as {string: any})[required] == nil then
             error(("tecs: a platform must supply %s"):format(required), 2)
         end

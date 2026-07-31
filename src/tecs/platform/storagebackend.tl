@@ -2,8 +2,9 @@
 The storage half of the platform seam: reaching a file, not finding one.
 
 `adapter` names storage as a seam because a console's content is not a
-directory tree. `basePath` and `prefPath` answer *where*, while this backend
-answers *how*. A platform can therefore place content at `/host0/title/`
+directory tree. `basePath`, `prefPath` and `cachePath` answer *where*, while
+this backend answers *how*. A platform can therefore place content at
+`/host0/title/`
 without forcing every read through `SDL_LoadFile`.
 
 `tecs.io.files` holds one of these and never reaches the FFI itself. A port
@@ -18,11 +19,11 @@ SDL's own answer for a target whose content is not a filesystem is
 that its paths are a different space: relative to a storage root, always
 `/`-separated, never absolute. That objection dissolves once the roots are
 the platform's, which they already are. Every path that reaches a backend
-was built by resolving against `basePath` or `prefPath`, which the same
-platform minted, so a port that answers `""` for its base and hands out
-storage-relative paths receives exactly those paths back. The engine
-concatenates and never interprets, which is why there is no virtual
-filesystem here and no mount table.
+was built by resolving against `basePath`, `prefPath` or `cachePath`, which
+the same platform minted, so a port that answers `""` for its base and hands
+out storage-relative paths receives exactly those paths back. The engine
+concatenates and never interprets, which is why there is no virtual filesystem
+here and no mount table.
 
 A path the platform did not mint, one a user typed or one from an
 absolute location, is passed through unchanged and the backend decides what

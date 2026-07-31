@@ -15,6 +15,7 @@ use image::ImageEncoder;
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg::{fontdb, ImageHrefResolver, Options, Tree};
 
+mod cache;
 mod cli;
 mod cli_docs;
 mod cli_mcp;
@@ -32,6 +33,7 @@ mod physics;
 mod regex;
 mod registry;
 mod uuid;
+mod window;
 mod worker;
 
 thread_local! {

@@ -1,7 +1,8 @@
 --[=[
 Resolves game paths and performs synchronous file operations.
 
-Use `assetPath` for shipped content and `writablePath` for mutable state.
+Use `assetPath` for shipped content, `writablePath` for persistent mutable
+state, and `cachePath` for data the application can reconstruct.
 Set the publisher and game names before resolving the first writable path:
 
 ```teal
@@ -99,7 +100,7 @@ end
 --- SDL combines these values with the current user and platform conventions
 --- to choose the directory returned by `preferencePath`. The defaults are
 --- `"tecs"` and `"tecs"`. Later calls change which directory the next
---- `preferencePath` or `writablePath` resolves.
+--- `preferencePath`, `writablePath`, or `cachePath` resolves.
 ---
 --- @param organization The caller supplies a non-empty publisher, studio, or
 ---     organization name.
@@ -120,10 +121,25 @@ end
 --- absent.
 ---
 --- @return Returns the directory with a trailing separator, named from the
----     preference identity. This is the only place a build may write:
----     everything else is read-only on at least one target.
+---     preference identity. This is where a build writes durable state;
+---     `cachePath` is the other writable root and holds only reconstructable
+---     data.
 function files.preferencePath(): string
     return content.prefPath(preferenceOrganization, preferenceApplication)
+end
+
+--- Returns the system cache directory for this application and creates it if
+--- absent.
+---
+--- The operating system may empty this directory between any two runs. Store
+--- only reconstructable downloads, compiled artifacts, thumbnails and similar
+--- derived data here. Saves, settings and other durable state belong under
+--- `preferencePath`.
+---
+--- @return Returns the directory with a trailing platform separator, named
+---     from the preference identity.
+function files.cachePath(): string
+    return content.cachePath(preferenceOrganization, preferenceApplication)
 end
 
 --- Returns the root from which the engine reads content.
@@ -470,9 +486,9 @@ end
 ---
 --- Command-line tools receive relative paths and resolve them against this
 --- directory. It is not where a
---- game reads content from or writes state to: `assetRoot` and `preferencePath`
---- answer that, and say why. A platform with no working directory answers nil,
---- which is most of the ones that are not a desktop.
+--- game reads content from or writes state to: `assetRoot`, `preferencePath`
+--- and `cachePath` answer that, and say why. A platform with no working
+--- directory answers nil, which is most of the ones that are not a desktop.
 --- @return Returns the directory with a trailing separator, or nil when the
 ---     platform has no working directory.
 --- @return Returns the platform reason when the first return is nil.
@@ -490,8 +506,8 @@ end
 --- so rather than inventing a path: macOS has no saved-games, screenshots or
 --- templates folder and answers nil for all three, and a platform that is not a
 --- desktop may have none of them. Treat every one of these as absent until it
---- is not, and never as a place a build may write; `preferencePath` is the only
---- such place.
+--- is not, and never as a place a build may write; `preferencePath` and
+--- `cachePath` are the two writable roots, with different durability.
 --- @param which The caller supplies the well-known folder to resolve.
 --- @return Returns the folder with a trailing separator, or nil when the
 ---     platform has no matching folder.

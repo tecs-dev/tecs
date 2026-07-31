@@ -8,14 +8,15 @@
 -- is its own, 64 by 64, and destroyed at the end; the screen saver is the one
 -- setting that outlives the process, so it is saved and restored.
 --
--- Three things are deliberately not exercised. Actual fullscreen animates for
+-- Four things are deliberately not exercised. Actual fullscreen animates for
 -- most of a second on a desktop and would take over the display of whoever is
 -- running the suite, so the fullscreen *mode* plumbing is driven on a windowed
 -- window, which is where SDL records it. Minimizing and maximizing are
 -- requests the window manager answers later, so the calls are made and the
 -- resulting flags are not asserted on. Keyboard grab asks some desktops for a
 -- permission prompt, so it is set and cleared without asserting the desktop
--- agreed.
+-- agreed. The system window menu is tested after destruction, since opening it
+-- on a live window would stop an unattended suite for user input.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
@@ -321,6 +322,53 @@ describe("platform.Window", function()
         assert.is_truthy(message:find("unknown progress state 'halfway'", 1, true))
     end)
 
+    ----------------------------------------------------------- custom chrome
+
+    it("installs, replaces and clears copied native hit regions", function()
+        local installed = window:setHitRegions({
+            { kind = "resizeTopLeft", x = 0, y = 0, width = 8, height = 8 },
+            { kind = "draggable", x = 8, y = 0, width = 48, height = 8 },
+        })
+        assert.is_boolean(installed)
+
+        -- A platform may reject hit testing entirely. Once it accepted the
+        -- callback, replacements only change Rust-owned memory and clearing
+        -- unregisters that same callback.
+        if installed then
+            assert.is_true(window:setHitRegions({
+                { kind = "resizeBottom", x = 0, y = 60, width = 64, height = 4 },
+            }))
+            assert.is_true(window:setHitRegions({}))
+        end
+        assert.is_true(window:setHitRegions())
+    end)
+
+    it("rejects malformed hit regions before SDL sees them", function()
+        local message = errorFrom(function()
+            window:setHitRegions({
+                { kind = "somewhere", x = 0, y = 0, width = 8, height = 8 },
+            })
+        end)
+        assert.is_not_nil(message)
+        assert.is_truthy(message:find("unknown hit region kind 'somewhere'", 1, true))
+
+        message = errorFrom(function()
+            window:setHitRegions({
+                { kind = "draggable", x = 0, y = 0, width = 0, height = 8 },
+            })
+        end)
+        assert.is_not_nil(message)
+        assert.is_truthy(message:find("hit region width must be an integer from 1", 1, true))
+
+        message = errorFrom(function()
+            window:setHitRegions({
+                { kind = "draggable", x = 0.5, y = 0, width = 8, height = 8 },
+            })
+        end)
+        assert.is_not_nil(message)
+        assert.is_truthy(message:find("hit region x must be an integer from 0", 1, true))
+    end)
+
     -------------------------------------------------------------- confinement
 
     it("confines the pointer to the window", function()
@@ -584,6 +632,10 @@ describe("platform.Window once it is destroyed", function()
         assert.is_false(window:setOpacity(1))
         assert.is_false(window:flash("cancel"))
         assert.is_false(window:setProgress("none"))
+        assert.is_false(window:showSystemMenu(0, 0))
+        assert.is_false(window:setHitRegions({
+            { kind = "draggable", x = 0, y = 0, width = 1, height = 1 },
+        }))
         assert.is_false(window:setMouseGrab(true))
         assert.is_false(window:setKeyboardGrab(true))
         assert.is_false(window:setMouseRect(1, 1, 1, 1))
