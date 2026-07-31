@@ -124,6 +124,29 @@ describe("gfx.text", function()
         renderer:destroy()
     end)
 
+    it("preserves narrow lowercase strokes at UI sizes", function()
+        local world, renderer = newScene()
+        local entity = spawnText(world, 32.35, 32.2, "i", 13)
+        local pixels = frame(world, renderer)
+        local x, y, width, height = text.glyphAt(world, entity, 1)
+        local stem = 0
+        local widest = 0
+        for py = math.floor(y), math.floor(y + height * 0.2) do
+            local row = 0
+            for px = math.floor(x - width * 0.6), math.ceil(x + width * 0.6) do
+                local green = screen:getPixel(pixels, px, py).g
+                if green > 0 then
+                    stem = stem + 1
+                    row = row + 1
+                end
+            end
+            widest = math.max(widest, row)
+        end
+        assert.is_true(stem > 0, "the i stem should survive the UI-size downsample")
+        assert.is_true(widest >= 2, "the i stem should remain wider than one framebuffer pixel")
+        renderer:destroy()
+    end)
+
     it("advances whitespace without emitting a glyph instance", function()
         local world, renderer = newScene()
         local entity = spawnText(world, 24, 48, "A A", 64)
