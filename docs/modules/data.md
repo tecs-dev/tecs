@@ -1,5 +1,5 @@
 ---
-description: "Typed stores, JSON, DEFLATE, and checksums over Lua byte strings"
+description: "Typed stores, JSON, DEFLATE, UUIDs, hashes, and checksums"
 outline: deep
 ---
 

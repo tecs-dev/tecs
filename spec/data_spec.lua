@@ -32,6 +32,8 @@ describe("tecs.data", function()
         assert.are.equal("function", type(data.fnv1a64))
         assert.are.equal("function", type(data.crc32))
         assert.are.equal("function", type(data.adler32))
+        assert.are.equal("function", type(data.uuid4))
+        assert.are.equal("function", type(data.uuid7))
     end)
 
     it("answers an independent settings table from newJSON", function()
