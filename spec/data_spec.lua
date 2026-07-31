@@ -22,16 +22,21 @@ describe("tecs.data", function()
         assert.are.equal(cjson.decode, data.decodeJSON)
     end)
 
-    it("carries the compression and hashing halves beside the JSON one", function()
-        -- Three modules resolved through one name, which is the whole point of
-        -- the merge: a save is encoded, compressed and stamped in one place.
+    it("carries byte transforms beside the JSON one", function()
+        -- A save can be encoded, compressed and stamped in one place.
         assert.are.equal("function", type(data.deflate))
         assert.are.equal("function", type(data.inflate))
         assert.are.equal("function", type(data.deflateRaw))
         assert.are.equal("function", type(data.inflateRaw))
         assert.are.equal("function", type(data.fnv1a64))
+        assert.are.equal("function", type(data.sha256))
         assert.are.equal("function", type(data.crc32))
         assert.are.equal("function", type(data.adler32))
+        assert.are.equal("function", type(data.hexEncode))
+        assert.are.equal("function", type(data.hexDecode))
+        assert.are.equal("function", type(data.base64Encode))
+        assert.are.equal("function", type(data.base64Decode))
+        assert.are.equal("function", type(data.transcode))
         assert.are.equal("function", type(data.uuid4))
         assert.are.equal("function", type(data.uuid7))
     end)
@@ -39,6 +44,38 @@ describe("tecs.data", function()
     it("publishes key enumeration on the Key namespace", function()
         assert.are.equal("function", type(data.Key.listKeys))
         assert.is_nil(data.listKeys)
+    end)
+
+    it("round-trips arbitrary bytes through hexadecimal", function()
+        local bytes = "\0Tecs\255\n"
+        assert.are.equal("0054656373ff0a", data.hexEncode(bytes))
+        assert.are.equal(bytes, data.hexDecode("0054656373FF0a"))
+    end)
+
+    it("rejects malformed hexadecimal text", function()
+        assert.has_error(function()
+            data.hexDecode("0")
+        end)
+        assert.has_error(function()
+            data.hexDecode("zz")
+        end)
+    end)
+
+    it("round-trips arbitrary bytes through canonical Base64", function()
+        assert.are.equal("", data.base64Encode(""))
+        assert.are.equal("Zg==", data.base64Encode("f"))
+        assert.are.equal("Zm8=", data.base64Encode("fo"))
+        assert.are.equal("Zm9v", data.base64Encode("foo"))
+        assert.are.equal("/wA=", data.base64Encode("\255\0"))
+        assert.are.equal("\255\0", data.base64Decode("/wA="))
+    end)
+
+    it("rejects non-canonical or malformed Base64 text", function()
+        for _, text in ipairs({ "Zg", "Zg=", "=g==", "Zg=A", "Zh==", "Zm9=" }) do
+            assert.has_error(function()
+                data.base64Decode(text)
+            end)
+        end
     end)
 
     it("answers an independent settings table from newJSON", function()

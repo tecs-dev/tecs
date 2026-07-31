@@ -2188,6 +2188,7 @@ dependencies = [
  "sdl3-sys",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-stream",
  "tokio-util",

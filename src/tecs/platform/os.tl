@@ -5,7 +5,9 @@ Runtime capabilities, clipboard access, child processes, and desktop services.
 
 Ask the installed build instead of inferring support from a target name.
 `capabilities` distinguishes targets that share an operating system but differ
-in JIT, worker, shader, storage, or device support.
+in JIT, worker, shader, storage, or device support. It reports the process
+sandbox separately because that environment can restrict filesystem and child
+process access without changing the target.
 
 ## Clipboard
 
@@ -139,6 +141,11 @@ local record Capabilities
     target: string
     --- Read-only. This is the CPU architecture this build targets.
     architecture: string
+    --- Read-only. Reports `"none"`, `"unknownContainer"`, `"flatpak"`,
+    --- `"snap"` or `"macOS"` for the process environment SDL detects. A
+    --- sandbox can restrict filesystem and child-process access independently
+    --- of the target and the build's other capabilities.
+    sandbox: string
 
     --- Read-only. This reports whether the runtime generates machine code.
     --- False on a target that requires interpretation.
@@ -598,6 +605,14 @@ local POWER_STATES <const>: {integer: string} = {
     [tonumber(C.SDL_POWERSTATE_CHARGED) as integer] = "charged",
 }
 
+local SANDBOXES <const>: {integer: string} = {
+    [tonumber(C.SDL_SANDBOX_NONE) as integer] = "none",
+    [tonumber(C.SDL_SANDBOX_UNKNOWN_CONTAINER) as integer] = "unknownContainer",
+    [tonumber(C.SDL_SANDBOX_FLATPAK) as integer] = "flatpak",
+    [tonumber(C.SDL_SANDBOX_SNAP) as integer] = "snap",
+    [tonumber(C.SDL_SANDBOX_MACOS) as integer] = "macOS",
+}
+
 local MESSAGE_FLAGS <const>: {string: integer} = {
     error = K.SDL_MESSAGEBOX_ERROR,
     warning = K.SDL_MESSAGEBOX_WARNING,
@@ -881,9 +896,11 @@ function platformOS.capabilities(): Capabilities
     local formats: {string} = {shaderpack.formatName(shadercompiler.format())}
 
     local runtimeShaders <const> = shadercompiler.isSupported()
+    local sandbox <const> = SANDBOXES[tonumber(C.SDL_GetSandbox()) as integer] or "unknownContainer"
     resolved = {
         target = platform,
         architecture = ffi.arch,
+        sandbox = sandbox,
         -- Whether machine code is being generated. On a target that forbids
         -- writable executable memory it is not, and the interpreter runs.
         jit = jitEnabled(),

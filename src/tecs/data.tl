@@ -1,5 +1,6 @@
 --[=[
-Typed stores, JSON, DEFLATE, UUIDs, hashes, and checksums.
+Typed stores, JSON, byte encodings, DEFLATE, text transcoding, UTF-8, UUIDs,
+hashes, and checksums.
 
 ## JSON
 
@@ -34,6 +35,20 @@ table normally encodes as an object; `empty_array` and `array_mt` express an
 empty list. `newJSON` creates an independent configuration for protocols that
 must not share process-wide settings.
 
+## Byte encodings
+
+Encode bytes for a JSON field or command-line value and restore them later:
+
+```teal
+local encoded <const> = tecs.data.base64Encode("\0sprite bytes")
+local bytes <const> = tecs.data.base64Decode(encoded)
+assert(bytes == "\0sprite bytes")
+```
+
+Base64 uses the padded RFC 4648 alphabet. Hexadecimal output is lowercase;
+the decoder accepts either ASCII letter case. Both decoders reject malformed
+or non-canonical input rather than recovering a different byte sequence.
+
 The sentinel and option names retain lua-cjson spelling because they belong to
 that library's compatibility surface.
 
@@ -56,6 +71,21 @@ hint may cost a copy but does not weaken validation.
 Inflation raises on malformed, truncated, or dictionary-dependent streams.
 Treat zlib error text as a diagnostic, not a string-matching interface.
 
+## Character transcoding
+
+Convert a complete byte string when an asset or protocol uses an encoding
+other than UTF-8:
+
+```teal
+local utf8 <const> = tecs.data.transcode(utf16Bytes, "UTF-16", "UTF-8")
+```
+
+The input and result are byte strings. Embedded NULs are ordinary bytes, so
+binary encodings such as UTF-16 and UTF-32 round-trip without truncation.
+Conversion raises for an unknown encoding name. UTF-8 and explicitly ordered
+UTF-16 and UTF-32 input is validated strictly; other encodings use the
+platform converter's substitution rules.
+
 ## UUIDs
 
 Generate RFC 9562 identifiers without a central allocator:
@@ -73,14 +103,36 @@ Both return the canonical lowercase 8-4-4-4-12 representation.
 UUIDs identify values; they do not authenticate a player or make an
 unguessable credential.
 
+## UTF-8
+
+Codepoint operations live under `tecs.data.utf8`:
+
+```teal
+local utf8 <const> = tecs.data.utf8
+local codepoint, nextOffset = utf8.decodeAt("A€", 2)
+assert(codepoint == 0x20ac)
+assert(nextOffset == 5)
+```
+
+The child works over explicit Lua string lengths, so embedded NUL is U+0000
+rather than a terminator. Malformed bytes decode as U+FFFD and remain
+traversable. These are codepoint operations, not grapheme segmentation.
+
 ## Hashes and checksums
 
 `fnv1a64` supplies fast process and build identity as 16 lowercase hexadecimal
-digits. `adler32` and `crc32` implement checksums required by formats that name
-them.
+digits. `sha256` supplies a cryptographic digest as 64 lowercase hexadecimal
+digits. `adler32` and `crc32` implement checksums required by formats that
+name them. Pass the checksum from one call as the second argument to continue
+over the next chunk without joining the chunks into one string:
 
-None provides cryptographic integrity. Verify downloaded artifacts with a
-cryptographic digest and a signed manifest.
+```teal
+local checksum = tecs.data.crc32(header)
+checksum = tecs.data.crc32(body, checksum)
+```
+
+SHA-256 authenticates nothing by itself. Verify downloaded artifacts against a
+digest obtained through a trusted channel or a signed manifest.
 
 ## Typed stores
 
@@ -104,6 +156,8 @@ local loader <const> = require("tecs.ffi.loader")
 local binding <const> = require("tecs.ffi.rust")
 local zlib <const> = require("tecs.ffi.zlib")
 local type TypedStore = require("tecs.data.Store")
+local transcode <const> = require("tecs.data.transcode")
+local type utf8Module = require("tecs.data.utf8")
 local storekeys <const> = require("tecs.internal.storekeys")
 
 -- Implementation details: The parser and encoder are C, from `vendor/cjson`,
@@ -344,6 +398,10 @@ end
 -- Implementation details: `adopt` adds lua-cjson's JSON interface to the
 -- compression and hashing functions defined here.
 local record data is JSON
+    --- Read-only. `utf8` provides UTF-8 codepoint operations over Lua byte
+    --- strings.
+    utf8: utf8Module
+
     --- `Store` holds typed values under process-wide keys.
     type Store = TypedStore
 
@@ -379,6 +437,35 @@ local record data is JSON
     --- @return Returns the existing key, or nil before any module creates it.
     findKey: function<T>(name: string): Key<T> | nil
 
+    --- Encodes bytes as lowercase hexadecimal text.
+    ---
+    --- @param bytes The caller supplies arbitrary bytes, including NUL.
+    --- @return Returns two lowercase ASCII hex digits for every input byte.
+    hexEncode: function(bytes: string): string
+
+    --- Decodes lowercase or uppercase hexadecimal text into bytes.
+    ---
+    --- @param text The caller supplies an even number of ASCII hex digits.
+    --- @return Returns the decoded bytes. Raises when `text` has an odd
+    ---     length or contains a character outside the hexadecimal alphabet.
+    hexDecode: function(text: string): string
+
+    --- Encodes bytes with the padded RFC 4648 Base64 alphabet.
+    ---
+    --- @param bytes The caller supplies arbitrary bytes, including NUL.
+    --- @return Returns ASCII Base64 text. The result has no line breaks and
+    ---     uses `=` padding when its length is not divisible by three.
+    base64Encode: function(bytes: string): string
+
+    --- Decodes canonical padded RFC 4648 Base64 text into bytes.
+    ---
+    --- @param text The caller supplies Base64 text in groups of four ASCII
+    ---     characters. It must use standard `+` and `/` characters and
+    ---     required `=` padding.
+    --- @return Returns the decoded bytes. Raises when `text` has invalid
+    ---     characters, malformed padding, or non-zero unused bits.
+    base64Decode: function(text: string): string
+
     --- Generates a random RFC 9562 UUID version 4.
     ---
     --- @return Returns a fresh UUID in canonical lowercase 8-4-4-4-12 form.
@@ -392,6 +479,28 @@ local record data is JSON
     ---
     --- @return Returns a fresh UUID in canonical lowercase 8-4-4-4-12 form.
     uuid7: function(): string
+
+    --- Converts a complete byte string between character encodings.
+    ---
+    --- Encoding names use the platform iconv spelling, such as `"UTF-8"`,
+    --- `"UTF-16LE"` and `"ISO-8859-1"`; the names available beyond SDL's
+    --- Unicode encodings depend on the platform. UTF-8 and explicitly ordered
+    --- UTF-16 and UTF-32 input is validated strictly; other encodings use the
+    --- platform converter's substitution rules. Conversion raises for an
+    --- unsupported name, invalid Unicode input, or an incomplete final
+    --- sequence. The input and result are binary-safe Lua strings; neither
+    --- stops at an embedded NUL. Byte order for the unsuffixed `"UTF-16"` and
+    --- `"UTF-32"` names is platform iconv behavior, so use an explicit `LE` or
+    --- `BE` suffix when a file format fixes it.
+    ---
+    --- @param bytes A complete byte string in `fromEncoding`.
+    --- @param fromEncoding The source encoding name. It must be non-empty and
+    ---     contain no NUL.
+    --- @param toEncoding The target encoding name. It must be non-empty and
+    ---     contain no NUL.
+    --- @return Returns a fresh byte string in `toEncoding`, including any NUL
+    ---     bytes the target representation requires.
+    transcode: function(bytes: string, fromEncoding: string, toEncoding: string): string
 end
 
 function data.newStore(): TypedStore
@@ -401,6 +510,156 @@ end
 data.newKey = storekeys.newKey as function<T>(name?: string, forType?: T): data.Key<T>
 data.findKey = storekeys.findKey as function<T>(name: string): data.Key<T> | nil
 data.Key.listKeys = storekeys.listKeys
+data.transcode = transcode
+
+local sbyte <const> = string.byte
+local schar <const> = string.char
+local ssub <const> = string.sub
+local concat <const> = table.concat
+
+local HEX <const> = "0123456789abcdef"
+local BASE64 <const> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local BASE64_DECODE <const>: {integer: integer} = {}
+for index = 1, #BASE64 do
+    BASE64_DECODE[sbyte(BASE64, index)] = index - 1
+end
+
+--- Encodes bytes as lowercase hexadecimal text.
+---
+--- @param bytes The caller supplies arbitrary bytes, including NUL.
+--- @return Returns two lowercase ASCII hex digits for every input byte.
+function data.hexEncode(bytes: string): string
+    local output: {string} = {}
+    for index = 1, #bytes do
+        local byte <const> = sbyte(bytes, index)
+        output[index] = ssub(HEX, math.floor(byte / 16) + 1, math.floor(byte / 16) + 1)
+            .. ssub(HEX, byte % 16 + 1, byte % 16 + 1)
+    end
+    return concat(output)
+end
+
+local function hexValue(byte: integer): integer | nil
+    if byte >= 48 and byte <= 57 then
+        return byte - 48
+    end
+    if byte >= 65 and byte <= 70 then
+        return byte - 65 + 10
+    end
+    if byte >= 97 and byte <= 102 then
+        return byte - 97 + 10
+    end
+    return nil
+end
+
+--- Decodes lowercase or uppercase hexadecimal text into bytes.
+---
+--- @param text The caller supplies an even number of ASCII hex digits.
+--- @return Returns the decoded bytes. Raises when `text` has an odd length or
+---     contains a character outside the hexadecimal alphabet.
+function data.hexDecode(text: string): string
+    if #text % 2 ~= 0 then
+        error("tecs: hexadecimal text must contain an even number of digits", 2)
+    end
+    local output: {string} = {}
+    local outputIndex = 1
+    for index = 1, #text, 2 do
+        local high <const> = hexValue(sbyte(text, index))
+        local low <const> = hexValue(sbyte(text, index + 1))
+        if high == nil or low == nil then
+            error("tecs: hexadecimal text contains a non-hexadecimal character", 2)
+        end
+        output[outputIndex] = schar(high * 16 + low)
+        outputIndex = outputIndex + 1
+    end
+    return concat(output)
+end
+
+--- Encodes bytes with the padded RFC 4648 Base64 alphabet.
+---
+--- @param bytes The caller supplies arbitrary bytes, including NUL.
+--- @return Returns ASCII Base64 text. The result has no line breaks and uses
+---     `=` padding when its length is not divisible by three.
+function data.base64Encode(bytes: string): string
+    local output: {string} = {}
+    local outputIndex = 1
+    for index = 1, #bytes, 3 do
+        local first <const> = sbyte(bytes, index)
+        local second = sbyte(bytes, index + 1)
+        local third = sbyte(bytes, index + 2)
+        output[outputIndex] = ssub(BASE64, math.floor(first / 4) + 1, math.floor(first / 4) + 1)
+        output[outputIndex + 1] = ssub(
+            BASE64,
+            first % 4 * 16 + math.floor((second or 0) / 16) + 1,
+            first % 4 * 16 + math.floor((second or 0) / 16) + 1
+        )
+        output[outputIndex + 2] = second ~= nil
+            and ssub(
+                BASE64,
+                second % 16 * 4 + math.floor((third or 0) / 64) + 1,
+                second % 16 * 4 + math.floor((third or 0) / 64) + 1
+            ) or "="
+        output[outputIndex + 3] = third ~= nil and ssub(BASE64, third % 64 + 1, third % 64 + 1) or "="
+        outputIndex = outputIndex + 4
+    end
+    return concat(output)
+end
+
+local function base64Value(byte: integer): integer
+    local value <const> = BASE64_DECODE[byte]
+    if value == nil then
+        error("tecs: Base64 text contains a character outside the RFC 4648 alphabet", 3)
+    end
+    return value
+end
+
+--- Decodes canonical padded RFC 4648 Base64 text into bytes.
+---
+--- @param text The caller supplies Base64 text in groups of four ASCII
+---     characters. It must use standard `+` and `/` characters and required
+---     `=` padding.
+--- @return Returns the decoded bytes. Raises when `text` has invalid
+---     characters, malformed padding, or non-zero unused bits.
+function data.base64Decode(text: string): string
+    local length <const> = #text
+    if length % 4 ~= 0 then
+        error("tecs: Base64 text must contain groups of four characters", 2)
+    end
+
+    local output: {string} = {}
+    local outputIndex = 1
+    for index = 1, length, 4 do
+        local first <const> = base64Value(sbyte(text, index))
+        local second <const> = base64Value(sbyte(text, index + 1))
+        local thirdByte <const> = sbyte(text, index + 2)
+        local fourthByte <const> = sbyte(text, index + 3)
+        local final <const> = index + 3 == length
+
+        if thirdByte == 61 then
+            if not final or fourthByte ~= 61 or second % 16 ~= 0 then
+                error("tecs: Base64 text has malformed padding", 2)
+            end
+            output[outputIndex] = schar(first * 4 + math.floor(second / 16))
+            outputIndex = outputIndex + 1
+        else
+            local third <const> = base64Value(thirdByte)
+            output[outputIndex] = schar(first * 4 + math.floor(second / 16))
+            outputIndex = outputIndex + 1
+            if fourthByte == 61 then
+                if not final or third % 4 ~= 0 then
+                    error("tecs: Base64 text has malformed padding", 2)
+                end
+                output[outputIndex] = schar(second % 16 * 16 + math.floor(third / 4))
+                outputIndex = outputIndex + 1
+            else
+                local fourth <const> = base64Value(fourthByte)
+                output[outputIndex] = schar(second % 16 * 16 + math.floor(third / 4))
+                output[outputIndex + 1] = schar(third % 4 * 64 + fourth)
+                outputIndex = outputIndex + 2
+            end
+        end
+    end
+    return concat(output)
+end
 
 local C <const> = zlib.C
 local K <const> = zlib.K
@@ -667,8 +926,6 @@ function data.inflate(bytes: string, sizeHint?: integer): string
     return result
 end
 
-local sbyte <const> = string.byte
-
 -- FNV-1a needs 64-bit arithmetic. FFI cdata avoids the carries, moduli, and
 -- division that two 32-bit halves require. LuaJIT sinks the cdata box after
 -- compiling the trace, so allocation stays bounded by the trace threshold.
@@ -692,6 +949,18 @@ local BASIS <const> = bor(lshift(u64(0xcbf29ce4), 32), 0x84222325)
 -- a 32-bit length. LuaJIT returns their `uLong` result as cdata.
 local adler32 <const> = zlib.C.adler32_z as function(seed: integer, bytes: string, length: integer): loader.CValue
 local crc32 <const> = zlib.C.crc32_z as function(seed: integer, bytes: string, length: integer): loader.CValue
+local floor <const> = math.floor
+local MAX_U32 <const> = 4294967295
+
+local function checksumSeed(previous: integer, algorithm: string): integer
+    if previous < 0 or previous > MAX_U32 or previous ~= floor(previous) then
+        error(("tecs: %s previous checksum must be an unsigned 32-bit integer"):format(algorithm), 3)
+    end
+    return previous
+end
+
+local sha256Text <const> = loader.newArray("char[65]")
+local sha256 <const> = R.tecsSha256 as function(bytes: string, length: integer, output: loader.CArray): boolean
 
 --- FNV-1a over the bytes of `text`, 64-bit, as sixteen lowercase hex digits.
 ---
@@ -706,6 +975,21 @@ function data.fnv1a64(text: string): string
     return tohex(state, 16)
 end
 
+--- Computes SHA-256 over the bytes of `text`.
+---
+--- SHA-256 detects whether bytes match a trusted digest. It does not prove who
+--- supplied either value, so artifact verification obtains the expected
+--- digest through a trusted channel or a signed manifest.
+---
+--- @param text Any string. NUL and bytes above 127 hash like any other.
+--- @return Sixty-four lowercase hexadecimal digits, high byte first.
+function data.sha256(text: string): string
+    if not sha256(text, #text, sha256Text) then
+        error("SHA-256 output buffer is unavailable", 2)
+    end
+    return loader.toString(sha256Text as loader.CValue)
+end
+
 --- Computes Adler-32 over the bytes of `text` as a number in [0, 2^32).
 ---
 --- The checksum RFC 1950 puts in a zlib stream's trailer, which is the only
@@ -715,9 +999,20 @@ end
 --- identity and this only for the format that specifies it.
 ---
 --- zlib computes it. The seed is 1, which is what RFC 1950 starts from and
---- what zlib's own documentation says to pass for the first call.
-function data.adler32(text: string): integer
-    return tonumber(adler32(1, text, #text)) as integer
+--- what zlib's own documentation says to pass for the first call. Pass the
+--- return value back as `previous` to continue the checksum over another
+--- chunk. An empty chunk leaves `previous` unchanged.
+---
+--- @param text Any string. NUL and bytes above 127 contribute like any other.
+--- @param previous The checksum returned after all preceding bytes. Omit it
+---     for the first chunk. Raises unless it is an unsigned 32-bit integer.
+--- @return The checksum after `text`, as an exact Lua number in [0, 2^32).
+function data.adler32(text: string, previous?: integer): integer
+    local seed = 1
+    if previous ~= nil then
+        seed = checksumSeed(previous, "adler32")
+    end
+    return tonumber(adler32(seed, text, #text)) as integer
 end
 
 --- Computes CRC-32 over the bytes of `text` as a number in [0, 2^32).
@@ -725,8 +1020,19 @@ end
 --- The checksum PNG, gzip and ZIP put beside compressed bytes. It detects
 --- accidental corruption and is not a cryptographic digest; use it only where
 --- a format specifies CRC-32 or where an error-detecting checksum is enough.
-function data.crc32(text: string): integer
-    return tonumber(crc32(0, text, #text)) as integer
+--- Pass the return value back as `previous` to continue the checksum over
+--- another chunk. An empty chunk leaves `previous` unchanged.
+---
+--- @param text Any string. NUL and bytes above 127 contribute like any other.
+--- @param previous The checksum returned after all preceding bytes. Omit it
+---     for the first chunk. Raises unless it is an unsigned 32-bit integer.
+--- @return The checksum after `text`, as an exact Lua number in [0, 2^32).
+function data.crc32(text: string, previous?: integer): integer
+    local seed = 0
+    if previous ~= nil then
+        seed = checksumSeed(previous, "crc32")
+    end
+    return tonumber(crc32(seed, text, #text)) as integer
 end
 
 -- Names adopted from lua-cjson. Listing them prevents upstream additions from

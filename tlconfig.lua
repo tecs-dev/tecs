@@ -346,7 +346,13 @@ local SIDEBAR = {
             },
             { text = "tecs.assets", path = "modules/assets" },
             { text = "tecs.audio", path = "modules/audio" },
-            { text = "tecs.data", path = "modules/data" },
+            {
+                text = "tecs.data",
+                path = "modules/data",
+                items = {
+                    { text = "tecs.data.utf8", path = "modules/data/utf8" },
+                },
+            },
             {
                 text = "tecs.ecs",
                 path = "modules/ecs",

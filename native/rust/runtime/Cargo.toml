@@ -29,6 +29,7 @@ rustls.workspace = true
 sdl3-sys.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true

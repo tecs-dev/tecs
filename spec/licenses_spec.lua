@@ -168,16 +168,11 @@ local NOTICE_NAMES = {
 -- a shipped dependency whose notice nothing asks for.
 local BUILD_ONLY_CRATES = {
     anyhow = true,
-    ["block-buffer"] = true,
-    ["crypto-common"] = true,
-    digest = true,
     errno = true,
     fastrand = true,
-    ["generic-array"] = true,
     ["linux-raw-sys"] = true,
     rustix = true,
     serde_spanned = true,
-    sha2 = true,
     tempfile = true,
     toml = true,
     toml_datetime = true,

@@ -74,6 +74,26 @@ describe("data.fnv1a64", function()
     end)
 end)
 
+describe("data.sha256", function()
+    it("matches the published reference vectors", function()
+        assert.are.equal("e3b0c44298fc1c149afbf4c8996fb924" .. "27ae41e4649b934ca495991b7852b855", data.sha256(""))
+        assert.are.equal("ba7816bf8f01cfea414140de5dae2223" .. "b00361a396177a9cb410ff61f20015ad", data.sha256("abc"))
+    end)
+
+    it("hashes bytes rather than characters", function()
+        assert.are.equal(
+            "a37cc3026aae4d519e0b19c298fa913b" .. "4dccfdf0658cbccbb7deaa0226d5acdb",
+            data.sha256("a\0b\255")
+        )
+    end)
+
+    it("returns sixty-four lowercase hexadecimal digits", function()
+        local digest = data.sha256("#version 450\nvoid main() {}\n")
+        assert.are.equal(64, #digest)
+        assert.matches("^[0-9a-f]+$", digest)
+    end)
+end)
+
 describe("data.adler32", function()
     it("matches the values RFC 1950's definition produces", function()
         assert.are.equal(0x00000001, data.adler32(""))
@@ -91,6 +111,29 @@ describe("data.adler32", function()
         assert.are.equal(21000, #long)
         assert.is_true(#long > 3 * 5552)
         assert.are.equal(0x8454d48d, data.adler32(long))
+    end)
+
+    it("continues over chunks without joining them", function()
+        local chunks = { "The quick ", "", "brown\0fox", string.rep("\255", 32) }
+        local checksum = data.adler32(chunks[1])
+        for index = 2, #chunks do
+            local before = checksum
+            checksum = data.adler32(chunks[index], checksum)
+            if chunks[index] == "" then
+                assert.are.equal(before, checksum)
+            end
+        end
+        assert.are.equal(data.adler32(table.concat(chunks)), checksum)
+    end)
+
+    it("rejects an invalid previous checksum", function()
+        for _, previous in ipairs({ -1, 0.5, 4294967296, 0 / 0 }) do
+            assert.has_error(function()
+                data.adler32("next", previous)
+            end, "tecs: adler32 previous checksum must be an unsigned 32-bit integer")
+        end
+        local boundary = data.adler32("", 4294967295)
+        assert.is_true(boundary >= 0 and boundary < 4294967296)
     end)
 
     it("returns a value inside thirty-two bits", function()
@@ -135,5 +178,27 @@ describe("data.crc32", function()
         local checksum = data.crc32(string.rep("\255", 8192))
         assert.are.equal("number", type(checksum))
         assert.is_true(checksum >= 0 and checksum < 4294967296)
+    end)
+
+    it("continues over chunks without joining them", function()
+        local chunks = { "123", "", "45\0", "6789", string.rep("\255", 32) }
+        local checksum = data.crc32(chunks[1])
+        for index = 2, #chunks do
+            local before = checksum
+            checksum = data.crc32(chunks[index], checksum)
+            if chunks[index] == "" then
+                assert.are.equal(before, checksum)
+            end
+        end
+        assert.are.equal(data.crc32(table.concat(chunks)), checksum)
+    end)
+
+    it("rejects an invalid previous checksum", function()
+        for _, previous in ipairs({ -1, 0.5, 4294967296, 0 / 0 }) do
+            assert.has_error(function()
+                data.crc32("next", previous)
+            end, "tecs: crc32 previous checksum must be an unsigned 32-bit integer")
+        end
+        assert.are.equal(4294967295, data.crc32("", 4294967295))
     end)
 end)

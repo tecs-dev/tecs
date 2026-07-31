@@ -8,7 +8,7 @@
 --- forward slash, so a caller joins them without asking which separator this
 --- platform prefers. Nothing here follows a symbolic link into a directory: a
 --- link that points at its own ancestor is a walk that does not end, and a
---- project holding one is not a reason for `tecs build` to hang.
+--- project holding one is not a reason for `tecs dist` to hang.
 
 local tecs <const> = require("tecs")
 

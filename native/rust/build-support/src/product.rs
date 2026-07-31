@@ -197,11 +197,10 @@ pub fn check(root: &Path) -> Result<()> {
 pub fn run_demo(root: &Path, preset: Preset, arguments: &[OsString]) -> Result<()> {
     let executable = build(root, preset)?;
     let paths = Paths::new(root, preset);
-    let entry = compile_teal_file(root, &paths, &root.join("main.tl"), "main.lua")?;
     let mut command = Command::new(executable);
     command
         .arg("--entry")
-        .arg(entry)
+        .arg(root.join("main.tl"))
         .args(arguments)
         .current_dir(root);
     apply_development_environment(&mut command, &paths);

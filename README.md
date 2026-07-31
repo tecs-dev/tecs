@@ -878,7 +878,11 @@ establishing that an asset is the asset that was published is a different
 question with a different answer. The algorithm is in the name because the
 values are written into files that outlive the process, so changing it has to
 be a rename that every caller is rechecked against rather than a silent change
-of meaning. `data.adler32` is there for the format that specifies it.
+of meaning. `data.sha256` answers the separate integrity question when the
+expected digest comes from a trusted channel or signed manifest. It crosses
+the Rust ABI because the runtime's pinned `sha2` implementation is shared with
+the build that stamps embedded payloads. `data.adler32` is there for the format
+that specifies it.
 
 `data.inflate` reads zlib streams and `data.inflateRaw` reads the
 DEFLATE inside them. zlib decodes both: it is pinned, bound, and carried
@@ -1409,6 +1413,11 @@ would make a game copying a path and then opening its folder reach three modules
 to do one thing. Names are qualified by what they act on, because a bare `text`,
 `data`, `clear`, `run` or `update` means nothing on a module that does all of
 it.
+
+The process sandbox is reported separately from the target. The same Linux or
+macOS build can run without one or inside Flatpak, Snap, an unknown container,
+or the macOS app sandbox, and those environments change filesystem and child
+process expectations without changing what executable was built.
 
 Standalone sensor handles sit under `tecs.input` instead, beside the pads and
 the keyboard, because a game asking what a device can sense is asking one
@@ -3614,6 +3623,27 @@ anything else launches it, and on a device there is no useful working directory
 at all. The build states where content sits relative to the executable, the C
 host resolves both its entry chunk and the asset root against that, and an
 installed tree runs from an unrelated directory with nothing in the environment.
+
+### Runtime Teal
+
+The host also accepts a `.tl` entry. It loads the pinned Teal compiler carried
+beside the engine, compiles that entry in memory, and installs Teal's module
+searcher for the state. A required `.lua` still wins over a `.tl` file with the
+same module name, so an ordinary precompiled release changes neither its load
+order nor its startup work.
+
+Set `TECS_TL_PATH` to one or more semicolon-separated source roots when an
+entry is below the root that its module names are relative to:
+
+```sh
+TECS_TL_PATH=src tecs --entry src/main.tl
+```
+
+The entry's own directory is always searched. Runtime compilation parses and
+generates Lua but does not reject Teal type errors, so `tecs check` and a
+precompiled release remain the normal gates. This is deliberately available in
+production for source-distributed games and mod loaders; it does not make that
+the default release path.
 
 ## Porting to a platform SDL does not cover
 
