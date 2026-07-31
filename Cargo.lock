@@ -2016,6 +2016,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "uuid",
 ]
 
 [[package]]

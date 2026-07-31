@@ -28,6 +28,7 @@ mod payload;
 mod physics;
 mod regex;
 mod registry;
+mod uuid;
 mod worker;
 
 thread_local! {

@@ -36,6 +36,7 @@ tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt-m
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 toml = "0.9"
+uuid = { version = "1.24", features = ["v4", "v7"] }
 walkdir = "2.5"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 

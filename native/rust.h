@@ -32,6 +32,10 @@ typedef struct TecsRegexSpan {
 
 const char *tecsRustError(void);
 
+/* RFC 9562 UUIDs. Each output holds 36 lowercase characters and a NUL. */
+bool tecsUuid4(char output[37]);
+bool tecsUuid7(char output[37]);
+
 TecsBytes *tecsCliHelp(void);
 TecsBytes *tecsCliParse(size_t count, const char *const *arguments);
 TecsBytes *tecsCliDocs(const char *directory, const char *query);
