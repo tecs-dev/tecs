@@ -391,6 +391,7 @@ describe("reload_shaders against a running application", function()
             mcpPort = 7137,
         })
         assert.is_true(app:_init())
+        assert.are.equal("reload [MCP :7137]", app.window.title)
         app:_iterate(nil, 0, nil)
 
         local response = cjson.decode(mcp.dispatch(cjson.encode({

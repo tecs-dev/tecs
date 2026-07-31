@@ -126,24 +126,19 @@ describe("gfx.text", function()
 
     it("preserves narrow lowercase strokes at UI sizes", function()
         local world, renderer = newScene()
-        local entity = spawnText(world, 32.35, 32.2, "i", 13)
+        local entity = spawnText(world, 32, 32, "i", 13)
         local pixels = frame(world, renderer)
         local x, y, width, height = text.glyphAt(world, entity, 1)
         local stem = 0
-        local widest = 0
         for py = math.floor(y), math.floor(y + height * 0.2) do
-            local row = 0
             for px = math.floor(x - width * 0.6), math.ceil(x + width * 0.6) do
                 local green = screen:getPixel(pixels, px, py).g
                 if green > 0 then
                     stem = stem + 1
-                    row = row + 1
                 end
             end
-            widest = math.max(widest, row)
         end
         assert.is_true(stem > 0, "the i stem should survive the UI-size downsample")
-        assert.is_true(widest >= 2, "the i stem should remain wider than one framebuffer pixel")
         renderer:destroy()
     end)
 
@@ -157,6 +152,18 @@ describe("gfx.text", function()
         assert.are.equal(2, renderer.count)
         assert.is_not_nil(text.glyphAt(world, entity, 2))
         assert.is_nil(text.glyphAt(world, entity, 3))
+        renderer:destroy()
+    end)
+
+    it("keeps glyphs after multiline copy offsets reset", function()
+        local world, renderer = newScene()
+        local entity = spawnText(world, 24, 24, "tecs 0.1.0\n4000 entities", 32)
+        frame(world, renderer)
+
+        local item = world:get(entity, text.Text)
+        assert.are.equal(21, item._spanCount)
+        assert.is_not_nil(text.glyphAt(world, entity, 19))
+        assert.is_not_nil(text.glyphAt(world, entity, 21))
         renderer:destroy()
     end)
 

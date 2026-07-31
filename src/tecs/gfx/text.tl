@@ -40,7 +40,8 @@ separate fonts for materially different quality tiers.
 
 Text supports explicit newlines and left, center, or right alignment. It does
 not wrap to a width, anchor outside the top-left corner, or style individual
-glyphs. The `glyph` material draws text unlit.
+glyphs. The `glyph` material draws text unlit through the forward-blended lane
+so its distance-field edge retains partial coverage.
 ]=]
 -- Implementation details:
 -- Glyphs are renderer instances rather than entities. Each text owns a span in
@@ -100,6 +101,7 @@ local BOUND_BYTES <const> = instancelayout.BOUND_BYTES
 local UNBOUNDED <const> = instancelayout.UNBOUNDED
 local HIDDEN <const> = instancelayout.HIDDEN
 local packSlot <const> = instancelayout.packSlot
+local BLENDED_X <const>, BLENDED_Y <const> = instancelayout.signsOf("blended")
 
 --- Glyph slots the producer's arrays start at, and the floor every growth
 --- doubles from.
@@ -706,15 +708,12 @@ function Glyphs:takeDirty(): {integer}
     return self._dirty
 end
 
---- None, because a glyph is drawn in the G-buffer lane whatever its alpha is.
----
---- The distance field resolves its own edge and the material puts that edge in
---- alpha, so a glyph does not need the forward pass to look right; routing text
---- there instead would take it out of the G-buffer and out of everything that
---- reads one, which is a change to how text is drawn rather than to how it is
---- counted.
+--- Every resident slot may reach the forward lane. Even a glyph with full tint
+--- alpha has partial distance-field coverage at its edge, so the opaque
+--- G-buffer would turn that edge into a hard, uneven contour. The high-water
+--- mark is the safe upper bound expected by a producer.
 function Glyphs:blended(): integer
-    return 0
+    return self.high
 end
 
 function Glyphs:write(floats: loader.CArray, bounds: loader.CArray, base: integer, first: integer, last: integer)
@@ -760,9 +759,11 @@ end
 local placements <const>: {number} = {}
 --- Native copy operation index per placement.
 local operations <const>: {integer} = {}
---- Line index per UTF-8 byte offset. SDL_ttf's clusters fill this without a C
---- query per glyph.
-local lineByOffset <const>: {integer: integer} = {}
+--- Global UTF-8 byte offset and top edge per line. SDL_ttf reports copy
+--- operation offsets relative to their line, including after explicit
+--- newlines, while its line substrings retain the offset into the whole text.
+local lineOffset <const>: {integer: integer} = {}
+local lineTop <const>: {integer: number} = {}
 local lineShift <const>: {integer: number} = {}
 local lineRect <const> = loader.newArray("TTF_SubString[1]")
 
@@ -832,40 +833,50 @@ local function layout(item: Text): integer, number, number
     local internal <const> = native.internal as loader.CStruct
     local scale <const> = item.size / item.font.size
 
-    for offset in pairs(lineByOffset) do
-        lineByOffset[offset] = nil
+    for line in pairs(lineOffset) do
+        lineOffset[line] = nil
     end
-    local clusters <const> = internal.clusters as loader.CArray
-    for index = 0, (internal.num_clusters as integer) - 1 do
-        local cluster <const> = clusters[index] as loader.CStruct
-        lineByOffset[cluster.offset as integer] = cluster.line_index as integer
+    for line in pairs(lineTop) do
+        lineTop[line] = nil
     end
     for line in pairs(lineShift) do
         lineShift[line] = nil
     end
     local weight <const> = ALIGNMENTS[item.align] or 0.0
-    if weight ~= 0.0 then
-        for line = 0, (native.num_lines as integer) - 1 do
-            if TTF.TTF_GetTextSubStringForLine(item._native, line, lineRect) then
-                local rect <const> = (lineRect[0] as loader.CStruct).rect as loader.CStruct
-                lineShift[line] = ((internal.w as number) - (rect.w as number)) * weight - (rect.x as number)
-            end
+    local lineCount <const> = native.num_lines as integer
+    for line = 0, lineCount - 1 do
+        if not TTF.TTF_GetTextSubStringForLine(item._native, line, lineRect) then
+            sdl.fail("TTF_GetTextSubStringForLine")
+        end
+        local substring <const> = lineRect[0] as loader.CStruct
+        local rect <const> = substring.rect as loader.CStruct
+        lineOffset[line] = substring.offset as integer
+        lineTop[line] = rect.y as number
+        if weight ~= 0.0 then
+            lineShift[line] = ((internal.w as number) - (rect.w as number)) * weight - (rect.x as number)
+        else
+            lineShift[line] = 0.0
         end
     end
 
     local count = 0
+    local line = 0
     local ops <const> = internal.ops as loader.CArray
     for index = 0, (internal.num_ops as integer) - 1 do
         local op <const> = ops[index] as loader.CStruct
         if op.cmd == 2 then
             local copy <const> = op.copy as loader.CStruct
             local dst <const> = copy.dst as loader.CStruct
-            if
-                not whitespaceAt(item.text, copy.text_offset as integer)
-                and (dst.w as number) > 0
-                and (dst.h as number) > 0
-            then
-                local line <const> = lineByOffset[copy.text_offset as integer] or 0
+            local centerY <const> = (dst.y as number) + (dst.h as number) * 0.5
+            while line + 1 < lineCount do
+                local nextTop <const> = lineTop[line + 1]
+                if nextTop == nil or centerY < nextTop then
+                    break
+                end
+                line = line + 1
+            end
+            local offset <const> = (lineOffset[line] or 0) + (copy.text_offset as integer)
+            if not whitespaceAt(item.text, offset) and (dst.w as number) > 0 and (dst.h as number) > 0 then
                 local shift <const> = lineShift[line] or 0.0
                 local base <const> = count * 4
                 count = count + 1
@@ -1146,8 +1157,8 @@ local function build(
         local bound = (span + index - 2) * BOUND_FLOATS
         bounds[bound] = x
         bounds[bound + 1] = y
-        bounds[bound + 2] = ex
-        bounds[bound + 3] = ey
+        bounds[bound + 2] = ex * BLENDED_X
+        bounds[bound + 3] = ey * BLENDED_Y
     end
 
     if count > 0 then

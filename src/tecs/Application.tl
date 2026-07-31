@@ -218,8 +218,10 @@ local record Application
         --- See `Application:stageCheckpoint` for what a game has to do, which
         --- is the part that matters.
         checkpoint: string
-        --- Caller-writable. Sets the MCP server port. Omitted means no server, since a game
-        --- should not open a socket nobody asked for.
+        --- Caller-writable. Sets the MCP server port. After the server starts,
+        --- the application appends `[MCP :port]` to the window title. Omitted
+        --- means no server, since a game should not open a socket nobody asked
+        --- for.
         mcpPort: integer
         --- Caller-writable. Watches loaded content files and reloads them when
         --- they change. Omitted means no watcher, on the same footing as the
@@ -802,6 +804,7 @@ function Application:_init(): boolean
         local mcpWorld = require("tecs.io.mcp.world")
         mcpWorld.bind(self.world)
         self.mcp = mcp.listen(config.mcpPort)
+        self.window:setTitle(("%s [MCP :%d]"):format(self.window.title, self.mcp.port))
 
         -- Registered here rather than in the tool module, because it acts on
         -- this application and there is no other way for a tool to reach one.

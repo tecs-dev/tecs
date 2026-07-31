@@ -173,17 +173,21 @@ return tecs.newApplication({
         -- Text is entities too. The plugin shapes the string and writes one
         -- renderer instance per glyph into the same cull and draw.
         world:addPlugin(tecs.gfx.textPlugin({renderer = app.renderer}))
+        local displayFont <const> = tecs.gfx.newTTF({
+            source = "fonts/JetBrainsMono-ExtraBold.ttf",
+            size = 32,
+        }).value
         local font <const> = tecs.gfx.newTTF({
             source = "fonts/JetBrainsMono-ExtraBold.ttf",
-            size = 64,
+            size = 16,
         }).value
         world:spawn(
             Transform(24, 24, 0, 1),
             Tint(0.92, 0.96, 1.0, 1.0),
             tecs.gfx.Text.new({
                 text = ("tecs %s\n%d entities"):format(tecs.version, COUNT),
-                font = font,
-                size = 28,
+                font = displayFont,
+                size = 32,
             })
         )
 
@@ -250,7 +254,7 @@ return tecs.newApplication({
             Tint(0.94, 0.97, 1.0, 1.0),
             tecs.gfx.Text.new({
                 text = "Tecs UI",
-                font = font,
+                font = displayFont,
                 size = 25,
             }),
             ChildOf(header)
@@ -261,7 +265,7 @@ return tecs.newApplication({
             RelativeTransform(0, 0, 3),
             Tint(0.54, 0.64, 0.76, 1.0),
             tecs.gfx.Text.new({
-                text = "ECS retained, GPU instanced",
+                text = "Retained ECS | GPU instanced",
                 font = font,
                 size = 13,
             }),
