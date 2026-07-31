@@ -617,16 +617,7 @@ return {
                 { text = "CLI", path = "cli" },
             },
             pages = pages,
-            sidebar_open = {
-                "modules",
-                "modules/data",
-                "modules/ecs",
-                "modules/gfx",
-                "modules/io",
-                "modules/math",
-                "modules/platform",
-                "cli",
-            },
+            sidebar_open = { "modules" },
             before_build = function(context)
                 checkWriting(context)
                 checkPages(context)
