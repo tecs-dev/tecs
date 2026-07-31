@@ -143,13 +143,13 @@ source:close()
 handle:close()
 -- #endregion tecs.io.newHandleStream
 
--- #region tecs.io.withMetadata
+-- #region tecs.io.newStreamWithMetadata
 local tecsIO <const> = require("tecs.io")
 local source <const> = tecsIO.newStringStream("{}")
-local json <const> = tecsIO.withMetadata(source, "application/json")
+local json <const> = tecsIO.newStreamWithMetadata(source, "application/json")
 print(json:contentType())
 json:close()
--- #endregion tecs.io.withMetadata
+-- #endregion tecs.io.newStreamWithMetadata
 
 -- #region tecs.io.Reader.read
 local tecsIO <const> = require("tecs.io")

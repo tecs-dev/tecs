@@ -40,7 +40,7 @@ end
 local newStringStream: function(text: string, contentType?: string): ReadableStream
 local newBufferStream: function(sourceBuffer: IOBuffer, contentType?: string): ReadWriteStream
 local newFileStream: function(path: string, contentType?: string): ReadWriteStream
-local withMetadata: function<T is Stream>(
+local newStreamWithMetadata: function<T is Stream>(
     source: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
 ): T
 local CHUNK <const> = 64 * 1024
@@ -382,7 +382,7 @@ local function snapshotStream(source: Stream, what: string): {string: any}
 end
 
 local function restoredMetadata<T is Stream>(source: T, saved: {string: any}): T
-    return withMetadata(
+    return newStreamWithMetadata(
         source, saved.contentType as string, saved.contentLength as integer, saved.isReplayable as boolean
     )
 end
@@ -1651,18 +1651,18 @@ MetadataReadWriteStream.writeAll = metadataWriteAll
 MetadataReadWriteStream.writeBuffer = metadataWriteBuffer
 
 --- Returns a lazy metadata view preserving the source's concrete interface.
-withMetadata = function<T is Stream>(
+newStreamWithMetadata = function<T is Stream>(
     source: T, contentTypeValue?: string, contentLengthValue?: integer, replayableValue?: boolean
 ): T
-    source = checkedStream(source, "io.withMetadata", 2)
+    source = checkedStream(source, "io.newStreamWithMetadata", 2)
     if contentTypeValue ~= nil and type(contentTypeValue) ~= "string" then
-        error("tecs: io.withMetadata content type must be a string", 2)
+        error("tecs: io.newStreamWithMetadata content type must be a string", 2)
     end
     if replayableValue ~= nil and type(replayableValue) ~= "boolean" then
-        error("tecs: io.withMetadata replayability must be boolean", 2)
+        error("tecs: io.newStreamWithMetadata replayability must be boolean", 2)
     end
     if contentLengthValue ~= nil then
-        contentLengthValue = nonNegative(contentLengthValue, "io.withMetadata content length", 2)
+        contentLengthValue = nonNegative(contentLengthValue, "io.newStreamWithMetadata content length", 2)
     end
     if
         (contentTypeValue == nil or contentTypeValue == source:contentType())
@@ -1737,7 +1737,7 @@ local record stream
     newByteStream: function(pointer: loader.CValue, length: integer, contentType?: string): ReadableStream
     newFileStream: function(path: string, contentType?: string): ReadWriteStream
     newHandleStream: function(handle: FILE, length?: integer, contentType?: string): ReadWriteStream
-    withMetadata: function<T is Stream>(
+    newStreamWithMetadata: function<T is Stream>(
         source: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
     ): T
     poll: function(): integer
@@ -1756,7 +1756,7 @@ return {
     newByteStream = newByteStream,
     newFileStream = newFileStream,
     newHandleStream = newHandleStream,
-    withMetadata = withMetadata,
+    newStreamWithMetadata = newStreamWithMetadata,
     poll = poll,
     pending = pending,
     _check = checkedStream,

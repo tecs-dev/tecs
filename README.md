@@ -1475,8 +1475,8 @@ by `tecs.io`, and media type and length are lazy metadata methods.
 `contentLength() ~= nil` is the one known-length test; a mirrored
 `hasKnownLength` method lost because it could only repeat that answer and add
 another operation every structural implementation had to keep consistent.
-`withMetadata` wraps those methods without eagerly opening or reading the
-source.
+`newStreamWithMetadata` wraps those methods without eagerly opening or reading
+the source.
 
 `tecs.Closeable` is the root structural lifetime contract because cursors,
 network handles, streams, and clients cross subsystem boundaries. It contains

@@ -203,7 +203,7 @@ local record binaryIO
     --- @return Returns a non-replayable readable and writable stream.
     newHandleStream: function(handle: FILE, length?: integer, contentType?: string): types.ReadWriteStream
 
-    --- Returns a lazy metadata view over a stream.
+    --- Creates a lazy metadata view over a stream.
     ---
     --- Nil inherits each value from `source`. The view retains and delegates
     --- to the source, preserves its static and runtime directional interface,
@@ -216,7 +216,7 @@ local record binaryIO
     ---     or omits it.
     --- @param isReplayable The caller overrides replayability or omits it.
     --- @return Returns a metadata view with the same type as `source`.
-    withMetadata: function<T is types.Stream>(
+    newStreamWithMetadata: function<T is types.Stream>(
         source: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
     ): T
 
@@ -506,7 +506,7 @@ binaryIO.newBufferStream = stream.newBufferStream
 binaryIO.newByteStream = stream.newByteStream
 binaryIO.newFileStream = stream.newFileStream
 binaryIO.newHandleStream = stream.newHandleStream
-binaryIO.withMetadata = stream.withMetadata
+binaryIO.newStreamWithMetadata = stream.newStreamWithMetadata
 
 local AddressMT <const>: metatable<binaryIO.Address> = {__index = binaryIO.Address}
 local TCPSocketMT <const>: metatable<binaryIO.TCPSocket> = {__index = binaryIO.TCPSocket}

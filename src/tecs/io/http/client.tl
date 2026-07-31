@@ -407,7 +407,9 @@ local function completeTransfer(
     response.url = responseURI
     local prepared <const>, body = protect(function(): Stream
         if transfer.sink ~= nil then
-            return stream.withMetadata(transfer.sink, response.headers["content-type"], transfer.transferred) as Stream
+            return stream.newStreamWithMetadata(
+                transfer.sink, response.headers["content-type"], transfer.transferred
+            ) as Stream
         end
         if transfer.responseBuffer == nil then
             transfer.responseBuffer = stream.newBuffer()
