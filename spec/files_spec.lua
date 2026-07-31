@@ -541,6 +541,32 @@ describe("io.files", function()
         end)
     end)
 
+    describe("streaming writes", function()
+        it("replaces by default and appends when requested", function()
+            local path = at("stream-write.txt")
+            assert.is_true(files.write(path, "existing"))
+            local replacement = assert(files.openWrite(path))
+
+            assert.is_true(replacement:write("replacement"))
+            assert.is_true(replacement:close())
+            assert.are.equal("replacement", files.read(path))
+
+            local append = assert(files.openWrite(path, "append"))
+
+            assert.is_true(append:write(" one"))
+            assert.is_true(append:flush())
+            assert.is_true(append:write(" two"))
+            assert.is_true(append:close())
+            assert.are.equal("replacement one two", files.read(path))
+        end)
+
+        it("rejects an unknown write mode", function()
+            assert.has_error(function()
+                files.openWrite(at("mode.txt"), "unknown")
+            end, "tecs: io.files.openWrite mode must be 'replace' or 'append'")
+        end)
+    end)
+
     describe("where the process and the user are", function()
         it("answers the working directory with a trailing separator", function()
             local cwd = files.currentDirectory()

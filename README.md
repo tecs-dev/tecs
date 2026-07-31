@@ -1441,12 +1441,12 @@ chunks until completion, close both endpoints, and return the buffer. The call
 site therefore owns the honest cost of moving the bytes without allocating
 transfer storage each time. Code that must overlap a large transfer with the
 main loop can run the same operation in a worker instead of turning every
-stream transfer into scheduled main-thread state. A platform backend without
-`openWrite` uses the whole-file fallback: it accumulates chunks, then `close`
-concatenates and writes the complete payload in one operation. Stable buffer
-sources bypass the scratch copy, strings retain their immutable Lua storage,
-and `hasBuffer` says exactly when `transferToBuffer` returns the retained
-object instead of materializing a new one.
+stream transfer into scheduled main-thread state. `openWrite` accepts explicit
+replacement and append modes. A platform backend without it accumulates
+replacement chunks, while append mode flushes only bytes not already appended.
+Stable buffer sources bypass the scratch copy, strings retain their immutable
+Lua storage, and `hasBuffer` says exactly when `transferToBuffer` returns the
+retained object instead of materializing a new one.
 
 The descriptor owns no cursor and does not take policy away from its backing:
 paths still open through `tecs.io.files`, TCP and UDP handles are constructed

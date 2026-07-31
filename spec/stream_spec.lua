@@ -440,6 +440,32 @@ describe("tecs.io transfers", function()
         assert.are.same({ "a", "ab", "ab" }, writes)
     end)
 
+    it("appends only new fallback writer bytes after each flush", function()
+        local backend = adapter.storage()
+        local originalOpenWrite = backend.openWrite
+        local originalAppend = backend.append
+        local appends = {}
+        backend.openWrite = nil
+        backend.append = function(_, bytes)
+            appends[#appends + 1] = bytes
+            return true
+        end
+
+        local ran, reason = pcall(function()
+            local writer = assert(tecs.io.files.openWrite("/virtual/append", "append"))
+            assert.is_true(writer:write("a"))
+            assert.is_true(writer:flush())
+            assert.is_true(writer:write("b"))
+            assert.is_true(writer:flush())
+            assert.is_true(writer:close())
+        end)
+        backend.openWrite = originalOpenWrite
+        backend.append = originalAppend
+
+        assert.is_true(ran, reason)
+        assert.are.same({ "a", "b" }, appends)
+    end)
+
     it("attempts every endpoint close and fails normal completion", function()
         local files = tecs.io.files
         local originalOpenRead = files.openRead

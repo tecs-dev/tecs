@@ -56,8 +56,8 @@ with a reason when the platform has no such notion, which is already what
 SDL answers for a folder a desktop does not have, so a caller that handled
 SDL's nil handles a port's. `openWrite` and `openRead` are optional in a
 different sense: `tecs.io.files` builds both out of `write` and `read` when a
-backend leaves them out, so every caller has them and only the memory a
-large file costs differs.
+backend leaves them out, using `append` for an appending writer, so every
+caller has them and only the memory a large file costs differs.
 
 Nothing here validates its arguments. `tecs.io.files` does that before it
 delegates, so a port inherits it rather than repeating it.
@@ -118,6 +118,12 @@ local enum UserFolder
     "videos"
 end
 
+--- How an incremental writer opens its destination.
+local enum WriteMode
+    "replace"
+    "append"
+end
+
 --- How a pattern is matched.
 local record GlobOptions
     --- Caller-writable. Matches without regard to case when true. Defaults to
@@ -141,12 +147,12 @@ local record Backend
     --- Appends `bytes` to `path`, creating the file when absent. The parent is
     --- not created.
     append: function(path: string, bytes: string): boolean, string
-    --- Opens `path` for writing in pieces, replacing whatever was there.
+    --- Opens `path` for writing in pieces using the requested mode.
     ---
     --- Optional. A platform that leaves it nil gets a writer `tecs.io.files`
-    --- builds out of `write`, which holds the pieces and writes once, so the
-    --- interface is the same everywhere and only the memory differs.
-    openWrite: function(path: string): Writer, string
+    --- builds out of `write` or `append`, so the interface is the same
+    --- everywhere and only the memory differs.
+    openWrite: function(path: string, mode: WriteMode): Writer, string
     --- Opens `path` for reading in pieces.
     ---
     --- Optional, with the same fallback in terms of `read`.
@@ -198,6 +204,8 @@ local record storagebackend
     folders: {UserFolder: boolean}
     --- How `Backend.glob` matches.
     GlobOptions: GlobOptions
+    --- How `Backend.openWrite` opens its destination.
+    WriteMode: WriteMode
     --- The seam a port implements.
     Backend: Backend
     --- The SDL backend, and the default everywhere.
@@ -472,7 +480,9 @@ local sdlBackend <const>: Backend = {
         return closed, closeReason
     end,
 
-    openWrite = function(path: string): Writer, string return sdlWriter(path, "wb") end,
+    openWrite = function(path: string, mode: WriteMode): Writer, string
+        return sdlWriter(path, mode == "append" and "ab" or "wb")
+    end,
     openRead = sdlReader,
 
     info = function(path: string): Info, string

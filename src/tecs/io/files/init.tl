@@ -63,6 +63,9 @@ local record files
     --- `GlobOptions` controls pattern matching.
     type GlobOptions = storagebackend.GlobOptions
 
+    --- `WriteMode` selects replacement or append behavior.
+    type WriteMode = storagebackend.WriteMode
+
     --- `LineIterator` yields each line in a file and returns nil at the end.
     type LineIterator = function(): string
 end
@@ -70,6 +73,7 @@ end
 local type Info = files.Info
 local type UserFolder = files.UserFolder
 local type GlobOptions = files.GlobOptions
+local type WriteMode = files.WriteMode
 local type LineIterator = files.LineIterator
 local type Writer = types.Writer
 local type Reader = types.Reader
@@ -437,13 +441,15 @@ end
 
 --- A `Writer` for a backend that has no streaming write.
 ---
---- Holds the pieces and writes them once on close, which is what `write`
---- already does and costs what it already costs. It exists so a caller has one
---- interface everywhere: a port that streams gets the memory back without the
---- caller knowing, and a port that does not is no worse than it was.
-local function bufferedWriter(backend: storagebackend.Backend, path: string): Writer, string
+--- Replacement mode holds the complete value for `write`. Append mode releases
+--- each successfully flushed group after handing it to `append`. It exists so
+--- a caller has one interface everywhere: a port that streams gets the memory
+--- back without the caller knowing, and a port that does not retains only what
+--- its whole-file operations require.
+local function bufferedWriter(backend: storagebackend.Backend, path: string, mode: WriteMode): Writer, string
     local pieces: {string} = {}
     local count = 0
+    local appended = false
 
     local writer <const> = {} as {string: any}
     local basicWriter <const> = writer as Writer
@@ -492,7 +498,19 @@ local function bufferedWriter(backend: storagebackend.Backend, path: string): Wr
         if pieces == nil then
             return false, "the writer is closed"
         end
-        return backend.write(path, table.concat(pieces, "", 1, count))
+        if mode == "replace" then
+            return backend.write(path, table.concat(pieces, "", 1, count))
+        end
+        if count == 0 and appended then
+            return true
+        end
+        local ok <const>, reason = backend.append(path, table.concat(pieces, "", 1, count))
+        if ok then
+            pieces = {}
+            count = 0
+            appended = true
+        end
+        return ok, reason
     end
     writer.close = function(_self: Writer): boolean, string
         if pieces == nil then
@@ -578,23 +596,31 @@ function files.append(path: string, bytes: string): boolean, string
     return adapter.storage().append(path, bytes)
 end
 
---- Opens `path` for writing in pieces, replacing whatever was there.
+--- Opens `path` for writing in pieces.
 ---
 --- Use it when bytes arrive over time and should not become one large string.
+--- The default `"replace"` mode replaces the destination. `"append"` keeps
+--- its existing bytes and creates the file when it does not exist.
 ---
 --- Close it. The bytes are not guaranteed to be on disk until `close` answers,
 --- and this call reports a full disk.
 ---
 --- @param path The caller supplies the destination file.
+--- @param mode The caller selects `"replace"` or `"append"`, or omits it to
+---     replace the destination.
 --- @return Returns a caller-owned writer, or nil when it cannot open.
 --- @return Returns the platform reason when the first return is nil.
-function files.openWrite(path: string): Writer, string
+function files.openWrite(path: string, mode?: WriteMode): Writer, string
     required(path, "openWrite")
+    mode = mode or "replace"
+    if mode ~= "replace" and mode ~= "append" then
+        error("tecs: io.files.openWrite mode must be 'replace' or 'append'", 2)
+    end
     local backend <const> = adapter.storage()
     if backend.openWrite ~= nil then
-        return backend.openWrite(path)
+        return backend.openWrite(path, mode)
     end
-    return bufferedWriter(backend, path)
+    return bufferedWriter(backend, path, mode)
 end
 
 --- Opens `path` for reading in pieces. The mirror of `openWrite`.

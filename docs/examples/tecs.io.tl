@@ -339,8 +339,8 @@ source:close()
 -- #endregion tecs.io.Reader.read
 
 -- #region tecs.io.transfer
-local source <const> = assert(io.open("save.bin", "rb"))
-local destination <const> = assert(io.open("save.copy", "wb"))
+local source <const> = assert(tecs.io.files.openRead("save.bin"))
+local destination <const> = assert(tecs.io.files.openWrite("save.copy"))
 local count <const>, reason = tecs.io.transfer(source, destination)
 
 assert(count, reason)

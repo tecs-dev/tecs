@@ -9,7 +9,7 @@ end
 
 -- #region tecs.io.files.openWrite
 local files <const> = require("tecs.io.files")
-local writer <const> = assert(files.openWrite("save.txt"))
+local writer <const> = assert(files.openWrite("save.txt", "append"))
 
 assert(writer:write("checkpoint"))
 assert(writer:close())
