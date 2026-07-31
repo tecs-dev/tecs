@@ -24,6 +24,59 @@ typedef struct TecsNetServer TecsNetServer;
 typedef struct TecsNetDatagram TecsNetDatagram;
 typedef struct TecsNetPacket TecsNetPacket;
 typedef struct TecsRegex TecsRegex;
+typedef struct TecsUiTree TecsUiTree;
+
+/* Taffy-backed retained UI layout. An entity id is the tree key, so Lua keeps
+ * ownership of the ECS hierarchy and Rust owns only the derived layout cache.
+ * A dimension value uses its accompanying unit: 0 auto, 1 points, 2 percent.
+ */
+typedef struct TecsUiDimension {
+    float value;
+    uint8_t unit;
+    uint8_t _padding[3];
+} TecsUiDimension;
+
+typedef struct TecsUiEdges {
+    TecsUiDimension left;
+    TecsUiDimension right;
+    TecsUiDimension top;
+    TecsUiDimension bottom;
+} TecsUiEdges;
+
+typedef struct TecsUiStyle {
+    uint8_t display;
+    uint8_t position;
+    uint8_t flex_direction;
+    uint8_t flex_wrap;
+    uint8_t justify_content;
+    uint8_t align_items;
+    uint8_t align_content;
+    uint8_t _padding0;
+    float flex_grow;
+    float flex_shrink;
+    TecsUiDimension flex_basis;
+    TecsUiDimension width;
+    TecsUiDimension height;
+    TecsUiDimension min_width;
+    TecsUiDimension min_height;
+    TecsUiDimension max_width;
+    TecsUiDimension max_height;
+    TecsUiEdges margin;
+    TecsUiEdges padding;
+    TecsUiEdges border;
+    TecsUiDimension gap_width;
+    TecsUiDimension gap_height;
+    TecsUiEdges inset;
+} TecsUiStyle;
+
+typedef struct TecsUiLayout {
+    float x;
+    float y;
+    float width;
+    float height;
+    uint8_t changed;
+    uint8_t _padding[3];
+} TecsUiLayout;
 
 typedef struct TecsRegexSpan {
     size_t start;
@@ -42,6 +95,16 @@ typedef struct TecsWindowHitRegion {
 typedef struct SDL_Window SDL_Window;
 
 const char *tecsRustError(void);
+
+TecsUiTree *tecsUiTreeCreate(void);
+void tecsUiTreeDestroy(TecsUiTree *tree);
+bool tecsUiTreeInsert(TecsUiTree *tree, uint64_t entity, const TecsUiStyle *style);
+bool tecsUiTreeRemove(TecsUiTree *tree, uint64_t entity);
+bool tecsUiTreeSetStyle(TecsUiTree *tree, uint64_t entity, const TecsUiStyle *style);
+bool tecsUiTreeSetChildren(TecsUiTree *tree, uint64_t entity, const uint64_t *children, size_t count);
+bool tecsUiTreeBegin(TecsUiTree *tree);
+bool tecsUiTreeCompute(TecsUiTree *tree, uint64_t root, float width, float height);
+bool tecsUiTreeLayout(const TecsUiTree *tree, uint64_t entity, TecsUiLayout *layout);
 
 /* RFC 9562 UUIDs. Each output holds 36 lowercase characters and a NUL. */
 bool tecsUuid4(char output[37]);

@@ -1,6 +1,6 @@
 ---
 description: "The tecs command line tool: project commands, offline reference, and MCP bridge"
-sidebar_order: 30
+sidebar_order: 40
 outline: deep
 ---
 

@@ -193,8 +193,8 @@ local REACH = {
     },
     {
         bucket = "direct",
-        reason = "Rapier, UUIDs, Rust regex, Rust standard networking, and "
-            .. "rmcp are pinned Rust services built for every target this "
+        reason = "Rapier, Taffy, UUIDs, Rust regex, Rust standard networking, "
+            .. "and rmcp are pinned Rust services built for every target this "
             .. "engine covers, so there is no platform seam to be on the far "
             .. "side of.",
         modules = {
@@ -204,6 +204,7 @@ local REACH = {
             "tecs/io/mcp/transport.lua",
             "tecs/io.lua",
             "tecs/regex.lua",
+            "tecs/ui.lua",
         },
     },
     {
@@ -218,6 +219,16 @@ local REACH = {
             "tecs/data/utf8/init.lua",
             "tecs/gfx/screenshot.lua",
             "tecs/io/mcp/tools.lua",
+        },
+    },
+    {
+        bucket = "direct",
+        reason = "Character decoding and transcoding are SDL library calls "
+            .. "over caller-owned bytes rather than platform services. No "
+            .. "storage or input seam decides their answers.",
+        modules = {
+            "tecs/data/transcode.lua",
+            "tecs/data/utf8/init.lua",
         },
     },
     {

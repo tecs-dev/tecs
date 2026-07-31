@@ -26,7 +26,17 @@ local tecs <const> = require("tecs")
 local platformEvents <const> = require("tecs.platform.events")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local shaderpack <const> = require("tecs.gpu.shaderpack")
+local materials <const> = require("tecs.gpu.materials")
+local type uiTypes = require("tecs.ui")
+local type assetTypes = require("tecs.assets")
+local type componentTypes = require("tecs.components")
+local type UiEvent = uiTypes.Event
+local type Image = assetTypes.Image
+local type Sprite = componentTypes.Sprite
+local type Future = require("tecs.Future")
 local Transform <const> = tecs.Transform
+local RelativeTransform <const> = tecs.ecs.RelativeTransform
+local ChildOf <const> = tecs.ecs.ChildOf
 local Tint <const> = tecs.gfx.Tint
 local PointLight <const> = tecs.gfx.PointLight
 local Renderable <const> = tecs.gfx.Renderable
@@ -120,10 +130,10 @@ return tecs.newApplication({
     framesInFlight = tonumber(os.getenv("TECS_INFLIGHT")) as integer,
     debug = true,
     ambientLight = {0.05, 0.05, 0.08},
-    -- Headroom over the field for the lights and for a glyph per character of
-    -- the caption, since a glyph is an entity and an instance like any other.
-    capacity = COUNT + 256,
-    maxEntities = COUNT + 512,
+    -- Headroom over the field for lights, composed UI shapes, and one entity
+    -- per glyph. Hitting the renderer capacity drops later instances.
+    capacity = COUNT + 512,
+    maxEntities = COUNT + 1024,
     debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
     presentMode = os.getenv("TECS_PRESENT"),
     mcpPort = tonumber(os.getenv("TECS_MCP")) as integer,
@@ -161,18 +171,286 @@ return tecs.newApplication({
         -- Text is entities too. The plugin shapes the string and writes one
         -- renderer instance per glyph into the same cull and draw.
         world:addPlugin(tecs.gfx.textPlugin({renderer = app.renderer}))
+        local font <const> = tecs.gfx.newTTF({
+            source = "fonts/JetBrainsMono-ExtraBold.ttf",
+            size = 64,
+        }).value
         world:spawn(
             Transform(24, 24, 0, 1),
             Tint(0.92, 0.96, 1.0, 1.0),
             tecs.gfx.Text.new({
                 text = ("tecs %s\n%d entities"):format(tecs.version, COUNT),
-                font = tecs.gfx.newTTF({
-                    source = "fonts/JetBrainsMono-ExtraBold.ttf",
-                    size = 64,
-                }).value,
+                font = font,
                 size = 28,
             })
         )
+
+        -- The UI is retained layout over the same entities and instance
+        -- producers. Retained layout positions containers; these leaves remain
+        -- ordinary rectangles, circles, images, and text.
+        local ui <const> = tecs.ui
+        tecs.gfx.layers.configure(
+            16,
+            {
+                sort = "z",
+                screenSpace = true,
+                unlit = true,
+            }
+        )
+        world:addPlugin(ui.plugin(app, {wheelStep = 36}))
+
+        local uiRoot <const> = world:spawn(
+            ui.Style({
+                width = "100%",
+                height = "100%",
+                flexDirection = "row",
+                justifyContent = "end",
+                padding = 24,
+            }),
+            ui.Root("screen"),
+            Transform(0, 0, 900, 16)
+        )
+        local panel <const> = world:spawn(
+            ui.Style({
+                width = 400,
+                height = "100%",
+                flexDirection = "column",
+                padding = 20,
+                gap = 12,
+            }),
+            RelativeTransform(),
+            ChildOf(uiRoot)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", inset = 0}),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 0),
+            Tint(0.035, 0.055, 0.09, 0.96),
+            tecs.gfx.Material(materials.id("rounded"), 0.04),
+            Renderable(),
+            ChildOf(panel)
+        )
+
+        local header <const> = world:spawn(ui.Style({height = 56, width = "100%"}), RelativeTransform(), ChildOf(panel))
+        world:spawn(
+            ui.Style({position = "absolute", width = 42, height = 42, inset = {left = 0, top = 4}}),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 2),
+            Tint(0.32, 0.82, 1.0, 1.0),
+            tecs.gfx.Material(materials.id("circle"), 0),
+            Renderable(),
+            ChildOf(header)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", width = 310, height = 28, inset = {left = 58, top = 0}}),
+            RelativeTransform(0, 0, 3),
+            Tint(0.94, 0.97, 1.0, 1.0),
+            tecs.gfx.Text.new({
+                text = "Tecs UI",
+                font = font,
+                size = 25,
+            }),
+            ChildOf(header)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", width = 310, height = 20, inset = {left = 58, top = 32}}),
+            RelativeTransform(0, 0, 3),
+            Tint(0.54, 0.64, 0.76, 1.0),
+            tecs.gfx.Text.new({
+                text = "ECS retained, GPU instanced",
+                font = font,
+                size = 13,
+            }),
+            ChildOf(header)
+        )
+
+        local status <const> = world:spawn(
+            ui.Style({height = 42, width = "100%"}),
+            RelativeTransform(0, 0, 3),
+            Tint(0.62, 0.75, 0.88, 1.0),
+            tecs.gfx.Text.new({
+                text = "Click, Tab, Shift-Tab, Return, or scroll",
+                font = font,
+                size = 13,
+            }),
+            ChildOf(panel)
+        )
+
+        local controls: {{integer}} = {}
+        local function setStatus(message: string)
+            local text = world:getMut(status, tecs.gfx.Text)
+            if text ~= nil then
+                text.text = message
+            end
+        end
+        local function spawnButton(parent: integer, label: string, tabIndex: integer): integer
+            local control <const> = world:spawn(
+                ui.Style({width = "100%", height = 44}),
+                ui.Interaction({tabIndex = tabIndex}),
+                RelativeTransform(),
+                ChildOf(parent)
+            )
+            local visual <const> = world:spawn(
+                ui.Style({position = "absolute", inset = 0}),
+                ui.Paint(true),
+                RelativeTransform(0, 0, 1),
+                Tint(0.12, 0.20, 0.30, 1.0),
+                tecs.gfx.Material(materials.id("rounded"), 0.18),
+                Renderable(),
+                ChildOf(control)
+            )
+            world:spawn(
+                ui.Style({position = "absolute", width = 300, height = 24, inset = {left = 14, top = 11}}),
+                RelativeTransform(0, 0, 2),
+                Tint(0.9, 0.95, 1.0, 1.0),
+                tecs.gfx.Text.new({text = label, font = font, size = 16}),
+                ChildOf(control)
+            )
+            controls[#controls + 1] = {control, visual}
+            world:observe(
+                control,
+                ui.Event,
+                function(event: UiEvent)
+                    if event.kind == "activate" then
+                        setStatus(("%s via %s"):format(label, event.source))
+                    end
+                end
+            )
+            return control
+        end
+
+        local actions <const> = world:spawn(
+            ui.Style({
+                width = "100%",
+                height = 44,
+                flexDirection = "row",
+                gap = 10,
+            }),
+            RelativeTransform(),
+            ChildOf(panel)
+        )
+        local function spawnCompactButton(label: string, tabIndex: integer)
+            local control <const> = world:spawn(
+                ui.Style({width = 112, height = 44}),
+                ui.Interaction({tabIndex = tabIndex}),
+                RelativeTransform(),
+                ChildOf(actions)
+            )
+            local visual <const> = world:spawn(
+                ui.Style({position = "absolute", inset = 0}),
+                ui.Paint(true),
+                RelativeTransform(0, 0, 1),
+                Tint(0.12, 0.20, 0.30, 1.0),
+                tecs.gfx.Material(materials.id("rounded"), 0.18),
+                Renderable(),
+                ChildOf(control)
+            )
+            world:spawn(
+                ui.Style({position = "absolute", width = 90, height = 22, inset = {left = 12, top = 11}}),
+                RelativeTransform(0, 0, 2),
+                Tint(0.9, 0.95, 1.0, 1.0),
+                tecs.gfx.Text.new({text = label, font = font, size = 15}),
+                ChildOf(control)
+            )
+            controls[#controls + 1] = {control, visual}
+            world:observe(
+                control,
+                ui.Event,
+                function(event: UiEvent)
+                    if event.kind == "activate" then
+                        setStatus(("%s via %s"):format(label, event.source))
+                    end
+                end
+            )
+        end
+        spawnCompactButton("Compose", 1)
+        spawnCompactButton("Inspect", 2)
+        spawnCompactButton("Ship", 3)
+
+        local viewport <const> = world:spawn(
+            ui.Style({
+                width = "100%",
+                flexGrow = 1,
+                minHeight = 120,
+            }),
+            ui.Scroll(),
+            RelativeTransform(),
+            ChildOf(panel)
+        )
+        local content <const> = world:spawn(
+            ui.Style({
+                width = "100%",
+                height = 508,
+                flexDirection = "column",
+                gap = 8,
+            }),
+            RelativeTransform(),
+            ChildOf(viewport)
+        )
+        local labels <const> = {
+            "Rectangle instance",
+            "Circle material",
+            "Text producer",
+            "Image sprite",
+            "Nested clipping",
+            "Dirty transforms",
+            "Focus navigation",
+            "Bubbling events",
+            "Pointer capture",
+        }
+        for index = 1, #labels do
+            spawnButton(content, ("%02d  %s"):format(index, labels[index]), index + 3)
+        end
+
+        -- Images remain sprites. Loading and residency are asynchronous; once
+        -- ready, this leaf simply joins the same retained hierarchy.
+        tecs.assets.loadImage(tecs.io.files.assetPath("demo/ui-badge.svg")):map(function(image: Image): Sprite
+            local sprite <const> = app.renderer:registerImage(image)
+            return sprite
+        end):onSettle(function(sprite: Future<Sprite>)
+            if sprite.status == "ready" then
+                world:spawn(
+                    ui.Style({
+                        position = "absolute",
+                        width = 32,
+                        height = 32,
+                        inset = {right = 8, top = 6},
+                    }),
+                    ui.Paint(true),
+                    RelativeTransform(0, 0, 3),
+                    sprite.value,
+                    Tint(1, 1, 1, 1),
+                    Renderable(),
+                    ChildOf(panel)
+                )
+            end
+        end)
+
+        world:addSystem({
+            name = "demo.UiState",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                for index = 1, #controls do
+                    local pair = controls[index]
+                    local state = world:get(pair[1], ui.InteractionState)
+                    local tint = world:get(pair[2], Tint)
+                    if state ~= nil and tint ~= nil then
+                        local r, g, b = 0.12, 0.20, 0.30
+                        if state.pressed then
+                            r, g, b = 0.14, 0.47, 0.62
+                        elseif state.hovered then
+                            r, g, b = 0.17, 0.34, 0.48
+                        elseif state.focused then
+                            r, g, b = 0.18, 0.29, 0.46
+                        end
+                        if tint.r ~= r or tint.g ~= g or tint.b ~= b then
+                            local changed = world:getMut(pair[2], Tint)
+                            changed.r, changed.g, changed.b = r, g, b
+                        end
+                    end
+                end
+            end,
+        })
 
         local elapsed = 0.0
 

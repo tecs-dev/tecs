@@ -219,8 +219,8 @@ local PAGE_OVERRIDES = {
                 title = "Batteries included",
                 details = "[Physics](/modules/physics), [audio](/modules/audio),"
                     .. " [particles](/modules/gfx/particles), [text](/modules/gfx/),"
-                    .. " [sequences](/modules/sequence), [sprite sheets](/modules/gfx/animation), and hot reload"
-                    .. " share the ECS.",
+                    .. " [retained UI](/ui/), [sequences](/modules/sequence),"
+                    .. " [sprite sheets](/modules/gfx/animation), and hot reload share the ECS.",
                 icon = "🔋",
             },
             {
