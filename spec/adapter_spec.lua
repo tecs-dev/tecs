@@ -24,6 +24,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local adapter = require("tecs.platform.adapter")
+local content = require("tecs.platform.content")
 local files = require("tecs.io.files")
 local events = require("tecs.platform.events")
 local newInput = require("tecs.input").newInput
@@ -173,12 +174,12 @@ describe("platform contract", function()
 
     before_each(function()
         adapter.reset()
-        files.resetPaths()
+        content.reset()
     end)
 
     teardown(function()
         adapter.reset()
-        files.resetPaths()
+        content.reset()
         shadercompiler.usePack(nil)
         C.SDL_Quit()
     end)
@@ -222,7 +223,7 @@ describe("platform contract", function()
 
     it("resolves content and state through the installed platform", function()
         adapter.install(fakePlatform())
-        files.resetPaths()
+        content.reset()
 
         assert.are.equal("/dev/content/", files.basePath())
         assert.are.equal("/dev/save/tecs/tecs/", files.preferencePath())
@@ -239,7 +240,7 @@ describe("platform contract", function()
         -- A development run reads out of a build tree whatever the platform is,
         -- because the platform's answer is where a shipped build put content.
         adapter.install(fakePlatform())
-        files.resetPaths()
+        content.reset()
         files.setAssetRoot("/tmp/staging")
         assert.are.equal("/tmp/staging/", files.assetRoot())
         assert.are.equal(
@@ -257,7 +258,7 @@ describe("platform contract", function()
         local platform = fakePlatform()
         platform.storage = fakeStorage()
         adapter.install(platform)
-        files.resetPaths()
+        content.reset()
         -- A development run has TECS_ASSETS set and it outranks the platform,
         -- so content is pointed back at the platform's own base here.
         files.setAssetRoot(files.basePath())
@@ -324,14 +325,14 @@ describe("platform contract", function()
         local platform = fakePlatform()
         platform.storage = fakeStorage()
         adapter.install(platform)
-        files.resetPaths()
+        content.reset()
         files.setAssetRoot(files.basePath())
 
         files.read(files.assetPath("levels/1.json"), "level")
-        assert.are.equal("level", files.loaded()["/dev/content/levels/1.json"])
-        assert.is_nil(files.loaded()["/dev/content/absent"])
+        assert.are.equal("level", content.loaded()["/dev/content/levels/1.json"])
+        assert.is_nil(content.loaded()["/dev/content/absent"])
         assert.is_nil(files.read("/dev/content/absent"))
-        assert.is_nil(files.loaded()["/dev/content/absent"], "a read that found nothing records nothing")
+        assert.is_nil(content.loaded()["/dev/content/absent"], "a read that found nothing records nothing")
     end)
 
     it("answers nil for what a platform says it does not have", function()
@@ -367,7 +368,7 @@ describe("platform contract", function()
             return os.getenv("TMPDIR") or "/tmp/"
         end
         adapter.install(platform)
-        files.resetPaths()
+        content.reset()
 
         assert.are.equal("sdl", adapter.storage().name)
         local save = files.writablePath("tecs-adapter-spec.txt")
@@ -460,7 +461,7 @@ describe("platform contract", function()
     it("returns to SDL when a platform is removed", function()
         adapter.install(fakePlatform({ { kind = "quit" } }))
         adapter.reset()
-        files.resetPaths()
+        content.reset()
 
         assert.are.equal("sdl", adapter.current().name)
         assert.is_nil(events.source, "the event hook must be cleared with the platform")

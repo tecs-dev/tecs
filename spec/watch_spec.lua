@@ -261,7 +261,7 @@ describe("the file watcher", function()
         assert.are.equal(1, calls)
 
         -- Still running, and still willing to try the next save.
-        assert.is_true(watcher.installed())
+        assert.is_true(watcher.isInstalled())
         write(dir .. "broken.glsl", FIRST)
         watcher.scan()
         watcher.scan()
@@ -353,7 +353,7 @@ describe("the file watcher", function()
         watcher.on("shader", handler)
 
         watcher.uninstall()
-        assert.is_false(watcher.installed())
+        assert.is_false(watcher.isInstalled())
         assert.are.same({}, watcher.watching())
 
         write(dir .. "stopped.glsl", SECOND)
@@ -388,6 +388,6 @@ describe("the file watcher", function()
             tostring(failure):find("no hot-reload support", 1, true),
             "unexpected refusal: " .. tostring(failure)
         )
-        assert.is_false(watcher.installed())
+        assert.is_false(watcher.isInstalled())
     end)
 end)

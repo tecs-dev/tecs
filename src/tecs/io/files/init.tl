@@ -159,14 +159,6 @@ function files.setAssetRoot(root: string)
     content.setAssetRoot(root)
 end
 
---- Forgets the cached roots.
----
---- Platform changes refresh roots automatically. Tests call this after moving
---- process state.
-function files.resetPaths()
-    content.reset()
-end
-
 --- Returns information about `path`, or nil when nothing occupies it.
 ---
 --- Nil is the answer for a path that does not exist, for a broken symbolic
@@ -324,20 +316,6 @@ end
 function files.read(path: string, kind?: string): string
     required(path, "read")
     return content.read(path, kind)
-end
-
---- Returns every path this process has read or decoded, by content kind.
----
---- Kinds include
---- "image", "sound", "font", or "document" for bytes nothing named.
----
---- A path that an asset loader failed to load is here too. Whatever asked for
---- it named it, and a file that would not decode is exactly the one worth
---- noticing a change to. A failed direct `read` is absent because it produced
---- no loaded document to reload.
---- @return Returns a live read-only table shared with the content system.
-function files.loaded(): {string: string}
-    return content.loaded()
 end
 
 --- A `Writer` for a backend that has no streaming write.

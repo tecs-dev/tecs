@@ -778,12 +778,11 @@ and `Audio:destroy` borrow it and read their own count first, so an instance wit
 nothing in flight waits on nobody, and `destroy` gives up whatever the drain ran
 out of time on rather than freeing the mixer under it.
 
-All three entry points record what they touched, and they record it in one
-place: `files.loaded` answers every path this process has read or decoded and
-the kind it was read as, which is what the file watcher polls instead of
-walking the content tree. Asset loads update the internal content registry
-rather than keeping a list of their own, because the decode they are recording
-happens on a worker and a second list is a second answer to the same question.
+All three entry points record what they touched in the internal content
+registry. The file watcher polls that registry instead of walking the content
+tree. Asset loads use the same registry rather than keeping a list of their
+own, because the decode they are recording happens on a worker and a second
+list is a second answer to the same question.
 
 ## Vector math stays in Lua
 

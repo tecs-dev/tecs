@@ -352,6 +352,8 @@ describe("the public surface", function()
             -- to route and nothing to keep consulting.
             assert.is_true(rawequal(rawget(tecs.io, "files"), require("tecs.io.files")))
             assert.is_true(rawequal(rawget(tecs.io, "watcher"), require("tecs.io.watcher")))
+            assert.is_function(tecs.io.watcher.isInstalled)
+            assert.is_nil(tecs.io.watcher.installed)
         end)
 
         it("hangs MCP below io and nowhere deeper", function()
@@ -368,6 +370,9 @@ describe("the public surface", function()
             assert.is_function(tecs.io.files.setPreferenceIdentity)
             assert.is_nil(tecs.io.files.organization)
             assert.is_nil(tecs.io.files.application)
+            assert.is_nil(tecs.io.files.loaded)
+            assert.is_nil(tecs.io.files.note)
+            assert.is_nil(tecs.io.files.resetPaths)
         end)
 
         it("answers nil for a name neither it nor the names below it carry", function()

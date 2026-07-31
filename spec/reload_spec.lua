@@ -425,7 +425,7 @@ describe("reload_shaders against a running application", function()
         })
         assert.is_true(app:_init())
 
-        assert.is_true(watcher.installed(), "the watcher the config asked for is not running")
+        assert.is_true(watcher.isInstalled(), "the watcher the config asked for is not running")
         local kinds = {}
         for _, kind in ipairs(watcher.kinds()) do
             kinds[kind] = true
@@ -440,7 +440,7 @@ describe("reload_shaders against a running application", function()
         assert.is_true(#watcher.watching() > 0, "a run that has drawn is watching nothing")
 
         app:_shutdown()
-        assert.is_false(watcher.installed(), "the watcher outlived the application")
+        assert.is_false(watcher.isInstalled(), "the watcher outlived the application")
         tools.bind(nil, nil)
         tools.bindReload(nil)
         restore()

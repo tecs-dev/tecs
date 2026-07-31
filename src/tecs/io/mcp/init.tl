@@ -65,7 +65,7 @@ local METHOD_NOT_FOUND <const> = -32601
 local record mcp
     --- Defines the decoded arguments a tool receives and the structured
     --- content it returns.
-    type Handler = function(arguments: {string: any}): {string: any}
+    type ToolHandler = function(arguments: {string: any}): {string: any}
 
     --- Describes one registered tool and its handler.
     record Tool
@@ -84,7 +84,7 @@ local record mcp
         --- Caller-writable. This handler runs synchronously inside `poll`.
         --- Required; its absence raises at registration rather than at call
         --- time.
-        handler: Handler
+        handler: ToolHandler
         --- Caller-writable. This declares whether the tool only reads state so
         --- an agent can judge a call before making it.
         readOnly: boolean

@@ -20,6 +20,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local files = require("tecs.io.files")
+local content = require("tecs.platform.content")
 local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
 local assets = require("tecs.assets")
@@ -477,7 +478,7 @@ describe("assets", function()
 
         -- The kind is the one it was first asked for under, so reading an
         -- image's bytes afterwards does not turn it into a document.
-        local loaded = files.loaded()
+        local loaded = content.loaded()
         assert.are.equal("image", loaded[FIXTURE])
         assert.are.equal("document", loaded["spec/fixtures/test_material.glsl"] or "document")
         assert.is_nil(loaded["spec/fixtures/does-not-exist.json"], "a path with no file was not read")

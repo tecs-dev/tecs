@@ -447,3 +447,15 @@ print(response.status, response.url.host)
 response.body:close()
 client:close()
 -- #endregion tecs.io.http.newClient
+
+-- #region tecs.io.watcher.poll
+local watcher <const> = require("tecs.io.watcher")
+
+local function runHeadlessWatcher(keepRunning: function(): boolean)
+    watcher.install({intervalSeconds = 0.25})
+    while keepRunning() do
+        watcher.poll()
+    end
+    watcher.uninstall()
+end
+-- #endregion tecs.io.watcher.poll

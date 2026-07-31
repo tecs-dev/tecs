@@ -735,7 +735,7 @@ mcp.register({
         end
 
         local enabled = args.enabled as boolean
-        if enabled == true and not watcher.installed() then
+        if enabled == true and not watcher.isInstalled() then
             watcher.install()
         elseif enabled == false then
             watcher.uninstall()
@@ -750,7 +750,7 @@ mcp.register({
         local unsettled = watcher.unsettled()
         local kinds = watcher.kinds()
         return {
-            watching = watcher.installed(),
+            watching = watcher.isInstalled(),
             files = #watching,
             paths = #watching > 0 and watching or data.empty_array,
             -- Files seen changing and not acted on yet, which is what a save

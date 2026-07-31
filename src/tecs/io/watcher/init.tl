@@ -10,11 +10,13 @@ if watcher.isSupported() then
     end)
     watcher.install({intervalSeconds = 0.25})
 end
-
--- Once an iteration. An application with `watch` in its config does this and
--- the install above for you.
-watcher.poll()
 ```
+
+An [`Application`](tealdoc:tecs.Application) with `watch` in its configuration
+installs the watcher and calls `poll` once per host iteration, including while
+the game is suspended or handling a crash. Game systems, plugins, and update
+functions do not call `poll`. Only a headless program without an application
+owns the manual loop shown on `poll`.
 
 The watcher scans only paths recorded by `tecs.io.files.read` and the asset
 loaders. It waits for a changed file's
@@ -194,7 +196,7 @@ end
 --- Returns whether the watcher is running.
 ---
 --- @return Returns true after `install` and before `uninstall`.
-function watcher.installed(): boolean
+function watcher.isInstalled(): boolean
     return running
 end
 
@@ -377,9 +379,18 @@ function watcher.scan(): integer
     return fired
 end
 
---- Scans when the configured interval has elapsed.
+--- Advances a manually driven headless watcher.
 ---
---- Call once per iteration.
+--- An [`Application`](tealdoc:tecs.Application) calls this automatically once
+--- per host iteration, including while suspended or crashed. Game systems,
+--- plugins, and update functions must not call it. A second call in the same
+--- loop can distort `intervalSeconds` and the number of matching observations
+--- counted by `Config.settle`.
+---
+--- Only a headless program without an application calls this manually,
+--- normally once per loop after `install`. The function returns immediately
+--- until `intervalSeconds` has elapsed, then scans only content already
+--- recorded by file or asset loading. It performs no sleeping.
 ---
 --- @return Returns how many handlers ran during this call.
 function watcher.poll(): integer

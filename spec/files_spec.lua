@@ -14,6 +14,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local ffi = require("ffi")
 local sdl = require("tecs.ffi.sdl3")
 local files = require("tecs.io.files")
+local content = require("tecs.platform.content")
 local assets = require("tecs.assets")
 local workers = require("tecs.workers")
 
@@ -339,7 +340,7 @@ describe("io.files", function()
             local save = at("slot1.json")
             assert.is_true(files.write(save, '{"score":41}'))
             assert.are.equal('{"score":41}', files.read(save))
-            assert.are.equal("document", files.loaded()[save], "the read is recorded for the watcher")
+            assert.are.equal("document", content.loaded()[save], "the read is recorded for the watcher")
         end)
 
         it("replaces what was there rather than appending", function()
