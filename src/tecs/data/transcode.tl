@@ -9,6 +9,9 @@
 local ffi <const> = require("ffi")
 local loader <const> = require("tecs.ffi.loader")
 local sdl <const> = require("tecs.ffi.sdl3")
+local type ioTypes = require("tecs.io.types")
+local type ByteView = ioTypes.ByteView
+local type ByteInput = string | ByteView
 
 local C <const> = sdl.C
 
@@ -32,14 +35,47 @@ local ICONV_EINVAL <const> = ffi.cast("size_t", -4) as loader.CValue
 
 local CHUNK_SIZE <const> = 4096
 
+local record ByteRange
+    pointer: loader.BytePointer
+    length: integer
+    owner: ByteInput
+end
+
+local function byteRange(value: ByteInput): ByteRange
+    if type(value) == "string" then
+        local text <const> = value as string
+        return {
+            pointer = ffi.cast("uint8_t *", text) as loader.BytePointer,
+            length = #text,
+            owner = text,
+        }
+    end
+    local dynamic <const> = value as {string: any}
+    if
+        type(value) ~= "table"
+        or type(dynamic.length) ~= "function"
+        or type(dynamic.getFFIPointer) ~= "function"
+        or type(dynamic.isReleased) ~= "function"
+        or (dynamic.isReleased as function(any): boolean)(value)
+    then
+        error("tecs.data.transcode: bytes must be a byte string or open io.ByteView", 3)
+    end
+    local view <const> = value as ByteView
+    return {
+        pointer = view:getFFIPointer(),
+        length = view:length(),
+        owner = view,
+    }
+end
+
 local function continuation(byte: integer): boolean
     return byte >= 0x80 and byte <= 0xBF
 end
 
-local function validateUTF8(bytes: string): string
-    local index = 1
-    while index <= #bytes do
-        local first <const> = string.byte(bytes, index) as integer
+local function validateUTF8(bytes: ByteRange): string
+    local index = 0
+    while index < bytes.length do
+        local first <const> = bytes.pointer[index] as integer
         local count = 0
         local secondMin = 0x80
         local secondMax = 0xBF
@@ -62,20 +98,20 @@ local function validateUTF8(bytes: string): string
                 secondMax = 0x8F
             end
         else
-            return ("tecs.data.transcode: invalid UTF-8 input at byte %d"):format(index)
+            return ("tecs.data.transcode: invalid UTF-8 input at byte %d"):format(index + 1)
         end
 
         if count > 0 then
-            if index + count > #bytes then
-                return ("tecs.data.transcode: incomplete UTF-8 input at byte %d"):format(index)
+            if index + count >= bytes.length then
+                return ("tecs.data.transcode: incomplete UTF-8 input at byte %d"):format(index + 1)
             end
-            local second <const> = string.byte(bytes, index + 1) as integer
+            local second <const> = bytes.pointer[index + 1] as integer
             if second < secondMin or second > secondMax then
-                return ("tecs.data.transcode: invalid UTF-8 input at byte %d"):format(index)
+                return ("tecs.data.transcode: invalid UTF-8 input at byte %d"):format(index + 1)
             end
             for offset = 2, count do
-                if not continuation(string.byte(bytes, index + offset) as integer) then
-                    return ("tecs.data.transcode: invalid UTF-8 input at byte %d"):format(index)
+                if not continuation(bytes.pointer[index + offset] as integer) then
+                    return ("tecs.data.transcode: invalid UTF-8 input at byte %d"):format(index + 1)
                 end
             end
             index = index + count + 1
@@ -84,32 +120,33 @@ local function validateUTF8(bytes: string): string
     return nil
 end
 
-local function word(bytes: string, index: integer, littleEndian: boolean): integer
-    local first <const>, second <const> = string.byte(bytes, index, index + 1)
+local function word(bytes: ByteRange, index: integer, littleEndian: boolean): integer
+    local first <const> = bytes.pointer[index] as integer
+    local second <const> = bytes.pointer[index + 1] as integer
     if littleEndian then
         return (first as integer) + (second as integer) * 0x100
     end
     return (first as integer) * 0x100 + (second as integer)
 end
 
-local function validateUTF16(bytes: string, littleEndian: boolean, name: string): string
-    local index = 1
-    while index <= #bytes do
-        if index + 1 > #bytes then
-            return ("tecs.data.transcode: incomplete %s input at byte %d"):format(name, index)
+local function validateUTF16(bytes: ByteRange, littleEndian: boolean, name: string): string
+    local index = 0
+    while index < bytes.length do
+        if index + 1 >= bytes.length then
+            return ("tecs.data.transcode: incomplete %s input at byte %d"):format(name, index + 1)
         end
         local first <const> = word(bytes, index, littleEndian)
         if first >= 0xD800 and first <= 0xDBFF then
-            if index + 3 > #bytes then
-                return ("tecs.data.transcode: incomplete %s input at byte %d"):format(name, index)
+            if index + 3 >= bytes.length then
+                return ("tecs.data.transcode: incomplete %s input at byte %d"):format(name, index + 1)
             end
             local second <const> = word(bytes, index + 2, littleEndian)
             if second < 0xDC00 or second > 0xDFFF then
-                return ("tecs.data.transcode: invalid %s input at byte %d"):format(name, index)
+                return ("tecs.data.transcode: invalid %s input at byte %d"):format(name, index + 1)
             end
             index = index + 4
         elseif first >= 0xDC00 and first <= 0xDFFF then
-            return ("tecs.data.transcode: invalid %s input at byte %d"):format(name, index)
+            return ("tecs.data.transcode: invalid %s input at byte %d"):format(name, index + 1)
         else
             index = index + 2
         end
@@ -117,13 +154,16 @@ local function validateUTF16(bytes: string, littleEndian: boolean, name: string)
     return nil
 end
 
-local function validateUTF32(bytes: string, littleEndian: boolean, name: string): string
-    local index = 1
-    while index <= #bytes do
-        if index + 3 > #bytes then
-            return ("tecs.data.transcode: incomplete %s input at byte %d"):format(name, index)
+local function validateUTF32(bytes: ByteRange, littleEndian: boolean, name: string): string
+    local index = 0
+    while index < bytes.length do
+        if index + 3 >= bytes.length then
+            return ("tecs.data.transcode: incomplete %s input at byte %d"):format(name, index + 1)
         end
-        local a <const>, b <const>, c <const>, d <const> = string.byte(bytes, index, index + 3)
+        local a <const> = bytes.pointer[index] as integer
+        local b <const> = bytes.pointer[index + 1] as integer
+        local c <const> = bytes.pointer[index + 2] as integer
+        local d <const> = bytes.pointer[index + 3] as integer
         local codepoint: integer
         if littleEndian then
             codepoint = (a as integer) + (b as integer) * 0x100 + (c as integer) * 0x10000 + (d as integer) * 0x1000000
@@ -131,14 +171,14 @@ local function validateUTF32(bytes: string, littleEndian: boolean, name: string)
             codepoint = (a as integer) * 0x1000000 + (b as integer) * 0x10000 + (c as integer) * 0x100 + (d as integer)
         end
         if codepoint > 0x10FFFF or (codepoint >= 0xD800 and codepoint <= 0xDFFF) then
-            return ("tecs.data.transcode: invalid %s input at byte %d"):format(name, index)
+            return ("tecs.data.transcode: invalid %s input at byte %d"):format(name, index + 1)
         end
         index = index + 4
     end
     return nil
 end
 
-local function validateInput(bytes: string, encoding: string): string
+local function validateInput(bytes: ByteRange, encoding: string): string
     local normalized <const> = encoding:upper():gsub("[_%-]", "")
     if normalized == "UTF8" then
         return validateUTF8(bytes)
@@ -173,17 +213,17 @@ local function failAt(kind: string, fromEncoding: string, inputLeft: loader.CArr
     return ("tecs.data.transcode: %s %s input at byte %d"):format(kind, fromEncoding, length - remaining + 1)
 end
 
-local function run(handle: loader.CPtr, bytes: string, fromEncoding: string): string, string
+local function run(handle: loader.CPtr, bytes: ByteRange, fromEncoding: string): string, string
     -- These arrays hold the pointer variables that iconv advances. `bytes`
     -- remains reachable for the whole call, so the borrowed input pointer does
     -- not outlive its Lua string.
     local input <const> = loader.newArray("const char *[1]")
     local inputLeft <const> = loader.newArray("size_t[1]")
-    input[0] = bytes
-    inputLeft[0] = #bytes
+    input[0] = ffi.cast("const char *", bytes.pointer)
+    inputLeft[0] = bytes.length
 
     local chunks: {string} = {}
-    local flushing = #bytes == 0
+    local flushing = bytes.length == 0
     while true do
         local outputBuffer <const> = loader.newArray("uint8_t[?]", CHUNK_SIZE)
         local output <const> = loader.newArray("char *[1]")
@@ -212,33 +252,34 @@ local function run(handle: loader.CPtr, bytes: string, fromEncoding: string): st
             if flushing then
                 return nil, "tecs.data.transcode: target encoding could not be finalized"
             end
-            return nil, failAt("invalid or unconvertible", fromEncoding, inputLeft, #bytes)
+            return nil, failAt("invalid or unconvertible", fromEncoding, inputLeft, bytes.length)
         elseif result == ICONV_EINVAL then
             if flushing then
                 return nil, "tecs.data.transcode: target encoding could not be finalized"
             end
-            return nil, failAt("incomplete", fromEncoding, inputLeft, #bytes)
+            return nil, failAt("incomplete", fromEncoding, inputLeft, bytes.length)
         elseif result == ICONV_ERROR then
             if flushing then
                 return nil, "tecs.data.transcode: target encoding could not be finalized"
             end
-            return nil, failAt("unconvertible", fromEncoding, inputLeft, #bytes)
+            return nil, failAt("unconvertible", fromEncoding, inputLeft, bytes.length)
         else
             if flushing then
                 return table.concat(chunks), nil
             end
             if tonumber(inputLeft[0]) ~= 0 then
-                return nil, failAt("unconvertible", fromEncoding, inputLeft, #bytes)
+                return nil, failAt("unconvertible", fromEncoding, inputLeft, bytes.length)
             end
             flushing = true
         end
     end
 end
 
-local function transcode(bytes: string, fromEncoding: string, toEncoding: string): string
+local function transcode(bytes: ByteInput, fromEncoding: string, toEncoding: string): string
     validEncoding(fromEncoding, "fromEncoding")
     validEncoding(toEncoding, "toEncoding")
-    local invalid <const> = validateInput(bytes, fromEncoding)
+    local input <const> = byteRange(bytes)
+    local invalid <const> = validateInput(input, fromEncoding)
     if invalid ~= nil then
         error(invalid, 2)
     end
@@ -256,7 +297,7 @@ local function transcode(bytes: string, fromEncoding: string, toEncoding: string
     -- A finalizer protects the context if allocation itself raises inside
     -- `run`; the normal path detaches it and closes synchronously below.
     ffi.gc(handle as ffi.CData, iconvClose as function(ffi.CData): integer)
-    local ran <const>, converted, reason = pcall(run, handle, bytes, fromEncoding) as (boolean, any, string)
+    local ran <const>, converted, reason = pcall(run, handle, input, fromEncoding) as (boolean, any, string)
     local closed <const> = close(handle)
 
     if not ran then
