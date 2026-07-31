@@ -100,6 +100,11 @@ local function fakeStorage()
         files[path] = bytes
         return true
     end
+    backend.append = function(path, bytes)
+        note("append", path)
+        files[path] = (files[path] or "") .. bytes
+        return true
+    end
     backend.info = function(path)
         note("info", path)
         if files[path] == nil then
@@ -112,6 +117,10 @@ local function fakeStorage()
             modifiedAt = 2e18,
             accessedAt = 2e18,
         }
+    end
+    backend.isSymlink = function(path)
+        note("isSymlink", path)
+        return false
     end
     backend.glob = function(path, pattern)
         note("glob " .. tostring(pattern), path)
@@ -278,12 +287,14 @@ describe("platform contract", function()
 
         local save = files.writablePath("slot1.json")
         assert.is_true(files.write(save, '{"score":41}'))
-        assert.are.equal('{"score":41}', files.read(save))
+        assert.is_true(files.append(save, "\n"))
+        assert.are.equal('{"score":41}\n', files.read(save))
 
         assert.are.equal(15, files.info(level).size)
         assert.is_true(files.exists(level))
         assert.is_true(files.isFile(level))
         assert.is_false(files.isDirectory(level))
+        assert.is_false(files.isSymlink(level))
         assert.is_false(files.exists("/dev/content/absent"))
 
         assert.are.same({ "levels", "levels/1.json" }, files.list(files.basePath()))
@@ -298,11 +309,13 @@ describe("platform contract", function()
         assert.are.same({
             "read /dev/content/levels/1.json",
             "write /dev/save/tecs/tecs/slot1.json",
+            "append /dev/save/tecs/tecs/slot1.json",
             "read /dev/save/tecs/tecs/slot1.json",
             "info /dev/content/levels/1.json",
             "info /dev/content/levels/1.json",
             "info /dev/content/levels/1.json",
             "info /dev/content/levels/1.json",
+            "isSymlink /dev/content/levels/1.json",
             "info /dev/content/absent",
             "glob * /dev/content/",
             "createDirectory /dev/save/tecs/tecs/shots",

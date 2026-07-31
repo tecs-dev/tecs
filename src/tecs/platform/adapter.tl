@@ -195,7 +195,18 @@ function adapter.install(platform: adapter.Platform)
     -- that are left out are `currentDirectory` and `userFolder`, which have no
     -- answer on a target that is not a desktop and are documented as absent.
     if platform.storage ~= nil then
-        for _, operation in ipairs({"read", "write", "info", "glob", "createDirectory", "remove", "rename", "copy"}) do
+        for _, operation in ipairs({
+            "read",
+            "write",
+            "append",
+            "info",
+            "isSymlink",
+            "glob",
+            "createDirectory",
+            "remove",
+            "rename",
+            "copy",
+        }) do
             if (platform.storage as {string: any})[operation] == nil then
                 error(("tecs: a storage backend must supply %s"):format(operation), 2)
             end

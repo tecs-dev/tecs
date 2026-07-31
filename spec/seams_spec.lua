@@ -39,7 +39,7 @@ local files = require("tecs.io.files")
 -- ships with the engine on every target and is not a portability question.
 local BINDINGS = { "rust", "sdl3", "sdl3mixer", "sdl3ttf", "shaderc", "spvc" }
 
--- Every SDL entry point that reaches content, and the decoders that take a
+-- Every native entry point that reaches content, and the decoders that take a
 -- path instead of a stream. This is the bug class: the storage seam covers
 -- where content lives and how a file is reached, so a call from this list
 -- outside the storage backend is a path that goes around it.
@@ -61,6 +61,7 @@ local STORAGE_SYMBOLS = {
     "SDL_RemovePath",
     "SDL_RenamePath",
     "SDL_CopyFile",
+    "tecsPathIsSymlink",
     -- Where content and state live.
     "SDL_GetBasePath",
     "SDL_GetPrefPath",
@@ -246,12 +247,13 @@ local STORAGE = {
             "SDL_RemovePath",
             "SDL_RenamePath",
             "SDL_CopyFile",
+            "tecsPathIsSymlink",
             "SDL_GetCurrentDirectory",
             "SDL_GetUserFolder",
         },
         reason = "The seam's SDL implementation, and the one place these "
-            .. "belong. Ten path calls, one each, plus the open a streaming "
-            .. "read or write is built on.",
+            .. "belong. SDL answers the ordinary path calls and Rust answers "
+            .. "whether the final path itself is a symbolic link.",
     },
     ["tecs/platform/adapter.lua"] = {
         bucket = "seam",
