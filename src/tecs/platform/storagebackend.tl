@@ -34,12 +34,14 @@ layer should invent.
 ## SDL filesystem backend
 
 The SDL backend below calls `SDL_LoadFile`, `SDL_GlobDirectory` and their
-neighbors directly, not `SDL_OpenFileStorage`. Storage has a readiness
-model a path call does not: it opens immediately and is unusable until
-`SDL_StorageReady` says so, which on a console can be after a mount or a
-download completes. On a machine where every backing it can have is the
-plain filesystem, a spec would only ever exercise the ready-immediately path
-and would prove nothing about the model that is the reason to have it.
+neighbors directly, not `SDL_OpenFileStorage`. Rust's filesystem metadata
+answers whether the final path itself is a symbolic link because SDL follows
+it. Both stay inside this backend. Storage has a readiness model a path call
+does not: it opens immediately and is unusable until `SDL_StorageReady` says
+so, which on a console can be after a mount or a download completes. On a
+machine where every backing it can have is the plain filesystem, a spec would
+only ever exercise the ready-immediately path and would prove nothing about
+the model that is the reason to have it.
 
 So `SDL_Storage` belongs to whichever backend needs it, which is the point
 of the seam. A port whose content is a title storage writes those calls, its
@@ -47,8 +49,8 @@ readiness wait included, in a module the engine never sees.
 
 ## Port contract
 
-Eight functions that take a path, two that open one for streaming, and two
-that ask about the host. The eight are required and are called without
+Ten functions that take a path, two that open one for streaming, and two that
+ask about the host. The ten are required and are called without
 checking. `currentDirectory` and `userFolder` are optional and answer nil
 with a reason when the platform has no such notion, which is already what
 SDL answers for a folder a desktop does not have, so a caller that handled
@@ -62,11 +64,13 @@ delegates, so a port inherits it rather than repeating it.
 ]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
+local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local buffer <const> = require("tecs.io.buffer")
 local type types = require("tecs.io.types")
 
 local C <const> = sdl.C
+local R <const> = rust.C
 local floor <const> = math.floor
 local max <const> = math.max
 
@@ -132,6 +136,9 @@ local record Backend
     --- Writes `bytes` to `path`, replacing whatever was there. The parent is
     --- not created.
     write: function(path: string, bytes: string): boolean, string
+    --- Appends `bytes` to `path`, creating the file when absent. The parent is
+    --- not created.
+    append: function(path: string, bytes: string): boolean, string
     --- Opens `path` for writing in pieces, replacing whatever was there.
     ---
     --- Optional. A platform that leaves it nil gets a writer `tecs.io.files`
@@ -144,6 +151,9 @@ local record Backend
     openRead: function(path: string): Reader, string
     --- What is at `path`, or nil and the reason there is nothing to describe.
     info: function(path: string): Info, string
+    --- Whether the final path itself is a symbolic link. Parent links are
+    --- followed.
+    isSymlink: function(path: string): boolean
     --- Entries under `path` matching `pattern`, as paths relative to `path`.
     --- A nil pattern walks the whole tree. `*` and `?` do not match a
     --- separator, so `"*"` is one level. Nil and a reason when `path` cannot
@@ -247,8 +257,8 @@ end
 --- The stream is a closed-over local rather than a field, so a closed writer
 --- has nothing left to call SDL with and says so instead of handing a freed
 --- pointer back to the library.
-local function sdlWriter(path: string): Writer, string
-    local stream = C.SDL_IOFromFile(path, "wb") as loader.CPtr
+local function sdlWriter(path: string, mode: string): Writer, string
+    local stream = C.SDL_IOFromFile(path, mode) as loader.CPtr
     if stream == nil then
         return nil, sdl.error()
     end
@@ -416,7 +426,20 @@ local sdlBackend <const>: Backend = {
         return false, sdl.error()
     end,
 
-    openWrite = sdlWriter,
+    append = function(path: string, bytes: string): boolean, string
+        local writer <const>, openReason = sdlWriter(path, "ab")
+        if writer == nil then
+            return false, openReason
+        end
+        local wrote <const>, writeReason = writer:write(bytes)
+        local closed <const>, closeReason = writer:close()
+        if not wrote then
+            return false, writeReason
+        end
+        return closed, closeReason
+    end,
+
+    openWrite = function(path: string): Writer, string return sdlWriter(path, "wb") end,
     openRead = sdlReader,
 
     info = function(path: string): Info, string
@@ -431,6 +454,8 @@ local sdlBackend <const>: Backend = {
             accessedAt = tonumber(FIELDS.access_time),
         }
     end,
+
+    isSymlink = function(path: string): boolean return tonumber(R.tecsPathIsSymlink(path, #path)) == 1 end,
 
     glob = function(path: string, pattern: string, options: GlobOptions): {string}, string
         local flags = 0

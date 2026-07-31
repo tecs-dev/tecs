@@ -57,6 +57,7 @@ int tecsCliMcp(void);
 
 TecsBytes *tecsSystemCachePath(const uint8_t *organization, size_t organization_length, const uint8_t *application,
                                size_t application_length);
+int tecsPathIsSymlink(const uint8_t *path, size_t path_length);
 
 TecsImage *tecsImageDecode(const uint8_t *bytes, size_t length);
 const uint8_t *tecsImagePixels(const TecsImage *image);
