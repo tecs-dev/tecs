@@ -1597,12 +1597,16 @@ process, a request. [`Future.tl`](src/tecs/Future.tl) gives all of them one
 settle-once state, failure, cancellation, listener and wait vocabulary.
 
 ```lua
-local Future = require("tecs.Future")
+local process, reason = tecs.io.newProcess({ args = { "git", "status", "--porcelain" } })
+if process == nil then error(reason) end
 
-tecs.platform.os.runProcess({ args = { "git", "rev-parse", "HEAD" } })
-    :map(function(result) return result.output end)
-    :recover(function() return "unknown" end)
-    :onSettle(function(future) print(future.value) end)
+process.finished
+    :map(function(exit) return exit:succeeded() end)
+    :recover(function() return false end)
+    :onSettle(function(future)
+        print(future.value)
+        process:close()
+    end)
 ```
 
 **`status` is a plain field.** `"pending"`, `"ready"`, `"failed"` or
@@ -1767,100 +1771,54 @@ for every body, and states both queue bounds beside the results.
 
 ## Shelling out
 
-A command line tool, a resource pipeline or an asset build wants to run another
-program, and a game wants to do it between two frames rather than instead of
-them. `tecs.platform.os` is that, and it is one of the few subsystems that is more
-useful without a window than with one, so it initializes no SDL subsystem and
-works under a plain interpreter.
+A command-line tool, resource pipeline, asset build, or game may need a
+child whose lifetime is longer than one function call. [`io.tl`](src/tecs/io.tl)
+therefore exposes a live process with independently closable stdin, stdout,
+and stderr endpoints. It initializes no SDL subsystem and works from a plain
+interpreter as well as from the game host.
 
 ```lua
-local run = tecs.platform.os.runProcess({ args = { "git", "rev-parse", "HEAD" } })
--- ... frames pass, the loop pumps ...
-if run.status == "ready" and run.value:succeeded() then
-    print(run.value.output)
-end
+local process, reason = tecs.io.newProcess({
+    args = { "asset-compiler", "--watch" },
+    stderr = "stdout",
+})
+if process == nil then error(reason) end
+
+local chunk, readReason = process.stdout:readAvailable()
+if readReason ~= nil then error(readReason) end
+if chunk ~= nil and chunk ~= "" then print(chunk) end
 ```
 
-A run is a [`Future`](#a-value-that-settles-once), so the words for how it
-ended are the ones every asynchronous thing in the tree uses, and a caller who
-wants the answer rather than the polling writes
-`proc.run(...):map(function(result) return result.output end)`.
+**Backpressure is part of the API.** A process pipe is bounded storage.
+`readAvailable` and `writeAvailable` return immediately and distinguish no
+current progress from EOF or failure. Their buffer and byte-view variants
+move bytes directly between caller storage and SDL's stream. A frame loop can
+therefore decide whether to retry, stop producing, or close the child instead
+of feeding an unbounded hidden queue.
 
-**One shape, and it is run-to-completion.** The result arrives whole, once,
-with the exit status beside it. The long-running child whose output you want as
-it appears is a different API rather than a flag on this one: it has to answer
-what a chunk is, what happens when a chatty child outruns its reader, and how
-two streams interleave once they are delivered separately over time, and every
-one of those is a guess here and a requirement there. The worker already reads
-incrementally, so a streaming variant grows from that seam; until it exists,
-output is accumulated whole and `timeoutMs` is what bounds a child that prints
-forever.
+**Complete exchange is built on the same pipes.** `communicate` alternates
+feeding stdin with draining both output streams, then waits for the exit and
+EOF. This is the useful one-call shape for a compiler invocation or CLI
+subcommand, but it is not a second process implementation. Its combined
+capture limit makes the deliberate whole-output allocation explicit.
 
-**The child never leaves the worker.** `SDL_ReadProcess` reads to end of file
-and a blocking `SDL_WaitProcess` waits for the child to exit, so on the main
-thread either one is a stalled frame for as long as the program runs. A run
-therefore goes out to a worker exactly as a decode does, and what comes back is
-bytes, an exit code and a pid.
+**One Lua state owns every process handle.** SDL process functions are not
+thread-safe, so the handle and all four operations that touch it stay on the
+main state. The operations used by a frame are nonblocking. A blocking reader,
+writer, `communicate`, or future wait is an explicit caller choice for a CLI,
+startup step, or worker. No Lua callback enters from native code.
 
-An `SDL_Process` could cross the way a decoded surface does, as an address with
-ownership attached, and it must not. SDL documents `SDL_WaitProcess`,
-`SDL_KillProcess`, `SDL_ReadProcess` and `SDL_DestroyProcess` as not thread
-safe, and unlike a surface a process is not a block of memory whose ownership
-can simply move: it is a pid that may be reaped exactly once, plus a set of
-pipe descriptors. Two states holding it is two states able to reap it, and the
-second reap lands on whatever pid the kernel has handed out since. The only
-reason to move it would be to call something from the main thread, and every
-call worth making there is one of those four. So the address stays on the
-worker and the caller gets a copy of the output, which is the right trade at
-this size: a decoded 4K texture is sixty-four megabytes and copying it twice is
-the frame, while `git rev-parse` answers forty-one bytes.
+**Exit and I/O are separate facts.** `finished` is a future because a child
+settles once, while stdout and stderr may yield any number of chunks first.
+A nonzero exit is still a ready `ProcessExit`; `succeeded` is the separate
+exit-code check. A spawn failure returns nil and a reason synchronously because
+there is no process or future to own.
 
-**The worker polls, and that is what makes it interruptible.** Instead of
-calling `SDL_ReadProcess` and disappearing for the child's lifetime, it asks
-`SDL_WaitProcess` with `block` false and reads the child's pipes through the
-non-blocking streams SDL hands out. Three things follow. A kill is a message
-the worker picks up on its next pass, so the main thread can end a child it is
-not allowed to touch. One worker holds any number of children at once, so a
-second run does not queue behind the first. And a child that writes past the
-pipe buffer keeps going, because something is draining it, rather than stopping
-until someone reads.
-
-**Teardown kills.** Reaping alone has no bound and a child that never exits
-parks it; detaching leaves a worker running inside a library the process is
-about to unmap, which is the failure
-[`ffi/loader.tl`](src/tecs/ffi/loader.tl)'s `RTLD_NODELETE` already exists for.
-So `proc.shutdown`, which the application runs at teardown, asks every live
-child to stop, gives it a quarter second, and then forces it. A forced kill is
-not refusable, so the join that follows is bounded by the kernel reaping the
-child, and a run whose child was still going ends at `"canceled"` rather than
-at a status that implies it finished. That includes a child the kernel never
-reaped: its future is settled on the way out rather than dropped, because the
-runner is about to stop and nothing would ever answer for it.
-
-**A failed spawn is a status, and an exit code is not one.** A program that
-cannot be started settles at `"failed"` with `error` set, the way a failed
-decode settles rather than raising. A child that ran and exited 3 settles
-`"ready"` carrying a result that says 3, because the code is the answer rather
-than an error, and `Result:succeeded` is the separate question about it. Reading
-that the other way would make every non-zero exit propagate as a failure through
-`map`, which is wrong for everything that shells out to a tool whose exit code
-is data.
-
-**Error output is separate by default.** `SDL_CreateProcess` inherits the
-child's standard error, and interleaving diagnostics into standard output
-corrupts anything parsing that output, so a run pipes both and answers them as
-`output` and `errorOutput`. `mergeStderr` folds them for the caller who wants a
-transcript. Creation always goes through `SDL_CreateProcessWithProperties`,
-which is a strict superset: piping error output, a working directory and an
-environment are reachable only there, and two creation paths would be two
-places where what the child inherits is written down.
-
-**Environment and working directory are exposed rather than hidden.** Both
-default to inheriting, which is what a tool almost always wants; `cwd` sets the
-directory, `env` sets variables over the inherited environment, and `clearEnv`
-starts from an empty one so `env` is the whole of what the child sees. `input`
-writes bytes to the child's standard input and closes it, which is what a child
-reading to end of input is waiting for.
+**Ownership makes reaping unavoidable.** The process owns its pipe endpoints.
+Closing one endpoint closes only that direction. Closing the process closes
+all endpoints, forcibly terminates a live child, synchronously reaps it, and
+settles `finished`. Application teardown closes every process still live so
+no child or pid-reaping obligation escapes the SDL lifetime.
 
 ## Networking is a transport, and the loop drives it
 

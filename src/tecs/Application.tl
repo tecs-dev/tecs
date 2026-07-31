@@ -124,7 +124,7 @@ local type Audio = audio.Audio
 local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
 local files <const> = require("tecs.io.files")
-local platformOS <const> = require("tecs.platform.os")
+local process <const> = require("tecs.io.process")
 local runtime <const> = require("tecs.runtime")
 
 -- Host-only event conversion operations. The public events record omits these
@@ -1239,10 +1239,10 @@ function Application:_shutdown(): boolean
     -- torn down is the one way asset loading can outlive the process it
     -- belongs to.
     assets.shutdown()
-    -- A child outlives the process that started it unless something ends it,
-    -- and the worker waiting on one would be a thread inside a library about
-    -- to be unmapped. So teardown kills: gently, then forcibly, then joins.
-    platformOS.shutdownProcesses()
+    -- A child outlives the process that started it unless something ends it.
+    -- Teardown closes every process, which forcibly terminates and reaps any
+    -- live child before SDL shuts down.
+    process.shutdown()
     log.closeFile()
 
     if self.device ~= nil then

@@ -18,8 +18,8 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local platformOS = require("tecs.platform.os")
 local files = require("tecs.io.files")
+local tecsIO = require("tecs.io")
 
 -- Absolute, because every child below is given a working directory of its own
 -- and a relative path would then resolve against the scaffolded project rather
@@ -70,7 +70,7 @@ local function tecs(args, cwd)
         argv[#argv + 1] = argument
     end
 
-    local run = platformOS.runProcess({
+    local child, startReason = tecsIO.newProcess({
         args = argv,
         cwd = cwd,
         env = {
@@ -80,15 +80,15 @@ local function tecs(args, cwd)
         },
         timeoutMs = 120000,
     })
-    run:wait(120000)
+    assert.is_not_nil(child, startReason)
 
     -- Both streams, because a compiler splits itself between them: the
     -- diagnostics that matter here land on one and the summary on the other,
     -- and a spec that read only one would report an empty string as a failure.
-    local result = platformOS.processResult(run)
-    if result ~= nil then
-        result.output = (result.output or "") .. (result.errorOutput or "")
-    end
+    local result, communicateReason = child:communicate()
+    assert.is_not_nil(result, communicateReason)
+    child:close()
+    result.output = result.output .. result.errorOutput
     return result
 end
 
@@ -130,7 +130,7 @@ describe("a scaffolded project", function()
     it("is written out", function()
         assert.is_not_nil(out, "no bin/tecs above " .. root)
         assert.is_not_nil(created, "tecs new never ran")
-        assert.are.equal(0, created.exitCode, created.output)
+        assert.are.equal(0, created.exit.exitCode, created.output)
 
         local manifest = io.open(project .. "/tecs.lua", "r")
         assert.is_not_nil(manifest, "no tecs.lua: " .. created.output)
@@ -150,7 +150,7 @@ describe("a scaffolded project", function()
 
     it("type-checks through tecs check", function()
         local checked = tecs({ "check" }, project)
-        assert.are.equal(0, checked.exitCode, checked.output)
+        assert.are.equal(0, checked.exit.exitCode, checked.output)
     end)
 
     -- Nothing of ours in a user's output. A warning from the engine's own
@@ -183,7 +183,7 @@ describe("a scaffolded project", function()
     it("stages development assets without compiling source", function()
         write(project .. "/assets/example.txt", "asset")
         local built = tecs({ "build" }, project)
-        assert.are.equal(0, built.exitCode, built.output)
+        assert.are.equal(0, built.exit.exitCode, built.output)
 
         local asset = io.open(project .. "/build/assets/example.txt", "r")
         assert.is_not_nil(asset, "no staged asset: " .. built.output)
@@ -195,7 +195,7 @@ describe("a scaffolded project", function()
 
     it("distributes", function()
         local built = tecs({ "dist" }, project)
-        assert.are.equal(0, built.exitCode, built.output)
+        assert.are.equal(0, built.exit.exitCode, built.output)
 
         local entry = io.open(project .. "/build/main.lua", "r")
         assert.is_not_nil(entry, "no build/main.lua: " .. built.output)
@@ -253,7 +253,7 @@ return tecs.newApplication({
 
     it("passes its own specs", function()
         local tested = tecs({ "test" }, project)
-        assert.are.equal(0, tested.exitCode, tested.output)
+        assert.are.equal(0, tested.exit.exitCode, tested.output)
         assert.is_truthy(tested.output:find("2 passed, 0 failed", 1, true), tested.output)
     end)
 end)
