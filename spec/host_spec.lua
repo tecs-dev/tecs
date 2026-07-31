@@ -14,7 +14,7 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local platformOS = require("tecs.platform.os")
+local tecsIO = require("tecs.io")
 
 --- The host binary, found by walking up from the tree the suite was pointed at.
 ---
@@ -59,7 +59,7 @@ local out = findHost()
 --- spec independent of how the suite was launched.
 local function observations()
     assert.is_not_nil(out, "no bin/tecs above " .. root)
-    local run = platformOS.runProcess({
+    local child, startReason = tecsIO.newProcess({
         args = { out .. "/bin/tecs", "--entry", "spec/fixtures/hostlifecycle.lua" },
         env = {
             TECS_LUA = root,
@@ -68,10 +68,11 @@ local function observations()
         },
         timeoutMs = 60000,
     })
-    run:wait(60000)
+    assert.is_not_nil(child, startReason)
 
-    local result = platformOS.processResult(run)
-    assert.is_not_nil(result, "the host never started")
+    local result, communicateReason = child:communicate()
+    assert.is_not_nil(result, communicateReason)
+    child:close()
     local output = result.output .. "\n" .. result.errorOutput
 
     local seen = {}
@@ -90,10 +91,6 @@ describe("host", function()
 
     setup(function()
         seen, raw = observations()
-    end)
-
-    teardown(function()
-        platformOS.shutdownProcesses()
     end)
 
     -- Defect: the arrival stamp dated an event from the pump that delivered it,

@@ -1,438 +1,405 @@
--- Child processes.
+-- Streaming child processes.
 --
--- Every test here runs a real program. The fixtures are the ones a POSIX
--- machine cannot be missing -- /bin/echo, /bin/sh, /bin/cat -- because a test
--- that depends on a tool being installed is a test that fails for a reason
--- nobody changed.
---
--- The blocking calls belong to the worker, so the properties under test are
--- mostly about the boundary: that a run does not hold the caller, that the
--- caller can still end a child it cannot touch, and that teardown does not
--- leave one behind.
---
--- A run is a Future<tecs.platform.os.ProcessResult>, so the four words for how it ended are the
--- ones every other asynchronous thing in the tree uses. The one worth reading
--- twice is that an exit code is not a failure: a child that ran and exited 3
--- settles "ready" carrying a result that says 3, because the code is the
--- answer rather than an error. "failed" is a child that never started and
--- "canceled" is one this process ended.
+-- Every fixture is a POSIX program available on the supported desktop test
+-- targets. Tests close their processes explicitly; the internal shutdown in
+-- teardown is the application-level safety net under test, not routine test
+-- ownership.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local ffi = require("ffi")
 local Application = require("tecs.Application")
-local platformOS = require("tecs.platform.os")
 local Future = require("tecs.Future")
+local processModule = require("tecs.io.process")
+local runtime = require("tecs.runtime")
 local sdl = require("tecs.ffi.sdl3")
+local tecsIO = require("tecs.io")
 
 ffi.cdef([[
     int tecsProcSpecSetenv(const char *, const char *, int) asm("setenv");
 ]])
 
---- Wall-clock milliseconds. `os.clock` measures processor time, and what these
---- tests are about is the time a caller was not spending.
 local function now()
     return tonumber(sdl.C.SDL_GetTicks())
 end
 
---- Runs a shell fragment and waits for it.
-local function shell(script, options)
-    local settings = options or {}
-    settings.args = { "/bin/sh", "-c", script }
-    return platformOS.runProcess(settings):wait(20000)
-end
-
---- Drops a trailing newline, which every one of these fixtures adds.
 local function trimmed(text)
     return (text:gsub("%s+$", ""))
 end
 
---- Pumps until the child behind `run` has started, so a kill has something to
---- land on rather than a task still queued.
-local function untilStarted(run)
-    local deadline = now() + 20000
-    while platformOS.processResult(run).pid == 0 and now() < deadline do
-        platformOS.updateProcesses()
-    end
-    assert.is_true(platformOS.processResult(run).pid > 0, "the child never started")
+local function newProcess(options)
+    local child, reason = tecsIO.newProcess(options)
+    assert.is_not_nil(child, reason)
+    return child
 end
 
-describe("proc", function()
+local function communicate(options, exchange)
+    local child = newProcess(options)
+    local result, reason = child:communicate(exchange)
+    assert.is_not_nil(result, reason)
+    child:close()
+    return result
+end
+
+local function shell(script, options, exchange)
+    local settings = options or {}
+    settings.args = { "/bin/sh", "-c", script }
+    return communicate(settings, exchange)
+end
+
+describe("streaming processes", function()
     teardown(function()
-        platformOS.shutdownProcesses()
+        processModule.shutdown()
     end)
 
-    it("runs a program and answers its output and exit code", function()
-        local run = platformOS.runProcess({ args = { "/bin/echo", "hello", "child" } })
-        assert.are.equal("pending", run.status)
+    it("captures output and reports the exit", function()
+        local result = communicate({ args = { "/bin/echo", "hello", "child" } })
 
-        run:wait(20000)
-        assert.are.equal("ready", run.status)
-        assert.is_nil(run.error)
-
-        local result = run.value
-        assert.are.equal(0, result.exitCode)
         assert.are.equal("hello child", trimmed(result.output))
+        assert.are.equal("", result.errorOutput)
+        assert.are.equal(0, result.exit.exitCode)
+        assert.is_false(result.exit.killed)
+        assert.is_false(result.exit.timedOut)
+        assert.is_true(result.exit:succeeded())
         assert.is_true(result:succeeded())
-        assert.is_true(result.pid > 0, "a started child reports its process id")
-        assert.are.same({ "/bin/echo", "hello", "child" }, result.args)
-        assert.are.equal(result, platformOS.processResult(run), "the future carries the record it filled in")
     end)
 
-    -- The distinction the four states exist to make. A tool whose exit code is
-    -- data must not have every non-zero exit propagate as a failure through
-    -- `map`, so a child that ran is "ready" whatever it reported.
-    it("keeps error output apart from output, and reports a failing exit", function()
-        local run = shell("echo written; echo complained 1>&2; exit 3")
-        assert.are.equal("ready", run.status, "an exit code is an answer, not a failure")
-        assert.are.equal(3, run.value.exitCode)
-        assert.are.equal("written", trimmed(run.value.output))
-        assert.are.equal("complained", trimmed(run.value.errorOutput))
-        assert.is_false(run.value:succeeded(), "a non-zero exit is not success")
+    it("keeps standard error separate and preserves nonzero exits", function()
+        local result = shell("echo written; echo complained 1>&2; exit 3")
+
+        assert.are.equal("written", trimmed(result.output))
+        assert.are.equal("complained", trimmed(result.errorOutput))
+        assert.are.equal(3, result.exit.exitCode)
+        assert.is_false(result:succeeded())
     end)
 
-    it("folds error output into output when asked", function()
-        local run = shell("echo complained 1>&2", { mergeStderr = true })
-        assert.are.equal("ready", run.status)
-        assert.are.equal("complained", trimmed(run.value.output))
-        assert.are.equal("", run.value.errorOutput)
+    it("merges standard error into standard output", function()
+        local result = shell("echo complained 1>&2", { stderr = "stdout" })
+
+        assert.are.equal("complained", trimmed(result.output))
+        assert.are.equal("", result.errorOutput)
     end)
 
-    it("reports a program it cannot start as a status, not a raise", function()
-        local run = platformOS.runProcess({ args = { "/no/such/tecs-program" } })
-        run:wait(20000)
-        assert.are.equal("failed", run.status, "a child that never started is the failure case")
-        assert.is_string(run.error)
-        assert.is_true(#run.error > 0, "a failure says what went wrong")
+    it("returns a creation failure without allocating a process", function()
+        local child, reason = tecsIO.newProcess({ args = { "/no/such/tecs-program" } })
+
+        assert.is_nil(child)
+        assert.is_string(reason)
+        assert.is_true(#reason > 0)
+    end)
+
+    it("validates programmer input by raising", function()
         assert.has_error(function()
-            return run.value
+            tecsIO.newProcess({ args = {} })
+        end)
+        assert.has_error(function()
+            tecsIO.newProcess({ args = { "/bin/echo", 7 } })
+        end)
+        assert.has_error(function()
+            tecsIO.newProcess({ args = { "/bin/echo" }, stderr = "invalid" })
         end)
     end)
 
-    it("runs the child in a given working directory", function()
-        local run = shell("pwd", { cwd = "/" })
-        assert.are.equal("ready", run.status)
-        assert.are.equal("/", trimmed(run.value.output))
+    it("runs in the requested working directory", function()
+        local result = shell("pwd", { cwd = "/" })
+
+        assert.are.equal("/", trimmed(result.output))
     end)
 
-    it("inherits the environment and lets a variable be set over it", function()
+    it("inherits and overlays environment variables", function()
         ffi.C.tecsProcSpecSetenv("TECS_PROC_MARKER", "parent", 1)
 
-        local inherited = shell("echo [$TECS_PROC_MARKER][$TECS_PROC_EXTRA]", {
+        local result = shell("echo [$TECS_PROC_MARKER][$TECS_PROC_EXTRA]", {
             env = { TECS_PROC_EXTRA = "added" },
         })
-        assert.are.equal("[parent][added]", trimmed(inherited.value.output))
+
+        assert.are.equal("[parent][added]", trimmed(result.output))
     end)
 
-    it("gives the child only what it is handed when the environment is cleared", function()
+    it("can replace the complete environment", function()
         ffi.C.tecsProcSpecSetenv("TECS_PROC_MARKER", "parent", 1)
 
-        local cleared = shell("echo [$TECS_PROC_MARKER][$TECS_PROC_EXTRA]", {
+        local result = shell("echo [$TECS_PROC_MARKER][$TECS_PROC_EXTRA]", {
             clearEnv = true,
             env = { TECS_PROC_EXTRA = "only" },
         })
-        assert.are.equal("[][only]", trimmed(cleared.value.output))
+
+        assert.are.equal("[][only]", trimmed(result.output))
     end)
 
-    it("feeds bytes to the child and closes its input", function()
-        -- cat reads to end of input, so this only returns if the input pipe
-        -- was closed once the bytes were through.
-        local run = platformOS
-            .runProcess({
-                args = { "/bin/cat" },
-                input = "fed through a pipe\n",
-            })
-            :wait(20000)
-        assert.are.equal("ready", run.status)
-        assert.are.equal("fed through a pipe", trimmed(run.value.output))
+    it("feeds a complete string and sends EOF", function()
+        local result = communicate({ args = { "/bin/cat" } }, {
+            input = "fed through a pipe\n",
+        })
+
+        assert.are.equal("fed through a pipe", trimmed(result.output))
     end)
 
-    it("does not hold the caller while the child runs", function()
-        local slow = platformOS.runProcess({ args = { "/bin/sh", "-c", "sleep 1; echo late" } })
+    it("feeds buffers and retained views without string conversion", function()
+        local bytes = tecsIO.newBuffer("buffer input")
+        local fromBuffer = communicate({ args = { "/bin/cat" } }, { input = bytes })
+        local view = bytes:view(7)
+        local fromView = communicate({ args = { "/bin/cat" } }, { input = view })
 
-        -- A frame's worth of polling, over and over, while the child sleeps.
-        -- Every pass has to come straight back: the blocking wait and the
-        -- blocking read are the worker's, not this thread's.
-        local polls = 0
-        local pollStart = now()
-        while now() - pollStart < 200 do
-            platformOS.updateProcesses()
-            polls = polls + 1
-        end
-        assert.are.equal("pending", slow.status, "the child is still going")
-        assert.is_true(polls > 200, "polling is cheap: " .. polls .. " passes in 200ms")
+        assert.are.equal("buffer input", fromBuffer.output)
+        assert.are.equal("input", fromView.output)
 
-        slow:wait(20000)
-        assert.are.equal("ready", slow.status)
-        assert.are.equal("late", trimmed(slow.value.output))
+        view:close()
+        bytes:close()
     end)
 
-    it("runs several children at once on one worker", function()
-        -- Children that keep going until they are killed, so what is measured
-        -- is that four of them exist together rather than how fast a machine
-        -- happens to start them.
-        local runs = {}
-        for index = 1, 4 do
-            runs[index] = platformOS.runProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
-        end
+    it("streams interactively through ordinary reader and writer methods", function()
+        local child = newProcess({ args = { "/bin/cat" } })
+        local written, writeReason = child.stdin:write("request\n")
+        assert.is_true(written, writeReason)
+        local closed, closeReason = child.stdin:close()
+        assert.is_true(closed, closeReason)
 
-        -- A child reports its process id as soon as it is started, so four ids
-        -- alongside four pending futures is the overlap itself rather than a
-        -- clock reading that says it probably happened.
+        local reply, readReason = child.stdout:read(64)
+        assert.are.equal("request\n", reply, readReason)
+        assert.are.equal("", child.stdout:read(64))
+
+        local exit = child.finished:wait(20000)
+        assert.are.equal("ready", exit.status, exit.error)
+        assert.are.equal(0, exit.value.exitCode)
+
+        child:close()
+    end)
+
+    it("reports no-data separately from EOF in nonblocking reads", function()
+        local child = newProcess({ args = { "/bin/sh", "-c", "sleep 0.1; printf ready" } })
+        local bytes, reason = child.stdout:readAvailable()
+        assert.is_nil(bytes)
+        assert.is_nil(reason)
+
+        local received = ""
         local deadline = now() + 20000
-        local live
-        repeat
-            platformOS.updateProcesses()
-            live = 0
-            for index = 1, 4 do
-                if platformOS.processResult(runs[index]).pid > 0 and runs[index].status == "pending" then
-                    live = live + 1
-                end
+        while now() < deadline do
+            runtime.poll()
+            bytes, reason = child.stdout:readAvailable()
+            assert.is_nil(reason)
+            if bytes == "" then
+                break
+            elseif bytes ~= nil then
+                received = received .. bytes
             end
-        until live == 4 or now() > deadline
-        assert.are.equal(4, live, "four children have to be running at once")
-
-        local seen = {}
-        for index = 1, 4 do
-            local pid = platformOS.processResult(runs[index]).pid
-            assert.is_nil(seen[pid], "each child is its own process")
-            seen[pid] = true
-            platformOS.killProcess(runs[index], true)
         end
 
-        for index = 1, 4 do
-            runs[index]:wait(20000)
-            assert.are.equal("canceled", runs[index].status)
-        end
+        assert.are.equal("ready", received)
+        assert.is_true(child.stdout:isEOF())
+        child:close()
     end)
 
-    -- What replaces waiting on the module's own list of runs: the join every
-    -- other subsystem uses, keeping input order whatever order they finish in.
-    it("waits for several runs through one join", function()
-        local runs = {
-            platformOS.runProcess({ args = { "/bin/sh", "-c", "sleep 0.3; echo first" } }),
-            platformOS.runProcess({ args = { "/bin/echo", "second" } }),
-            platformOS.runProcess({ args = { "/bin/echo", "third" } }),
-        }
-        local joined = Future.all(runs):wait(20000)
+    it("reads directly into a reusable buffer", function()
+        local child = newProcess({ args = { "/bin/echo", "direct" } })
+        local destination = tecsIO.newBuffer("prefix:")
+        local got, reason = child.stdout:readInto(destination, 64, destination:length())
 
-        assert.are.equal("ready", joined.status)
-        assert.are.equal(0, platformOS.pendingProcesses())
-        assert.are.equal("first", trimmed(joined.value[1].output))
-        assert.are.equal("second", trimmed(joined.value[2].output))
-        assert.are.equal("third", trimmed(joined.value[3].output))
+        assert.are.equal(7, got, reason)
+        assert.are.equal("prefix:direct\n", destination:getString())
+
+        child:close()
+        destination:close()
     end)
 
-    it("composes a run into what the caller actually wanted", function()
-        local text = platformOS
-            .runProcess({ args = { "/bin/echo", "composed" } })
-            :map(function(result)
-                return trimmed(result.output)
-            end)
-            :wait(20000)
-
-        assert.are.equal("ready", text.status)
-        assert.are.equal("composed", text.value)
-    end)
-
-    it("kills a child on request", function()
-        local run = platformOS.runProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
-        -- The kill is a message to the worker, so the child has to exist
-        -- before it lands; the worker starts it before it reads the next
-        -- message, so ordering is the channel's rather than a sleep's.
-        platformOS.killProcess(run, true)
-        run:wait(20000)
-        assert.are.equal("canceled", run.status, "this process ended it")
-        assert.are.equal("killed", run.error)
-    end)
-
-    -- The other spelling, and the one that counts holders. A run nothing else
-    -- is watching ends when its last consumer gives it up.
-    it("ends a child when the last holder of its future cancels", function()
-        local run = platformOS.runProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
-        untilStarted(run)
-
-        run:cancel()
-        assert.are.equal("canceled", run.status)
-
-        -- And the kill really went out: the worker stops holding the child.
+    it("moves available pipe bytes directly between reusable buffers", function()
+        local child = newProcess({ args = { "/bin/cat" } })
+        local source = tecsIO.newBuffer("nonblocking buffer")
+        local destination = tecsIO.newBuffer()
+        local sent = 0
         local deadline = now() + 20000
-        while platformOS.pendingProcesses() > 0 and now() < deadline do
-            platformOS.updateProcesses()
+
+        while sent < source:length() and now() < deadline do
+            local wrote, writeReason = child.stdin:writeAvailableFrom(source, sent)
+            assert.is_nil(writeReason)
+            if wrote ~= nil then
+                sent = sent + wrote
+            else
+                runtime.poll()
+            end
         end
-        assert.are.equal(0, platformOS.pendingProcesses(), "the runner is still holding the child")
+        child.stdin:close()
+
+        while now() < deadline do
+            local got, readReason = child.stdout:readAvailableInto(destination, 64, destination:length())
+            assert.is_nil(readReason)
+            if got == 0 then
+                break
+            elseif got == nil then
+                runtime.poll()
+            end
+        end
+
+        assert.are.equal(source:length(), sent)
+        assert.are.equal(source:getString(), destination:getString())
+
+        child:close()
+        destination:close()
+        source:close()
     end)
 
-    it("keeps the child for another holder when one gives up", function()
-        local run = platformOS.runProcess({ args = { "/bin/echo", "shared" } })
-        run._watchers = run._watchers + 1
+    it("drains output larger than an operating-system pipe", function()
+        local line = ("x"):rep(40)
+        local result = shell("i=0; while [ $i -lt 8000 ]; do printf '" .. line .. "\\n'; i=$((i + 1)); done")
 
-        run:cancel()
-        assert.are.equal("pending", run.status, "a shared run was ended by one holder")
-
-        run:wait(20000)
-        assert.are.equal("ready", run.status)
-        assert.are.equal("shared", trimmed(run.value.output))
+        assert.are.equal(8000 * 41, #result.output)
     end)
 
-    it("kills a child that outruns its timeout", function()
+    it("enforces the combined capture limit", function()
+        local child = newProcess({ args = { "/bin/sh", "-c", "printf 123456789" } })
+        local result, reason = child:communicate({ maxOutputBytes = 4 })
+
+        assert.is_nil(result)
+        assert.are.equal("process output exceeds the configured maximum", reason)
+        assert.is_false(child:isRunning())
+        child:close()
+    end)
+
+    it("supports inherited and discarded endpoints", function()
+        local child = newProcess({
+            args = { "/bin/sh", "-c", "exit 0" },
+            stdin = "null",
+            stdout = "null",
+            stderr = "null",
+        })
+
+        assert.is_nil(child.stdin)
+        assert.is_nil(child.stdout)
+        assert.is_nil(child.stderr)
+
+        local result, reason = child:communicate()
+        assert.is_not_nil(result, reason)
+        assert.are.equal("", result.output)
+        assert.are.equal("", result.errorOutput)
+        child:close()
+    end)
+
+    it("terminates a child at its deadline", function()
         local started = now()
-        local run = platformOS
-            .runProcess({
-                args = { "/bin/sh", "-c", "sleep 30" },
-                timeoutMs = 200,
-            })
-            :wait(20000)
-        assert.are.equal("canceled", run.status)
-        assert.are.equal("timed out", run.error)
-        assert.is_true(now() - started < 5000, "the timeout is what ended it")
+        local child = newProcess({
+            args = { "/bin/sh", "-c", "sleep 30" },
+            timeoutMs = 100,
+        })
+        local exit = child.finished:wait(20000)
+
+        assert.are.equal("ready", exit.status, exit.error)
+        assert.is_true(exit.value.killed)
+        assert.is_true(exit.value.timedOut)
+        assert.is_false(exit.value:succeeded())
+        assert.is_true(now() - started < 5000)
+        child:close()
     end)
 
-    -- A killed child settles with no value, because there is no answer to the
-    -- question it was asked. What it managed to say before it was stopped is
-    -- still worth having, and it is on the record the run filled in.
-    it("keeps what a child wrote before it was killed", function()
-        local run = platformOS
-            .runProcess({
-                args = { "/bin/sh", "-c", "echo spoke; sleep 30" },
-                timeoutMs = 500,
-            })
-            :wait(20000)
-        assert.are.equal("canceled", run.status)
-        assert.has_error(function()
-            return run.value
-        end)
-        assert.are.equal("spoke", trimmed(platformOS.processResult(run).output))
+    it("kills and reaps a child explicitly", function()
+        local child = newProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
+        local killed, reason = child:kill(true)
+        assert.is_true(killed, reason)
+
+        local exit = child.finished:wait(20000)
+        assert.are.equal("ready", exit.status, exit.error)
+        assert.is_true(exit.value.killed)
+        child:close()
     end)
 
-    it("reads more than a pipe will hold without deadlocking", function()
-        -- A child writing past the pipe buffer stops until someone reads. The
-        -- worker reads as it polls, which is what keeps this from hanging.
-        local run = shell("for i in $(seq 1 8000); do echo " .. ("x"):rep(40) .. "; done")
-        assert.are.equal("ready", run.status)
-        assert.are.equal(8000 * 41, #run.value.output, "every byte past the pipe buffer arrives")
-    end)
+    it("joins several process-exit futures", function()
+        local children = {
+            newProcess({ args = { "/bin/sh", "-c", "sleep 0.1; exit 1" } }),
+            newProcess({ args = { "/bin/sh", "-c", "exit 2" } }),
+            newProcess({ args = { "/bin/sh", "-c", "exit 3" } }),
+        }
+        local joined = Future.all({
+            children[1].finished,
+            children[2].finished,
+            children[3].finished,
+        }):wait(20000)
 
-    it("refuses a run with nothing to run", function()
-        assert.has_error(function()
-            platformOS.runProcess({ args = {} })
-        end)
-        assert.has_error(function()
-            platformOS.runProcess({ args = { "/bin/echo", 7 } })
-        end)
-    end)
+        assert.are.equal("ready", joined.status, joined.error)
+        assert.are.equal(1, joined.value[1].exitCode)
+        assert.are.equal(2, joined.value[2].exitCode)
+        assert.are.equal(3, joined.value[3].exitCode)
 
-    it("kills a child that is still running at shutdown, and returns", function()
-        local run = platformOS.runProcess({ args = { "/bin/sh", "-c", "trap '' TERM; sleep 60" } })
-        untilStarted(run)
-
-        local started = now()
-        platformOS.shutdownProcesses()
-        local elapsed = now() - started
-
-        assert.are.equal("canceled", run.status, "teardown ends a child, it does not detach it")
-        assert.is_false(platformOS.processRunnerInstalled(), "the worker is joined")
-        assert.is_true(elapsed < 5000, "teardown is bounded: " .. elapsed .. "ms")
-
-        -- And the module still works afterwards: the next run installs again.
-        local after = platformOS.runProcess({ args = { "/bin/echo", "again" } }):wait(20000)
-        assert.are.equal("again", trimmed(after.value.output))
-    end)
-
-    -- Shutdown settles every in-flight handle, including children that the
-    -- kernel has not reaped yet.
-    it("leaves nothing pending after shutdown", function()
-        local runs = {}
-        for index = 1, 3 do
-            runs[index] = platformOS.runProcess({ args = { "/bin/sh", "-c", "trap '' TERM; sleep 60" } })
-        end
-        untilStarted(runs[3])
-
-        platformOS.shutdownProcesses()
-
-        assert.are.equal(0, platformOS.pendingProcesses())
-        for index = 1, 3 do
-            assert.are.equal(
-                "canceled",
-                runs[index].status,
-                "a run outlived the runner still reading as though it were going"
-            )
+        for _, child in ipairs(children) do
+            child:close()
         end
     end)
 
-    it("runs a child with no SDL subsystem initialized", function()
-        -- Proved from inside a fresh interpreter rather than from here, where
-        -- another spec in this run has already brought up video. The child
-        -- requires the whole surface, runs a child of its own, and then asks
-        -- what SDL has initialized; the answer has to be nothing.
+    it("closing a process closes its endpoints and settles its future", function()
+        local child = newProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
+        local input = child.stdin
+        local output = child.stdout
+
+        child:close()
+
+        assert.is_true(input:isClosed())
+        assert.is_true(output:isClosed())
+        assert.are.equal("ready", child.finished.status)
+        assert.is_true(child.finished.value.killed)
+    end)
+
+    it("runs without initializing an SDL subsystem", function()
         local script = os.tmpname()
         local file = assert(io.open(script, "w"))
         file:write(([[
             package.path = %q .. "/?.lua;" .. %q .. "/?/init.lua;;"
             local tecs = require("tecs")
-            local run = tecs.platform.os.runProcess({ args = { "/bin/echo", "headless" } })
-            run:wait(20000)
+            local child, reason = tecs.io.newProcess({args = {"/bin/echo", "headless"}})
+            if child == nil then error(reason) end
+            local result, communicateReason = child:communicate()
+            if result == nil then error(communicateReason) end
             local sdl = require("tecs.ffi.sdl3")
-            print(("%%d %%s %%s"):format(
-                tonumber(sdl.C.SDL_WasInit(0)), run.status,
-                (run.value.output:gsub("%%s+$", ""))))
-            tecs.platform.os.shutdownProcesses()
+            print(("%%d %%s"):format(
+                tonumber(sdl.C.SDL_WasInit(0)),
+                (result.output:gsub("%%s+$", ""))))
+            child:close()
         ]]):format(root, root))
         file:close()
 
-        local run = platformOS.runProcess({ args = { "luajit", script } }):wait(30000)
+        local result = communicate({ args = { "luajit", script } })
         os.remove(script)
 
-        assert.are.equal("ready", run.status, run.error)
-        assert.are.equal("0 ready headless", trimmed(run.value.output))
+        assert.are.equal("0 headless", trimmed(result.output), result.errorOutput)
     end)
 
     describe("through the application lifecycle", function()
-        --- An application with a window small enough to be cheap. Neither
-        --- `logFile` nor `debug` is set, so no log file is written.
         local function build(config)
-            config.window = { title = "proc", width = 64, height = 64 }
+            config.window = { title = "process", width = 64, height = 64 }
             return Application.newApplication(config)
         end
 
-        it("resolves a run without the game pumping it", function()
-            local run
+        it("polls a process future once per host iteration", function()
+            local child
             local app = build({
                 plugin = function()
-                    run = platformOS.runProcess({ args = { "/bin/echo", "framed" } })
+                    child = newProcess({ args = { "/bin/sh", "-c", "sleep 0.05" } })
                 end,
             })
             assert.is_true(app:_init())
-            assert.are.equal("pending", run.status)
 
-            -- Nothing in this application waits on the run, so only the loop's
-            -- own call can move it.
             for _ = 1, 400 do
-                if run.status ~= "pending" then
+                if child.finished.status ~= "pending" then
                     break
                 end
                 app:_iterate(nil, 0, nil)
             end
 
-            assert.are.equal("ready", run.status, "the loop never drained the runner")
-            assert.are.equal("framed", trimmed(run.value.output))
+            assert.are.equal("ready", child.finished.status)
+            child:close()
             app:_shutdown()
         end)
 
-        it("ends a child and stops the runner at shutdown", function()
-            local run
+        it("closes every live process during shutdown", function()
+            local child
             local app = build({
                 plugin = function()
-                    run = platformOS.runProcess({ args = { "/bin/sh", "-c", "sleep 60" } })
+                    child = newProcess({ args = { "/bin/sh", "-c", "sleep 60" } })
                 end,
             })
             assert.is_true(app:_init())
-            untilStarted(run)
 
             assert.is_true(app:_shutdown())
-            assert.are.equal("canceled", run.status, "the child outlived the application")
-            assert.is_false(platformOS.processRunnerInstalled(), "the runner thread outlived the application")
+            assert.are.equal("ready", child.finished.status)
+            assert.is_true(child.finished.value.killed)
         end)
     end)
 end)

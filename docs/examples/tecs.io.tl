@@ -8,6 +8,94 @@ print(bytes:length())
 bytes:close()
 -- #endregion tecs.io.newBuffer
 
+-- #region tecs.io.newProcess
+tecs.scoped(function(scope: tecs.Scope)
+    local process, reason = tecs.io.newProcess({
+        args = {"git", "rev-parse", "HEAD"},
+        timeoutMs = 2000,
+    })
+    if process == nil then
+        error(reason)
+    end
+    scope:own(process)
+
+    local result, communicateReason = process:communicate()
+
+    assert(result, communicateReason)
+    assert(result:succeeded())
+    print(result.output)
+end)
+-- #endregion tecs.io.newProcess
+
+-- #region tecs.io.Process.communicate
+tecs.scoped(function(scope: tecs.Scope)
+    local process, reason = tecs.io.newProcess({args = {"/bin/cat"}})
+    if process == nil then
+        error(reason)
+    end
+    scope:own(process)
+
+    local result, communicateReason = process:communicate({
+        input = "request bytes\n",
+        maxOutputBytes = 1024 * 1024,
+    })
+
+    assert(result, communicateReason)
+    assert(result.output == "request bytes\n")
+end)
+-- #endregion tecs.io.Process.communicate
+
+-- #region tecs.io.ProcessReader.readAvailable
+tecs.scoped(function(scope: tecs.Scope)
+    local process, reason = tecs.io.newProcess({
+        args = {"/bin/sh", "-c", "sleep 1; printf ready"},
+    })
+    if process == nil then
+        error(reason)
+    end
+    scope:own(process)
+
+    local chunk <const>, readReason = process.stdout:readAvailable()
+
+    assert(chunk == nil)
+    assert(readReason == nil)
+end)
+-- #endregion tecs.io.ProcessReader.readAvailable
+
+-- #region tecs.io.ProcessReader.readInto
+tecs.scoped(function(scope: tecs.Scope)
+    local process, reason = tecs.io.newProcess({args = {"/bin/echo", "bytes"}})
+    if process == nil then
+        error(reason)
+    end
+    scope:own(process)
+    local output <const> = scope:own(tecs.io.newBuffer())
+
+    local count <const>, readReason = process.stdout:readInto(output)
+
+    assert(count, readReason)
+    assert(output:getString() == "bytes\n")
+end)
+-- #endregion tecs.io.ProcessReader.readInto
+
+-- #region tecs.io.ProcessWriter.writeFrom
+tecs.scoped(function(scope: tecs.Scope)
+    local process, reason = tecs.io.newProcess({args = {"/bin/cat"}})
+    if process == nil then
+        error(reason)
+    end
+    scope:own(process)
+    local input <const> = scope:own(tecs.io.newBuffer("buffer input"))
+
+    local written <const>, writeReason = process.stdin:writeFrom(input)
+    process.stdin:close()
+    local output <const>, readReason = process.stdout:read(1024)
+
+    assert(written == input:length(), writeReason)
+    assert(output == "buffer input", readReason)
+end)
+-- #endregion tecs.io.ProcessWriter.writeFrom
+
 -- #region tecs.io.newStringReader
 local reader <const> = tecs.io.newStringReader("snapshot bytes")
 

@@ -6,15 +6,21 @@ Assets, child processes, and HTTP requests return
 results without blocking a frame:
 
 ```teal no-format
-tecs.platform.os.runProcess({args = {"git", "rev-parse", "HEAD"}})
-    :map(function(result: tecs.platform.os.ProcessResult): string
-        return result.output
+local process, reason = tecs.io.newProcess({args = {"git", "status", "--porcelain"}})
+if process == nil then
+    error(reason)
+end
+
+process.finished
+    :map(function(exit: tecs.io.ProcessExit): boolean
+        return exit:succeeded()
     end)
-    :recover(function(): string
-        return "unknown"
+    :recover(function(): boolean
+        return false
     end)
-    :onSettle(function(revision: tecs.Future<string>)
-        print(revision.value)
+    :onSettle(function(succeeded: tecs.Future<boolean>)
+        print(succeeded.value)
+        process:close()
     end)
 ```
 
@@ -48,14 +54,17 @@ that automatically. `wait` pumps in blocking slices for startup, tools, and
 tests:
 
 ```teal no-format
-local result <const> = tecs.platform.os.runProcess({
-    args = {"git", "status", "--porcelain"},
-})
-    :wait(2000)
-
-if result.status == "ready" then
-    print(result.value.output)
+local process, reason = tecs.io.newProcess({args = {"git", "status", "--porcelain"}})
+if process == nil then
+    error(reason)
 end
+local finished <const> = process.finished:wait(2000)
+
+if finished.status == "ready" then
+    print(finished.value.exitCode)
+end
+
+process:close()
 ```
 
 Do not call `wait` or read a pending `value` from a frame. A timeout leaves the

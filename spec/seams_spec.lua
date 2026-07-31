@@ -174,13 +174,22 @@ local REACH = {
         bucket = "direct",
         reason = "Optional operating-system facilities SDL already presents "
             .. "as one portable contract: what this build can do here, the "
-            .. "clipboard, child processes, native dialogs, locales, power, "
+            .. "clipboard, native dialogs, locales, power, "
             .. "standalone sensors and physical audio devices. None is part "
             .. "of the engine lifecycle or required for a game to run.",
         modules = {
             "tecs/platform/audio.lua",
             "tecs/platform/sensors.lua",
             "tecs/platform/os.lua",
+        },
+    },
+    {
+        bucket = "direct",
+        reason = "SDL's nonblocking process pipes are the portability layer. "
+            .. "They expose the same Reader and Writer contract without a "
+            .. "platform callback or an engine-lifecycle dependency.",
+        modules = {
+            "tecs/io/process.lua",
         },
     },
     {
