@@ -96,18 +96,19 @@
     --tealdoc-button-brand-background: var(--tealdoc-link);
     --tealdoc-button-brand-hover-background: var(--tealdoc-link-hover);
 
-    /* The bar is black in both themes, which is the oldest piece of the
-     * identity and the reason the wordmark below is a badge. */
-    --tealdoc-header-background: #000000;
-    --tealdoc-header-color: #ffffff;
-    --tealdoc-header-muted-color: #d9d2c3;
-    --tealdoc-header-border: #3d3748;
-    --tealdoc-header-control-background: #16141b;
+    /* The bar continues the left navigation's surface across the viewport. */
+    --tealdoc-header-background: var(--tealdoc-sidebar-background);
+    --tealdoc-header-color: var(--tealdoc-text);
+    --tealdoc-header-muted-color: var(--tealdoc-text-muted);
+    --tealdoc-header-border: var(--tealdoc-border);
+    --tealdoc-header-control-background: var(--tealdoc-background-alt);
 
     /* The display face, on headings and on the two navigations. Body text
      * stays in the reading face, which is what a paragraph is set in. */
     --tealdoc-font-heading: "Jersey 15", sans-serif;
     --tealdoc-heading-font-weight: 400;
+    /* Tealdoc applies this on both sides of each h2 separator. */
+    --tealdoc-heading-2-spacing: 1.75rem;
     --tealdoc-sidebar-font-family: var(--tealdoc-font-heading);
     --tealdoc-outline-font-family: var(--tealdoc-font-heading);
     --tealdoc-sidebar-font-size: 0.85rem;
@@ -150,17 +151,16 @@
     --tealdoc-hero-glow-opacity: 1;
 }
 
-/* The wordmark. A black badge with the logo red on it and a purple rule under,
- * which is the one piece of the identity that is a drawing rather than a
- * color, so it is written against tealdoc's classes rather than its tokens.
- * No `logo` is configured, so this is the whole mark. */
+/* The wordmark. Logo red with a purple rule under, which is the one piece of
+ * the identity that is a drawing rather than a color, so it is written against
+ * tealdoc's classes rather than its tokens. No `logo` is configured, so this
+ * is the whole mark. */
 .tealdoc-brand-name {
     display: inline-flex;
     align-items: center;
     height: 40px;
     margin-left: -12px;
     padding: 0 12px;
-    background: #000;
     color: #da6f66;
     font-family: var(--tealdoc-font-heading);
     font-size: 1.5rem;
