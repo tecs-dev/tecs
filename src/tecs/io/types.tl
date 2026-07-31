@@ -17,7 +17,7 @@ local type Closeable = coretypes.Closeable
 --- A view is a snapshot: changing its source buffer first detaches that
 --- buffer's allocation, so the view keeps seeing the bytes it was created
 --- from. `getString` is the explicit copying boundary.
-local interface ByteView
+local interface ByteView is Closeable
     --- Returns the retained range's byte length.
     ---
     --- @param self The open view to inspect.
@@ -35,7 +35,7 @@ local interface ByteView
     --- LuaJIT FFI cannot enforce constness. Writing through a cast pointer is
     --- unsafe and breaks the snapshot guarantee.
     --- @param self The open view whose storage to borrow.
-    --- @return Returns a pointer valid until `release`.
+    --- @return Returns a pointer valid until `close`.
     getFFIPointer: function(self: ByteView): loader.BytePointer
 
     --- Retains a zero-copy subrange.
@@ -51,23 +51,23 @@ local interface ByteView
     --- Returns whether the view has released its retained allocation.
     ---
     --- @param self The view to inspect.
-    --- @return Returns true after release.
+    --- @return Returns true after `close`.
     isReleased: function(self: ByteView): boolean
 
-    --- Releases the retained allocation.
+    --- Releases this view's reference to the retained allocation.
     ---
     --- Repeated calls are safe. Every method except `isReleased` and
-    --- `release` raises afterwards.
-    --- @param self The view to release.
-    release: function(self: ByteView)
+    --- `close` raises afterwards.
+    --- @param self The view to close.
+    close: function(self: ByteView)
 end
 
 --- An exclusive, zero-copy writable range reserved from a [`Buffer`](tealdoc:tecs.io.Buffer).
-local interface WriteRange
+local interface WriteRange is Closeable
     --- Borrows the reserved range's writable address.
     ---
     --- @param self The open range whose storage to borrow.
-    --- @return Returns a pointer valid until `commit` or `release`.
+    --- @return Returns a pointer valid until `commit` or `close`.
     getFFIPointer: function(self: WriteRange): loader.BytePointer
 
     --- Returns the maximum byte count the native writer may fill.
@@ -78,23 +78,23 @@ local interface WriteRange
 
     --- Commits bytes written through the borrowed pointer.
     ---
-    --- The call releases the range. A gap before the committed bytes is
+    --- The call closes the range. A gap before the committed bytes is
     --- zero-filled.
     --- @param self The open range to commit.
     --- @param used The caller supplies the written count up to `capacity`.
     commit: function(self: WriteRange, used: integer)
 
-    --- Releases the range without changing the buffer's logical length.
+    --- Closes the range without changing the buffer's logical length.
     ---
-    --- @param self The range to release.
-    release: function(self: WriteRange)
+    --- @param self The range to close.
+    close: function(self: WriteRange)
 end
 
 --- An owned, growable sequence of bytes.
 ---
 --- Its logical length is separate from capacity. Offsets are zero-based, and
 --- `clear` retains the allocation for reuse.
-local interface Buffer
+local interface Buffer is Closeable
     type ByteView = ByteView
     type WriteRange = WriteRange
     --- Returns the number of logical bytes.
@@ -172,24 +172,24 @@ local interface Buffer
 
     --- Borrows the address of the first byte.
     ---
-    --- The pointer is invalid after capacity grows or `release` runs. The
+    --- The pointer is invalid after capacity grows or `close` runs. The
     --- buffer must remain reachable for the whole native call that uses it.
     --- @param self The buffer whose storage to borrow.
     --- @return Returns a mutable FFI byte pointer.
     getFFIPointer: function(self: Buffer): loader.BytePointer
 
-    --- Returns whether `release` has given up the allocation.
+    --- Returns whether `close` has given up the allocation.
     ---
     --- @param self The buffer to inspect.
-    --- @return Returns true after release.
+    --- @return Returns true after `close`.
     isReleased: function(self: Buffer): boolean
 
-    --- Gives up the allocation and makes the buffer unusable.
+    --- Closes the buffer, gives up its allocation, and makes it unusable.
     ---
     --- Repeated calls are safe. Every method except `isReleased` and
-    --- `release` raises afterwards.
-    --- @param self The buffer to release.
-    release: function(self: Buffer)
+    --- `close` raises afterwards.
+    --- @param self The buffer to close.
+    close: function(self: Buffer)
 end
 
 --- A caller-owned source of binary strings.
@@ -445,7 +445,7 @@ local interface WritableStream is Stream
     --- Replaces the destination with a retained immutable byte range.
     ---
     --- The operation retains its own view until the future settles, so the
-    --- caller may release `view` immediately after this call.
+    --- caller may close `view` immediately after this call.
     --- @param self The writable descriptor.
     --- @param view The caller supplies an open
     ---     [`ByteView`](tealdoc:tecs.io.ByteView).

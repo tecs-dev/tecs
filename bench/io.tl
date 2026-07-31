@@ -292,7 +292,7 @@ local function readInto(path: string, materialize: boolean): string, integer, in
         local read <const>, readFailure = reader:readInto(scratch, CHUNK)
         if read == nil then
             reader:close()
-            scratch:release()
+            scratch:close()
             error(format("bench: cannot read %s: %s", path, readFailure or "unknown"), 0)
         end
         if read == 0 then
@@ -305,7 +305,7 @@ local function readInto(path: string, materialize: boolean): string, integer, in
     end
     reader:close()
     local capacity <const> = scratch:capacity()
-    scratch:release()
+    scratch:close()
     return materialize and concat(pieces) or "", count, capacity
 end
 
@@ -590,7 +590,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                 local source <const> = ioModule.newStringStream(fixture)
                 local output <const> = source:transferToBuffer().value
                 checkBuffer("string-buffer", output, hash)
-                output:release()
+                output:close()
                 source:close()
             end,
             operation = function(): Observation
@@ -603,7 +603,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                     function(output: IOBuffer): integer return output:length() end,
                     function(output: IOBuffer): integer return output:capacity() end
                 )
-                future.value:release()
+                future.value:close()
                 source:close()
                 return result
             end,
@@ -644,7 +644,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                 local source <const> = ioModule.newByteStream(sourceBuffer:getFFIPointer() as loader.CValue, size)
                 local output <const> = source:transferToBuffer().value
                 checkBuffer("byte-buffer", output, hash)
-                output:release()
+                output:close()
                 source:close()
             end,
             operation = function(): Observation
@@ -657,7 +657,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                     function(output: IOBuffer): integer return output:length() end,
                     function(output: IOBuffer): integer return output:capacity() end
                 )
-                future.value:release()
+                future.value:close()
                 source:close()
                 return result
             end,
@@ -669,7 +669,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                 local source <const> = ioModule.newFileStream(sourcePath)
                 local output <const> = source:transferToBuffer().value
                 checkBuffer("file-buffer", output, hash)
-                output:release()
+                output:close()
                 source:close()
             end,
             operation = function(): Observation
@@ -682,7 +682,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                     function(output: IOBuffer): integer return output:length() end,
                     function(output: IOBuffer): integer return output:capacity() end
                 )
-                future.value:release()
+                future.value:close()
                 source:close()
                 return result
             end,
@@ -698,7 +698,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                 checkBuffer("string-transfer", output, hash)
                 source:close()
                 destination:close()
-                output:release()
+                output:close()
             end,
             operation = function(): Observation
                 local output <const> = ioModule.newBuffer()
@@ -714,7 +714,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                 )
                 source:close()
                 destination:close()
-                output:release()
+                output:close()
                 return result
             end,
         },
@@ -729,7 +729,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                 checkBuffer("file-transfer", output, hash)
                 source:close()
                 destination:close()
-                output:release()
+                output:close()
             end,
             operation = function(): Observation
                 local output <const> = ioModule.newBuffer()
@@ -745,7 +745,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                 )
                 source:close()
                 destination:close()
-                output:release()
+                output:close()
                 return result
             end,
         },
@@ -814,7 +814,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                     checkBuffer(format("concurrent-file[%d]", index), outputs[index], hash)
                     sources[index]:close()
                     destinations[index]:close()
-                    outputs[index]:release()
+                    outputs[index]:close()
                 end
             end,
             operation = function(): Observation
@@ -882,7 +882,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                     end
                     sources[index]:close()
                     destinations[index]:close()
-                    outputs[index]:release()
+                    outputs[index]:close()
                 end
                 return {
                     count = count,
@@ -956,7 +956,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
             end
         end
     end
-    sourceBuffer:release()
+    sourceBuffer:close()
     if VALIDATE then
         print(format("validated %d bytes across %d paths with CRC-32 %s", size, selectedCount, expected))
     end

@@ -278,14 +278,14 @@ describe("data.inflate", function()
 end)
 
 describe("data.deflate", function()
-    it("compresses and inflates retained views after their buffers release", function()
+    it("compresses and inflates retained views after their buffers close", function()
         local ioModule = require("tecs").io
         local source = ioModule.newBuffer("payload")
         local sourceView = source:view()
         sourceView.getString = function()
             error("compression copied its input")
         end
-        source:release()
+        source:close()
 
         local wrapped = data.deflate(sourceView)
         local raw = data.deflateRaw(sourceView)
@@ -293,15 +293,15 @@ describe("data.deflate", function()
         local rawBuffer = ioModule.newBuffer(raw)
         local wrappedView = wrappedBuffer:view()
         local rawView = rawBuffer:view()
-        wrappedBuffer:release()
-        rawBuffer:release()
+        wrappedBuffer:close()
+        rawBuffer:close()
 
         assert.are.equal("payload", data.inflate(wrappedView))
         assert.are.equal("payload", data.inflateRaw(rawView))
 
-        sourceView:release()
-        wrappedView:release()
-        rawView:release()
+        sourceView:close()
+        wrappedView:close()
+        rawView:close()
     end)
 
     it("round trips zlib and raw streams", function()

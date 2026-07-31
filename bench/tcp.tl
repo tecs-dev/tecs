@@ -479,10 +479,10 @@ local function run()
 
     collect("restart")
     if sourceBuffer ~= nil and not sourceBuffer:isReleased() then
-        sourceBuffer:release()
+        sourceBuffer:close()
     end
     if destinationBuffer ~= nil and not destinationBuffer:isReleased() then
-        destinationBuffer:release()
+        destinationBuffer:close()
     end
     if client ~= nil then
         client:close()

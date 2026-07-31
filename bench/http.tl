@@ -494,9 +494,9 @@ return tecs.newApplication({
                         server.connection:close()
                     end
                     server.listener:close()
-                    server.pending:release()
-                    uploadBuffer:release()
-                    downloadBuffer:release()
+                    server.pending:close()
+                    uploadBuffer:close()
+                    downloadBuffer:close()
                     remove(uploadPath)
                 end) as (boolean, any)
                 if not cleaned and benchmarkFailure == nil then

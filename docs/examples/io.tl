@@ -6,21 +6,21 @@
 local tecsIO <const> = require("tecs.io")
 local bytes <const> = tecsIO.newBuffer("save data")
 print(bytes:length())
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.newBuffer
 
 -- #region tecs.io.Buffer.length
 local tecsIO <const> = require("tecs.io")
 local bytes <const> = tecsIO.newBuffer("four")
 print(bytes:length())
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.Buffer.length
 
 -- #region tecs.io.Buffer.capacity
 local tecsIO <const> = require("tecs.io")
 local bytes <const> = tecsIO.newBuffer("data")
 assert(bytes:capacity() >= bytes:length())
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.Buffer.capacity
 
 -- #region tecs.io.Buffer.clear
@@ -30,7 +30,7 @@ local capacity <const> = bytes:capacity()
 bytes:clear()
 assert(bytes:length() == 0)
 assert(bytes:capacity() == capacity)
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.Buffer.clear
 
 -- #region tecs.io.Buffer.ensureCapacity
@@ -39,7 +39,7 @@ local bytes <const> = tecsIO.newBuffer("data")
 bytes:ensureCapacity(1024)
 assert(bytes:capacity() >= 1024)
 assert(bytes:length() == 4)
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.Buffer.ensureCapacity
 
 -- #region tecs.io.Buffer.resize
@@ -49,14 +49,14 @@ bytes:resize(6)
 assert(bytes:getString() == "data\0\0")
 bytes:resize(2)
 assert(bytes:getString() == "da")
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.Buffer.resize
 
 -- #region tecs.io.Buffer.getString
 local tecsIO <const> = require("tecs.io")
 local bytes <const> = tecsIO.newBuffer("headerpayload")
 print(bytes:getString(6, 7))
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.Buffer.getString
 
 -- #region tecs.io.Buffer.setString
@@ -66,7 +66,7 @@ bytes:setString("XY", 3)
 assert(bytes:getString() == "abcXYfgh")
 bytes:setString("!", 10)
 assert(bytes:getString(8, 3) == "\0\0!")
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.Buffer.setString
 
 -- #region tecs.io.Buffer.getFFIPointer
@@ -74,23 +74,23 @@ local tecsIO <const> = require("tecs.io")
 local bytes <const> = tecsIO.newBuffer("native bytes")
 local pointer <const> = bytes:getFFIPointer()
 print(pointer)
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.Buffer.getFFIPointer
 
 -- #region tecs.io.Buffer.isReleased
 local tecsIO <const> = require("tecs.io")
 local bytes <const> = tecsIO.newBuffer()
 assert(not bytes:isReleased())
-bytes:release()
+bytes:close()
 assert(bytes:isReleased())
 -- #endregion tecs.io.Buffer.isReleased
 
--- #region tecs.io.Buffer.release
+-- #region tecs.io.Buffer.close
 local tecsIO <const> = require("tecs.io")
 local bytes <const> = tecsIO.newBuffer("secret")
-bytes:release()
-bytes:release()
--- #endregion tecs.io.Buffer.release
+bytes:close()
+bytes:close()
+-- #endregion tecs.io.Buffer.close
 
 -- #region tecs.io.newEmptyStream
 local tecsIO <const> = require("tecs.io")
@@ -113,7 +113,7 @@ local stream <const> = tecsIO.newBufferStream(bytes)
 assert(stream:writeAll("new").value)
 print(bytes:getString())
 stream:close()
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.newBufferStream
 
 -- #region tecs.io.newByteStream
@@ -172,7 +172,7 @@ assert(count, reason)
 print(bytes:getString())
 reader:close()
 source:close()
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.Reader.readInto
 
 -- #region tecs.io.Reader.close
@@ -193,7 +193,7 @@ assert(wrote, reason)
 assert(writer:close())
 print(bytes:getString())
 destination:close()
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.Writer.write
 
 -- #region tecs.io.Writer.writeFrom
@@ -206,8 +206,8 @@ local count <const>, reason = writer:writeFrom(source)
 assert(count, reason)
 assert(writer:close())
 destination:close()
-source:release()
-output:release()
+source:close()
+output:close()
 -- #endregion tecs.io.Writer.writeFrom
 
 -- #region tecs.io.Writer.flush
@@ -287,7 +287,7 @@ local bytes <const> = tecsIO.newBuffer("data")
 local source <const> = tecsIO.newBufferStream(bytes)
 print(source:hasBuffer())
 source:close()
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.ReadableStream.hasBuffer
 
 -- #region tecs.io.ReadableStream.newReader
@@ -312,7 +312,7 @@ local tecsIO <const> = require("tecs.io")
 local source <const> = tecsIO.newFileStream("save.bin")
 local bytes <const> = source:transferToBuffer(1024 * 1024).value
 print(bytes:length())
-bytes:release()
+bytes:close()
 source:close()
 -- #endregion tecs.io.ReadableStream.transferToBuffer
 
@@ -325,7 +325,7 @@ local count <const> = source:transferTo(destination).value
 print(count, output:getString())
 source:close()
 destination:close()
-output:release()
+output:close()
 -- #endregion tecs.io.ReadableStream.transferTo
 
 -- #region tecs.io.ReadableStream.transferToFile
@@ -352,7 +352,7 @@ local writer <const> = assert(destination:newWriter())
 assert(writer:write("data"))
 assert(writer:close())
 destination:close()
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.WritableStream.newWriter
 
 -- #region tecs.io.WritableStream.writeAll
@@ -370,7 +370,7 @@ local destination <const> = tecsIO.newFileStream("save.bin")
 local count <const> = destination:writeBuffer(bytes).value
 print(count)
 destination:close()
-bytes:release()
+bytes:close()
 -- #endregion tecs.io.WritableStream.writeBuffer
 
 -- #region tecs.io.poll

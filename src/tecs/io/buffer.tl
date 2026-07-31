@@ -189,7 +189,7 @@ end
 function OwnedBuffer:isReleased(): boolean
     return self._released
 end
-function OwnedBuffer:release()
+function OwnedBuffer:close()
     if not self._released then
         self._released = true
         self._allocation.references = self._allocation.references - 1
@@ -234,7 +234,7 @@ end
 function OwnedView:isReleased(): boolean
     return self._released
 end
-function OwnedView:release()
+function OwnedView:close()
     if not self._released then
         self._released = true
         self._allocation.references = self._allocation.references - 1
@@ -262,9 +262,9 @@ function OwnedWriteRange:commit(used: integer)
         error("tecs: io.WriteRange commit is past its capacity", 2)
     end
     commitWrite(self._buffer, self._offset, used)
-    self:release()
+    self:close()
 end
-function OwnedWriteRange:release()
+function OwnedWriteRange:close()
     self._released = true
     self._pointer = nil
 end

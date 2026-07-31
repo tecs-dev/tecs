@@ -323,7 +323,7 @@ local function closeSource(transfer: Transfer)
         transfer.sourceReader = nil
     end
     if transfer.sourceScratch ~= nil then
-        transfer.sourceScratch:release()
+        transfer.sourceScratch:close()
         transfer.sourceScratch = nil
     end
     transfer.sourcePending = 0
@@ -362,11 +362,11 @@ end
 
 local function releaseResponseBuffers(transfer: Transfer)
     if transfer.responseBuffer ~= nil then
-        transfer.responseBuffer:release()
+        transfer.responseBuffer:close()
         transfer.responseBuffer = nil
     end
     if transfer.responseScratch ~= nil then
-        transfer.responseScratch:release()
+        transfer.responseScratch:close()
         transfer.responseScratch = nil
     end
 end
@@ -427,7 +427,7 @@ local function completeTransfer(
     end
     response.body = body as Stream
     if transfer.responseScratch ~= nil then
-        transfer.responseScratch:release()
+        transfer.responseScratch:close()
         transfer.responseScratch = nil
     end
     transfer.future:complete(response)
