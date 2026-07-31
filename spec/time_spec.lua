@@ -221,9 +221,6 @@ describe("platform.time", function()
                 or preferences.dateFormat == "dayMonthYear"
                 or preferences.dateFormat == "monthDayYear"
         )
-        assert.is_true(
-            preferences.timeFormat == "twentyFourHour"
-                or preferences.timeFormat == "twelveHour"
-        )
+        assert.is_true(preferences.timeFormat == "twentyFourHour" or preferences.timeFormat == "twelveHour")
     end)
 end)
