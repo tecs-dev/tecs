@@ -151,7 +151,8 @@ describe("resource scopes", function()
         local file
 
         tecs.scoped(function(scope)
-            file = scope:own(assert(io.tmpfile()))
+            file = assert(io.tmpfile())
+            scope:own(file)
 
             assert.are.equal("file", io.type(file))
         end)
@@ -161,6 +162,14 @@ describe("resource scopes", function()
 
     it("validates untyped callers at registration", function()
         local ok, reason = pcall(function()
+            tecs.scoped(function(scope)
+                scope:own(nil)
+            end)
+        end)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(reason):find("Scope:own needs a non-nil value", 1, true))
+
+        ok, reason = pcall(function()
             tecs.scoped(function(scope)
                 scope:own({})
             end)

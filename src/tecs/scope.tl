@@ -7,8 +7,10 @@ returns it unchanged, so its concrete type is preserved:
 
 ```teal
 tecs.scoped(function(scope: tecs.Scope)
-    local input <const> = scope:own(assert(io.open("save.bin", "rb")))
-    local output <const> = scope:own(assert(io.open("save.copy", "wb")))
+    local input <const> = assert(tecs.io.files.openRead("save.bin"))
+    local output <const> = assert(tecs.io.files.openWrite("save.copy"))
+    scope:own(input)
+    scope:own(output)
 
     assert(tecs.io.transfer(input, output))
 end)
@@ -43,6 +45,7 @@ local interface Scope
     --- Calling a captured scope after that callback returns, raises, or begins
     --- cleanup raises instead of creating an ownership obligation nobody will
     --- run.
+    --- Passing nil or a value without a `close` method raises immediately.
     ---
     --- @param self The active scope that will own the value.
     --- @param value An open [`Closeable`](tealdoc:tecs.Closeable) or Lua file.
@@ -133,10 +136,12 @@ function ScopeImpl:own<T>(value: T): T
     if not self.active then
         error("tecs: Scope is no longer active", 2)
     end
+    if value == nil then
+        error("tecs: Scope:own needs a non-nil value", 2)
+    end
 
-    -- Teal proves this at typed call sites. Validate the same boundary for a
-    -- Lua caller now rather than letting an invalid value fail after the body
-    -- has already completed.
+    -- Validate registration now rather than letting an invalid value fail
+    -- after the body has already completed.
     local kind <const> = type(value as any)
     if kind ~= "table" and kind ~= "userdata" and kind ~= "cdata" then
         error("tecs: Scope needs a value with a close method", 2)

@@ -19,7 +19,8 @@ flushed, or closed:
 ```teal
 tecs.scoped(function(scope: tecs.Scope)
     local save <const> = scope:own(tecs.io.newFileStream("save.bin"))
-    local bytes <const> = scope:own(assert(save:transferToBuffer()))
+    local bytes <const> = assert(save:transferToBuffer())
+    scope:own(bytes)
 
     print(bytes:length())
 end)
