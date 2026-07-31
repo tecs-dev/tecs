@@ -8,10 +8,7 @@ describe("tecs.data.transcode", function()
         local text = "A\0\195\169\240\157\132\158"
         local utf16 = transcode(text, "UTF-8", "UTF-16LE")
 
-        assert.are.equal(
-            "A\0\0\0\233\0\052\216\030\221",
-            utf16
-        )
+        assert.are.equal("A\0\0\0\233\0\052\216\030\221", utf16)
         assert.are.equal(text, transcode(utf16, "UTF-16LE", "UTF-8"))
     end)
 
@@ -19,10 +16,7 @@ describe("tecs.data.transcode", function()
         local text = "A\0\240\157\132\158"
         local utf32 = transcode(text, "UTF-8", "UTF-32BE")
 
-        assert.are.equal(
-            "\0\0\0A\0\0\0\0\0\1\209\30",
-            utf32
-        )
+        assert.are.equal("\0\0\0A\0\0\0\0\0\1\209\30", utf32)
         assert.are.equal(text, transcode(utf32, "UTF-32BE", "UTF-8"))
     end)
 

@@ -586,8 +586,17 @@ function data.base64Encode(bytes: string): string
         local second = sbyte(bytes, index + 1)
         local third = sbyte(bytes, index + 2)
         output[outputIndex] = ssub(BASE64, math.floor(first / 4) + 1, math.floor(first / 4) + 1)
-        output[outputIndex + 1] = ssub(BASE64, first % 4 * 16 + math.floor((second or 0) / 16) + 1, first % 4 * 16 + math.floor((second or 0) / 16) + 1)
-        output[outputIndex + 2] = second ~= nil and ssub(BASE64, second % 16 * 4 + math.floor((third or 0) / 64) + 1, second % 16 * 4 + math.floor((third or 0) / 64) + 1) or "="
+        output[outputIndex + 1] = ssub(
+            BASE64,
+            first % 4 * 16 + math.floor((second or 0) / 16) + 1,
+            first % 4 * 16 + math.floor((second or 0) / 16) + 1
+        )
+        output[outputIndex + 2] = second ~= nil
+            and ssub(
+                BASE64,
+                second % 16 * 4 + math.floor((third or 0) / 64) + 1,
+                second % 16 * 4 + math.floor((third or 0) / 64) + 1
+            ) or "="
         output[outputIndex + 3] = third ~= nil and ssub(BASE64, third % 64 + 1, third % 64 + 1) or "="
         outputIndex = outputIndex + 4
     end
