@@ -896,8 +896,7 @@ function platformOS.capabilities(): Capabilities
     local formats: {string} = {shaderpack.formatName(shadercompiler.format())}
 
     local runtimeShaders <const> = shadercompiler.isSupported()
-    local sandbox <const> =
-        SANDBOXES[tonumber(C.SDL_GetSandbox()) as integer] or "unknownContainer"
+    local sandbox <const> = SANDBOXES[tonumber(C.SDL_GetSandbox()) as integer] or "unknownContainer"
     resolved = {
         target = platform,
         architecture = ffi.arch,
