@@ -8,6 +8,7 @@ mixer sending sound out. Kept a file of its own because it reaches SDL and
 nothing else, so listing devices never opens a mixer.
 ]=]
 
+local ffi <const> = require("ffi")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 
@@ -217,8 +218,10 @@ function audio.openMicrophone(config?: MicrophoneConfig): Microphone, string
     if stream == nil then
         return nil, sdl.error()
     end
+    stream = ffi.gc(stream as ffi.CData, C.SDL_DestroyAudioStream as function(ffi.CData)) as loader.CPtr
     if not C.SDL_ResumeAudioStreamDevice(stream) then
         local message = sdl.error()
+        ffi.gc(stream as ffi.CData, nil)
         C.SDL_DestroyAudioStream(stream)
         return nil, message
     end
@@ -291,6 +294,7 @@ function Microphone:destroy()
     if self._destroyed then
         return
     end
+    ffi.gc(self._stream as ffi.CData, nil)
     C.SDL_DestroyAudioStream(self._stream)
     self._stream = nil
     self._destroyed = true

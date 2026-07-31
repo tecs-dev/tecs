@@ -55,8 +55,9 @@ transfers are cooperative futures too. Listening, accepting, reading, writing,
 and receiving are nonblocking.
 
 Every address, TCP socket, listener, UDP socket, and UDP packet owns a
-resource. Close it explicitly. Closing is idempotent; using a closed value
-returns a failure.
+resource. Close it explicitly. A GC finalizer releases an abandoned network
+handle as a last resort, but cannot report a close error. Closing is
+idempotent; using a closed value returns a failure.
 
 Naming `tecs.io` loads none of its children. Reading `files`, `http`, `mcp`, or
 `watcher` loads only that child.
@@ -70,6 +71,7 @@ Naming `tecs.io` loads none of its children. Reading `files`, `http`, `mcp`, or
 -- Reading `tecs.io` does not initialize a protocol. The HTTP and MCP runtimes
 -- start only when their respective subordinate modules are read.
 
+local ffi <const> = require("ffi")
 local binding <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local Future <const> = require("tecs.Future")
@@ -627,13 +629,30 @@ local function closed()
     liveObjects = liveObjects - 1
 end
 
+--- Keeps an owned network handle from leaking when its Lua wrapper is abandoned.
+---
+--- Explicit `close` removes this finalizer before destroying the handle, so
+--- the native destructor runs exactly once on the normal path. A finalizer
+--- cannot report a close error, which is why callers must still close values
+--- they own.
+local function managedHandle(handle: loader.CPtr, destroy: function(loader.CPtr)): loader.CPtr
+    return ffi.gc(
+        handle as ffi.CData, function(held: ffi.CData) destroy(held as loader.CPtr); closed() end
+    ) as loader.CPtr
+end
+
+local function destroyHandle(handle: loader.CPtr, destroy: function(loader.CPtr))
+    ffi.gc(handle as ffi.CData, nil)
+    destroy(handle)
+end
+
 local function addressFrom(handle: loader.CPtr, host: string): binaryIO.Address
     local length <const> = loader.newArray("size_t[1]")
     local text <const> = C.tecsNetAddressText(handle, length)
     local address = setmetatable({} as binaryIO.Address, AddressMT)
     address.host = host
     address.text = text ~= nil and loader.toBytes(text, tonumber(length[0]) as integer) or host
-    address._handle = handle
+    address._handle = managedHandle(handle, C.tecsNetAddressDestroy as function(loader.CPtr))
     address._closed = false
     opened()
     return address
@@ -648,14 +667,14 @@ function binaryIO.Address:close()
         return
     end
     self._closed = true
-    C.tecsNetAddressDestroy(self._handle)
+    destroyHandle(self._handle, C.tecsNetAddressDestroy as function(loader.CPtr))
     self._handle = nil
     closed()
 end
 
 local function tcpSocketFrom(handle: loader.CPtr): binaryIO.TCPSocket
     local connection = setmetatable({} as binaryIO.TCPSocket, TCPSocketMT)
-    connection._handle = handle
+    connection._handle = managedHandle(handle, C.tecsNetStreamDestroy as function(loader.CPtr))
     connection._buffer = loader.newArray("uint8_t[?]", MAX_READ_BYTES)
     connection._closed = false
     opened()
@@ -825,7 +844,7 @@ function binaryIO.TCPSocket:close()
         return
     end
     self._closed = true
-    C.tecsNetStreamDestroy(self._handle)
+    destroyHandle(self._handle, C.tecsNetStreamDestroy as function(loader.CPtr))
     self._handle = nil
     closed()
 end
@@ -861,7 +880,7 @@ function binaryIO.TCPListener:close()
         return
     end
     self._closed = true
-    C.tecsNetServerDestroy(self._handle)
+    destroyHandle(self._handle, C.tecsNetServerDestroy as function(loader.CPtr))
     self._handle = nil
     closed()
 end
@@ -943,7 +962,7 @@ function binaryIO.UDPSocket:close()
         return
     end
     self._closed = true
-    C.tecsNetDatagramDestroy(self._handle)
+    destroyHandle(self._handle, C.tecsNetDatagramDestroy as function(loader.CPtr))
     self._handle = nil
     closed()
 end
@@ -1080,7 +1099,7 @@ function binaryIO.listen(port: integer, address?: binaryIO.Address): binaryIO.TC
     end
     local server = setmetatable({} as binaryIO.TCPListener, TCPListenerMT)
     server.port = port
-    server._handle = handle
+    server._handle = managedHandle(handle, C.tecsNetServerDestroy as function(loader.CPtr))
     server._closed = false
     opened()
     return server
@@ -1102,7 +1121,7 @@ function binaryIO.bind(port: integer, address?: binaryIO.Address): binaryIO.UDPS
     end
     local socket = setmetatable({} as binaryIO.UDPSocket, UDPSocketMT)
     socket.port = port
-    socket._handle = handle
+    socket._handle = managedHandle(handle, C.tecsNetDatagramDestroy as function(loader.CPtr))
     socket._closed = false
     opened()
     return socket
