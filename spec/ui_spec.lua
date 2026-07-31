@@ -15,9 +15,16 @@ local function fakeRenderer()
     local renderer = {
         clips = {},
         cleared = {},
-        camera = {},
+        camera = {
+            x = 0,
+            y = 0,
+            zoom = 1,
+            rotation = 0,
+            calls = 0,
+        },
     }
     function renderer.camera:toScreen(x, y)
+        self.calls = self.calls + 1
         return x, y
     end
     function renderer:setClipRegion(index, region)
@@ -33,6 +40,21 @@ local function fakeRenderer()
         self.cleared[index] = true
     end
     return renderer
+end
+
+local function fakeWindow(width, height, density)
+    local window = {
+        width = width,
+        height = height,
+        density = density,
+    }
+    function window:getSize()
+        return self.width, self.height
+    end
+    function window:pixelDensity()
+        return self.density
+    end
+    return window
 end
 
 local function fakeInput()
@@ -70,6 +92,70 @@ local function fakeInput()
 end
 
 describe("tecs.ui", function()
+    it("parses CSS-like dimensions and follows an application window", function()
+        local renderer = fakeRenderer()
+        local window = fakeWindow(200, 120, 2)
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer, window = window }))
+
+        local rootEntity =
+            world:spawn(ui.Style({ width = "100%", height = "100%", padding = "10px" }), ui.Root("screen"))
+        local child =
+            world:spawn(ui.Style({ width = "50%", height = "20px" }), RelativeTransform(), ChildOf(rootEntity))
+
+        world:update(1 / 60)
+
+        local root = world:get(rootEntity, ui.Root)
+        assert.are.equal(200, root.width)
+        assert.are.equal(120, root.height)
+        assert.are.equal(2, root.pixelDensity)
+        assert.are.equal(90, world:get(child, ui.Layout).width)
+        assert.are.equal(20, world:get(child, ui.Layout).height)
+
+        window.width, window.height, window.density = 300, 180, 1.5
+        world:update(1 / 60)
+
+        root = world:get(rootEntity, ui.Root)
+        assert.are.equal(300, root.width)
+        assert.are.equal(180, root.height)
+        assert.are.equal(1.5, root.pixelDensity)
+        assert.are.equal(140, world:get(child, ui.Layout).width)
+    end)
+
+    it("rejects malformed dimension strings when a style is synchronized", function()
+        local renderer = fakeRenderer()
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer }))
+        world:spawn(ui.Style({ width = "wide", height = 20 }), ui.Root("screen", 100, 100, 1))
+
+        local ok, message = pcall(function()
+            world:update(1 / 60)
+        end)
+        assert.is_false(ok)
+        assert.matches("invalid UI dimension", message)
+    end)
+
+    it("skips clip and hit geometry until retained state changes", function()
+        local renderer = fakeRenderer()
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer }))
+
+        local rootEntity =
+            world:spawn(ui.Style({ width = 100, height = 80 }), ui.Root("world", 100, 80, 1), ui.Scroll())
+        world:spawn(ui.Style({ width = 40, height = 20 }), ui.Interaction(), RelativeTransform(), ChildOf(rootEntity))
+
+        world:update(1 / 60)
+        local calls = renderer.camera.calls
+        assert.is_true(calls > 0)
+
+        world:update(1 / 60)
+        assert.are.equal(calls, renderer.camera.calls)
+
+        renderer.camera.x = 10
+        world:update(1 / 60)
+        assert.is_true(renderer.camera.calls > calls)
+    end)
+
     it("scrolls descendants without recomputing their Taffy layout", function()
         local renderer = fakeRenderer()
         local world = tecs.ecs.newWorld()
@@ -228,7 +314,13 @@ describe("tecs.ui", function()
         local renderer = fakeRenderer()
         local input = fakeInput()
         local world = tecs.ecs.newWorld()
-        world:addPlugin(ui.plugin({ renderer = renderer, input = input }))
+        local app = {
+            world = world,
+            window = {},
+            renderer = renderer,
+            input = input,
+        }
+        world:addPlugin(ui.plugin(app, { wheelStep = 12 }))
 
         local viewport = world:spawn(ui.Style({ width = 100, height = 60 }), ui.Root("screen", 100, 60, 1), ui.Scroll())
         local content = world:spawn(ui.Style({ width = 100, height = 180 }), RelativeTransform(), ChildOf(viewport))
@@ -240,8 +332,8 @@ describe("tecs.ui", function()
         input.wheelY = -1
         world:update(1 / 60)
 
-        assert.are.equal(40, world:get(viewport, ui.Scroll).y)
-        assert.are.equal(-40, world:get(content, RelativeTransform).y)
+        assert.are.equal(12, world:get(viewport, ui.Scroll).y)
+        assert.are.equal(-12, world:get(content, RelativeTransform).y)
 
         input:clear()
         world:observe(viewport, ui.Event, function(event)
@@ -251,7 +343,7 @@ describe("tecs.ui", function()
         end)
         input.wheelY = -1
         world:update(1 / 60)
-        assert.are.equal(40, world:get(viewport, ui.Scroll).y)
+        assert.are.equal(12, world:get(viewport, ui.Scroll).y)
     end)
 
     it("navigates visible controls and activates focus from the keyboard", function()

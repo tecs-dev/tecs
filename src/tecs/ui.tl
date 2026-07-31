@@ -1,16 +1,22 @@
 --[=[
-Retained, Taffy-backed UI layout for ordinary Tecs entities.
+Retained UI layout for ordinary Tecs entities.
 
 [`Style`](tealdoc:tecs.ui.Style) describes layout only. It does not replace a
 rectangle, circle, sprite, image, or text component. Put an existing drawing
 component on the same entity, or on a child, and add `Paint(true)` when its
-transform should stretch to the Taffy box. Drawing remains in the existing
+transform should stretch to the computed box. Drawing remains in the existing
 instanced producers and shaders.
 
-The plugin retains one Rust Taffy tree keyed by ECS entity ID. `ChildOf` is the
+The plugin retains one native layout tree keyed by ECS entity ID. `ChildOf` is the
 layout hierarchy as well as the transform hierarchy. The layout system writes
 `Layout` only when the box changes and writes `RelativeTransform` only when
 layout or scrolling changes its result.
+
+`px`, `%`, and `auto` dimension strings are parsed only when a `Style` enters or dirties the
+retained tree. Unchanged frames skip layout computation, layout export, clip
+reconstruction, and hit-rectangle reconstruction. A screen root installed
+through `plugin(app)` follows the application's logical window size and pixel
+density automatically.
 
 `Paint(true)` centers and stretches a drawing leaf over its box. Keep
 containers at unit scale and put their rectangle, circle, or image on an
@@ -33,10 +39,12 @@ rotate its clip.
 
 ## Interaction and navigation
 
-Passing `input = app.input` to [`plugin`](tealdoc:tecs.ui.plugin) enables
-clip-aware hit testing. [`Interaction`](tealdoc:tecs.ui.Interaction) opts in a
-layout box, and [`InteractionState`](tealdoc:tecs.ui.InteractionState) reports
-hover, primary-button capture, and focus without replacing application state.
+Passing the application to [`plugin`](tealdoc:tecs.ui.plugin) supplies its
+renderer and input, enabling clip-aware hit testing. Manual options remain
+available to tests and tools. [`Interaction`](tealdoc:tecs.ui.Interaction) opts
+in a layout box, and [`InteractionState`](tealdoc:tecs.ui.InteractionState)
+reports hover, primary-button capture, and focus without replacing application
+state.
 
 The plugin emits one bubbling [`Event`](tealdoc:tecs.ui.Event) at entity
 addresses. A primary press captures its target through release; releasing over
@@ -55,35 +63,52 @@ renderer’s exact-tie instance order.
 local ui <const> = tecs.ui
 local ChildOf <const> = tecs.ecs.ChildOf
 local RelativeTransform <const> = tecs.ecs.RelativeTransform
+local type uiTypes = require("tecs.ui")
+local type UiEvent = uiTypes.Event
 
-world:addPlugin(ui.plugin({
-    renderer = app.renderer,
-    input = app.input,
-}))
+local function spawnInterface(world: tecs.World)
+    local root <const> = world:spawn(
+        ui.Style({width = "100%", height = "100%"}),
+        ui.Root("screen")
+    )
+    local viewport <const> = world:spawn(
+        ui.Style({width = "320px", height = "240px", padding = 8}),
+        ui.Scroll(),
+        RelativeTransform(),
+        ChildOf(root)
+    )
 
-local root <const> = world:spawn(
-    ui.Style({ width = 1280, height = 720 }),
-    ui.Root("screen", 1280, 720, app.window:pixelDensity())
-)
-local viewport <const> = world:spawn(
-    ui.Style({ width = 320, height = 240, padding = 8 }),
-    ui.Scroll(),
-    RelativeTransform(),
-    ChildOf(root)
-)
+    world:spawn(
+        ui.Style({width = 300, height = 600}),
+        ui.Interaction(),
+        RelativeTransform(),
+        ChildOf(viewport)
+    )
 
-world:spawn(
-    ui.Style({ width = 300, height = 600 }),
-    ui.Interaction(),
-    RelativeTransform(),
-    ChildOf(viewport)
-)
+    world:observe(viewport, ui.Event, function(event: UiEvent)
+        if event.kind == "activate" then
+            print("activated", event.target)
+        end
+    end)
+end
+```
 
-world:observe(viewport, ui.Event, function(event: ui.Event)
-    if event.kind == "activate" then
-        print("activated", event.target)
-    end
-end)
+Install the UI from the application plugin, and let a `Startup` system invoke
+the layout function:
+
+```teal
+local function gamePlugin(world: tecs.World, app: tecs.Application)
+    world:addPlugin(ui.plugin(app))
+    world:addSystem({
+        name = "game.SpawnInterface",
+        phase = tecs.ecs.phases.Startup,
+        run = function()
+            spawnInterface(world)
+        end,
+    })
+end
+
+return tecs.newApplication({plugin = gamePlugin})
 ```
 ]=]
 
@@ -106,12 +131,14 @@ local RelativeTransform <const> = ecs.RelativeTransform
 local ChildOf <const> = ecs.ChildOf
 local Clip <const> = components.Clip
 
---- `Style` stores the Taffy properties that place one UI entity.
+--- `Style` stores the layout properties that place one UI entity.
 local record Style is Component
     --- Caller-writable. The caller supplies a table and marks `Style` dirty
-    --- after mutating it. Numeric dimensions use logical points. A
-    --- `{value=number, unit="percent"}` table uses a parent-relative
-    --- percentage; `{unit="points"}` is the explicit form of a number.
+    --- after mutating it. Numbers and `"24px"` strings use logical UI pixels,
+    --- `"50%"` is parent-relative, and `"auto"` selects automatic sizing.
+    --- Invalid strings raise when the plugin synchronizes the style. The
+    --- older `{value=number, unit="percent"}` and `unit="points"` table forms
+    --- remain supported.
     ---
     --- Supported keys are `display`, `position`, `flexDirection`, `flexWrap`,
     --- `justifyContent`, `alignItems`, `alignContent`, `flexGrow`,
@@ -126,17 +153,23 @@ local record Root is Component
     --- Caller-writable. The caller chooses `"screen"` for logical screen
     --- coordinates or `"world"` for coordinates projected by the camera.
     space: string
-    --- Caller-writable. The caller supplies the Taffy root width and the
-    --- camera projection width in logical units.
+    --- Caller-writable. The caller supplies the layout root width and the
+    --- camera projection width in logical units. When `plugin` receives an
+    --- application, the engine overwrites this field on screen roots with the
+    --- current logical window width.
     width: number
-    --- Caller-writable. The caller supplies the Taffy root height and the
-    --- camera projection height in logical units.
+    --- Caller-writable. The caller supplies the layout root height and the
+    --- camera projection height in logical units. When `plugin` receives an
+    --- application, the engine overwrites this field on screen roots with the
+    --- current logical window height.
     height: number
     --- Caller-writable. The caller supplies target pixels per logical point
-    --- for a screen root. The default is one.
+    --- for a screen root. The default is one. When `plugin` receives an
+    --- application, the engine overwrites this field on screen roots with the
+    --- window's current pixel density.
     pixelDensity: number
 end
---- `Layout` reports the last box computed by Taffy.
+--- `Layout` reports the last box computed by retained layout.
 local record Layout is Component
     --- Read-only. The engine reports the box's X offset from its parent.
     x: number
@@ -162,10 +195,10 @@ local record Scroll is Component
     --- logical units.
     y: number
     --- Engine-owned. The engine reports the horizontal extent of the direct
-    --- Taffy children. Ordinary game code should ignore this field.
+    --- layout children. Ordinary game code should ignore this field.
     contentWidth: number
     --- Engine-owned. The engine reports the vertical extent of the direct
-    --- Taffy children. Ordinary game code should ignore this field.
+    --- layout children. Ordinary game code should ignore this field.
     contentHeight: number
 end
 --- `Interaction` makes one computed layout box a UI input target.
@@ -263,7 +296,11 @@ local interface InputReader
     keyPressed: function(self: InputReader, key: string | integer, layer?: any): boolean
     modifierDown: function(self: InputReader, name: string, layer?: any): boolean
 end
---- `Options` configures one world's retained UI service.
+local interface WindowReader
+    getSize: function(self: WindowReader): integer, integer
+    pixelDensity: function(self: WindowReader): number
+end
+--- `Options` configures one world's retained UI service through explicit dependencies.
 local record Options
     --- Caller-writable. The caller supplies the renderer whose camera and GPU
     --- clip table the UI uses.
@@ -278,6 +315,21 @@ local record Options
     --- enable hit testing, scrolling, focus, and activation. Omitting it
     --- installs layout and clipping only.
     input: any
+    --- Caller-writable. The caller supplies the input layer the UI may read.
+    --- Omitting it reads the base layer.
+    layer: any
+    --- Caller-writable. The caller sets logical scroll units per wheel unit.
+    --- The default is 40.
+    wheelStep: number
+end
+--- `Overrides` changes defaults supplied by an application or explicit options.
+local record Overrides
+    --- Caller-writable. The caller reserves the first UI-owned clip index.
+    --- The default is one.
+    firstClip: integer
+    --- Caller-writable. The caller reserves the last UI-owned clip index.
+    --- The default is 255.
+    lastClip: integer
     --- Caller-writable. The caller supplies the input layer the UI may read.
     --- Omitting it reads the base layer.
     layer: any
@@ -427,14 +479,40 @@ local record Install
     captured: integer
     focused: integer
     input: InputReader
+    window: WindowReader
     layer: any
     wheelStep: number
+    geometryDirty: boolean
+    hasWorldRoots: boolean
+    cameraX: number
+    cameraY: number
+    cameraZoom: number
+    cameraRotation: number
 end
 
 local function unit(value: any, output: any)
     local target = output as {string: any}
     if type(value) == "number" then
         target.value, target.unit = value, 1
+    elseif type(value) == "string" then
+        local text = value as string
+        if text == "auto" then
+            target.value, target.unit = 0, 0
+            return
+        end
+        local amount = text:match("^([+-]?%d*%.?%d+)px$")
+        if amount ~= nil then
+            target.value, target.unit = tonumber(amount), 1
+            return
+        end
+        amount = text:match("^([+-]?%d*%.?%d+)%%$")
+        if amount ~= nil then
+            target.value, target.unit = (tonumber(amount) as number) / 100, 2
+            return
+        end
+        error(
+            ("tecs: invalid UI dimension %q; expected a number, 'auto', '<number>px', or '<number>%%'"):format(text), 3
+        )
     elseif type(value) == "table" then
         target.value = (value as {string: any}).value or 0
         target.unit = (value as {string: any}).unit == "percent" and 2
@@ -547,7 +625,7 @@ local record ui
     --- Read-only. Exposes the tag that marks an entity as participating in UI
     --- layout. `Style`, `Root`, and `Scroll` add it automatically.
     Node: Component
-    --- Read-only. Exposes the component that supplies Taffy layout properties
+    --- Read-only. Exposes the component that supplies retained layout properties
     --- and adds `Layout` and `tecs.gfx.Clip`.
     Style: Style
     --- Read-only. Exposes the component that gives a retained UI tree its
@@ -573,45 +651,63 @@ local record ui
     --- `Options` configures rendering, input, scrolling, and the owned
     --- clip-index range.
     type Options = Options
+    --- `Overrides` changes scrolling and clip allocation without repeating an
+    --- application's renderer and input.
+    type Overrides = Overrides
 
-    --- Returns a plugin that derives layout, transforms, clipping, and optional
-    --- interaction from retained Taffy nodes.
+    --- Returns a plugin that derives layout, transforms, clipping, and
+    --- optional interaction from retained layout nodes.
     ---
     --- The plugin owns every renderer clip index from `firstClip` through
     --- `lastClip`, inclusive. Reserve a smaller range when another system also
     --- calls `Renderer:setClipRegion`. Exhausting the range raises rather than
     --- drawing unclipped content.
     ---
-    --- When `input` is present, the plugin reads its configured layer in
-    --- `PreUpdate`. It retains the visible hit geometry derived after the
-    --- previous frame's layout and clipping, which is the geometry the player
-    --- was shown when the input arrived.
+    --- Passing an [`Application`](tealdoc:tecs.Application) supplies its
+    --- renderer, input, and window. The plugin then synchronizes every screen
+    --- root's logical size and pixel density before layout. The optional
+    --- second argument overrides clip allocation, the input layer, and wheel
+    --- distance. Passing `Options` directly preserves manual wiring for tests,
+    --- tools, and worlds not owned by an application. When input is present,
+    --- the plugin reads its configured layer in `PreUpdate`. It uses the hit
+    --- geometry derived after the previous frame's layout and clipping, which
+    --- is the geometry the player was shown when the input arrived.
     ---
-    --- @param options The caller supplies a renderer and may reserve an
-    ---     inclusive clip range within 1 through 255.
+    --- @param source The caller supplies an application or manually wired
+    ---     options containing a renderer.
+    --- @param overrides The caller may override source defaults without
+    ---     repeating its renderer and input.
     --- @return Returns a plugin for `world:addPlugin`. Each world receives a
     ---     separate retained tree and clip allocator.
-    plugin: function(Options): function(World)
+    plugin: function(source: any, overrides?: Overrides): function(World)
 end
 
 ui.Node = NodeComponent
 ui.Style, ui.Root, ui.Layout, ui.Paint, ui.Scroll = Style, Root, Layout, Paint, Scroll
 ui.Interaction, ui.InteractionState, ui.Event = Interaction, InteractionState, Event
 
-function ui.plugin(options: Options): function(World)
-    if options == nil or options.renderer == nil then
+function ui.plugin(provider: any, overrides?: Overrides): function(World)
+    local configuration <const> = provider as {string: any}
+    if configuration == nil or configuration.renderer == nil then
         error("tecs: the UI plugin needs a `renderer`", 2)
     end
-    local firstClip = options.firstClip or 1
-    local lastClip = options.lastClip or 255
-    local wheelStep = options.wheelStep or 40
+    local overrideValues <const> = overrides or {}
+    local firstClip = (overrideValues.firstClip or configuration.firstClip or 1) as integer
+    local lastClip = (overrideValues.lastClip or configuration.lastClip or 255) as integer
+    local wheelStep = (overrideValues.wheelStep or configuration.wheelStep or 40) as number
     if firstClip < 1 or lastClip > 255 or firstClip > lastClip then
         error("tecs: UI clip range must be within 1 through 255", 2)
     end
     if wheelStep < 0 then
         error("tecs: UI wheelStep cannot be negative", 2)
     end
-    local renderer <const> = options.renderer
+    local renderer <const> = configuration.renderer as Renderer
+    local inputReader <const> = configuration.input as InputReader
+    local window = configuration.window as WindowReader
+    if window ~= nil and (type(window.getSize) ~= "function" or type(window.pixelDensity) ~= "function") then
+        window = nil
+    end
+    local layer <const> = overrideValues.layer or configuration.layer
     return function(world: World)
         local tree = C.tecsUiTreeCreate()
         if tree == nil then
@@ -644,9 +740,16 @@ function ui.plugin(options: Options): function(World)
             hovered = nil,
             captured = nil,
             focused = nil,
-            input = options.input as InputReader,
-            layer = options.layer,
+            input = inputReader,
+            window = window,
+            layer = layer,
             wheelStep = wheelStep,
+            geometryDirty = true,
+            hasWorldRoots = false,
+            cameraX = math.huge,
+            cameraY = math.huge,
+            cameraZoom = math.huge,
+            cameraRotation = math.huge,
         }
         -- These names are compatibility surfaces exposed by the debugger.
         local nodes = world:newQuery({name = "tecs.UiLayout", include = {NodeComponent, Style, Layout}})
@@ -662,14 +765,54 @@ function ui.plugin(options: Options): function(World)
             phase = ecs.phases.PostUpdate,
             before = {"RelativeTransform"},
             run = function()
+                local layoutDirty = false
                 local hierarchyDirty = false
+                local transformDirty = false
+
+                local screenWidth: number = 0
+                local screenHeight: number = 0
+                local screenDensity: number = 1
+                local activeWindow = install.window
+                if activeWindow ~= nil then
+                    screenWidth, screenHeight = activeWindow:getSize()
+                    screenDensity = activeWindow:pixelDensity()
+                end
+                install.hasWorldRoots = false
+                for archetype, length, entities in roots:iter() do
+                    local values = archetype:get(Root)
+                    layoutDirty = layoutDirty or archetype:isComponentDirty(Root)
+                    for row = 1, length do
+                        local value = values[row]
+                        if value.space == "world" then
+                            install.hasWorldRoots = true
+                        elseif
+                            install.window ~= nil
+                            and (
+                                value.width ~= screenWidth
+                                or value.height ~= screenHeight
+                                or value.pixelDensity ~= screenDensity
+                            )
+                        then
+                            local changed = world:getMut(entities[row], Root)
+                            changed.width, changed.height = screenWidth, screenHeight
+                            changed.pixelDensity = screenDensity
+                            layoutDirty = true
+                        end
+                    end
+                end
+
                 for entity in pairs(install.live) do
                     install.live[entity] = nil
                 end
                 for archetype, length, entities in nodes:iter() do
                     local styles = archetype:get(Style)
                     local styleDirty = archetype:isComponentDirty(Style)
-                    hierarchyDirty = hierarchyDirty or styleDirty or archetype:isComponentDirty(ChildOf)
+                    local childDirty = archetype:isComponentDirty(ChildOf)
+                    layoutDirty = layoutDirty or styleDirty or childDirty
+                    hierarchyDirty = hierarchyDirty or childDirty
+                    transformDirty = transformDirty
+                        or archetype:isComponentDirty(RelativeTransform)
+                        or archetype:isComponentDirty(Paint)
                     for row = 1, length do
                         local entity = entities[row]
                         install.live[entity] = true
@@ -679,6 +822,7 @@ function ui.plugin(options: Options): function(World)
                                 error("tecs: UI node creation failed: " .. loader.toString(C.tecsRustError()), 2)
                             end
                             install.known[entity] = true
+                            layoutDirty = true
                             hierarchyDirty = true
                         elseif
                             styleDirty
@@ -704,6 +848,7 @@ function ui.plugin(options: Options): function(World)
                     end
                     install.known[entity] = nil
                     install.childKeys[entity] = nil
+                    layoutDirty = true
                     hierarchyDirty = true
                 end
                 if hierarchyDirty then
@@ -713,21 +858,36 @@ function ui.plugin(options: Options): function(World)
                         end
                     end
                 end
-                if not (C.tecsUiTreeBegin(install.tree) as boolean) then
-                    error("tecs: UI layout reset failed: " .. loader.toString(C.tecsRustError()), 2)
+
+                for archetype in scrolls:iter() do
+                    if archetype:isComponentDirty(Scroll) then
+                        transformDirty = true
+                    end
                 end
-                for archetype, length, entities in roots:iter() do
-                    local rootColumn = archetype:get(Root)
-                    for row = 1, length do
-                        local root = rootColumn[row]
-                        if
-                            root.width > 0
-                            and root.height > 0
-                            and not (
-                                C.tecsUiTreeCompute(install.tree, entities[row], root.width, root.height) as boolean
-                            )
-                        then
-                            error("tecs: UI layout failed: " .. loader.toString(C.tecsRustError()), 2)
+
+                if not layoutDirty and not transformDirty then
+                    return
+                end
+
+                -- The native tree retains its last boxes. Scrolling and paint
+                -- changes can reuse those boxes without recomputing layout.
+                if layoutDirty then
+                    if not (C.tecsUiTreeBegin(install.tree) as boolean) then
+                        error("tecs: UI layout reset failed: " .. loader.toString(C.tecsRustError()), 2)
+                    end
+                    for archetype, length, entities in roots:iter() do
+                        local rootColumn = archetype:get(Root)
+                        for row = 1, length do
+                            local root = rootColumn[row]
+                            if
+                                root.width > 0
+                                and root.height > 0
+                                and not (
+                                    C.tecsUiTreeCompute(install.tree, entities[row], root.width, root.height) as boolean
+                                )
+                            then
+                                error("tecs: UI layout failed: " .. loader.toString(C.tecsRustError()), 2)
+                            end
                         end
                     end
                 end
@@ -773,19 +933,22 @@ function ui.plugin(options: Options): function(World)
                         end
                     end
                 end
-                local bounds: BoundsContext = {world = world, width = 0, height = 0}
-                for archetype, length, entities in scrolls:iter() do
-                    local values = archetype:get(Scroll)
-                    for row = 1, length do
-                        bounds.width, bounds.height = 0, 0
-                        world:targets(entities[row], ChildOf, collectBounds, bounds)
-                        local value = values[row]
-                        if value.contentWidth ~= bounds.width or value.contentHeight ~= bounds.height then
-                            local changed = world:getMut(entities[row], Scroll)
-                            changed.contentWidth, changed.contentHeight = bounds.width, bounds.height
+                if layoutDirty then
+                    local bounds: BoundsContext = {world = world, width = 0, height = 0}
+                    for archetype, length, entities in scrolls:iter() do
+                        local values = archetype:get(Scroll)
+                        for row = 1, length do
+                            bounds.width, bounds.height = 0, 0
+                            world:targets(entities[row], ChildOf, collectBounds, bounds)
+                            local value = values[row]
+                            if value.contentWidth ~= bounds.width or value.contentHeight ~= bounds.height then
+                                local changed = world:getMut(entities[row], Scroll)
+                                changed.contentWidth, changed.contentHeight = bounds.width, bounds.height
+                            end
                         end
                     end
                 end
+                install.geometryDirty = true
             end,
         })
         local function regionFor(entity: integer): number
@@ -1016,6 +1179,44 @@ function ui.plugin(options: Options): function(World)
             after = {"RelativeTransform", "tecs.UiLayout"},
             before = {"tecs.TextLayout"},
             run = function()
+                -- The queries are cheap dirty gates over archetypes. The tree
+                -- walks and coordinate projection below run only when their
+                -- retained geometry can have changed.
+                local geometryDirty = install.geometryDirty
+                for archetype in nodes:iter() do
+                    geometryDirty = geometryDirty
+                        or archetype:isComponentDirty(Transform)
+                        or archetype:isComponentDirty(ChildOf)
+                        or archetype:isComponentDirty(Root)
+                        or archetype:isComponentDirty(Scroll)
+                        or archetype:isComponentDirty(Paint)
+                end
+                for archetype in interactions:iter() do
+                    geometryDirty = geometryDirty or archetype:isComponentDirty(Interaction)
+                end
+
+                local camera = renderer.camera
+                local cameraX = camera.x or 0
+                local cameraY = camera.y or 0
+                local cameraZoom = camera.zoom or 1
+                local cameraRotation = camera.rotation or 0
+                if
+                    install.hasWorldRoots
+                    and (
+                        cameraX ~= install.cameraX
+                        or cameraY ~= install.cameraY
+                        or cameraZoom ~= install.cameraZoom
+                        or cameraRotation ~= install.cameraRotation
+                    )
+                then
+                    geometryDirty = true
+                end
+                install.cameraX, install.cameraY = cameraX, cameraY
+                install.cameraZoom, install.cameraRotation = cameraZoom, cameraRotation
+                if not geometryDirty then
+                    return
+                end
+
                 for key in pairs(install.clipUsed) do
                     install.clipUsed[key] = nil
                 end
@@ -1086,6 +1287,7 @@ function ui.plugin(options: Options): function(World)
                         install.clipRight[index], install.clipBottom[index] = nil, nil
                     end
                 end
+                install.geometryDirty = false
             end,
         })
         local function targetAt(list: {Hit}, count: integer, x: number, y: number, nestedFirst: boolean): integer

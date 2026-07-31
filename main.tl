@@ -130,10 +130,10 @@ return tecs.newApplication({
     framesInFlight = tonumber(os.getenv("TECS_INFLIGHT")) as integer,
     debug = true,
     ambientLight = {0.05, 0.05, 0.08},
-    -- Headroom over the field for the lights and for a glyph per character of
-    -- the caption, since a glyph is an entity and an instance like any other.
-    capacity = COUNT + 256,
-    maxEntities = COUNT + 512,
+    -- Headroom over the field for lights, composed UI shapes, and one entity
+    -- per glyph. Hitting the renderer capacity drops later instances.
+    capacity = COUNT + 512,
+    maxEntities = COUNT + 1024,
     debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
     presentMode = os.getenv("TECS_PRESENT"),
     mcpPort = tonumber(os.getenv("TECS_MCP")) as integer,
@@ -186,11 +186,9 @@ return tecs.newApplication({
         )
 
         -- The UI is retained layout over the same entities and instance
-        -- producers. Taffy positions containers; these leaves remain ordinary
-        -- rectangles, circles, images, and text.
+        -- producers. Retained layout positions containers; these leaves remain
+        -- ordinary rectangles, circles, images, and text.
         local ui <const> = tecs.ui
-        local screenWidth, screenHeight = app.window:getSize()
-        local density <const> = app.window:pixelDensity()
         tecs.gfx.layers.configure(
             16,
             {
@@ -199,27 +197,23 @@ return tecs.newApplication({
                 unlit = true,
             }
         )
-        world:addPlugin(ui.plugin({
-            renderer = app.renderer,
-            input = app.input,
-            wheelStep = 36,
-        }))
+        world:addPlugin(ui.plugin(app, {wheelStep = 36}))
 
         local uiRoot <const> = world:spawn(
             ui.Style({
-                width = screenWidth,
-                height = screenHeight,
+                width = "100%",
+                height = "100%",
                 flexDirection = "row",
                 justifyContent = "end",
                 padding = 24,
             }),
-            ui.Root("screen", screenWidth, screenHeight, density),
+            ui.Root("screen"),
             Transform(0, 0, 900, 16)
         )
         local panel <const> = world:spawn(
             ui.Style({
                 width = 400,
-                height = {value = 100, unit = "percent"},
+                height = "100%",
                 flexDirection = "column",
                 padding = 20,
                 gap = 12,
@@ -237,9 +231,7 @@ return tecs.newApplication({
             ChildOf(panel)
         )
 
-        local header <const> = world:spawn(
-            ui.Style({height = 56, width = {value = 100, unit = "percent"}}), RelativeTransform(), ChildOf(panel)
-        )
+        local header <const> = world:spawn(ui.Style({height = 56, width = "100%"}), RelativeTransform(), ChildOf(panel))
         world:spawn(
             ui.Style({position = "absolute", width = 42, height = 42, inset = {left = 0, top = 4}}),
             ui.Paint(true),
@@ -254,7 +246,7 @@ return tecs.newApplication({
             RelativeTransform(0, 0, 3),
             Tint(0.94, 0.97, 1.0, 1.0),
             tecs.gfx.Text.new({
-                text = "Taffy + Tecs UI",
+                text = "Tecs UI",
                 font = font,
                 size = 25,
             }),
@@ -273,7 +265,7 @@ return tecs.newApplication({
         )
 
         local status <const> = world:spawn(
-            ui.Style({height = 42, width = {value = 100, unit = "percent"}}),
+            ui.Style({height = 42, width = "100%"}),
             RelativeTransform(0, 0, 3),
             Tint(0.62, 0.75, 0.88, 1.0),
             tecs.gfx.Text.new({
@@ -293,7 +285,7 @@ return tecs.newApplication({
         end
         local function spawnButton(parent: integer, label: string, tabIndex: integer): integer
             local control <const> = world:spawn(
-                ui.Style({width = {value = 100, unit = "percent"}, height = 44}),
+                ui.Style({width = "100%", height = 44}),
                 ui.Interaction({tabIndex = tabIndex}),
                 RelativeTransform(),
                 ChildOf(parent)
@@ -329,7 +321,7 @@ return tecs.newApplication({
 
         local actions <const> = world:spawn(
             ui.Style({
-                width = {value = 100, unit = "percent"},
+                width = "100%",
                 height = 44,
                 flexDirection = "row",
                 gap = 10,
@@ -377,7 +369,7 @@ return tecs.newApplication({
 
         local viewport <const> = world:spawn(
             ui.Style({
-                width = {value = 100, unit = "percent"},
+                width = "100%",
                 flexGrow = 1,
                 minHeight = 120,
             }),
@@ -387,7 +379,7 @@ return tecs.newApplication({
         )
         local content <const> = world:spawn(
             ui.Style({
-                width = {value = 100, unit = "percent"},
+                width = "100%",
                 height = 508,
                 flexDirection = "column",
                 gap = 8,
@@ -411,7 +403,7 @@ return tecs.newApplication({
         end
 
         -- Images remain sprites. Loading and residency are asynchronous; once
-        -- ready, this leaf simply joins the same Taffy hierarchy.
+        -- ready, this leaf simply joins the same retained hierarchy.
         tecs.assets.loadImage(tecs.io.files.assetPath("demo/ui-badge.svg")):map(function(image: Image): Sprite
             local sprite <const> = app.renderer:registerImage(image)
             return sprite
