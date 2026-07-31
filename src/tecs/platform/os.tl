@@ -22,7 +22,9 @@ reads may return only the value this process wrote.
 
 ## Child processes
 
-`runProcess` runs the child on a worker and returns immediately. Pump
+`runProcess` runs the child on a worker and returns immediately. An
+[`Application`](tealdoc:tecs.Application) pumps the process runner
+automatically. A headless program without an application calls
 `tecs.runtime.poll` once per loop until the future settles:
 
 ```teal
@@ -286,8 +288,9 @@ local record platformOS
 
     --- Runs a program and answers a future for it, immediately.
     ---
-    --- Nothing here blocks. The future reads "pending" until
-    --- `updateProcesses`, or a `wait` on it, takes the answer.
+    --- Nothing here blocks. An application collects the answer on a later
+    --- host iteration. In a headless program, the future reads "pending"
+    --- until `tecs.runtime.poll`, or a `wait` on it, takes the answer.
     ---
     --- @param options Copied by this call, so later edits to the same table do
     ---     not reach the child. The first call also starts the process runner.
@@ -333,8 +336,20 @@ local record platformOS
     ---     which asks and the child may refuse.
     killProcess: function(run: Future<ProcessResult>, force?: boolean)
 
-    --- Settles completed process runs. Call once per frame.
-    --- @return How many runs finished.
+    --- Advances the manually driven headless process runner.
+    ---
+    --- An [`Application`](tealdoc:tecs.Application) advances this source
+    --- through `tecs.runtime.poll` once per host iteration, including while
+    --- suspended or crashed. Ordinary game code, plugins, and systems must
+    --- not call it.
+    ---
+    --- A headless program normally calls `tecs.runtime.poll` instead. Call
+    --- this directly only when the program deliberately wants to advance
+    --- child processes without advancing other active facilities. The
+    --- function returns immediately after settling every completed run
+    --- currently available.
+    ---
+    --- @return The number of runs that finished during this call.
     updateProcesses: function(): integer
 
     --- Returns the number of runs that have not answered yet.
