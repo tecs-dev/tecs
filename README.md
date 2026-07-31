@@ -3189,8 +3189,24 @@ Nested viewports are intersected on the CPU and receive one of the existing
 clip indices, because an instance has room for one index and the fragment
 shader already tests one rectangle. The plugin owns a caller-selected range of
 the renderer's 255 indices and fails when that range is exhausted. Scroll and
-clip precede event routing so a later hit test can reject the same off-viewport
-content the GPU rejects.
+clip produce the visible hit rectangles retained for the next input frame, so
+the event router rejects the same off-viewport content the GPU rejected in the
+frame the player saw.
+
+Interaction remains entity-addressed too. `UiInteraction` admits a computed box
+to hit testing, `UiInteractionState` carries transient hover, primary-button
+capture and focus, and one typed event bubbles through `ChildOf`. A separate
+callback tree or DOM would duplicate both identity and ancestry, so the world
+bus is the event route. The plugin reads the existing input layer in
+`PreUpdate`, wheel scrolling mutates `UiScroll` before layout in the same frame,
+and Tab traversal plus Return or Space activation uses the same visible target
+set as pointer input.
+
+Hit ordering uses the renderer's layer-depth calculation. Exact depth ties use
+UI depth and entity identity because the renderer's final instance position is
+an extraction detail and not a stable public order. A UI whose overlapping
+controls require a visual winner therefore gives them distinct layers or Z
+values rather than making click behavior depend on archetype packing.
 
 ## Shapes are materials
 
@@ -3957,6 +3973,14 @@ allowed to borrow from its machine.
 
 `TECS_FRAMES=N cargo xtask run` exits after N frames, so an automated run can drive
 a real window to completion.
+
+The task compiles `main.tl` into the selected development output before it
+launches the host, matching the packaged entry shape. `cargo xtask check`
+already type-checks that source together with the engine, so asking the host's
+source loader to resolve the same full program again would duplicate the check
+and makes a large showcase pay the loader's recursive type-resolution depth.
+The standalone `tecs --entry file.tl` path remains available to projects that
+want source loading at launch.
 
 ## One program owns both halves of a documentation page
 

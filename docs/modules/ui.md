@@ -1,5 +1,5 @@
 ---
-description: "Retained Taffy layout, scrolling, and clipping for composed UI entities"
+description: "Retained Taffy layout, clipping, scrolling, and interaction for composed UI entities"
 ---
 
 # tecs.ui
