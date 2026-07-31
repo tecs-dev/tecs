@@ -45,15 +45,10 @@ const CONTENT: &str = match option_env!("TECS_CONTENT") {
     Some(value) => value,
     None => "",
 };
-// This stays Lua rather than Rust so Teal owns the generated Lua and its
-// diagnostics. `require("tl")` registers Teal's internal modules, and the
-// loader compiles one source chunk without writing a generated file.
-const TEAL_ENTRY: &[u8] = br#"
-local entry = assert(__tecsTealEntry)
-local file, openError = io.open(entry, "rb")
-if file == nil then error(openError, 0) end
-local source = file:read("*a")
-file:close()
+// This stays Lua rather than Rust so Teal owns generated Lua and diagnostics.
+// The loader lets either kind of source entry require a Teal project module.
+const SOURCE_ENTRY: &[u8] = br#"
+local entry = assert(__tecsSourceEntry)
 require("tl")
 require("teal.package_loader").install_loader()
 -- Teal installs ahead of Lua by default. Tecs keeps generated Lua as the
@@ -61,8 +56,17 @@ require("teal.package_loader").install_loader()
 local searchers = package.searchers or package.loaders
 local tealSearcher = table.remove(searchers, 2)
 table.insert(searchers, 3, tealSearcher)
-local chunk, compileError = require("teal.loader").load(source, "@" .. entry)
-if chunk == nil then error(compileError, 0) end
+local chunk, loadError
+if entry:sub(-3) == ".tl" then
+    local file, openError = io.open(entry, "rb")
+    if file == nil then error(openError, 0) end
+    local source = file:read("*a")
+    file:close()
+    chunk, loadError = require("teal.loader").load(source, "@" .. entry)
+else
+    chunk, loadError = loadfile(entry)
+end
+if chunk == nil then error(loadError, 0) end
 return chunk()
 "#;
 
@@ -110,7 +114,7 @@ unsafe extern "C" {
     fn tecsPayloadLoadChunk(state: *mut LuaState, name: *const c_char) -> c_int;
 }
 
-fn teal_source_paths(entry: &CStr, configured: Option<&str>) -> String {
+fn source_paths(entry: &CStr, configured: Option<&str>) -> String {
     let mut roots = Vec::new();
     if let Some(parent) = Path::new(entry.to_string_lossy().as_ref()).parent() {
         let parent = parent.to_string_lossy();
@@ -502,16 +506,49 @@ unsafe fn initialize(
         tecsPayloadInstall(lua);
     }
 
-    unsafe { lua_createtable(lua, argc, 0) };
     let arguments = if argc == 0 {
         &[][..]
     } else {
         unsafe { slice::from_raw_parts(argv, argc as usize) }
     };
-    for (index, argument) in arguments.iter().enumerate() {
+    // `--entry` is a private leading host option. Looking for it later would
+    // mistake a forwarded game argument of the same spelling for another
+    // bootstrap.
+    let entry = (arguments.len() > 2
+        && !arguments[1].is_null()
+        && unsafe { CStr::from_ptr(arguments[1]) }.to_bytes() == b"--entry"
+        && !arguments[2].is_null())
+    .then(|| unsafe { CStr::from_ptr(arguments[2]) }.to_owned());
+    if let Some(entry) = entry.as_ref() {
+        unsafe {
+            lua_pushstring(lua, entry.as_ptr());
+            lua_setfield(lua, LUA_GLOBALS_INDEX, c"__tecsEntry".as_ptr());
+        }
+    }
+    let game_arguments = if entry.is_some() && arguments.len() > 3 {
+        &arguments[3..]
+    } else if entry.is_none() && arguments.len() > 1 {
+        &arguments[1..]
+    } else {
+        &[][..]
+    };
+    unsafe {
+        lua_createtable(
+            lua,
+            c_int::try_from(game_arguments.len()).unwrap_or(c_int::MAX),
+            0,
+        )
+    };
+    if let Some(argument_zero) = arguments.first() {
+        unsafe {
+            lua_pushstring(lua, *argument_zero);
+            lua_rawseti(lua, -2, 0);
+        }
+    }
+    for (index, argument) in game_arguments.iter().enumerate() {
         unsafe {
             lua_pushstring(lua, *argument);
-            lua_rawseti(lua, -2, c_int::try_from(index).unwrap_or(c_int::MAX));
+            lua_rawseti(lua, -2, c_int::try_from(index + 1).unwrap_or(c_int::MAX));
         }
     }
     unsafe { lua_setfield(lua, LUA_GLOBALS_INDEX, c"arg".as_ptr()) };
@@ -562,14 +599,6 @@ unsafe fn initialize(
         }
     }
 
-    // `--entry` is a private leading host option. Looking for it later would
-    // mistake a forwarded game argument of the same spelling for another
-    // bootstrap.
-    let entry = (arguments.len() > 2
-        && !arguments[1].is_null()
-        && unsafe { CStr::from_ptr(arguments[1]) }.to_bytes() == b"--entry"
-        && !arguments[2].is_null())
-    .then(|| unsafe { CStr::from_ptr(arguments[2]) }.to_owned());
     let configured_entry = clean_cstring(ENTRY);
     let carried = entry.as_deref().unwrap_or(configured_entry.as_c_str());
     let resolved = entry.clone().unwrap_or_else(|| {
@@ -580,29 +609,31 @@ unsafe fn initialize(
         )
     });
     let teal_entry = is_teal_entry(resolved.as_c_str());
-    if teal_entry {
-        let configured_sources = std::env::var("TECS_TL_PATH").ok();
-        let sources = teal_source_paths(resolved.as_c_str(), configured_sources.as_deref());
-        if !sources.is_empty() {
-            unsafe {
-                lua_getfield(lua, LUA_GLOBALS_INDEX, c"package".as_ptr());
-                lua_getfield(lua, -1, c"path".as_ptr());
-            }
-            let had = unsafe { lua_tolstring(lua, -1, ptr::null_mut()) };
-            let had = if had.is_null() {
-                String::new()
-            } else {
-                unsafe { CStr::from_ptr(had) }
-                    .to_string_lossy()
-                    .into_owned()
-            };
-            let path = clean_cstring(format!("{had};{sources}"));
-            unsafe {
-                lua_settop(lua, -2);
-                lua_pushstring(lua, path.as_ptr());
-                lua_setfield(lua, -2, c"path".as_ptr());
-                lua_settop(lua, -2);
-            }
+    let configured_sources = std::env::var("TECS_TL_PATH").ok();
+    let source_loader = teal_entry
+        || configured_sources
+            .as_deref()
+            .is_some_and(|value| !value.is_empty());
+    let sources = source_paths(resolved.as_c_str(), configured_sources.as_deref());
+    if !sources.is_empty() {
+        unsafe {
+            lua_getfield(lua, LUA_GLOBALS_INDEX, c"package".as_ptr());
+            lua_getfield(lua, -1, c"path".as_ptr());
+        }
+        let had = unsafe { lua_tolstring(lua, -1, ptr::null_mut()) };
+        let had = if had.is_null() {
+            String::new()
+        } else {
+            unsafe { CStr::from_ptr(had) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        let path = clean_cstring(format!("{had};{sources}"));
+        unsafe {
+            lua_settop(lua, -2);
+            lua_pushstring(lua, path.as_ptr());
+            lua_setfield(lua, -2, c"path".as_ptr());
+            lua_settop(lua, -2);
         }
     }
 
@@ -613,17 +644,17 @@ unsafe fn initialize(
         let _ = carried;
         -1
     };
-    if compiled < 0 && teal_entry {
+    if compiled < 0 && source_loader {
         unsafe {
             lua_pushstring(lua, resolved.as_ptr());
-            lua_setfield(lua, LUA_GLOBALS_INDEX, c"__tecsTealEntry".as_ptr());
+            lua_setfield(lua, LUA_GLOBALS_INDEX, c"__tecsSourceEntry".as_ptr());
         }
-        let name = c"@tecs:teal-entry";
+        let name = c"@tecs:source-entry";
         compiled = unsafe {
             luaL_loadbuffer(
                 lua,
-                TEAL_ENTRY.as_ptr().cast(),
-                TEAL_ENTRY.len(),
+                SOURCE_ENTRY.as_ptr().cast(),
+                SOURCE_ENTRY.len(),
                 name.as_ptr(),
             )
         };
@@ -779,23 +810,29 @@ pub unsafe extern "C" fn SDL_AppQuit(appstate: *mut c_void, _result: SDL_AppResu
 mod tests {
     use std::ffi::CString;
 
-    use super::{is_teal_entry, teal_source_paths};
+    use super::{is_teal_entry, source_paths};
 
     #[test]
-    fn teal_entries_add_their_parent_and_configured_source_roots() {
+    fn entries_add_their_parent_and_configured_source_roots() {
         // The configured source root lets an entry below `src/` require a
         // sibling by its project module name rather than its directory.
         let entry = CString::new("src/game/main.tl").unwrap();
 
         assert!(is_teal_entry(&entry));
         assert_eq!(
-            teal_source_paths(&entry, Some("src;mods")),
+            source_paths(&entry, Some("src;mods")),
             "src/game/?.lua;src/game/?/init.lua;src/?.lua;src/?/init.lua;mods/?.lua;mods/?/init.lua"
+        );
+
+        let lua_entry = CString::new("tools/alternate.lua").unwrap();
+        assert_eq!(
+            source_paths(&lua_entry, Some("src")),
+            "tools/?.lua;tools/?/init.lua;src/?.lua;src/?/init.lua"
         );
     }
 
     #[test]
-    fn lua_entries_do_not_enable_the_teal_loader() {
+    fn identifies_teal_entries_by_extension() {
         assert!(!is_teal_entry(&CString::new("main.lua").unwrap()));
     }
 }

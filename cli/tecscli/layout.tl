@@ -74,40 +74,30 @@ end
 --- A release bakes the CLI in as its entry chunk, so the binary's own name is
 --- enough. A build tree bakes in the demo instead and reaches the CLI through
 --- `--entry`, which is the seam that already existed. Both are answered by
---- repeating whatever this process was started with, rather than by asking
---- which kind of tree this is.
+--- the explicit entry the host consumed, rather than by asking which kind of
+--- tree this is.
 function layout.reinvoke(): {string}
-    local argv = (_G as {string: {integer: string}})["arg"]
     local command <const>: {string} = {layout.self()}
-    local index = 1
-    while argv[index] ~= nil do
-        if argv[index] == "--entry" and argv[index + 1] ~= nil then
-            command[#command + 1] = "--entry"
-            command[#command + 1] = argv[index + 1]
-            break
-        end
-        index = index + 1
+    local entry <const> = (_G as {string: string})["__tecsEntry"]
+    if entry ~= nil then
+        command[#command + 1] = "--entry"
+        command[#command + 1] = entry
     end
     return command
 end
 
---- The arguments this process was given, with a leading `--entry` pair gone.
+--- The arguments this process was given.
 ---
---- The host consumes `--entry` and hands the whole vector through, so a CLI
---- reached that way sees two arguments it did not ask for. Stripping them here
---- is what makes a build tree's `tecs --entry <chunk> check` and a release's
---- `tecs check` the same command.
+--- The host consumes a leading `--entry` pair before constructing `arg`, so a
+--- build tree's `tecs --entry <chunk> check` and a release's `tecs check`
+--- expose the same list.
 function layout.arguments(): {string}
     local argv = (_G as {string: {integer: string}})["arg"]
     local args: {string} = {}
     local index = 1
     while argv[index] ~= nil do
-        if argv[index] == "--entry" and argv[index + 1] ~= nil and #args == 0 then
-            index = index + 2
-        else
-            args[#args + 1] = argv[index]
-            index = index + 1
-        end
+        args[#args + 1] = argv[index]
+        index = index + 1
     end
     return args
 end

@@ -213,6 +213,8 @@ local REACH = {
         modules = {
             "tecs/audio.lua",
             "tecs/assets.lua",
+            "tecs/data/transcode.lua",
+            "tecs/data/utf8/init.lua",
             "tecs/gfx/screenshot.lua",
             "tecs/io/mcp/tools.lua",
         },

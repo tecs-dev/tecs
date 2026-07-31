@@ -77,7 +77,12 @@ local function detach(self: OwnedBuffer, minimum: integer)
     end
     local capacity = max(MIN_CAPACITY, old.capacity)
     while capacity < minimum do
-        capacity = capacity * 2
+        local doubled <const> = capacity * 2
+        if doubled <= capacity or doubled > MAX_INTEGER then
+            capacity = minimum
+            break
+        end
+        capacity = doubled
     end
     local fresh <const> = allocation(capacity)
     if self._length > 0 then
