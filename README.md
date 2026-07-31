@@ -122,7 +122,7 @@ Working today:
   through the instance stream and the cull that were already there, blending
   over the composited image or adding to it as the effect asks
 
-Not built yet: post-processing, UI, tiled maps and multi-camera.
+Not built yet: post-processing, tiled maps and multi-camera.
 
 Design notes live in `../tecs-plans`, kept outside this repository so plans and
 code have separate histories.
@@ -3168,6 +3168,29 @@ nothing to a row that does not, and what it costs instead is a second copy of
 extraction's bound and placement arithmetic living on the GPU, where it can
 drift from the one that produced the rows. That is a larger change than the one
 it replaces, and it is not built either.
+
+## UI is layout over entities
+
+Taffy owns UI layout and nothing else. A retained Taffy tree in Rust is keyed
+by the same entity IDs the world already owns, and `ChildOf` is its hierarchy.
+Styles cross the FFI only when their component column is dirty; computed boxes
+come back into `UiLayout`, and only changed boxes mark that column dirty. Taffy
+therefore replaces neither the ECS nor the renderer and introduces no DOM
+beside them.
+
+A rectangle, circle, image and text remain their existing components, material
+and instance producer. `UiPaint` can copy a box into the transform scale, but
+the entity still reaches the GPU through the same archetype run or text
+producer as one positioned without UI. Layout does not create a second drawing
+path, which keeps shape instancing and text residency intact.
+
+`UiScroll` moves descendants after layout and treats its own box as a viewport.
+Nested viewports are intersected on the CPU and receive one of the existing
+clip indices, because an instance has room for one index and the fragment
+shader already tests one rectangle. The plugin owns a caller-selected range of
+the renderer's 255 indices and fails when that range is exhausted. Scroll and
+clip precede event routing so a later hit test can reject the same off-viewport
+content the GPU rejects.
 
 ## Shapes are materials
 

@@ -446,6 +446,7 @@ local SIDEBAR = {
             },
             { text = "tecs.regex", path = "modules/regex" },
             { text = "tecs.sequence", path = "modules/sequence" },
+            { text = "tecs.ui", path = "modules/ui" },
             { text = "tecs.workers", path = "modules/workers" },
         },
     },

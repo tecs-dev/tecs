@@ -240,6 +240,7 @@ The host loads `tecs` before the entry file. A game can use these names without 
 - [`tecs.platform`](/modules/platform/) - platform events, operating-system services, time, and windows
 - [`tecs.regex`](/modules/regex) - compiled regular expressions over Lua byte strings
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
+- [`tecs.ui`](/modules/ui) - retained Taffy layout, scrolling, and clipping over existing drawing components
 - [`tecs.workers`](/modules/workers) - typed background jobs
 
 Inside one of those, one level and no deeper:

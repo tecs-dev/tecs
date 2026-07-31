@@ -33,6 +33,7 @@ mod physics;
 mod regex;
 mod registry;
 mod sha256;
+mod ui;
 mod uuid;
 mod window;
 mod worker;
