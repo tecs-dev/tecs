@@ -183,7 +183,6 @@ local BUILD_ONLY_CRATES = {
     toml_datetime = true,
     toml_parser = true,
     toml_writer = true,
-    version_check = true,
     winnow = true,
 }
 

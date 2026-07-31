@@ -45,10 +45,13 @@ own future and a hold on the same image. A later load after settlement decodes
 again. Sound loads never share.
 
 `loadString` reads a complete file into a binary-safe string without
-interpreting it. Image loads accept
-PNG and JPEG. `tecs.audio.decoders()` reports the sound formats linked into the
-current build. Sound mode `"resident"` decodes the complete clip, `"stream"`
-opens a source for each voice, and `"auto"` chooses from the duration threshold.
+interpreting it. Image loads accept PNG, JPEG and static SVG. SVG renders at
+its intrinsic dimensions. It uses the bundled JetBrains Mono for all text and
+ignores external image references, so installed fonts and the worker's current
+directory cannot change its pixels. `tecs.audio.decoders()` reports the sound
+formats linked into the current build. Sound mode `"resident"` decodes the
+complete clip, `"stream"` opens a source for each voice, and `"auto"` chooses
+from the duration threshold.
 
 Use `Future.all` to join independent loads. Release each ready payload after
 its consumer takes ownership.
@@ -640,8 +643,10 @@ end
 --- is invisible to the others. A load that starts after the first has settled
 --- decodes again: nothing here is a cache.
 ---
---- @param path PNG or JPEG. The build contains no other decoder, and another
----     format fails during decoding.
+--- @param path The caller supplies a PNG, JPEG or static SVG path. The loader
+---     renders SVG at its intrinsic width and height, uses bundled JetBrains
+---     Mono for text, and ignores external image references. Another format
+---     fails during decoding.
 --- @return A pending future, never nil. Raises instead when `install` has not run.
 ---     Failures reach it as a failed settlement, not through this call: a missing file
 ---     is a future that fails once the worker has looked. Canceling it gives up this

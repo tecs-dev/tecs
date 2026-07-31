@@ -8,9 +8,12 @@ use std::cell::RefCell;
 use std::ffi::{c_char, CString};
 use std::ptr;
 use std::slice;
+use std::sync::Arc;
 
 use image::codecs::png::PngEncoder;
-use image::{ImageEncoder, ImageError};
+use image::ImageEncoder;
+use resvg::tiny_skia::{Pixmap, Transform};
+use resvg::usvg::{fontdb, ImageHrefResolver, Options, Tree};
 
 mod cli;
 mod cli_docs;
@@ -61,7 +64,7 @@ fn set_error(error: impl ToString) {
     });
 }
 
-fn decode(bytes: &[u8]) -> Result<TecsImage, ImageError> {
+fn decode_raster(bytes: &[u8]) -> Result<TecsImage, image::ImageError> {
     let image = image::load_from_memory(bytes)?.into_rgba8();
     let (width, height) = image.dimensions();
     Ok(TecsImage {
@@ -69,6 +72,64 @@ fn decode(bytes: &[u8]) -> Result<TecsImage, ImageError> {
         width,
         height,
     })
+}
+
+fn decode_svg(bytes: &[u8]) -> Result<TecsImage, String> {
+    // SVG output must not change with the fonts installed on the machine
+    // running the game. Tecs already ships this face for its own text, so it
+    // is the complete SVG font database rather than one fallback among system
+    // fonts.
+    let mut fonts = fontdb::Database::new();
+    fonts.load_font_data(
+        include_bytes!("../../../../assets/fonts/JetBrainsMono-ExtraBold.ttf").to_vec(),
+    );
+    // External image references bypass the storage seam, make a load depend on
+    // the worker's current directory, and leave file watching unaware of the
+    // dependency. The custom resolver therefore permits inline SVG data only.
+    let options = Options {
+        font_family: "JetBrains Mono".to_owned(),
+        style_sheet: Some("text { font-family: 'JetBrains Mono' !important; }".to_owned()),
+        fontdb: Arc::new(fonts),
+        image_href_resolver: ImageHrefResolver {
+            resolve_data: ImageHrefResolver::default_data_resolver(),
+            resolve_string: Box::new(|_, _| None),
+        },
+        ..Options::default()
+    };
+    let tree = Tree::from_data(bytes, &options).map_err(|error| error.to_string())?;
+    let size = tree.size().to_int_size();
+    let mut pixmap = Pixmap::new(size.width(), size.height())
+        .ok_or_else(|| "SVG dimensions are too large".to_owned())?;
+    resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
+
+    // tiny-skia renders premultiplied RGBA. Tecs' image ABI is straight RGBA,
+    // and its forward shader premultiplies at composition time, so passing
+    // these bytes through would darken every translucent edge twice.
+    let mut pixels = Vec::with_capacity(pixmap.data().len());
+    for pixel in pixmap.pixels() {
+        let straight = pixel.demultiply();
+        pixels.extend_from_slice(&[
+            straight.red(),
+            straight.green(),
+            straight.blue(),
+            straight.alpha(),
+        ]);
+    }
+
+    Ok(TecsImage {
+        pixels: pixels.into_boxed_slice(),
+        width: size.width(),
+        height: size.height(),
+    })
+}
+
+fn decode(bytes: &[u8]) -> Result<TecsImage, String> {
+    match decode_raster(bytes) {
+        Ok(image) => Ok(image),
+        Err(raster_error) => decode_svg(bytes).map_err(|svg_error| {
+            format!("unsupported image: raster decoder: {raster_error}; SVG decoder: {svg_error}")
+        }),
+    }
 }
 
 fn encode_png_rgbx(
@@ -132,7 +193,7 @@ pub extern "C" fn tecsCliHelp() -> *mut TecsBytes {
     }))
 }
 
-/// Decodes PNG or JPEG bytes into a tightly packed RGBA8 allocation.
+/// Decodes PNG, JPEG, or static SVG bytes into tightly packed RGBA8 pixels.
 ///
 /// Returns null on malformed input or allocation/size failure and records the
 /// reason in `tecsRustError`.
@@ -307,7 +368,7 @@ mod tests {
     use image::codecs::jpeg::JpegEncoder;
     use image::{ExtendedColorType, ImageEncoder};
 
-    use super::{decode, encode_png_rgbx};
+    use super::{decode, decode_svg, encode_png_rgbx};
 
     #[test]
     fn png_round_trip_is_rgba_and_opaque() {
@@ -342,5 +403,38 @@ mod tests {
             assert!(pixel[2] < 50);
             assert_eq!(pixel[3], 255);
         }
+    }
+
+    #[test]
+    fn svg_decodes_at_its_intrinsic_size_to_straight_rgba() {
+        let decoded = decode_svg(
+            br##"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="1">
+                <rect width="1" height="1" fill="#ff0000" fill-opacity="0.5"/>
+                <rect x="1" width="1" height="1" fill="#00ff00"/>
+            </svg>"##,
+        )
+        .unwrap();
+
+        assert_eq!((decoded.width, decoded.height), (2, 1));
+        assert_eq!(decoded.pixels[0], 255);
+        assert_eq!(decoded.pixels[1], 0);
+        assert_eq!(decoded.pixels[2], 0);
+        assert!((127..=128).contains(&decoded.pixels[3]));
+        assert_eq!(&decoded.pixels[4..], &[0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn svg_text_uses_the_bundled_font() {
+        let decoded = decode_svg(
+            br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                <text x="0" y="13" font-family="not-installed" font-size="14">T</text>
+            </svg>"##,
+        )
+        .unwrap();
+
+        assert!(
+            decoded.pixels.chunks_exact(4).any(|pixel| pixel[3] != 0),
+            "the bundled fallback font did not render SVG text"
+        );
     }
 }

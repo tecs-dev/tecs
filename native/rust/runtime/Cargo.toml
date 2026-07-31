@@ -23,6 +23,7 @@ rapier2d.workspace = true
 rayon.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+resvg.workspace = true
 rmcp.workspace = true
 rustls.workspace = true
 sdl3-sys.workspace = true
