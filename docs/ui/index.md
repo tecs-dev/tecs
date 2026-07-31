@@ -20,8 +20,12 @@ The boundary is intentionally narrow:
 - [`tecs.ui.Layout`](/modules/ui#tecs.ui.Layout) reports the computed box.
 - [`tecs.ui.Paint`](/modules/ui#tecs.ui.Paint) optionally stretches an existing
   drawing leaf to that box.
+- [`tecs.ui.Intrinsic`](/modules/ui#tecs.ui.Intrinsic) lets text, images, and
+  custom leaves contribute their natural size.
 - [`tecs.ui.Scroll`](/modules/ui#tecs.ui.Scroll) offsets descendants and assigns
   the existing renderer clip component.
+- [`tecs.ui.Scrollbar`](/modules/ui#tecs.ui.Scrollbar) drives a composed thumb;
+  it is not a special renderer primitive.
 - [`tecs.ui.Interaction`](/modules/ui#tecs.ui.Interaction) opts a box into hit
   testing, focus, and activation.
 
@@ -55,12 +59,27 @@ end
 
 When the plugin receives an application, it keeps every screen root's logical
 size and pixel density synchronized with the window. Percentage dimensions
-therefore follow a resize without a game observer or per-frame system. World
-roots remain explicit and use camera coordinates instead:
+therefore follow a resize without a game observer or per-frame system.
+
+World roots have two explicit contracts. A manually sized root preserves its
+authored extent for a render target or world-space panel:
 
 ```teal
-ui.Root("world", cameraWidth, cameraHeight)
+ui.Root("world", layoutWidth, layoutHeight, 1, "manual")
 ```
+
+A camera-sized root follows the active camera and physical viewport. Its
+layout units are world units, its origin is the camera's top-left world point,
+and camera zoom or rotation updates its root transform:
+
+```teal
+ui.Root("world", 0, 0, 1, "camera")
+```
+
+Camera sizing requires the application form of `ui.plugin`, because the
+window supplies the viewport. Screen roots accept `"auto"` or `"manual"`;
+world roots accept `"camera"` in addition to the manual behavior selected by
+`"auto"`.
 
 ## Install from the application plugin
 
@@ -152,7 +171,7 @@ world:spawn(
 
 The same pattern works with every drawing producer. A circle keeps the circle
 material, text keeps the distance-field text producer, and an image keeps its
-sprite:
+sprite. Add `Intrinsic` when a leaf should size itself instead of stretching:
 
 ```teal
 world:spawn(
@@ -166,7 +185,8 @@ world:spawn(
 )
 
 world:spawn(
-    ui.Style({width = 280, height = 28}),
+    ui.Style({maxWidth = "100%"}),
+    ui.Intrinsic("text", {wrap = true}),
     tecs.ecs.RelativeTransform(0, 0, 2),
     tecs.gfx.Tint(0.94, 0.97, 1.0, 1.0),
     tecs.gfx.Text.new({
@@ -177,6 +197,19 @@ world:spawn(
     tecs.ecs.ChildOf(panel)
 )
 ```
+
+`ui.Intrinsic("image")` reads the selected sprite region's source dimensions
+from the renderer and preserves its aspect ratio when only one axis is
+constrained. `ui.Intrinsic("custom", {width = 80, height = 24})` supplies
+cached metrics for another leaf producer. `scale` converts source units into
+UI units.
+
+Text wrapping is a retained convergence step. Taffy chooses the available
+width, the UI plugin asks SDL_ttf for the exact wrapped height, and only that
+dirty root is solved again. No native-to-Lua callback runs inside Taffy and
+unchanged text is not reshaped each frame. The chosen width is retained in
+`Text.wrapWidth`, so the ordinary text instance producer draws the same lines
+that layout measured.
 
 Do not stretch a container that owns layout children. Its transform scale
 would compose into every descendant. Stretch a dedicated absolute drawing
@@ -252,14 +285,43 @@ local content <const> = world:spawn(
 ```
 
 Programmatic scrolling writes `Scroll.x` or `Scroll.y` through `getMut`.
-`contentWidth` and `contentHeight` are engine-owned measurements.
+Offsets clamp to the complete retained extent, including negative and
+absolute descendants. `contentX`, `contentY`, `contentWidth`, and
+`contentHeight` are engine-owned measurements. Snapshots retain `x` and `y`;
+the derived content fields are rebuilt after load.
+
+Wheel movement starts at the deepest viewport and hands any unused distance
+to its ancestors. Shift converts a vertical wheel into horizontal movement
+when the device reports no horizontal axis. Call `ui.reveal(world, entity)`
+to expose a descendant through every ancestor viewport. Focusing an entity
+does this automatically.
+
+Compose a draggable vertical thumb from the same ordinary material and
+instance components used elsewhere:
+
+```teal
+world:spawn(
+    ui.Scrollbar("vertical", 6, 2, 18),
+    ui.Interaction({focusable = false, draggable = true, order = 100}),
+    tecs.ecs.RelativeTransform(0, 0, 10),
+    tecs.gfx.Tint(0.4, 0.7, 0.9, 0.9),
+    tecs.gfx.Material(tecs.gfx.materials.id("rounded"), 0.5),
+    tecs.gfx.Renderable(),
+    tecs.ecs.ChildOf(viewport)
+)
+```
+
+The thumb receives a zero length when its axis has no overflow. Horizontal
+scrollbars use the same component with `"horizontal"`.
 
 ## Observe clicks and keyboard activation
 
 `Interaction` adds clip-aware hit testing and transient
-`InteractionState`. A primary press captures its target through release.
-Releasing over the same target emits `click` followed by `activate`. Tab and
-Shift-Tab move focus; Return and Space activate the focused control.
+`InteractionState`. Every mouse or touch identity captures independently.
+Releasing over the same target emits `click` followed by `activate`. A
+draggable interaction emits `dragStart`, `dragMove`, and `dragEnd`; losing its
+input layer emits `dragCancel`. Tab and Shift-Tab move focus; Return and Space
+activate the focused control.
 
 ```teal
 local type uiTypes = require("tecs.ui")
@@ -283,22 +345,46 @@ Events bubble through `ChildOf`. An observer can set `event.consumed = true`
 to stop ancestor delivery. Consuming a wheel event also suppresses default
 scrolling.
 
+`event.pointerId` distinguishes simultaneous touches and
+`event.pointerType` reports `"mouse"` or `"touch"`. Pointer movement and drag
+events put their movement in `deltaX` and `deltaY`.
+
+Call `ui.focus`, `ui.blur`, and `ui.focused` for programmatic focus. A modal
+panel can carry `ui.FocusScope()` and constrain navigation until popped:
+
+```teal
+ui.focus(world, firstField)
+ui.pushFocusScope(world, dialog)
+-- The active scope now owns Tab traversal and pointer targeting.
+ui.popFocusScope(world, dialog) -- Restores the prior focus when possible.
+```
+
+`Interaction.tabIndex` defines the primary navigation order.
+`Interaction.order` is the explicit authorial tie-breaker for focus and hit
+testing, while `Style.style.order` controls retained sibling layout order.
+Equal values fall back to the order in which entities first entered the
+retained tree, not to entity identity. Give overlapping controls explicit
+orders when their stacking is meaningful.
+
 ![The same demo after keyboard focus and activation change its retained state](/images/ui-interaction.png)
 
 Read `InteractionState` from an update system to select hover, pressed, and
 focused colors. Only call `getMut` on the visual component when the selected
 color actually changes, preserving dirty-gated GPU synchronization.
 
-## Current limits
+## Editing and accessibility boundary
 
-Text and images do not yet contribute intrinsic measurements, so give those
-leaves explicit dimensions. Scrolling is wheel and programmatic offset;
-touch panning, kinetic motion, scrollbars, focus reveal, and nested-wheel
-handoff are not implemented. Navigation is linear Tab order, and pointer input
-currently models one mouse pointer and its primary button.
+The current interaction layer stops at semantic activation and dragging. Text
+editing, selection, IME composition, clipboard commands, controller spatial
+navigation, and platform accessibility exposure are designed but not yet
+implemented. In particular, a `Text` drawing entity is not implicitly an edit
+control, and an `Interaction` does not invent a role or accessible name.
 
-These limits keep the ownership boundary visible. Future controls remain
-composed entities rather than a DOM, CSS cascade, or parallel widget renderer.
+Those features will remain composed ECS state: editing state beside a `Text`
+leaf, platform text input entered only while that entity is focused,
+controller actions routed through the input layer, and a semantic snapshot
+bridged from Rust without an FFI callback into Lua. They do not require a DOM,
+CSS cascade, or parallel widget renderer.
 
 ## Run the examples
 

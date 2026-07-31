@@ -21,6 +21,11 @@ reconstruction, and hit-rectangle reconstruction. A screen root installed
 through `plugin(app)` follows the application's logical window size and pixel
 density automatically.
 
+[`Intrinsic`](tealdoc:tecs.ui.Intrinsic) copies cached text, sprite-region, or
+custom leaf metrics into Taffy when the source component dirties. Wrapping text
+uses a bounded retained convergence pass: Taffy chooses its width, SDL_ttf
+measures that width exactly, and no native layout callback enters Lua.
+
 `Paint(true)` centers and stretches a drawing leaf over its box. Keep
 containers at unit scale and put their rectangle, circle, or image on an
 absolute child with `Paint`: transform scale composes through `ChildOf`, so a
@@ -35,6 +40,12 @@ Every nested viewport is intersected before the plugin assigns the existing
 ordinary GPU instance. `firstClip` and `lastClip` reserve which of the
 renderer’s 255 clip rectangles the UI owns.
 
+Content extent includes negative, absolute, and nested descendants. Wheel
+distance that a deepest viewport cannot consume passes to its ancestors.
+`reveal` exposes a descendant programmatically, and `Scrollbar` derives a
+composed thumb transform without adding a renderer primitive. Snapshots retain
+scroll offsets and derive content extent again after load.
+
 Screen roots use logical UI coordinates and multiply clips by `pixelDensity`.
 World roots project viewport corners through the renderer camera. Clip
 rectangles stay axis-aligned; rotating a scroll viewport therefore does not
@@ -46,21 +57,23 @@ Passing the application to [`plugin`](tealdoc:tecs.ui.plugin) supplies its
 renderer and input, enabling clip-aware hit testing. Manual options remain
 available to tests and tools. [`Interaction`](tealdoc:tecs.ui.Interaction) opts
 in a layout box, and [`InteractionState`](tealdoc:tecs.ui.InteractionState)
-reports hover, primary-button capture, and focus without replacing application
-state.
+reports hover, per-pointer capture, drag, and focus without replacing
+application state.
 
 The plugin emits one bubbling [`Event`](tealdoc:tecs.ui.Event) at entity
-addresses. A primary press captures its target through release; releasing over
-that target emits `"click"` and then `"activate"`. Tab and Shift-Tab traverse
-visible focusable controls, and Return or Space emits `"activate"` at the
-focused control. A `"wheel"` event begins at the deepest viewport under the
-pointer; setting `event.consumed = true` prevents both ancestor delivery and
-default scrolling.
+addresses. Mouse and touch identities capture independently; releasing over a
+captured target emits `"click"` and then `"activate"`, while draggable targets
+emit semantic drag events. Tab and Shift-Tab traverse visible focusable
+controls, and Return or Space emits `"activate"` at the focused control.
+Programmatic focus, focus reveal, and modal focus scopes use the same state. A
+`"wheel"` event begins at the deepest viewport under the pointer; setting
+`event.consumed = true` prevents both ancestor delivery and default scrolling.
 
 Hit priority uses the renderer's layer-depth calculation. A depth tie prefers
-the deeper UI node and then the larger entity ID. Give overlapping controls
-distinct layers or Z values when their visual order must not depend on the
-renderer’s exact-tie instance order.
+the deeper UI node, explicit `Interaction.order`, and then stable retained
+insertion order. `Style.style.order` independently orders layout siblings.
+Give overlapping controls explicit orders and distinct renderer depth when
+both their input and drawing order are meaningful.
 
 ```teal
 local ui <const> = tecs.ui
@@ -123,6 +136,7 @@ local rust <const> = require("tecs.ffi.rust")
 local type loader = require("tecs.ffi.loader")
 local components <const> = require("tecs.components")
 local layers <const> = require("tecs.gfx.layers")
+local text <const> = require("tecs.gfx.text")
 local ffi <const> = require("ffi")
 
 local type Component = ecs.Component
@@ -148,8 +162,9 @@ local record Style is Component
     --- `justifyContent`, `alignItems`, `alignContent`, `flexGrow`,
     --- `flexShrink`, `flexBasis`, `width`, `height`, `minWidth`, `minHeight`,
     --- `maxWidth`, `maxHeight`, `margin`, `padding`, `border`, `gap`,
-    --- `rowGap`, and `inset`. Edge values accept one dimension or a table with
-    --- `left`, `right`, `top`, and `bottom`.
+    --- `rowGap`, `inset`, and the Tecs-only integer `order` used to retain
+    --- authorial sibling order. Edge values accept one dimension or a table
+    --- with `left`, `right`, `top`, and `bottom`.
     style: {string: any}
 end
 --- `Root` supplies the available space and coordinate mapping for one tree.
@@ -157,21 +172,26 @@ local record Root is Component
     --- Caller-writable. The caller chooses `"screen"` for logical screen
     --- coordinates or `"world"` for coordinates projected by the camera.
     space: string
-    --- Caller-writable. The caller supplies the layout root width and the
-    --- camera projection width in logical units. When `plugin` receives an
-    --- application, the engine overwrites this field on screen roots with the
-    --- current logical window width.
+    --- Caller-writable. The caller supplies the layout root width. An
+    --- application-backed screen root with automatic sizing follows the
+    --- logical window width; a camera-sized world root derives world units
+    --- from the physical viewport and camera zoom.
     width: number
-    --- Caller-writable. The caller supplies the layout root height and the
-    --- camera projection height in logical units. When `plugin` receives an
-    --- application, the engine overwrites this field on screen roots with the
-    --- current logical window height.
+    --- Caller-writable. The caller supplies the layout root height. An
+    --- application-backed screen root with automatic sizing follows the
+    --- logical window height; a camera-sized world root derives world units
+    --- from the physical viewport and camera zoom.
     height: number
-    --- Caller-writable. The caller supplies target pixels per logical point
-    --- for a screen root. The default is one. When `plugin` receives an
-    --- application, the engine overwrites this field on screen roots with the
-    --- window's current pixel density.
+    --- Caller-writable. The caller supplies target pixels per logical point.
+    --- The default is one. Automatic screen and camera-sized world roots
+    --- follow the window's current pixel density.
     pixelDensity: number
+    --- Caller-writable. The caller selects `"auto"` for the standard behavior,
+    --- `"manual"` to preserve every authored field, or `"camera"` on a world
+    --- root to derive its extent and transform from the active camera.
+    --- `"auto"` follows the window for screen roots and is manual for world
+    --- roots.
+    sizing: string
 end
 --- `Layout` reports the last box computed by retained layout.
 local record Layout is Component
@@ -190,6 +210,30 @@ local record Paint is Component
     --- and height into `RelativeTransform.scaleX` and `scaleY`.
     stretch: boolean
 end
+--- `Intrinsic` supplies cached leaf metrics to Taffy without a Lua callback.
+local record Intrinsic is Component
+    --- Caller-writable. The caller selects `"custom"`, `"text"`, or
+    --- `"image"`. Text reads `tecs.gfx.text.Text`; image reads
+    --- `tecs.components.Sprite`; custom reads the dimensions below.
+    source: string
+    --- Caller-writable. The caller supplies the preferred custom width in
+    --- logical units. Text and image sources ignore this field.
+    width: number
+    --- Caller-writable. The caller supplies the preferred custom height in
+    --- logical units. Text and image sources ignore this field.
+    height: number
+    --- Caller-writable. The caller supplies the custom minimum-content width.
+    --- Zero uses `width`. Text derives its longest unbroken run and image
+    --- sources preserve their aspect ratio instead.
+    minWidth: number
+    --- Caller-writable. The caller scales text or source-image units into UI
+    --- units. The default is one.
+    scale: number
+    --- Caller-writable. The caller lets Taffy choose a text line width and
+    --- lets the plugin write that result to `Text.wrapWidth`. Other sources
+    --- ignore this field.
+    wrap: boolean
+end
 --- `Scroll` offsets descendants and clips them to this entity's layout box.
 local record Scroll is Component
     --- Caller-writable. The caller supplies the horizontal scroll offset in
@@ -198,12 +242,38 @@ local record Scroll is Component
     --- Caller-writable. The caller supplies the vertical scroll offset in
     --- logical units.
     y: number
-    --- Engine-owned. The engine reports the horizontal extent of the direct
-    --- layout children. Ordinary game code should ignore this field.
+    --- Engine-owned. The engine reports the horizontal extent of retained
+    --- content, including nested and absolute descendants. Ordinary game code
+    --- should ignore this field.
     contentWidth: number
-    --- Engine-owned. The engine reports the vertical extent of the direct
-    --- layout children. Ordinary game code should ignore this field.
+    --- Engine-owned. The engine reports the vertical extent of retained
+    --- content, including nested and absolute descendants. Ordinary game code
+    --- should ignore this field.
     contentHeight: number
+    --- Engine-owned. The engine reports the smallest horizontal content
+    --- coordinate, including negative-positioned descendants. Ordinary game
+    --- code should ignore this field.
+    contentX: number
+    --- Engine-owned. The engine reports the smallest vertical content
+    --- coordinate, including negative-positioned descendants. Ordinary game
+    --- code should ignore this field.
+    contentY: number
+end
+--- `Scrollbar` derives one composed thumb transform from an ancestor viewport.
+local record Scrollbar is Component
+    --- Caller-writable. The caller selects `"horizontal"` or `"vertical"`.
+    axis: string
+    --- Caller-writable. The caller sets the thumb thickness in logical units.
+    thickness: number
+    --- Caller-writable. The caller leaves this much room inside each end of
+    --- the viewport track.
+    inset: number
+    --- Caller-writable. The caller sets the smallest thumb length in logical
+    --- units.
+    minLength: number
+end
+--- `FocusScope` marks an entity that may become the active navigation boundary.
+local record FocusScope is Component
 end
 --- `Interaction` makes one computed layout box a UI input target.
 local record Interaction is Component
@@ -214,9 +284,16 @@ local record Interaction is Component
     --- navigation can focus this entity. The default is true.
     focusable: boolean
     --- Caller-writable. The caller orders keyboard focus. Positive values come
-    --- first in ascending order, zero values follow in entity order, and
+    --- first in ascending order, zero values follow in authorial order, and
     --- negative values skip keyboard navigation.
     tabIndex: integer
+    --- Caller-writable. The caller supplies an authorial tie-breaker for hit
+    --- testing and focus when controls share renderer depth and tab index.
+    --- Higher values hit later; lower values focus first.
+    order: integer
+    --- Caller-writable. The caller enables semantic drag events after pointer
+    --- movement crosses the plugin's drag threshold.
+    draggable: boolean
 end
 --- `InteractionState` reports transient state derived by the UI plugin.
 local record InteractionState is Component
@@ -224,20 +301,25 @@ local record InteractionState is Component
     --- entity's visible, clipped box. Ordinary game code may read this field
     --- to choose its visual state and must not write it.
     hovered: boolean
-    --- Engine-owned. The engine reports whether the primary pointer button
-    --- was pressed on the entity and remains captured. Ordinary game code may
-    --- read this field and must not write it.
+    --- Engine-owned. The engine reports whether at least one pointer was
+    --- pressed on the entity and remains captured. Ordinary game code may read
+    --- this field and must not write it.
     pressed: boolean
     --- Engine-owned. The engine reports whether keyboard activation currently
     --- targets the entity. Ordinary game code may read this field and must not
     --- write it.
     focused: boolean
+    --- Engine-owned. The engine reports whether at least one captured pointer
+    --- is dragging this entity. Ordinary game code may read this field and
+    --- must not write it.
+    dragging: boolean
 end
 --- `Event` reports one semantic interaction at an entity address.
 local record Event is events.Event
     --- Read-only. Reports `"pointerEnter"`, `"pointerLeave"`,
-    --- `"pointerDown"`, `"pointerUp"`, `"click"`, `"wheel"`, `"focus"`,
-    --- `"blur"`, or `"activate"`.
+    --- `"pointerDown"`, `"pointerMove"`, `"pointerUp"`, `"click"`, `"wheel"`,
+    --- `"focus"`, `"blur"`, `"activate"`, `"dragStart"`, `"dragMove"`,
+    --- `"dragEnd"`, or `"dragCancel"`.
     kind: string
     --- Read-only. Identifies the entity where dispatch began.
     target: integer
@@ -248,15 +330,22 @@ local record Event is events.Event
     x: number
     --- Read-only. Reports the pointer's vertical window coordinate.
     y: number
-    --- Read-only. Reports the mouse button, or zero when the event has no
-    --- button.
+    --- Read-only. Reports the mouse button, or zero for touch and events that
+    --- have no button.
     button: integer
-    --- Read-only. Reports horizontal wheel movement for a `"wheel"` event.
+    --- Read-only. Identifies `"mouse"` or one opaque touch identity. Keyboard,
+    --- controller, and programmatic events use the empty string.
+    pointerId: string
+    --- Read-only. Reports `"mouse"`, `"touch"`, `"pen"`, or `"none"`.
+    pointerType: string
+    --- Read-only. Reports horizontal movement for pointer-move, drag, and
+    --- wheel events, or zero for other events.
     deltaX: number
-    --- Read-only. Reports vertical wheel movement for a `"wheel"` event.
+    --- Read-only. Reports vertical movement for pointer-move, drag, and wheel
+    --- events, or zero for other events.
     deltaY: number
-    --- Read-only. Reports `"pointer"` or `"keyboard"` as the activation
-    --- source.
+    --- Read-only. Reports `"pointer"`, `"keyboard"`, `"controller"`, or
+    --- `"programmatic"` as the activation source.
     source: string
     --- Caller-writable. An observer may set this field to stop bubbling and
     --- suppress the default wheel scroll.
@@ -273,8 +362,10 @@ local record Event is events.Event
     --- @param x The pointer's horizontal window coordinate.
     --- @param y The pointer's vertical window coordinate.
     --- @param button The mouse button or zero.
-    --- @param deltaX Horizontal wheel movement or zero.
-    --- @param deltaY Vertical wheel movement or zero.
+    --- @param pointerId The pointer's stable identity or the empty string.
+    --- @param pointerType The pointer device kind or `"none"`.
+    --- @param deltaX Horizontal pointer, drag, or wheel movement or zero.
+    --- @param deltaY Vertical pointer, drag, or wheel movement or zero.
     --- @param source The activation source.
     --- @return Returns an independent event value.
     metamethod __call: function(
@@ -284,10 +375,19 @@ local record Event is events.Event
         x: number,
         y: number,
         button: integer,
+        pointerId: string,
+        pointerType: string,
         deltaX: number,
         deltaY: number,
         source: string
     ): Event
+end
+local interface TouchReader
+    device: string
+    finger: string
+    x: number
+    y: number
+    pressure: number
 end
 local interface InputReader
     mouseX: number
@@ -299,6 +399,7 @@ local interface InputReader
     mouseReleased: function(self: InputReader, button: string | integer, layer?: any): boolean
     keyPressed: function(self: InputReader, key: string | integer, layer?: any): boolean
     modifierDown: function(self: InputReader, name: string, layer?: any): boolean
+    touches: function(self: InputReader, layer?: any): {TouchReader}
 end
 local interface WindowReader
     getSize: function(self: WindowReader): integer, integer
@@ -325,6 +426,9 @@ local record Options
     --- Caller-writable. The caller sets logical scroll units per wheel unit.
     --- The default is 40.
     wheelStep: number
+    --- Caller-writable. The caller sets pointer movement in logical units
+    --- before a draggable capture emits `"dragStart"`. The default is four.
+    dragThreshold: number
 end
 --- `Overrides` changes defaults supplied by an application or explicit options.
 local record Overrides
@@ -340,6 +444,9 @@ local record Overrides
     --- Caller-writable. The caller sets logical scroll units per wheel unit.
     --- The default is 40.
     wheelStep: number
+    --- Caller-writable. The caller sets pointer movement in logical units
+    --- before a draggable capture emits `"dragStart"`. The default is four.
+    dragThreshold: number
 end
 
 -- Compatibility surface: snapshots and tools name this component "UiNode".
@@ -367,8 +474,8 @@ ecs.newComponent({
 ecs.newComponent({
     name = "UiRoot",
     container = Root,
-    fields = {"space", "width", "height", "pixelDensity"},
-    defaults = {"screen", 0, 0, 1},
+    fields = {"space", "width", "height", "pixelDensity", "sizing"},
+    defaults = {"screen", 0, 0, 1, "auto"},
     requires = {Style, Transform},
 })
 
@@ -380,6 +487,35 @@ ecs.newComponent({
     defaults = {false},
 })
 
+-- Compatibility surface: snapshots and tools name this component
+-- "UiIntrinsic".
+ecs.newComponent({
+    name = "UiIntrinsic",
+    container = Intrinsic,
+    fields = {"source", "width", "height", "minWidth", "scale", "wrap"},
+    defaults = {"custom", 0, 0, 0, 1, false},
+    requires = {Style},
+    __call = function(instance: Intrinsic, source?: string | {string: any}, options?: {string: any})
+        local values = options or {}
+        if type(source) == "table" then
+            values = source as {string: any}
+            source = values.source as string
+        end
+        instance.source = source as string or "custom"
+        instance.width = values.width as number or 0
+        instance.height = values.height as number or 0
+        instance.minWidth = values.minWidth as number or 0
+        instance.scale = values.scale as number or 1
+        instance.wrap = values.wrap == true
+        if instance.source ~= "custom" and instance.source ~= "text" and instance.source ~= "image" then
+            error("tecs: Intrinsic.source must be 'custom', 'text', or 'image'", 3)
+        end
+        if instance.scale < 0 then
+            error("tecs: Intrinsic.scale cannot be negative", 3)
+        end
+    end,
+})
+
 -- Compatibility surface: snapshots and tools name this component "UiScroll".
 ecs.newFFIComponent({
     name = "UiScroll",
@@ -389,9 +525,41 @@ ecs.newFFIComponent({
         {"y", "float"},
         {"contentWidth", "float"},
         {"contentHeight", "float"},
+        {"contentX", "float"},
+        {"contentY", "float"},
     },
-    defaults = {0, 0, 0, 0},
+    defaults = {0, 0, 0, 0, 0, 0},
     requires = {Style},
+    serialize = function(instance: Scroll): {string: any} return {x = instance.x, y = instance.y} end,
+    deserialize = function(_world: World, stored: {string: any}): Scroll
+        return Scroll(stored.x as number or 0, stored.y as number or 0)
+    end,
+})
+
+-- Compatibility surface: snapshots and tools name this component
+-- "UiScrollbar".
+ecs.newComponent({
+    name = "UiScrollbar",
+    container = Scrollbar,
+    fields = {"axis", "thickness", "inset", "minLength"},
+    defaults = {"vertical", 6, 2, 18},
+    requires = {RelativeTransform},
+    init = function(instance: Scrollbar)
+        if instance.axis ~= "horizontal" and instance.axis ~= "vertical" then
+            error("tecs: Scrollbar.axis must be 'horizontal' or 'vertical'", 3)
+        end
+        if instance.thickness < 0 or instance.inset < 0 or instance.minLength < 0 then
+            error("tecs: Scrollbar dimensions cannot be negative", 3)
+        end
+    end,
+})
+
+-- Compatibility surface: snapshots and tools name this component
+-- "UiFocusScope".
+ecs.newComponent({
+    name = "UiFocusScope",
+    container = FocusScope,
+    fields = {},
 })
 
 -- Compatibility surface: snapshots and tools name this component
@@ -399,8 +567,8 @@ ecs.newFFIComponent({
 ecs.newFFIComponent({
     name = "UiInteractionState",
     container = InteractionState,
-    fields = {{"hovered", "bool"}, {"pressed", "bool"}, {"focused", "bool"}},
-    defaults = {false, false, false},
+    fields = {{"hovered", "bool"}, {"pressed", "bool"}, {"focused", "bool"}, {"dragging", "bool"}},
+    defaults = {false, false, false, false},
     transient = true,
 })
 
@@ -409,14 +577,16 @@ ecs.newFFIComponent({
 ecs.newComponent({
     name = "UiInteraction",
     container = Interaction,
-    fields = {"enabled", "focusable", "tabIndex"},
-    defaults = {true, true, 0},
-    requires = {Style, InteractionState},
+    fields = {"enabled", "focusable", "tabIndex", "order", "draggable"},
+    defaults = {true, true, 0, 0, false},
+    requires = {InteractionState},
     __call = function(instance: Interaction, value?: {string: any})
         local options = value or {}
         instance.enabled = options.enabled ~= false
         instance.focusable = options.focusable ~= false
         instance.tabIndex = options.tabIndex as integer or 0
+        instance.order = options.order as integer or 0
+        instance.draggable = options.draggable == true
     end,
 })
 
@@ -427,6 +597,8 @@ Event.init = function(
     x: number,
     y: number,
     button: integer,
+    pointerId: string,
+    pointerType: string,
     deltaX: number,
     deltaY: number,
     source: string
@@ -436,6 +608,8 @@ Event.init = function(
     event.currentTarget = target
     event.x, event.y = x, y
     event.button = button
+    event.pointerId = pointerId
+    event.pointerType = pointerType
     event.deltaX, event.deltaY = deltaX, deltaY
     event.source = source
     event.consumed = false
@@ -453,7 +627,25 @@ local record Hit
     bottom: number
     depth: number
     tabIndex: integer
+    order: integer
+    ordinal: integer
     treeDepth: integer
+end
+
+local record PointerState
+    id: string
+    kind: string
+    x: number
+    y: number
+    previousX: number
+    previousY: number
+    startX: number
+    startY: number
+    startScroll: number
+    hovered: integer
+    captured: integer
+    dragging: boolean
+    seen: boolean
 end
 
 local record Install
@@ -480,18 +672,33 @@ local record Install
     scrollHits: {Hit}
     scrollHitCount: integer
     hovered: integer
-    captured: integer
     focused: integer
+    pointers: {string: PointerState}
+    focusScopes: {integer}
+    focusRestore: {integer: integer}
+    ordinals: {integer: integer}
+    nextOrdinal: integer
+    focusEntity: function(entity?: integer, source?: string, x?: number, y?: number): boolean
+    revealEntity: function(entity: integer, align?: string): boolean
+    pushScope: function(entity: integer): boolean
+    popScope: function(entity?: integer): boolean
+    cancelPointers: function()
     input: InputReader
     window: WindowReader
     layer: any
     wheelStep: number
+    dragThreshold: number
     geometryDirty: boolean
     hasWorldRoots: boolean
+    hasCameraRoots: boolean
     cameraX: number
     cameraY: number
     cameraZoom: number
     cameraRotation: number
+    layoutCameraX: number
+    layoutCameraY: number
+    layoutCameraZoom: number
+    layoutCameraRotation: number
     screenWidth: number
     screenHeight: number
     screenDensity: number
@@ -499,28 +706,36 @@ local record Install
     rootMembershipDirty: boolean
 end
 
+local installs <const>: {World: Install} = setmetatable(
+    {} as {World: Install}, {__mode = "k"} as metatable<{World: Install}>
+)
+local noTouches <const>: {TouchReader} = {}
+
 local function unit(value: any, output: any)
     local target = output as {string: any}
     if type(value) == "number" then
         target.value, target.unit = value, 1
     elseif type(value) == "string" then
-        local text = value as string
-        if text == "auto" then
+        local dimensionText = value as string
+        if dimensionText == "auto" then
             target.value, target.unit = 0, 0
             return
         end
-        local amount = text:match("^([+-]?%d*%.?%d+)px$")
+        local amount = dimensionText:match("^([+-]?%d*%.?%d+)px$")
         if amount ~= nil then
             target.value, target.unit = tonumber(amount), 1
             return
         end
-        amount = text:match("^([+-]?%d*%.?%d+)%%$")
+        amount = dimensionText:match("^([+-]?%d*%.?%d+)%%$")
         if amount ~= nil then
             target.value, target.unit = (tonumber(amount) as number) / 100, 2
             return
         end
         error(
-            ("tecs: invalid UI dimension %q; expected a number, 'auto', '<number>px', or '<number>%%'"):format(text), 3
+            ("tecs: invalid UI dimension %q; expected a number, 'auto', '<number>px', or '<number>%%'"):format(
+                dimensionText
+            ),
+            3
         )
     elseif type(value) == "table" then
         target.value = (value as {string: any}).value or 0
@@ -582,10 +797,59 @@ local function nativeStyle(value: {string: any}): loader.CStruct
     return out
 end
 
+local function nativeMeasure(world: World, renderer: Renderer, entity: integer, value: Intrinsic): loader.CStruct
+    local out = ffi.new("TecsUiMeasure") as loader.CStruct
+    local scale = value.scale
+    if scale < 0 then
+        error("tecs: Intrinsic.scale cannot be negative", 3)
+    end
+    if value.source == "custom" then
+        out.kind = 1
+        out.width, out.height = value.width, value.height
+        out.min_width = value.minWidth > 0 and value.minWidth or value.width
+        out.measured_width, out.measured_height = value.width, value.height
+    elseif value.source == "image" then
+        local sprite = world:get(entity, components.Sprite)
+        if sprite == nil then
+            error("tecs: an image Intrinsic requires tecs.components.Sprite", 3)
+        end
+        local width, height = renderer:spriteSize(sprite)
+        out.kind = 2
+        out.width, out.height = width * scale, height * scale
+        out.min_width = out.width
+        out.measured_width, out.measured_height = out.width, out.height
+    elseif value.source == "text" then
+        local item = world:get(entity, text.Text)
+        if item == nil then
+            error("tecs: a text Intrinsic requires tecs.gfx.text.Text", 3)
+        end
+        local width, height, minWidth = text.measureIntrinsic(item)
+        local measuredWidth = item.wrapWidth > 0 and item.wrapWidth or width
+        local _, measuredHeight = text.measureText(item)
+        out.kind = 3
+        out.width, out.height = width * scale, height * scale
+        out.min_width = minWidth * scale
+        out.measured_width, out.measured_height = measuredWidth * scale, measuredHeight * scale
+    else
+        error("tecs: Intrinsic.source must be 'custom', 'text', or 'image'", 3)
+    end
+    return out
+end
+
 local function collectChild(id: integer, install: Install)
     if install.live[id] then
         install.children[#install.children + 1] = id
     end
+end
+
+local function ensureOrdinal(install: Install, entity: integer): integer
+    local ordinal = install.ordinals[entity]
+    if ordinal == nil then
+        ordinal = install.nextOrdinal
+        install.nextOrdinal = ordinal + 1
+        install.ordinals[entity] = ordinal
+    end
+    return ordinal
 end
 
 local function syncChildren(world: World, install: Install, entity: integer)
@@ -594,8 +858,22 @@ local function syncChildren(world: World, install: Install, entity: integer)
         children[index] = nil
     end
     world:targets(entity, ChildOf, collectChild, install)
-    table.sort(children)
-    local key = table.concat(children, ":")
+    local function orderOf(id: integer): integer
+        local value = world:get(id, Style)
+        return value ~= nil and value.style.order as integer or 0
+    end
+    table.sort(
+        children,
+        function(left: integer, right: integer): boolean
+            local leftOrder, rightOrder = orderOf(left), orderOf(right)
+            return leftOrder ~= rightOrder and leftOrder < rightOrder
+                or (leftOrder == rightOrder and ensureOrdinal(install, left) < ensureOrdinal(install, right))
+        end
+    )
+    local key = ""
+    for index = 1, #children do
+        key = key .. children[index] .. "@" .. orderOf(children[index]) .. ":"
+    end
     if install.childKeys[entity] == key then
         return
     end
@@ -609,25 +887,32 @@ local function syncChildren(world: World, install: Install, entity: integer)
     end
 end
 
-local record BoundsContext
+local record ContentContext
     world: World
-    width: number
-    height: number
+    viewport: integer
+    x: number
+    y: number
+    minX: number
+    minY: number
 end
 
-local function collectBounds(entity: integer, context: BoundsContext)
+local function collectContentMinimum(entity: integer, context: ContentContext)
     local layout = context.world:get(entity, Layout)
     if layout == nil then
         return
     end
-    local right = layout.x + layout.width
-    local bottom = layout.y + layout.height
-    if right > context.width then
-        context.width = right
+    local previousX, previousY = context.x, context.y
+    context.x, context.y = previousX + layout.x, previousY + layout.y
+    if context.x < context.minX then
+        context.minX = context.x
     end
-    if bottom > context.height then
-        context.height = bottom
+    if context.y < context.minY then
+        context.minY = context.y
     end
+    if context.world:get(entity, Scroll) == nil then
+        context.world:targets(entity, ChildOf, collectContentMinimum, context)
+    end
+    context.x, context.y = previousX, previousY
 end
 
 local function applyLayoutTransform(world: World, entity: integer, x: number, y: number, width: number, height: number)
@@ -676,9 +961,16 @@ local record ui
     --- Read-only. Exposes the component that optionally stretches an existing
     --- primitive to its computed box.
     Paint: Paint
+    --- Read-only. Exposes cached custom, text, or image leaf measurement.
+    Intrinsic: Intrinsic
     --- Read-only. Exposes the component that offsets descendants and clips
     --- their existing GPU instances.
     Scroll: Scroll
+    --- Read-only. Exposes a composed scrollbar thumb driven by its parent
+    --- viewport.
+    Scrollbar: Scrollbar
+    --- Read-only. Exposes the marker used by `pushFocusScope`.
+    FocusScope: FocusScope
     --- Read-only. Exposes the component that admits a layout box to hit
     --- testing and keyboard navigation.
     Interaction: Interaction
@@ -693,6 +985,39 @@ local record ui
     --- `Overrides` changes scrolling and clip allocation without repeating an
     --- application's renderer and input.
     type Overrides = Overrides
+
+    --- Moves focus to one enabled, focusable interaction.
+    --- @param world The caller supplies a world with the UI plugin.
+    --- @param entity The caller supplies the interaction to focus.
+    --- @return Returns false when the plugin is missing or the entity cannot
+    ---     receive focus.
+    focus: function(world: World, entity: integer): boolean
+    --- Clears the world's focused interaction.
+    --- @param world The caller supplies a world with the UI plugin.
+    --- @return Returns false when the plugin is missing.
+    blur: function(world: World): boolean
+    --- Returns the world's focused interaction.
+    --- @param world The caller supplies a world with or without the UI plugin.
+    --- @return Returns the focused entity, or nil when nothing is focused.
+    focused: function(world: World): integer
+    --- Scrolls every ancestor viewport enough to expose one descendant.
+    --- @param world The caller supplies a world with the UI plugin.
+    --- @param entity The caller supplies a retained UI descendant.
+    --- @param align The caller selects `"nearest"`, `"start"`, `"center"`, or
+    ---     `"end"`; omission selects `"nearest"`.
+    --- @return Returns false when the plugin or layout is missing.
+    reveal: function(world: World, entity: integer, align?: string): boolean
+    --- Pushes one modal navigation boundary and remembers the current focus.
+    --- @param world The caller supplies a world with the UI plugin.
+    --- @param scope The caller supplies an entity carrying `FocusScope`.
+    --- @return Returns false when the plugin or scope is missing.
+    pushFocusScope: function(world: World, scope: integer): boolean
+    --- Pops the active navigation boundary and restores its saved focus.
+    --- @param world The caller supplies a world with the UI plugin.
+    --- @param scope The caller may require a particular active scope.
+    --- @return Returns false when the plugin is missing or the requested scope
+    ---     is not active.
+    popFocusScope: function(world: World, scope?: integer): boolean
 
     --- Returns a plugin that derives layout, transforms, clipping, and
     --- optional interaction from retained layout nodes.
@@ -722,8 +1047,40 @@ local record ui
 end
 
 ui.Node = NodeComponent
-ui.Style, ui.Root, ui.Layout, ui.Paint, ui.Scroll = Style, Root, Layout, Paint, Scroll
+ui.Style, ui.Root, ui.Layout, ui.Paint = Style, Root, Layout, Paint
+ui.Intrinsic, ui.Scroll, ui.Scrollbar = Intrinsic, Scroll, Scrollbar
+ui.FocusScope = FocusScope
 ui.Interaction, ui.InteractionState, ui.Event = Interaction, InteractionState, Event
+
+function ui.focus(world: World, entity: integer): boolean
+    local install = installs[world]
+    return install ~= nil and install.focusEntity(entity, "programmatic") or false
+end
+
+function ui.blur(world: World): boolean
+    local install = installs[world]
+    return install ~= nil and install.focusEntity(nil, "programmatic") or false
+end
+
+function ui.focused(world: World): integer
+    local install = installs[world]
+    return install ~= nil and install.focused or nil
+end
+
+function ui.reveal(world: World, entity: integer, align?: string): boolean
+    local install = installs[world]
+    return install ~= nil and install.revealEntity(entity, align) or false
+end
+
+function ui.pushFocusScope(world: World, scope: integer): boolean
+    local install = installs[world]
+    return install ~= nil and install.pushScope(scope) or false
+end
+
+function ui.popFocusScope(world: World, scope?: integer): boolean
+    local install = installs[world]
+    return install ~= nil and install.popScope(scope) or false
+end
 
 function ui.plugin(provider: any, overrides?: Overrides): function(World)
     local configuration <const> = provider as {string: any}
@@ -734,11 +1091,15 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
     local firstClip = (overrideValues.firstClip or configuration.firstClip or 1) as integer
     local lastClip = (overrideValues.lastClip or configuration.lastClip or 255) as integer
     local wheelStep = (overrideValues.wheelStep or configuration.wheelStep or 40) as number
+    local dragThreshold = (overrideValues.dragThreshold or configuration.dragThreshold or 4) as number
     if firstClip < 1 or lastClip > 255 or firstClip > lastClip then
         error("tecs: UI clip range must be within 1 through 255", 2)
     end
     if wheelStep < 0 then
         error("tecs: UI wheelStep cannot be negative", 2)
+    end
+    if dragThreshold < 0 then
+        error("tecs: UI dragThreshold cannot be negative", 2)
     end
     local renderer <const> = configuration.renderer as Renderer
     local inputReader <const> = configuration.input as InputReader
@@ -777,24 +1138,42 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             scrollHits = {},
             scrollHitCount = 0,
             hovered = nil,
-            captured = nil,
             focused = nil,
+            pointers = {},
+            focusScopes = {},
+            focusRestore = {},
+            ordinals = {},
+            nextOrdinal = 1,
+            focusEntity = function(_entity?: integer, _source?: string, _x?: number, _y?: number): boolean
+                return false
+            end,
+            revealEntity = function(_entity: integer, _align?: string): boolean return false end,
+            pushScope = function(_entity: integer): boolean return false end,
+            popScope = function(_entity?: integer): boolean return false end,
+            cancelPointers = function() end,
             input = inputReader,
             window = window,
             layer = layer,
             wheelStep = wheelStep,
+            dragThreshold = dragThreshold,
             geometryDirty = true,
             hasWorldRoots = false,
+            hasCameraRoots = false,
             cameraX = math.huge,
             cameraY = math.huge,
             cameraZoom = math.huge,
             cameraRotation = math.huge,
+            layoutCameraX = math.huge,
+            layoutCameraY = math.huge,
+            layoutCameraZoom = math.huge,
+            layoutCameraRotation = math.huge,
             screenWidth = math.huge,
             screenHeight = math.huge,
             screenDensity = math.huge,
             nodeMembershipDirty = true,
             rootMembershipDirty = true,
         }
+        installs[world] = install
         local worldImpl <const> = world as internal.WorldImpl
         -- These names are compatibility surfaces exposed by the debugger.
         local function invalidateNodes()
@@ -820,18 +1199,116 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             onEntitiesAdded = invalidateRoots,
             onEntitiesRemoved = invalidateRoots,
         })
+        local intrinsics = world:newQuery({
+            name = "tecs.UiIntrinsics",
+            include = {NodeComponent, Intrinsic},
+            onEntitiesAdded = invalidateNodes,
+            onEntitiesRemoved = invalidateNodes,
+        })
         local scrolls = world:newQuery({
             name = "tecs.UiScrolls",
             include = {Scroll, Layout},
             onEntitiesAdded = invalidateGeometry,
             onEntitiesRemoved = invalidateGeometry,
         })
-        local interactions = world:newQuery({
-            name = "tecs.UiInteractions",
-            include = {Interaction, InteractionState, Layout, Transform},
+        local scrollbars = world:newQuery({
+            name = "tecs.UiScrollbars",
+            include = {Scrollbar, RelativeTransform},
             onEntitiesAdded = invalidateGeometry,
             onEntitiesRemoved = invalidateGeometry,
         })
+        local interactions = world:newQuery({
+            name = "tecs.UiInteractions",
+            include = {Interaction, InteractionState, Transform},
+            onEntitiesAdded = invalidateGeometry,
+            onEntitiesRemoved = invalidateGeometry,
+        })
+        local noMeasure <const> = ffi.new("TecsUiMeasure") as loader.CStruct
+        local function computeLayoutPass()
+            if not (C.tecsUiTreeBegin(install.tree) as boolean) then
+                error("tecs: UI layout reset failed: " .. loader.toString(C.tecsRustError()), 2)
+            end
+            for archetype, length, entities in roots:iter() do
+                local rootColumn = archetype:get(Root)
+                for row = 1, length do
+                    local root = rootColumn[row]
+                    if
+                        root.width > 0
+                        and root.height > 0
+                        and not (C.tecsUiTreeCompute(install.tree, entities[row], root.width, root.height) as boolean)
+                    then
+                        error("tecs: UI layout failed: " .. loader.toString(C.tecsRustError()), 2)
+                    end
+                end
+            end
+            local changes = C.tecsUiTreeChanges(install.tree, install.changeCount) as loader.CArray
+            local changeCount = tonumber(install.changeCount[0]) as integer
+            if changeCount > 0 and changes == nil then
+                error("tecs: UI layout export failed: " .. loader.toString(C.tecsRustError()), 2)
+            end
+            for index = 0, changeCount - 1 do
+                local output = changes[index] as loader.CStruct
+                local entity = tonumber(output.entity) as integer
+                local x, y = output.x as number, output.y as number
+                local width, height = output.width as number, output.height as number
+                local current = world:get(entity, Layout)
+                if
+                    current ~= nil
+                    and (current.x ~= x or current.y ~= y or current.width ~= width or current.height ~= height)
+                then
+                    local changed = world:getMut(entity, Layout)
+                    changed.x, changed.y, changed.width, changed.height = x, y, width, height
+                end
+                local scroll = world:get(entity, Scroll)
+                if scroll ~= nil then
+                    local contentWidth = math.max(width, output.content_width as number)
+                    local contentHeight = math.max(height, output.content_height as number)
+                    if scroll.contentWidth ~= contentWidth or scroll.contentHeight ~= contentHeight then
+                        scroll = world:getMut(entity, Scroll)
+                        scroll.contentWidth, scroll.contentHeight = contentWidth, contentHeight
+                    end
+                end
+                applyLayoutTransform(world, entity, x, y, width, height)
+            end
+        end
+
+        local function synchronizeTextWrapping(): boolean
+            local changed = false
+            for archetype, length, entities in intrinsics:iter() do
+                local values = archetype:get(Intrinsic)
+                local texts = archetype:get(text.Text)
+                if texts ~= nil then
+                    for row = 1, length do
+                        local value = values[row]
+                        if value.source == "text" and value.wrap then
+                            local layout = world:get(entities[row], Layout)
+                            local item = texts[row]
+                            local scale = value.scale
+                            local wrapWidth = layout ~= nil and scale > 0 and layout.width / scale or 0
+                            if math.abs(item.wrapWidth - wrapWidth) > 0.01 then
+                                item = world:getMut(entities[row], text.Text)
+                                item.wrapWidth = wrapWidth
+                                if not (
+                                    C.tecsUiTreeSetMeasure(
+                                        install.tree,
+                                        entities[row],
+                                        nativeMeasure(world, renderer, entities[row], value)
+                                    ) as boolean
+                                ) then
+                                    error(
+                                        "tecs: wrapped UI text synchronization failed: "
+                                            .. loader.toString(C.tecsRustError()),
+                                        2
+                                    )
+                                end
+                                changed = true
+                            end
+                        end
+                    end
+                end
+            end
+            return changed
+        end
         -- This system name is a compatibility surface exposed by the debugger.
         world:addSystem({
             name = "tecs.UiLayout",
@@ -844,6 +1321,8 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 local nodeStateDirty = install.nodeMembershipDirty
                 local rootStateDirty = install.rootMembershipDirty
                 local scrollDirty = false
+                local scrollbarDirty = false
+                local intrinsicDirty = install.nodeMembershipDirty
 
                 -- Query observers carry structural membership changes even
                 -- when an empty ephemeral archetype is destroyed and leaves
@@ -858,12 +1337,22 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                         local relativeDirty = archetype:isComponentDirty(RelativeTransform)
                         local paintDirty = archetype:isComponentDirty(Paint)
                         local viewportDirty = archetype:isComponentDirty(Scroll)
+                        local measureDirty = columns[Intrinsic] ~= nil
+                            and (
+                                archetype:isComponentDirty(Intrinsic)
+                                or archetype:isComponentDirty(text.Text)
+                                or archetype:isComponentDirty(components.Sprite)
+                            )
                         nodeStateDirty = nodeStateDirty or styleDirty or childDirty
                         rootStateDirty = rootStateDirty or rootDirty
-                        hierarchyDirty = hierarchyDirty or childDirty
-                        layoutDirty = layoutDirty or styleDirty or childDirty or rootDirty
+                        hierarchyDirty = hierarchyDirty or childDirty or styleDirty
+                        intrinsicDirty = intrinsicDirty or measureDirty
+                        layoutDirty = layoutDirty or styleDirty or childDirty or rootDirty or measureDirty
                         transformDirty = transformDirty or relativeDirty or paintDirty
                         scrollDirty = scrollDirty or viewportDirty
+                    end
+                    if columns[Scrollbar] and archetype:isComponentDirty(Scrollbar) then
+                        scrollbarDirty = true
                     end
                 end
 
@@ -885,12 +1374,28 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                     install.screenWidth, install.screenHeight = screenWidth, screenHeight
                     install.screenDensity = screenDensity
                 end
-                if not layoutDirty and not transformDirty and not scrollDirty and not windowDirty then
+                local camera = renderer.camera
+                local cameraSizingDirty = install.hasCameraRoots
+                    and (
+                        install.layoutCameraX ~= camera.x
+                        or install.layoutCameraY ~= camera.y
+                        or install.layoutCameraZoom ~= camera.zoom
+                        or install.layoutCameraRotation ~= camera.rotation
+                    )
+                if
+                    not layoutDirty
+                    and not transformDirty
+                    and not scrollDirty
+                    and not scrollbarDirty
+                    and not windowDirty
+                    and not cameraSizingDirty
+                then
                     return
                 end
 
-                if rootStateDirty or windowDirty then
+                if rootStateDirty or windowDirty or cameraSizingDirty then
                     install.hasWorldRoots = false
+                    install.hasCameraRoots = false
                     for _archetype, length, entities in roots:iter() do
                         local values = _archetype:get(Root)
                         for row = 1, length do
@@ -903,8 +1408,48 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                             local value = values[row]
                             if value.space == "world" then
                                 install.hasWorldRoots = true
+                                if value.sizing == "camera" then
+                                    if activeWindow == nil then
+                                        error("tecs: a camera-sized UI root requires a window", 2)
+                                    end
+                                    if camera.zoom <= 0 then
+                                        error("tecs: a camera-sized UI root requires positive camera zoom", 2)
+                                    end
+                                    install.hasCameraRoots = true
+                                    local viewportWidth = screenWidth * screenDensity
+                                    local viewportHeight = screenHeight * screenDensity
+                                    local width = viewportWidth / camera.zoom
+                                    local height = viewportHeight / camera.zoom
+                                    local rootChanged = value.width ~= width
+                                        or value.height ~= height
+                                        or value.pixelDensity ~= screenDensity
+                                    if rootChanged then
+                                        local changed = world:getMut(entities[row], Root)
+                                        changed.width, changed.height = width, height
+                                        changed.pixelDensity = screenDensity
+                                        layoutDirty = true
+                                    end
+                                    local x, y = camera:toWorld(0, 0, viewportWidth, viewportHeight)
+                                    local transform = world:get(entities[row], Transform)
+                                    if
+                                        transform.x ~= x
+                                        or transform.y ~= y
+                                        or transform.rotation ~= camera.rotation
+                                        or transform.scaleX ~= 1
+                                        or transform.scaleY ~= 1
+                                    then
+                                        transform = world:getMut(entities[row], Transform)
+                                        transform.x, transform.y = x, y
+                                        transform.rotation = camera.rotation
+                                        transform.scaleX, transform.scaleY = 1, 1
+                                        transformDirty = true
+                                    end
+                                elseif value.sizing ~= "auto" and value.sizing ~= "manual" then
+                                    error("tecs: Root.sizing must be 'auto', 'manual', or 'camera'", 2)
+                                end
                             elseif
                                 activeWindow ~= nil
+                                and value.sizing ~= "manual"
                                 and (
                                     value.width ~= screenWidth
                                     or value.height ~= screenHeight
@@ -915,9 +1460,13 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                                 changed.width, changed.height = screenWidth, screenHeight
                                 changed.pixelDensity = screenDensity
                                 layoutDirty = true
+                            elseif value.sizing ~= "auto" and value.sizing ~= "manual" then
+                                error("tecs: a screen Root.sizing must be 'auto' or 'manual'", 2)
                             end
                         end
                     end
+                    install.layoutCameraX, install.layoutCameraY = camera.x, camera.y
+                    install.layoutCameraZoom, install.layoutCameraRotation = camera.zoom, camera.rotation
                 end
 
                 if nodeStateDirty then
@@ -929,6 +1478,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                         local styleDirty = archetype:isComponentDirty(Style)
                         for row = 1, length do
                             local entity = entities[row]
+                            ensureOrdinal(install, entity)
                             install.live[entity] = true
                             local style = styles[row].style
                             if not install.known[entity] then
@@ -964,6 +1514,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                         end
                         install.known[entity] = nil
                         install.childKeys[entity] = nil
+                        install.ordinals[entity] = nil
                         layoutDirty = true
                         hierarchyDirty = true
                     end
@@ -976,48 +1527,50 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                     end
                     install.nodeMembershipDirty = false
                 end
+                if intrinsicDirty then
+                    for _archetype, length, entities in nodes:iter() do
+                        for row = 1, length do
+                            local entity = entities[row]
+                            if
+                                world:get(entity, Intrinsic) == nil
+                                and not (C.tecsUiTreeSetMeasure(install.tree, entity, noMeasure) as boolean)
+                            then
+                                error("tecs: UI measurement removal failed: " .. loader.toString(C.tecsRustError()), 2)
+                            end
+                        end
+                    end
+                    for archetype, length, entities in intrinsics:iter() do
+                        local values = archetype:get(Intrinsic)
+                        for row = 1, length do
+                            if not (
+                                C.tecsUiTreeSetMeasure(
+                                    install.tree,
+                                    entities[row],
+                                    nativeMeasure(world, renderer, entities[row], values[row])
+                                ) as boolean
+                            ) then
+                                error(
+                                    "tecs: UI measurement synchronization failed: "
+                                        .. loader.toString(C.tecsRustError()),
+                                    2
+                                )
+                            end
+                        end
+                    end
+                end
                 install.rootMembershipDirty = false
 
                 -- The native tree retains its last boxes. Scrolling and paint
                 -- changes can reuse those boxes without recomputing layout.
                 if layoutDirty then
-                    if not (C.tecsUiTreeBegin(install.tree) as boolean) then
-                        error("tecs: UI layout reset failed: " .. loader.toString(C.tecsRustError()), 2)
-                    end
-                    for archetype, length, entities in roots:iter() do
-                        local rootColumn = archetype:get(Root)
-                        for row = 1, length do
-                            local root = rootColumn[row]
-                            if
-                                root.width > 0
-                                and root.height > 0
-                                and not (
-                                    C.tecsUiTreeCompute(install.tree, entities[row], root.width, root.height) as boolean
-                                )
-                            then
-                                error("tecs: UI layout failed: " .. loader.toString(C.tecsRustError()), 2)
-                            end
+                    computeLayoutPass()
+                    local pass = 1
+                    while synchronizeTextWrapping() do
+                        pass = pass + 1
+                        if pass > 4 then
+                            error("tecs: intrinsic text layout did not converge after four passes", 2)
                         end
-                    end
-                    local changes = C.tecsUiTreeChanges(install.tree, install.changeCount) as loader.CArray
-                    local changeCount = tonumber(install.changeCount[0]) as integer
-                    if changeCount > 0 and changes == nil then
-                        error("tecs: UI layout export failed: " .. loader.toString(C.tecsRustError()), 2)
-                    end
-                    for index = 0, changeCount - 1 do
-                        local output = changes[index] as loader.CStruct
-                        local entity = tonumber(output.entity) as integer
-                        local x, y = output.x as number, output.y as number
-                        local width, height = output.width as number, output.height as number
-                        local current = world:get(entity, Layout)
-                        if
-                            current ~= nil
-                            and (current.x ~= x or current.y ~= y or current.width ~= width or current.height ~= height)
-                        then
-                            local changed = world:getMut(entity, Layout)
-                            changed.x, changed.y, changed.width, changed.height = x, y, width, height
-                        end
-                        applyLayoutTransform(world, entity, x, y, width, height)
+                        computeLayoutPass()
                     end
                 end
 
@@ -1032,29 +1585,133 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                     end
                 end
 
+                if layoutDirty then
+                    local content: ContentContext = {
+                        world = world,
+                        viewport = 0,
+                        x = 0,
+                        y = 0,
+                        minX = 0,
+                        minY = 0,
+                    }
+                    for archetype, length, entities in scrolls:iter() do
+                        local values = archetype:get(Scroll)
+                        for row = 1, length do
+                            local entity = entities[row]
+                            content.viewport = entity
+                            content.x, content.y = 0, 0
+                            content.minX, content.minY = 0, 0
+                            world:targets(entity, ChildOf, collectContentMinimum, content)
+                            local value = values[row]
+                            local right = value.contentWidth
+                            local bottom = value.contentHeight
+                            local contentWidth = right - content.minX
+                            local contentHeight = bottom - content.minY
+                            local viewport = world:get(entity, Layout)
+                            local minX, minY = content.minX, content.minY
+                            local maxX = math.max(minX, minX + contentWidth - viewport.width)
+                            local maxY = math.max(minY, minY + contentHeight - viewport.height)
+                            local nextX = math.max(minX, math.min(maxX, value.x))
+                            local nextY = math.max(minY, math.min(maxY, value.y))
+                            if
+                                value.contentX ~= minX
+                                or value.contentY ~= minY
+                                or value.contentWidth ~= contentWidth
+                                or value.contentHeight ~= contentHeight
+                                or value.x ~= nextX
+                                or value.y ~= nextY
+                            then
+                                local changed = world:getMut(entity, Scroll)
+                                changed.contentX, changed.contentY = minX, minY
+                                changed.contentWidth, changed.contentHeight = contentWidth, contentHeight
+                                changed.x, changed.y = nextX, nextY
+                                scrollDirty = true
+                            end
+                        end
+                    end
+                end
+
+                if scrollDirty then
+                    for archetype, length, entities in scrolls:iter() do
+                        if layoutDirty or archetype:isComponentDirty(Scroll) then
+                            local values = archetype:get(Scroll)
+                            local layouts = archetype:get(Layout)
+                            for row = 1, length do
+                                local value, viewport = values[row], layouts[row]
+                                local maxX = math.max(
+                                    value.contentX, value.contentX + value.contentWidth - viewport.width
+                                )
+                                local maxY = math.max(
+                                    value.contentY, value.contentY + value.contentHeight - viewport.height
+                                )
+                                local x = math.max(value.contentX, math.min(maxX, value.x))
+                                local y = math.max(value.contentY, math.min(maxY, value.y))
+                                if x ~= value.x or y ~= value.y then
+                                    local changed = world:getMut(entities[row], Scroll)
+                                    changed.x, changed.y = x, y
+                                end
+                            end
+                        end
+                    end
+                end
+
                 -- A viewport offset affects only its direct children's local
                 -- transforms. Descendant world transforms follow through the
                 -- ordinary ChildOf hierarchy.
                 if scrollDirty then
                     for archetype, length, entities in scrolls:iter() do
-                        if archetype:isComponentDirty(Scroll) then
+                        if layoutDirty or archetype:isComponentDirty(Scroll) then
                             for row = 1, length do
                                 world:targets(entities[row], ChildOf, applyCurrentLayout, world)
                             end
                         end
                     end
                 end
-                if layoutDirty then
-                    local bounds: BoundsContext = {world = world, width = 0, height = 0}
-                    for archetype, length, entities in scrolls:iter() do
-                        local values = archetype:get(Scroll)
+
+                if layoutDirty or scrollDirty or scrollbarDirty then
+                    for archetype, length, entities in scrollbars:iter() do
+                        local bars = archetype:get(Scrollbar)
+                        local relatives = archetype:get(RelativeTransform)
                         for row = 1, length do
-                            bounds.width, bounds.height = 0, 0
-                            world:targets(entities[row], ChildOf, collectBounds, bounds)
-                            local value = values[row]
-                            if value.contentWidth ~= bounds.width or value.contentHeight ~= bounds.height then
-                                local changed = world:getMut(entities[row], Scroll)
-                                changed.contentWidth, changed.contentHeight = bounds.width, bounds.height
+                            local parent = world:getFirstRelationship(entities[row], ChildOf)
+                            local viewport = parent ~= nil and world:get(parent.target, Scroll) or nil
+                            local layout = parent ~= nil and world:get(parent.target, Layout) or nil
+                            if viewport ~= nil and layout ~= nil then
+                                local bar = bars[row]
+                                local vertical = bar.axis == "vertical"
+                                local viewportLength = vertical and layout.height or layout.width
+                                local contentLength = vertical and viewport.contentHeight or viewport.contentWidth
+                                local contentStart = vertical and viewport.contentY or viewport.contentX
+                                local offset = vertical and viewport.y or viewport.x
+                                local track = math.max(0, viewportLength - bar.inset * 2)
+                                local thumb = contentLength > viewportLength
+                                    and math.max(bar.minLength, track * viewportLength / contentLength) or 0
+                                if thumb > track then
+                                    thumb = track
+                                end
+                                local range = math.max(0, contentLength - viewportLength)
+                                local position = range > 0 and (offset - contentStart) / range * (track - thumb) or 0
+                                local x, y, scaleX, scaleY: number, number, number, number
+                                if vertical then
+                                    x = layout.width - bar.inset - bar.thickness * 0.5
+                                    y = bar.inset + position + thumb * 0.5
+                                    scaleX, scaleY = bar.thickness, thumb
+                                else
+                                    x = bar.inset + position + thumb * 0.5
+                                    y = layout.height - bar.inset - bar.thickness * 0.5
+                                    scaleX, scaleY = thumb, bar.thickness
+                                end
+                                local relative = relatives[row]
+                                if
+                                    relative.x ~= x
+                                    or relative.y ~= y
+                                    or relative.scaleX ~= scaleX
+                                    or relative.scaleY ~= scaleY
+                                then
+                                    relative = world:getMut(entities[row], RelativeTransform)
+                                    relative.x, relative.y = x, y
+                                    relative.scaleX, relative.scaleY = scaleX, scaleY
+                                end
                             end
                         end
                     end
@@ -1092,6 +1749,10 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 density = value.pixelDensity
                 rootSpace = value.space
                 rootWidth, rootHeight = value.width, value.height
+                if rootSpace == "world" and install.window ~= nil then
+                    rootWidth = install.screenWidth * install.screenDensity
+                    rootHeight = install.screenHeight * install.screenDensity
+                end
             end
             local minX, minY = -math.huge, -math.huge
             local maxX, maxY = math.huge, math.huge
@@ -1166,7 +1827,8 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
         local function screenRectFor(entity: integer): number, number, number, number, number, integer
             local transform = world:get(entity, Transform)
             local layout = world:get(entity, Layout)
-            if transform == nil or layout == nil then
+            local scrollbar = world:get(entity, Scrollbar)
+            if transform == nil or (layout == nil and scrollbar == nil) then
                 return nil
             end
 
@@ -1195,7 +1857,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             local cx, cy: number, number
             local dx, dy: number, number
             local paint = world:get(entity, Paint)
-            if paint ~= nil and paint.stretch then
+            if scrollbar ~= nil or (paint ~= nil and paint.stretch) then
                 local halfX, halfY = transform.scaleX * 0.5, transform.scaleY * 0.5
                 local xx, xy = cosine * halfX, sine * halfX
                 local yx, yy = -sine * halfY, cosine * halfY
@@ -1217,10 +1879,15 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 density = 1
             end
             if rootValue.space == "world" then
-                ax, ay = renderer.camera:toScreen(ax, ay, rootValue.width, rootValue.height)
-                bx, by = renderer.camera:toScreen(bx, by, rootValue.width, rootValue.height)
-                cx, cy = renderer.camera:toScreen(cx, cy, rootValue.width, rootValue.height)
-                dx, dy = renderer.camera:toScreen(dx, dy, rootValue.width, rootValue.height)
+                local viewportWidth, viewportHeight = rootValue.width, rootValue.height
+                if install.window ~= nil then
+                    viewportWidth = install.screenWidth * install.screenDensity
+                    viewportHeight = install.screenHeight * install.screenDensity
+                end
+                ax, ay = renderer.camera:toScreen(ax, ay, viewportWidth, viewportHeight)
+                bx, by = renderer.camera:toScreen(bx, by, viewportWidth, viewportHeight)
+                cx, cy = renderer.camera:toScreen(cx, cy, viewportWidth, viewportHeight)
+                dx, dy = renderer.camera:toScreen(dx, dy, viewportWidth, viewportHeight)
                 ax, ay, bx, by = ax / density, ay / density, bx / density, by / density
                 cx, cy, dx, dy = cx / density, cy / density, dx / density, dy / density
             end
@@ -1265,6 +1932,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             index: integer,
             entity: integer,
             tabIndex: integer,
+            order: integer,
             left: number,
             top: number,
             right: number,
@@ -1279,6 +1947,8 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             end
             hit.entity = entity
             hit.tabIndex = tabIndex
+            hit.order = order
+            hit.ordinal = ensureOrdinal(install, entity)
             hit.left, hit.top, hit.right, hit.bottom = left, top, right, bottom
             hit.depth, hit.treeDepth = depth, treeDepth
         end
@@ -1296,7 +1966,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 local geometryDirty = install.geometryDirty
                 if not geometryDirty then
                     for archetype in pairs(worldImpl._dirtyArchetypes) do
-                        if archetype.columns[Style] then
+                        if archetype.columns[Style] or archetype.columns[Scrollbar] then
                             geometryDirty = archetype:isComponentDirty(Transform)
                                 or archetype:isComponentDirty(ChildOf)
                                 or archetype:isComponentDirty(Root)
@@ -1358,6 +2028,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                                     hitCount,
                                     entities[row],
                                     value.tabIndex,
+                                    value.order,
                                     left,
                                     top,
                                     right,
@@ -1381,6 +2052,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                                 scrollHitCount,
                                 entities[row],
                                 -1,
+                                0,
                                 left,
                                 top,
                                 right,
@@ -1405,11 +2077,34 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 install.geometryDirty = false
             end,
         })
+        local function withinActiveScope(entity: integer): boolean
+            local scopes = install.focusScopes
+            local scope = scopes[#scopes]
+            if scope == nil then
+                return true
+            end
+            local current: integer | nil = entity
+            while current ~= nil do
+                if current == scope then
+                    return true
+                end
+                local parent = world:getFirstRelationship(current, ChildOf)
+                current = parent ~= nil and parent.target or nil
+            end
+            return false
+        end
+
         local function targetAt(list: {Hit}, count: integer, x: number, y: number, nestedFirst: boolean): integer
             local best: Hit = nil
             for index = 1, count do
                 local hit = list[index]
-                if x >= hit.left and x < hit.right and y >= hit.top and y < hit.bottom then
+                if
+                    withinActiveScope(hit.entity)
+                    and x >= hit.left
+                    and x < hit.right
+                    and y >= hit.top
+                    and y < hit.bottom
+                then
                     if
                         best == nil
                         or (
@@ -1417,13 +2112,28 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                             and (
                                 hit.treeDepth > best.treeDepth
                                 or (hit.treeDepth == best.treeDepth and hit.depth < best.depth)
+                                or (
+                                    hit.treeDepth == best.treeDepth
+                                    and hit.depth == best.depth
+                                    and hit.ordinal > best.ordinal
+                                )
                             )
                         )
                         or (
                             not nestedFirst
-                            and (hit.depth < best.depth or (hit.depth == best.depth and hit.treeDepth > best.treeDepth))
+                            and (
+                                hit.depth < best.depth
+                                or (hit.depth == best.depth and hit.treeDepth > best.treeDepth)
+                                or (
+                                    hit.depth == best.depth
+                                    and hit.treeDepth == best.treeDepth
+                                    and (
+                                        hit.order > best.order
+                                        or (hit.order == best.order and hit.ordinal > best.ordinal)
+                                    )
+                                )
+                            )
                         )
-                        or (hit.treeDepth == best.treeDepth and hit.depth == best.depth and hit.entity > best.entity)
                     then
                         best = hit
                     end
@@ -1441,9 +2151,13 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             deltaX: number,
             deltaY: number,
             source: string,
-            bubbles: boolean
+            bubbles: boolean,
+            pointerId?: string,
+            pointerType?: string
         ): Event
-            local event = Event(kind, target, x, y, button, deltaX, deltaY, source)
+            local event = Event(
+                kind, target, x, y, button, pointerId or "", pointerType or "none", deltaX, deltaY, source
+            )
             local current: integer | nil = target
             while current ~= nil do
                 event.currentTarget = current
@@ -1457,24 +2171,97 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             return event
         end
 
-        local function setHovered(entity: integer, value: boolean)
+        local function refreshInteractionState(entity?: integer)
+            if entity == nil then
+                return
+            end
             local state = world:get(entity, InteractionState)
-            if state ~= nil and state.hovered ~= value then
-                world:getMut(entity, InteractionState).hovered = value
+            if state == nil then
+                return
+            end
+            local hovered, pressed, dragging = false, false, false
+            for _, pointer in pairs(install.pointers) do
+                hovered = hovered or pointer.hovered == entity
+                pressed = pressed or pointer.captured == entity
+                dragging = dragging or (pointer.captured == entity and pointer.dragging)
+            end
+            if state.hovered ~= hovered or state.pressed ~= pressed or state.dragging ~= dragging then
+                state = world:getMut(entity, InteractionState)
+                state.hovered, state.pressed, state.dragging = hovered, pressed, dragging
             end
         end
 
-        local function setPressed(entity: integer, value: boolean)
-            local state = world:get(entity, InteractionState)
-            if state ~= nil and state.pressed ~= value then
-                world:getMut(entity, InteractionState).pressed = value
+        local function reveal(entity: integer, align?: string): boolean
+            local layout = world:get(entity, Layout)
+            if layout == nil then
+                return false
             end
+            align = align or "nearest"
+            if align ~= "nearest" and align ~= "start" and align ~= "center" and align ~= "end" then
+                error("tecs: reveal alignment must be 'nearest', 'start', 'center', or 'end'", 3)
+            end
+            local left, top = layout.x, layout.y
+            local right, bottom = left + layout.width, top + layout.height
+            local current = entity
+            while true do
+                local relationship = world:getFirstRelationship(current, ChildOf)
+                if relationship == nil then
+                    break
+                end
+                local parent = relationship.target
+                local scroll = world:get(parent, Scroll)
+                local parentLayout = world:get(parent, Layout)
+                if scroll ~= nil and parentLayout ~= nil then
+                    local function revealAxis(start: number, finish: number, offset: number, viewport: number): number
+                        if align == "start" then
+                            return start
+                        elseif align == "center" then
+                            return (start + finish - viewport) * 0.5
+                        elseif align == "end" then
+                            return finish - viewport
+                        elseif start < offset then
+                            return start
+                        elseif finish > offset + viewport then
+                            return finish - viewport
+                        end
+                        return offset
+                    end
+                    local x = revealAxis(left, right, scroll.x, parentLayout.width)
+                    local y = revealAxis(top, bottom, scroll.y, parentLayout.height)
+                    local maxX = math.max(scroll.contentX, scroll.contentX + scroll.contentWidth - parentLayout.width)
+                    local maxY = math.max(scroll.contentY, scroll.contentY + scroll.contentHeight - parentLayout.height)
+                    x = math.max(scroll.contentX, math.min(maxX, x))
+                    y = math.max(scroll.contentY, math.min(maxY, y))
+                    if x ~= scroll.x or y ~= scroll.y then
+                        local changed = world:getMut(parent, Scroll)
+                        changed.x, changed.y = x, y
+                    end
+                    left, right = left - x, right - x
+                    top, bottom = top - y, bottom - y
+                end
+                if parentLayout ~= nil then
+                    left, right = left + parentLayout.x, right + parentLayout.x
+                    top, bottom = top + parentLayout.y, bottom + parentLayout.y
+                end
+                current = parent
+            end
+            return true
         end
 
-        local function focus(entity?: integer, source?: string, x?: number, y?: number)
+        local function focus(entity?: integer, source?: string, x?: number, y?: number): boolean
             local previous = install.focused
             if previous == entity then
-                return
+                return true
+            end
+            if entity ~= nil and not withinActiveScope(entity) then
+                return false
+            end
+            if entity ~= nil then
+                local interaction = world:get(entity, Interaction)
+                local state = world:get(entity, InteractionState)
+                if interaction == nil or not interaction.enabled or not interaction.focusable or state == nil then
+                    return false
+                end
             end
             if previous ~= nil then
                 local state = world:get(previous, InteractionState)
@@ -1485,16 +2272,15 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             end
             install.focused = nil
             if entity ~= nil then
-                local interaction = world:get(entity, Interaction)
                 local state = world:get(entity, InteractionState)
-                if interaction ~= nil and interaction.enabled and interaction.focusable and state ~= nil then
-                    install.focused = entity
-                    if not state.focused then
-                        world:getMut(entity, InteractionState).focused = true
-                    end
-                    dispatch(entity, "focus", x or 0, y or 0, 0, 0, 0, source or "keyboard", true)
+                install.focused = entity
+                if not state.focused then
+                    world:getMut(entity, InteractionState).focused = true
                 end
+                dispatch(entity, "focus", x or 0, y or 0, 0, 0, 0, source or "keyboard", true)
+                reveal(entity, "nearest")
             end
+            return true
         end
 
         local function focusBefore(left: Hit, right: Hit): boolean
@@ -1506,7 +2292,16 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             if left.tabIndex ~= right.tabIndex then
                 return left.tabIndex < right.tabIndex
             end
-            return left.entity < right.entity
+            if left.order ~= right.order then
+                return left.order < right.order
+            end
+            if left.top ~= right.top then
+                return left.top < right.top
+            end
+            if left.left ~= right.left then
+                return left.left < right.left
+            end
+            return left.ordinal < right.ordinal
         end
 
         local function moveFocus(backward: boolean)
@@ -1519,7 +2314,11 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 local hit = install.hits[index]
                 local interaction = world:get(hit.entity, Interaction)
                 if
-                    interaction ~= nil and interaction.enabled and interaction.focusable and interaction.tabIndex >= 0
+                    interaction ~= nil
+                    and interaction.enabled
+                    and interaction.focusable
+                    and interaction.tabIndex >= 0
+                    and withinActiveScope(hit.entity)
                 then
                     if first == nil or focusBefore(hit, first) then
                         first = hit
@@ -1541,6 +2340,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                         and interaction.enabled
                         and interaction.focusable
                         and interaction.tabIndex >= 0
+                        and withinActiveScope(hit.entity)
                     then
                         if focusBefore(hit, current) and (before == nil or focusBefore(before, hit)) then
                             before = hit
@@ -1554,103 +2354,431 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             focus(nextHit ~= nil and nextHit.entity or nil, "keyboard")
         end
 
+        install.revealEntity = reveal
+        install.focusEntity = focus
+        install.pushScope = function(scope: integer): boolean
+            if world:get(scope, FocusScope) == nil then
+                return false
+            end
+            for index = 1, #install.focusScopes do
+                if install.focusScopes[index] == scope then
+                    return index == #install.focusScopes
+                end
+            end
+            install.focusRestore[scope] = install.focused
+            install.cancelPointers()
+            install.focusScopes[#install.focusScopes + 1] = scope
+            focus(nil, "programmatic")
+            moveFocus(false)
+            return true
+        end
+        install.popScope = function(scope?: integer): boolean
+            local scopes = install.focusScopes
+            local active = scopes[#scopes]
+            if active == nil or (scope ~= nil and scope ~= active) then
+                return false
+            end
+            install.cancelPointers()
+            scopes[#scopes] = nil
+            local restore = install.focusRestore[active]
+            install.focusRestore[active] = nil
+            if restore ~= nil and world:get(restore, Interaction) ~= nil and withinActiveScope(restore) then
+                focus(restore, "programmatic")
+            else
+                focus(nil, "programmatic")
+                moveFocus(false)
+            end
+            return true
+        end
+
+        local function scrollBy(entity: integer, deltaX: number, deltaY: number)
+            local current: integer | nil = entity
+            while current ~= nil and (math.abs(deltaX) > 0.001 or math.abs(deltaY) > 0.001) do
+                local scroll = world:get(current, Scroll)
+                local layout = world:get(current, Layout)
+                if scroll ~= nil and layout ~= nil then
+                    local maxX = math.max(scroll.contentX, scroll.contentX + scroll.contentWidth - layout.width)
+                    local maxY = math.max(scroll.contentY, scroll.contentY + scroll.contentHeight - layout.height)
+                    local x = math.max(scroll.contentX, math.min(maxX, scroll.x + deltaX))
+                    local y = math.max(scroll.contentY, math.min(maxY, scroll.y + deltaY))
+                    local consumedX, consumedY = x - scroll.x, y - scroll.y
+                    if consumedX ~= 0 or consumedY ~= 0 then
+                        local changed = world:getMut(current, Scroll)
+                        changed.x, changed.y = x, y
+                        deltaX, deltaY = deltaX - consumedX, deltaY - consumedY
+                    end
+                end
+                local parent = world:getFirstRelationship(current, ChildOf)
+                current = parent ~= nil and parent.target or nil
+            end
+        end
+
         if install.input ~= nil then
+            local endedPointers: {string} = {}
+
+            local function updatePointerHover(pointer: PointerState, canRead: boolean)
+                local previous = pointer.hovered
+                local hovered = canRead and targetAt(install.hits, install.hitCount, pointer.x, pointer.y, false) or nil
+                if previous == hovered then
+                    return
+                end
+                pointer.hovered = hovered
+                if pointer.kind == "mouse" then
+                    install.hovered = hovered
+                end
+                refreshInteractionState(previous)
+                if previous ~= nil and world:get(previous, InteractionState) ~= nil then
+                    dispatch(
+                        previous,
+                        "pointerLeave",
+                        pointer.x,
+                        pointer.y,
+                        0,
+                        0,
+                        0,
+                        "pointer",
+                        false,
+                        pointer.id,
+                        pointer.kind
+                    )
+                end
+                refreshInteractionState(hovered)
+                if hovered ~= nil then
+                    dispatch(
+                        hovered,
+                        "pointerEnter",
+                        pointer.x,
+                        pointer.y,
+                        0,
+                        0,
+                        0,
+                        "pointer",
+                        false,
+                        pointer.id,
+                        pointer.kind
+                    )
+                end
+            end
+
+            local function beginPointer(pointer: PointerState)
+                local target = pointer.hovered
+                pointer.startX, pointer.startY = pointer.x, pointer.y
+                pointer.dragging = false
+                pointer.captured = target
+                pointer.startScroll = 0
+                if target ~= nil then
+                    local bar = world:get(target, Scrollbar)
+                    local parent = world:getFirstRelationship(target, ChildOf)
+                    local scroll = parent ~= nil and world:get(parent.target, Scroll) or nil
+                    if bar ~= nil and scroll ~= nil then
+                        pointer.startScroll = bar.axis == "vertical" and scroll.y or scroll.x
+                    end
+                    refreshInteractionState(target)
+                    local interaction = world:get(target, Interaction)
+                    if interaction ~= nil and interaction.focusable then
+                        focus(target, "pointer", pointer.x, pointer.y)
+                    end
+                    dispatch(
+                        target, "pointerDown", pointer.x, pointer.y, 1, 0, 0, "pointer", true, pointer.id, pointer.kind
+                    )
+                else
+                    focus(nil, "pointer", pointer.x, pointer.y)
+                end
+            end
+
+            local function moveScrollbar(pointer: PointerState)
+                local target = pointer.captured
+                local bar = target ~= nil and world:get(target, Scrollbar) or nil
+                local relationship = target ~= nil and world:getFirstRelationship(target, ChildOf) or nil
+                local scroll = relationship ~= nil and world:get(relationship.target, Scroll) or nil
+                local layout = relationship ~= nil and world:get(relationship.target, Layout) or nil
+                if bar == nil or scroll == nil or layout == nil then
+                    return
+                end
+                local vertical = bar.axis == "vertical"
+                local viewportLength = vertical and layout.height or layout.width
+                local contentLength = vertical and scroll.contentHeight or scroll.contentWidth
+                local contentStart = vertical and scroll.contentY or scroll.contentX
+                local track = math.max(0, viewportLength - bar.inset * 2)
+                local thumb = math.min(
+                    track, math.max(bar.minLength, track * viewportLength / math.max(viewportLength, contentLength))
+                )
+                local travel = track - thumb
+                local range = math.max(0, contentLength - viewportLength)
+                if travel <= 0 or range <= 0 then
+                    return
+                end
+                local delta = vertical and (pointer.y - pointer.startY) or (pointer.x - pointer.startX)
+                local value = math.max(
+                    contentStart, math.min(contentStart + range, pointer.startScroll + delta / travel * range)
+                )
+                if vertical then
+                    if value ~= scroll.y then
+                        world:getMut(relationship.target, Scroll).y = value
+                    end
+                else
+                    if value ~= scroll.x then
+                        world:getMut(relationship.target, Scroll).x = value
+                    end
+                end
+            end
+
+            local function movePointer(pointer: PointerState)
+                local dx, dy = pointer.x - pointer.previousX, pointer.y - pointer.previousY
+                if dx == 0 and dy == 0 then
+                    return
+                end
+                local target = pointer.captured or pointer.hovered
+                if target ~= nil and world:get(target, InteractionState) ~= nil then
+                    dispatch(
+                        target,
+                        "pointerMove",
+                        pointer.x,
+                        pointer.y,
+                        0,
+                        dx,
+                        dy,
+                        "pointer",
+                        true,
+                        pointer.id,
+                        pointer.kind
+                    )
+                end
+                local captured = pointer.captured
+                local interaction = captured ~= nil and world:get(captured, Interaction) or nil
+                if interaction ~= nil and interaction.draggable then
+                    if not pointer.dragging then
+                        local totalX, totalY = pointer.x - pointer.startX, pointer.y - pointer.startY
+                        if totalX * totalX + totalY * totalY >= install.dragThreshold * install.dragThreshold then
+                            pointer.dragging = true
+                            refreshInteractionState(captured)
+                            dispatch(
+                                captured,
+                                "dragStart",
+                                pointer.x,
+                                pointer.y,
+                                1,
+                                totalX,
+                                totalY,
+                                "pointer",
+                                true,
+                                pointer.id,
+                                pointer.kind
+                            )
+                        end
+                    end
+                    if pointer.dragging then
+                        dispatch(
+                            captured,
+                            "dragMove",
+                            pointer.x,
+                            pointer.y,
+                            1,
+                            dx,
+                            dy,
+                            "pointer",
+                            true,
+                            pointer.id,
+                            pointer.kind
+                        )
+                        moveScrollbar(pointer)
+                    end
+                end
+            end
+
+            local function endPointer(pointer: PointerState, canceled: boolean)
+                local captured = pointer.captured
+                pointer.captured = nil
+                if captured == nil then
+                    return
+                end
+                if world:get(captured, InteractionState) ~= nil then
+                    dispatch(
+                        captured, "pointerUp", pointer.x, pointer.y, 1, 0, 0, "pointer", true, pointer.id, pointer.kind
+                    )
+                    if pointer.dragging then
+                        dispatch(
+                            captured,
+                            canceled and "dragCancel" or "dragEnd",
+                            pointer.x,
+                            pointer.y,
+                            1,
+                            pointer.x - pointer.startX,
+                            pointer.y - pointer.startY,
+                            "pointer",
+                            true,
+                            pointer.id,
+                            pointer.kind
+                        )
+                    elseif not canceled and captured == pointer.hovered then
+                        local clicked = dispatch(
+                            captured, "click", pointer.x, pointer.y, 1, 0, 0, "pointer", true, pointer.id, pointer.kind
+                        )
+                        if not clicked.consumed then
+                            dispatch(
+                                captured,
+                                "activate",
+                                pointer.x,
+                                pointer.y,
+                                1,
+                                0,
+                                0,
+                                "pointer",
+                                true,
+                                pointer.id,
+                                pointer.kind
+                            )
+                        end
+                    end
+                end
+                pointer.dragging = false
+                refreshInteractionState(captured)
+            end
+
+            install.cancelPointers = function()
+                for _, pointer in pairs(install.pointers) do
+                    if pointer.captured ~= nil then
+                        endPointer(pointer, true)
+                    end
+                end
+            end
+
             -- This system name is a compatibility surface exposed by the debugger.
             world:addSystem({
                 name = "tecs.UiInput",
                 phase = ecs.phases.PreUpdate,
                 run = function()
                     local input = install.input
+                    while
+                        #install.focusScopes > 0
+                        and world:get(install.focusScopes[#install.focusScopes], FocusScope) == nil
+                    do
+                        install.popScope()
+                    end
                     if install.focused ~= nil then
                         local interaction = world:get(install.focused, Interaction)
-                        if interaction == nil or not interaction.enabled or not interaction.focusable then
+                        if
+                            interaction == nil
+                            or not interaction.enabled
+                            or not interaction.focusable
+                            or not withinActiveScope(install.focused)
+                        then
                             focus(nil, "keyboard")
                         end
                     end
-                    if install.captured ~= nil and world:get(install.captured, InteractionState) == nil then
-                        install.captured = nil
-                    end
+
                     local canRead = input:canRead(install.layer)
-                    local x, y = input.mouseX, input.mouseY
-                    local hovered = canRead and targetAt(install.hits, install.hitCount, x, y, false) or nil
-                    if hovered ~= install.hovered then
-                        if install.hovered ~= nil then
-                            local previous = install.hovered
-                            setHovered(previous, false)
-                            if world:get(previous, InteractionState) ~= nil then
-                                dispatch(previous, "pointerLeave", x, y, 0, 0, 0, "pointer", false)
-                            end
-                        end
-                        install.hovered = hovered
-                        if hovered ~= nil then
-                            setHovered(hovered, true)
-                            dispatch(hovered, "pointerEnter", x, y, 0, 0, 0, "pointer", false)
-                        end
+                    local mouse = install.pointers.mouse
+                    if mouse == nil then
+                        mouse = {
+                            id = "mouse",
+                            kind = "mouse",
+                            x = input.mouseX,
+                            y = input.mouseY,
+                            previousX = input.mouseX,
+                            previousY = input.mouseY,
+                            startX = input.mouseX,
+                            startY = input.mouseY,
+                            startScroll = 0,
+                            seen = true,
+                        } as PointerState
+                        install.pointers.mouse = mouse
                     end
-
+                    mouse.previousX, mouse.previousY = mouse.x, mouse.y
+                    mouse.x, mouse.y = input.mouseX, input.mouseY
+                    updatePointerHover(mouse, canRead)
                     if not canRead then
-                        return
-                    end
-                    if input:mousePressed("left", install.layer) then
-                        install.captured = hovered
-                        if hovered ~= nil then
-                            setPressed(hovered, true)
-                            local interaction = world:get(hovered, Interaction)
-                            if interaction ~= nil and interaction.focusable then
-                                focus(hovered, "pointer", x, y)
-                            end
-                            dispatch(hovered, "pointerDown", x, y, 1, 0, 0, "pointer", true)
-                        else
-                            focus(nil, "pointer", x, y)
+                        endPointer(mouse, true)
+                    else
+                        movePointer(mouse)
+                        if input:mousePressed("left", install.layer) then
+                            beginPointer(mouse)
                         end
-                    end
-                    if input:mouseReleased("left", install.layer) then
-                        local captured = install.captured
-                        install.captured = nil
-                        if captured ~= nil and world:get(captured, InteractionState) ~= nil then
-                            setPressed(captured, false)
-                            dispatch(captured, "pointerUp", x, y, 1, 0, 0, "pointer", true)
-                            if captured == hovered then
-                                local clicked = dispatch(captured, "click", x, y, 1, 0, 0, "pointer", true)
-                                if not clicked.consumed then
-                                    dispatch(captured, "activate", x, y, 1, 0, 0, "pointer", true)
-                                end
-                            end
+                        if input:mouseReleased("left", install.layer) then
+                            endPointer(mouse, false)
                         end
                     end
 
-                    if input.wheelX ~= 0 or input.wheelY ~= 0 then
+                    for _, pointer in pairs(install.pointers) do
+                        if pointer.kind == "touch" then
+                            pointer.seen = false
+                        end
+                    end
+                    local touches = noTouches
+                    if canRead and type((input as {string: any}).touches) == "function" then
+                        touches = input:touches(install.layer)
+                    end
+                    for index = 1, #touches do
+                        local touch = touches[index]
+                        local id = touch.device .. ":" .. touch.finger
+                        local pointer = install.pointers[id]
+                        local began = pointer == nil
+                        if pointer == nil then
+                            pointer = {
+                                id = id,
+                                kind = "touch",
+                                x = touch.x,
+                                y = touch.y,
+                                previousX = touch.x,
+                                previousY = touch.y,
+                                startX = touch.x,
+                                startY = touch.y,
+                                startScroll = 0,
+                            } as PointerState
+                            install.pointers[id] = pointer
+                        else
+                            pointer.previousX, pointer.previousY = pointer.x, pointer.y
+                            pointer.x, pointer.y = touch.x, touch.y
+                        end
+                        pointer.seen = true
+                        updatePointerHover(pointer, true)
+                        if began then
+                            beginPointer(pointer)
+                        else
+                            movePointer(pointer)
+                        end
+                    end
+                    for index = #endedPointers, 1, -1 do
+                        endedPointers[index] = nil
+                    end
+                    for id, pointer in pairs(install.pointers) do
+                        if pointer.kind == "touch" and not pointer.seen then
+                            endedPointers[#endedPointers + 1] = id
+                        end
+                    end
+                    for index = 1, #endedPointers do
+                        local id = endedPointers[index]
+                        local pointer = install.pointers[id]
+                        endPointer(pointer, not canRead)
+                        local hovered = pointer.hovered
+                        pointer.hovered = nil
+                        install.pointers[id] = nil
+                        refreshInteractionState(hovered)
+                    end
+
+                    local x, y = mouse.x, mouse.y
+                    if canRead and (input.wheelX ~= 0 or input.wheelY ~= 0) then
                         local target = targetAt(install.scrollHits, install.scrollHitCount, x, y, true)
                         if target ~= nil then
+                            local wheelX, wheelY = input.wheelX, input.wheelY
+                            if input:modifierDown("shift", install.layer) and wheelX == 0 then
+                                wheelX, wheelY = wheelY, 0
+                            end
                             local wheel = dispatch(
-                                target, "wheel", x, y, 0, input.wheelX, input.wheelY, "pointer", true
+                                target, "wheel", x, y, 0, wheelX, wheelY, "pointer", true, mouse.id, mouse.kind
                             )
                             if not wheel.consumed then
-                                local scroll = world:get(target, Scroll)
-                                local layout = world:get(target, Layout)
-                                if scroll ~= nil and layout ~= nil then
-                                    local maxX = math.max(0, scroll.contentWidth - layout.width)
-                                    local maxY = math.max(0, scroll.contentHeight - layout.height)
-                                    local nextX = math.max(
-                                        0, math.min(maxX, scroll.x - input.wheelX * install.wheelStep)
-                                    )
-                                    local nextY = math.max(
-                                        0, math.min(maxY, scroll.y - input.wheelY * install.wheelStep)
-                                    )
-                                    if nextX ~= scroll.x or nextY ~= scroll.y then
-                                        local changed = world:getMut(target, Scroll)
-                                        changed.x, changed.y = nextX, nextY
-                                    end
-                                end
+                                scrollBy(target, -wheelX * install.wheelStep, -wheelY * install.wheelStep)
                             end
                         end
                     end
 
-                    if input:keyPressed("tab", install.layer) then
+                    if canRead and input:keyPressed("tab", install.layer) then
                         moveFocus(input:modifierDown("shift", install.layer))
                     end
                     if
-                        install.focused ~= nil
+                        canRead
+                        and install.focused ~= nil
                         and (input:keyPressed("return", install.layer) or input:keyPressed("space", install.layer))
                     then
                         dispatch(install.focused, "activate", x, y, 0, 0, 0, "keyboard", true)

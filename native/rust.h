@@ -84,7 +84,19 @@ typedef struct TecsUiLayoutChange {
     float y;
     float width;
     float height;
+    float content_width;
+    float content_height;
 } TecsUiLayoutChange;
+
+typedef struct TecsUiMeasure {
+    uint8_t kind;
+    uint8_t _padding[3];
+    float width;
+    float height;
+    float min_width;
+    float measured_width;
+    float measured_height;
+} TecsUiMeasure;
 
 typedef struct TecsRegexSpan {
     size_t start;
@@ -109,6 +121,7 @@ void tecsUiTreeDestroy(TecsUiTree *tree);
 bool tecsUiTreeInsert(TecsUiTree *tree, uint64_t entity, const TecsUiStyle *style);
 bool tecsUiTreeRemove(TecsUiTree *tree, uint64_t entity);
 bool tecsUiTreeSetStyle(TecsUiTree *tree, uint64_t entity, const TecsUiStyle *style);
+bool tecsUiTreeSetMeasure(TecsUiTree *tree, uint64_t entity, const TecsUiMeasure *measure);
 bool tecsUiTreeSetChildren(TecsUiTree *tree, uint64_t entity, const uint64_t *children, size_t count);
 bool tecsUiTreeInvalidateRoot(TecsUiTree *tree, uint64_t entity);
 bool tecsUiTreeBegin(TecsUiTree *tree);

@@ -140,8 +140,8 @@ end
 --- Write through `world:getMut(entity, Text)`. A write through `world:get`
 --- leaves the column clean and the glyphs stale.
 local record Text is Component
-    --- Caller-writable. Sets the laid-out string. A newline starts a line;
-    --- nothing else breaks one.
+    --- Caller-writable. Sets the laid-out string. A newline starts a line and
+    --- `wrapWidth` may introduce additional line breaks.
     text: string
     --- Caller-writable. Selects the font that supplies the glyphs. Without one,
     --- the text draws nothing.
@@ -151,6 +151,10 @@ local record Text is Component
     --- Caller-writable. Selects `"left"`, `"center"`, or `"right"` alignment
     --- within the block's widest line.
     align: string
+    --- Caller-writable. Sets the maximum line width in world units. Zero
+    --- disables wrapping. Retained UI writes this field for a wrapping
+    --- intrinsic text leaf after Taffy chooses its available width.
+    wrapWidth: number
 
     --- Engine-owned. Reports the width of the last layout in world units.
     --- Assigning it has no effect.
@@ -178,6 +182,9 @@ local record Text is Component
     --- Engine-owned. Stores the last laid-out alignment. Ordinary game code
     --- should ignore this field.
     _builtAlign: string
+    --- Engine-owned. Stores the last laid-out wrapping width. Ordinary game
+    --- code should ignore this field.
+    _builtWrapWidth: number
     --- Engine-owned. Stores SDL_ttf's reusable shaped text. Ordinary game
     --- code should ignore this field.
     _native: loader.CPtr
@@ -187,6 +194,9 @@ local record Text is Component
     --- Engine-owned. Stores the string used by `_native`. Ordinary game code
     --- should ignore this field.
     _nativeText: string
+    --- Engine-owned. Stores the native wrapping width in source-font pixels.
+    --- Ordinary game code should ignore this field.
+    _nativeWrapWidth: integer
     --- Engine-owned. Stores the last laid-out red channel. Ordinary game code
     --- should ignore this field.
     _builtR: number
@@ -270,11 +280,24 @@ local record text
     --- entity.
     --- @param item A [`Text`](tealdoc:tecs.gfx.text.Text) value to read. It need
     ---     not belong to an entity.
+    --- @param wrapWidth The caller may override `item.wrapWidth` for this
+    ---     measurement without changing the retained authored value.
     --- @return Width at `item.size`, before
     ---     [`Transform`](/modules/ecs/#tecs.ecs.Transform) scale. Returns zero for a missing
     ---     item, font, or string.
     --- @return Height on the same terms, counting complete line boxes.
-    measureText: function(item: Text): number, number
+    measureText: function(item: Text, wrapWidth?: number): number, number
+    --- Returns the preferred and minimum-content metrics for a text item.
+    ---
+    --- The minimum-content width is the widest whitespace-delimited run. The
+    --- function shapes only while called and does not change authored fields.
+    --- Retained UI calls it only when the text or its intrinsic settings are
+    --- dirty.
+    --- @param item A [`Text`](tealdoc:tecs.gfx.text.Text) value with a font.
+    --- @return Preferred width with wrapping disabled.
+    --- @return Preferred height with wrapping disabled.
+    --- @return Minimum-content width of the widest unbroken run.
+    measureIntrinsic: function(item: Text): number, number, number
     --- Creates the plugin that lays out text for a renderer.
     --- @param options Requires `renderer`.
     --- @return A world plugin. Each world gets its own producer run while
@@ -777,12 +800,24 @@ local function updateNative(item: Text): loader.CPtr
         item._native = ffi.gc(native as ffi.CData, TTF.TTF_DestroyText as function(ffi.CData)) as loader.CPtr
         item._nativeFont = item.font
         item._nativeText = item.text
+        item._nativeWrapWidth = -1
         changed = true
     elseif item._nativeText ~= item.text then
         if not TTF.TTF_SetTextString(native, item.text, #item.text) then
             sdl.fail("TTF_SetTextString")
         end
         item._nativeText = item.text
+        changed = true
+    end
+    local wrapWidth = 0
+    if item.wrapWidth > 0 and item.size > 0 then
+        wrapWidth = math.max(1, math.floor(item.wrapWidth / item.size * item.font.size + 0.5))
+    end
+    if item._nativeWrapWidth ~= wrapWidth then
+        if not TTF.TTF_SetTextWrapWidth(native, wrapWidth) then
+            sdl.fail("TTF_SetTextWrapWidth")
+        end
+        item._nativeWrapWidth = wrapWidth
         changed = true
     end
     if changed and not TTF.TTF_UpdateText(item._native) then
@@ -848,12 +883,45 @@ end
 
 -- This calls the same layout routine as the plugin, without producing
 -- instances or touching an entity.
-function text.measureText(item: Text): number, number
+function text.measureText(item: Text, wrapWidth?: number): number, number
     if item == nil or item.font == nil or item.text == nil then
         return 0.0, 0.0
     end
+    local previous = item.wrapWidth
+    if wrapWidth ~= nil then
+        item.wrapWidth = wrapWidth
+    end
     local _, width, height = layout(item)
+    if wrapWidth ~= nil then
+        item.wrapWidth = previous
+    end
     return width, height
+end
+
+local intrinsicProbe: Text = {
+    text = "",
+    size = 16,
+    align = "left",
+    wrapWidth = 0,
+} as Text
+
+function text.measureIntrinsic(item: Text): number, number, number
+    if item == nil or item.font == nil or item.text == nil then
+        return 0.0, 0.0, 0.0
+    end
+    local width, height = text.measureText(item, 0)
+    local probe = intrinsicProbe
+    probe.font, probe.size, probe.align = item.font, item.size, "left"
+    probe.wrapWidth = 0
+    local minWidth = 0.0
+    for run in item.text:gmatch("%S+") do
+        probe.text = run
+        local runWidth = text.measureText(probe, 0)
+        if runWidth > minWidth then
+            minWidth = runWidth
+        end
+    end
+    return width, height, minWidth
 end
 
 -------------------------------------------------------------------------------
@@ -1090,6 +1158,7 @@ local function build(
     item._builtFont = font
     item._builtSize = item.size
     item._builtAlign = item.align
+    item._builtWrapWidth = item.wrapWidth
     item._builtR, item._builtG = r, g
     item._builtB, item._builtA = b, a
     item._builtX, item._builtY, item._builtZ = originX, originY, z
@@ -1110,6 +1179,7 @@ local function stale(item: Text, transform: TransformInstance, tint: TintInstanc
         or item._builtFont ~= item.font
         or item._builtSize ~= item.size
         or item._builtAlign ~= item.align
+        or item._builtWrapWidth ~= item.wrapWidth
     then
         return true
     end
@@ -1257,6 +1327,7 @@ text.Text = ecs.newComponent({
         "font",
         "size",
         "align",
+        "wrapWidth",
     },
     init = function(item: Text)
         if item.text == nil then
@@ -1267,6 +1338,11 @@ text.Text = ecs.newComponent({
         end
         if item.align == nil then
             item.align = "left"
+        end
+        if item.wrapWidth == nil then
+            item.wrapWidth = 0
+        elseif item.wrapWidth < 0 then
+            error("tecs: Text.wrapWidth cannot be negative", 3)
         end
         if ALIGNMENTS[item.align] == nil then
             error(("tecs: '%s' is not an alignment; use left, center or right"):format(tostring(item.align)), 3)
@@ -1284,6 +1360,7 @@ text.Text = ecs.newComponent({
             font = item.font ~= nil and item.font.name or nil,
             size = item.size,
             align = item.align,
+            wrapWidth = item.wrapWidth,
         }
     end,
     deserialize = function(_world: World, stored: {string: any}): Text
@@ -1291,7 +1368,9 @@ text.Text = ecs.newComponent({
         -- without one, which lays out nothing rather than failing a load.
         local name = stored.font as string
         local font = name ~= nil and fontsByName[name] or nil
-        return text.Text(stored.text as string, font, stored.size as number, stored.align as string)
+        return text.Text(
+            stored.text as string, font, stored.size as number, stored.align as string, stored.wrapWidth as number or 0
+        )
     end,
 })
 

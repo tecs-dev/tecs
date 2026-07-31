@@ -12,6 +12,7 @@ local Renderer = require("tecs.Renderer")
 local assets = require("tecs.assets")
 local components = require("tecs.components")
 local text = require("tecs.gfx.text")
+local ui = require("tecs.ui")
 
 local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
@@ -19,6 +20,8 @@ local SIZE = 256
 
 local Transform = tecs.Transform
 local Tint = components.Tint
+local ChildOf = tecs.ecs.ChildOf
+local RelativeTransform = tecs.ecs.RelativeTransform
 
 describe("gfx.text", function()
     local window, device, screen, font
@@ -168,6 +171,57 @@ describe("gfx.text", function()
         assert.is_true(measuredHeight > 48)
         assert.is_true(math.abs(item.width - measuredWidth) < 0.01)
         assert.is_true(math.abs(item.height - measuredHeight) < 0.01)
+        renderer:destroy()
+    end)
+
+    it("measures intrinsic runs and wraps retained text at an authored width", function()
+        local world, renderer = newScene()
+        local entity = spawnText(world, 20, 20, "alpha beta gamma", 32, "left")
+        frame(world, renderer)
+
+        local item = world:get(entity, text.Text)
+        local preferredWidth, preferredHeight, minWidth = text.measureIntrinsic(item)
+        assert.is_true(preferredWidth > minWidth)
+        assert.is_true(minWidth > 0)
+        local wrappedWidth, wrappedHeight = text.measureText(item, preferredWidth * 0.55)
+        assert.is_true(wrappedWidth < preferredWidth)
+        assert.is_true(wrappedHeight > preferredHeight)
+        assert.are.equal(0, item.wrapWidth)
+
+        world:getMut(entity, text.Text).wrapWidth = preferredWidth * 0.55
+        frame(world, renderer)
+        item = world:get(entity, text.Text)
+        assert.is_true(math.abs(item.width - wrappedWidth) < 0.01)
+        assert.is_true(math.abs(item.height - wrappedHeight) < 0.01)
+        renderer:destroy()
+    end)
+
+    it("converges intrinsic UI text to Taffy's chosen wrapping width", function()
+        local world, renderer = newScene()
+        world:addPlugin(ui.plugin({ renderer = renderer }))
+        local rootEntity = world:spawn(
+            ui.Style({ width = 120, height = 120, flexDirection = "column" }),
+            ui.Root("screen", 120, 120, 1)
+        )
+        local entity = world:spawn(
+            ui.Style({ maxWidth = "100%" }),
+            ui.Intrinsic("text", { wrap = true }),
+            RelativeTransform(),
+            ChildOf(rootEntity),
+            Tint(0.0, 1.0, 0.0, 1.0),
+            text.Text.new({ text = "alpha beta gamma", font = font, size = 32 })
+        )
+        frame(world, renderer)
+
+        local layout = world:get(entity, ui.Layout)
+        local item = world:get(entity, text.Text)
+        assert.is_true(layout.width <= 120)
+        assert.is_true(layout.height > 32)
+        assert.is_true(math.abs(item.wrapWidth - layout.width) < 0.01)
+        assert.is_true(
+            math.abs(item.height - layout.height) <= 1,
+            ("rendered height %.3f should match UI height %.3f"):format(item.height, layout.height)
+        )
         renderer:destroy()
     end)
 

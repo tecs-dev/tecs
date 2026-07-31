@@ -33,7 +33,7 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
             local font <const> = tecs.gfx.newTTF({
                 source = "fonts/JetBrainsMono-ExtraBold.ttf",
                 size = 48,
-            }).value
+            }):wait().value
             local root <const> = world:spawn(
                 ui.Style({
                     width = "100%",
@@ -92,10 +92,9 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
             world:spawn(
                 ui.Style({
                     position = "absolute",
-                    width = 330,
-                    height = 30,
                     inset = {left = 56, top = 0},
                 }),
+                ui.Intrinsic("text"),
                 RelativeTransform(0, 0, 2),
                 Tint(0.94, 0.97, 1.0, 1.0),
                 tecs.gfx.Text.new({
@@ -109,8 +108,8 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
             local status <const> = world:spawn(
                 ui.Style({
                     width = "100%",
-                    height = 24,
                 }),
+                ui.Intrinsic("text"),
                 RelativeTransform(0, 0, 2),
                 Tint(0.58, 0.7, 0.84, 1.0),
                 tecs.gfx.Text.new({
@@ -146,6 +145,15 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                 RelativeTransform(),
                 ChildOf(viewport)
             )
+            world:spawn(
+                ui.Scrollbar("vertical", 6, 2, 18),
+                ui.Interaction({focusable = false, draggable = true, order = 100}),
+                RelativeTransform(0, 0, 10),
+                Tint(0.32, 0.82, 1.0, 0.85),
+                Material(materials.id("rounded"), 0.5),
+                Renderable(),
+                ChildOf(viewport)
+            )
 
             local function spawnButton(label: string, tabIndex: integer)
                 local button <const> = world:spawn(
@@ -169,10 +177,9 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                 world:spawn(
                     ui.Style({
                         position = "absolute",
-                        width = 330,
-                        height = 24,
                         inset = {left = 14, top = 13},
                     }),
+                    ui.Intrinsic("text"),
                     RelativeTransform(0, 0, 2),
                     Tint(0.9, 0.95, 1.0, 1.0),
                     tecs.gfx.Text.new({
