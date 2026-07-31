@@ -12,11 +12,35 @@ local type loader = require("tecs.ffi.loader")
 local type coretypes = require("tecs.types")
 local type Closeable = coretypes.Closeable
 
+--- An immutable, zero-copy range retained from a [`Buffer`](tealdoc:tecs.io.Buffer).
+---
+--- A view is a snapshot: changing its source buffer first detaches that
+--- buffer's allocation, so the view keeps seeing the bytes it was created
+--- from. `getString` is the explicit copying boundary.
+local interface ByteView
+    length: function(self: ByteView): integer
+    getString: function(self: ByteView): string
+    getFFIPointer: function(self: ByteView): loader.BytePointer
+    view: function(self: ByteView, offset?: integer, count?: integer): ByteView
+    isReleased: function(self: ByteView): boolean
+    release: function(self: ByteView)
+end
+
+--- An exclusive, zero-copy writable range reserved from a [`Buffer`](tealdoc:tecs.io.Buffer).
+local interface WriteRange
+    getFFIPointer: function(self: WriteRange): loader.BytePointer
+    capacity: function(self: WriteRange): integer
+    commit: function(self: WriteRange, used: integer)
+    release: function(self: WriteRange)
+end
+
 --- An owned, growable sequence of bytes.
 ---
 --- Its logical length is separate from capacity. Offsets are zero-based, and
 --- `clear` retains the allocation for reuse.
 local interface Buffer
+    type ByteView = ByteView
+    type WriteRange = WriteRange
     --- Returns the number of logical bytes.
     ---
     --- @param self The buffer to inspect.
@@ -69,6 +93,12 @@ local interface Buffer
     --- @param offset The caller supplies a zero-based offset or omits it for
     ---     zero.
     setString: function(self: Buffer, bytes: string, offset?: integer)
+
+    --- Returns a zero-copy immutable snapshot of a byte range.
+    view: function(self: Buffer, offset?: integer, count?: integer): ByteView
+
+    --- Reserves an exclusive range for a native writer without an intermediate string.
+    reserveRange: function(self: Buffer, offset: integer, minimum: integer): WriteRange
 
     --- Borrows the address of the first byte.
     ---
@@ -334,6 +364,8 @@ end
 
 local record types
     type Buffer = Buffer
+    type ByteView = ByteView
+    type WriteRange = WriteRange
     type Reader = Reader
     type Writer = Writer
     type Stream = Stream

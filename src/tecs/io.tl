@@ -144,6 +144,12 @@ local record binaryIO
     --- A `Buffer` is owned growable FFI-backed byte storage.
     type Buffer = IOBuffer
 
+    --- A `ByteView` retains an immutable zero-copy range from a buffer.
+    type ByteView = types.ByteView
+
+    --- A `WriteRange` reserves an exclusive zero-copy buffer range for a native writer.
+    type WriteRange = types.WriteRange
+
     --- Creates an owned growable byte buffer.
     ---
     --- @param initial The caller supplies a non-negative zero-filled logical
@@ -312,6 +318,13 @@ local record binaryIO
         --- @return Returns the number of bytes accepted.
         --- @return Returns the reason when the first return is nil.
         writeFrom: function(self: TCPSocket, source: IOBuffer, offset?: integer, count?: integer): integer, string
+        --- Queues a retained byte view without constructing an intermediate string.
+        ---
+        --- The native send queue copies the range before this call returns.
+        --- @param source The caller supplies an open [`ByteView`](tealdoc:tecs.io.ByteView).
+        --- @return Returns the number of bytes accepted.
+        --- @return Returns the reason when the first return is nil.
+        writeView: function(self: TCPSocket, source: types.ByteView): integer, string
         --- Returns bytes accepted but not yet sent.
         ---
         --- @return Returns the queued byte count, zero after sending, or nil on
@@ -733,6 +746,26 @@ function binaryIO.TCPSocket:writeFrom(source: IOBuffer, offset?: integer, count?
         return 0
     end
     if tonumber(C.tecsNetStreamWrite(self._handle, source:getFFIPointer() + at, size)) == 0 then
+        return nil, loader.toString(C.tecsRustError())
+    end
+    return size
+end
+
+function binaryIO.TCPSocket:writeView(source: types.ByteView): integer, string
+    if self._closed then
+        return nil, "connection is closed"
+    end
+    if source == nil or source:isReleased() then
+        error("tecs: TCPSocket:writeView needs an open io.ByteView", 2)
+    end
+    local size <const> = source:length()
+    if size > MAX_WRITE_BYTES then
+        error(("tecs: TCPSocket:writeView accepts at most %d bytes, not %d"):format(MAX_WRITE_BYTES, size), 2)
+    end
+    if size == 0 then
+        return 0
+    end
+    if tonumber(C.tecsNetStreamWrite(self._handle, source:getFFIPointer(), size)) == 0 then
         return nil, loader.toString(C.tecsRustError())
     end
     return size
