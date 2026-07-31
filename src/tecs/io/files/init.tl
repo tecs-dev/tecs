@@ -44,6 +44,9 @@ local type types = require("tecs.io.types")
 local floor <const> = math.floor
 local max <const> = math.max
 local min <const> = math.min
+local G <const> = _G as {string: any}
+local loadstring <const> = G["loadstring"] as function(string, string): function(...: any): any..., string
+local setfenv <const> = G["setfenv"] as function(any, {string: any})
 
 local record files
     --- `PathType` identifies a file, directory or other
@@ -59,11 +62,15 @@ local record files
 
     --- `GlobOptions` controls pattern matching.
     type GlobOptions = storagebackend.GlobOptions
+
+    --- `LineIterator` yields each line in a file and returns nil at the end.
+    type LineIterator = function(): string
 end
 
 local type Info = files.Info
 local type UserFolder = files.UserFolder
 local type GlobOptions = files.GlobOptions
+local type LineIterator = files.LineIterator
 local type Writer = types.Writer
 local type Reader = types.Reader
 local type IOBuffer = types.Buffer
@@ -115,6 +122,17 @@ function files.setPreferenceIdentity(organization: string, application: string)
     end
     preferenceOrganization = organization
     preferenceApplication = application
+end
+
+--- Returns the publisher and game names used for writable user data.
+---
+--- The pair starts as `"tecs", "tecs"` and changes when
+--- `setPreferenceIdentity` succeeds.
+---
+--- @return Returns the current publisher, studio, or organization name.
+--- @return Returns the current game or application name.
+function files.preferenceIdentity(): string, string
+    return preferenceOrganization, preferenceApplication
 end
 
 --- Returns the writable directory for this application and creates it if
@@ -215,6 +233,20 @@ function files.isDirectory(path: string): boolean
     required(path, "isDirectory")
     local info <const> = adapter.storage().info(path)
     return info ~= nil and info.kind == "directory"
+end
+
+--- Returns whether the final object named by `path` is a symbolic link.
+---
+--- Unlike `info`, this function does not follow the final link. It does follow
+--- links in parent directories, so the result is path introspection and not a
+--- security boundary. A path that is absent or cannot be inspected returns
+--- false.
+---
+--- @param path The caller supplies an absolute or platform-resolvable path.
+--- @return Returns true when the final path itself is a symbolic link.
+function files.isSymlink(path: string): boolean
+    required(path, "isSymlink")
+    return adapter.storage().isSymlink(path)
 end
 
 --- Returns entries under `path` that match `pattern`.
@@ -334,6 +366,81 @@ function files.read(path: string, kind?: string): string
     return content.read(path, kind)
 end
 
+--- Iterates over the lines in a whole file.
+---
+--- The function reads and closes the file before it returns the iterator, so
+--- breaking the loop retains only the immutable bytes and no file descriptor.
+--- It strips LF and CRLF terminators, returns empty lines between adjacent
+--- terminators, and does not invent another empty line after a final
+--- terminator. Use `openRead` when the input is too large to hold whole.
+---
+--- ```teal
+--- local nextLine <const> = assert(tecs.io.files.lines(path))
+--- for line in nextLine do
+---     print(line)
+--- end
+--- ```
+---
+--- @param path The caller supplies the source file.
+--- @return Returns a
+---     [`LineIterator`](tealdoc:tecs.io.files.LineIterator) that yields each
+---     line in order, or nil when the platform cannot read the file.
+--- @return Returns the failure reason when the first return is nil.
+function files.lines(path: string): LineIterator, string
+    required(path, "lines")
+    local bytes <const> = files.read(path)
+    if bytes == nil then
+        return nil, ("cannot read %s"):format(path)
+    end
+    local at = 1
+    local length <const> = #bytes
+    return function(): string
+        if at > length then
+            return nil
+        end
+        local newline <const> = bytes:find("\n", at, true)
+        if newline == nil then
+            local line <const> = bytes:sub(at)
+            at = length + 1
+            return line
+        end
+        local last = newline - 1
+        if last >= at and bytes:byte(last) == 13 then
+            last = last - 1
+        end
+        local line <const> = bytes:sub(at, last)
+        at = newline + 1
+        return line
+    end
+end
+
+--- Compiles a Lua file without running it.
+---
+--- The function reads through the installed storage backend rather than
+--- `loadfile`, records the source for file watching, and uses `@path` as the
+--- compiler's chunk name. The default environment is the caller's global
+--- environment. A supplied environment is installed exactly as given and is
+--- not a security boundary unless the caller makes it one.
+---
+--- @param path The caller supplies the Lua source file.
+--- @param environment The caller supplies the globals visible when the chunk
+---     runs, or omits them to use the process globals.
+--- @return Returns the compiled chunk, or nil when reading or compilation
+---     fails. Calling the returned function executes the file.
+--- @return Returns the read or compiler reason when the first return is nil.
+function files.load(path: string, environment?: {string: any}): function(...: any): any..., string
+    required(path, "load")
+    local bytes <const> = files.read(path)
+    if bytes == nil then
+        return nil, ("cannot read %s"):format(path)
+    end
+    local chunk <const>, reason = loadstring(bytes, "@" .. path)
+    if chunk ~= nil and environment ~= nil then
+        setfenv(chunk, environment)
+    end
+    return chunk, reason
+end
+
 --- A `Writer` for a backend that has no streaming write.
 ---
 --- Holds the pieces and writes them once on close, which is what `write`
@@ -433,6 +540,24 @@ function files.write(path: string, bytes: string): boolean, string
         error("tecs: io.files.write needs bytes to write", 2)
     end
     return adapter.storage().write(path, bytes)
+end
+
+--- Appends `bytes` to `path`, creating the file when absent.
+---
+--- The string's length controls the binary write, so embedded NUL bytes remain
+--- data. The platform opens the destination in append mode instead of reading
+--- and replacing it. The parent directory must already exist.
+---
+--- @param path The caller supplies the destination file.
+--- @param bytes The caller supplies the binary contents to append.
+--- @return Returns whether the platform appended every byte.
+--- @return Returns the platform reason when the first return is false.
+function files.append(path: string, bytes: string): boolean, string
+    required(path, "append")
+    if bytes == nil then
+        error("tecs: io.files.append needs bytes to append", 2)
+    end
+    return adapter.storage().append(path, bytes)
 end
 
 --- Opens `path` for writing in pieces, replacing whatever was there.

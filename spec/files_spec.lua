@@ -128,11 +128,13 @@ describe("io.files on the public surface", function()
 
     it("configures the preference identity through the public module", function()
         local tecs = require("tecs")
+        local previousOrganization, previousApplication = tecs.io.files.preferenceIdentity()
         tecs.io.files.setPreferenceIdentity("Ex Nihilo", "Starfarer")
+        assert.are.same({ "Ex Nihilo", "Starfarer" }, { tecs.io.files.preferenceIdentity() })
         local configured = tecs.io.files.preferencePath()
         assert.are.equal(files.preferencePath(), configured)
         assert.are.equal(files.cachePath, tecs.io.files.cachePath)
-        tecs.io.files.setPreferenceIdentity("tecs", "tecs")
+        tecs.io.files.setPreferenceIdentity(previousOrganization, previousApplication)
         assert.are_not.equal(configured, files.preferencePath())
         assert.is_nil(tecs.io.files.organization)
         assert.is_nil(tecs.io.files.application)
@@ -227,18 +229,31 @@ describe("io.files", function()
             assert.is_false(files.isDirectory(at("nothing")))
         end)
 
-        it("follows a symbolic link, and reports a broken one as absent", function()
-            -- SDL stats rather than lstats, so a link is never a kind of its
-            -- own. Documented rather than worked around, because a caller
-            -- resolving links itself would need a call SDL does not offer.
+        it("inspects a link itself while ordinary metadata follows it", function()
+            -- SDL stats rather than lstats, while the Rust path operation asks
+            -- about the final object itself. The two answers are deliberately
+            -- different and a broken link remains a link.
             files.write(at("target.txt"), "pointed at")
             os.execute(("ln -s %q %q"):format(at("target.txt"), at("link.txt")))
             os.execute(("ln -s %q %q"):format(at("nowhere"), at("broken.txt")))
 
+            assert.is_false(files.isSymlink(at("target.txt")))
+            assert.is_true(files.isSymlink(at("link.txt")))
+            assert.is_true(files.isSymlink(at("broken.txt")))
+            assert.is_false(files.isSymlink(at("nothing")))
             assert.is_true(files.isFile(at("link.txt")))
             assert.are.equal(10, files.info(at("link.txt")).size)
             assert.is_nil(files.info(at("broken.txt")))
             assert.is_false(files.exists(at("broken.txt")))
+        end)
+
+        it("follows links in parents when inspecting the final path", function()
+            files.createDirectory(at("real"))
+            files.write(at("real/inside.txt"), "inside")
+            os.execute(("ln -s %q %q"):format(at("real"), at("linked")))
+
+            assert.is_true(files.isSymlink(at("linked")))
+            assert.is_false(files.isSymlink(at("linked/inside.txt")))
         end)
     end)
 
@@ -350,11 +365,83 @@ describe("io.files", function()
             assert.are.equal("short", files.read(at("over.txt")))
         end)
 
+        it("appends binary bytes and creates an absent file", function()
+            local path = at("journal.bin")
+            assert.is_true(files.append(path, "first\0"))
+            assert.is_true(files.append(path, "\255last"))
+            assert.are.equal("first\0\255last", files.read(path))
+
+            assert.is_true(files.append(at("empty.bin"), ""))
+            assert.are.equal(0, files.info(at("empty.bin")).size)
+        end)
+
         it("does not create the parent it is written into", function()
             local ok, reason = files.write(at("nowhere/x.txt"), "x")
             assert.is_false(ok)
             assert.is_true(#reason > 0)
             assert.is_false(files.exists(at("nowhere")))
+
+            ok, reason = files.append(at("still-nowhere/x.txt"), "x")
+            assert.is_false(ok)
+            assert.is_true(#reason > 0)
+            assert.is_false(files.exists(at("still-nowhere")))
+        end)
+    end)
+
+    describe("reading documents", function()
+        it("iterates LF and CRLF lines without retaining an open file", function()
+            local path = at("lines.txt")
+            files.write(path, "first\r\nsecond\n\nlast\n")
+            local nextLine = assert(files.lines(path))
+            local found = {}
+            for line in nextLine do
+                found[#found + 1] = line
+            end
+
+            assert.are.same({ "first", "second", "", "last" }, found)
+            assert.are.equal("document", content.loaded()[path])
+        end)
+
+        it("distinguishes an empty file from one empty line", function()
+            files.write(at("empty.txt"), "")
+            assert.is_nil(assert(files.lines(at("empty.txt")))())
+
+            files.write(at("one-empty-line.txt"), "\n")
+            local nextLine = assert(files.lines(at("one-empty-line.txt")))
+            assert.are.equal("", nextLine())
+            assert.is_nil(nextLine())
+        end)
+
+        it("reports a file it cannot read before returning an iterator", function()
+            local nextLine, reason = files.lines(at("missing.txt"))
+            assert.is_nil(nextLine)
+            assert.is_true(reason:find(at("missing.txt"), 1, true) ~= nil)
+        end)
+
+        it("compiles through the watched read and installs an environment", function()
+            local path = at("script.lua")
+            files.write(path, "calls = (calls or 0) + 1\nreturn answer + ...")
+            local environment = { answer = 40 }
+            local chunk, reason = files.load(path, environment)
+
+            assert.is_function(chunk)
+            assert.is_nil(reason)
+            assert.is_nil(environment.calls, "compiling the chunk ran it")
+            assert.are.equal(42, chunk(2))
+            assert.are.equal(1, environment.calls)
+            assert.are.equal("document", content.loaded()[path])
+        end)
+
+        it("attributes compiler errors to the file and reports missing input", function()
+            local path = at("broken.lua")
+            files.write(path, "local =")
+            local chunk, reason = files.load(path)
+            assert.is_nil(chunk)
+            assert.is_true(reason:find(path, 1, true) ~= nil)
+
+            chunk, reason = files.load(at("missing.lua"))
+            assert.is_nil(chunk)
+            assert.is_true(reason:find(at("missing.lua"), 1, true) ~= nil)
         end)
     end)
 
@@ -511,12 +598,16 @@ describe("io.files", function()
                 { "exists", files.exists },
                 { "isFile", files.isFile },
                 { "isDirectory", files.isDirectory },
+                { "isSymlink", files.isSymlink },
                 { "list", files.list },
                 { "glob", files.glob },
                 { "createDirectory", files.createDirectory },
                 { "remove", files.remove },
                 { "write", files.write },
+                { "append", files.append },
                 { "read", files.read },
+                { "lines", files.lines },
+                { "load", files.load },
             }
             for _, call in ipairs(calls) do
                 assert.has_error(function()
@@ -539,6 +630,9 @@ describe("io.files", function()
             assert.has_error(function()
                 files.write(at("x"), nil)
             end, "tecs: io.files.write needs bytes to write")
+            assert.has_error(function()
+                files.append(at("x"), nil)
+            end, "tecs: io.files.append needs bytes to append")
         end)
     end)
 

@@ -20,6 +20,7 @@ mod cli;
 mod cli_docs;
 mod cli_mcp;
 mod dialogs;
+mod files;
 mod host;
 mod http;
 mod logsink;
