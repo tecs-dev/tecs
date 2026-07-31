@@ -220,6 +220,7 @@ return tecs.newApplication({
             ui.Style({
                 width = 400,
                 height = {value = 100, unit = "percent"},
+                flexDirection = "column",
                 padding = 20,
                 gap = 12,
             }),
@@ -388,6 +389,7 @@ return tecs.newApplication({
             ui.Style({
                 width = {value = 100, unit = "percent"},
                 height = 508,
+                flexDirection = "column",
                 gap = 8,
             }),
             RelativeTransform(),
@@ -410,7 +412,7 @@ return tecs.newApplication({
 
         -- Images remain sprites. Loading and residency are asynchronous; once
         -- ready, this leaf simply joins the same Taffy hierarchy.
-        tecs.assets.loadImage(tecs.io.files.assetPath("bench/sprites.png")):map(function(image: Image): Sprite
+        tecs.assets.loadImage(tecs.io.files.assetPath("demo/ui-badge.svg")):map(function(image: Image): Sprite
             local sprite <const> = app.renderer:registerImage(image)
             return sprite
         end):onSettle(function(sprite: Future<Sprite>)
