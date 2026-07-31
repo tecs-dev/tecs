@@ -9,7 +9,7 @@
 -- `cargo xtask docs-build` renders the site, `cargo xtask docs-dev` serves it
 -- and rebuilds on a change, and `cargo xtask docs-check` builds it into a
 -- scratch directory. What holds the site to the API it describes is
--- `before_build` at the bottom of this file.
+-- the checks in `before_build` at the bottom of this file.
 
 -- Where this file is, so the checks below read the tree rather than whatever
 -- directory tealdoc or the compiler was started in. Paths written into the
@@ -186,14 +186,10 @@ local function modulePages()
     return pages
 end
 
--- The pages, in the order the site reads them: the introduction, the tool, and
--- the modules. A route ending in a slash is a section and is written in that
--- section's `index.md`; every other route is a file beside it.
---
--- A page's description is not here. It is the `description:` in the page's own
--- frontmatter, read in `before_build`, so the one copy of it lives where the
--- page it labels does.
-local PAGES = {
+-- Tealdoc discovers every Markdown page below `docs`. These entries add only
+-- the generated API projections and home-page presentation that cannot be
+-- inferred from a Markdown path or its frontmatter.
+local PAGE_OVERRIDES = {
     {
         route = "",
         title = "Tecs",
@@ -235,10 +231,8 @@ local PAGES = {
             },
         },
     },
-    { route = "getting-started", title = "Getting started" },
     {
         route = "modules/",
-        title = "tecs",
         public = "tecs",
         api = {
             {
@@ -247,20 +241,8 @@ local PAGES = {
             },
         },
     },
-
-    { route = "cli/", title = "Tecs CLI" },
-    { route = "cli/projects", title = "Projects" },
-    { route = "cli/scope", title = "Scope" },
-}
-
-for _, page in ipairs(modulePages()) do
-    table.insert(PAGES, page)
-end
-
-for _, page in ipairs({
     {
         route = "modules/ecs/",
-        title = "tecs.ecs",
         public = "tecs.ecs",
         api = {
             "tecs.ecs",
@@ -271,200 +253,17 @@ for _, page in ipairs({
             },
         },
     },
-    { route = "modules/ecs/archetype", title = "Archetypes" },
-    { route = "modules/ecs/builtins", title = "Builtins" },
-    { route = "modules/ecs/components/", title = "Components" },
-    { route = "modules/ecs/components/bundles", title = "Component Bundles" },
-    { route = "modules/ecs/components/construction", title = "Component Construction" },
-    { route = "modules/ecs/components/dirty-tracking", title = "Dirty Tracking" },
-    { route = "modules/ecs/components/ffi", title = "FFI Components" },
-    { route = "modules/ecs/components/scalar-components", title = "Scalar Components" },
-    { route = "modules/ecs/components/serialization", title = "Component Serialization" },
-    { route = "modules/ecs/components/table-components", title = "Table Components" },
-    { route = "modules/ecs/components/tag-components", title = "Tag Components" },
-    { route = "modules/ecs/events", title = "Events" },
-    { route = "modules/ecs/mutation-model", title = "Mutation model" },
-    { route = "modules/ecs/phases", title = "Phases" },
-    { route = "modules/ecs/plugins", title = "Plugins" },
-    { route = "modules/ecs/profiling", title = "Profiling" },
-    { route = "modules/ecs/queries/", title = "Queries" },
-    { route = "modules/ecs/queries/callbacks", title = "Query callbacks" },
-    { route = "modules/ecs/queries/grouping", title = "Query grouping" },
-    {
-        route = "modules/ecs/random",
-        title = "tecs.ecs.random",
-        public = "tecs.ecs.random",
-        api = { "tecs.random" },
-    },
-    { route = "modules/ecs/relationships/", title = "Relationships" },
-    { route = "modules/ecs/relationships/ffi", title = "FFI Relationships" },
-    { route = "modules/ecs/save-games", title = "Save games" },
-    { route = "modules/ecs/states", title = "State stack" },
-    { route = "modules/ecs/systems", title = "Systems" },
-    { route = "modules/ecs/world", title = "World" },
-}) do
-    table.insert(PAGES, page)
-end
-
--- The sidebar, written out rather than derived from the routes.
---
--- One row per page, and no row for anything smaller. The sidebar moves a
--- reader between pages; a function lives on the page that documents it and is
--- reached through that page's own outline. Three rows that land in the same
--- place teach a reader that the sidebar does not know where things are.
---
--- Alphabetical ignoring case, and spelled the way a game writes it. A reader
--- looking for `tecs.io.watcher` scans for that string; a thematic
--- grouping makes them guess which of four headings somebody filed it under
--- first. The name a group carries is the prefix of every name inside it, so a
--- closed group still tells a reader scanning for a name whether to open it.
---
--- The one nesting is the real one. A module that sits inside another is a row
--- inside its parent's group, because that is where its name puts it: a reader
--- holding `tecs.gfx.layers` reads it left to right and finds `tecs.gfx` first.
--- A group that names a page carries that page as the first row inside it.
-local SIDEBAR = {
-    {
-        text = "Introduction",
-        items = {
-            { text = "Getting started", path = "getting-started" },
-        },
-    },
-    {
-        text = "Modules",
-        items = {
-            -- `Application` and `Future` are types on the root rather than
-            -- modules, so they sit under `tecs` rather than beside
-            -- `tecs.assets`. The group is the page.
-            {
-                text = "tecs",
-                path = "modules",
-                items = {
-                    { text = "tecs.Application", path = "modules/Application" },
-                    { text = "tecs.Future", path = "modules/Future" },
-                },
-            },
-            { text = "tecs.assets", path = "modules/assets" },
-            { text = "tecs.audio", path = "modules/audio" },
-            {
-                text = "tecs.data",
-                path = "modules/data",
-                items = {
-                    { text = "tecs.data.utf8", path = "modules/data/utf8" },
-                },
-            },
-            {
-                text = "tecs.ecs",
-                path = "modules/ecs",
-                items = {
-                    { text = "Archetypes", path = "modules/ecs/archetype" },
-                    { text = "Builtins", path = "modules/ecs/builtins" },
-                    {
-                        text = "Components",
-                        path = "modules/ecs/components",
-                        collapsed = true,
-                        items = {
-                            { text = "Bundles", path = "modules/ecs/components/bundles" },
-                            { text = "Construction", path = "modules/ecs/components/construction" },
-                            { text = "Dirty tracking", path = "modules/ecs/components/dirty-tracking" },
-                            { text = "FFI components", path = "modules/ecs/components/ffi" },
-                            { text = "Scalar components", path = "modules/ecs/components/scalar-components" },
-                            { text = "Serialization", path = "modules/ecs/components/serialization" },
-                            { text = "Table components", path = "modules/ecs/components/table-components" },
-                            { text = "Tag components", path = "modules/ecs/components/tag-components" },
-                        },
-                    },
-                    { text = "Events", path = "modules/ecs/events" },
-                    { text = "Mutation model", path = "modules/ecs/mutation-model" },
-                    { text = "Phases", path = "modules/ecs/phases" },
-                    { text = "Plugins", path = "modules/ecs/plugins" },
-                    { text = "Profiling", path = "modules/ecs/profiling" },
-                    {
-                        text = "Queries",
-                        path = "modules/ecs/queries",
-                        collapsed = true,
-                        items = {
-                            { text = "Callbacks", path = "modules/ecs/queries/callbacks" },
-                            { text = "Grouping", path = "modules/ecs/queries/grouping" },
-                        },
-                    },
-                    { text = "tecs.ecs.random", path = "modules/ecs/random" },
-                    {
-                        text = "Relationships",
-                        path = "modules/ecs/relationships",
-                        collapsed = true,
-                        items = {
-                            { text = "FFI relationships", path = "modules/ecs/relationships/ffi" },
-                        },
-                    },
-                    { text = "Save games", path = "modules/ecs/save-games" },
-                    { text = "States", path = "modules/ecs/states" },
-                    { text = "Systems", path = "modules/ecs/systems" },
-                    { text = "World", path = "modules/ecs/world" },
-                },
-            },
-            { text = "tecs.events", path = "modules/events" },
-            {
-                text = "tecs.gfx",
-                path = "modules/gfx",
-                items = {
-                    { text = "tecs.gfx.animation", path = "modules/gfx/animation" },
-                    { text = "tecs.gfx.layers", path = "modules/gfx/layers" },
-                    { text = "tecs.gfx.materials", path = "modules/gfx/materials" },
-                    { text = "tecs.gfx.particles", path = "modules/gfx/particles" },
-                },
-            },
-            {
-                text = "tecs.io",
-                path = "modules/io",
-                items = {
-                    { text = "tecs.io.files", path = "modules/io/files" },
-                    { text = "tecs.io.http", path = "modules/io/http" },
-                    { text = "tecs.io.mcp", path = "modules/io/mcp" },
-                    { text = "tecs.io.watcher", path = "modules/io/watcher" },
-                },
-            },
-            { text = "tecs.input", path = "modules/input" },
-            { text = "tecs.log", path = "modules/log" },
-            {
-                text = "tecs.math",
-                path = "modules/math",
-                items = {
-                    { text = "tecs.math.vec2", path = "modules/math/vec2" },
-                },
-            },
-            { text = "tecs.physics", path = "modules/physics" },
-            {
-                text = "tecs.platform",
-                path = "modules/platform",
-                items = {
-                    { text = "tecs.platform.events", path = "modules/platform/events" },
-                    { text = "tecs.platform.os", path = "modules/platform/os" },
-                    { text = "tecs.platform.time", path = "modules/platform/time" },
-                    { text = "tecs.platform.window", path = "modules/platform/window" },
-                },
-            },
-            { text = "tecs.regex", path = "modules/regex" },
-            { text = "tecs.sequence", path = "modules/sequence" },
-            { text = "tecs.workers", path = "modules/workers" },
-        },
-    },
-    -- The CLI is a group rather than a row under the introduction, because it
-    -- is a tool with a surface of its own rather than one more thing to read
-    -- once.
-    {
-        text = "CLI",
-        items = {
-            { text = "Overview", path = "cli" },
-            { text = "Projects", path = "cli/projects" },
-            { text = "Scope", path = "cli/scope" },
-        },
-    },
 }
 
--- Modules starts open on every page. Other groups open only when they contain
--- the page being read.
-local SIDEBAR_OPEN = { "Modules" }
+for _, page in ipairs(modulePages()) do
+    table.insert(PAGE_OVERRIDES, page)
+end
+
+table.insert(PAGE_OVERRIDES, {
+    route = "modules/ecs/random",
+    public = "tecs.ecs.random",
+    api = { "tecs.random" },
+})
 
 -- Public modules normally resolve through `SURFACE`. `tecs.ecs.random` is the
 -- exception: `tecs.ecs` owns it directly because engine modules also require
@@ -544,20 +343,6 @@ local function listed(markdown)
     return names
 end
 
---- Fills each page's description in from the page's own frontmatter, so a
---- description is written once, where the page it labels is, and
---- `scripts/check-docs-descriptions.sh` gates the one copy.
-local function describePages(context)
-    for _, page in ipairs(context.pages) do
-        local frontmatter = read(page.source):match("^%-%-%-\n(.-)\n%-%-%-\n")
-        local description = frontmatter and ("\n" .. frontmatter .. "\n"):match("\ndescription: *(.-) *\n")
-        if not description or description == "" then
-            error(page.source .. " has no description in its frontmatter", 0)
-        end
-        page.description = description:match('^"(.*)"$') or description
-    end
-end
-
 local BANNED_HEADINGS = {
     What = true,
     How = true,
@@ -625,27 +410,36 @@ local function checkWriting(context)
         checkText(path, readTree(path))
     end
 
-    for _, path in ipairs(context.settings.sources) do
-        local source = readTree(path)
-        local equals = source:match("^%-%-%[(=*)%[")
-        if equals == nil then
-            error(path .. " must start with a long module doc comment", 0)
+    local checked = {}
+    for _, page in ipairs(context.pages) do
+        for _, api in ipairs(page.api or {}) do
+            local module = type(api) == "table" and api.module or api
+            local item = context.env.registry["$" .. module]
+            local path = item and item.location and item.location.filename
+            if path and not checked[path] then
+                checked[path] = true
+                local source = read(path)
+                local equals = source:match("^%-%-%[(=*)%[")
+                if equals == nil then
+                    error(path .. " must start with a long module doc comment", 0)
+                end
+                local opening = source:find("\n", 1, true)
+                local closing = source:find("\n]" .. equals .. "]", opening + 1, true)
+                if not closing then
+                    error(path .. " has an unterminated long module doc comment", 0)
+                end
+                checkText(path, source:sub(opening + 1, closing - 1))
+            end
         end
-        local opening = source:find("\n", 1, true)
-        local closing = source:find("\n]" .. equals .. "]", opening + 1, true)
-        if not closing then
-            error(path .. " has an unterminated long module doc comment", 0)
-        end
-        checkText(path, source:sub(opening + 1, closing - 1))
     end
 end
 
 --- Holds the site to the API it describes, and fails the build rather than
 --- publishing one that has quietly lost a page.
 ---
---- Four things: every public name has a page, no page outlives the module it
---- documents, the homepage listing agrees with `src/tecs/init.tl`, and the
---- sidebar has one row per page. A fifth, that a page's committed reference
+--- Three things: every public name has a page, no page outlives the module it
+--- documents, and the homepage listing agrees with `src/tecs/init.tl`. A fourth,
+--- that a page's committed reference
 --- matches a fresh render, went with the thing it checked: the render happens
 --- here now, so there is no second copy to drift.
 local function checkPages(context)
@@ -728,44 +522,13 @@ local function checkPages(context)
         )
     end
 
-    local navigable = {}
-    local function walk(items)
-        for _, item in ipairs(items) do
-            if item.path then
-                navigable[item.path] = true
-            end
-            walk(item.items or {})
-        end
-    end
-    walk(context.settings.sidebar)
-    local unreachable = {}
-    for _, page in ipairs(context.pages) do
-        -- The home page is the site root, reached from the header rather than
-        -- navigated to from the sidebar.
-        if page.path ~= "" and not navigable[page.path] then
-            table.insert(unreachable, "/" .. page.path)
-        end
-    end
-    if #unreachable > 0 then
-        error(
-            "pages the sidebar does not reach: "
-                .. table.concat(ordered(unreachable), ", ")
-                .. "\nOne sidebar row per page. Add each to SIDEBAR in tlconfig.lua.",
-            0
-        )
-    end
 end
 
-local pages = {}
-for _, entry in ipairs(PAGES) do
-    local source = "docs/index.md"
-    if entry.route ~= "" then
-        source = "docs/" .. (entry.route:match("/$") and entry.route .. "index.md" or entry.route .. ".md")
-    end
+local pages = { "docs" }
+for _, entry in ipairs(PAGE_OVERRIDES) do
     table.insert(pages, {
         path = (entry.route:gsub("/$", "")),
         title = entry.title,
-        source = source,
         api = entry.api,
         public = entry.public,
         layout = entry.layout,
@@ -777,22 +540,6 @@ for _, entry in ipairs(PAGES) do
         features = entry.features,
     })
 end
-
--- Every file a page's reference renders from, gathered from the pages above so
--- that a module reaches the site by being named on one of them and no other
--- way.
-local sources = {}
-local staged = {}
-for _, page in ipairs(pages) do
-    for _, api in ipairs(page.api or {}) do
-        local module = type(api) == "table" and api.module or api
-        if not staged[module] then
-            staged[module] = true
-            table.insert(sources, (moduleFile((module:gsub("%.init$", "")))))
-        end
-    end
-end
-table.sort(sources)
 
 return {
     build_dir = "build",
@@ -869,12 +616,18 @@ return {
                 { text = "Modules", path = "modules" },
                 { text = "CLI", path = "cli" },
             },
-            sources = sources,
             pages = pages,
-            sidebar = SIDEBAR,
-            sidebar_open = SIDEBAR_OPEN,
+            sidebar_open = {
+                "modules",
+                "modules/data",
+                "modules/ecs",
+                "modules/gfx",
+                "modules/io",
+                "modules/math",
+                "modules/platform",
+                "cli",
+            },
             before_build = function(context)
-                describePages(context)
                 checkWriting(context)
                 checkPages(context)
             end,

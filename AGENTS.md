@@ -271,15 +271,15 @@ tests prose. The only defense is the person making the change, at the time they 
 - A page that cannot be verified against the code should not be written. A gap is honest; a
   confident wrong answer is not.
 
-Tealdoc renders the site from `tealdoc.site` in `tlconfig.lua`, which holds the settings, the
-navigation, the sidebar and one entry per page. It reads module prose and declaration contracts
-from Teal, then renders generated summary tables under `Module contents` and the full type,
-function and value sections below them. A signature has no second copy to drift from.
+Tealdoc discovers pages and their navigation from `docs/`. Frontmatter holds page metadata, and
+`tealdoc.site` in `tlconfig.lua` holds site settings plus the API projections that append generated
+references to module pages. Tealdoc reads module prose and declaration contracts from Teal, then
+renders generated summary tables under `Module contents` and the full type, function and value
+sections below them. A signature has no second copy to drift from.
 
 `cargo xtask docs-check` is the gate, and it holds three things: every page carries a one-line
-`description:`; the module list matches `src/tecs/init.tl` in three listings at once
-(`docs/index.md`, `docs/modules/index.md` and `SIDEBAR` in `tlconfig.lua`), in one order, with one
-page per public name and no page outliving its module; and every link and anchor in the built site
+`description:`; the module list and discovered module pages match `src/tecs/init.tl`, with one page
+per public name and no page outliving its module; and every link and anchor in the built site
 resolves. The first is `scripts/check-docs-descriptions.sh`; the other two are the render itself,
 through the site's `before_build` hook and tealdoc's own link validation.
 

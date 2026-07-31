@@ -1,5 +1,6 @@
 ---
 description: "Build Tecs, return an application from an entry file, and register a first game plugin"
+sidebar_order: 10
 outline: deep
 ---
 

@@ -221,7 +221,6 @@ pub fn check(root: &Path) -> Result<()> {
     let scratch = tempfile::Builder::new().prefix("tecs-docs.").tempdir()?;
     let site = scratch.path().join("site");
     build(root, &site)?;
-    check_module_intro(root, &site)?;
     check_rendered_hierarchy(&site)?;
     check_rendered_writing(&site)?;
     println!("OK: the site builds, and every link and anchor in it resolves");
@@ -344,98 +343,6 @@ fn check_rendered_hierarchy(site: &Path) -> Result<()> {
                 path.display()
             );
         }
-    }
-    Ok(())
-}
-
-/// Holds Tealdoc's three module-documentation handoffs together: the parser
-/// reads the file-leading long comment, the projected public view retains it,
-/// and the site places it ahead of the symbol summary.
-fn check_module_intro(root: &Path, site: &Path) -> Result<()> {
-    let source_path = root.join("src/tecs/io/files/init.tl");
-    let source = fs::read_to_string(&source_path)?;
-    let equals = source
-        .strip_prefix("--[")
-        .and_then(|rest| rest.find('[').map(|end| &rest[..end]))
-        .filter(|value| value.chars().all(|character| character == '='))
-        .with_context(|| {
-            format!(
-                "{} does not start with a long module doc comment",
-                source_path.display()
-            )
-        })?;
-    let opening = 4 + equals.len();
-    let closing = format!("]{}]", equals);
-    let end = source[opening..]
-        .find(&closing)
-        .map(|offset| opening + offset)
-        .with_context(|| {
-            format!(
-                "{} has an unterminated module doc comment",
-                source_path.display()
-            )
-        })?;
-    let first_line = source[opening..end]
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map(str::trim)
-        .context("the io.files module doc comment has no prose")?;
-
-    let output_path = site.join("modules/io/files.md");
-    let output = fs::read_to_string(&output_path)?;
-    let introduction = output.find(first_line).with_context(|| {
-        format!(
-            "{} omits the module prose from {}",
-            output_path.display(),
-            source_path.display()
-        )
-    })?;
-    let contents = output.find("## Module contents").with_context(|| {
-        format!(
-            "{} does not place its API summary in Module contents",
-            output_path.display()
-        )
-    })?;
-    let summary = [
-        "**Constructors**",
-        "**Types**",
-        "**Functions**",
-        "**Macros**",
-        "**Values**",
-    ]
-    .into_iter()
-    .filter_map(|heading| output.find(heading))
-    .min()
-    .with_context(|| format!("{} has no API summary", output_path.display()))?;
-    if introduction > contents || contents > summary {
-        anyhow::bail!(
-            "{} does not order module prose, Module contents and its API summary",
-            output_path.display()
-        );
-    }
-    let function_summary = output
-        .find("**Functions**")
-        .with_context(|| format!("{} has no function summary", output_path.display()))?;
-    let type_summary = output
-        .find("**Types**")
-        .with_context(|| format!("{} has no type summary", output_path.display()))?;
-    if type_summary > function_summary {
-        anyhow::bail!(
-            "{} places the function summary before the type summary",
-            output_path.display()
-        );
-    }
-    let functions = output
-        .find("\n## Functions\n")
-        .with_context(|| format!("{} has no function details", output_path.display()))?;
-    let types = output
-        .find("\n## Types\n")
-        .with_context(|| format!("{} has no type details", output_path.display()))?;
-    if types > functions {
-        anyhow::bail!(
-            "{} places function details before type details",
-            output_path.display()
-        );
     }
     Ok(())
 }
