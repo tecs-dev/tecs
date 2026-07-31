@@ -110,7 +110,7 @@ source:close()
 local tecsIO <const> = require("tecs.io")
 local bytes <const> = tecsIO.newBuffer("old")
 local stream <const> = tecsIO.newBufferStream(bytes)
-stream:writeAll("new").value
+assert(stream:writeAll("new").value)
 print(bytes:getString())
 stream:close()
 bytes:release()
@@ -129,7 +129,7 @@ source:close()
 -- #region tecs.io.newFileStream
 local tecsIO <const> = require("tecs.io")
 local save <const> = tecsIO.newFileStream("save.bin", "application/octet-stream")
-save:writeAll("save data").value
+assert(save:writeAll("save data").value)
 print(save:readAll().value)
 save:close()
 -- #endregion tecs.io.newFileStream
@@ -411,11 +411,9 @@ local function pollWebServer()
     end
 
     local body <const> = "Hello from Tecs\n"
-    local response <const> = ("HTTP/1.1 200 OK\r\nContent-Length: %d\r\n"
-        .. "Content-Type: text/plain\r\nConnection: close\r\n\r\n%s"):format(
-        #body,
-        body
-    )
+    local response <const> = (
+        "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n" .. "Content-Type: text/plain\r\nConnection: close\r\n\r\n%s"
+    ):format(#body, body)
     local sent <const>, sendReason = client:write(response)
     assert(sent, sendReason)
     assert(client:drain(1000))
@@ -430,9 +428,7 @@ listener:close()
 
 -- #region tecs.io.http.newURI
 local http <const> = require("tecs.io.http")
-local endpoint <const>, reason = http.newURI(
-    "https://user@example.com:8443/assets/list.json?page=2"
-)
+local endpoint <const>, reason = http.newURI("https://user@example.com:8443/assets/list.json?page=2")
 assert(endpoint, reason)
 print(endpoint.scheme, endpoint.host, endpoint.port)
 print(endpoint.path, endpoint.query)
