@@ -1,5 +1,5 @@
 ---
-description: "Typed stores, JSON, DEFLATE, UUIDs, hashes, and checksums"
+description: "Typed stores, JSON, byte encodings, DEFLATE, UUIDs, hashes, and checksums"
 outline: deep
 ---
 

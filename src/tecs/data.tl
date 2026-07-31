@@ -34,6 +34,20 @@ table normally encodes as an object; `empty_array` and `array_mt` express an
 empty list. `newJSON` creates an independent configuration for protocols that
 must not share process-wide settings.
 
+## Text encodings
+
+Encode bytes for a JSON field or command-line value and restore them later:
+
+```teal
+local encoded <const> = tecs.data.base64Encode("\0sprite bytes")
+local bytes <const> = tecs.data.base64Decode(encoded)
+assert(bytes == "\0sprite bytes")
+```
+
+Base64 uses the padded RFC 4648 alphabet. Hexadecimal output is lowercase;
+the decoder accepts either ASCII letter case. Both decoders reject malformed
+or non-canonical input rather than recovering a different byte sequence.
+
 The sentinel and option names retain lua-cjson spelling because they belong to
 that library's compatibility surface.
 
@@ -379,6 +393,35 @@ local record data is JSON
     --- @return Returns a fresh caller-owned process-wide table.
     listKeys: function(): {string: integer}
 
+    --- Encodes bytes as lowercase hexadecimal text.
+    ---
+    --- @param bytes The caller supplies arbitrary bytes, including NUL.
+    --- @return Returns two lowercase ASCII hex digits for every input byte.
+    hexEncode: function(bytes: string): string
+
+    --- Decodes lowercase or uppercase hexadecimal text into bytes.
+    ---
+    --- @param text The caller supplies an even number of ASCII hex digits.
+    --- @return Returns the decoded bytes. Raises when `text` has an odd
+    ---     length or contains a character outside the hexadecimal alphabet.
+    hexDecode: function(text: string): string
+
+    --- Encodes bytes with the padded RFC 4648 Base64 alphabet.
+    ---
+    --- @param bytes The caller supplies arbitrary bytes, including NUL.
+    --- @return Returns ASCII Base64 text. The result has no line breaks and
+    ---     uses `=` padding when its length is not divisible by three.
+    base64Encode: function(bytes: string): string
+
+    --- Decodes canonical padded RFC 4648 Base64 text into bytes.
+    ---
+    --- @param text The caller supplies Base64 text in groups of four ASCII
+    ---     characters. It must use standard `+` and `/` characters and
+    ---     required `=` padding.
+    --- @return Returns the decoded bytes. Raises when `text` has invalid
+    ---     characters, malformed padding, or non-zero unused bits.
+    base64Decode: function(text: string): string
+
     --- Generates a random RFC 9562 UUID version 4.
     ---
     --- @return Returns a fresh UUID in canonical lowercase 8-4-4-4-12 form.
@@ -401,6 +444,146 @@ end
 data.newKey = storekeys.newKey as function<T>(name?: string, forType?: T): TypedStore.Key<T>
 data.findKey = storekeys.findKey
 data.listKeys = storekeys.listKeys
+
+local sbyte <const> = string.byte
+local schar <const> = string.char
+local ssub <const> = string.sub
+local concat <const> = table.concat
+
+local HEX <const> = "0123456789abcdef"
+local BASE64 <const> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local BASE64_DECODE <const>: {integer: integer} = {}
+for index = 1, #BASE64 do
+    BASE64_DECODE[sbyte(BASE64, index)] = index - 1
+end
+
+--- Encodes bytes as lowercase hexadecimal text.
+---
+--- @param bytes The caller supplies arbitrary bytes, including NUL.
+--- @return Returns two lowercase ASCII hex digits for every input byte.
+function data.hexEncode(bytes: string): string
+    local output: {string} = {}
+    for index = 1, #bytes do
+        local byte <const> = sbyte(bytes, index)
+        output[index] = ssub(HEX, math.floor(byte / 16) + 1, math.floor(byte / 16) + 1)
+            .. ssub(HEX, byte % 16 + 1, byte % 16 + 1)
+    end
+    return concat(output)
+end
+
+local function hexValue(byte: integer): integer | nil
+    if byte >= 48 and byte <= 57 then
+        return byte - 48
+    end
+    if byte >= 65 and byte <= 70 then
+        return byte - 65 + 10
+    end
+    if byte >= 97 and byte <= 102 then
+        return byte - 97 + 10
+    end
+    return nil
+end
+
+--- Decodes lowercase or uppercase hexadecimal text into bytes.
+---
+--- @param text The caller supplies an even number of ASCII hex digits.
+--- @return Returns the decoded bytes. Raises when `text` has an odd length or
+---     contains a character outside the hexadecimal alphabet.
+function data.hexDecode(text: string): string
+    if #text % 2 ~= 0 then
+        error("tecs: hexadecimal text must contain an even number of digits", 2)
+    end
+    local output: {string} = {}
+    local outputIndex = 1
+    for index = 1, #text, 2 do
+        local high <const> = hexValue(sbyte(text, index))
+        local low <const> = hexValue(sbyte(text, index + 1))
+        if high == nil or low == nil then
+            error("tecs: hexadecimal text contains a non-hexadecimal character", 2)
+        end
+        output[outputIndex] = schar(high * 16 + low)
+        outputIndex = outputIndex + 1
+    end
+    return concat(output)
+end
+
+--- Encodes bytes with the padded RFC 4648 Base64 alphabet.
+---
+--- @param bytes The caller supplies arbitrary bytes, including NUL.
+--- @return Returns ASCII Base64 text. The result has no line breaks and uses
+---     `=` padding when its length is not divisible by three.
+function data.base64Encode(bytes: string): string
+    local output: {string} = {}
+    local outputIndex = 1
+    for index = 1, #bytes, 3 do
+        local first <const> = sbyte(bytes, index)
+        local second = sbyte(bytes, index + 1)
+        local third = sbyte(bytes, index + 2)
+        output[outputIndex] = ssub(BASE64, math.floor(first / 4) + 1, math.floor(first / 4) + 1)
+        output[outputIndex + 1] = ssub(BASE64, first % 4 * 16 + math.floor((second or 0) / 16) + 1, first % 4 * 16 + math.floor((second or 0) / 16) + 1)
+        output[outputIndex + 2] = second ~= nil and ssub(BASE64, second % 16 * 4 + math.floor((third or 0) / 64) + 1, second % 16 * 4 + math.floor((third or 0) / 64) + 1) or "="
+        output[outputIndex + 3] = third ~= nil and ssub(BASE64, third % 64 + 1, third % 64 + 1) or "="
+        outputIndex = outputIndex + 4
+    end
+    return concat(output)
+end
+
+local function base64Value(byte: integer): integer
+    local value <const> = BASE64_DECODE[byte]
+    if value == nil then
+        error("tecs: Base64 text contains a character outside the RFC 4648 alphabet", 3)
+    end
+    return value
+end
+
+--- Decodes canonical padded RFC 4648 Base64 text into bytes.
+---
+--- @param text The caller supplies Base64 text in groups of four ASCII
+---     characters. It must use standard `+` and `/` characters and required
+---     `=` padding.
+--- @return Returns the decoded bytes. Raises when `text` has invalid
+---     characters, malformed padding, or non-zero unused bits.
+function data.base64Decode(text: string): string
+    local length <const> = #text
+    if length % 4 ~= 0 then
+        error("tecs: Base64 text must contain groups of four characters", 2)
+    end
+
+    local output: {string} = {}
+    local outputIndex = 1
+    for index = 1, length, 4 do
+        local first <const> = base64Value(sbyte(text, index))
+        local second <const> = base64Value(sbyte(text, index + 1))
+        local thirdByte <const> = sbyte(text, index + 2)
+        local fourthByte <const> = sbyte(text, index + 3)
+        local final <const> = index + 3 == length
+
+        if thirdByte == 61 then
+            if not final or fourthByte ~= 61 or second % 16 ~= 0 then
+                error("tecs: Base64 text has malformed padding", 2)
+            end
+            output[outputIndex] = schar(first * 4 + math.floor(second / 16))
+            outputIndex = outputIndex + 1
+        else
+            local third <const> = base64Value(thirdByte)
+            output[outputIndex] = schar(first * 4 + math.floor(second / 16))
+            outputIndex = outputIndex + 1
+            if fourthByte == 61 then
+                if not final or third % 4 ~= 0 then
+                    error("tecs: Base64 text has malformed padding", 2)
+                end
+                output[outputIndex] = schar(second % 16 * 16 + math.floor(third / 4))
+                outputIndex = outputIndex + 1
+            else
+                local fourth <const> = base64Value(fourthByte)
+                output[outputIndex] = schar(second % 16 * 16 + math.floor(third / 4))
+                output[outputIndex + 1] = schar(third % 4 * 64 + fourth)
+                outputIndex = outputIndex + 2
+            end
+        end
+    end
+    return concat(output)
+end
 
 local C <const> = zlib.C
 local K <const> = zlib.K
@@ -666,8 +849,6 @@ function data.inflate(bytes: string, sizeHint?: integer): string
     end
     return result
 end
-
-local sbyte <const> = string.byte
 
 -- FNV-1a needs 64-bit arithmetic. FFI cdata avoids the carries, moduli, and
 -- division that two 32-bit halves require. LuaJIT sinks the cdata box after
