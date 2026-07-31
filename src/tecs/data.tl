@@ -77,7 +77,13 @@ unguessable credential.
 
 `fnv1a64` supplies fast process and build identity as 16 lowercase hexadecimal
 digits. `adler32` and `crc32` implement checksums required by formats that name
-them.
+them. Pass the checksum from one call as the second argument to continue over
+the next chunk without joining the chunks into one string:
+
+```teal
+local checksum = tecs.data.crc32(header)
+checksum = tecs.data.crc32(body, checksum)
+```
 
 None provides cryptographic integrity. Verify downloaded artifacts with a
 cryptographic digest and a signed manifest.
@@ -692,6 +698,15 @@ local BASIS <const> = bor(lshift(u64(0xcbf29ce4), 32), 0x84222325)
 -- a 32-bit length. LuaJIT returns their `uLong` result as cdata.
 local adler32 <const> = zlib.C.adler32_z as function(seed: integer, bytes: string, length: integer): loader.CValue
 local crc32 <const> = zlib.C.crc32_z as function(seed: integer, bytes: string, length: integer): loader.CValue
+local floor <const> = math.floor
+local MAX_U32 <const> = 4294967295
+
+local function checksumSeed(previous: integer, algorithm: string): integer
+    if previous < 0 or previous > MAX_U32 or previous ~= floor(previous) then
+        error(("tecs: %s previous checksum must be an unsigned 32-bit integer"):format(algorithm), 3)
+    end
+    return previous
+end
 
 --- FNV-1a over the bytes of `text`, 64-bit, as sixteen lowercase hex digits.
 ---
@@ -715,9 +730,20 @@ end
 --- identity and this only for the format that specifies it.
 ---
 --- zlib computes it. The seed is 1, which is what RFC 1950 starts from and
---- what zlib's own documentation says to pass for the first call.
-function data.adler32(text: string): integer
-    return tonumber(adler32(1, text, #text)) as integer
+--- what zlib's own documentation says to pass for the first call. Pass the
+--- return value back as `previous` to continue the checksum over another
+--- chunk. An empty chunk leaves `previous` unchanged.
+---
+--- @param text Any string. NUL and bytes above 127 contribute like any other.
+--- @param previous The checksum returned after all preceding bytes. Omit it
+---     for the first chunk. Raises unless it is an unsigned 32-bit integer.
+--- @return The checksum after `text`, as an exact Lua number in [0, 2^32).
+function data.adler32(text: string, previous?: integer): integer
+    local seed = 1
+    if previous ~= nil then
+        seed = checksumSeed(previous, "adler32")
+    end
+    return tonumber(adler32(seed, text, #text)) as integer
 end
 
 --- Computes CRC-32 over the bytes of `text` as a number in [0, 2^32).
@@ -725,8 +751,19 @@ end
 --- The checksum PNG, gzip and ZIP put beside compressed bytes. It detects
 --- accidental corruption and is not a cryptographic digest; use it only where
 --- a format specifies CRC-32 or where an error-detecting checksum is enough.
-function data.crc32(text: string): integer
-    return tonumber(crc32(0, text, #text)) as integer
+--- Pass the return value back as `previous` to continue the checksum over
+--- another chunk. An empty chunk leaves `previous` unchanged.
+---
+--- @param text Any string. NUL and bytes above 127 contribute like any other.
+--- @param previous The checksum returned after all preceding bytes. Omit it
+---     for the first chunk. Raises unless it is an unsigned 32-bit integer.
+--- @return The checksum after `text`, as an exact Lua number in [0, 2^32).
+function data.crc32(text: string, previous?: integer): integer
+    local seed = 0
+    if previous ~= nil then
+        seed = checksumSeed(previous, "crc32")
+    end
+    return tonumber(crc32(seed, text, #text)) as integer
 end
 
 -- Names adopted from lua-cjson. Listing them prevents upstream additions from
