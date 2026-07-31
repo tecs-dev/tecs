@@ -1304,9 +1304,10 @@ on a frame that could pay for it. The host times the hook and says so past
 Staging again replaces what was staged: there is one checkpoint, not a queue.
 Staging once and backgrounding twice writes once, on the argument the host
 deduplicates backgroundings with, which is that the second write is the one that
-gets interrupted and it had nothing new to say. The write goes through a
-neighboring file and a rename, so what is on disk is either the previous
-checkpoint or this one and never half of either. `app:readCheckpoint()` is the
+gets interrupted and it had nothing new to say. The write uses the storage
+backend's atomic durable commit, so what is on disk is either the previous
+checkpoint or this one and never half of either, and success confirms the
+platform's durable flush contract. `app:readCheckpoint()` is the
 other half, read while building the world; nil covers a first run, a game that
 staged nothing and a file the player deleted, and none of those is an error.
 `config.checkpoint` names the file, and staging without one raises rather than
@@ -1502,7 +1503,7 @@ primitive and nothing composed out of several, and on SDL each of those is the
 obvious call: `SDL_GetPathInfo` behind `info`, `exists`, `isFile` and
 `isDirectory`, Rust filesystem metadata behind `isSymlink`,
 `SDL_GlobDirectory` behind `list` and `glob`, `SDL_LoadFile` behind `read`,
-then `createDirectory`, `remove`, `rename`, `copy`, `write`, `append`,
+then `createDirectory`, `remove`, `rename`, `copy`, `write`, `writeAtomic`, `append`,
 `currentDirectory` and `userFolder`. `lines` and `load` compose over the one
 watched whole-file read rather than opening a second path around it. No virtual
 filesystem and no invented path scheme, so a failure is the platform's failure
@@ -1513,6 +1514,20 @@ no subsystem and is more useful with no window than with one.
 exception the streaming body needed: a backend that can open a file is asked
 to, and one that cannot is buffered over, so a download that ends in a file and
 an upload read out of one both work whatever a port supplied.
+
+`writeAtomic` is the operation ordinary `write` deliberately is not. The SDL
+filesystem backend creates an exclusive neighboring temporary file, writes and
+durably synchronizes it, atomically replaces the destination, then synchronizes
+the parent directory on systems that expose that operation. A failure before
+replacement leaves the destination alone and removes the temporary. A failure
+after replacement reports that the new file is complete and visible but its
+directory entry was not confirmed durable. Apple platforms request
+`F_FULLFSYNC` and fall back to `fsync` where a filesystem does not support it,
+Windows requests a write-through replacement, and Unix
+filesystems synchronize the containing directory. This is a storage capability,
+not a composition: a console backend may map it to its own transaction, and a
+backend with no equivalent reports unsupported rather than quietly falling back
+to `write` plus `rename` and claiming a guarantee it cannot make.
 
 Nothing here reaches the operating system, because `adapter` names storage as a
 seam and a seam that covered only _where_ content is would leave every read of a

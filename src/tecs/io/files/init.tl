@@ -18,7 +18,7 @@ end
 local path <const> =
     files.writablePath("saves/slot1.json")
 local bytes <const> = tecs.data.encodeJSON({ level = 3, hp = 100 })
-ok, reason = files.write(path, bytes)
+ok, reason = files.writeAtomic(path, bytes)
 if not ok then
     error(reason)
 end
@@ -66,6 +66,11 @@ local record files
     --- `WriteMode` selects replacement or append behavior.
     type WriteMode = storagebackend.WriteMode
 
+    --- `ByteInput` supplies a string or open
+    --- [`Buffer`](/modules/io/#tecs.io.Buffer) or
+    --- [`ByteView`](/modules/io/#tecs.io.ByteView).
+    type ByteInput = storagebackend.ByteInput
+
     --- `LineIterator` yields each line in a file and returns nil at the end.
     type LineIterator = function(): string
 end
@@ -74,6 +79,7 @@ local type Info = files.Info
 local type UserFolder = files.UserFolder
 local type GlobOptions = files.GlobOptions
 local type WriteMode = files.WriteMode
+local type ByteInput = files.ByteInput
 local type LineIterator = files.LineIterator
 local type Writer = types.Writer
 local type Reader = types.Reader
@@ -576,6 +582,56 @@ function files.write(path: string, bytes: string): boolean, string
         error("tecs: io.files.write needs bytes to write", 2)
     end
     return adapter.storage().write(path, bytes)
+end
+
+--- Durably writes `bytes` and atomically replaces `path`.
+---
+--- The platform writes a uniquely named temporary file beside `path`, commits
+--- its complete contents to durable storage, atomically replaces the
+--- destination, and commits the containing directory where the operating
+--- system provides that operation. An existing destination remains untouched
+--- when anything fails before replacement, and no temporary file is retained.
+---
+--- A failure after replacement means the complete new file is visible but the
+--- platform could not confirm that the directory update will survive a power
+--- loss. The function returns false in that case rather than overstating
+--- durability. Hardware can still violate an operating system's completed
+--- flush request.
+---
+--- A storage backend without an atomic durable commit returns false and an
+--- unsupported reason. The function never falls back to `write` plus `rename`.
+--- The parent directory must already exist.
+---
+--- @param path The caller supplies the destination file.
+--- @param bytes The caller supplies a string or open
+---     [`Buffer`](/modules/io/#tecs.io.Buffer) or
+---     [`ByteView`](/modules/io/#tecs.io.ByteView) containing the complete
+---     binary contents. Buffers and views are borrowed only for this
+---     synchronous call and are not copied or closed.
+--- @return Returns whether the platform confirmed the atomic durable write.
+--- @return Returns the platform or unsupported reason when the first return is false.
+function files.writeAtomic(path: string, bytes: ByteInput): boolean, string
+    required(path, "writeAtomic")
+    if bytes == nil then
+        error("tecs: io.files.writeAtomic needs bytes to write", 2)
+    end
+    if type(bytes) ~= "string" then
+        local dynamic <const> = bytes as {string: any}
+        if
+            type(bytes) ~= "table"
+            or type(dynamic.length) ~= "function"
+            or type(dynamic.getFFIPointer) ~= "function"
+            or type(dynamic.isReleased) ~= "function"
+            or (dynamic.isReleased as function(any): boolean)(bytes)
+        then
+            error("tecs: io.files.writeAtomic needs a byte string or open io.Buffer or io.ByteView", 2)
+        end
+    end
+    local backend <const> = adapter.storage()
+    if backend.writeAtomic == nil then
+        return false, ("atomic durable writes are not supported by the %s storage backend"):format(backend.name)
+    end
+    return backend.writeAtomic(path, bytes)
 end
 
 --- Appends `bytes` to `path`, creating the file when absent.

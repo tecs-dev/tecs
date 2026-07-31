@@ -562,10 +562,11 @@ end
 
 --- Writes the staged checkpoint, if there is one that has not been written.
 ---
---- Through a neighboring file and a rename, so the checkpoint on disk is
---- either the previous one or this one and never half of either. That is not
---- fussiness: this runs when the platform is about to stop the process, and
---- the write that gets interrupted is the one nobody was watching.
+--- Through the platform's atomic durable write, so the checkpoint on disk is
+--- either the previous one or this one and never half of either, and the
+--- successful answer includes a durable commit. That is not fussiness: this
+--- runs when the platform is about to stop the process, and the write that
+--- gets interrupted is the one nobody was watching.
 ---
 --- Reports rather than raises. A platform callback calls it, where
 --- there is nobody left to catch anything and a failed save must not also cost
@@ -577,17 +578,9 @@ local function flushCheckpoint(self: Application, occasion: string): boolean
     end
 
     local bytes <const> = self._checkpointBytes
-    local pending <const> = path .. ".new"
-    local wrote, writeFailure = files.write(pending, bytes)
+    local wrote, writeFailure = files.writeAtomic(path, bytes)
     if not wrote then
-        LOGGER:error("the checkpoint could not be written to %s: %s", pending, tostring(writeFailure))
-        return false
-    end
-
-    local moved, moveFailure = files.rename(pending, path)
-    if not moved then
-        LOGGER:error("the checkpoint could not be moved into place at %s: %s", path, tostring(moveFailure))
-        files.remove(pending)
+        LOGGER:error("the checkpoint could not be committed to %s: %s", path, tostring(writeFailure))
         return false
     end
 

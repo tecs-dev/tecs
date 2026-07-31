@@ -14,6 +14,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local ffi = require("ffi")
 local sdl = require("tecs.ffi.sdl3")
 local files = require("tecs.io.files")
+local buffer = require("tecs.io.buffer")
 local content = require("tecs.platform.content")
 local assets = require("tecs.assets")
 local workers = require("tecs.workers")
@@ -350,6 +351,40 @@ describe("io.files", function()
             assert.are.equal(blob, files.read(at("blob.bin")))
         end)
 
+        it("atomically creates and replaces complete binary contents", function()
+            local path = at("atomic.bin")
+            assert.is_true(files.writeAtomic(path, "first\0value"))
+            assert.are.equal("first\0value", files.read(path))
+
+            assert.is_true(files.writeAtomic(path, "short"))
+            assert.are.equal("short", files.read(path))
+        end)
+
+        it("borrows buffers and views without a string conversion", function()
+            local source = buffer.new("buffer contents")
+            local view = source:view(7)
+
+            assert.is_true(files.writeAtomic(at("buffer.bin"), source))
+            assert.are.equal("buffer contents", files.read(at("buffer.bin")))
+            assert.is_true(files.writeAtomic(at("view.bin"), view))
+            assert.are.equal("contents", files.read(at("view.bin")))
+
+            view:close()
+            source:close()
+        end)
+
+        it("leaves no temporary file when atomic replacement fails", function()
+            local destination = at("occupied")
+            assert.is_true(files.createDirectory(destination))
+            assert.is_true(files.write(destination .. "/kept", "original"))
+
+            local ok, reason = files.writeAtomic(destination, "replacement")
+            assert.is_false(ok)
+            assert.is_true(#reason > 0)
+            assert.are.equal("original", files.read(destination .. "/kept"))
+            assert.are.same({ "occupied", "occupied/kept" }, sorted(files.glob(temp)))
+        end)
+
         it("pairs with the read beside it", function()
             -- One pair in one module, and the record of what was opened kept
             -- with them, because that record is what `watch` polls.
@@ -630,6 +665,7 @@ describe("io.files", function()
                 { "createDirectory", files.createDirectory },
                 { "remove", files.remove },
                 { "write", files.write },
+                { "writeAtomic", files.writeAtomic },
                 { "append", files.append },
                 { "read", files.read },
                 { "lines", files.lines },
@@ -656,6 +692,9 @@ describe("io.files", function()
             assert.has_error(function()
                 files.write(at("x"), nil)
             end, "tecs: io.files.write needs bytes to write")
+            assert.has_error(function()
+                files.writeAtomic(at("x"), nil)
+            end, "tecs: io.files.writeAtomic needs bytes to write")
             assert.has_error(function()
                 files.append(at("x"), nil)
             end, "tecs: io.files.append needs bytes to append")

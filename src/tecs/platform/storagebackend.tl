@@ -59,6 +59,12 @@ different sense: `tecs.io.files` builds both out of `write` and `read` when a
 backend leaves them out, using `append` for an appending writer, so every
 caller has them and only the memory a large file costs differs.
 
+`writeAtomic` is optional without a fallback. A title storage may have a
+transaction or commit operation that provides the same guarantee, but
+`write` followed by `rename` cannot synthesize durability or preserve the
+destination through every failure. A backend that cannot provide the contract
+leaves it nil and `tecs.io.files.writeAtomic` reports that it is unsupported.
+
 Nothing here validates its arguments. `tecs.io.files` does that before it
 delegates, so a port inherits it rather than repeating it.
 ]=]
@@ -79,6 +85,10 @@ local type Reader = types.Reader
 local type Writer = types.Writer
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
+-- Buffer structurally satisfies ByteView's read-only byte-range operations.
+-- Naming one table side keeps Teal able to discriminate the union while both
+-- public types pass it without a copy.
+local type ByteInput = string | ByteView
 
 --- What a path is. Symbolic links are followed where the platform has them, so
 --- a link never reports as one: "other" is a socket, a fifo or a device.
@@ -144,6 +154,11 @@ local record Backend
     --- Writes `bytes` to `path`, replacing whatever was there. The parent is
     --- not created.
     write: function(path: string, bytes: string): boolean, string
+    --- Durably writes `bytes` and atomically replaces `path`.
+    ---
+    --- Optional. There is deliberately no fallback in terms of `write` and
+    --- `rename`, because those operations cannot provide this contract.
+    writeAtomic: function(path: string, bytes: ByteInput): boolean, string
     --- Appends `bytes` to `path`, creating the file when absent. The parent is
     --- not created.
     append: function(path: string, bytes: string): boolean, string
@@ -206,6 +221,8 @@ local record storagebackend
     GlobOptions: GlobOptions
     --- How `Backend.openWrite` opens its destination.
     WriteMode: WriteMode
+    --- Complete bytes accepted by an atomic write without an intermediate copy.
+    ByteInput: ByteInput
     --- The seam a port implements.
     Backend: Backend
     --- The SDL backend, and the default everywhere.
@@ -260,6 +277,16 @@ local function take(pointer: loader.CValue): string
     local text = loader.toString(pointer)
     C.SDL_free(pointer)
     return text
+end
+
+--- Borrows complete bytes for the duration of one synchronous native call.
+local function byteRange(bytes: ByteInput): loader.BytePointer, integer
+    if type(bytes) == "string" then
+        local text <const> = bytes as string
+        return ffi.cast("uint8_t *", text) as loader.BytePointer, #text
+    end
+    local input <const> = bytes as ByteView
+    return input:getFFIPointer(), input:length()
 end
 
 --- Opens an `SDL_IOStream` and wraps it as a `Writer`.
@@ -465,6 +492,14 @@ local sdlBackend <const>: Backend = {
             return true
         end
         return false, sdl.error()
+    end,
+
+    writeAtomic = function(path: string, bytes: ByteInput): boolean, string
+        local pointer <const>, length = byteRange(bytes)
+        if R.tecsFileWriteAtomic(path, #path, pointer, length) then
+            return true
+        end
+        return false, loader.toString(R.tecsRustError())
     end,
 
     append = function(path: string, bytes: string): boolean, string

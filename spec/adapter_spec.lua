@@ -290,6 +290,13 @@ describe("platform contract", function()
         assert.is_true(files.append(save, "\n"))
         assert.are.equal('{"score":41}\n', files.read(save))
 
+        local committed, commitReason = files.writeAtomic(save, "replacement")
+        assert.is_false(committed)
+        assert.are.equal(
+            "atomic durable writes are not supported by the spec.console.storage storage backend",
+            commitReason
+        )
+
         assert.are.equal(15, files.info(level).size)
         assert.is_true(files.exists(level))
         assert.is_true(files.isFile(level))
@@ -338,6 +345,19 @@ describe("platform contract", function()
         reader:close()
 
         assert.are.same({ "read " .. path }, platform.storage.calls)
+    end)
+
+    it("delegates atomic durability only when the storage backend supplies it", function()
+        local platform = fakePlatform()
+        platform.storage = fakeStorage()
+        platform.storage.writeAtomic = function(path, bytes)
+            platform.storage.calls[#platform.storage.calls + 1] = "writeAtomic " .. path .. " " .. bytes
+            return true
+        end
+        adapter.install(platform)
+
+        assert.is_true(files.writeAtomic("/dev/save/checkpoint", "complete"))
+        assert.are.same({ "writeAtomic /dev/save/checkpoint complete" }, platform.storage.calls)
     end)
 
     it("records what the platform opened, so a watcher sees it", function()
