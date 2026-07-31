@@ -9,7 +9,9 @@
 local ffi <const> = require("ffi")
 local loader <const> = require("tecs.ffi.loader")
 local sdl <const> = require("tecs.ffi.sdl3")
+local buffer <const> = require("tecs.io.buffer")
 local type ioTypes = require("tecs.io.types")
+local type IOBuffer = ioTypes.Buffer
 local type ByteView = ioTypes.ByteView
 local type ByteInput = string | ByteView
 
@@ -213,7 +215,9 @@ local function failAt(kind: string, fromEncoding: string, inputLeft: loader.CArr
     return ("tecs.data.transcode: %s %s input at byte %d"):format(kind, fromEncoding, length - remaining + 1)
 end
 
-local function run(handle: loader.CPtr, bytes: ByteRange, fromEncoding: string): string, string
+local function runInto(
+    handle: loader.CPtr, bytes: ByteRange, fromEncoding: string, destination: IOBuffer
+): integer, string
     -- These arrays hold the pointer variables that iconv advances. `bytes`
     -- remains reachable for the whole call, so the borrowed input pointer does
     -- not outlive its Lua string.
@@ -222,12 +226,12 @@ local function run(handle: loader.CPtr, bytes: ByteRange, fromEncoding: string):
     input[0] = ffi.cast("const char *", bytes.pointer)
     inputLeft[0] = bytes.length
 
-    local chunks: {string} = {}
+    local output <const> = loader.newArray("char *[1]")
+    local outputLeft <const> = loader.newArray("size_t[1]")
+    local producedTotal = 0
     local flushing = bytes.length == 0
     while true do
-        local outputBuffer <const> = loader.newArray("uint8_t[?]", CHUNK_SIZE)
-        local output <const> = loader.newArray("char *[1]")
-        local outputLeft <const> = loader.newArray("size_t[1]")
+        local outputBuffer <const>, previous = buffer.prepareWrite(destination, producedTotal, CHUNK_SIZE)
         output[0] = outputBuffer
         outputLeft[0] = CHUNK_SIZE
 
@@ -240,9 +244,8 @@ local function run(handle: loader.CPtr, bytes: ByteRange, fromEncoding: string):
             result = iconv(handle, input, inputLeft, output, outputLeft)
         end
         local produced <const> = CHUNK_SIZE - (tonumber(outputLeft[0]) as integer)
-        if produced > 0 then
-            chunks[#chunks + 1] = loader.toBytes(outputBuffer as loader.CValue, produced)
-        end
+        buffer.commitWrite(destination, producedTotal, produced, previous)
+        producedTotal = producedTotal + produced
 
         if result == ICONV_E2BIG then
             -- A full chunk is expected, but accepting a partial one is valid
@@ -265,7 +268,7 @@ local function run(handle: loader.CPtr, bytes: ByteRange, fromEncoding: string):
             return nil, failAt("unconvertible", fromEncoding, inputLeft, bytes.length)
         else
             if flushing then
-                return table.concat(chunks), nil
+                return producedTotal, nil
             end
             if tonumber(inputLeft[0]) ~= 0 then
                 return nil, failAt("unconvertible", fromEncoding, inputLeft, bytes.length)
@@ -275,7 +278,8 @@ local function run(handle: loader.CPtr, bytes: ByteRange, fromEncoding: string):
     end
 end
 
-local function transcode(bytes: ByteInput, fromEncoding: string, toEncoding: string): string
+local function convertInto(bytes: ByteInput, fromEncoding: string, toEncoding: string, destination: IOBuffer): integer
+    destination:clear()
     validEncoding(fromEncoding, "fromEncoding")
     validEncoding(toEncoding, "toEncoding")
     local input <const> = byteRange(bytes)
@@ -297,19 +301,40 @@ local function transcode(bytes: ByteInput, fromEncoding: string, toEncoding: str
     -- A finalizer protects the context if allocation itself raises inside
     -- `run`; the normal path detaches it and closes synchronously below.
     ffi.gc(handle as ffi.CData, iconvClose as function(ffi.CData): integer)
-    local ran <const>, converted, reason = pcall(run, handle, input, fromEncoding) as (boolean, any, string)
+    local ran <const>, converted, reason = pcall(
+        runInto, handle, input, fromEncoding, destination
+    ) as (boolean, any, string)
     local closed <const> = close(handle)
 
     if not ran then
+        destination:clear()
         error(converted, 0)
     end
     if reason ~= nil then
+        destination:clear()
         error(reason, 2)
     end
     if not closed then
+        destination:clear()
         error("tecs.data.transcode: SDL could not close the conversion context", 2)
     end
-    return converted as string
+    return converted as integer
 end
 
-return transcode
+local function convert(bytes: ByteInput, fromEncoding: string, toEncoding: string): string
+    local destination <const> = buffer.new()
+    convertInto(bytes, fromEncoding, toEncoding, destination)
+    local converted <const> = destination:getString()
+    destination:close()
+    return converted
+end
+
+local record transcoder
+    convert: function(ByteInput, string, string): string
+    convertInto: function(ByteInput, string, string, IOBuffer): integer
+end
+
+return {
+    convert = convert,
+    convertInto = convertInto,
+} as transcoder

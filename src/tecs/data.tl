@@ -52,6 +52,19 @@ Every byte transform accepts a Lua string or an open
 [`ByteView`](tealdoc:tecs.io.ByteView). A view is read through its retained
 pointer without first becoming a Lua string.
 
+The string-returning calls are the convenient path. A hot loop can reuse one
+[`Buffer`](tealdoc:tecs.io.Buffer) through the corresponding `Into` call:
+
+```teal
+local spriteBytes <const> = "\0sprite bytes"
+local encoded <const> = tecs.io.newBuffer()
+tecs.data.base64EncodeInto(spriteBytes, encoded)
+local payload <const> = encoded:view()
+-- Pass `payload` to an API that consumes a ByteView.
+payload:close()
+encoded:close()
+```
+
 The sentinel and option names retain lua-cjson spelling because they belong to
 that library's compatibility surface.
 
@@ -69,10 +82,12 @@ assert(restored == bytes)
 
 `inflateRaw` and `deflateRaw` handle RFC 1951 blocks without a zlib header or
 trailer. The decompressed-size argument provides an allocation hint. A wrong
-hint may cost a copy but does not weaken validation.
+hint may cost a copy but does not weaken validation. The following `maxBytes`
+argument is a hard ceiling and defaults to 268,435,456 bytes.
 
 Inflation raises on malformed, truncated, or dictionary-dependent streams.
-Treat zlib error text as a diagnostic, not a string-matching interface.
+It also raises before returning output beyond the ceiling. Treat zlib error
+text as a diagnostic, not a string-matching interface.
 
 ## Character transcoding
 
@@ -87,7 +102,8 @@ The input and result are byte strings. Embedded NULs are ordinary bytes, so
 binary encodings such as UTF-16 and UTF-32 round-trip without truncation.
 Conversion raises for an unknown encoding name. UTF-8 and explicitly ordered
 UTF-16 and UTF-32 input is validated strictly; other encodings use the
-platform converter's substitution rules.
+platform converter's substitution rules. `transcodeInto` writes into a
+reusable Buffer when a string result would be an avoidable allocation.
 
 ## UUIDs
 
@@ -117,9 +133,10 @@ assert(codepoint == 0x20ac)
 assert(nextOffset == 5)
 ```
 
-The child works over explicit Lua string lengths, so embedded NUL is U+0000
-rather than a terminator. Malformed bytes decode as U+FFFD and remain
-traversable. These are codepoint operations, not grapheme segmentation.
+The child works over explicit byte lengths in strings and ByteViews, so
+embedded NUL is U+0000 rather than a terminator. Malformed bytes decode as
+U+FFFD and remain traversable. These are codepoint operations, not grapheme
+segmentation.
 
 ## Hashes and checksums
 
@@ -158,11 +175,13 @@ local bit <const> = require("bit")
 local loader <const> = require("tecs.ffi.loader")
 local binding <const> = require("tecs.ffi.rust")
 local zlib <const> = require("tecs.ffi.zlib")
+local buffer <const> = require("tecs.io.buffer")
 local type ioTypes = require("tecs.io.types")
 local type TypedStore = require("tecs.data.Store")
-local transcode <const> = require("tecs.data.transcode")
+local transcoder <const> = require("tecs.data.transcode")
 local type utf8Module = require("tecs.data.utf8")
 local storekeys <const> = require("tecs.internal.storekeys")
+local type IOBuffer = ioTypes.Buffer
 local type ByteView = ioTypes.ByteView
 local type ByteInput = string | ByteView
 
@@ -453,6 +472,18 @@ local record data is JSON
     --- @return Returns two lowercase ASCII hex digits for every input byte.
     hexEncode: function(bytes: ByteInput): string
 
+    --- Encodes bytes as lowercase hexadecimal text in a reusable buffer.
+    ---
+    --- The function clears `destination` before writing and retains its
+    --- allocation for later calls.
+    ---
+    --- @param bytes The caller supplies a byte string or open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView), including NUL.
+    --- @param destination The caller supplies an open
+    ---     [`Buffer`](tealdoc:tecs.io.Buffer) that receives the ASCII result.
+    --- @return Returns the number of bytes written.
+    hexEncodeInto: function(bytes: ByteInput, destination: IOBuffer): integer
+
     --- Decodes lowercase or uppercase hexadecimal text into bytes.
     ---
     --- @param text The caller supplies an even number of ASCII hex digits in
@@ -461,6 +492,18 @@ local record data is JSON
     ---     length or contains a character outside the hexadecimal alphabet.
     hexDecode: function(text: ByteInput): string
 
+    --- Decodes hexadecimal text into a reusable buffer.
+    ---
+    --- The function clears `destination` before validating or writing. It
+    --- therefore remains empty when decoding raises.
+    ---
+    --- @param text The caller supplies an even number of ASCII hex digits in
+    ---     a string or open [`ByteView`](tealdoc:tecs.io.ByteView).
+    --- @param destination The caller supplies an open
+    ---     [`Buffer`](tealdoc:tecs.io.Buffer) that receives the decoded bytes.
+    --- @return Returns the number of bytes written.
+    hexDecodeInto: function(text: ByteInput, destination: IOBuffer): integer
+
     --- Encodes bytes with the padded RFC 4648 Base64 alphabet.
     ---
     --- @param bytes The caller supplies a byte string or an open
@@ -468,6 +511,18 @@ local record data is JSON
     --- @return Returns ASCII Base64 text. The result has no line breaks and
     ---     uses `=` padding when its length is not divisible by three.
     base64Encode: function(bytes: ByteInput): string
+
+    --- Encodes bytes as padded RFC 4648 Base64 in a reusable buffer.
+    ---
+    --- The function clears `destination` before writing and retains its
+    --- allocation for later calls.
+    ---
+    --- @param bytes The caller supplies a byte string or open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView), including NUL.
+    --- @param destination The caller supplies an open
+    ---     [`Buffer`](tealdoc:tecs.io.Buffer) that receives the ASCII result.
+    --- @return Returns the number of bytes written.
+    base64EncodeInto: function(bytes: ByteInput, destination: IOBuffer): integer
 
     --- Decodes canonical padded RFC 4648 Base64 text into bytes.
     ---
@@ -478,6 +533,18 @@ local record data is JSON
     --- @return Returns the decoded bytes. Raises when `text` has invalid
     ---     characters, malformed padding, or non-zero unused bits.
     base64Decode: function(text: ByteInput): string
+
+    --- Decodes canonical padded RFC 4648 Base64 into a reusable buffer.
+    ---
+    --- The function clears `destination` before validating or writing. It
+    --- therefore remains empty when decoding raises.
+    ---
+    --- @param text The caller supplies canonical Base64 text in a string or
+    ---     open [`ByteView`](tealdoc:tecs.io.ByteView).
+    --- @param destination The caller supplies an open
+    ---     [`Buffer`](tealdoc:tecs.io.Buffer) that receives the decoded bytes.
+    --- @return Returns the number of bytes written.
+    base64DecodeInto: function(text: ByteInput, destination: IOBuffer): integer
 
     --- Generates a random RFC 9562 UUID version 4.
     ---
@@ -515,6 +582,22 @@ local record data is JSON
     --- @return Returns a fresh byte string in `toEncoding`, including any NUL
     ---     bytes the target representation requires.
     transcode: function(bytes: ByteInput, fromEncoding: string, toEncoding: string): string
+
+    --- Converts complete bytes between character encodings into a reusable
+    --- buffer.
+    ---
+    --- The function clears `destination` before validating or converting. It
+    --- therefore remains empty when conversion raises.
+    ---
+    --- @param bytes A complete byte string or open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView) in `fromEncoding`.
+    --- @param fromEncoding The source encoding name.
+    --- @param toEncoding The target encoding name.
+    --- @param destination The caller supplies an open
+    ---     [`Buffer`](tealdoc:tecs.io.Buffer) that receives the converted
+    ---     bytes.
+    --- @return Returns the number of bytes written.
+    transcodeInto: function(bytes: ByteInput, fromEncoding: string, toEncoding: string, destination: IOBuffer): integer
 end
 
 function data.newStore(): TypedStore
@@ -524,12 +607,14 @@ end
 data.newKey = storekeys.newKey as function<T>(name?: string, forType?: T): data.Key<T>
 data.findKey = storekeys.findKey as function<T>(name: string): data.Key<T> | nil
 data.Key.listKeys = storekeys.listKeys
-data.transcode = transcode as function(ByteInput, string, string): string
+data.transcode = transcoder.convert as function(ByteInput, string, string): string
+data.transcodeInto = transcoder.convertInto as function(ByteInput, string, string, IOBuffer): integer
 
 local sbyte <const> = string.byte
-local schar <const> = string.char
-local ssub <const> = string.sub
-local concat <const> = table.concat
+local floor <const> = math.floor
+local min <const> = math.min
+local max <const> = math.max
+local MAX_INTEGER <const> = 9007199254740991
 
 local record ByteRange
     pointer: loader.BytePointer
@@ -566,9 +651,23 @@ end
 
 local HEX <const> = "0123456789abcdef"
 local BASE64 <const> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local HEX_BYTES <const>: {integer} = {}
+local BASE64_BYTES <const>: {integer} = {}
 local BASE64_DECODE <const>: {integer: integer} = {}
+for index = 1, #HEX do
+    HEX_BYTES[index] = sbyte(HEX, index)
+end
 for index = 1, #BASE64 do
-    BASE64_DECODE[sbyte(BASE64, index)] = index - 1
+    local byte <const> = sbyte(BASE64, index)
+    BASE64_BYTES[index] = byte
+    BASE64_DECODE[byte] = index - 1
+end
+
+local function outputLength(value: number, what: string): integer
+    if value < 0 or value > MAX_INTEGER or value ~= floor(value) then
+        error(("tecs: %s output is too large"):format(what), 3)
+    end
+    return value as integer
 end
 
 --- Encodes bytes as lowercase hexadecimal text.
@@ -577,14 +676,25 @@ end
 ---     [`ByteView`](tealdoc:tecs.io.ByteView), including NUL.
 --- @return Returns two lowercase ASCII hex digits for every input byte.
 function data.hexEncode(bytes: ByteInput): string
-    local input <const> = byteRange(bytes, "hexEncode", 2)
-    local output: {string} = {}
+    local destination <const> = buffer.new()
+    data.hexEncodeInto(bytes, destination)
+    local result <const> = destination:getString()
+    destination:close()
+    return result
+end
+
+function data.hexEncodeInto(bytes: ByteInput, destination: IOBuffer): integer
+    local input <const> = byteRange(bytes, "hexEncodeInto", 2)
+    local length <const> = outputLength(input.length * 2, "hexadecimal")
+    destination:clear()
+    local output <const>, previous = buffer.prepareWrite(destination, 0, length)
     for index = 0, input.length - 1 do
         local byte <const> = input.pointer[index] as integer
-        output[index + 1] = ssub(HEX, math.floor(byte / 16) + 1, math.floor(byte / 16) + 1)
-            .. ssub(HEX, byte % 16 + 1, byte % 16 + 1)
+        output[index * 2] = HEX_BYTES[floor(byte / 16) + 1]
+        output[index * 2 + 1] = HEX_BYTES[byte % 16 + 1]
     end
-    return concat(output)
+    buffer.commitWrite(destination, 0, length, previous)
+    return length
 end
 
 local function hexValue(byte: integer): integer | nil
@@ -607,22 +717,32 @@ end
 --- @return Returns the decoded bytes. Raises when `text` has an odd length or
 ---     contains a character outside the hexadecimal alphabet.
 function data.hexDecode(text: ByteInput): string
+    local destination <const> = buffer.new()
+    data.hexDecodeInto(text, destination)
+    local result <const> = destination:getString()
+    destination:close()
+    return result
+end
+
+function data.hexDecodeInto(text: ByteInput, destination: IOBuffer): integer
     local input <const> = byteRange(text, "hexDecode", 2)
+    destination:clear()
     if input.length % 2 ~= 0 then
         error("tecs: hexadecimal text must contain an even number of digits", 2)
     end
-    local output: {string} = {}
-    local outputIndex = 1
+    local length <const> = (input.length / 2) as integer
+    local output <const>, previous = buffer.prepareWrite(destination, 0, length)
     for index = 0, input.length - 1, 2 do
         local high <const> = hexValue(input.pointer[index] as integer)
         local low <const> = hexValue(input.pointer[index + 1] as integer)
         if high == nil or low == nil then
+            destination:clear()
             error("tecs: hexadecimal text contains a non-hexadecimal character", 2)
         end
-        output[outputIndex] = schar(high * 16 + low)
-        outputIndex = outputIndex + 1
+        output[(index / 2) as integer] = high * 16 + low
     end
-    return concat(output)
+    buffer.commitWrite(destination, 0, length, previous)
+    return length
 end
 
 --- Encodes bytes with the padded RFC 4648 Base64 alphabet.
@@ -632,9 +752,19 @@ end
 --- @return Returns ASCII Base64 text. The result has no line breaks and uses
 ---     `=` padding when its length is not divisible by three.
 function data.base64Encode(bytes: ByteInput): string
-    local input <const> = byteRange(bytes, "base64Encode", 2)
-    local output: {string} = {}
-    local outputIndex = 1
+    local destination <const> = buffer.new()
+    data.base64EncodeInto(bytes, destination)
+    local result <const> = destination:getString()
+    destination:close()
+    return result
+end
+
+function data.base64EncodeInto(bytes: ByteInput, destination: IOBuffer): integer
+    local input <const> = byteRange(bytes, "base64EncodeInto", 2)
+    local length <const> = outputLength(floor((input.length + 2) / 3) * 4, "Base64")
+    destination:clear()
+    local output <const>, previous = buffer.prepareWrite(destination, 0, length)
+    local outputIndex = 0
     for index = 0, input.length - 1, 3 do
         local first <const> = input.pointer[index] as integer
         local second: integer = nil
@@ -645,30 +775,56 @@ function data.base64Encode(bytes: ByteInput): string
         if index + 2 < input.length then
             third = input.pointer[index + 2] as integer
         end
-        output[outputIndex] = ssub(BASE64, math.floor(first / 4) + 1, math.floor(first / 4) + 1)
-        output[outputIndex + 1] = ssub(
-            BASE64,
-            first % 4 * 16 + math.floor((second or 0) / 16) + 1,
-            first % 4 * 16 + math.floor((second or 0) / 16) + 1
-        )
-        output[outputIndex + 2] = second ~= nil
-            and ssub(
-                BASE64,
-                second % 16 * 4 + math.floor((third or 0) / 64) + 1,
-                second % 16 * 4 + math.floor((third or 0) / 64) + 1
-            ) or "="
-        output[outputIndex + 3] = third ~= nil and ssub(BASE64, third % 64 + 1, third % 64 + 1) or "="
+        output[outputIndex] = BASE64_BYTES[floor(first / 4) + 1]
+        output[outputIndex + 1] = BASE64_BYTES[first % 4 * 16 + floor((second or 0) / 16) + 1]
+        output[outputIndex + 2] = second ~= nil and BASE64_BYTES[second % 16 * 4 + floor((third or 0) / 64) + 1] or 61
+        output[outputIndex + 3] = third ~= nil and BASE64_BYTES[third % 64 + 1] or 61
         outputIndex = outputIndex + 4
     end
-    return concat(output)
+    buffer.commitWrite(destination, 0, length, previous)
+    return length
 end
 
-local function base64Value(byte: integer): integer
-    local value <const> = BASE64_DECODE[byte]
-    if value == nil then
-        error("tecs: Base64 text contains a character outside the RFC 4648 alphabet", 3)
+local function base64Value(byte: integer): integer | nil
+    return BASE64_DECODE[byte]
+end
+
+local function decodedBase64Length(input: ByteRange): integer
+    local length <const> = input.length
+    if length % 4 ~= 0 then
+        error("tecs: Base64 text must contain groups of four characters", 3)
     end
-    return value
+    local padding = 0
+    for index = 0, length - 1, 4 do
+        local first <const> = base64Value(input.pointer[index] as integer)
+        local second <const> = base64Value(input.pointer[index + 1] as integer)
+        local thirdByte <const> = input.pointer[index + 2] as integer
+        local fourthByte <const> = input.pointer[index + 3] as integer
+        local final <const> = index + 4 == length
+        if first == nil or second == nil then
+            error("tecs: Base64 text contains a character outside the RFC 4648 alphabet", 3)
+        end
+        if thirdByte == 61 then
+            if not final or fourthByte ~= 61 or second % 16 ~= 0 then
+                error("tecs: Base64 text has malformed padding", 3)
+            end
+            padding = 2
+        else
+            local third <const> = base64Value(thirdByte)
+            if third == nil then
+                error("tecs: Base64 text contains a character outside the RFC 4648 alphabet", 3)
+            end
+            if fourthByte == 61 then
+                if not final or third % 4 ~= 0 then
+                    error("tecs: Base64 text has malformed padding", 3)
+                end
+                padding = 1
+            elseif base64Value(fourthByte) == nil then
+                error("tecs: Base64 text contains a character outside the RFC 4648 alphabet", 3)
+            end
+        end
+    end
+    return (length / 4 * 3 - padding) as integer
 end
 
 --- Decodes canonical padded RFC 4648 Base64 text into bytes.
@@ -680,46 +836,46 @@ end
 --- @return Returns the decoded bytes. Raises when `text` has invalid
 ---     characters, malformed padding, or non-zero unused bits.
 function data.base64Decode(text: ByteInput): string
+    local destination <const> = buffer.new()
+    data.base64DecodeInto(text, destination)
+    local result <const> = destination:getString()
+    destination:close()
+    return result
+end
+
+function data.base64DecodeInto(text: ByteInput, destination: IOBuffer): integer
     local input <const> = byteRange(text, "base64Decode", 2)
     local length <const> = input.length
-    if length % 4 ~= 0 then
-        error("tecs: Base64 text must contain groups of four characters", 2)
-    end
-
-    local output: {string} = {}
-    local outputIndex = 1
+    destination:clear()
+    local decodedLength <const> = decodedBase64Length(input)
+    local output <const>, previous = buffer.prepareWrite(destination, 0, decodedLength)
+    local outputIndex = 0
     for index = 0, length - 1, 4 do
-        local first <const> = base64Value(input.pointer[index] as integer)
-        local second <const> = base64Value(input.pointer[index + 1] as integer)
+        local first <const> = base64Value(input.pointer[index] as integer) as integer
+        local second <const> = base64Value(input.pointer[index + 1] as integer) as integer
         local thirdByte <const> = input.pointer[index + 2] as integer
         local fourthByte <const> = input.pointer[index + 3] as integer
-        local final <const> = index + 4 == length
 
         if thirdByte == 61 then
-            if not final or fourthByte ~= 61 or second % 16 ~= 0 then
-                error("tecs: Base64 text has malformed padding", 2)
-            end
-            output[outputIndex] = schar(first * 4 + math.floor(second / 16))
+            output[outputIndex] = first * 4 + floor(second / 16)
             outputIndex = outputIndex + 1
         else
-            local third <const> = base64Value(thirdByte)
-            output[outputIndex] = schar(first * 4 + math.floor(second / 16))
+            local third <const> = base64Value(thirdByte) as integer
+            output[outputIndex] = first * 4 + floor(second / 16)
             outputIndex = outputIndex + 1
             if fourthByte == 61 then
-                if not final or third % 4 ~= 0 then
-                    error("tecs: Base64 text has malformed padding", 2)
-                end
-                output[outputIndex] = schar(second % 16 * 16 + math.floor(third / 4))
+                output[outputIndex] = second % 16 * 16 + floor(third / 4)
                 outputIndex = outputIndex + 1
             else
-                local fourth <const> = base64Value(fourthByte)
-                output[outputIndex] = schar(second % 16 * 16 + math.floor(third / 4))
-                output[outputIndex + 1] = schar(third % 4 * 64 + fourth)
+                local fourth <const> = base64Value(fourthByte) as integer
+                output[outputIndex] = second % 16 * 16 + floor(third / 4)
+                output[outputIndex + 1] = third % 4 * 64 + fourth
                 outputIndex = outputIndex + 2
             end
         end
     end
-    return concat(output)
+    buffer.commitWrite(destination, 0, decodedLength, previous)
+    return decodedLength
 end
 
 local C <const> = zlib.C
@@ -779,9 +935,14 @@ local WINDOW_BITS <const> = 15
 -- The output starts with this many bytes when the caller gives no hint.
 local INITIAL_CAPACITY <const> = 4096
 
--- Most output offered to one `inflate` call. `avail_out` is a `uInt`, so the
--- loop splits larger output rather than wrapping the count.
+-- Most input or output offered to one zlib call. Both `avail_in` and
+-- `avail_out` are `uInt`, so every larger range is split rather than wrapped.
 local MAX_CHUNK <const> = 0x40000000
+
+-- Limits decompression unless the caller deliberately supplies another
+-- ceiling. Large game assets can opt in without leaving untrusted streams
+-- able to grow until the process runs out of memory.
+local DEFAULT_MAX_INFLATE_BYTES <const> = 256 * 1024 * 1024
 
 -- Meanings for return codes that carry no zlib message.
 local CODE_NAMES <const>: {integer: string} = {
@@ -807,13 +968,96 @@ local function describe(fields: loader.CStruct, status: integer): string
     return ("tecs: the compressed stream is not valid: %s"):format(named)
 end
 
---- Inflates all of `bytes` under `windowBits`, which is what selects the
---- wrapper. Returns the bytes, or nil and what went wrong.
-local function run(bytes: ByteInput, windowBits: integer, sizeHint?: integer): string, string
+local function optionalSize(value: integer, what: string, default: integer): integer
+    if value == nil then
+        return default
+    end
+    if type(value) ~= "number" or value ~= floor(value) or value < 0 or value > MAX_INTEGER then
+        error(("tecs: %s must be a non-negative integer"):format(what), 4)
+    end
+    return value
+end
+
+local function offerInput(fields: loader.CStruct, input: ByteRange, consumed: integer): integer
+    if fields.avail_in == 0 and consumed < input.length then
+        local count <const> = min(input.length - consumed, MAX_CHUNK)
+        fields.next_in = input.pointer + consumed
+        fields.avail_in = count
+        return count
+    end
+    return fields.avail_in as integer
+end
+
+local function inflateBody(
+    fields: loader.CStruct, input: ByteRange, destination: IOBuffer, maxBytes: integer, initialCapacity: integer
+): integer, string
+    destination:clear()
+    destination:ensureCapacity(min(maxBytes, initialCapacity))
+    local consumed = 0
+    local produced = 0
+
+    while true do
+        local offeredInput <const> = offerInput(fields, input, consumed)
+        local capacity = destination:capacity()
+        if capacity <= produced then
+            local target = max(INITIAL_CAPACITY, capacity * 2)
+            if target <= capacity or target > maxBytes + 1 then
+                target = maxBytes + 1
+            end
+            destination:ensureCapacity(target)
+            capacity = destination:capacity()
+        end
+        local room = min(capacity - produced, MAX_CHUNK, maxBytes - produced + 1)
+        if room < 1 then
+            room = 1
+        end
+
+        local output <const>, previous = buffer.prepareWrite(destination, produced, room)
+        fields.next_out = output
+        fields.avail_out = room
+        local status <const> = inflate(fields as loader.CValue, K.Z_NO_FLUSH)
+        local inputLeft <const> = fields.avail_in as integer
+        local spare <const> = fields.avail_out as integer
+        consumed = consumed + offeredInput - inputLeft
+        local wrote <const> = room - spare
+        if wrote > maxBytes - produced then
+            buffer.commitWrite(destination, produced, 0, previous)
+            destination:clear()
+            return nil, ("tecs: inflated data exceeds maxBytes (%d)"):format(maxBytes)
+        end
+        buffer.commitWrite(destination, produced, wrote, previous)
+        produced = produced + wrote
+
+        if status == K.Z_STREAM_END then
+            return produced
+        end
+        if status ~= K.Z_OK and status ~= K.Z_BUF_ERROR then
+            destination:clear()
+            return nil, describe(fields, status)
+        end
+        if inputLeft == 0 and consumed == input.length and spare ~= 0 then
+            destination:clear()
+            return nil, "tecs: the compressed stream ends inside a block"
+        end
+    end
+end
+
+--- Inflates all of `bytes` under `windowBits` into caller-owned storage.
+local function runInto(
+    bytes: ByteInput, windowBits: integer, destination: IOBuffer, sizeHint?: integer, maxBytes?: integer
+): integer, string
     local input <const> = byteRange(bytes, "inflate", 3)
-    local capacity = sizeHint
-    if capacity == nil or capacity < 1 then
-        capacity = INITIAL_CAPACITY
+    destination:clear()
+    local limit <const> = optionalSize(maxBytes, "inflate maxBytes", DEFAULT_MAX_INFLATE_BYTES)
+    if limit == MAX_INTEGER then
+        error("tecs: inflate maxBytes is too large", 3)
+    end
+    local initial = min(INITIAL_CAPACITY, limit)
+    if sizeHint ~= nil then
+        initial = optionalSize(sizeHint, "inflate sizeHint", 0)
+    end
+    if sizeHint ~= nil and initial > limit then
+        error("tecs: inflate sizeHint must not exceed maxBytes", 3)
     end
 
     local stream <const> = loader.newStruct("z_stream")
@@ -821,51 +1065,18 @@ local function run(bytes: ByteInput, windowBits: integer, sizeHint?: integer): s
 
     local status = inflateInit2(stream, windowBits, VERSION, STREAM_SIZE)
     if status ~= K.Z_OK then
-        -- Nothing to end: an init that failed allocated nothing.
         return nil, describe(fields, status)
     end
 
-    -- The range retains its Lua string or view owner for as long as zlib reads
-    -- through the borrowed pointer.
-    fields.next_in = input.pointer
-    fields.avail_in = input.length
-
-    local out = loader.newArray("uint8_t[?]", capacity)
-    local produced = 0
-
-    while true do
-        if produced == capacity then
-            capacity = capacity * 2
-            local grown = loader.newArray("uint8_t[?]", capacity)
-            loader.copyBytes(grown, out as loader.CValue, produced)
-            out = grown
-        end
-
-        local room = capacity - produced
-        if room > MAX_CHUNK then
-            room = MAX_CHUNK
-        end
-        fields.next_out = loader.bytePointer(out as loader.CValue) + produced
-        fields.avail_out = room
-
-        status = inflate(stream, K.Z_NO_FLUSH)
-        local spare = fields.avail_out as integer
-        produced = produced + room - spare
-
-        if status == K.Z_STREAM_END then
-            inflateEnd(stream)
-            return loader.toBytes(out as loader.CValue, produced)
-        end
-        if status ~= K.Z_OK and status ~= K.Z_BUF_ERROR then
-            local reason = describe(fields, status)
-            inflateEnd(stream)
-            return nil, reason
-        end
-        if spare ~= 0 then
-            inflateEnd(stream)
-            return nil, "tecs: the compressed stream ends inside a block"
-        end
+    local ran <const>, produced, reason = pcall(
+        inflateBody, fields, input, destination, limit, initial
+    ) as (boolean, any, string)
+    inflateEnd(stream)
+    if not ran then
+        destination:clear()
+        error(produced, 0)
     end
+    return produced as integer, reason
 end
 
 --- Validates and normalizes a compression level. Minus one asks zlib for its
@@ -875,17 +1086,54 @@ local function compressionLevel(level?: integer): integer
     if given == nil then
         return K.Z_DEFAULT_COMPRESSION
     end
-    if given ~= math.floor(given) or given < -1 or given > 9 then
+    if given ~= floor(given) or given < -1 or given > 9 then
         error("tecs: compression level must be an integer from -1 to 9", 3)
     end
     return given
 end
 
---- Deflates all of `bytes` under `windowBits`, returning the bytes or nil and
---- the native failure. `deflateBound` guarantees one output buffer is enough,
---- so encoding allocates once and never grows or copies.
-local function encode(bytes: ByteInput, windowBits: integer, level?: integer): string, string
+local function deflateBody(
+    fields: loader.CStruct, input: ByteRange, destination: IOBuffer, capacity: integer
+): integer, string
+    destination:clear()
+    destination:ensureCapacity(capacity)
+    local consumed = 0
+    local produced = 0
+
+    while true do
+        local offeredInput <const> = offerInput(fields, input, consumed)
+        local finishing <const> = consumed + offeredInput == input.length
+        local room <const> = min(capacity - produced, MAX_CHUNK)
+        if room < 1 then
+            destination:clear()
+            return nil, "tecs: zlib exceeded its deflate output bound"
+        end
+        local output <const>, previous = buffer.prepareWrite(destination, produced, room)
+        fields.next_out = output
+        fields.avail_out = room
+        local status <const> = deflate(fields as loader.CValue, finishing and K.Z_FINISH or K.Z_NO_FLUSH)
+        local inputLeft <const> = fields.avail_in as integer
+        local wrote <const> = room - (fields.avail_out as integer)
+        consumed = consumed + offeredInput - inputLeft
+        buffer.commitWrite(destination, produced, wrote, previous)
+        produced = produced + wrote
+
+        if status == K.Z_STREAM_END then
+            return produced
+        end
+        if status ~= K.Z_OK then
+            destination:clear()
+            return nil, describe(fields, status)
+        end
+    end
+end
+
+--- Deflates all of `bytes` under `windowBits` into caller-owned storage.
+local function encodeInto(
+    bytes: ByteInput, windowBits: integer, destination: IOBuffer, level?: integer
+): integer, string
     local input <const> = byteRange(bytes, "deflate", 3)
+    destination:clear()
     local stream <const> = loader.newStruct("z_stream")
     local fields <const> = stream as loader.CStruct
     local status = deflateInit2(
@@ -895,22 +1143,20 @@ local function encode(bytes: ByteInput, windowBits: integer, level?: integer): s
         return nil, describe(fields, status)
     end
 
-    local capacity = tonumber(deflateBound(stream, input.length)) as integer
-    local out <const> = loader.newArray("uint8_t[?]", capacity)
-    fields.next_in = input.pointer
-    fields.avail_in = input.length
-    fields.next_out = out
-    fields.avail_out = capacity
-
-    status = deflate(stream, K.Z_FINISH)
-    if status ~= K.Z_STREAM_END then
-        local reason = describe(fields, status)
+    local capacity <const> = tonumber(deflateBound(stream, input.length)) as integer
+    if capacity < 1 or capacity > MAX_INTEGER then
         deflateEnd(stream)
-        return nil, reason
+        return nil, "tecs: compressed output is too large"
     end
-    local produced = capacity - (fields.avail_out as integer)
+    local ran <const>, produced, reason = pcall(
+        deflateBody, fields, input, destination, capacity
+    ) as (boolean, any, string)
     deflateEnd(stream)
-    return loader.toBytes(out as loader.CValue, produced)
+    if not ran then
+        destination:clear()
+        error(produced, 0)
+    end
+    return produced as integer, reason
 end
 
 --- Compresses bytes as a raw RFC 1951 DEFLATE stream.
@@ -921,11 +1167,35 @@ end
 ---     compression; one through nine trade time for size.
 --- @return Returns a fresh string containing the compressed bytes.
 function data.deflateRaw(bytes: ByteInput, level?: integer): string
-    local result, reason = encode(bytes, -WINDOW_BITS, level)
-    if result == nil then
+    local destination <const> = buffer.new()
+    local produced, reason = encodeInto(bytes, -WINDOW_BITS, destination, level)
+    if produced == nil then
+        destination:close()
         error(reason, 2)
     end
+    local result <const> = destination:getString()
+    destination:close()
     return result
+end
+
+--- Compresses bytes as raw DEFLATE into a reusable buffer.
+---
+--- The function clears `destination` before writing and retains its allocation
+--- for later calls.
+---
+--- @param bytes The caller supplies a byte string or open
+---     [`ByteView`](tealdoc:tecs.io.ByteView).
+--- @param destination The caller supplies an open
+---     [`Buffer`](tealdoc:tecs.io.Buffer) that receives the compressed bytes.
+--- @param level Minus one or omitted uses zlib's default. Zero stores without
+---     compression; one through nine trade time for size.
+--- @return Returns the number of bytes written.
+function data.deflateRawInto(bytes: ByteInput, destination: IOBuffer, level?: integer): integer
+    local produced, reason = encodeInto(bytes, -WINDOW_BITS, destination, level)
+    if produced == nil then
+        error(reason, 2)
+    end
+    return produced
 end
 
 --- Compresses bytes as an RFC 1950 zlib stream, including its header and
@@ -937,11 +1207,35 @@ end
 ---     compression; one through nine trade time for size.
 --- @return Returns a fresh string containing the compressed bytes.
 function data.deflate(bytes: ByteInput, level?: integer): string
-    local result, reason = encode(bytes, WINDOW_BITS, level)
-    if result == nil then
+    local destination <const> = buffer.new()
+    local produced, reason = encodeInto(bytes, WINDOW_BITS, destination, level)
+    if produced == nil then
+        destination:close()
         error(reason, 2)
     end
+    local result <const> = destination:getString()
+    destination:close()
     return result
+end
+
+--- Compresses bytes as a zlib stream into a reusable buffer.
+---
+--- The function clears `destination` before writing and retains its allocation
+--- for later calls.
+---
+--- @param bytes The caller supplies a byte string or open
+---     [`ByteView`](tealdoc:tecs.io.ByteView).
+--- @param destination The caller supplies an open
+---     [`Buffer`](tealdoc:tecs.io.Buffer) that receives the compressed bytes.
+--- @param level Minus one or omitted uses zlib's default. Zero stores without
+---     compression; one through nine trade time for size.
+--- @return Returns the number of bytes written.
+function data.deflateInto(bytes: ByteInput, destination: IOBuffer, level?: integer): integer
+    local produced, reason = encodeInto(bytes, WINDOW_BITS, destination, level)
+    if produced == nil then
+        error(reason, 2)
+    end
+    return produced
 end
 
 --- Decompresses a raw DEFLATE stream, the form RFC 1951 defines.
@@ -955,17 +1249,50 @@ end
 ---     raises because it is not a stream.
 --- @param sizeHint The decompressed size, when the caller's format records it.
 ---     Only an allocation hint: a wrong one costs a copy, never an error.
+--- @param maxBytes The hard output ceiling. Omit it to use
+---     268,435,456 bytes. Inflation raises and returns no partial output when
+---     the stream exceeds it.
 --- @return The decompressed bytes, which may be empty. Never nil: a stream that does not
 ---     decode raises.
-function data.inflateRaw(bytes: ByteInput, sizeHint?: integer): string
+function data.inflateRaw(bytes: ByteInput, sizeHint?: integer, maxBytes?: integer): string
+    local destination <const> = buffer.new()
     if byteRange(bytes, "inflateRaw", 2).length == 0 then
+        destination:close()
         error("tecs: an empty string is not a DEFLATE stream", 2)
     end
-    local result, reason = run(bytes, -WINDOW_BITS, sizeHint)
-    if result == nil then
+    local produced, reason = runInto(bytes, -WINDOW_BITS, destination, sizeHint, maxBytes)
+    if produced == nil then
+        destination:close()
         error(reason, 2)
     end
+    local result <const> = destination:getString()
+    destination:close()
     return result
+end
+
+--- Decompresses raw DEFLATE into a reusable buffer.
+---
+--- The function clears `destination` before validating or writing. It remains
+--- empty when inflation raises.
+---
+--- @param bytes The caller supplies the complete compressed stream in a byte
+---     string or open [`ByteView`](tealdoc:tecs.io.ByteView).
+--- @param destination The caller supplies an open
+---     [`Buffer`](tealdoc:tecs.io.Buffer) that receives the decompressed bytes.
+--- @param sizeHint The expected output size, used only to reserve capacity.
+--- @param maxBytes The hard output ceiling. Omit it to use
+---     268,435,456 bytes.
+--- @return Returns the number of bytes written.
+function data.inflateRawInto(bytes: ByteInput, destination: IOBuffer, sizeHint?: integer, maxBytes?: integer): integer
+    if byteRange(bytes, "inflateRaw", 2).length == 0 then
+        destination:clear()
+        error("tecs: an empty string is not a DEFLATE stream", 2)
+    end
+    local produced, reason = runInto(bytes, -WINDOW_BITS, destination, sizeHint, maxBytes)
+    if produced == nil then
+        error(reason, 2)
+    end
+    return produced
 end
 
 --- Decompresses a zlib stream, the form RFC 1950 defines.
@@ -986,17 +1313,50 @@ end
 ---     it is not a stream.
 --- @param sizeHint The decompressed size, when the caller's format records it.
 ---     Only an allocation hint: a wrong one costs a copy, never an error.
+--- @param maxBytes The hard output ceiling. Omit it to use
+---     268,435,456 bytes. Inflation raises and returns no partial output when
+---     the stream exceeds it.
 --- @return The decompressed bytes, which may be empty. Never nil: a bad header, a corrupt
 ---     block, a truncated stream and a trailer that disagrees all raise.
-function data.inflate(bytes: ByteInput, sizeHint?: integer): string
+function data.inflate(bytes: ByteInput, sizeHint?: integer, maxBytes?: integer): string
+    local destination <const> = buffer.new()
     if byteRange(bytes, "inflate", 2).length == 0 then
+        destination:close()
         error("tecs: an empty string is not a zlib stream", 2)
     end
-    local result, reason = run(bytes, WINDOW_BITS, sizeHint)
-    if result == nil then
+    local produced, reason = runInto(bytes, WINDOW_BITS, destination, sizeHint, maxBytes)
+    if produced == nil then
+        destination:close()
         error(reason, 2)
     end
+    local result <const> = destination:getString()
+    destination:close()
     return result
+end
+
+--- Decompresses a zlib stream into a reusable buffer.
+---
+--- The function clears `destination` before validating or writing. It remains
+--- empty when inflation raises.
+---
+--- @param bytes The caller supplies the complete zlib stream in a byte string
+---     or open [`ByteView`](tealdoc:tecs.io.ByteView).
+--- @param destination The caller supplies an open
+---     [`Buffer`](tealdoc:tecs.io.Buffer) that receives the decompressed bytes.
+--- @param sizeHint The expected output size, used only to reserve capacity.
+--- @param maxBytes The hard output ceiling. Omit it to use
+---     268,435,456 bytes.
+--- @return Returns the number of bytes written.
+function data.inflateInto(bytes: ByteInput, destination: IOBuffer, sizeHint?: integer, maxBytes?: integer): integer
+    if byteRange(bytes, "inflate", 2).length == 0 then
+        destination:clear()
+        error("tecs: an empty string is not a zlib stream", 2)
+    end
+    local produced, reason = runInto(bytes, WINDOW_BITS, destination, sizeHint, maxBytes)
+    if produced == nil then
+        error(reason, 2)
+    end
+    return produced
 end
 
 -- FNV-1a needs 64-bit arithmetic. FFI cdata avoids the carries, moduli, and
@@ -1024,7 +1384,6 @@ local adler32 <const> = zlib.C.adler32_z as function(
     seed: integer, bytes: loader.CValue, length: integer
 ): loader.CValue
 local crc32 <const> = zlib.C.crc32_z as function(seed: integer, bytes: loader.CValue, length: integer): loader.CValue
-local floor <const> = math.floor
 local MAX_U32 <const> = 4294967295
 
 local function checksumSeed(previous: integer, algorithm: string): integer

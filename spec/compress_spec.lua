@@ -315,6 +315,47 @@ describe("data.deflate", function()
         assert.are.equal("", data.inflateRaw(data.deflateRaw("")))
     end)
 
+    it("reuses caller-owned buffers for wrapped and raw streams", function()
+        local ioModule = require("tecs").io
+        local text = mixture(32768)
+        local compressed = ioModule.newBuffer("discarded")
+        local restored = ioModule.newBuffer("discarded")
+
+        assert.are.equal(#data.deflate(text), data.deflateInto(text, compressed))
+        local capacity = compressed:capacity()
+        local compressedView = compressed:view()
+        assert.are.equal(#text, data.inflateInto(compressedView, restored, #text))
+        compressedView:close()
+        assert.are.equal(text, restored:getString())
+
+        assert.are.equal(#data.deflateRaw(text), data.deflateRawInto(text, compressed))
+        assert.are.equal(capacity, compressed:capacity())
+        compressedView = compressed:view()
+        assert.are.equal(#text, data.inflateRawInto(compressedView, restored, #text))
+        compressedView:close()
+        assert.are.equal(text, restored:getString())
+
+        compressed:close()
+        restored:close()
+    end)
+
+    it("enforces a hard decompressed-output ceiling", function()
+        local ioModule = require("tecs").io
+        local text = string.rep("expands", 100)
+        local compressed = data.deflate(text)
+        local destination = ioModule.newBuffer("old bytes")
+
+        assert.has_error(function()
+            data.inflate(compressed, nil, #text - 1)
+        end)
+        assert.has_error(function()
+            data.inflateInto(compressed, destination, nil, #text - 1)
+        end)
+        assert.are.equal(0, destination:length())
+        assert.are.equal(text, data.inflate(compressed, #text, #text))
+        destination:close()
+    end)
+
     it("accepts every compression level and rejects invalid ones", function()
         local text = string.rep("compress me", 100)
         for level = 0, 9 do

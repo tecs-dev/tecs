@@ -380,16 +380,16 @@ pub fn test_package(root: &Path, preset: Preset) -> Result<()> {
 pub fn benchmark(root: &Path, preset: Preset, name: &str, arguments: &[OsString]) -> Result<()> {
     let source = match name {
         "shapes" | "physics" | "sprites" | "text" | "particles" | "latency" | "http" | "io"
-        | "tcp" => name,
+        | "tcp" | "data" => name,
         "alloc" | "allocation" => "allocation",
         _ => anyhow::bail!(
             "unknown benchmark {name:?}; expected shapes, physics, sprites, text, \
-             particles, latency, http, io, tcp, or allocation"
+             particles, latency, http, io, tcp, data, or allocation"
         ),
     };
-    if matches!(source, "io" | "tcp") && preset.sanitize {
+    if matches!(source, "io" | "tcp" | "data") && preset.sanitize {
         anyhow::bail!(
-            "the io and tcp benchmarks run under system LuaJIT, not the instrumented native host; \
+            "the io, tcp, and data benchmarks run under system LuaJIT, not the instrumented native host; \
              sanitizer preset {preset} would not sanitize it"
         );
     }
@@ -401,7 +401,7 @@ pub fn benchmark(root: &Path, preset: Preset, name: &str, arguments: &[OsString]
         &root.join("bench").join(format!("{source}.tl")),
         &format!("bench/{source}.lua"),
     )?;
-    let mut command = if matches!(source, "io" | "tcp") {
+    let mut command = if matches!(source, "io" | "tcp" | "data") {
         let mut command = Command::new("luajit");
         command.arg(entry);
         command

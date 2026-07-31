@@ -19,10 +19,15 @@ assert(codepoint == 0x20ac)
 assert(nextOffset == 2)
 ```
 
-The end cursor is `#text + 1`. `decodeAt` returns nil there, and
+The end cursor is the byte length plus one. `decodeAt` returns nil there, and
 `decodeBefore` returns nil at cursor 1. An offset inside a multibyte sequence
 is not moved to a boundary automatically. SDL reports the malformed fragment
 at that exact position as U+FFFD.
+
+Every inspection function accepts a Lua string or an open
+[`ByteView`](tealdoc:tecs.io.ByteView). A view is read through its retained
+pointer without first becoming a Lua string. `validPrefixLength` answers the
+byte count a caller can use to retain a zero-copy view at a UTF-8 boundary.
 
 Malformed UTF-8 is recoverable rather than exceptional. Forward decoding
 returns U+FFFD and consumes one malformed byte, so callers can keep scanning.
@@ -35,15 +40,17 @@ A combining mark, variation selector, or member of an emoji sequence is a
 separate result. Text editing that needs cursor movement by grapheme cluster
 requires a Unicode segmentation implementation above this module.
 
-Naming `tecs.data` does not load SDL for these operations. Reading `utf8`
-loads this child once.
 ]=]
 
+local ffi <const> = require("ffi")
 local loader <const> = require("tecs.ffi.loader")
 local sdl <const> = require("tecs.ffi.sdl3")
+local type ioTypes = require("tecs.io.types")
+local type ByteView = ioTypes.ByteView
+local type ByteInput = string | ByteView
 
 local floor <const> = math.floor
-local sbyte <const> = string.byte
+local max <const> = math.max
 local sub <const> = string.sub
 local INVALID <const> = 0xfffd
 local MAX_CODEPOINT <const> = 0x10ffff
@@ -51,24 +58,23 @@ local MAX_CODEPOINT <const> = 0x10ffff
 local stepUTF8 <const> = sdl.C.SDL_StepUTF8 as function(cursor: loader.CArray, remaining: loader.CArray): integer
 local encodeUTF8 <const> = sdl.C.SDL_UCS4ToUTF8 as function(codepoint: integer, destination: loader.CArray): any
 
--- LuaJIT string pointers are borrowed for the duration of each SDL call.
--- Naming their one operation keeps the cast narrow and lets Teal reject
--- arithmetic on every other open C value.
-local record StringPointer
-    metamethod __add: function(self: StringPointer, offset: integer): StringPointer
+local record ByteRange
+    pointer: loader.BytePointer
+    length: integer
+    owner: ByteInput
 end
 
 local record dataUTF8
-    --- Counts Unicode codepoints in a Lua string.
+    --- Counts Unicode codepoints in bytes.
     ---
     --- This is not a byte count or a grapheme count. Each malformed byte
     --- contributes one U+FFFD result, while an embedded NUL contributes the
     --- valid U+0000 codepoint and does not end the input.
     ---
-    --- @param text The complete byte string. The function reads all `#text`
-    ---     bytes, including bytes after an embedded NUL.
+    --- @param bytes The caller supplies a complete byte string or open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView), including embedded NUL.
     --- @return The number of forward decoding steps.
-    length: function(text: string): integer
+    length: function(bytes: ByteInput): integer
 
     --- Decodes the codepoint beginning at a byte offset.
     ---
@@ -77,13 +83,15 @@ local record dataUTF8
     --- codepoint boundary when the caller supplies an offset inside a
     --- multibyte sequence.
     ---
-    --- @param text The complete byte string. Embedded NUL is U+0000.
-    --- @param byteOffset A one-based byte cursor from 1 through `#text + 1`.
-    ---     The final value is the end cursor. Other values raise.
+    --- @param bytes The caller supplies a complete byte string or open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView). Embedded NUL is U+0000.
+    --- @param byteOffset A one-based byte cursor from 1 through the byte
+    ---     length plus one. The final value is the end cursor. Other values
+    ---     raise.
     --- @return The Unicode codepoint, or nil at the end cursor.
     --- @return The one-based cursor immediately after the result, or the
     ---     unchanged end cursor when no codepoint remains.
-    decodeAt: function(text: string, byteOffset: integer): integer | nil, integer
+    decodeAt: function(bytes: ByteInput, byteOffset: integer): integer | nil, integer
 
     --- Decodes the codepoint before a byte cursor.
     ---
@@ -92,13 +100,15 @@ local record dataUTF8
     --- reports the final byte as U+FFFD instead. Forward and reverse scans
     --- therefore recover from malformed input one byte at a time.
     ---
-    --- @param text The complete byte string. Embedded NUL is U+0000.
-    --- @param byteOffset A one-based byte cursor from 1 through `#text + 1`.
-    ---     The value points after the codepoint to read. Other values raise.
+    --- @param bytes The caller supplies a complete byte string or open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView). Embedded NUL is U+0000.
+    --- @param byteOffset A one-based byte cursor from 1 through the byte
+    ---     length plus one. It points after the codepoint to read. Other
+    ---     values raise.
     --- @return The preceding Unicode codepoint, or nil at cursor 1.
     --- @return The one-based starting offset of the result, or 1 when no
     ---     codepoint precedes the cursor.
-    decodeBefore: function(text: string, byteOffset: integer): integer | nil, integer
+    decodeBefore: function(bytes: ByteInput, byteOffset: integer): integer | nil, integer
 
     --- Encodes one Unicode scalar value as UTF-8.
     ---
@@ -114,11 +124,25 @@ local record dataUTF8
     --- codepoints above U+10FFFF, stray continuation bytes, and truncated
     --- sequences. Embedded NUL and an encoded U+FFFD are valid.
     ---
-    --- @param text The complete byte string. The function reads all `#text`
-    ---     bytes rather than treating NUL as a terminator.
+    --- @param bytes The caller supplies a complete byte string or open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView), including embedded NUL.
     --- @return True only when forward decoding never needs a replacement for
     ---     a malformed byte.
-    isValid: function(text: string): boolean
+    isValid: function(bytes: ByteInput): boolean
+
+    --- Returns the longest prefix ending at a complete UTF-8 decoding unit.
+    ---
+    --- The function returns a byte count and never copies the input. A caller
+    --- can pass the result to `ByteView:view` to retain the prefix. Malformed
+    --- bytes remain one-byte units and therefore fit whenever their byte does.
+    ---
+    --- @param bytes The caller supplies a complete byte string or open
+    ---     [`ByteView`](tealdoc:tecs.io.ByteView).
+    --- @param maxBytes A non-negative integer byte ceiling. Other values
+    ---     raise.
+    --- @return Returns the largest safe prefix length no greater than
+    ---     `maxBytes`.
+    validPrefixLength: function(bytes: ByteInput, maxBytes: integer): integer
 
     --- Truncates a string without splitting a valid UTF-8 sequence.
     ---
@@ -134,8 +158,35 @@ local record dataUTF8
     truncate: function(text: string, maxBytes: integer): string
 end
 
-local function checkOffset(text: string, byteOffset: integer, level: integer)
-    local maximum <const> = #text + 1
+local function byteRange(value: ByteInput, level: integer): ByteRange
+    if type(value) == "string" then
+        local text <const> = value as string
+        return {
+            pointer = ffi.cast("uint8_t *", text) as loader.BytePointer,
+            length = #text,
+            owner = text,
+        }
+    end
+    local dynamic <const> = value as {string: any}
+    if
+        type(value) ~= "table"
+        or type(dynamic.length) ~= "function"
+        or type(dynamic.getFFIPointer) ~= "function"
+        or type(dynamic.isReleased) ~= "function"
+        or (dynamic.isReleased as function(any): boolean)(value)
+    then
+        error("tecs: UTF-8 needs a byte string or open io.ByteView", level)
+    end
+    local view <const> = value as ByteView
+    return {
+        pointer = view:getFFIPointer(),
+        length = view:length(),
+        owner = view,
+    }
+end
+
+local function checkOffset(bytes: ByteRange, byteOffset: integer, level: integer)
+    local maximum <const> = bytes.length + 1
     if type(byteOffset) ~= "number" or byteOffset ~= floor(byteOffset) or byteOffset < 1 or byteOffset > maximum then
         error(("tecs: UTF-8 byte offset must be an integer from 1 through %d"):format(maximum), level)
     end
@@ -147,15 +198,14 @@ end
 --- SDL uses codepoint zero as its end sentinel and deliberately leaves the
 --- cursor unchanged. Lua strings are length-delimited, so zero is data here.
 local function forward(
-    text: string, byteOffset: integer, cursor: loader.CArray, remaining: loader.CArray
+    bytes: ByteRange, byteOffset: integer, cursor: loader.CArray, remaining: loader.CArray
 ): integer, integer
-    if sbyte(text, byteOffset) == 0 then
+    if bytes.pointer[byteOffset - 1] == 0 then
         return 0, byteOffset + 1
     end
 
-    local available <const> = #text - byteOffset + 1
-    cursor[0] = text
-    cursor[0] = (cursor[0] as StringPointer) + (byteOffset - 1)
+    local available <const> = bytes.length - byteOffset + 1
+    cursor[0] = ffi.cast("const char *", bytes.pointer + (byteOffset - 1))
     remaining[0] = available
     local codepoint <const> = stepUTF8(cursor, remaining)
     -- SDL 3.4.12's implementation accepts the unused historical four-byte
@@ -169,42 +219,46 @@ local function forward(
     return codepoint, byteOffset + available - (tonumber(remaining[0]) as integer)
 end
 
-function dataUTF8.length(text: string): integer
+function dataUTF8.length(value: ByteInput): integer
+    local bytes <const> = byteRange(value, 2)
     local cursor <const> = loader.newArray("const char *[1]")
     local remaining <const> = loader.newArray("size_t[1]")
     local byteOffset = 1
     local count = 0
-    while byteOffset <= #text do
-        local _, nextOffset = forward(text, byteOffset, cursor, remaining)
+    while byteOffset <= bytes.length do
+        local _, nextOffset = forward(bytes, byteOffset, cursor, remaining)
         byteOffset = nextOffset
         count = count + 1
     end
     return count
 end
 
-function dataUTF8.decodeAt(text: string, byteOffset: integer): integer | nil, integer
-    checkOffset(text, byteOffset, 3)
-    if byteOffset > #text then
+function dataUTF8.decodeAt(value: ByteInput, byteOffset: integer): integer | nil, integer
+    local bytes <const> = byteRange(value, 2)
+    checkOffset(bytes, byteOffset, 3)
+    if byteOffset > bytes.length then
         return nil, byteOffset
     end
 
     local cursor <const> = loader.newArray("const char *[1]")
     local remaining <const> = loader.newArray("size_t[1]")
-    return forward(text, byteOffset, cursor, remaining)
+    return forward(bytes, byteOffset, cursor, remaining)
 end
 
-function dataUTF8.decodeBefore(text: string, byteOffset: integer): integer | nil, integer
-    checkOffset(text, byteOffset, 3)
+function dataUTF8.decodeBefore(value: ByteInput, byteOffset: integer): integer | nil, integer
+    local bytes <const> = byteRange(value, 2)
+    checkOffset(bytes, byteOffset, 3)
     if byteOffset == 1 then
         return nil, 1
     end
-    if sbyte(text, byteOffset - 1) == 0 then
+    if bytes.pointer[byteOffset - 2] == 0 then
         return 0, byteOffset - 1
     end
 
     local startOffset = byteOffset - 1
-    while startOffset > 1 do
-        local byte <const> = sbyte(text, startOffset)
+    local minimum <const> = max(1, byteOffset - 4)
+    while startOffset > minimum do
+        local byte <const> = bytes.pointer[startOffset - 1] as integer
         if byte < 0x80 or byte >= 0xc0 then
             break
         end
@@ -216,7 +270,7 @@ function dataUTF8.decodeBefore(text: string, byteOffset: integer): integer | nil
     -- keeps reverse recovery symmetrical with forward recovery.
     local forwardCursor <const> = loader.newArray("const char *[1]")
     local remaining <const> = loader.newArray("size_t[1]")
-    local codepoint, nextOffset = forward(text, startOffset, forwardCursor, remaining)
+    local codepoint, nextOffset = forward(bytes, startOffset, forwardCursor, remaining)
     if nextOffset ~= byteOffset then
         return INVALID, byteOffset - 1
     end
@@ -240,12 +294,13 @@ function dataUTF8.encode(codepoint: integer): string
     return loader.toBytes(destination as loader.CValue, length)
 end
 
-function dataUTF8.isValid(text: string): boolean
+function dataUTF8.isValid(value: ByteInput): boolean
+    local bytes <const> = byteRange(value, 2)
     local cursor <const> = loader.newArray("const char *[1]")
     local remaining <const> = loader.newArray("size_t[1]")
     local byteOffset = 1
-    while byteOffset <= #text do
-        local codepoint, nextOffset = forward(text, byteOffset, cursor, remaining)
+    while byteOffset <= bytes.length do
+        local codepoint, nextOffset = forward(bytes, byteOffset, cursor, remaining)
         if codepoint == INVALID and nextOffset == byteOffset + 1 then
             return false
         end
@@ -254,27 +309,43 @@ function dataUTF8.isValid(text: string): boolean
     return true
 end
 
-function dataUTF8.truncate(text: string, maxBytes: integer): string
+function dataUTF8.validPrefixLength(value: ByteInput, maxBytes: integer): integer
     if type(maxBytes) ~= "number" or maxBytes ~= floor(maxBytes) or maxBytes < 0 then
         error("tecs: UTF-8 maxBytes must be a non-negative integer", 2)
     end
-    if #text <= maxBytes then
-        return text
+    local bytes <const> = byteRange(value, 2)
+    if bytes.length <= maxBytes then
+        return bytes.length
+    end
+    if maxBytes == 0 then
+        return 0
     end
 
-    local cursor <const> = loader.newArray("const char *[1]")
-    local remaining <const> = loader.newArray("size_t[1]")
-    local byteOffset = 1
-    local endOffset = 1
-    while byteOffset <= #text and byteOffset <= maxBytes do
-        local _, nextOffset = forward(text, byteOffset, cursor, remaining)
-        if nextOffset - 1 > maxBytes then
+    local endCursor <const> = maxBytes + 1
+    local startOffset = maxBytes
+    local minimum <const> = max(1, endCursor - 4)
+    while startOffset > minimum do
+        local byte <const> = bytes.pointer[startOffset - 1] as integer
+        if byte < 0x80 or byte >= 0xc0 then
             break
         end
-        endOffset = nextOffset
-        byteOffset = nextOffset
+        startOffset = startOffset - 1
     end
-    return sub(text, 1, endOffset - 1)
+    local cursor <const> = loader.newArray("const char *[1]")
+    local remaining <const> = loader.newArray("size_t[1]")
+    local _, nextOffset = forward(bytes, startOffset, cursor, remaining)
+    if nextOffset > endCursor then
+        return startOffset - 1
+    end
+    return maxBytes
+end
+
+function dataUTF8.truncate(text: string, maxBytes: integer): string
+    local length <const> = dataUTF8.validPrefixLength(text, maxBytes)
+    if length == #text then
+        return text
+    end
+    return sub(text, 1, length)
 end
 
 return dataUTF8

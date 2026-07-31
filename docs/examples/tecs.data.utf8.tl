@@ -43,6 +43,21 @@ assert(utf8.isValid("café"))
 assert(not utf8.isValid("\xff"))
 -- #endregion tecs.data.utf8.isValid
 
+-- #region tecs.data.utf8.validPrefixLength
+--[=[
+Retains a zero-copy prefix at a complete codepoint boundary.
+]=]
+local tecs <const> = require("tecs")
+local bytes <const> = tecs.io.newBuffer("A€B")
+local all <const> = bytes:view()
+local count <const> = tecs.data.utf8.validPrefixLength(all, 3)
+local prefix <const> = all:view(0, count)
+assert(prefix:getString() == "A")
+prefix:close()
+all:close()
+bytes:close()
+-- #endregion tecs.data.utf8.validPrefixLength
+
 -- #region tecs.data.utf8.truncate
 --[=[
 Leaves a multibyte codepoint intact at the byte limit.

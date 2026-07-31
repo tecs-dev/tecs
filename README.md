@@ -845,9 +845,7 @@ because its implementation contains arithmetic or randomness.
 ## Data transforms and typed stores
 
 Encoding, hashing and decompression share the public `tecs.data` module because
-a save is encoded, compressed and stamped as one task. Their implementations
-remain in three files, and the surface resolves them lazily, so asking for a
-hash loads neither encoder nor decompressor.
+a save is encoded, compressed and stamped as one task.
 
 UUID generation shares that module because its result is an identifier stored
 in data, not a mathematical operation. `uuid4` uses operating-system randomness

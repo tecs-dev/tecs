@@ -7,7 +7,8 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local utf8 = require("tecs").data.utf8
+local tecs = require("tecs")
+local utf8 = tecs.data.utf8
 local REPLACEMENT = 0xfffd
 
 describe("tecs.data.utf8", function()
@@ -161,6 +162,26 @@ describe("tecs.data.utf8", function()
         assert.are.equal(2, utf8.length("e\204\129"))
     end)
 
+    it("inspects retained byte views without copying them to strings", function()
+        local source = tecs.io.newBuffer("before:A\226\130\172B:after")
+        local view = source:view(7, 5)
+        view.getString = function()
+            error("UTF-8 copied its input")
+        end
+        source:close()
+
+        assert.are.equal(3, utf8.length(view))
+        assert.is_true(utf8.isValid(view))
+        local codepoint, offset = utf8.decodeAt(view, 2)
+        assert.are.equal(0x20ac, codepoint)
+        assert.are.equal(5, offset)
+        codepoint, offset = utf8.decodeBefore(view, offset)
+        assert.are.equal(0x20ac, codepoint)
+        assert.are.equal(2, offset)
+        assert.are.equal(4, utf8.validPrefixLength(view, 4))
+        view:close()
+    end)
+
     it("truncates only at complete decoding units", function()
         local text = "A\226\130\172B"
         assert.are.equal("", utf8.truncate(text, 0))
@@ -170,6 +191,27 @@ describe("tecs.data.utf8", function()
         assert.are.equal("A\226\130\172", utf8.truncate(text, 4))
         assert.are.equal(text, utf8.truncate(text, 5))
         assert.are.equal(text, utf8.truncate(text, 100))
+    end)
+
+    it("finds a safe prefix without allocating a result", function()
+        local text = "A\226\130\172B"
+        assert.are.equal(0, utf8.validPrefixLength(text, 0))
+        assert.are.equal(1, utf8.validPrefixLength(text, 1))
+        assert.are.equal(1, utf8.validPrefixLength(text, 2))
+        assert.are.equal(1, utf8.validPrefixLength(text, 3))
+        assert.are.equal(4, utf8.validPrefixLength(text, 4))
+        assert.are.equal(5, utf8.validPrefixLength(text, 100))
+
+        local malformed = "\226\130"
+        assert.are.equal(1, utf8.validPrefixLength(malformed, 1))
+        assert.are.equal(2, utf8.validPrefixLength(malformed, 2))
+    end)
+
+    it("bounds reverse resynchronization across malformed continuation runs", function()
+        local text = string.rep("\128", 10000)
+        local codepoint, offset = utf8.decodeBefore(text, #text + 1)
+        assert.are.equal(REPLACEMENT, codepoint)
+        assert.are.equal(#text, offset)
     end)
 
     it("preserves complete NUL and malformed byte units when truncating", function()
@@ -211,6 +253,9 @@ describe("tecs.data.utf8", function()
         end)
         assert.has_error(function()
             utf8.truncate("a", "1")
+        end)
+        assert.has_error(function()
+            utf8.validPrefixLength("a", -1)
         end)
 
         assert.has_error(function()

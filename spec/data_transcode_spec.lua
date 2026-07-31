@@ -1,7 +1,9 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local transcode = require("tecs").data.transcode
+local tecs = require("tecs")
+local data = tecs.data
+local transcode = data.transcode
 
 describe("tecs.data.transcode", function()
     it("round-trips UTF-16LE without losing embedded NULs", function()
@@ -26,6 +28,29 @@ describe("tecs.data.transcode", function()
 
         assert.are.equal(12000, #utf16)
         assert.are.equal(text, transcode(utf16, "UTF-16LE", "UTF-8"))
+    end)
+
+    it("writes into a reusable buffer without intermediate output strings", function()
+        local destination = tecs.io.newBuffer("discarded")
+        local text = string.rep("\195\169\0", 3000)
+
+        assert.are.equal(12000, data.transcodeInto(text, "UTF-8", "UTF-16LE", destination))
+        local capacity = destination:capacity()
+        assert.are.equal(text, transcode(destination:getString(), "UTF-16LE", "UTF-8"))
+
+        assert.are.equal(2, data.transcodeInto("A", "UTF-8", "UTF-16LE", destination))
+        assert.are.equal("A\0", destination:getString())
+        assert.are.equal(capacity, destination:capacity())
+        destination:close()
+    end)
+
+    it("leaves the destination empty when conversion fails", function()
+        local destination = tecs.io.newBuffer("old bytes")
+        assert.has_error(function()
+            data.transcodeInto("\195(", "UTF-8", "UTF-16LE", destination)
+        end)
+        assert.are.equal(0, destination:length())
+        destination:close()
     end)
 
     it("accepts empty input while still validating the encodings", function()
