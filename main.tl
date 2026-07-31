@@ -242,7 +242,8 @@ return tecs.newApplication({
             ChildOf(header)
         )
         world:spawn(
-            ui.Style({position = "absolute", width = 310, height = 28, inset = {left = 58, top = 0}}),
+            ui.Style({position = "absolute", inset = {left = 58, top = 0}}),
+            ui.Intrinsic("text"),
             RelativeTransform(0, 0, 3),
             Tint(0.94, 0.97, 1.0, 1.0),
             tecs.gfx.Text.new({
@@ -253,7 +254,8 @@ return tecs.newApplication({
             ChildOf(header)
         )
         world:spawn(
-            ui.Style({position = "absolute", width = 310, height = 20, inset = {left = 58, top = 32}}),
+            ui.Style({position = "absolute", inset = {left = 58, top = 32}}),
+            ui.Intrinsic("text"),
             RelativeTransform(0, 0, 3),
             Tint(0.54, 0.64, 0.76, 1.0),
             tecs.gfx.Text.new({
@@ -265,7 +267,8 @@ return tecs.newApplication({
         )
 
         local status <const> = world:spawn(
-            ui.Style({height = 42, width = "100%"}),
+            ui.Style({minHeight = 42, width = "100%"}),
+            ui.Intrinsic("text"),
             RelativeTransform(0, 0, 3),
             Tint(0.62, 0.75, 0.88, 1.0),
             tecs.gfx.Text.new({
@@ -300,7 +303,8 @@ return tecs.newApplication({
                 ChildOf(control)
             )
             world:spawn(
-                ui.Style({position = "absolute", width = 300, height = 24, inset = {left = 14, top = 11}}),
+                ui.Style({position = "absolute", inset = {left = 14, top = 11}}),
+                ui.Intrinsic("text"),
                 RelativeTransform(0, 0, 2),
                 Tint(0.9, 0.95, 1.0, 1.0),
                 tecs.gfx.Text.new({text = label, font = font, size = 16}),
@@ -346,7 +350,8 @@ return tecs.newApplication({
                 ChildOf(control)
             )
             world:spawn(
-                ui.Style({position = "absolute", width = 90, height = 22, inset = {left = 12, top = 11}}),
+                ui.Style({position = "absolute", inset = {left = 12, top = 11}}),
+                ui.Intrinsic("text"),
                 RelativeTransform(0, 0, 2),
                 Tint(0.9, 0.95, 1.0, 1.0),
                 tecs.gfx.Text.new({text = label, font = font, size = 15}),
@@ -385,6 +390,15 @@ return tecs.newApplication({
                 gap = 8,
             }),
             RelativeTransform(),
+            ChildOf(viewport)
+        )
+        world:spawn(
+            ui.Scrollbar("vertical", 6, 2, 18),
+            ui.Interaction({focusable = false, draggable = true, order = 100}),
+            RelativeTransform(0, 0, 10),
+            Tint(0.32, 0.82, 1.0, 0.85),
+            tecs.gfx.Material(materials.id("rounded"), 0.5),
+            Renderable(),
             ChildOf(viewport)
         )
         local labels <const> = {

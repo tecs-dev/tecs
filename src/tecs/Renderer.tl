@@ -346,6 +346,36 @@ function Renderer:sprite(name: string, u0?: number, v0?: number, u1?: number, v1
     return self._extractor:sprite(name, u0, v0, u1, v1)
 end
 
+--- Returns a sprite's natural width and height in source-image pixels.
+---
+--- A static sub-rectangle returns its fraction of the registered image. A GPU
+--- animation encoding returns the whole image because its current frame lives
+--- in the frame table rather than in the sprite's UV fields.
+---
+--- @param sprite The caller supplies a [`Sprite`](tealdoc:tecs.components.Sprite)
+---     whose image has been registered on this renderer.
+--- @return Returns natural source width, or zero when the image is unresolved.
+--- @return Returns natural source height, or zero when the image is unresolved.
+function Renderer:spriteSize(sprite: components.Sprite): number, number
+    if sprite == nil or sprite.image == 0 then
+        return 0, 0
+    end
+    local region = self._extractor:regionOf(sprite.image as integer)
+    if region == nil then
+        return 0, 0
+    end
+    if sprite.u0 < 0 then
+        return region.width, region.height
+    end
+    local spanU = region.u1 - region.u0
+    local spanV = region.v1 - region.v0
+    if spanU == 0 or spanV == 0 then
+        return 0, 0
+    end
+    return math.abs((sprite.u1 - sprite.u0) / spanU) * region.width,
+        math.abs((sprite.v1 - sprite.v0) / spanV) * region.height
+end
+
 --- Points region `index` at a rectangle in target pixels.
 ---
 --- Fragments of an instance carrying `Clip(index)` are kept where they land

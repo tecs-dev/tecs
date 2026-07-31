@@ -28,6 +28,15 @@ local function fakeRenderer()
         self.calls = self.calls + 1
         return x, y
     end
+    function renderer.camera:toWorld(x, y, width, height)
+        local dx = (x - width * 0.5) / self.zoom
+        local dy = (y - height * 0.5) / self.zoom
+        local cosine, sine = math.cos(self.rotation), math.sin(self.rotation)
+        return self.x + dx * cosine - dy * sine, self.y + dx * sine + dy * cosine
+    end
+    function renderer:spriteSize()
+        return self.spriteWidth or 0, self.spriteHeight or 0
+    end
     function renderer:setClipRegion(index, region)
         self.clips[index] = {
             x = region.x,
@@ -68,9 +77,11 @@ local function fakeInput()
         released = {},
         keys = {},
         modifiers = {},
+        touchList = {},
+        readable = true,
     }
     function input:canRead()
-        return true
+        return self.readable
     end
     function input:mousePressed(button)
         return self.pressed[button] == true
@@ -83,6 +94,9 @@ local function fakeInput()
     end
     function input:modifierDown(name)
         return self.modifiers[name] == true
+    end
+    function input:touches()
+        return self.touchList
     end
     function input:clear()
         self.wheelX, self.wheelY = 0, 0
@@ -121,6 +135,65 @@ describe("tecs.ui", function()
         assert.are.equal(180, root.height)
         assert.are.equal(1.5, root.pixelDensity)
         assert.are.equal(140, world:get(child, ui.Layout).width)
+    end)
+
+    it("measures custom and image leaves without authored dimensions", function()
+        local renderer = fakeRenderer()
+        renderer.spriteWidth, renderer.spriteHeight = 80, 40
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer }))
+
+        local rootEntity = world:spawn(
+            ui.Style({ width = 200, height = 100, flexDirection = "row", alignItems = "center" }),
+            ui.Root("screen", 200, 100, 1)
+        )
+        local custom = world:spawn(
+            ui.Style(),
+            ui.Intrinsic("custom", { width = 42, height = 17 }),
+            RelativeTransform(),
+            ChildOf(rootEntity)
+        )
+        local image = world:spawn(
+            ui.Style({ width = 30 }),
+            ui.Intrinsic("image"),
+            components.Sprite(1),
+            RelativeTransform(),
+            ChildOf(rootEntity)
+        )
+
+        world:update(1 / 60)
+
+        assert.are.equal(42, world:get(custom, ui.Layout).width)
+        assert.are.equal(17, world:get(custom, ui.Layout).height)
+        assert.are.equal(30, world:get(image, ui.Layout).width)
+        assert.are.equal(15, world:get(image, ui.Layout).height)
+    end)
+
+    it("derives camera-sized world roots and preserves manual roots", function()
+        local renderer = fakeRenderer()
+        renderer.camera.x, renderer.camera.y, renderer.camera.zoom = 10, 20, 2
+        local window = fakeWindow(200, 100, 2)
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer, window = window }))
+
+        local cameraRoot = world:spawn(ui.Style(), ui.Root("world", 0, 0, 1, "camera"))
+        local manualRoot = world:spawn(ui.Style(), ui.Root("world", 70, 40, 3, "manual"))
+        world:update(1 / 60)
+
+        local root = world:get(cameraRoot, ui.Root)
+        local transform = world:get(cameraRoot, Transform)
+        assert.are.equal(200, root.width)
+        assert.are.equal(100, root.height)
+        assert.are.equal(2, root.pixelDensity)
+        assert.are.equal(-90, transform.x)
+        assert.are.equal(-30, transform.y)
+        assert.are.equal(70, world:get(manualRoot, ui.Root).width)
+
+        window.width = 300
+        renderer.camera.x = 30
+        world:update(1 / 60)
+        assert.are.equal(300, world:get(cameraRoot, ui.Root).width)
+        assert.are.equal(70, world:get(manualRoot, ui.Root).width)
     end)
 
     it("rejects malformed dimension strings when a style is synchronized", function()
@@ -196,7 +269,8 @@ describe("tecs.ui", function()
 
         local viewport =
             world:spawn(ui.Style({ width = 100, height = 80 }), ui.Root("screen", 100, 80, 2), ui.Scroll(10, 12))
-        local child = world:spawn(ui.Style({ width = 20, height = 10 }), RelativeTransform(), ChildOf(viewport))
+        local child =
+            world:spawn(ui.Style({ width = 200, height = 100, flexShrink = 0 }), RelativeTransform(), ChildOf(viewport))
 
         world:update(1 / 60)
 
@@ -312,6 +386,8 @@ describe("tecs.ui", function()
         assert.is_true(state.focused)
         assert.same({
             "pointerEnter:" .. button,
+            "pointerMove:" .. button,
+            "pointerMove:" .. rootEntity,
             "focus:" .. button,
             "focus:" .. rootEntity,
             "pointerDown:" .. button,
@@ -379,6 +455,86 @@ describe("tecs.ui", function()
         assert.are.equal(12, world:get(viewport, ui.Scroll).y)
     end)
 
+    it("hands unused wheel distance to ancestor viewports", function()
+        local renderer = fakeRenderer()
+        local input = fakeInput()
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer, input = input, wheelStep = 10 }))
+
+        local outer = world:spawn(ui.Style({ width = 100, height = 100 }), ui.Root("screen", 100, 100, 1), ui.Scroll())
+        local inner =
+            world:spawn(ui.Style({ width = 100, height = 60 }), ui.Scroll(), RelativeTransform(), ChildOf(outer))
+        world:spawn(ui.Style({ width = 100, height = 120 }), RelativeTransform(), ChildOf(inner))
+        world:spawn(ui.Style({ width = 100, height = 180 }), RelativeTransform(), ChildOf(outer))
+        world:update(1 / 60)
+
+        world:getMut(inner, ui.Scroll).y = 60
+        world:update(1 / 60)
+        input.mouseX, input.mouseY = 20, 20
+        input.wheelY = -1
+        world:update(1 / 60)
+
+        assert.are.equal(60, world:get(inner, ui.Scroll).y)
+        assert.are.equal(10, world:get(outer, ui.Scroll).y)
+    end)
+
+    it("tracks negative content, clamps offsets, and persists only offsets", function()
+        local renderer = fakeRenderer()
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer }))
+
+        local viewport = world:spawn(ui.Style({ width = 100, height = 60 }), ui.Root("screen", 100, 60, 1), ui.Scroll())
+        world:spawn(
+            ui.Style({ position = "absolute", width = 40, height = 30, inset = { left = -25, top = -15 } }),
+            RelativeTransform(),
+            ChildOf(viewport)
+        )
+        world:update(1 / 60)
+
+        local scroll = world:get(viewport, ui.Scroll)
+        assert.are.equal(-25, scroll.contentX)
+        assert.are.equal(-15, scroll.contentY)
+        world:getMut(viewport, ui.Scroll).x = -100
+        world:getMut(viewport, ui.Scroll).y = 100
+        world:update(1 / 60)
+        scroll = world:get(viewport, ui.Scroll)
+        assert.are.equal(scroll.contentX, scroll.x)
+        assert.are.equal(0, scroll.y)
+        assert.same({ x = scroll.x, y = scroll.y }, ui.Scroll.serialize(scroll))
+    end)
+
+    it("derives and drags a composed scrollbar thumb", function()
+        local renderer = fakeRenderer()
+        local input = fakeInput()
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer, input = input, dragThreshold = 1 }))
+
+        local viewport =
+            world:spawn(ui.Style({ width = 100, height = 100 }), ui.Root("screen", 100, 100, 1), ui.Scroll())
+        world:spawn(ui.Style({ width = 100, height = 200 }), RelativeTransform(), ChildOf(viewport))
+        local thumb = world:spawn(
+            ui.Scrollbar("vertical", 6, 2, 18),
+            ui.Interaction({ draggable = true, focusable = false, order = 10 }),
+            ChildOf(viewport)
+        )
+        world:update(1 / 60)
+
+        local relative = world:get(thumb, RelativeTransform)
+        assert.are.equal(95, relative.x)
+        assert.are.equal(26, relative.y)
+        assert.are.equal(6, relative.scaleX)
+        assert.are.equal(48, relative.scaleY)
+
+        input.mouseX, input.mouseY = 95, 26
+        input.pressed.left = true
+        world:update(1 / 60)
+        input:clear()
+        input.mouseY = 50
+        world:update(1 / 60)
+        assert.are.equal(50, world:get(viewport, ui.Scroll).y)
+        assert.is_true(world:get(thumb, ui.InteractionState).dragging)
+    end)
+
     it("navigates visible controls and activates focus from the keyboard", function()
         local renderer = fakeRenderer()
         local input = fakeInput()
@@ -428,5 +584,146 @@ describe("tecs.ui", function()
         world:update(1 / 60)
         assert.is_true(world:get(first, ui.InteractionState).focused)
         assert.is_false(world:get(second, ui.InteractionState).focused)
+    end)
+
+    it("supports programmatic focus, reveal, and nested focus scopes", function()
+        local renderer = fakeRenderer()
+        local input = fakeInput()
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer, input = input }))
+
+        local rootEntity =
+            world:spawn(ui.Style({ width = 100, height = 50 }), ui.Root("screen", 100, 50, 1), ui.Scroll())
+        local outside = world:spawn(
+            ui.Style({ width = 80, height = 30 }),
+            ui.Interaction({ order = 1 }),
+            RelativeTransform(),
+            ChildOf(rootEntity)
+        )
+        local scope = world:spawn(
+            ui.Style({ width = 80, height = 80 }),
+            ui.FocusScope(),
+            RelativeTransform(),
+            ChildOf(rootEntity)
+        )
+        local inside = world:spawn(
+            ui.Style({ width = 70, height = 30, margin = { top = 40 } }),
+            ui.Interaction({ order = 2 }),
+            RelativeTransform(),
+            ChildOf(scope)
+        )
+        world:update(1 / 60)
+
+        assert.is_true(ui.focus(world, outside))
+        assert.are.equal(outside, ui.focused(world))
+        assert.is_true(ui.pushFocusScope(world, scope))
+        assert.are.equal(inside, ui.focused(world))
+        assert.is_false(ui.focus(world, outside))
+        assert.are.equal(inside, ui.focused(world))
+        assert.is_true(world:get(rootEntity, ui.Scroll).y > 0)
+        assert.is_true(ui.popFocusScope(world, scope))
+        assert.are.equal(outside, ui.focused(world))
+        assert.is_true(ui.blur(world))
+        assert.is_nil(ui.focused(world))
+    end)
+
+    it("uses explicit interaction order and a stable retained fallback", function()
+        local renderer = fakeRenderer()
+        local input = fakeInput()
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer, input = input }))
+
+        local rootEntity = world:spawn(ui.Style({ width = 80, height = 40 }), ui.Root("screen", 80, 40, 1))
+        local first = world:spawn(
+            ui.Style({ position = "absolute", width = 40, height = 30 }),
+            ui.Interaction(),
+            RelativeTransform(),
+            ChildOf(rootEntity)
+        )
+        local second = world:spawn(
+            ui.Style({ position = "absolute", width = 40, height = 30 }),
+            ui.Interaction(),
+            RelativeTransform(),
+            ChildOf(rootEntity)
+        )
+        local clicked
+        world:observe(first, ui.Event, function(event)
+            if event.kind == "click" then
+                clicked = first
+            end
+        end)
+        world:observe(second, ui.Event, function(event)
+            if event.kind == "click" then
+                clicked = second
+            end
+        end)
+        world:update(1 / 60)
+
+        input.mouseX, input.mouseY = 10, 10
+        input.pressed.left = true
+        world:update(1 / 60)
+        input:clear()
+        input.released.left = true
+        world:update(1 / 60)
+        assert.are.equal(second, clicked)
+
+        world:getMut(first, ui.Interaction).order = 5
+        world:update(1 / 60)
+        clicked = nil
+        input:clear()
+        input.pressed.left = true
+        world:update(1 / 60)
+        input:clear()
+        input.released.left = true
+        world:update(1 / 60)
+        assert.are.equal(first, clicked)
+    end)
+
+    it("tracks simultaneous touches and emits pointer-specific drag events", function()
+        local renderer = fakeRenderer()
+        local input = fakeInput()
+        local world = tecs.ecs.newWorld()
+        world:addPlugin(ui.plugin({ renderer = renderer, input = input, dragThreshold = 2 }))
+
+        local rootEntity =
+            world:spawn(ui.Style({ width = 100, height = 40, flexDirection = "row" }), ui.Root("screen", 100, 40, 1))
+        local first = world:spawn(
+            ui.Style({ width = 50, height = 40 }),
+            ui.Interaction({ draggable = true }),
+            RelativeTransform(),
+            ChildOf(rootEntity)
+        )
+        local second = world:spawn(
+            ui.Style({ width = 50, height = 40 }),
+            ui.Interaction(),
+            RelativeTransform(),
+            ChildOf(rootEntity)
+        )
+        local events = {}
+        world:observe(first, ui.Event, function(event)
+            if event.kind:match("^drag") then
+                events[#events + 1] = event.kind .. ":" .. event.pointerId .. ":" .. event.pointerType
+            end
+        end)
+        world:update(1 / 60)
+
+        input.touchList = {
+            { device = "touch", finger = "one", x = 10, y = 10, pressure = 1 },
+            { device = "touch", finger = "two", x = 70, y = 10, pressure = 1 },
+        }
+        world:update(1 / 60)
+        assert.is_true(world:get(first, ui.InteractionState).pressed)
+        assert.is_true(world:get(second, ui.InteractionState).pressed)
+
+        input.touchList[1].x = 20
+        world:update(1 / 60)
+        assert.same({ "dragStart:touch:one:touch", "dragMove:touch:one:touch" }, events)
+        assert.is_true(world:get(first, ui.InteractionState).dragging)
+
+        table.remove(input.touchList, 1)
+        world:update(1 / 60)
+        assert.are.equal("dragEnd:touch:one:touch", events[#events])
+        assert.is_false(world:get(first, ui.InteractionState).pressed)
+        assert.is_true(world:get(second, ui.InteractionState).pressed)
     end)
 end)
