@@ -63,10 +63,13 @@ pub enum Command {
     /// Compile and run the project's specs.
     Test,
 
-    /// Compile sources and stage assets.
+    /// Stage development assets without compiling source code.
     Build,
 
-    /// Build and launch the game.
+    /// Type-check, precompile, and stage a distributable build.
+    Dist,
+
+    /// Launch the game from its source entry.
     Run {
         /// Application entry to run instead of the one in tecs.lua.
         entry: Option<PathBuf>,
@@ -217,6 +220,7 @@ fn run_result(command: Command) -> Vec<u8> {
         }
         Command::Test => push_field(&mut result, b"test"),
         Command::Build => push_field(&mut result, b"build"),
+        Command::Dist => push_field(&mut result, b"dist"),
         Command::Run { entry, arguments } => {
             push_field(&mut result, b"run");
             push_field(
@@ -405,6 +409,9 @@ mod tests {
             }
             command => panic!("parsed the wrong command: {command:?}"),
         }
+
+        let parsed = Cli::try_parse_from(["tecs", "dist"]).unwrap();
+        assert!(matches!(parsed.command, Command::Dist));
     }
 
     #[test]
@@ -416,6 +423,7 @@ mod tests {
             "format",
             "test",
             "build",
+            "dist",
             "run",
             "clean",
             "info",
