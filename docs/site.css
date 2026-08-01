@@ -416,10 +416,9 @@ main:has(.tealdoc-home-hero) {
 
 /* Syntax.
  *
- * Tealdoc ships a Tokyo Night pair: blues and purples, on a page that now has
- * neither. These are the same twelve roles in this palette's own colors, and
- * they are where most of the green on the site actually lands, because code is
- * on every page and prose links are not.
+ * These twelve syntax roles use the site's own palette. They are where most of
+ * the green on the site actually lands, because code is on every page and
+ * prose links are not.
  *
  * Strings take the green and functions the aqua, which are the two roles that
  * recur most inside a block, so a listing reads as green over sand rather than
@@ -527,18 +526,15 @@ main:has(.tealdoc-home-hero) {
     }
 }
 
-/* Inline code in prose is not a syntax token: it is a bare `<code>`, which
- * Pico paints in a cool blue-grey that nothing downstream was overriding. It
- * reads through the accent instead, which tealdoc already switches per theme,
- * so one declaration covers both.
+/* Inline code in prose is not a syntax token: it is a bare `<code>`. It reads
+ * through the accent, which already switches per theme, so one declaration
+ * covers both.
  *
- * The selector is Pico's own rather than a plain `:root`, because Pico sets
- * this token on `:root:not([data-theme=dark])` and a bare `:root` loses to it
- * on specificity no matter what order the files load in. This site keys its
- * theme off `data-tealdoc-theme`, so `data-theme` is never set here and the
- * negation always matches; matching Pico's shape ties the specificity and
- * lets file order decide, which is the same bargain the syntax block above
- * makes with tealdoc. */
+ * The selector matches the bundled stylesheet's specificity. A bare `:root`
+ * loses regardless of file order. This site keys its theme off
+ * `data-tealdoc-theme`, so `data-theme` is never set here and the negation
+ * always matches; matching the selector shape lets file order decide, as in
+ * the syntax block above. */
 
 :root:not([data-theme="dark"]) {
     --pico-code-color: var(--tealdoc-accent);
