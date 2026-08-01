@@ -22,14 +22,26 @@ local function game(world: tecs.World, app: tecs.Application)
             error(loaded.error, 0)
         end
         for _, primitive in ipairs(meshes:registerModel(loaded.value)) do
-            world:spawn(
-                primitive.transform,
-                primitive.mesh,
-                primitive.bounds,
-                primitive.material,
-                Tint(1, 1, 1, 1),
-                Renderable3D()
-            )
+            if primitive.skin ~= nil then
+                world:spawn(
+                    primitive.transform,
+                    primitive.mesh,
+                    primitive.bounds,
+                    primitive.material,
+                    primitive.skin,
+                    Tint(1, 1, 1, 1),
+                    Renderable3D()
+                )
+            else
+                world:spawn(
+                    primitive.transform,
+                    primitive.mesh,
+                    primitive.bounds,
+                    primitive.material,
+                    Tint(1, 1, 1, 1),
+                    Renderable3D()
+                )
+            end
         end
         print("gltf3d: loaded textured glTF geometry and transparent PBR material data")
     end)

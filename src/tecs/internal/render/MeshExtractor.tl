@@ -26,6 +26,7 @@ local max <const> = math.max
 local record MeshExtractorOptions
     capacity: integer
     transparency: boolean
+    skinning: boolean
 end
 
 local record MeshDraw
@@ -46,11 +47,14 @@ local record MeshExtractor
     _instances: loader.CArray
     _bounds: loader.CArray
     _commands: loader.CArray
+    _skins: loader.CArray
     _slot: integer
     _drawByAsset: {integer: MeshDraw}
     _materialSlotByAsset: {integer: integer}
     _alphaModeBySlot: {integer: integer}
     _transparency: boolean
+    _skinning: boolean
+    _skinSlotByAsset: {integer: integer}
     _extractSeconds: number
 end
 
@@ -65,6 +69,8 @@ function MeshExtractor.create(options: MeshExtractorOptions): MeshExtractor
     self._materialSlotByAsset = {}
     self._alphaModeBySlot = {[0] = 0}
     self._transparency = options.transparency
+    self._skinning = options.skinning
+    self._skinSlotByAsset = {}
     self._extractSeconds = 0.0
     return self
 end
@@ -75,12 +81,17 @@ function MeshExtractor:registerMaterial(asset: integer, slot: integer, alphaMode
 end
 
 function MeshExtractor:setStaging(
-    slot: integer, instances: loader.CArray, bounds: loader.CArray, commands: loader.CArray
+    slot: integer, instances: loader.CArray, bounds: loader.CArray, commands: loader.CArray, skins?: loader.CArray
 )
     self._slot = slot
     self._instances = instances
     self._bounds = bounds
     self._commands = commands
+    self._skins = skins
+end
+
+function MeshExtractor:registerSkin(asset: integer, slot: integer)
+    self._skinSlotByAsset[asset] = slot
 end
 
 function MeshExtractor:registerMesh(
@@ -109,6 +120,7 @@ function MeshExtractor:extract(packet: MeshFramePacket)
     local instances <const> = self._instances
     local spheres <const> = self._bounds
     local commands <const> = self._commands
+    local instanceSkins <const> = self._skins
     local written = 0
     local dropped = 0
     local missing = 0
@@ -120,7 +132,9 @@ function MeshExtractor:extract(packet: MeshFramePacket)
         local bounds <const> = archetype:get(components.Bounds3D)
         local materials <const> = archetype:get(components.MeshMaterial)
         local tints <const> = archetype:get(components.Tint)
+        local skins = self._skinning and archetype:get(components.MeshSkin) or nil
         local resolved = false
+        local skinResolved = false
 
         for row = 1, length do
             if written >= self.capacity then
@@ -178,6 +192,27 @@ function MeshExtractor:extract(packet: MeshFramePacket)
                     instances[base + 13] = tint.r
                     instances[base + 14] = tint.g
                     instances[base + 15] = tint.b
+                    if self._skinning then
+                        local skinSlot = -1
+                        if skins ~= nil then
+                            local skin = skins[row]
+                            skinSlot = skin.slot as integer
+                            if skinSlot < 0 then
+                                skinSlot = self._skinSlotByAsset[skin.asset as integer]
+                                if skinSlot == nil then
+                                    error(
+                                        ("tecs: no mesh skin is registered as '%s'"):format(
+                                            components.meshSkinName(skin.asset as integer)
+                                        ),
+                                        2
+                                    )
+                                end
+                                skin.slot = skinSlot
+                                skinResolved = true
+                            end
+                        end
+                        instanceSkins[written] = skinSlot
+                    end
 
                     local command = commands[written] as loader.CStruct
                     command.num_indices = draw.indexCount
@@ -211,12 +246,18 @@ function MeshExtractor:extract(packet: MeshFramePacket)
             -- dirty-gated consumer observe that write.
             archetype:getMut(components.Mesh)
         end
+        if skinResolved then
+            archetype:getMut(components.MeshSkin)
+        end
     end
 
     if written > 0 then
         packet.instanceRanges:mark(0, written * meshlayout.INSTANCE_BYTES)
         packet.boundsRanges:mark(0, written * meshlayout.BOUND_BYTES)
         packet.commandRanges:mark(0, written * meshlayout.COMMAND_BYTES)
+        if self._skinning then
+            packet.skinRanges:mark(0, written * 4)
+        end
     end
     packet.count = written
     packet.dropped = dropped

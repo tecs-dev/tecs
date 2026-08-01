@@ -410,11 +410,11 @@ pub fn test_package(root: &Path, preset: Preset) -> Result<()> {
 pub fn benchmark(root: &Path, preset: Preset, name: &str, arguments: &[OsString]) -> Result<()> {
     let source = match name {
         "shapes" | "physics" | "sprites" | "text" | "particles" | "latency" | "http" | "io"
-        | "tcp" | "data" | "meshcontract" | "meshshadows" | "bitset" | "snapshot" => name,
+        | "tcp" | "data" | "meshcontract" | "meshshadows" | "meshskinning" | "bitset" | "snapshot" => name,
         "alloc" | "allocation" => "allocation",
         _ => anyhow::bail!(
             "unknown benchmark {name:?}; expected shapes, physics, sprites, text, \
-             particles, latency, http, io, tcp, data, meshcontract, meshshadows, bitset, snapshot, or allocation"
+             particles, latency, http, io, tcp, data, meshcontract, meshshadows, meshskinning, bitset, snapshot, or allocation"
         ),
     };
     if matches!(

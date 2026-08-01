@@ -181,6 +181,10 @@ local record gfx
     --- negative value means the asset has not been made resident.
     Mesh: components.Mesh
 
+    --- Selects a resident joint palette for an entity in a skinning-enabled
+    --- mesh domain. Omit it for rigid geometry.
+    MeshSkin: components.MeshSkin
+
     --- Selects resident PBR data for the mesh domain. `asset` is a
     --- `meshMaterialId` identity and `slot` is engine-owned residency state.
     MeshMaterial: components.MeshMaterial

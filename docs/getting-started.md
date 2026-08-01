@@ -200,6 +200,53 @@ no map, shadow command buffer, cull pipeline, or graphics pipeline. The 2D
 `shadows` application option remains a separate occluder and drop-shadow
 system.
 
+## Optional GPU skinning
+
+Enable skeletal deformation separately from rigid mesh rendering:
+
+```teal
+local IDENTITY <const>: {number} = {
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 1, 0,
+    0, 0, 0, 1,
+}
+
+return tecs.newApplication({
+    sprites = false,
+    meshes = {
+        skinning = {jointCapacity = 4096},
+    },
+    plugin = function(_world: tecs.World, app: tecs.Application)
+        local skin <const> = app.renderer.meshes:registerSkin(
+            "models/hero#pose",
+            IDENTITY
+        )
+        -- Spawn `skin` beside Mesh, Bounds3D, MeshMaterial, Tint, and
+        -- Renderable3D. Call updateSkin with the same matrix count later.
+    end,
+})
+```
+
+`assets.newMesh` accepts four joint indices and four weights per vertex through
+its separate `joints` and `weights` arrays. `assets.loadGLTF` decodes
+`JOINTS_0`, `WEIGHTS_0`, skins, and inverse bind matrices. `registerModel`
+returns `primitive.skin` for a skinned primitive; spawn that component beside
+the rest of the primitive bundle. Animation clips and morph targets still fail
+loading instead of being ignored.
+
+`updateSkin` stages complete column-major palettes into the next frame rather
+than submitting a GPU command buffer per call. Joint matrices deform positions,
+normals, tangents, and shadow casters. Culling still uses the entity's
+`Bounds3D`, so animated content must supply a sphere large enough for every
+pose it can reach.
+
+Omitting `meshes.skinning` preserves the rigid vertex and instance layouts and
+allocates no skin attributes, palette offsets, joint matrices, or skinned
+shader variants. Run `cargo xtask example skinning3d` for a two-joint example
+and `cargo xtask bench meshskinning` with `BENCH_MESH_SKINNING=0` and `=1` to
+measure the isolated lane.
+
 ## Game modules
 
 Split a game into plugins and install them from the entry plugin:

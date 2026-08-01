@@ -205,19 +205,54 @@ describe("the 3D scene contract", function()
                 })
             end, "tecs: mesh 'bad://index' index 3 is outside 0..0")
         end)
+
+        it("keeps optional skin attributes outside the rigid vertex stream", function()
+            local source = triangle("procedural://skin-source")
+            local vertices = {}
+            for index = 0, source.vertexCount * 12 - 1 do
+                vertices[index + 1] = source.vertices[index]
+            end
+            source:release()
+            local mesh = assets.newMesh({
+                name = "procedural://skinned-triangle",
+                vertices = vertices,
+                indices = { 0, 1, 2 },
+                joints = { 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0 },
+                weights = { 1, 0, 0, 0, 0.25, 0.75, 0, 0, 1, 0, 0, 0 },
+            })
+            assert.is_not_nil(mesh.skinVertices)
+            near(mesh.skinVertices[8 + 4], 0.25)
+            near(mesh.skinVertices[8 + 5], 0.75)
+            mesh:release()
+            assert.is_nil(mesh.skinVertices)
+
+            assert.has_error(function()
+                assets.newMesh({
+                    name = "bad://skin-pair",
+                    vertices = vertices,
+                    indices = { 0, 1, 2 },
+                    joints = { 0 },
+                })
+            end, "tecs: mesh 'bad://skin-pair' joints and weights must be supplied together")
+        end)
     end)
 
     describe("MeshExtractor", function()
-        local function extractorScene(capacity, transparency)
+        local function extractorScene(capacity, transparency, skinning)
             local world = tecs.ecs.newWorld()
-            local packet = MeshFramePacket.create()
-            local extractor = MeshExtractor.create({ capacity = capacity, transparency = transparency })
+            local packet = MeshFramePacket.create(skinning)
+            local extractor = MeshExtractor.create({
+                capacity = capacity,
+                transparency = transparency,
+                skinning = skinning,
+            })
             local instances = loader.newArray("float[?]", capacity * 16)
             local bounds = loader.newArray("float[?]", capacity * 4)
             local commands = loader.newArray("SDL_GPUIndexedIndirectDrawCommand[?]", capacity)
-            extractor:setStaging(0, instances, bounds, commands)
+            local skins = skinning and loader.newArray("float[?]", capacity) or nil
+            extractor:setStaging(0, instances, bounds, commands, skins)
             extractor:install(world, packet, nil)
-            return world, extractor, packet, instances, bounds, commands
+            return world, extractor, packet, instances, bounds, commands, skins
         end
 
         it("resolves residency once and writes mesh-owned staging", function()
@@ -254,6 +289,36 @@ describe("the 3D scene contract", function()
             assert.are.equal(11, commands[0].vertex_offset)
             assert.are.equal(0, commands[0].first_instance)
             assert.are.equal(7, world:get(entity, components.Mesh).slot)
+        end)
+
+        it("writes optional palette offsets without changing rigid instances", function()
+            local world, extractor, packet, _, _, _, skins = extractorScene(2, false, true)
+            local meshAsset = components.meshId("procedural://skinned")
+            local skinAsset = components.meshSkinId("procedural://skeleton")
+            extractor:registerMesh(meshAsset, 0, 0, 0, 3)
+            extractor:registerSkin(skinAsset, 12)
+            world:spawn(
+                tecs.Transform3D(),
+                components.Mesh(meshAsset, 0),
+                components.Bounds3D(),
+                components.MeshMaterial(),
+                components.MeshSkin(skinAsset),
+                components.Tint(),
+                components.Renderable3D()
+            )
+            world:spawn(
+                tecs.Transform3D(),
+                components.Mesh(meshAsset, 0),
+                components.Bounds3D(),
+                components.MeshMaterial(),
+                components.Tint(),
+                components.Renderable3D()
+            )
+
+            extractor:extract(packet)
+            assert.are.equal(12, skins[0])
+            assert.are.equal(-1, skins[1])
+            assert.are.equal(8, packet.skinRanges.bytes)
         end)
 
         it("drops over capacity without leaving the world deferred", function()

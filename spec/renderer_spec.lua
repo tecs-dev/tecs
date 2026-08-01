@@ -94,7 +94,7 @@ describe("ecs.Renderer", function()
         }
     end
 
-    local function triangleMesh(name)
+    local function triangleMesh(name, skinned)
         return assets.newMesh({
             name = name,
             vertices = {
@@ -136,6 +136,8 @@ describe("ecs.Renderer", function()
                 1,
             },
             indices = { 0, 1, 2 },
+            joints = skinned and { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } or nil,
+            weights = skinned and { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 } or nil,
         })
     end
 
@@ -294,6 +296,9 @@ describe("ecs.Renderer", function()
         assert.is_nil(renderer.meshes._backend.shadowPipeline)
         assert.is_nil(renderer.meshes._backend._shadowCommands)
         assert.is_nil(renderer.meshes._backend._shadowMarkPipeline)
+        assert.is_nil(renderer.meshes._backend._skinVertices)
+        assert.is_nil(renderer.meshes._backend._instanceSkins)
+        assert.is_nil(renderer.meshes._backend._jointMatrices)
         assert.is_nil(renderer.deferred.graph._targets.meshShadowMap)
 
         local source = triangleMesh("spec://triangle")
@@ -322,6 +327,47 @@ describe("ecs.Renderer", function()
         assert.are.equal(1, renderer.meshes.count)
         assert.are.equal(1, renderer.meshes.rewritten)
         assert.are.equal(255, screen:getPixel(pixels, SIZE / 2 - 6, SIZE / 2 + 6).r)
+        renderer:destroy()
+    end)
+
+    it("deforms vertices through an opt-in resident joint palette", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                skinning = { jointCapacity = 4 },
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local mesh, bounds = renderer.meshes:registerMesh(triangleMesh("spec://skinned-triangle", true))
+        local identity = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }
+        local skin = renderer.meshes:registerSkin("spec://one-joint", identity)
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5 }),
+            mesh,
+            bounds,
+            components.MeshMaterial(),
+            skin,
+            components.Tint(1, 0, 0, 1),
+            components.Renderable3D()
+        )
+
+        local before = frameOnce(world, renderer)
+        assert.are.equal(255, screen:getPixel(before, SIZE / 2 - 6, SIZE / 2 + 6).r)
+        local translated = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.8, 0, 0, 1 }
+        renderer.meshes:updateSkin(skin, translated)
+        local after = frameOnce(world, renderer)
+        assert.are.equal(0, screen:getPixel(after, SIZE / 2 - 6, SIZE / 2 + 6).r)
+        assert.are.equal(255, screen:getPixel(after, SIZE / 2 + 8, SIZE / 2 + 6).r)
+        assert.is_true(renderer.meshes.skinning)
+        assert.are.equal(1, renderer.meshes.jointCount)
+        assert.is_not_nil(renderer.meshes._backend._skinVertices)
+        assert.is_not_nil(renderer.meshes._backend._instanceSkins)
+        assert.is_not_nil(renderer.meshes._backend._jointMatrices)
         renderer:destroy()
     end)
 
