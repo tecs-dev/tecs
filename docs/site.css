@@ -166,9 +166,11 @@
     --tealdoc-outline-font-weight: 400;
     --tealdoc-outline-title-font-weight: 400;
 
-    /* Square corners on the code, which is the one place this site is a
-     * terminal rather than a page. */
-    --tealdoc-code-block-radius: 0;
+    /* Rounded, to match the cards and the search field. The corner is small
+     * enough to read as a softened edge rather than as a pill: a listing is
+     * still a block of text, and a large radius starts clipping the first and
+     * last glyph of the top and bottom lines. */
+    --tealdoc-code-block-radius: 6px;
 
     /* The hero name is set in the display face, which carries more weight per
      * point than a text face, so it takes fewer of them. The narrow value is
@@ -187,6 +189,23 @@
     --tealdoc-hero-glow-size: 192px;
     --tealdoc-hero-glow-blur: 44px;
     --tealdoc-hero-glow-opacity: 1;
+}
+
+/* Widen the margin the outline's active item is decided by.
+ *
+ * Two numbers settle which entry is marked, and tealdoc sets them 3.4px apart:
+ * an anchor jump lands a heading at `scroll-padding-top`, which is the header
+ * plus 1rem, or 85.6px down; the scroll spy only marks a heading once its top
+ * is within header + 24px, or 89px. A jump therefore qualifies by 3.4px, and
+ * anything that rounds the other way, a zoom step or a fractional device pixel,
+ * marks the heading before it instead.
+ *
+ * Half a rem lands the jump at 74.8px, which clears the line by 14px rather
+ * than by 3, and still leaves ten of visible gap under the bar. It costs a
+ * little of the space above a heading you jumped to, which is the cheaper of
+ * the two. */
+:root {
+    scroll-padding-top: calc(var(--tealdoc-header-height) + 0.5rem);
 }
 
 /* The wordmark, which sits beside the cactus rather than replacing it. Clay
