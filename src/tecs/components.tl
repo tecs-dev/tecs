@@ -32,6 +32,7 @@ The 3D mesh contract is separate from the sprite lane. `tecs.Transform3D`,
 [`Bounds3D`](tealdoc:tecs.components.Bounds3D),
 [`MeshMaterial`](tealdoc:tecs.components.MeshMaterial),
 optional [`MeshSkin`](tealdoc:tecs.components.MeshSkin),
+optional [`MeshMorph`](tealdoc:tecs.components.MeshMorph),
 [`Tint`](tealdoc:tecs.components.Tint), and
 [`Renderable3D`](tealdoc:tecs.components.Renderable3D) describe an opaque mesh
 for the optional mesh domain.
@@ -213,6 +214,12 @@ local meshSkinIds: {string: integer} = {}
 local meshSkinNames: {integer: string} = {}
 local meshSkinCount = 0
 
+--- Interned mesh-morph names. Weight residency is domain-local, while the
+--- normalized name is what a snapshot can retain.
+local meshMorphIds: {string: integer} = {}
+local meshMorphNames: {integer: string} = {}
+local meshMorphCount = 0
+
 --- The scheme a name may lead with, whose `//` is not a path separator: what
 --- follows it is an authority rather than a directory.
 local SCHEME_PREFIX <const> = "^(%a[%w+.-]*://)(.*)$"
@@ -349,6 +356,25 @@ local function meshSkinName(id: integer): string
     return meshSkinNames[id]
 end
 
+local function meshMorphId(name: string): integer
+    if name == nil or name == "" then
+        error("tecs: a mesh morph name cannot be empty", 2)
+    end
+    name = normalizePath(name)
+    local id = meshMorphIds[name]
+    if id ~= nil then
+        return id
+    end
+    meshMorphCount = meshMorphCount + 1
+    meshMorphIds[name] = meshMorphCount
+    meshMorphNames[meshMorphCount] = name
+    return meshMorphCount
+end
+
+local function meshMorphName(id: integer): string
+    return meshMorphNames[id]
+end
+
 --- Samples a texture instead of drawing flat color.
 ---
 --- `image` is an index from `imageId`, which names the image; `slot` is the
@@ -428,6 +454,43 @@ ecs.newFFIComponent({
             image = imageId(name)
         end
         return Sprite(image, data.u0 as number, data.v0 as number, data.u1 as number, data.v1 as number)
+    end,
+})
+
+--- Selects one resident morph-weight vector for GPU mesh deformation.
+---
+--- `asset` is the stable name's process-local identity. `slot` is the first
+--- weight in domain residency and starts negative so extraction can resolve
+--- it once. The component is optional; a morphed mesh without it uses its
+--- undeformed base geometry.
+local record MeshMorph is Component
+    --- Caller-writable. Selects weights by their `meshMorphId` index. Zero
+    --- selects no morph weights.
+    asset: number
+    --- Engine-owned. Stores the first resident weight. Set it negative when
+    --- changing `asset`; otherwise ordinary game code should ignore it.
+    slot: number
+end
+
+ecs.newFFIComponent({
+    -- This component name is stored in snapshots and is an external
+    -- compatibility surface.
+    name = "MeshMorph",
+    container = MeshMorph,
+    fields = {
+        {"asset", "int32_t"},
+        {"slot", "int32_t"},
+    },
+    defaults = {0, -1},
+    serialize = function(instance: MeshMorph): {string: any}
+        return {meshMorph = meshMorphNames[instance.asset as integer]}
+    end,
+    deserialize = function(_world: types.World, data: {string: any}): MeshMorph
+        local name = data.meshMorph as string
+        if name == nil or name == "" then
+            return MeshMorph(0, -1)
+        end
+        return MeshMorph(meshMorphId(name), -1)
     end,
 })
 
@@ -775,6 +838,11 @@ local record components
     --- negative value means unresolved.
     MeshSkin: MeshSkin
 
+    --- Read-only. Exposes the optional morph-weight component. `asset` is a
+    --- process-local `meshMorphId`; `slot` is engine-owned residency, and a
+    --- negative value means unresolved.
+    MeshMorph: MeshMorph
+
     --- Read-only. Exposes the 3D material-reference component. `asset` is a
     --- process-local `meshMaterialId`; `slot` is engine-owned residency, and
     --- zero selects the neutral built-in material.
@@ -867,6 +935,16 @@ local record components
     --- @return The normalized name, or nil when the index names nothing.
     meshSkinName: function(id: integer): string
 
+    --- Returns the process-local identity of a normalized mesh-morph name.
+    --- @param name A non-empty stable weight-vector name.
+    --- @return A positive index stable for the life of the process.
+    meshMorphId: function(name: string): integer
+
+    --- Returns the normalized name represented by a mesh-morph index.
+    --- @param id An index previously returned by `meshMorphId`.
+    --- @return The normalized name, or nil when the index names nothing.
+    meshMorphName: function(id: integer): string
+
     --- Returns the process-local identity of a mesh material name.
     --- @param name A non-empty stable material name.
     --- @return A positive index stable for the life of the process.
@@ -883,6 +961,7 @@ components.Tint = Tint
 components.Sprite = Sprite
 components.Mesh = Mesh
 components.MeshSkin = MeshSkin
+components.MeshMorph = MeshMorph
 components.MeshMaterial = MeshMaterial
 components.Bounds3D = Bounds3D
 components.Material = Material
@@ -898,6 +977,8 @@ components.meshId = meshId
 components.meshName = meshName
 components.meshSkinId = meshSkinId
 components.meshSkinName = meshSkinName
+components.meshMorphId = meshMorphId
+components.meshMorphName = meshMorphName
 components.meshMaterialId = meshMaterialId
 components.meshMaterialName = meshMaterialName
 

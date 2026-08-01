@@ -8,6 +8,7 @@ cargo xtask example scene3d
 cargo xtask example gltf3d
 cargo xtask example skinning3d
 cargo xtask example animated3d
+cargo xtask example morph3d
 ```
 
 `ui-demo.tl` is the complete engine showcase. It exercises the sprite renderer,
@@ -31,3 +32,7 @@ loading and clip sampling.
 `animated3d.tl` loads a skinned glTF clip, creates an independently posed model
 instance, binds its primitive to an ECS entity, and samples the clip into both
 the entity transform and the instance-owned GPU palette.
+
+`morph3d.tl` loads a glTF morph target and weight animation, then samples it
+into an instance-owned GPU weight vector. Geometry and clip data remain shared;
+only the changing weights belong to the instance.

@@ -1,5 +1,5 @@
 ---
-description: "Asynchronous byte, image, sound, and animated glTF loading through futures"
+description: "Asynchronous byte, image, sound, and animated glTF loading with skins and morph targets"
 outline: deep
 ---
 

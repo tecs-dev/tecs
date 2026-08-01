@@ -328,6 +328,15 @@ describe("shaderpack", function()
 
         local fragment = pack.shaders["instance.frag"]
         assert.are.same({ 1, 1, 1 }, fragment.threadCount)
+
+        local mesh = pack.shaders["mesh.vert"]
+        local skinned = pack.shaders["mesh.vert|MESH_SKINNING=1"]
+        local morphed = pack.shaders["mesh.vert|MESH_MORPHING=1"]
+        local combined = pack.shaders["mesh.vert|MESH_MORPHING=1,MESH_SKINNING=1"]
+        assert.are.equal(2, mesh.counts.readOnlyStorageBuffers)
+        assert.are.equal(5, skinned.counts.readOnlyStorageBuffers)
+        assert.are.equal(5, morphed.counts.readOnlyStorageBuffers)
+        assert.are.equal(8, combined.counts.readOnlyStorageBuffers)
     end)
 
     it("rejects a file that is not a pack", function()

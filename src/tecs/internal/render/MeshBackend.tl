@@ -13,6 +13,11 @@ counts, and compact whole commands into a GPU-only indirect buffer. The CPU
 still submits the fixed extracted command count; cleared trailing commands
 carry zero instances, so no visibility count crosses back from the GPU.
 
+Skin and morph deformation are independent opt-in buffer and shader lanes.
+Morph deltas are immutable mesh residency, while complete weight vectors are
+retained and staged only when registered or updated. Rigid domains keep the
+base bindings and shader variant.
+
 An enabled shadow lane repeats that same mark, scan, and compact sequence
 against the light volume before camera culling reuses the scratch buffers.
 Only its compacted indirect commands reach the shadow raster pass, so meshes
@@ -68,11 +73,18 @@ local record MeshRegion
     vertexCount: integer
     firstIndex: integer
     indexCount: integer
+    firstMorphVertex: integer
+    morphTargetCount: integer
 end
 
 local record SkinRegion
     firstJoint: integer
     jointCount: integer
+end
+
+local record MorphRegion
+    firstWeight: integer
+    weightCount: integer
 end
 
 local record MeshBackendOptions
@@ -88,6 +100,9 @@ local record MeshBackendOptions
     shadows: MeshShadowOptions
     skinning: boolean
     jointCapacity: integer
+    morphing: boolean
+    morphVertexCapacity: integer
+    morphWeightCapacity: integer
 end
 
 local record MeshMaterialData
@@ -119,6 +134,7 @@ local record MeshBackend
     type MaterialData = MeshMaterialData
     type ShadowOptions = MeshShadowOptions
     type SkinRegion = SkinRegion
+    type MorphRegion = MorphRegion
 
     capacity: integer
     vertexCapacity: integer
@@ -141,8 +157,13 @@ local record MeshBackend
     textureCount: integer
     jointCapacity: integer
     jointCount: integer
+    morphVertexCapacity: integer
+    morphVertexCount: integer
+    morphWeightCapacity: integer
+    morphWeightCount: integer
 
     updateSkin: function(self, region: SkinRegion, matrices: {number})
+    updateMorph: function(self, region: MorphRegion, weights: {number})
 
     _bounds: Buffer
     _skinVertices: Buffer
@@ -150,6 +171,11 @@ local record MeshBackend
     _jointMatrices: Buffer
     _jointValues: loader.CArray
     _jointRanges: dirtyranges
+    _morphVertices: Buffer
+    _instanceMorphs: Buffer
+    _morphWeights: Buffer
+    _morphValues: loader.CArray
+    _morphRanges: dirtyranges
     _slots: Buffer
     _blocks: Buffer
     _visibleCommands: Buffer
@@ -197,6 +223,7 @@ local record MeshBackend
     _regionByAsset: {integer: MeshRegion}
     _materialSlotByAsset: {integer: integer}
     _skinRegionByAsset: {integer: SkinRegion}
+    _morphRegionByAsset: {integer: MorphRegion}
     _textureRegions: {TextureArray.Region}
     _textureByName: {string: integer}
     _device: loader.CPtr
@@ -213,6 +240,7 @@ local record MeshBackend
     _blending: boolean
     _shadows: boolean
     _skinning: boolean
+    _morphing: boolean
     _shadowActive: boolean
     _shadow: MeshShadowOptions
     _shadowUniform: loader.CArray
@@ -220,15 +248,25 @@ end
 
 local MeshBackendMT <const>: metatable<MeshBackend> = {__index = MeshBackend}
 
-local function skinDefines(skinning: boolean): {string: string}
-    return skinning and {MESH_SKINNING = "1"} or nil
+local function vertexDefines(skinning: boolean, morphing: boolean): {string: string}
+    if not skinning and not morphing then
+        return nil
+    end
+    local defines: {string: string} = {}
+    if skinning then
+        defines.MESH_SKINNING = "1"
+    end
+    if morphing then
+        defines.MESH_MORPHING = "1"
+    end
+    return defines
 end
 
 local function buildGeometry(
-    device: loader.CPtr, deferred: Deferred, shadows: boolean, skinning: boolean
+    device: loader.CPtr, deferred: Deferred, shadows: boolean, skinning: boolean, morphing: boolean
 ): GraphicsPipeline
     local albedoFormat, normalFormat, ormFormat, emissionFormat = deferred:geometryFormats()
-    local vertex = Shader.load(device, "mesh.vert", {defines = skinDefines(skinning)})
+    local vertex = Shader.load(device, "mesh.vert", {defines = vertexDefines(skinning, morphing)})
     local fragment = Shader.load(device, "mesh.frag", {defines = shadows and {MESH_SHADOWS = "1"} or nil})
     local pipeline = GraphicsPipeline.create(
         device,
@@ -247,9 +285,9 @@ local function buildGeometry(
 end
 
 local function buildForward(
-    device: loader.CPtr, deferred: Deferred, shadows: boolean, skinning: boolean
+    device: loader.CPtr, deferred: Deferred, shadows: boolean, skinning: boolean, morphing: boolean
 ): GraphicsPipeline
-    local vertex = Shader.load(device, "mesh.vert", {defines = skinDefines(skinning)})
+    local vertex = Shader.load(device, "mesh.vert", {defines = vertexDefines(skinning, morphing)})
     local fragment = Shader.load(device, "mesh.forward.frag", {defines = shadows and {MESH_SHADOWS = "1"} or nil})
     local pipeline = GraphicsPipeline.create(
         device,
@@ -268,8 +306,10 @@ local function buildForward(
     return pipeline
 end
 
-local function buildShadow(device: loader.CPtr, deferred: Deferred, skinning: boolean): GraphicsPipeline
-    local vertex = Shader.load(device, "mesh.shadow.vert", {defines = skinDefines(skinning)})
+local function buildShadow(
+    device: loader.CPtr, deferred: Deferred, skinning: boolean, morphing: boolean
+): GraphicsPipeline
+    local vertex = Shader.load(device, "mesh.shadow.vert", {defines = vertexDefines(skinning, morphing)})
     local fragment = Shader.load(device, "mesh.shadow.frag", {})
     local pipeline = GraphicsPipeline.create(
         device,
@@ -300,6 +340,10 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self.textureCount = 0
     self.jointCapacity = options.jointCapacity or 0
     self.jointCount = 0
+    self.morphVertexCapacity = options.morphVertexCapacity or 0
+    self.morphVertexCount = 0
+    self.morphWeightCapacity = options.morphWeightCapacity or 0
+    self.morphWeightCount = 0
     self._device = device
     self._deferred = deferred
     self._destroyed = false
@@ -307,6 +351,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._regionByAsset = {}
     self._materialSlotByAsset = {}
     self._skinRegionByAsset = {}
+    self._morphRegionByAsset = {}
     self._textureRegions = {}
     self._textureByName = {}
     self._count = 0
@@ -314,6 +359,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._blending = false
     self._shadows = options.shadows ~= nil
     self._skinning = options.skinning
+    self._morphing = options.morphing
     self._shadowActive = false
     self._shadow = options.shadows
     if self._shadows then
@@ -375,6 +421,34 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
         )
         self._jointValues = loader.newArray("float[?]", self.jointCapacity * JOINT_FLOATS)
         self._jointRanges = dirtyranges.create()
+    end
+    if self._morphing then
+        self._morphVertices = Buffer.create(
+            device,
+            {
+                usage = {"storage"},
+                size = self.morphVertexCapacity * meshlayout.MORPH_VERTEX_BYTES,
+                name = "mesh.morphVertices",
+            }
+        )
+        self._instanceMorphs = Buffer.create(
+            device,
+            {
+                usage = {"storage"},
+                size = self.capacity * meshlayout.MORPH_INSTANCE_BYTES,
+                name = "mesh.instanceMorphs",
+            }
+        )
+        self._morphWeights = Buffer.create(
+            device,
+            {
+                usage = {"storage"},
+                size = self.morphWeightCapacity * 4,
+                name = "mesh.morphWeights",
+            }
+        )
+        self._morphValues = loader.newArray("float[?]", self.morphWeightCapacity)
+        self._morphRanges = dirtyranges.create()
     end
     self._bounds = Buffer.create(
         device,
@@ -467,7 +541,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._bucketScanWrites = {}
     self._placeWrites = {}
     self._placeReads = {}
-    self.pipeline = buildGeometry(device, deferred, self._shadows, self._skinning)
+    self.pipeline = buildGeometry(device, deferred, self._shadows, self._skinning, self._morphing)
     if self._shadows then
         self._shadowCommands = Buffer.create(
             device,
@@ -480,7 +554,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
         if self._transparent then
             self._shadowMarkPipeline = ComputePipeline.load(device, "mesh.mark.comp", {defines = {MESH_ALPHA = "1"}})
         end
-        self.shadowPipeline = buildShadow(device, deferred, self._skinning)
+        self.shadowPipeline = buildShadow(device, deferred, self._skinning, self._morphing)
     end
     if self._transparent then
         local groups <const> = math.ceil(self.capacity / CULL_GROUP)
@@ -518,7 +592,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
         )
         self._rankPipeline = ComputePipeline.load(device, "mesh.rank.comp", {})
         self._placePipeline = ComputePipeline.load(device, "mesh.place.comp", {})
-        self.blendPipeline = buildForward(device, deferred, self._shadows, self._skinning)
+        self.blendPipeline = buildForward(device, deferred, self._shadows, self._skinning, self._morphing)
     end
     return self
 end
@@ -607,11 +681,12 @@ function MeshBackend:materialSlot(asset: integer): integer
     return self._materialSlotByAsset[asset]
 end
 
-function MeshBackend:mapSlot(slot: integer): loader.CArray, loader.CArray, loader.CArray, loader.CArray
+function MeshBackend:mapSlot(slot: integer): loader.CArray, loader.CArray, loader.CArray, loader.CArray, loader.CArray
     return self.instances:mapSlotAs(slot, "float *", false),
         self._bounds:mapSlotAs(slot, "float *", false),
         self.commands:mapSlotAs(slot, "SDL_GPUIndexedIndirectDrawCommand *", false),
-        self._skinning and self._instanceSkins:mapSlotAs(slot, "float *", false) or nil
+        self._skinning and self._instanceSkins:mapSlotAs(slot, "float *", false) or nil,
+        self._morphing and self._instanceMorphs:mapSlotAs(slot, "float *", false) or nil
 end
 
 function MeshBackend:registerMesh(asset: integer, mesh: assets.Mesh): MeshRegion
@@ -649,6 +724,8 @@ function MeshBackend:registerMesh(asset: integer, mesh: assets.Mesh): MeshRegion
         vertexCount = mesh.vertexCount,
         firstIndex = self.indexCount,
         indexCount = mesh.indexCount,
+        firstMorphVertex = self.morphVertexCount,
+        morphTargetCount = mesh.morphTargetCount,
     } as MeshRegion
     self.vertices:upload(
         mesh.vertices, mesh.vertexCount * meshlayout.VERTEX_BYTES, region.firstVertex * meshlayout.VERTEX_BYTES
@@ -662,6 +739,26 @@ function MeshBackend:registerMesh(asset: integer, mesh: assets.Mesh): MeshRegion
             mesh.vertexCount * meshlayout.SKIN_VERTEX_BYTES,
             region.firstVertex * meshlayout.SKIN_VERTEX_BYTES
         )
+    end
+    if mesh.morphVertices ~= nil then
+        if not self._morphing then
+            error("tecs: morphed geometry requires meshes.morphing", 2)
+        end
+        local morphVertices <const> = mesh.vertexCount * mesh.morphTargetCount
+        if self.morphVertexCount + morphVertices > self.morphVertexCapacity then
+            error(
+                ("tecs: mesh morph vertex capacity is %d, but registering '%s' needs %d"):format(
+                    self.morphVertexCapacity, mesh.name, self.morphVertexCount + morphVertices
+                ),
+                2
+            )
+        end
+        self._morphVertices:upload(
+            mesh.morphVertices,
+            morphVertices * meshlayout.MORPH_VERTEX_BYTES,
+            region.firstMorphVertex * meshlayout.MORPH_VERTEX_BYTES
+        )
+        self.morphVertexCount = self.morphVertexCount + morphVertices
     end
     self.indices:upload(mesh.indices, mesh.indexCount * 4, region.firstIndex * 4)
 
@@ -718,6 +815,49 @@ end
 
 function MeshBackend:skinRegion(asset: integer): SkinRegion
     return self._skinRegionByAsset[asset]
+end
+
+function MeshBackend:registerMorph(asset: integer, weights: {number}): MorphRegion
+    if not self._morphing then
+        error("tecs: mesh morphing is not enabled", 2)
+    end
+    local existing = self._morphRegionByAsset[asset]
+    if existing ~= nil then
+        return existing
+    end
+    if weights == nil or #weights == 0 then
+        error("tecs: mesh morph weights cannot be empty", 2)
+    end
+    if self.morphWeightCount + #weights > self.morphWeightCapacity then
+        error(
+            ("tecs: mesh morph weight capacity is %d, but registration needs %d"):format(
+                self.morphWeightCapacity, self.morphWeightCount + #weights
+            ),
+            2
+        )
+    end
+    local region <const> = {firstWeight = self.morphWeightCount, weightCount = #weights} as MorphRegion
+    self._morphRegionByAsset[asset] = region
+    self.morphWeightCount = self.morphWeightCount + #weights
+    self:updateMorph(region, weights)
+    return region
+end
+
+function MeshBackend:updateMorph(region: MorphRegion, weights: {number})
+    if region == nil or weights == nil or #weights ~= region.weightCount then
+        error("tecs: mesh morph weight count does not match its registered target count", 2)
+    end
+    for index, weight in ipairs(weights) do
+        if weight == nil or weight ~= weight or weight == math.huge or weight == -math.huge then
+            error(("tecs: mesh morph weight %d is not finite"):format(index), 2)
+        end
+        self._morphValues[region.firstWeight + index - 1] = weight
+    end
+    self._morphRanges:mark(region.firstWeight * 4, region.weightCount * 4)
+end
+
+function MeshBackend:morphRegion(asset: integer): MorphRegion
+    return self._morphRegionByAsset[asset]
 end
 
 function MeshBackend:regionOf(asset: integer): MeshRegion
@@ -793,12 +933,26 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame)
         end
         ranges:clear()
     end
+    if self._morphing then
+        self._instanceMorphs:markSlotRanges(slot, packet.morphRanges)
+        local ranges <const> = self._morphRanges
+        local source <const> = loader.bytePointer(self._morphValues as loader.CValue)
+        for entry = 0, ranges.count - 1 do
+            local offset, size = ranges:at(entry)
+            self._morphWeights:writeSlot(slot, offset, source + offset, size)
+        end
+        ranges:clear()
+    end
     self.instances:flushSlot(slot, frame.commandBuffer)
     self._bounds:flushSlot(slot, frame.commandBuffer)
     self.commands:flushSlot(slot, frame.commandBuffer)
     if self._skinning then
         self._instanceSkins:flushSlot(slot, frame.commandBuffer)
         self._jointMatrices:flushSlot(slot, frame.commandBuffer)
+    end
+    if self._morphing then
+        self._instanceMorphs:flushSlot(slot, frame.commandBuffer)
+        self._morphWeights:flushSlot(slot, frame.commandBuffer)
     end
     self._count = packet.count
     self._viewProjection = packet.viewProjection
@@ -996,10 +1150,17 @@ function MeshBackend:recordShadowMap(context: Deferred.PassContext)
     local buffers <const> = self._geometryBuffers
     buffers[1] = self.vertices.handle
     buffers[2] = self.instances.handle
+    local bufferSlot = 3
+    if self._morphing then
+        buffers[bufferSlot] = self._morphVertices.handle
+        buffers[bufferSlot + 1] = self._instanceMorphs.handle
+        buffers[bufferSlot + 2] = self._morphWeights.handle
+        bufferSlot = bufferSlot + 3
+    end
     if self._skinning then
-        buffers[3] = self._skinVertices.handle
-        buffers[4] = self._instanceSkins.handle
-        buffers[5] = self._jointMatrices.handle
+        buffers[bufferSlot] = self._skinVertices.handle
+        buffers[bufferSlot + 1] = self._instanceSkins.handle
+        buffers[bufferSlot + 2] = self._jointMatrices.handle
     end
     context.pass:bindVertexStorageBuffers(0, buffers)
     local fragmentBuffers <const> = self._fragmentBuffers
@@ -1021,10 +1182,17 @@ function MeshBackend:recordGeometry(context: Deferred.PassContext)
     local buffers <const> = self._geometryBuffers
     buffers[1] = self.vertices.handle
     buffers[2] = self.instances.handle
+    local bufferSlot = 3
+    if self._morphing then
+        buffers[bufferSlot] = self._morphVertices.handle
+        buffers[bufferSlot + 1] = self._instanceMorphs.handle
+        buffers[bufferSlot + 2] = self._morphWeights.handle
+        bufferSlot = bufferSlot + 3
+    end
     if self._skinning then
-        buffers[3] = self._skinVertices.handle
-        buffers[4] = self._instanceSkins.handle
-        buffers[5] = self._jointMatrices.handle
+        buffers[bufferSlot] = self._skinVertices.handle
+        buffers[bufferSlot + 1] = self._instanceSkins.handle
+        buffers[bufferSlot + 2] = self._jointMatrices.handle
     end
     context.pass:bindVertexStorageBuffers(0, buffers)
     local fragmentBuffers <const> = self._fragmentBuffers
@@ -1049,10 +1217,17 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
     local buffers <const> = self._forwardBuffers
     buffers[1] = self.vertices.handle
     buffers[2] = self.instances.handle
+    local bufferSlot = 3
+    if self._morphing then
+        buffers[bufferSlot] = self._morphVertices.handle
+        buffers[bufferSlot + 1] = self._instanceMorphs.handle
+        buffers[bufferSlot + 2] = self._morphWeights.handle
+        bufferSlot = bufferSlot + 3
+    end
     if self._skinning then
-        buffers[3] = self._skinVertices.handle
-        buffers[4] = self._instanceSkins.handle
-        buffers[5] = self._jointMatrices.handle
+        buffers[bufferSlot] = self._skinVertices.handle
+        buffers[bufferSlot + 1] = self._instanceSkins.handle
+        buffers[bufferSlot + 2] = self._jointMatrices.handle
     end
     context.pass:bindVertexStorageBuffers(0, buffers)
     local fragmentBuffers <const> = self._fragmentBuffers
@@ -1070,7 +1245,7 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
 end
 
 function MeshBackend:rebuildPipeline(deferred: Deferred)
-    local geometry <const> = buildGeometry(self._device, deferred, self._shadows, self._skinning)
+    local geometry <const> = buildGeometry(self._device, deferred, self._shadows, self._skinning, self._morphing)
     local mark <const> = ComputePipeline.load(
         self._device, self._transparent and "mesh.lanes.mark.comp" or "mesh.mark.comp", {}
     )
@@ -1082,13 +1257,13 @@ function MeshBackend:rebuildPipeline(deferred: Deferred)
     local shadow: GraphicsPipeline = nil
     local shadowMark: ComputePipeline = nil
     if self._shadows then
-        shadow = buildShadow(self._device, deferred, self._skinning)
+        shadow = buildShadow(self._device, deferred, self._skinning, self._morphing)
         if self._transparent then
             shadowMark = ComputePipeline.load(self._device, "mesh.mark.comp", {defines = {MESH_ALPHA = "1"}})
         end
     end
     if self._transparent then
-        blend = buildForward(self._device, deferred, self._shadows, self._skinning)
+        blend = buildForward(self._device, deferred, self._shadows, self._skinning, self._morphing)
         rank = ComputePipeline.load(self._device, "mesh.rank.comp", {})
         place = ComputePipeline.load(self._device, "mesh.place.comp", {})
     end
@@ -1134,6 +1309,11 @@ function MeshBackend:destroy()
         self._skinVertices:destroy()
         self._instanceSkins:destroy()
         self._jointMatrices:destroy()
+    end
+    if self._morphing then
+        self._morphVertices:destroy()
+        self._instanceMorphs:destroy()
+        self._morphWeights:destroy()
     end
     self._bounds:destroy()
     self.commands:destroy()

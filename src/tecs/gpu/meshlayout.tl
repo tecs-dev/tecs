@@ -11,6 +11,10 @@ local record meshlayout
     VERTEX_BYTES: integer
     SKIN_VERTEX_FLOATS: integer
     SKIN_VERTEX_BYTES: integer
+    MORPH_VERTEX_FLOATS: integer
+    MORPH_VERTEX_BYTES: integer
+    MORPH_INSTANCE_FLOATS: integer
+    MORPH_INSTANCE_BYTES: integer
     INSTANCE_FLOATS: integer
     INSTANCE_BYTES: integer
     BOUND_FLOATS: integer
@@ -27,6 +31,16 @@ meshlayout.VERTEX_BYTES = meshlayout.VERTEX_FLOATS * 4
 -- residency exactly.
 meshlayout.SKIN_VERTEX_FLOATS = 8
 meshlayout.SKIN_VERTEX_BYTES = meshlayout.SKIN_VERTEX_FLOATS * 4
+
+-- position.xyz, normal.xyz, and tangent.xyz deltas. Targets are stored
+-- consecutively, each with vertexCount entries.
+meshlayout.MORPH_VERTEX_FLOATS = 9
+meshlayout.MORPH_VERTEX_BYTES = meshlayout.MORPH_VERTEX_FLOATS * 4
+
+-- first morph vertex, base vertex, vertices per target, first weight, and
+-- target count. A negative first morph vertex disables deformation.
+meshlayout.MORPH_INSTANCE_FLOATS = 5
+meshlayout.MORPH_INSTANCE_BYTES = meshlayout.MORPH_INSTANCE_FLOATS * 4
 
 -- position.xyz, rotation.xyzw, scale.xyz, mesh slot, material id and param,
 -- then opaque base color rgb from Tint.

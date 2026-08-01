@@ -94,7 +94,7 @@ describe("ecs.Renderer", function()
         }
     end
 
-    local function triangleMesh(name, skinned)
+    local function triangleMesh(name, skinned, morphed)
         return assets.newMesh({
             name = name,
             vertices = {
@@ -138,6 +138,10 @@ describe("ecs.Renderer", function()
             indices = { 0, 1, 2 },
             joints = skinned and { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } or nil,
             weights = skinned and { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 } or nil,
+            morphTargets = morphed and {
+                { positions = { 0.8, 0, 0, 0.8, 0, 0, 0.8, 0, 0 } },
+            } or nil,
+            morphWeights = morphed and { 0 } or nil,
         })
     end
 
@@ -299,6 +303,9 @@ describe("ecs.Renderer", function()
         assert.is_nil(renderer.meshes._backend._skinVertices)
         assert.is_nil(renderer.meshes._backend._instanceSkins)
         assert.is_nil(renderer.meshes._backend._jointMatrices)
+        assert.is_nil(renderer.meshes._backend._morphVertices)
+        assert.is_nil(renderer.meshes._backend._instanceMorphs)
+        assert.is_nil(renderer.meshes._backend._morphWeights)
         assert.is_nil(renderer.deferred.graph._targets.meshShadowMap)
 
         local source = triangleMesh("spec://triangle")
@@ -368,6 +375,46 @@ describe("ecs.Renderer", function()
         assert.is_not_nil(renderer.meshes._backend._skinVertices)
         assert.is_not_nil(renderer.meshes._backend._instanceSkins)
         assert.is_not_nil(renderer.meshes._backend._jointMatrices)
+        renderer:destroy()
+    end)
+
+    it("deforms vertices through an opt-in resident morph vector", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                morphing = { vertexCapacity = 16, weightCapacity = 4 },
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local mesh, bounds = renderer.meshes:registerMesh(triangleMesh("spec://morphed-triangle", false, true))
+        local morph = renderer.meshes:registerMorph("spec://one-target", { 0 })
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5 }),
+            mesh,
+            bounds,
+            components.MeshMaterial(),
+            morph,
+            components.Tint(1, 0, 0, 1),
+            components.Renderable3D()
+        )
+
+        local before = frameOnce(world, renderer)
+        assert.are.equal(255, screen:getPixel(before, SIZE / 2 - 6, SIZE / 2 + 6).r)
+        renderer.meshes:updateMorph(morph, { 1 })
+        local after = frameOnce(world, renderer)
+        assert.are.equal(0, screen:getPixel(after, SIZE / 2 - 6, SIZE / 2 + 6).r)
+        assert.are.equal(255, screen:getPixel(after, SIZE / 2 + 8, SIZE / 2 + 6).r)
+        assert.is_true(renderer.meshes.morphing)
+        assert.are.equal(3, renderer.meshes.morphVertexCount)
+        assert.are.equal(1, renderer.meshes.morphWeightCount)
+        assert.is_not_nil(renderer.meshes._backend._morphVertices)
+        assert.is_not_nil(renderer.meshes._backend._instanceMorphs)
+        assert.is_not_nil(renderer.meshes._backend._morphWeights)
         renderer:destroy()
     end)
 

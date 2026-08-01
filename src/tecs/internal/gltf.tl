@@ -240,9 +240,6 @@ local function decodeAnimations(
             local target <const> = channel.target as {string: any}
             local nodeIndex <const> = target ~= nil and target.node as integer or nil
             local targetPath <const> = target ~= nil and target.path as string or nil
-            if targetPath == "weights" then
-                error(("tecs: %s uses unsupported morph-weight animation"):format(path), 0)
-            end
             local pathCode: integer
             local components: integer
             if targetPath == "translation" then
@@ -251,6 +248,25 @@ local function decodeAnimations(
                 pathCode, components = 1, 4
             elseif targetPath == "scale" then
                 pathCode, components = 2, 3
+            elseif targetPath == "weights" then
+                pathCode = 3
+                local targetNode <const> = nodeIndex ~= nil and nodes[nodeIndex + 1] or nil
+                local mesh = targetNode ~= nil and targetNode.mesh as integer or nil
+                local sourceMesh = mesh ~= nil and (document.meshes as {{string: any}} or {})[mesh + 1] or nil
+                if sourceMesh == nil then
+                    error(("tecs: %s morph-weight animation targets a node without a mesh"):format(path), 0)
+                end
+                for _, primitive in ipairs(sourceMesh.primitives as {{string: any}} or {}) do
+                    local targetCount <const> = #(primitive.targets as {{string: integer}} or {})
+                    if components == nil then
+                        components = targetCount
+                    elseif components ~= targetCount then
+                        error(("tecs: %s morph-weight animation targets inconsistent primitives"):format(path), 0)
+                    end
+                end
+                if components == nil or components == 0 then
+                    error(("tecs: %s morph-weight animation targets a mesh without morph targets"):format(path), 0)
+                end
             else
                 error(
                     ("tecs: %s animation %d channel %d has an unsupported target"):format(
@@ -268,7 +284,7 @@ local function decodeAnimations(
                     0
                 )
             end
-            if node.matrix ~= nil then
+            if node.matrix ~= nil and pathCode ~= 3 then
                 error(("tecs: %s animates node %d, which uses a fixed matrix"):format(path, nodeIndex), 0)
             end
             local targetKey <const> = tostring(nodeIndex) .. ":" .. tostring(pathCode)
@@ -306,12 +322,11 @@ local function decodeAnimations(
                 )
             end
             local outputRows <const> = input.count * (interpolation == 2 and 3 or 1)
-            if
-                output.components ~= components
-                or output.count ~= outputRows
-                or output.componentType ~= 5126
-                or output.normalized
-            then
+            local outputShape <const> = pathCode == 3
+                and output.components == 1
+                and output.count == outputRows * components or output.components == components
+                and output.count == outputRows
+            if not outputShape or output.componentType ~= 5126 or output.normalized then
                 error(
                     ("tecs: %s animation %d channel %d has the wrong output shape"):format(
                         path, animationIndex - 1, channelIndex - 1
@@ -337,7 +352,7 @@ local function decodeAnimations(
                 duration = math.max(duration, time)
             end
             for row = 0, output.count - 1 do
-                for lane = 0, components - 1 do
+                for lane = 0, output.components - 1 do
                     local item <const> = value(output, row, lane)
                     if not finite(item) then
                         error(("tecs: %s animation %d contains a non-finite value"):format(path, animationIndex - 1), 0)
@@ -349,6 +364,7 @@ local function decodeAnimations(
                 node = nodeIndex + 1,
                 path = pathCode,
                 interpolation = interpolation,
+                width = components,
                 times = times,
                 values = values,
             }
@@ -371,7 +387,7 @@ local function normalize3(x: number, y: number, z: number): number, number, numb
 end
 
 local function decodePrimitive(
-    document: {string: any}, buffers: {string}, primitive: {string: any}, name: string
+    document: {string: any}, buffers: {string}, primitive: {string: any}, name: string, defaultWeights: {number}
 ): {string: any}
     if primitive.mode ~= nil and primitive.mode ~= 4 then
         error(("tecs: %s is not a triangle primitive"):format(name), 0)
@@ -386,9 +402,6 @@ local function decodePrimitive(
     if (attributes.JOINTS_0 == nil) ~= (attributes.WEIGHTS_0 == nil) then
         error(("tecs: %s must supply JOINTS_0 and WEIGHTS_0 together"):format(name), 0)
     end
-    if primitive.targets ~= nil then
-        error(("tecs: %s uses unsupported morph targets"):format(name), 0)
-    end
     local positions <const> = accessor(document, buffers, attributes.POSITION)
     if positions.components ~= 3 then
         error(("tecs: %s POSITION is not VEC3"):format(name), 0)
@@ -398,6 +411,7 @@ local function decodePrimitive(
     local uvs: Access = nil
     local joints: Access = nil
     local weights: Access = nil
+    local morphTargets: {{string: Access}} = {}
     if attributes.NORMAL ~= nil then
         normals = accessor(document, buffers, attributes.NORMAL)
         sameRows(normals, 3, positions.count, name .. " NORMAL")
@@ -424,6 +438,34 @@ local function decodePrimitive(
         then
             error(("tecs: %s WEIGHTS_0 does not use float or normalized unsigned values"):format(name), 0)
         end
+    end
+    for targetIndex, target in ipairs(primitive.targets as {{string: integer}} or {}) do
+        for semantic in pairs(target) do
+            if semantic ~= "POSITION" and semantic ~= "NORMAL" and semantic ~= "TANGENT" then
+                error(
+                    ("tecs: %s morph target %d uses unsupported %s deltas"):format(name, targetIndex - 1, semantic), 0
+                )
+            end
+        end
+        local decoded: {string: Access} = {}
+        for _, semantic in ipairs({"POSITION", "NORMAL", "TANGENT"}) do
+            local index <const> = target[semantic]
+            if index ~= nil then
+                local source <const> = accessor(document, buffers, index)
+                sameRows(source, 3, positions.count, name .. " morph " .. semantic)
+                if source.componentType ~= 5126 or source.normalized then
+                    error(("tecs: %s morph target %d %s is not float VEC3"):format(name, targetIndex - 1, semantic), 0)
+                end
+                decoded[semantic] = source
+            end
+        end
+        if decoded.POSITION == nil and decoded.NORMAL == nil and decoded.TANGENT == nil then
+            error(("tecs: %s morph target %d is empty"):format(name, targetIndex - 1), 0)
+        end
+        morphTargets[targetIndex] = decoded
+    end
+    if #defaultWeights ~= 0 and #defaultWeights ~= #morphTargets then
+        error(("tecs: %s mesh weights do not match its morph targets"):format(name), 0)
     end
     if primitive.material ~= nil then
         local material = (document.materials as {{string: any}} or {})[(primitive.material as integer) + 1]
@@ -476,6 +518,7 @@ local function decodePrimitive(
 
     local vertices <const> = ffi.new("float[?]", positions.count * 12) as loader.CArray
     local skinVertices: loader.CArray = nil
+    local morphVertices: loader.CArray = nil
     local maxJoint = -1
     if joints ~= nil then
         skinVertices = ffi.new("float[?]", positions.count * 8) as loader.CArray
@@ -499,6 +542,29 @@ local function decodePrimitive(
             for lane = 0, 3 do
                 skinVertices[at + 4 + lane] = (skinVertices[at + 4 + lane] as number) / total
             end
+        end
+    end
+    local morphRadius = 0.0
+    if #morphTargets > 0 then
+        morphVertices = ffi.new("float[?]", positions.count * #morphTargets * 9) as loader.CArray
+        for row = 0, positions.count - 1 do
+            local displacement = 0.0
+            for targetIndex, target in ipairs(morphTargets) do
+                local destination <const> = ((targetIndex - 1) * positions.count + row) * 9
+                for lane = 0, 2 do
+                    morphVertices[destination + lane] = target.POSITION ~= nil and value(target.POSITION, row, lane)
+                        or 0
+                    morphVertices[destination + 3 + lane] = target.NORMAL ~= nil and value(target.NORMAL, row, lane)
+                        or 0
+                    morphVertices[destination + 6 + lane] = target.TANGENT ~= nil and value(target.TANGENT, row, lane)
+                        or 0
+                end
+                local dx, dy, dz <const> = morphVertices[destination] as number,
+                    morphVertices[destination + 1] as number,
+                    morphVertices[destination + 2] as number
+                displacement = displacement + math.sqrt(dx * dx + dy * dy + dz * dz)
+            end
+            morphRadius = math.max(morphRadius, displacement)
         end
     end
     local generatedNormals: loader.CArray = nil
@@ -631,12 +697,16 @@ local function decodePrimitive(
         vertices = ffi.string(vertices as string, positions.count * 48),
         indices = ffi.string(indices as string, indexCount * 4),
         skinVertices = skinVertices ~= nil and ffi.string(skinVertices as string, positions.count * 32) or nil,
+        morphVertices = morphVertices ~= nil
+            and ffi.string(morphVertices as string, positions.count * #morphTargets * 36) or nil,
+        morphTargetCount = #morphTargets,
+        morphWeights = defaultWeights,
         vertexCount = positions.count,
         indexCount = indexCount,
         centerX = centerX,
         centerY = centerY,
         centerZ = centerZ,
-        radius = math.sqrt(radiusSquared),
+        radius = math.sqrt(radiusSquared) + morphRadius,
         material = primitive.material ~= nil and (primitive.material as integer) + 1 or 0,
         maxJoint = maxJoint,
     }
@@ -927,14 +997,23 @@ function gltf.decodeFile(path: string): {string: any}
 
     local meshes: {{string: any}} = {}
     local byMesh: {integer: {integer}} = {}
+    local weightsByMesh: {integer: {number}} = {}
     for meshIndex, source in ipairs(document.meshes as {{string: any}} or {}) do
         local primitiveIndices: {integer} = {}
+        local defaultWeights: {number} = {}
+        for index, weight in ipairs(source.weights as {number} or {}) do
+            if not finite(weight) then
+                error(("tecs: %s mesh %d has a non-finite morph weight"):format(path, meshIndex - 1), 0)
+            end
+            defaultWeights[index] = weight
+        end
         for primitiveIndex, primitive in ipairs(source.primitives as {{string: any}}) do
             local name <const> = path .. "#mesh-" .. (meshIndex - 1) .. "-primitive-" .. (primitiveIndex - 1)
-            meshes[#meshes + 1] = decodePrimitive(document, buffers, primitive, name)
+            meshes[#meshes + 1] = decodePrimitive(document, buffers, primitive, name, defaultWeights)
             primitiveIndices[#primitiveIndices + 1] = #meshes
         end
         byMesh[meshIndex] = primitiveIndices
+        weightsByMesh[meshIndex] = defaultWeights
     end
 
     local draws: {{string: any}} = {}
@@ -1095,7 +1174,8 @@ function gltf.decodeFile(path: string): {string: any}
         visiting[index] = true
         local world <const> = worldOf(index)
         if node.mesh ~= nil then
-            local nodeMeshes <const> = byMesh[(node.mesh as integer) + 1]
+            local meshIndex <const> = (node.mesh as integer) + 1
+            local nodeMeshes <const> = byMesh[meshIndex]
             if nodeMeshes == nil then
                 error(("tecs: %s node names a missing mesh"):format(path), 0)
             end
@@ -1114,11 +1194,25 @@ function gltf.decodeFile(path: string): {string: any}
                         error(("tecs: %s mesh joint index exceeds skin %d"):format(path, node.skin as integer), 0)
                     end
                 end
-                local transform <const> = decompose(world)
+                local transform <const> = decompose(world) as {string: any}
                 transform.mesh = mesh
                 transform.material = geometry.material as number
                 transform.skin = skin
                 transform.node = index + 1
+                local sourceWeights <const> = node.weights as {number} or weightsByMesh[meshIndex]
+                local targetCount <const> = geometry.morphTargetCount as integer
+                if #sourceWeights ~= 0 and #sourceWeights ~= targetCount then
+                    error(("tecs: %s node %d weights do not match its morph targets"):format(path, index), 0)
+                end
+                local weights: {number} = {}
+                for target = 1, targetCount do
+                    local weight <const> = #sourceWeights == 0 and 0.0 or sourceWeights[target]
+                    if not finite(weight) then
+                        error(("tecs: %s node %d has a non-finite morph weight"):format(path, index), 0)
+                    end
+                    weights[target] = weight
+                end
+                transform.weights = weights
                 draws[#draws + 1] = transform
             end
         end

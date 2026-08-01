@@ -1,12 +1,25 @@
 #version 450
 #pragma tecs variants MESH_SKINNING=1
+#pragma tecs variants MESH_MORPHING=1
+#pragma tecs variants MESH_SKINNING=1 MESH_MORPHING=1
 
 layout(set = 0, binding = 0) readonly buffer Vertices { float value[]; } vertices;
 layout(set = 0, binding = 1) readonly buffer Instances { float value[]; } instances;
+#ifdef MESH_MORPHING
+layout(set = 0, binding = 2) readonly buffer MorphVertices { float value[]; } morphVertices;
+layout(set = 0, binding = 3) readonly buffer InstanceMorphs { float value[]; } instanceMorphs;
+layout(set = 0, binding = 4) readonly buffer MorphWeights { float value[]; } morphWeights;
+#endif
 #ifdef MESH_SKINNING
+#ifdef MESH_MORPHING
+layout(set = 0, binding = 5) readonly buffer SkinVertices { float value[]; } skinVertices;
+layout(set = 0, binding = 6) readonly buffer InstanceSkins { float value[]; } instanceSkins;
+layout(set = 0, binding = 7) readonly buffer JointMatrices { float value[]; } jointMatrices;
+#else
 layout(set = 0, binding = 2) readonly buffer SkinVertices { float value[]; } skinVertices;
 layout(set = 0, binding = 3) readonly buffer InstanceSkins { float value[]; } instanceSkins;
 layout(set = 0, binding = 4) readonly buffer JointMatrices { float value[]; } jointMatrices;
+#endif
 #endif
 
 layout(set = 1, binding = 0) uniform ShadowView {
@@ -20,6 +33,29 @@ vec3 rotateBy(vec4 rotation, vec3 value) {
     vec3 twice = 2.0 * cross(rotation.xyz, value);
     return value + rotation.w * twice + cross(rotation.xyz, twice);
 }
+
+#ifdef MESH_MORPHING
+vec3 morphPosition(vec3 position) {
+    int metadata = gl_InstanceIndex * 5;
+    int firstMorphVertex = int(instanceMorphs.value[metadata]);
+    if (firstMorphVertex < 0) {
+        return position;
+    }
+    int firstVertex = int(instanceMorphs.value[metadata + 1]);
+    int vertexCount = int(instanceMorphs.value[metadata + 2]);
+    int firstWeight = int(instanceMorphs.value[metadata + 3]);
+    int targetCount = int(instanceMorphs.value[metadata + 4]);
+    int localVertex = gl_VertexIndex - firstVertex;
+    for (int target = 0; target < targetCount; target++) {
+        int at = (firstMorphVertex + target * vertexCount + localVertex) * 9;
+        position += vec3(
+            morphVertices.value[at],
+            morphVertices.value[at + 1],
+            morphVertices.value[at + 2]) * morphWeights.value[firstWeight + target];
+    }
+    return position;
+}
+#endif
 
 #ifdef MESH_SKINNING
 mat4 jointMatrix(int joint) {
@@ -61,6 +97,9 @@ void main() {
         vertices.value[vertexBase],
         vertices.value[vertexBase + 1],
         vertices.value[vertexBase + 2]);
+#ifdef MESH_MORPHING
+    localPosition = morphPosition(localPosition);
+#endif
 #ifdef MESH_SKINNING
     localPosition = skinPosition(localPosition);
 #endif
