@@ -17,8 +17,10 @@ hero:
       link: /modules/
 
 features:
-  - title: Live inspection
-    details: Inspect, freeze, and edit a running game through the <a href="/modules/io/mcp">built-in MCP server</a>.
+  - title: Build with AI
+    details: >-
+      A <a href="/modules/io/mcp">built-in MCP server</a> lets humans and agents
+      inspect, freeze and edit a running game.
     icon: 🤖
   - title: ECS built for LuaJIT
     details: >-
@@ -77,31 +79,53 @@ Cargo; [getting started](/getting-started) covers that workflow.
 
 ## Entities are the interface
 
-Anything that renders or updates per frame is an entity in a world. The host
-owns the loop: an entry file returns an application, so game code registers
-work instead of driving frames itself.
+A drawn quad, a light, a sound, a physics body: each one is an entity carrying
+components, and the subsystem that cares for it finds it by query. A game holds
+no draw list, no voice handle and no body pointer, so what works on one of them
+works on all of them. A [snapshot](/modules/ecs/save-games) saves the scene, the
+[profiler](/modules/ecs/profiling) reports where the frame went, and the
+[debug server](/modules/io/mcp) inspects and edits any of it while the game runs.
+
+The host owns the loop. An entry file returns an application, and the plugin it
+carries registers work instead of driving frames.
 
 ```teal
 local Transform2D <const> = tecs.Transform2D
+local gfx <const> = tecs.gfx
 
 return tecs.newApplication({
+    window = {title = "Spin", width = 1280, height = 720},
+    ambientLight = {0.05, 0.05, 0.08},
     plugin = function(world: tecs.World, app: tecs.Application)
-        local movers = world:newQuery({ include = { Transform2D } })
+        -- Something on screen is an entity. Nothing issues a draw call for it.
+        world:spawn(
+            Transform2D.new({x = 640, y = 360, scaleX = 64, scaleY = 64}),
+            gfx.Tint(0.85, 0.4, 0.3, 1.0),
+            gfx.Renderable2D()
+        )
+
+        -- So is the light falling on it, placed by the same Transform2D.
+        world:spawn(
+            Transform2D.new({x = 520, y = 300}),
+            gfx.PointLight2D(120, 600, 1.0, 0.9, 0.7, 3.0)
+        )
+
+        local movers <const> = world:newQuery({
+            include = {Transform2D, gfx.Renderable2D},
+        })
 
         world:addSystem({
             name = "game.Spin",
             phase = tecs.ecs.phases.Update,
             run = function(dt: number)
                 for archetype, length in movers:iter() do
-                    local transforms = archetype:getMut(Transform2D)
+                    local transforms <const> = archetype:getMut(Transform2D)
                     for row = 1, length do
                         transforms[row].rotation = transforms[row].rotation + dt
                     end
                 end
             end,
         })
-
-        world:spawn(Transform2D(100, 100))
     end,
 })
 ```
