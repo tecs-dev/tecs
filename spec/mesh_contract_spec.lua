@@ -12,6 +12,7 @@ local components = require("tecs.components")
 local Camera3D = require("tecs.gfx.Camera3D")
 local MeshExtractor = require("tecs.internal.render.MeshExtractor")
 local MeshFramePacket = require("tecs.internal.render.MeshFramePacket")
+local frustum = require("tecs.internal.render.frustum")
 
 local function triangle(name)
     return assets.newMesh({
@@ -130,6 +131,18 @@ describe("the 3D scene contract", function()
             assert.are.equal(-1, restored.slot)
         end)
 
+        it("keeps mesh material identity separate from 2D materials", function()
+            local world = tecs.ecs.newWorld()
+            local asset = components.meshMaterialId("models//props/./crate.glb#paint")
+            assert.are.equal("models/props/crate.glb#paint", components.meshMaterialName(asset))
+
+            local encoded = components.MeshMaterial.serialize(components.MeshMaterial(asset, 9))
+            assert.same({ meshMaterial = "models/props/crate.glb#paint" }, encoded)
+            local restored = components.MeshMaterial.deserialize(world, encoded)
+            assert.are.equal(asset, restored.asset)
+            assert.are.equal(-1, restored.slot)
+        end)
+
         it("uses a unit local sphere and rejects a negative radius", function()
             local bounds = components.Bounds3D()
             assert.are.equal(0, bounds.centerX)
@@ -215,7 +228,7 @@ describe("the 3D scene contract", function()
                 tecs.Transform3D.new({ x = 4, y = 5, z = 6, scaleX = 2 }),
                 components.Mesh(asset),
                 components.Bounds3D(1, 0, 0, 0.5),
-                components.Material(3, 0.25),
+                components.MeshMaterial(3, 0),
                 components.Tint(0.2, 0.4, 0.6, 1),
                 components.Renderable3D()
             )
@@ -226,8 +239,8 @@ describe("the 3D scene contract", function()
             assert.are.equal(0, packet.dropped)
             assert.are.equal(1, packet.rewritten)
             assert.are.equal(7, instances[10])
-            assert.are.equal(3, instances[11])
-            near(instances[12], 0.25)
+            assert.are.equal(0, instances[11])
+            near(instances[12], 0)
             near(instances[13], 0.2)
             near(instances[14], 0.4)
             near(instances[15], 0.6)
@@ -252,7 +265,7 @@ describe("the 3D scene contract", function()
                     tecs.Transform3D(),
                     components.Mesh(asset, 0),
                     components.Bounds3D(),
-                    components.Material(),
+                    components.MeshMaterial(),
                     components.Tint(),
                     components.Renderable3D()
                 )
@@ -278,7 +291,7 @@ describe("the 3D scene contract", function()
                 tecs.Transform3D(),
                 components.Mesh(asset),
                 components.Bounds3D(),
-                components.Material(),
+                components.MeshMaterial(),
                 components.Tint(),
                 components.Renderable3D()
             )
@@ -343,6 +356,28 @@ describe("the 3D scene contract", function()
             assert.has_error(function()
                 camera:matrix(100, 100)
             end, "Camera3D rotation quaternion must not be zero")
+        end)
+
+        it("extracts six planes that keep and reject bounding spheres", function()
+            local camera = Camera3D.newCamera3D({ verticalFov = math.pi / 2, near = 1, far = 10 })
+            local planes = loader.newArray("float[24]")
+            frustum.write(camera:matrix(100, 100), planes)
+
+            local function visible(x, y, z, radius)
+                for plane = 0, 5 do
+                    local at = plane * 4
+                    if planes[at] * x + planes[at + 1] * y + planes[at + 2] * z + planes[at + 3] < -radius then
+                        return false
+                    end
+                end
+                return true
+            end
+
+            assert.is_true(visible(0, 0, -2, 0.1))
+            assert.is_true(visible(2, 0, -2, 0.1), "a sphere touching the right plane survives")
+            assert.is_false(visible(3, 0, -2, 0.1))
+            assert.is_false(visible(0, 0, -0.5, 0.1))
+            assert.is_false(visible(0, 0, -11, 0.1))
         end)
     end)
 

@@ -32,7 +32,7 @@ local meshlayout <const> = require("tecs.gpu.meshlayout")
 local Transform3D <const> = tecs.Transform3D
 local Mesh <const> = components.Mesh
 local Bounds3D <const> = components.Bounds3D
-local Material <const> = components.Material
+local MeshMaterial <const> = components.MeshMaterial
 local Tint <const> = components.Tint
 local Renderable3D <const> = components.Renderable3D
 
@@ -56,12 +56,12 @@ local world <const> = tecs.ecs.newWorld()
 local asset <const> = components.meshId("bench://unit-mesh")
 world:batchSpawn(
     COUNT,
-    {Transform3D, Mesh, Bounds3D, Material, Tint, Renderable3D},
+    {Transform3D, Mesh, Bounds3D, MeshMaterial, Tint, Renderable3D},
     function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
         local transforms = archetype:getMut(Transform3D)
         local meshes = archetype:getMut(Mesh)
         local bounds = archetype:getMut(Bounds3D)
-        local materials = archetype:getMut(Material)
+        local materials = archetype:getMut(MeshMaterial)
         local tints = archetype:getMut(Tint)
         for row = firstRow, lastRow do
             local transform = transforms[row]
@@ -87,8 +87,8 @@ world:batchSpawn(
             bound.radius = 1.0
 
             local material = materials[row]
-            material.id = 0
-            material.param = 0.25
+            material.asset = 0
+            material.slot = 0
 
             local tint = tints[row]
             tint.r = 1.0

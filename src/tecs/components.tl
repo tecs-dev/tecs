@@ -30,10 +30,12 @@ shadows.
 The 3D mesh contract is separate from the sprite lane. `tecs.Transform3D`,
 [`Mesh`](tealdoc:tecs.components.Mesh),
 [`Bounds3D`](tealdoc:tecs.components.Bounds3D),
+[`MeshMaterial`](tealdoc:tecs.components.MeshMaterial),
 [`Tint`](tealdoc:tecs.components.Tint), and
 [`Renderable3D`](tealdoc:tecs.components.Renderable3D) describe an opaque mesh
 for the optional mesh domain.
-[`Material`](tealdoc:tecs.components.Material) is shared by both domains.
+[`Material`](tealdoc:tecs.components.Material) remains the compiled 2D shader
+identity; mesh material data has its own persisted name and resident slot.
 
 [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) remains at `tecs.Transform2D` because
 physics, hierarchy, sequencing, and graphics share it. Other render components
@@ -198,6 +200,12 @@ local meshIds: {string: integer} = {}
 local meshNames: {integer: string} = {}
 local meshCount = 0
 
+--- Interned mesh-material names. This is a separate persisted identity from
+--- compiled 2D material programs and from device-local residency slots.
+local meshMaterialIds: {string: integer} = {}
+local meshMaterialNames: {integer: string} = {}
+local meshMaterialCount = 0
+
 --- The scheme a name may lead with, whose `//` is not a path separator: what
 --- follows it is an authority rather than a directory.
 local SCHEME_PREFIX <const> = "^(%a[%w+.-]*://)(.*)$"
@@ -294,6 +302,25 @@ end
 --- Name a mesh index stands for, or nil when the index names nothing.
 local function meshName(id: integer): string
     return meshNames[id]
+end
+
+local function meshMaterialId(name: string): integer
+    if name == nil or name == "" then
+        error("tecs: a mesh material name cannot be empty", 2)
+    end
+    name = normalizePath(name)
+    local id = meshMaterialIds[name]
+    if id ~= nil then
+        return id
+    end
+    meshMaterialCount = meshMaterialCount + 1
+    meshMaterialIds[name] = meshMaterialCount
+    meshMaterialNames[meshMaterialCount] = name
+    return meshMaterialCount
+end
+
+local function meshMaterialName(id: integer): string
+    return meshMaterialNames[id]
 end
 
 --- Samples a texture instead of drawing flat color.
@@ -411,6 +438,43 @@ ecs.newFFIComponent({
     end,
 })
 
+--- Selects resident PBR data for the 3D mesh domain.
+---
+--- A compiled 2D [`Material`](tealdoc:tecs.components.Material) and a loaded
+--- glTF material are different compatibility surfaces. `asset` therefore
+--- names a mesh material independently, while `slot` is engine-owned device
+--- residency. Zero in both fields selects the neutral built-in material.
+local record MeshMaterial is Component
+    --- Caller-writable. Selects material data by its `meshMaterialId` index.
+    --- Zero selects the neutral built-in material.
+    asset: number
+    --- Engine-owned. Stores the mesh domain's resident material slot. Set it
+    --- negative when changing `asset`; otherwise game code should ignore it.
+    slot: number
+end
+
+ecs.newFFIComponent({
+    -- This component name is stored in snapshots and is an external
+    -- compatibility surface.
+    name = "MeshMaterial",
+    container = MeshMaterial,
+    fields = {
+        {"asset", "int32_t"},
+        {"slot", "int32_t"},
+    },
+    defaults = {0, 0},
+    serialize = function(instance: MeshMaterial): {string: any}
+        return {meshMaterial = meshMaterialNames[instance.asset as integer]}
+    end,
+    deserialize = function(_world: types.World, data: {string: any}): MeshMaterial
+        local name = data.meshMaterial as string
+        if name == nil or name == "" then
+            return MeshMaterial(0, 0)
+        end
+        return MeshMaterial(meshMaterialId(name), -1)
+    end,
+})
+
 --- Defines a mesh's local-space bounding sphere.
 ---
 --- A sphere stays four floats in extraction and transforms conservatively
@@ -447,19 +511,17 @@ ecs.newFFIComponent({
 
 --- Selects the material that shades renderable geometry.
 ---
---- Absent means the default material. In the sprite domain it samples the
---- image array and covers the whole quad, so an entity with neither a Sprite
---- nor a Material still draws. The mesh domain supplies the same neutral image
---- inputs when it has no texture. Present selects one of the materials found
+--- Absent means the default 2D material. It samples the sprite image array and
+--- covers the whole quad, so an entity with neither a Sprite nor a Material
+--- still draws. Present selects one of the compiled shader materials found
 --- under `materials/`.
 ---
 --- Use `materials.id(name)` instead of writing an id. Sorted material names
 --- determine ids, so adding a file may renumber them. Snapshots therefore store
 --- only the material name.
 ---
---- Sprite and mesh domains carry the same material id and parameter through
---- their own instance formats. The material ABI is shared; their extraction,
---- culling, and draw layouts are not.
+--- Meshes use [`MeshMaterial`](tealdoc:tecs.components.MeshMaterial), whose
+--- resident PBR data is independent from this compiled 2D shader identity.
 local record Material is Component
     --- Caller-writable. Selects a material by the id returned from
     --- `materials.id`.
@@ -645,15 +707,19 @@ local record components
     --- residency state and a negative value means unresolved.
     Mesh: Mesh
 
+    --- Read-only. Exposes the 3D material-reference component. `asset` is a
+    --- process-local `meshMaterialId`; `slot` is engine-owned residency, and
+    --- zero selects the neutral built-in material.
+    MeshMaterial: MeshMaterial
+
     --- Read-only. Exposes a local-space mesh bounding sphere. The center uses
     --- mesh-local coordinates and `radius` defaults to one world unit.
     Bounds3D: Bounds3D
 
-    --- Read-only. Exposes the material component shared by sprite and mesh
-    --- domains. Absent selects the default material. Take `id` from
-    --- `materials.id(name)` rather than writing a number because sorted
-    --- material names determine ids and may move when a file appears. `param`
-    --- runs from zero to one and means whatever the material says it does.
+    --- Read-only. Exposes the compiled 2D shader material component. Absent
+    --- selects the default material. Take `id` from `materials.id(name)`
+    --- rather than writing a number because sorted material names determine
+    --- ids and may move when a file appears. Meshes use `MeshMaterial`.
     Material: Material
 
     --- Read-only. Exposes the point-light component resolved by deferred
@@ -722,12 +788,23 @@ local record components
     --- @param id An index previously returned by `meshId`.
     --- @return The normalized name, or nil when the index names nothing.
     meshName: function(id: integer): string
+
+    --- Returns the process-local identity of a mesh material name.
+    --- @param name A non-empty stable material name.
+    --- @return A positive index stable for the life of the process.
+    meshMaterialId: function(name: string): integer
+
+    --- Returns the name represented by a mesh material index.
+    --- @param id An index previously returned by `meshMaterialId`.
+    --- @return The normalized name, or nil when the index names nothing.
+    meshMaterialName: function(id: integer): string
 end
 
 components.PreviousTransform2D = PreviousTransform2D
 components.Tint = Tint
 components.Sprite = Sprite
 components.Mesh = Mesh
+components.MeshMaterial = MeshMaterial
 components.Bounds3D = Bounds3D
 components.Material = Material
 components.PointLight2D = PointLight2D
@@ -740,5 +817,7 @@ components.imageId = imageId
 components.imageName = imageName
 components.meshId = meshId
 components.meshName = meshName
+components.meshMaterialId = meshMaterialId
+components.meshMaterialName = meshMaterialName
 
 return components

@@ -96,16 +96,14 @@ describe(
             "rejects invalid options and coordinates",
             function()
                 luassert.has_error(
-                    function() noise.new({octaves = 0}) end,
-                    "noise: octaves must be an integer from 1 through 32"
+                    function() noise.new({octaves = 0}) end, "noise: octaves must be an integer from 1 through 32"
                 )
                 luassert.has_error(
                     function() noise.new({algorithm = "missing" as noise.Algorithm}) end,
                     "noise: unknown algorithm missing"
                 )
                 luassert.has_error(
-                    function() noise.new({fractal = "missing" as noise.Fractal}) end,
-                    "noise: unknown fractal missing"
+                    function() noise.new({fractal = "missing" as noise.Fractal}) end, "noise: unknown fractal missing"
                 )
                 luassert.has_error(
                     function() noise.new({weightedStrength = 1.1}) end,
@@ -118,7 +116,9 @@ describe(
                     function() field:fill2({}, -1, 2) end,
                     "noise: width must be an integer from zero through 2147483647"
                 )
-                luassert.has_error(function() field:fill2({}, 1073741824, 2) end, "noise: the grid dimensions are too large")
+                luassert.has_error(
+                    function() field:fill2({}, 1073741824, 2) end, "noise: the grid dimensions are too large"
+                )
             end
         )
     end

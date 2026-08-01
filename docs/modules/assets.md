@@ -1,5 +1,5 @@
 ---
-description: "Asynchronous byte loading and media decoding through futures"
+description: "Asynchronous byte, image, sound, and static glTF loading through futures"
 outline: deep
 ---
 

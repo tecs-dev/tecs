@@ -181,16 +181,20 @@ local record gfx
     --- negative value means the asset has not been made resident.
     Mesh: components.Mesh
 
+    --- Selects resident PBR data for the mesh domain. `asset` is a
+    --- `meshMaterialId` identity and `slot` is engine-owned residency state.
+    MeshMaterial: components.MeshMaterial
+
     --- Supplies a mesh's local-space bounding sphere. The mesh cull
     --- transforms its center and scales its radius by the largest absolute
     --- scale axis.
     Bounds3D: components.Bounds3D
 
-    --- Selects one material shared by sprite and mesh domains. Absent selects
-    --- the default material. Take `id` from `materials.id(name)` rather than
-    --- writing a number because sorted material names determine ids and move
-    --- when a file is added. `param` runs from zero to one and means whatever
-    --- the material says it does.
+    --- Selects a compiled 2D shader material. Absent selects the default
+    --- material. Take `id` from `materials.id(name)` rather than writing a
+    --- number because sorted material names determine ids and move when a
+    --- file is added. Meshes use `MeshMaterial` instead. `param` runs from
+    --- zero to one and means whatever the selected 2D material says it does.
     Material: components.Material
 
     --- A light the deferred lighting pass resolves, positioned by the
@@ -257,6 +261,16 @@ local record gfx
     --- @param id An index previously returned by `meshId`.
     --- @return The normalized name, or nil when the index names nothing.
     meshName: function(id: integer): string
+
+    --- Returns a process-local identity for a mesh material name.
+    --- @param name A non-empty stable material name.
+    --- @return A positive process-local index.
+    meshMaterialId: function(name: string): integer
+
+    --- Returns the name represented by a mesh material identity.
+    --- @param id An index previously returned by `meshMaterialId`.
+    --- @return The normalized name, or nil.
+    meshMaterialName: function(id: integer): string
 
     --- What `newTTF` answers with, and what a `Text` names.
     type Font = text.Font

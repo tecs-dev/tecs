@@ -34,6 +34,7 @@ cargo xtask deps
 cargo xtask build
 cargo xtask test
 cargo xtask example ui-demo
+cargo xtask example gltf3d
 ```
 
 `cargo xtask deps` installs system development dependencies. The repository

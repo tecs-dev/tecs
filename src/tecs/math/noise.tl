@@ -237,9 +237,7 @@ function noise.Noise:fill2(
         self._scratch = loader.newArray("float[?]", capacity)
         self._scratchCapacity = capacity
     end
-    if not C.tecsNoiseFill2(
-        self._handle, self._scratch, width, height, originX, originY, stepX, stepY
-    ) as boolean then
+    if not C.tecsNoiseFill2(self._handle, self._scratch, width, height, originX, originY, stepX, stepY) as boolean then
         error("noise: the grid dimensions are too large", 2)
     end
 

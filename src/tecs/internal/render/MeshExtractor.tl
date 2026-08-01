@@ -47,6 +47,7 @@ local record MeshExtractor
     _commands: loader.CArray
     _slot: integer
     _drawByAsset: {integer: MeshDraw}
+    _materialSlotByAsset: {integer: integer}
     _extractSeconds: number
 end
 
@@ -58,8 +59,13 @@ function MeshExtractor.create(options: MeshExtractorOptions): MeshExtractor
     self.capacity = options.capacity
     self._slot = 0
     self._drawByAsset = {}
+    self._materialSlotByAsset = {}
     self._extractSeconds = 0.0
     return self
+end
+
+function MeshExtractor:registerMaterial(asset: integer, slot: integer)
+    self._materialSlotByAsset[asset] = slot
 end
 
 function MeshExtractor:setStaging(
@@ -105,7 +111,7 @@ function MeshExtractor:extract(packet: MeshFramePacket)
         local transforms <const> = archetype:get(Transform3D)
         local meshes <const> = archetype:get(components.Mesh)
         local bounds <const> = archetype:get(components.Bounds3D)
-        local materials <const> = archetype:get(components.Material)
+        local materials <const> = archetype:get(components.MeshMaterial)
         local tints <const> = archetype:get(components.Tint)
         local resolved = false
 
@@ -129,6 +135,20 @@ function MeshExtractor:extract(packet: MeshFramePacket)
                 if draw ~= nil and meshSlot >= 0 then
                     local transform = transforms[row]
                     local material = materials[row]
+                    local materialSlot = material.slot as integer
+                    if materialSlot < 0 then
+                        materialSlot = self._materialSlotByAsset[material.asset as integer]
+                        if materialSlot == nil then
+                            error(
+                                ("tecs: no mesh material is registered as '%s'"):format(
+                                    components.meshMaterialName(material.asset as integer)
+                                ),
+                                2
+                            )
+                        end
+                        material.slot = materialSlot
+                        resolved = true
+                    end
                     local tint = tints[row]
                     local base <const> = written * meshlayout.INSTANCE_FLOATS
                     instances[base] = transform.x
@@ -142,8 +162,8 @@ function MeshExtractor:extract(packet: MeshFramePacket)
                     instances[base + 8] = transform.scaleY
                     instances[base + 9] = transform.scaleZ
                     instances[base + 10] = meshSlot
-                    instances[base + 11] = material.id
-                    instances[base + 12] = material.param
+                    instances[base + 11] = materialSlot
+                    instances[base + 12] = 0.0
                     instances[base + 13] = tint.r
                     instances[base + 14] = tint.g
                     instances[base + 15] = tint.b
@@ -204,7 +224,7 @@ function MeshExtractor:install(world: types.World, packet: MeshFramePacket, publ
             Transform3D,
             components.Mesh,
             components.Bounds3D,
-            components.Material,
+            components.MeshMaterial,
             components.Tint,
             components.Renderable3D,
         },

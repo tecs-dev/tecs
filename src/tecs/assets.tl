@@ -29,9 +29,10 @@ The loader decodes pixels but creates no GPU resource. The renderer decides
 texture residency. Audio follows the same split between decoded clips and
 voices.
 
-`newMesh` constructs immutable procedural geometry synchronously. It copies
-vertices and indices into CPU-owned arrays that a mesh domain consumes when
-the geometry becomes resident. Mesh file decoding is not part of this stage.
+`newMesh` constructs immutable procedural geometry synchronously. `loadGLTF`
+decodes static glTF 2.0 and GLB scenes on the worker, including their images
+and metallic-roughness materials. Both produce CPU-owned data that the mesh
+domain consumes when it becomes resident.
 
 ## Lifetime
 
@@ -88,6 +89,7 @@ local rust = require("tecs.ffi.rust")
 local loader = require("tecs.ffi.loader")
 local files = require("tecs.io.files")
 local workers = require("tecs.workers")
+local gltf = require("tecs.internal.gltf")
 
 local MIX = mixer.C
 local RUST = rust.C
@@ -128,6 +130,15 @@ local function readBytes(task)
         return {id = task.id, error = "cannot read " .. task.path}
     end
     return {id = task.id, bytes = bytes}
+end
+
+local function decodeModel(task)
+    local ok, result = pcall(gltf.decodeFile, task.path)
+    if not ok then
+        return {id = task.id, error = tostring(result)}
+    end
+    result.id = task.id
+    return result
 end
 
 -- Length in milliseconds, or -1 when the container cannot say. A format that
@@ -189,6 +200,8 @@ while true do
     if task == nil then break end
     if task.kind == "sound" then
         self:send(decodeSound(task))
+    elseif task.kind == "model" then
+        self:send(decodeModel(task))
     elseif task.kind == "bytes" then
         self:send(readBytes(task))
     else
@@ -328,6 +341,99 @@ local record MeshOptions
     indices: {integer}
 end
 
+--- Describes one decoded glTF material before GPU registration.
+local record ModelMaterial
+    --- Read-only. Contains the stable material name.
+    name: string
+    --- Read-only. Selects metallic-roughness PBR at zero or unlit at one.
+    model: integer
+    --- Read-only. Selects a one-based entry in `Model.images`, or zero.
+    baseColorImage: integer
+    --- Read-only. Selects a tangent-space normal image, or zero.
+    normalImage: integer
+    --- Read-only. Selects a glTF metallic-roughness image, or zero.
+    metallicRoughnessImage: integer
+    --- Read-only. Selects an occlusion image, or zero.
+    occlusionImage: integer
+    --- Read-only. Selects an emissive image, or zero.
+    emissiveImage: integer
+    --- Read-only. Reports the alpha-mask cutoff. Zero keeps every fragment.
+    alphaCutoff: number
+    --- Read-only. Reports the base-color red factor.
+    baseR: number
+    --- Read-only. Reports the base-color green factor.
+    baseG: number
+    --- Read-only. Reports the base-color blue factor.
+    baseB: number
+    --- Read-only. Reports the base-color alpha factor.
+    baseA: number
+    --- Read-only. Reports the emissive red factor.
+    emissiveR: number
+    --- Read-only. Reports the emissive green factor.
+    emissiveG: number
+    --- Read-only. Reports the emissive blue factor.
+    emissiveB: number
+    --- Read-only. Reports the metallic factor.
+    metallic: number
+    --- Read-only. Reports the roughness factor.
+    roughness: number
+    --- Read-only. Reports tangent-space normal strength.
+    normalScale: number
+    --- Read-only. Reports sampled occlusion strength.
+    occlusionStrength: number
+end
+
+--- Describes one static primitive instance in a decoded glTF scene.
+local record ModelDraw
+    --- Read-only. Selects a one-based entry in `Model.meshes`.
+    mesh: integer
+    --- Read-only. Selects a one-based entry in `Model.materials`, or zero for
+    --- the neutral material.
+    material: integer
+    --- Read-only. Reports world translation x from the selected glTF scene.
+    x: number
+    --- Read-only. Reports world translation y.
+    y: number
+    --- Read-only. Reports world translation z.
+    z: number
+    --- Read-only. Reports world quaternion x.
+    rotationX: number
+    --- Read-only. Reports world quaternion y.
+    rotationY: number
+    --- Read-only. Reports world quaternion z.
+    rotationZ: number
+    --- Read-only. Reports world quaternion w.
+    rotationW: number
+    --- Read-only. Reports world scale x.
+    scaleX: number
+    --- Read-only. Reports world scale y.
+    scaleY: number
+    --- Read-only. Reports world scale z.
+    scaleZ: number
+end
+
+--- Represents one decoded static glTF 2.0 scene.
+---
+--- Meshes use the same fixed vertex layout as `newMesh`. Images remain
+--- decoded CPU pixels. `renderer.meshes:registerModel` consumes all of them
+--- and returns spawnable primitive records. Skinning, morph targets,
+--- animation, and alpha blending are deliberately outside this opaque lane.
+local record Model
+    --- Read-only. Contains the requested `.gltf` or `.glb` path unchanged.
+    path: string
+    --- Read-only. Contains unique decoded primitive geometry.
+    meshes: {Mesh}
+    --- Read-only. Contains unique decoded source images.
+    images: {Image}
+    --- Read-only. Contains decoded metallic-roughness material descriptions.
+    materials: {ModelMaterial}
+    --- Read-only. Contains the selected scene's flattened static draws.
+    draws: {ModelDraw}
+    --- Releases every CPU mesh and image not already consumed. Calling it
+    --- again does nothing.
+    release: function(self: Model)
+end
+
 local record assets
     --- Read-only. Exposes the decoded image type.
     Image: Image
@@ -338,12 +444,33 @@ local record assets
     --- Read-only. Exposes the immutable CPU mesh type.
     Mesh: Mesh
 
+    --- Read-only. Exposes the decoded static glTF scene type.
+    Model: Model
+
+    --- Read-only. Exposes one glTF material description.
+    ModelMaterial: ModelMaterial
+
+    --- Read-only. Exposes one flattened glTF primitive instance.
+    ModelDraw: ModelDraw
+
     --- Builds procedural mesh data in the renderer's fixed vertex layout.
     --- @param options The caller supplies a name, interleaved vertices, and
     ---     zero-based triangle indices.
     --- @return Returns CPU geometry that `renderer.meshes:registerMesh`
     ---     consumes or the caller releases.
     newMesh: function(options: MeshOptions): Mesh
+
+    --- Queues static glTF 2.0 or GLB decoding on the asset worker.
+    ---
+    --- External buffers and images resolve relative to the model path. Data
+    --- URIs and embedded GLB resources are supported. Triangle primitives,
+    --- static node transforms, metallic-roughness PBR, normal, occlusion,
+    --- emissive, alpha-mask, and unlit materials are decoded. A transparent,
+    --- skinned, morphed, animated, sparse-accessor, or non-triangle input
+    --- settles as failed instead of being loaded incompletely.
+    --- @param path The caller supplies a `.gltf` or `.glb` asset path.
+    --- @return Returns a pending future that owns its ready model.
+    loadGLTF: function(path: string): Future<Model>
 
     --- Reports whether the loading worker is running.
     ---
@@ -359,10 +486,96 @@ end
 local ImageMT <const>: metatable<Image> = {__index = Image}
 local SoundMT <const>: metatable<Sound> = {__index = Sound}
 local MeshMT <const>: metatable<Mesh> = {__index = Mesh}
+local ModelMT <const>: metatable<Model> = {__index = Model}
 
 function Mesh:release()
     self.vertices = nil
     self.indices = nil
+end
+
+function Model:release()
+    for _, mesh in ipairs(self.meshes) do
+        mesh:release()
+    end
+    for _, image in ipairs(self.images) do
+        image:release()
+    end
+end
+
+local function imageFromBytes(bytes: string, path: string): Image
+    local decoded = RUST.tecsImageDecode(ffi.cast("const uint8_t *", bytes), #bytes)
+    if decoded == nil then
+        error(("cannot decode %s: %s"):format(path, loader.toString(RUST.tecsRustError())), 0)
+    end
+    local width <const> = tonumber(RUST.tecsImageWidth(decoded)) as integer
+    return setmetatable(
+        {
+            path = path,
+            _image = decoded,
+            pixels = RUST.tecsImagePixels(decoded) as loader.CValue,
+            width = width,
+            height = tonumber(RUST.tecsImageHeight(decoded)) as integer,
+            pitch = width * 4,
+            _refs = 1,
+        } as Image,
+        ImageMT
+    )
+end
+
+local function modelFromWorker(result: {string: any}): Model
+    local images: {Image} = {}
+    local meshes: {Mesh} = {}
+    local built, modelOrReason = pcall(function(): Model
+        for index, source in ipairs(result.images as {{string: any}}) do
+            images[index] = imageFromBytes(source.bytes as string, source.name as string)
+        end
+        for index, source in ipairs(result.meshes as {{string: any}}) do
+            local vertexCount <const> = source.vertexCount as integer
+            local indexCount <const> = source.indexCount as integer
+            local vertices <const> = loader.newArray("float[?]", vertexCount * meshlayout.VERTEX_FLOATS)
+            local indices <const> = loader.newArray("uint32_t[?]", indexCount)
+            loader.copyTo(
+                loader.bytePointer(vertices as loader.CValue),
+                source.vertices as loader.CValue,
+                vertexCount * meshlayout.VERTEX_BYTES
+            )
+            loader.copyTo(loader.bytePointer(indices as loader.CValue), source.indices as loader.CValue, indexCount * 4)
+            meshes[index] = setmetatable(
+                {
+                    name = source.name as string,
+                    vertices = vertices,
+                    indices = indices,
+                    vertexCount = vertexCount,
+                    indexCount = indexCount,
+                    centerX = source.centerX as number,
+                    centerY = source.centerY as number,
+                    centerZ = source.centerZ as number,
+                    radius = source.radius as number,
+                } as Mesh,
+                MeshMT
+            )
+        end
+        return setmetatable(
+            {
+                path = result.path as string,
+                meshes = meshes,
+                images = images,
+                materials = result.materials as {ModelMaterial},
+                draws = result.draws as {ModelDraw},
+            } as Model,
+            ModelMT
+        )
+    end) as (boolean, any)
+    if not built then
+        for _, mesh in ipairs(meshes) do
+            mesh:release()
+        end
+        for _, image in ipairs(images) do
+            image:release()
+        end
+        error(tostring(modelOrReason), 0)
+    end
+    return modelOrReason as Model
 end
 
 function assets.newMesh(options: MeshOptions): Mesh
@@ -457,7 +670,8 @@ end
 --- one object: see `loadImage`.
 local record Entry
     id: integer
-    --- "bytes", "image" or "sound", which decides what the answer is built into.
+    --- "bytes", "image", "model" or "sound", which decides what the answer
+    --- is built into.
     kind: string
     path: string
     root: Future<any>
@@ -590,6 +804,16 @@ local function settleResult(result: {string: any}): boolean
             sound.audio = ffi.cast("MIX_Audio *", ffi.cast("uintptr_t", result.audio)) as loader.CValue
         end
         root:complete(sound)
+        return true
+    end
+
+    if entry.kind == "model" then
+        local built, model = pcall(modelFromWorker, result) as (boolean, any)
+        if not built then
+            root:fail(tostring(model))
+        else
+            root:complete(model as Model)
+        end
         return true
     end
 
@@ -851,6 +1075,14 @@ function assets.loadString(path: string, kind?: string): Future<string>
         shared = root
     end
     return shared:map(function(bytes: string): string return bytes end) as Future<string>
+end
+
+function assets.loadGLTF(path: string): Future<Model>
+    content.note(path, "model")
+    local root, id = queue("model", path)
+    root._watchers = 1
+    worker:send({id = id, kind = "model", path = path})
+    return root as Future<Model>
 end
 
 --- Queues a sound for loading and answers a future for it immediately.

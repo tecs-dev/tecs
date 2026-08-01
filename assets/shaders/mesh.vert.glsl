@@ -14,6 +14,9 @@ layout(set = 1, binding = 0) uniform View {
 
 layout(location = 0) out vec3 vNormal;
 layout(location = 1) flat out vec3 vColor;
+layout(location = 2) out vec2 vUV;
+layout(location = 3) out vec4 vTangent;
+layout(location = 4) flat out int vMaterial;
 
 vec3 rotateBy(vec4 rotation, vec3 value) {
     vec3 twice = 2.0 * cross(rotation.xyz, value);
@@ -30,6 +33,11 @@ void main() {
         vertices.value[vertexBase + 3],
         vertices.value[vertexBase + 4],
         vertices.value[vertexBase + 5]);
+    vec4 localTangent = vec4(
+        vertices.value[vertexBase + 6],
+        vertices.value[vertexBase + 7],
+        vertices.value[vertexBase + 8],
+        vertices.value[vertexBase + 9]);
 
     int instanceBase = gl_InstanceIndex * 16;
     vec3 position = vec3(
@@ -54,6 +62,12 @@ void main() {
         scale.y == 0.0 ? 0.0 : 1.0 / scale.y,
         scale.z == 0.0 ? 0.0 : 1.0 / scale.z);
     vNormal = normalize(rotateBy(rotation, localNormal * inverseScale));
+    vec3 tangent = rotateBy(rotation, localTangent.xyz * scale);
+    tangent = normalize(tangent - vNormal * dot(vNormal, tangent));
+    float reflection = scale.x * scale.y * scale.z < 0.0 ? -1.0 : 1.0;
+    vTangent = vec4(tangent, localTangent.w * reflection);
+    vUV = vec2(vertices.value[vertexBase + 10], vertices.value[vertexBase + 11]);
+    vMaterial = int(instances.value[instanceBase + 11]);
     vColor = vec3(
         instances.value[instanceBase + 13],
         instances.value[instanceBase + 14],

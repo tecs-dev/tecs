@@ -760,6 +760,12 @@ function Application:_init(): boolean
     self.audio = audio.newAudio(config.audio)
     self.audio:install(self.world)
 
+    -- Direct image, model, and byte loads are valid from the game's entry
+    -- plugin. Start the shared worker before that callback, and let shutdown
+    -- stop it after audio has drained its own loads. Subsystems retain their
+    -- installed checks for headless use outside an Application.
+    assets.install()
+
     -- Tweening and sequencing are one plugin, and it belongs to the engine
     -- rather than to the game: both drive entities through the fixed phases,
     -- and a game that forgot to install it would find its own authored

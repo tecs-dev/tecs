@@ -49,6 +49,9 @@ Working today:
   render targets with pixel readback
 - Compute pipelines with reflected workgroup size, and GPU-driven drawing: a
   compute pass writes the draw arguments, one indirect draw consumes them
+- Optional opaque 3D rendering with immutable indexed mesh residency, static
+  glTF 2.0 and GLB loading, texture arrays, metallic-roughness and unlit
+  material dispatch, and ordered GPU frustum culling
 - A declarative pass graph, and a deferred pipeline built on it
 - Sixteen layers, each a band of the depth range that never sorts against
   another, deciding how its contents sort within that band, where they are
@@ -125,7 +128,8 @@ Working today:
   through the instance stream and the cull that were already there, blending
   over the composited image or adding to it as the effect asks
 
-Not built yet: opaque 3D drawing, post-processing, tiled maps and multi-camera.
+Not built yet: transparent 3D drawing, skinned or animated models,
+post-processing, tiled maps and multi-camera.
 
 Design notes live in `../tecs-plans`, kept outside this repository so plans and
 code have separate histories.
@@ -2153,12 +2157,14 @@ callback registry. Shared device, material, pass, graph and lighting
 mechanisms remain under `tecs.gpu`; domain-specific hot paths and pipelines
 remain concrete.
 
-The first mesh command stream contains one unculled indexed command per
-extracted entity. That is a deliberately temporary producer behind the draw
-boundary, not a per-triangle submission path: a million-triangle mesh remains
-one immutable region and one command. A later mesh cull can write a compacted
-stream with the same command shape without changing the asset, component, or
-domain contribution contracts.
+The mesh source stream contains one indexed command per extracted entity, not
+one per triangle. Three ordered compute passes test its world-space bounding
+sphere, scan survivor counts, and compact whole 20-byte commands into a
+GPU-only indirect buffer. A million-triangle mesh therefore remains one
+immutable region, one bound, and one command. The CPU submits the fixed
+candidate count; commands after the compacted prefix are cleared to zero
+instances, so no visible count crosses back from the device and draw order is
+deterministic.
 
 Both domains are construction choices rather than permanent renderer weight.
 Omitting `meshes` loads no mesh implementation and allocates no mesh buffers;
@@ -2173,6 +2179,25 @@ component carrying the resident slot plus its derived `Bounds3D`. One such
 range may contain millions of triangles. Entity count follows independently
 transformable scene objects, not triangle count; later spatial partitioning or
 meshlets can remain a backend detail behind the same asset identity.
+
+`assets.loadGLTF` performs JSON, GLB, accessor, hierarchy, geometry, image, and
+material decoding on the asset worker. Only plain tables and byte strings
+cross back. The main thread creates CPU mesh and image records, and
+`renderer.meshes:registerModel` consumes those records into device residency.
+Static triangle scenes, embedded or relative resources, alpha masks,
+metallic-roughness PBR, normal, occlusion, emissive, and unlit materials are
+accepted. Unsupported transparency, skinning, animation, morphing, sampler
+state, and transform shear fail the future instead of loading an incomplete
+scene.
+
+Mesh textures occupy one mesh-owned array and materials occupy one immutable
+storage table. An instance carries only its material slot, and the fragment
+shader dispatches on an integer model constant. This keeps the opaque lane at
+one graphics pipeline and one indirect draw regardless of material count.
+`MeshMaterial` is intentionally distinct from the 2D `Material`: the latter is
+an id into a build-time compiled shader set, while the former is an id into
+runtime PBR data loaded from an asset. Sharing the word did not make their
+identity or persistence rules the same.
 
 Dimensional names make the boundary visible where it matters:
 `Transform2D`, `Camera2D`, `Renderable2D`, `PointLight2D`, `Occluder2D` and
@@ -3584,6 +3609,11 @@ The instance count each draw consumes is written by that chain into an
 `SDL_GPUIndexedIndirectDrawCommand`, so the CPU never learns what survived the
 cull.
 
+The mesh lane uses the same principle with a separate hot path. Its ordered
+mark, scan, and compact chain preserves entity order while producing indexed
+commands for arbitrary resident mesh regions. The CPU never visits triangles
+and never reads visibility back.
+
 That is the whole reason for the deferred-only decision. There are no vertex
 buffers anywhere: shaders index storage buffers by vertex and instance ID.
 
@@ -3649,8 +3679,9 @@ What makes the swap cheap is that the pipeline objects a frame binds are read
 through the backend every frame, so replacing them is picked up by the next
 frame with no pass graph rebuilt and nothing in the world touched.
 `Backend:rebuildPipelines` is that half. It waits for the device to go idle,
-builds the geometry and forward pipelines, the five cull and sort pipelines and
-the deferred pass's own four against the formats the G-buffer was created with,
+builds the sprite geometry and forward pipelines, its five cull and sort
+pipelines, the mesh geometry and three cull pipelines, and the deferred pass's
+own four against the formats the G-buffer was created with,
 and installs them only once every one of them has compiled, so a source that no
 longer compiles raises and leaves the process drawing exactly what it drew.
 

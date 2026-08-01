@@ -140,6 +140,7 @@ local REACH = {
             .. "unchanged; the only thing it has to declare is its bytecode "
             .. "format, which is what `Platform.shaderFormat` is for.",
         modules = {
+            "tecs/internal/render/MeshBackend.lua",
             "tecs/internal/render/SpriteBackend.lua",
             "tecs/gfx/text.lua",
             "tecs/gfx/particles.lua",

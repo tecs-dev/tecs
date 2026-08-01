@@ -8,7 +8,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local Transform3D <const> = tecs.Transform3D
-local Material <const> = tecs.gfx.Material
+local MeshMaterial <const> = tecs.gfx.MeshMaterial
 local Tint <const> = tecs.gfx.Tint
 local Renderable3D <const> = tecs.gfx.Renderable3D
 
@@ -96,7 +96,9 @@ local function game(world: tecs.World, app: tecs.Application)
         vertices = meshVertices,
         indices = TRIANGLES,
     }))
-    local cube <const> = world:spawn(Transform3D(), mesh, bounds, Material(), Tint(0.2, 0.72, 1.0, 1.0), Renderable3D())
+    local cube <const> = world:spawn(
+        Transform3D(), mesh, bounds, MeshMaterial(), Tint(0.2, 0.72, 1.0, 1.0), Renderable3D()
+    )
 
     print("scene3d: drawing one resident 8-vertex, 36-index opaque mesh")
     print("scene3d: escape or close the window to quit")

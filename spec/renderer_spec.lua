@@ -250,7 +250,7 @@ describe("ecs.Renderer", function()
             tecs.Transform3D.new({ x = -0.5, y = -0.5 }),
             mesh,
             bounds,
-            components.Material(),
+            components.MeshMaterial(),
             components.Tint(1, 0, 0, 1),
             components.Renderable3D()
         )
@@ -258,6 +258,75 @@ describe("ecs.Renderer", function()
         assert.are.equal(1, renderer.meshes.count)
         assert.are.equal(1, renderer.meshes.rewritten)
         assert.are.equal(255, screen:getPixel(pixels, SIZE / 2 - 6, SIZE / 2 + 6).r)
+        renderer:destroy()
+    end)
+
+    it("culls mesh commands from their world-space bounds on the GPU", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = { capacity = 4, vertexCapacity = 16, indexCapacity = 24 },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local mesh, bounds = renderer.meshes:registerMesh(triangleMesh("spec://culled-triangle"))
+
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5 }),
+            mesh,
+            components.Bounds3D(1000, bounds.centerY, bounds.centerZ, bounds.radius),
+            components.MeshMaterial(),
+            components.Tint(1, 0, 0, 1),
+            components.Renderable3D()
+        )
+
+        local pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2 - 6, SIZE / 2 + 6)
+        assert.are.equal(1, renderer.meshes.count, "extraction still submits the candidate")
+        assert.are.equal(0, pixel.r, "the GPU removes the command before indirect drawing")
+        renderer:destroy()
+    end)
+
+    it("samples a resident texture through integer mesh material dispatch", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 1, 1, 1 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                materialCapacity = 4,
+                textureWidth = 8,
+                textureHeight = 8,
+                textureLayers = 1,
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local mesh, bounds = renderer.meshes:registerMesh(triangleMesh("spec://textured-triangle"))
+        local texture = renderer.meshes:registerTexture(solid("spec://mesh-red", 255, 0, 0))
+        local material = renderer.meshes:registerMaterial({
+            name = "spec://mesh-unlit-red",
+            model = renderer.meshes.MATERIAL_UNLIT,
+            baseColorTexture = texture,
+        })
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5 }),
+            mesh,
+            bounds,
+            material,
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+
+        local pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2 - 6, SIZE / 2 + 6)
+        assert.are.equal(255, pixel.r)
+        assert.are.equal(0, pixel.g)
+        assert.are.equal(1, renderer.meshes.textureCount)
+        assert.are.equal(2, renderer.meshes.materialCount)
+        assert.has_error(function()
+            renderer.meshes:registerMaterial({ name = "spec://missing-texture", baseColorTexture = 99 })
+        end, "tecs: mesh material baseColorTexture names unknown texture 99")
         renderer:destroy()
     end)
 

@@ -92,7 +92,6 @@ describe("Application", function()
         local loading
         local app = build({
             plugin = function()
-                assets.install()
                 loading = assets.loadImage(FIXTURE)
             end,
         })
@@ -141,7 +140,7 @@ describe("Application", function()
     it("stops the loading worker at shutdown", function()
         local app = build({
             plugin = function()
-                assets.install()
+                assert.is_true(assets.installed())
             end,
         })
         assert.is_true(app:_init())
@@ -151,9 +150,10 @@ describe("Application", function()
         assert.is_false(assets.installed(), "the decoding thread outlived the application")
     end)
 
-    it("shuts down cleanly when nothing ever loaded an asset", function()
+    it("shuts down the application-owned worker when nothing loaded", function()
         local app = build({})
         assert.is_true(app:_init())
+        assert.is_true(assets.installed())
         app:_iterate(nil, 0, nil)
         assert.is_true(app:_shutdown())
         assert.is_false(assets.installed())
