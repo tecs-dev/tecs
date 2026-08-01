@@ -22,10 +22,6 @@ jobs:
 
     engine:
         runs-on: macos-15
-        permissions:
-            contents: read
-            pages: write
-            id-token: write
         steps:
             - uses: actions/checkout@v4
             - run: brew update
@@ -33,6 +29,18 @@ jobs:
             - run: cargo xtask check
             - run: cargo xtask format-check
             - run: cargo xtask test
+
+    docs:
+        runs-on: macos-15
+        permissions:
+            contents: read
+            pages: write
+            id-token: write
+        steps:
+            - uses: actions/checkout@v4
+            - run: brew update
+            - run: brew install luajit luarocks
+            - run: cargo xtask dev-tools
             - run: cargo xtask docs-check
             - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
               run: cargo xtask docs-build
@@ -44,7 +52,7 @@ jobs:
 
     deploy-docs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        needs: engine
+        needs: docs
         runs-on: ubuntu-latest
         permissions:
             pages: write
