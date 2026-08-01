@@ -301,6 +301,21 @@
  * full-width and lets it dominate the first screen. Keep it present without
  * making the introduction start below the fold. */
 @media (max-width: 760px) {
+    /* The site increases its root type for prose. A menu is a control surface,
+     * not prose, so keep its rows compact enough to scan and reach. */
+    .tealdoc-mobile-menu,
+    .tealdoc-mobile-menu .tealdoc-sidebar-section summary {
+        font-size: 0.75rem;
+    }
+
+    /* The one-column copy area can be much narrower than the desktop hero.
+     * Let the heading follow that width while preserving a single, readable
+     * line on a phone. */
+    .tealdoc-hero-copy h1 {
+        font-size: clamp(0.85rem, calc(8.2vw - 0.1rem), var(--tealdoc-hero-name-size-narrow));
+        white-space: nowrap;
+    }
+
     .tealdoc-home-hero .tealdoc-hero-image img {
         width: min(72vw, 260px);
         max-height: 220px;
