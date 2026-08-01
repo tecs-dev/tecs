@@ -185,7 +185,6 @@ local interface SignalListener is Closeable
     --- @param self The open listener whose queue advances.
     --- @return Returns one selected signal, or nil when none is pending.
     next: function(self: SignalListener): ProcessSignal
-
 end
 
 --- Describes what this build can do on the current target.

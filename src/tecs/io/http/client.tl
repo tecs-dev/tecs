@@ -94,8 +94,10 @@ local record client
         --- Caller-writable. Lists host names whose TLS certificates are not
         --- verified.
         insecureHosts: {string}
-        --- Caller-writable. Sets an absolute proxy URI as text. Nil follows
-        --- the environment; an empty string forces a direct connection.
+        --- Caller-writable. Sets the textual spelling of an absolute proxy
+        --- [`URI`](tealdoc:tecs.io.URI). Nil follows the environment; an empty
+        --- string forces a direct connection. This option accepts a string,
+        --- not a `URI` object.
         proxy: string
         --- Caller-writable. Lists hosts excluded from an explicitly configured
         --- proxy.
@@ -399,9 +401,7 @@ local function completeTransfer(
     response.url = responseURI
     local prepared <const>, body = protect(function(): Stream
         if transfer.sink ~= nil then
-            return stream.withMetadata(
-                transfer.sink, response.headers["content-type"], transfer.transferred
-            ) as Stream
+            return stream.withMetadata(transfer.sink, response.headers["content-type"], transfer.transferred) as Stream
         end
         if transfer.responseBuffer == nil then
             transfer.responseBuffer = stream.newBuffer()

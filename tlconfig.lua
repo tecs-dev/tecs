@@ -100,8 +100,21 @@ end
 local BESIDE = {
     ["tecs.gfx.animation"] = { "tecs.gfx.sheet" },
     ["tecs.input"] = { "tecs.platform.Gamepad", "tecs.platform.sensors" },
-    ["tecs.io"] = { "tecs.io.types", "tecs.io.Path", "tecs.io.Process", "tecs.io.URI" },
+    ["tecs.io"] = { "tecs.io.types" },
 }
+
+-- A PascalCase child normally renders on its parent namespace page. These
+-- three are complete class modules with their own source files and pages.
+local CHILD_PAGES = {
+    ["tecs.io.Path"] = true,
+    ["tecs.io.Process"] = true,
+    ["tecs.io.URI"] = true,
+}
+
+local function childHasPage(parent, name, spec)
+    local public = "tecs." .. parent .. "." .. name
+    return not spec.member and (name:match("^[a-z]") ~= nil or CHILD_PAGES[public])
+end
 
 --- Orders names the way a listing presents them: alphabetically, ignoring
 --- case, because that is how a name is looked up.
@@ -119,9 +132,8 @@ end
 --- The page one public name gets: its route, the modules its reference renders
 --- from, and the name those are rewritten to.
 ---
---- A `within` key has a page of its own only when it is a module, which is what
---- luacase says. A PascalCase one is a class reached through its namespace,
---- `tecs.gfx.Camera2D`, and belongs on the namespace's page.
+--- A `within` key has a page of its own when it is a luacase module or an
+--- explicitly independent class module.
 local function modulePage(name, spec, parent)
     local public = "tecs." .. (parent and parent .. "." .. name or name)
     local route = "modules/" .. (parent and parent .. "/" .. name or name)
@@ -175,7 +187,7 @@ local function modulePages()
         table.insert(pages, modulePage(name, SURFACE[name]))
         local below = {}
         for key, spec in pairs(SURFACE[name].within or {}) do
-            if key:match("^[a-z]") and not spec.member then
+            if childHasPage(name, key, spec) then
                 table.insert(below, key)
             end
         end
@@ -327,7 +339,7 @@ local function publicNames()
     local sub = {}
     for name, spec in pairs(SURFACE) do
         for key, child in pairs(spec.within or {}) do
-            if key:match("^[a-z]") and not child.member then
+            if childHasPage(name, key, child) then
                 table.insert(sub, name .. "." .. key)
             end
         end

@@ -52,9 +52,10 @@ local record http
     --- defaults to zero for no response limit. `compressed` defaults to true.
     ---
     --- `insecureHosts` disables certificate verification for named hosts and
-    --- logs a warning for each. `proxy` follows environment variables when
-    --- nil, forces a direct connection when empty, or supplies a proxy URI.
-    --- `noProxy` uses Reqwest's exclusion syntax, and `proxyCredentials` uses
+    --- logs a warning for each. `proxy` accepts the textual spelling of an
+    --- absolute [`URI`](tealdoc:tecs.io.URI), follows environment variables
+    --- when nil, and forces a direct connection when empty. `noProxy` uses
+    --- Reqwest's exclusion syntax, and `proxyCredentials` uses
     --- `user:password`.
     type ClientOptions = client.Options
 

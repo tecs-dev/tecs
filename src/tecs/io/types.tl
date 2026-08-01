@@ -72,7 +72,6 @@ local interface ByteView is Closeable
     --- @param self The view to inspect.
     --- @return Returns true after `close`.
     isReleased: function(self: ByteView): boolean
-
 end
 
 --- An exclusive, zero-copy writable range reserved from a [`Buffer`](tealdoc:tecs.io.Buffer).
@@ -97,7 +96,6 @@ local interface WriteRange is Closeable
     --- @param self The open range to commit.
     --- @param used The caller supplies the written count up to `capacity`.
     commit: function(self: WriteRange, used: integer)
-
 end
 
 --- An owned, growable sequence of bytes.
@@ -223,7 +221,6 @@ local interface Buffer is Closeable
     --- @param self The buffer to inspect.
     --- @return Returns true after `close`.
     isReleased: function(self: Buffer): boolean
-
 end
 
 --- A caller-owned binary source.
@@ -261,7 +258,6 @@ local interface Reader is Closeable
     --- @return Returns the number of bytes written into the destination.
     --- @return Returns the source's reason when the first return is nil.
     readInto: function(self: Reader, destination: Buffer, offset?: integer, count?: integer): integer, string
-
 end
 
 --- Describes a random-access byte cursor.
@@ -453,7 +449,6 @@ local interface Stream is Closeable
     --- @param self The descriptor to inspect.
     --- @return Returns true when opening a later reader replays all bytes.
     isReplayable: function(self: Stream): boolean
-
 end
 
 --- Describes binary storage that can create readers.

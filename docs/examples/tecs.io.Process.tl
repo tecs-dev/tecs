@@ -2,12 +2,10 @@
 
 -- #region tecs.io.Process.new
 tecs.scoped(function(scope: tecs.Scope)
-    local child <const> = scope:own(
-        tecs.io.Process.new({
-            args = {"git", "rev-parse", "HEAD"},
-            timeoutMs = 2000,
-        })
-    )
+    local child <const> = scope:own(tecs.io.Process.new({
+        args = {"git", "rev-parse", "HEAD"},
+        timeoutMs = 2000,
+    }))
 
     local result, communicateReason = child:communicate()
 
@@ -33,11 +31,9 @@ end)
 
 -- #region tecs.io.Process.Reader.readAvailable
 tecs.scoped(function(scope: tecs.Scope)
-    local child <const> = scope:own(
-        tecs.io.Process.new({
-            args = {"/bin/sh", "-c", "sleep 1; printf ready"},
-        })
-    )
+    local child <const> = scope:own(tecs.io.Process.new({
+        args = {"/bin/sh", "-c", "sleep 1; printf ready"},
+    }))
 
     local chunk <const>, readReason = child.stdout:readAvailable()
 

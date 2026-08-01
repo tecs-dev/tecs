@@ -256,6 +256,9 @@ Inside one of those, one level and no deeper:
 - [`tecs.io.files`](/modules/io/files) - where a game may read and write, and what to do with a path
 - [`tecs.io.http`](/modules/io/http) - fetching over HTTP without stopping the frame
 - [`tecs.io.mcp`](/modules/io/mcp) - the debug server agents and humans drive a running game through
+- [`tecs.io.Path`](/modules/io/Path) - immutable UTF-8 paths with platform-native component rules
+- [`tecs.io.Process`](/modules/io/Process) - streaming child processes with backpressured standard I/O
+- [`tecs.io.URI`](/modules/io/URI) - immutable general-purpose URIs with component-aware modification
 - [`tecs.io.watcher`](/modules/io/watcher) - watching files for change
 - [`tecs.math.vec2`](/modules/math/vec2) - allocation-free two-dimensional vector and point math
 - [`tecs.platform.events`](/modules/platform/events) - typed platform events routed through the world

@@ -68,12 +68,10 @@ end
 
 -- #region tecs.io.Process.new
 tecs.scoped(function(scope: tecs.Scope)
-    local child <const> = scope:own(
-        tecs.io.Process.new({
-            args = {"git", "status", "--porcelain"},
-            cwd = tecs.io.Path.new("workspace"),
-        })
-    )
+    local child <const> = scope:own(tecs.io.Process.new({
+        args = {"git", "status", "--porcelain"},
+        cwd = tecs.io.Path.new("workspace"),
+    }))
 
     local result, communicateReason = child:communicate()
 

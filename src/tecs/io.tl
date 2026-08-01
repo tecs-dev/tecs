@@ -564,7 +564,6 @@ local record binaryIO
         --- datagram. A zero-length datagram uses an empty buffer. `close`
         --- releases it.
         bytes: IOBuffer
-
     end
 
     --- A `UDPSocket` sends and receives UDP packets. Closing it releases the
