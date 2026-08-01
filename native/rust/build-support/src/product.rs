@@ -178,6 +178,7 @@ pub fn build(root: &Path, preset: Preset) -> Result<PathBuf> {
 pub fn check(root: &Path) -> Result<()> {
     let mut sources = teal_sources(&root.join("src"))?;
     sources.extend(teal_sources(&root.join("bench"))?);
+    sources.extend(teal_sources(&root.join("examples"))?);
     sources.extend(cli_sources(&root.join("cli"))?);
     sources.push(root.join("main.tl"));
     let mut command = Command::new(root.join("vendor/bin/tl"));
@@ -192,6 +193,44 @@ pub fn check(root: &Path) -> Result<()> {
         .args(sources)
         .current_dir(root);
     run(&mut command, "Teal type checking")
+}
+
+pub fn run_example(root: &Path, preset: Preset, name: &str, arguments: &[OsString]) -> Result<()> {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+    {
+        anyhow::bail!("example names contain only lowercase letters and digits");
+    }
+    let source = root.join("examples").join(format!("{name}.tl"));
+    if !source.is_file() {
+        let mut available = teal_sources(&root.join("examples"))?
+            .into_iter()
+            .filter_map(|path| {
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(str::to_owned)
+            })
+            .collect::<Vec<_>>();
+        available.sort();
+        anyhow::bail!(
+            "unknown example {name:?}; expected {}",
+            available.join(", ")
+        );
+    }
+
+    let executable = build(root, preset)?;
+    let paths = Paths::new(root, preset);
+    let entry = compile_teal_file(root, &paths, &source, &format!("examples/{name}.lua"))?;
+    let mut command = Command::new(executable);
+    command
+        .arg("--entry")
+        .arg(entry)
+        .args(arguments)
+        .current_dir(root);
+    apply_development_environment(&mut command, &paths);
+    run(&mut command, &format!("{name} example"))
 }
 
 pub fn run_demo(root: &Path, preset: Preset, arguments: &[OsString]) -> Result<()> {

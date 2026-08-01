@@ -52,6 +52,14 @@ enum Task {
         #[arg(last = true)]
         arguments: Vec<OsString>,
     },
+    /// Run a named example through the native SDL host.
+    Example {
+        name: String,
+        #[arg(long)]
+        preset: Option<Preset>,
+        #[arg(last = true)]
+        arguments: Vec<OsString>,
+    },
     /// Build the shader pack consumed by release packages.
     Shaders {
         #[arg(long)]
@@ -250,6 +258,18 @@ fn main() -> Result<()> {
         }
         Task::Run { preset, arguments } => {
             product::run_demo(&root, preset.map_or_else(host_default, Ok)?, &arguments)?;
+        }
+        Task::Example {
+            name,
+            preset,
+            arguments,
+        } => {
+            product::run_example(
+                &root,
+                preset.map_or_else(host_default, Ok)?,
+                &name,
+                &arguments,
+            )?;
         }
         Task::Shaders { preset } => {
             product::shaders(&root, preset.map_or_else(host_default, Ok)?)?;
