@@ -1,5 +1,5 @@
 ---
-description: "Seeded named streams, standalone generators, snapshots, and Perlin noise"
+description: "Seeded named streams, standalone generators, and snapshot restoration"
 outline: deep
 ---
 

@@ -28,6 +28,7 @@ mod luamods;
 mod mcodearena;
 mod mcp;
 mod net;
+mod noise;
 mod path;
 #[cfg(feature = "payload")]
 mod payload;

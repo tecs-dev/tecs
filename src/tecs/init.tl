@@ -542,6 +542,7 @@ local SURFACE <const>: {string: Namespace} = {
     math = {
         module = "tecs.math",
         within = {
+            noise = {module = "tecs.math.noise"},
             vec2 = {module = "tecs.math.vec2"},
         },
     },

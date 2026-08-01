@@ -24,6 +24,7 @@ typedef struct TecsNetStream TecsNetStream;
 typedef struct TecsNetServer TecsNetServer;
 typedef struct TecsNetDatagram TecsNetDatagram;
 typedef struct TecsNetPacket TecsNetPacket;
+typedef struct TecsNoise TecsNoise;
 typedef struct TecsRegex TecsRegex;
 typedef struct TecsUiTree TecsUiTree;
 typedef struct TecsUri TecsUri;
@@ -122,6 +123,16 @@ typedef struct TecsWindowHitRegion {
 typedef struct SDL_Window SDL_Window;
 
 const char *tecsRustError(void);
+
+/* Immutable procedural noise fields. Algorithm and fractal values are private
+ * discriminants selected by the tecs.math.noise binding. */
+TecsNoise *tecsNoiseCreate(int32_t seed, uint8_t algorithm, uint8_t fractal, float frequency, int32_t octaves,
+                           float lacunarity, float gain, float weighted_strength, float ping_pong_strength);
+void tecsNoiseDestroy(TecsNoise *noise);
+float tecsNoiseSample2(const TecsNoise *noise, double x, double y);
+float tecsNoiseSample3(const TecsNoise *noise, double x, double y, double z);
+bool tecsNoiseFill2(const TecsNoise *noise, float *output, size_t width, size_t height, double origin_x,
+                    double origin_y, double step_x, double step_y);
 
 /* Immutable absolute URIs. Every borrowed component remains valid until the
  * parsed value is destroyed. Modifier functions return a new parsed value. */

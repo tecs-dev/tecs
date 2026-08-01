@@ -88,8 +88,9 @@ Working today:
   three clocks (fixed, frame, presentation) for the three rates gameplay,
   scripted input and presentation run at
 - Seeded generation in named, independent streams, whose state a snapshot
-  carries and whose sequence is the same on every machine, with Perlin noise
-  seeded the same way ([`src/tecs/random.tl`](src/tecs/random.tl))
+  carries and whose sequence is the same on every machine
+  ([`src/tecs/random.tl`](src/tecs/random.tl)), beside native procedural fields
+  with scalar and bulk sampling ([`src/tecs/math/noise.tl`](src/tecs/math/noise.tl))
 - Sprite sheets on Aseprite's model: frames with their own durations, named
   tags playing forward, in reverse or pingpong, and slices carrying pivots,
   built by a grid, an explicit rect list, a builder, or read from an Aseprite
@@ -840,6 +841,13 @@ normalization or rotation does too little work to repay an FFI call, and the
 call would be opaque to the trace around it. Native vector math starts making
 sense when one call walks a contiguous array; this API is for one vector in the
 game code already touching it.
+
+Procedural noise sits under `tecs.math.noise` but crosses the Rust ABI. One
+sample performs enough hashing, interpolation and optional octave composition
+to repay the call, and `fill2` keeps an entire row-major grid on the native side
+until its values are ready. FastNoise Lite owns the algorithms; Tecs owns the
+small configuration and sampling surface rather than carrying another copy of
+their arithmetic in Teal.
 
 UUIDs, hashes and checksums remain under `tecs.data`. They are persisted
 identities or operate on byte strings, and none is numeric geometry merely
@@ -3974,7 +3982,8 @@ src/tecs/assets.tl        images and clips, decoded on a worker
 src/tecs/workers.tl       threads with serialized channels
 src/tecs/Future.tl        the value everything asynchronous settles into
 src/tecs/io/http/         requests, and the clients the loop turns
-src/tecs/random.tl        seeded streams and Perlin noise
+src/tecs/random.tl        seeded streams a snapshot carries
+src/tecs/math/            angle, vector, and procedural field math
 src/tecs/data/            stores, JSON, DEFLATE, UUIDs, hashes and checksums
 src/tecs/regex.tl         compiled Rust regular expressions over byte strings
 assets/                   shaders, materials and fonts, globbed at build time
