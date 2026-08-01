@@ -28,6 +28,7 @@ local type scopeModule = require("tecs.scope")
 local type audio = require("tecs.audio")
 local type Renderer = require("tecs.Renderer")
 local type Camera2D = require("tecs.gfx.Camera2D")
+local type Camera3D = require("tecs.gfx.Camera3D")
 local type animation = require("tecs.gfx.animation")
 local type events = require("tecs.events")
 local type input = require("tecs.input")
@@ -95,6 +96,10 @@ local record gfx
     Camera2D: Camera2D
     type Camera2DOptions = Camera2D.Options
 
+    --- The perspective view used by the 3D mesh domain.
+    Camera3D: Camera3D
+    type Camera3DOptions = Camera3D.Options
+
     --- A world to a frame, through an extractor and a backend.
     Renderer: Renderer
     type RendererOptions = Renderer.Options
@@ -113,6 +118,12 @@ local record gfx
     ---     rather than a second view.
     newCamera2D: function(options?: Camera2D.Options): Camera2D
 
+    --- Builds a perspective view into a right-handed 3D world.
+    --- @param options Omit for a camera at the origin looking down negative z.
+    --- @return A camera whose position, orientation, and projection fields the
+    ---     caller assigns directly.
+    newCamera3D: function(options?: Camera3D.Options): Camera3D
+
     --- Builds a renderer against an open GPU device.
     ---
     --- @param device The `SDL_GPUDevice` to draw through, which stays the
@@ -126,8 +137,8 @@ local record gfx
     ---     backend, and releases all three from `destroy`.
     newRenderer: function(device: loader.CPtr, swapchainFormat: integer, options: Renderer.Options): Renderer
 
-    -- The components a game spawns to put something on screen. All but
-    -- `Renderable2D` are FFI components, so their columns are contiguous C
+    -- The components a game spawns to put something on screen. All but the two
+    -- Renderable tags are FFI components, so their columns are contiguous C
     -- memory the sync walks row by row into mapped GPU staging: writing one
     -- through `world:get` needs an explicit `world:markComponentDirty`, since
     -- only `getMut` marks the column on its own.
@@ -161,12 +172,21 @@ local record gfx
     --- Only the image name survives a snapshot.
     Sprite: components.Sprite
 
-    --- Selects one of the materials found under `materials/`. Absent means
-    --- the default, which samples the image array over the whole quad, so an
-    --- entity with neither this nor a Sprite still draws. Take `id` from
-    --- `materials.id(name)` rather than writing a number: ids are positions
-    --- in sorted order and move when a material file is added. `param` is 0
-    --- to 1 and means whatever the material says it does.
+    --- Selects immutable geometry for the 3D mesh domain. `asset` is the
+    --- process-local index returned by `meshId`; `slot` is engine-owned and a
+    --- negative value means the asset has not been made resident.
+    Mesh: components.Mesh
+
+    --- Supplies a mesh's local-space bounding sphere. The future mesh cull
+    --- transforms its center and scales its radius by the largest absolute
+    --- scale axis.
+    Bounds3D: components.Bounds3D
+
+    --- Selects one material shared by sprite and mesh domains. Absent selects
+    --- the default material. Take `id` from `materials.id(name)` rather than
+    --- writing a number because sorted material names determine ids and move
+    --- when a file is added. `param` runs from zero to one and means whatever
+    --- the material says it does.
     Material: components.Material
 
     --- A light the deferred lighting pass resolves, positioned by the
@@ -200,6 +220,10 @@ local record gfx
     --- is what most entities in a world are.
     Renderable2D: components.Renderable2D
 
+    --- Marks an entity as contributing geometry to the future mesh domain.
+    --- Without it, a `Transform3D` and `Mesh` remain ordinary world state.
+    Renderable3D: components.Renderable3D
+
     --- Index of an image name, assigning one the first time it is seen.
     ---
     --- The name is normalized lexically first, so `"a/b.png"` and
@@ -218,6 +242,17 @@ local record gfx
     --- @param id An index previously handed out by `imageId`.
     --- @return The normalized name, or nil when the index names nothing.
     imageName: function(id: integer): string
+
+    --- Index of a normalized mesh asset name, assigning one on first use.
+    --- @param name A non-empty mesh asset name or path.
+    --- @return A positive process-local index that snapshots replace with the
+    ---     name.
+    meshId: function(name: string): integer
+
+    --- Name a mesh index stands for.
+    --- @param id An index previously returned by `meshId`.
+    --- @return The normalized name, or nil when the index names nothing.
+    meshName: function(id: integer): string
 
     --- What `newTTF` answers with, and what a `Text` names.
     type Font = text.Font
@@ -378,6 +413,11 @@ local record tecs
     --- level down would not: `ecs` is loaded by the time `tecs` is.
     Transform2D: ecs.Transform2D
 
+    --- Where a 3D entity is: world position, local-to-world quaternion, and
+    --- local scale. The default is the identity transform. It sits at the root
+    --- beside `Transform2D` because simulation and rendering share it.
+    Transform3D: ecs.Transform3D
+
     assets: assets
     audio: audio
     physics: physics
@@ -404,6 +444,7 @@ tecs.ecs = ecs
 -- Assigned rather than resolved, for the same reason `ecs` is: the module it
 -- comes off is already loaded here, so there is nothing to defer.
 tecs.Transform2D = ecs.Transform2D
+tecs.Transform3D = ecs.Transform3D
 
 --- How one public name resolves, at whatever depth it is written.
 ---
@@ -470,9 +511,10 @@ local SURFACE <const>: {string: Namespace} = {
     events = {module = "tecs.events"},
     input = {module = "tecs.input"},
     gfx = {
-        beside = {"tecs.components", "tecs.gfx.Camera2D", "tecs.Renderer", "tecs.gfx.text"},
+        beside = {"tecs.components", "tecs.gfx.Camera2D", "tecs.gfx.Camera3D", "tecs.Renderer", "tecs.gfx.text"},
         within = {
             Camera2D = {module = "tecs.gfx.Camera2D"},
+            Camera3D = {module = "tecs.gfx.Camera3D"},
             Renderer = {module = "tecs.Renderer"},
             animation = {module = "tecs.gfx.animation"},
             layers = {module = "tecs.gfx.layers"},

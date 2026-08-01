@@ -144,9 +144,9 @@ local described = surfaceNames(INIT)
 
 --- The three names on `tecs` that no descriptor answers, and why each is
 --- direct. `ecs` reaches nothing below Lua, so it is assigned as the module
---- returns rather than resolved; `Transform2D` comes off it and so is already
---- loaded whenever `tecs` is; `version` is a string.
-local DIRECT = { ecs = true, version = true, Transform2D = true }
+--- returns rather than resolved; both transforms come off it and so are
+--- already loaded whenever `tecs` is; `version` is a string.
+local DIRECT = { ecs = true, version = true, Transform2D = true, Transform3D = true }
 
 --- Teal type names that are a Lua type, and the Lua type each of them is. A
 --- field declared one of these carries a value rather than a module, so it is
@@ -291,10 +291,12 @@ describe("the public surface", function()
             -- namespace rather than a module wanting a page of its own, and it
             -- resolves to the module that declares it rather than a copy.
             assert.is_true(rawequal(tecs.gfx.Camera2D, require("tecs.gfx.Camera2D")))
+            assert.is_true(rawequal(tecs.gfx.Camera3D, require("tecs.gfx.Camera3D")))
             assert.is_true(rawequal(tecs.gfx.Renderer, require("tecs.Renderer")))
             -- The constructor sits on the namespace, not on the class, which
             -- is what `newCamera2D` means: the module owns the type.
             assert.are.equal(require("tecs.gfx.Camera2D").newCamera2D, tecs.gfx.newCamera2D)
+            assert.are.equal(require("tecs.gfx.Camera3D").newCamera3D, tecs.gfx.newCamera3D)
             assert.are.equal(require("tecs.Renderer").newRenderer, tecs.gfx.newRenderer)
         end)
     end)

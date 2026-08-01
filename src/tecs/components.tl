@@ -27,6 +27,13 @@ tint.a = 0.5
 [`DropShadow2D`](tealdoc:tecs.components.DropShadow2D) describe deferred lighting and
 shadows.
 
+The 3D mesh contract is separate from the sprite lane. `tecs.Transform3D`,
+[`Mesh`](tealdoc:tecs.components.Mesh),
+[`Bounds3D`](tealdoc:tecs.components.Bounds3D), and
+[`Renderable3D`](tealdoc:tecs.components.Renderable3D) describe an opaque mesh
+without loading or running the future mesh renderer.
+[`Material`](tealdoc:tecs.components.Material) is shared by both domains.
+
 [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) remains at `tecs.Transform2D` because
 physics, hierarchy, sequencing, and graphics share it. Other render components
 live under `tecs.gfx`.
@@ -177,6 +184,15 @@ local imageIds: {string: integer} = {}
 local imageNames: {integer: string} = {}
 local imageCount = 0
 
+--- Interned mesh names.
+---
+--- A process-local id keeps the ECS column compact while snapshots retain the
+--- durable name. Geometry residency later resolves that id to a domain-owned
+--- slot; neither number is a persisted asset identity.
+local meshIds: {string: integer} = {}
+local meshNames: {integer: string} = {}
+local meshCount = 0
+
 --- The scheme a name may lead with, whose `//` is not a path separator: what
 --- follows it is an authority rather than a directory.
 local SCHEME_PREFIX <const> = "^(%a[%w+.-]*://)(.*)$"
@@ -252,6 +268,27 @@ end
 --- Name an index stands for, or nil when the index names nothing.
 local function imageName(id: integer): string
     return imageNames[id]
+end
+
+--- Index of a mesh name, assigning one on first use.
+local function meshId(name: string): integer
+    if name == nil or name == "" then
+        error("tecs: a mesh name cannot be empty", 2)
+    end
+    name = normalizePath(name)
+    local id = meshIds[name]
+    if id ~= nil then
+        return id
+    end
+    meshCount = meshCount + 1
+    meshIds[name] = meshCount
+    meshNames[meshCount] = name
+    return meshCount
+end
+
+--- Name a mesh index stands for, or nil when the index names nothing.
+local function meshName(id: integer): string
+    return meshNames[id]
 end
 
 --- Samples a texture instead of drawing flat color.
@@ -336,18 +373,88 @@ ecs.newFFIComponent({
     end,
 })
 
---- Selects the material that shades a renderable's quad.
+--- Selects immutable geometry for the future 3D mesh domain.
 ---
---- Absent means the default, which samples the image array and covers the whole
---- quad, so an entity with neither a Sprite nor a Material still draws. Present
---- selects one of the materials found under `materials/`.
+--- `asset` is the process-local index returned by `meshId`. `slot` is
+--- engine-owned residency state and starts negative so a mesh domain can
+--- resolve it once. Snapshots store only the normalized asset name.
+local record Mesh is Component
+    --- Caller-writable. Selects geometry by its `meshId` index. Zero selects
+    --- no mesh.
+    asset: number
+    --- Engine-owned. Stores the mesh domain's residency slot. Set it negative
+    --- when changing `asset`; otherwise ordinary game code should ignore it.
+    slot: number
+end
+
+ecs.newFFIComponent({
+    name = "Mesh",
+    container = Mesh,
+    fields = {
+        {"asset", "int32_t"},
+        {"slot", "int32_t"},
+    },
+    defaults = {0, -1},
+    serialize = function(instance: Mesh): {string: any} return {mesh = meshNames[instance.asset as integer]} end,
+    deserialize = function(_world: types.World, data: {string: any}): Mesh
+        local name = data.mesh as string
+        local asset = 0
+        if name ~= nil and name ~= "" then
+            asset = meshId(name)
+        end
+        return Mesh(asset, -1)
+    end,
+})
+
+--- Defines a mesh's local-space bounding sphere.
+---
+--- A sphere stays four floats in extraction and transforms conservatively
+--- under non-uniform scale by multiplying `radius` by the largest absolute
+--- scale axis. Asset loading may supply these values, and callers may override
+--- them for generated or animated geometry.
+local record Bounds3D is Component
+    --- Caller-writable. Sets the local-space sphere-center x coordinate.
+    centerX: number
+    --- Caller-writable. Sets the local-space sphere-center y coordinate.
+    centerY: number
+    --- Caller-writable. Sets the local-space sphere-center z coordinate.
+    centerZ: number
+    --- Caller-writable. Sets the non-negative local-space sphere radius.
+    radius: number
+end
+
+ecs.newFFIComponent({
+    name = "Bounds3D",
+    container = Bounds3D,
+    fields = {
+        {"centerX", "float"},
+        {"centerY", "float"},
+        {"centerZ", "float"},
+        {"radius", "float"},
+    },
+    defaults = {0, 0, 0, 1},
+    init = function(instance: Bounds3D)
+        if instance.radius < 0.0 then
+            error("Bounds3D radius must be greater than or equal to 0, got: " .. tostring(instance.radius))
+        end
+    end,
+})
+
+--- Selects the material that shades renderable geometry.
+---
+--- Absent means the default material. In the sprite domain it samples the
+--- image array and covers the whole quad, so an entity with neither a Sprite
+--- nor a Material still draws. The mesh domain supplies the same neutral image
+--- inputs when it has no texture. Present selects one of the materials found
+--- under `materials/`.
 ---
 --- Use `materials.id(name)` instead of writing an id. Sorted material names
 --- determine ids, so adding a file may renumber them. Snapshots therefore store
 --- only the material name.
 ---
---- One instance format either way: the batch, the cull and the draw do not know
---- which material an entity uses, which is what keeps the whole scene one draw.
+--- Sprite and mesh domains carry the same material id and parameter through
+--- their own instance formats. The material ABI is shared; their extraction,
+--- culling, and draw layouts are not.
 local record Material is Component
     --- Caller-writable. Selects a material by the id returned from
     --- `materials.id`.
@@ -483,9 +590,21 @@ ecs.newComponent({
     container = Renderable2D,
 })
 
+--- Marks an entity as contributing geometry to the future 3D mesh domain.
+--- Without it, a `tecs.Transform3D` and [`Mesh`](tealdoc:tecs.components.Mesh)
+--- describe state but enter no render query.
+local record Renderable3D is Component
+end
+
+ecs.newComponent({
+    name = "Renderable3D",
+    container = Renderable3D,
+})
+
 -- Implementation details:
--- All render components except Renderable2D use FFI columns. Transform2D remains
--- an ECS builtin because every subsystem shares it.
+-- All render components except the two Renderable tags use FFI columns.
+-- Transform2D and Transform3D remain ECS builtins because simulation and
+-- rendering share them.
 local record components
     --- Read-only. Exposes the transform component used for frame interpolation.
     --- Presence is
@@ -516,14 +635,20 @@ local record components
     --- Only the image name survives a snapshot.
     Sprite: Sprite
 
-    --- Read-only. Exposes the material component, which selects one of the
-    --- materials found under `materials/`. Absent means
-    --- the default, which samples the image array over the whole quad, so an
-    --- entity with neither this nor a
-    --- [`Sprite`](tealdoc:tecs.components.Sprite) still draws. Take `id` from
-    --- `materials.id(name)` rather than writing a number: ids are positions
-    --- in sorted order and may move when a material file appears. `param` is 0
-    --- to 1 and means whatever the material says it does.
+    --- Read-only. Exposes the mesh-reference component. `asset` is a
+    --- process-local `meshId` and zero means no mesh. `slot` is engine-owned
+    --- residency state and a negative value means unresolved.
+    Mesh: Mesh
+
+    --- Read-only. Exposes a local-space mesh bounding sphere. The center uses
+    --- mesh-local coordinates and `radius` defaults to one world unit.
+    Bounds3D: Bounds3D
+
+    --- Read-only. Exposes the material component shared by sprite and mesh
+    --- domains. Absent selects the default material. Take `id` from
+    --- `materials.id(name)` rather than writing a number because sorted
+    --- material names determine ids and may move when a file appears. `param`
+    --- runs from zero to one and means whatever the material says it does.
     Material: Material
 
     --- Read-only. Exposes the point-light component resolved by deferred
@@ -558,6 +683,11 @@ local record components
     --- is what most entities in a world are.
     Renderable2D: Renderable2D
 
+    --- Read-only. Exposes the tag that admits an entity carrying
+    --- `tecs.Transform3D`, [`Mesh`](tealdoc:tecs.components.Mesh), and
+    --- [`Bounds3D`](tealdoc:tecs.components.Bounds3D) to the future mesh domain.
+    Renderable3D: Renderable3D
+
     --- Returns the index of an image name and assigns one on first use.
     ---
     --- The function normalizes names lexically, so `"a/b.png"` and
@@ -577,18 +707,33 @@ local record components
     --- @param id An index previously handed out by `imageId`.
     --- @return The normalized name, or nil when the index names nothing.
     imageName: function(id: integer): string
+
+    --- Returns the process-local index of a normalized mesh asset name.
+    --- @param name A non-empty mesh asset name or path.
+    --- @return A positive index stable for the life of the process.
+    meshId: function(name: string): integer
+
+    --- Returns the normalized asset name represented by a mesh index.
+    --- @param id An index previously returned by `meshId`.
+    --- @return The normalized name, or nil when the index names nothing.
+    meshName: function(id: integer): string
 end
 
 components.PreviousTransform2D = PreviousTransform2D
 components.Tint = Tint
 components.Sprite = Sprite
+components.Mesh = Mesh
+components.Bounds3D = Bounds3D
 components.Material = Material
 components.PointLight2D = PointLight2D
 components.Clip = Clip
 components.Occluder2D = Occluder2D
 components.DropShadow2D = DropShadow2D
 components.Renderable2D = Renderable2D
+components.Renderable3D = Renderable3D
 components.imageId = imageId
 components.imageName = imageName
+components.meshId = meshId
+components.meshName = meshName
 
 return components

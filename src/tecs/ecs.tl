@@ -158,6 +158,11 @@ local record ecs
     --- world holds. Hierarchy, physics, sequencing, and rendering all use it.
     Transform2D: builtins.Transform2D
 
+    --- Read-only. `Transform3D` places an entity in a right-handed 3D world.
+    --- Its quaternion turns local coordinates into world coordinates and uses
+    --- `(x, y, z, w)` field order.
+    Transform3D: builtins.Transform3D
+
     --- Read-only.
     --- [`RelativeTransform2D`](/modules/ecs/#tecs.ecs.RelativeTransform2D) expresses a
     --- pose relative to a [`ChildOf`](/modules/ecs/#tecs.ecs.ChildOf) parent. The
@@ -377,6 +382,7 @@ ecs.random = random
 -- and hierarchy systems. Internal code reaches it through
 -- `tecs.internal.builtins`, which is where it is declared.
 ecs.Transform2D = builtins.Transform2D
+ecs.Transform3D = builtins.Transform3D
 ecs.RelativeTransform2D = builtins.RelativeTransform2D
 ecs.ChildOf = builtins.ChildOf
 ecs.Name = builtins.Name

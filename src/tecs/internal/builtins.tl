@@ -74,6 +74,79 @@ local record builtins
         new: function(data: {string: any}): Transform2D
     end
 
+    --- Places an entity in a right-handed three-dimensional world.
+    ---
+    --- Position uses world units. Rotation is a normalized quaternion in
+    --- `(x, y, z, w)` order that turns local coordinates into world
+    --- coordinates. Scale is local and may be non-uniform. The identity
+    --- transform is at the origin with quaternion `(0, 0, 0, 1)` and unit
+    --- scale.
+    record Transform3D is Component
+        --- Caller-writable. Sets the world-space x coordinate.
+        x: number
+
+        --- Caller-writable. Sets the world-space y coordinate.
+        y: number
+
+        --- Caller-writable. Sets the world-space z coordinate.
+        z: number
+
+        --- Caller-writable. Sets the quaternion x component.
+        rotationX: number
+
+        --- Caller-writable. Sets the quaternion y component.
+        rotationY: number
+
+        --- Caller-writable. Sets the quaternion z component.
+        rotationZ: number
+
+        --- Caller-writable. Sets the quaternion scalar component.
+        rotationW: number
+
+        --- Caller-writable. Sets the local x scale.
+        scaleX: number
+
+        --- Caller-writable. Sets the local y scale.
+        scaleY: number
+
+        --- Caller-writable. Sets the local z scale.
+        scaleZ: number
+
+        --- Creates a three-dimensional transform from positional values.
+        ---
+        --- Prefer `Transform3D.new` when setting only some fields because the
+        --- positional quaternion follows the three position values.
+        --- @param x The world-space x coordinate, which defaults to zero.
+        --- @param y The world-space y coordinate, which defaults to zero.
+        --- @param z The world-space z coordinate, which defaults to zero.
+        --- @param rotationX The quaternion x component, which defaults to zero.
+        --- @param rotationY The quaternion y component, which defaults to zero.
+        --- @param rotationZ The quaternion z component, which defaults to zero.
+        --- @param rotationW The quaternion scalar component, which defaults to one.
+        --- @param scaleX The local x scale, which defaults to one.
+        --- @param scaleY The local y scale, which defaults to one.
+        --- @param scaleZ The local z scale, which defaults to one.
+        --- @return The created transform component.
+        metamethod __call: function(
+            self,
+            x?: number,
+            y?: number,
+            z?: number,
+            rotationX?: number,
+            rotationY?: number,
+            rotationZ?: number,
+            rotationW?: number,
+            scaleX?: number,
+            scaleY?: number,
+            scaleZ?: number
+        ): Transform3D
+
+        --- Creates a three-dimensional transform from named values.
+        --- @param data A partial transform table whose omitted fields use the identity defaults.
+        --- @return The created transform component.
+        new: function(data: {string: any}): Transform3D
+    end
+
     --- Despawns an entity when the TTL reaches zero.
     record TTL is Component
         --- The total amount of time the entity had to live.
@@ -368,6 +441,24 @@ components.newFFIComponent({
             error("Transform2D layer must be greater than 0, got: " .. tostring(instance.layer))
         end
     end,
+})
+
+components.newFFIComponent({
+    name = "Transform3D",
+    container = builtins.Transform3D,
+    fields = {
+        {"x", "float"},
+        {"y", "float"},
+        {"z", "float"},
+        {"rotationX", "float"},
+        {"rotationY", "float"},
+        {"rotationZ", "float"},
+        {"rotationW", "float"},
+        {"scaleX", "float"},
+        {"scaleY", "float"},
+        {"scaleZ", "float"},
+    },
+    defaults = {0, 0, 0, 0, 0, 0, 1, 1, 1, 1},
 })
 
 local function percentComplete(self: builtins.TTL): number

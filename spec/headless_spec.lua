@@ -205,10 +205,10 @@ describe("tecs headless", function()
                 local eager = package.loaded["tecs.gfx.layers"] ~= nil
                 local layers = tecs.gfx.layers
 
-                -- Everything else that lives under src/tecs/gfx, plus the two
+                -- Everything else that lives under src/tecs/gfx, plus the
                 -- modules a graphics stack starts with.
                 local siblings = {
-                    "tecs.gfx.Camera2D", "tecs.gfx.animation", "tecs.gfx.particles",
+                    "tecs.gfx.Camera2D", "tecs.gfx.Camera3D", "tecs.gfx.animation", "tecs.gfx.particles",
                     "tecs.gfx.text", "tecs.Renderer", "tecs.ffi.sdl3",
                 }
                 local loaded = {}

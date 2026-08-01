@@ -273,6 +273,7 @@ On `tecs` itself, because no one module owns them:
 - [`tecs.newApplication`](/modules/Application) - builds the application an entry file returns
 - [`tecs.scoped`](/modules/#tecs.scoped) - closes explicitly owned resources when one callback ends
 - [`tecs.Transform2D`](/modules/ecs/builtins#transform) - where an entity is, and the one component every subsystem moves
+- [`tecs.Transform3D`](/modules/ecs/#tecs.ecs.Transform3D) - a right-handed 3D position, orientation, and scale
 - [`tecs.version`](/modules/) - the version of this build, as a string
 
 :::

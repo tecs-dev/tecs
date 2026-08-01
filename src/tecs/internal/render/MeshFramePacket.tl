@@ -1,0 +1,102 @@
+--[=[
+One frame's immutable 3D mesh metadata at the world-to-GPU boundary.
+
+The future mesh extractor writes instance and bounding-sphere bytes directly
+into domain-owned mapped staging, then records only their ranges here. The
+future mesh backend consumes this packet without reaching back into a world.
+The sprite packet and its image, light, and 2D camera state remain separate.
+
+One packet is allocated per mesh domain and reused. `begin` clears range state,
+`setCamera` copies the view, and extraction assigns the three instance counts
+before handing the packet to the backend. Nothing here owns mesh geometry or
+refers to a Lua entity.
+]=]
+
+local loader <const> = require("tecs.ffi.loader")
+local dirtyranges <const> = require("tecs.gpu.dirtyranges")
+
+local type Camera3D = require("tecs.gfx.Camera3D")
+
+local record MeshFramePacket
+    --- Staging slot whose instance and bounds ranges this frame names.
+    slot: integer
+    --- Mesh instances resident after extraction.
+    count: integer
+    --- Mesh instances dropped because the domain capacity was full.
+    dropped: integer
+    --- Mesh instances whose staging bytes extraction rewrote this frame.
+    rewritten: integer
+
+    --- World-space camera x copied during extraction.
+    cameraX: number
+    --- World-space camera y copied during extraction.
+    cameraY: number
+    --- World-space camera z copied during extraction.
+    cameraZ: number
+    --- Positive near-plane distance used to build `viewProjection`.
+    near: number
+    --- Far-plane distance used to build `viewProjection`.
+    far: number
+    --- Column-major world-to-clip matrix with depth in `[0, 1]`.
+    viewProjection: loader.CArray
+
+    --- Dirty byte ranges in the mesh instance staging buffer.
+    instanceRanges: dirtyranges
+    --- Dirty byte ranges in the bounding-sphere staging buffer.
+    boundsRanges: dirtyranges
+
+    --- Creates a reusable empty packet.
+    --- @return A packet with allocated matrix and range storage.
+    create: function(): MeshFramePacket
+
+    --- Begins writing one frame through a staging slot.
+    --- @param slot The zero-based staging slot selected by the renderer.
+    begin: function(self, slot: integer)
+
+    --- Copies a camera and its matrix into the packet.
+    --- @param camera The camera read now and not retained.
+    --- @param width The positive viewport width passed to the camera.
+    --- @param height The positive viewport height passed to the camera.
+    setCamera: function(self, camera: Camera3D, width: number, height: number)
+end
+
+local MeshFramePacketMT <const>: metatable<MeshFramePacket> = {__index = MeshFramePacket}
+
+function MeshFramePacket.create(): MeshFramePacket
+    local self = setmetatable({} as MeshFramePacket, MeshFramePacketMT)
+    self.slot = 0
+    self.count = 0
+    self.dropped = 0
+    self.rewritten = 0
+    self.cameraX = 0.0
+    self.cameraY = 0.0
+    self.cameraZ = 0.0
+    self.near = 0.1
+    self.far = 1000.0
+    self.viewProjection = loader.newArray("float[16]")
+    self.instanceRanges = dirtyranges.create()
+    self.boundsRanges = dirtyranges.create()
+    return self
+end
+
+function MeshFramePacket:begin(slot: integer)
+    self.slot = slot
+    self.instanceRanges:clear()
+    self.boundsRanges:clear()
+end
+
+function MeshFramePacket:setCamera(camera: Camera3D, width: number, height: number)
+    self.cameraX = camera.x
+    self.cameraY = camera.y
+    self.cameraZ = camera.z
+    self.near = camera.near
+    self.far = camera.far
+
+    local source <const> = camera:matrix(width, height)
+    local destination <const> = self.viewProjection
+    for index = 0, 15 do
+        destination[index] = source[index]
+    end
+end
+
+return MeshFramePacket
