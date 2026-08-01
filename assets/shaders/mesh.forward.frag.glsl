@@ -1,4 +1,5 @@
 #version 450
+#pragma tecs variants MESH_SHADOWS=1
 // Shades alpha-blended mesh surfaces after deferred composition. Meshes are
 // sorted back to front before this pass and use premultiplied alpha so one
 // pipeline handles the complete glTF BLEND contract.
@@ -16,9 +17,17 @@ struct Light {
     vec4 color;
 };
 
-layout(set = 2, binding = 2) readonly buffer Lights { Light item[]; } lights;
-layout(set = 2, binding = 3) readonly buffer TileCounts { uint count[]; } tiles;
-layout(set = 2, binding = 4) readonly buffer TileLights { uint index[]; } tileLights;
+#ifdef MESH_SHADOWS
+#define MESH_IMAGE_BINDING 1
+#define MESH_MATERIAL_BINDING 2
+#define MESH_LIGHT_BINDING 3
+#else
+#define MESH_LIGHT_BINDING 2
+#endif
+
+layout(set = 2, binding = MESH_LIGHT_BINDING) readonly buffer Lights { Light item[]; } lights;
+layout(set = 2, binding = MESH_LIGHT_BINDING + 1) readonly buffer TileCounts { uint count[]; } tiles;
+layout(set = 2, binding = MESH_LIGHT_BINDING + 2) readonly buffer TileLights { uint index[]; } tileLights;
 
 layout(set = 3, binding = 1) uniform Scene {
     vec4 ambient;
@@ -30,6 +39,9 @@ layout(set = 3, binding = 1) uniform Scene {
 } scene;
 
 #include "lighting.glsl"
+#ifdef MESH_SHADOWS
+#include "meshshadow.glsl"
+#endif
 #include "meshmaterial.glsl"
 
 void main() {
@@ -37,6 +49,11 @@ void main() {
     vec3 color = surface.albedo.rgb;
     if (surface.lit >= 0.5) {
         vec3 accumulated = scene.ambient.rgb * surface.orm.r;
+#ifdef MESH_SHADOWS
+        float sunLambert = max(dot(surface.normal, -meshShadow.direction.xyz), 0.0);
+        accumulated += meshShadow.colorStrength.rgb * meshShadow.direction.w
+            * sunLambert * meshShadowVisibility(vWorld, surface.normal);
+#endif
         int tile = lightTileOf(vWorld.xy, scene.bounds);
         int count = int(tiles.count[tile]);
         int base = tile * LIGHT_TILE_SLOTS;

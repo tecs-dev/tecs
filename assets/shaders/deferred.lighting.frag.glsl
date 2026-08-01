@@ -22,6 +22,8 @@
 // pushes is the same either way, so a pipeline built one way and driven the
 // other differs in what it samples and never in what it is told.
 #pragma tecs variants SHADOWS=1
+#pragma tecs variants MESH_SHADOWS=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1
 
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 outColor;
@@ -87,6 +89,12 @@ layout(set = 3, binding = 0) uniform Scene {
     // xy the offset that goes with it, z how many steps a march at full
     // attenuation takes, w the world height a full-height occluder stands.
     vec4 maskParams;
+#ifdef MESH_SHADOWS
+    // Direction from a surface toward the mesh domain's light, with intensity
+    // in w, then its color. Only mesh geometry marks itself as participating.
+    vec4 meshLightDirection;
+    vec4 meshLightColor;
+#endif
 } scene;
 
 #include "lighting.glsl"
@@ -204,6 +212,17 @@ void main() {
     // directionally known contribution and is not hidden by a baked ambient
     // term; its own shadowing is handled separately below.
     vec3 accumulated = scene.ambient.rgb * orm.r;
+#ifdef MESH_SHADOWS
+    // ORM alpha is otherwise reserved. A shadow-enabled mesh writes its
+    // directional visibility into the bottom quarter; sprites and ordinary
+    // meshes leave the channel at one and therefore receive no 3D sun term.
+    if (orm.a < 0.5) {
+        float visibility = clamp(orm.a * 4.0, 0.0, 1.0);
+        float sunLambert = max(dot(normal, scene.meshLightDirection.xyz), 0.0);
+        accumulated += scene.meshLightColor.rgb
+            * scene.meshLightDirection.w * sunLambert * visibility;
+    }
+#endif
 #ifdef SHADOWS
     float noise = dither(fragment);
 #endif

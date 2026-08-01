@@ -25,6 +25,13 @@ than two flags: a thing that wants to be grounded is exactly the thing that
 must not put a light-blocking silhouette in the mask, because a crowd of
 them merges under the mask's max blend into one flat mat of darkness.
 
+One different pass runs before geometry when the mesh domain enables its
+directional shadow map. Meshes compact against that light volume on the GPU,
+then the pass writes their nearest depth into a single-channel target. Opaque
+and masked geometry samples it while filling the G-buffer; blended geometry
+samples it in forward. A renderer without that option keeps the original
+targets, shader variants, and pass list.
+
 Composite and present are two passes rather than one because a pass writing
 the swapchain is the end of the frame: the swapchain texture belongs to the
 presenter once submitted, is not created with the sampled usage bit, and is
@@ -97,6 +104,7 @@ local RGBA8 <const> = 4
 --- generated cdef rather than copied out of the header, for the reason the
 --- blend factors are.
 local R8 <const> = tonumber(C.SDL_GPU_TEXTUREFORMAT_R8_UNORM) as integer
+local R16 <const> = tonumber(C.SDL_GPU_TEXTUREFORMAT_R16_UNORM) as integer
 
 local MAX_LIGHTS <const> = lightlayout.MAX
 local LIGHT_FLOATS <const> = lightlayout.FLOATS
@@ -112,6 +120,8 @@ local BIN_GROUP <const> = 64
 --- transform from the world into the occluder mask, each padded to a vec4.
 local SCENE_FLOATS <const> = 24
 local SCENE_BYTES <const> = SCENE_FLOATS * 4
+local MESH_SHADOW_SCENE_FLOATS <const> = 32
+local MESH_SHADOW_SCENE_BYTES <const> = MESH_SHADOW_SCENE_FLOATS * 4
 
 --- Floats the block a shadow draw is placed from holds: a matrix and four
 --- parameters.
@@ -266,6 +276,13 @@ local record DeferredOptions
     --- what puts a caster back on top of the shadow it threw across its own
     --- feet. Ignored unless `shadows` is set.
     dropShadows: function(context: PassGraph.PassContext)
+    --- Engine-owned. Enables the mesh domain's directional shadow-map target
+    --- at this scale. Nil omits the target, pass, and shader variant.
+    meshShadowScale: number
+    --- Engine-owned. Reports whether opaque mesh casters exist this frame.
+    meshShadowActive: function(): boolean
+    --- Engine-owned. Draws mesh depth into the directional shadow map.
+    meshShadowMap: function(context: PassGraph.PassContext)
 end
 
 --- The deferred pipeline: its pass graph, the pipelines it binds, and the
@@ -355,8 +372,9 @@ local record Deferred
     _blurPipeline: GraphicsPipeline
     --- `SCENE_FLOATS` pushed to the lighting fragment stage: ambient, then the
     --- target size, then the view, then the grid's world rectangle, then the
-    --- transform into the occluder mask, each padded out to a vec4. Held rather
-    --- than allocated per frame, since the pass runs every frame.
+    --- transform into the occluder mask, each padded out to a vec4. A
+    --- mesh-shadow graph adds two light vec4s. Held rather than allocated per
+    --- frame, since the pass runs every frame.
     _sceneUniform: loader.CArray
     --- One step along the axis a blur pass is blurring, in mask UV. Rewritten
     --- between the two passes, so it is one array and a push each.
@@ -368,6 +386,19 @@ local record Deferred
     --- was told. Read by everything that would otherwise have to test for a
     --- target that is not there.
     _shadows: boolean
+    --- Whether the graph owns the optional mesh shadow-map lane.
+    _meshShadows: boolean
+    --- Reports whether the current frame has an opaque mesh caster.
+    _meshShadowActive: function(): boolean
+    --- Direction from a surface toward the mesh domain's directional light.
+    _meshLightX: number
+    _meshLightY: number
+    _meshLightZ: number
+    --- Directional-light intensity and color.
+    _meshLightIntensity: number
+    _meshLightR: number
+    _meshLightG: number
+    _meshLightB: number
     --- Reports whether the current frame should build and sample shadows.
     _shadowActive: function(): boolean
     --- Size of the mask relative to the frame, as the targets were declared
@@ -526,6 +557,16 @@ local function sceneUniform(self: Deferred, width: number, height: number): load
     scene[21] = 0.5 - (maskC * self._frameViewX + maskD * self._frameViewY)
     scene[22] = self._shadowSteps
     scene[23] = self._shadowHeight
+    if self._meshShadows then
+        scene[24] = self._meshLightX
+        scene[25] = self._meshLightY
+        scene[26] = self._meshLightZ
+        scene[27] = self._meshLightIntensity
+        scene[28] = self._meshLightR
+        scene[29] = self._meshLightG
+        scene[30] = self._meshLightB
+        scene[31] = 0.0
+    end
     return scene
 end
 
@@ -555,8 +596,14 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     -- turns the feature on.
     local tuning <const> = options.shadows or {}
     local shadows <const> = options.shadows ~= nil
+    local meshShadows <const> = options.meshShadowScale ~= nil
     self._shadows = shadows
+    self._meshShadows = meshShadows
     self._shadowActive = options.shadowActive or alwaysEnabled
+    self._meshShadowActive = options.meshShadowActive or alwaysEnabled
+    self._meshLightX, self._meshLightY, self._meshLightZ = 0.0, 1.0, 0.0
+    self._meshLightIntensity = 0.0
+    self._meshLightR, self._meshLightG, self._meshLightB = 1.0, 1.0, 1.0
     self._shadowMaskScale = tuning.maskScale or 1.0
     self._shadowSteps = tuning.steps or 24
     self._shadowMargin = tuning.margin or 200.0
@@ -578,7 +625,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         }
     )
     self._lightScratch = loader.newArray("float[?]", MAX_LIGHTS * LIGHT_FLOATS)
-    self._sceneUniform = loader.newArray("float[?]", SCENE_FLOATS)
+    self._sceneUniform = loader.newArray("float[?]", meshShadows and MESH_SHADOW_SCENE_FLOATS or SCENE_FLOATS)
     self._binUniform = loader.newArray("float[8]")
     self._viewX = 0.0
     self._viewY = 0.0
@@ -680,6 +727,17 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         format = RGBA8,
     })
 
+    if meshShadows then
+        graph:target({
+            -- Compatibility surface: games may add passes around this target
+            -- by name, so the string stays stable if the mesh modules move.
+            name = "meshShadowMap",
+            format = R16,
+            scale = options.meshShadowScale,
+            clear = {r = 1, g = 1, b = 1, a = 1},
+        })
+    end
+
     if shadows then
         graph:target({
             -- One mask for every light, rather than a pass per light. Red
@@ -712,17 +770,41 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         })
     end
 
-    self._lightingPipeline = buildPipeline(
-        device, "deferred.lighting.frag", RGBA8, "lighting", shadows and {SHADOWS = "1"} or nil
-    )
+    local lightingDefines: {string: string} = nil
+    if shadows or meshShadows then
+        lightingDefines = {}
+        if shadows then
+            lightingDefines.SHADOWS = "1"
+        end
+        if meshShadows then
+            lightingDefines.MESH_SHADOWS = "1"
+        end
+    end
+    self._lightingPipeline = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting", lightingDefines)
     if shadows then
         self._blurPipeline = buildPipeline(device, "occluder.blur.frag", RGBA8, "occluderBlur", nil)
     end
     self._compositePipeline = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite", nil)
     self._presentPipeline = buildPipeline(device, "deferred.present.frag", swapchainFormat, "present", nil)
 
+    if meshShadows then
+        graph:pass({
+            -- Compatibility surface: the mesh domain contributes the draw,
+            -- while the frame-wide graph owns the target and ordering.
+            name = "meshShadows",
+            outputs = {"meshShadowMap"},
+            enabled = self._meshShadowActive,
+            execute = function(context: PassGraph.PassContext)
+                if options.meshShadowMap ~= nil then
+                    options.meshShadowMap(context)
+                end
+            end,
+        })
+    end
+
     graph:pass({
         name = "geometry",
+        inputs = meshShadows and {"meshShadowMap"} or nil,
         outputs = {"albedo", "normal", "orm", "emission"},
         -- Cleared to the far plane every frame, and less-or-equal rather than
         -- "less" so equal depths still resolve to whatever drew last. Draw
@@ -825,7 +907,9 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
 
             context.pass:bindPipeline(self._lightingPipeline.handle)
             context.pass:bindFragmentStorageBuffers(0, buffers)
-            C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, scene, SCENE_BYTES)
+            C.SDL_PushGPUFragmentUniformData(
+                context.commandBuffer, 0, scene, self._meshShadows and MESH_SHADOW_SCENE_BYTES or SCENE_BYTES
+            )
             context.pass:draw(3)
         end,
     })
@@ -850,6 +934,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         -- the whole of why blended content has to arrive sorted: depth decides
         -- it against the G-buffer and cannot decide it against itself.
         name = "forward",
+        inputs = meshShadows and {"meshShadowMap"} or nil,
         outputs = {"scene"},
         depth = {test = true, write = false},
         execute = function(context: PassGraph.PassContext)
@@ -1079,9 +1164,17 @@ function Deferred:rebuildPipelines()
     local blur: GraphicsPipeline = nil
     local bin: ComputePipeline = nil
     local built, reason = pcall(function(): string
-        lighting = buildPipeline(
-            device, "deferred.lighting.frag", RGBA8, "lighting", self._shadows and {SHADOWS = "1"} or nil
-        )
+        local defines: {string: string} = nil
+        if self._shadows or self._meshShadows then
+            defines = {}
+            if self._shadows then
+                defines.SHADOWS = "1"
+            end
+            if self._meshShadows then
+                defines.MESH_SHADOWS = "1"
+            end
+        end
+        lighting = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting", defines)
         composite = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite", nil)
         present = buildPipeline(device, "deferred.present.frag", self.graph.swapchainFormat, "present", nil)
         if self._shadows then
@@ -1232,6 +1325,32 @@ end
 --- paying for a list nothing reads.
 function Deferred:castsShadows(): boolean
     return self._shadows
+end
+
+--- Reports whether the graph owns the mesh directional-shadow target.
+--- @return Returns true only when renderer creation enabled mesh shadows.
+function Deferred:castsMeshShadows(): boolean
+    return self._meshShadows
+end
+
+--- Returns the format a mesh shadow-map pipeline must write.
+--- @return Returns the graph-owned single-channel normalized format.
+function Deferred:meshShadowFormat(): integer
+    return self.graph:formatOf("meshShadowMap")
+end
+
+--- Updates the directional light applied only to shadow-enabled mesh pixels.
+--- @param x Normalized direction from a surface toward the light.
+--- @param y Normalized direction from a surface toward the light.
+--- @param z Normalized direction from a surface toward the light.
+--- @param intensity Non-negative directional-light intensity.
+--- @param r Directional-light red.
+--- @param g Directional-light green.
+--- @param b Directional-light blue.
+function Deferred:setMeshLight(x: number, y: number, z: number, intensity: number, r: number, g: number, b: number)
+    self._meshLightX, self._meshLightY, self._meshLightZ = x, y, z
+    self._meshLightIntensity = intensity
+    self._meshLightR, self._meshLightG, self._meshLightB = r, g, b
 end
 
 --- The color format a pipeline drawing into the occluder mask must be created

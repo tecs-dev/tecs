@@ -218,6 +218,9 @@ describe("platform.Window", function()
         assert.is_true(#modes > 0, "a display offers at least one fullscreen mode")
 
         local chosen = modes[1]
+        -- The returned record owns a native copy. SDL's list has already been
+        -- freed, and collection must not leave its retained pointer dangling.
+        collectgarbage("collect")
         assert.is_true(window:setFullscreenMode(chosen))
         local read = window:fullscreenMode()
         assert.is_not_nil(read)

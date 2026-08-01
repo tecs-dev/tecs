@@ -34,12 +34,21 @@ start a graphics stack.
   sprite animation, and particles.
 - Optional 3D rendering with indexed mesh residency, ordered GPU frustum
   culling, texture and PBR material residency, static glTF/GLB loading, and an
-  independently allocated transparent forward lane.
+  independently allocated transparent forward lane and directional-shadow
+  lane.
 - Input, audio, physics, assets, workers, async I/O, HTTP, file watching, and
   a debug server.
 
-Skinned and animated 3D rendering, mesh shadows, post-processing, tiled maps,
-and multi-camera are not yet built.
+Skinned and animated 3D rendering, post-processing, tiled maps, and
+multi-camera are not yet built.
+
+Mesh shadows use one camera-centered directional map, not the 2D occluder-mask
+pipeline. Their mark, scan, compact, map, and shader resources exist only when
+the mesh domain opts in. Shadow culling reuses the ordered GPU compaction
+shape: off-camera casters inside the light volume remain, while instances
+outside that volume submit no geometry to the shadow raster pass. A surviving
+mesh still submits its complete resident index range; this is instance culling,
+not per-triangle culling inside one mesh.
 
 ## Build
 
@@ -49,7 +58,9 @@ Run `cargo xtask deps` once to install and stage development dependencies, then:
 ```bash
 cargo xtask build              # Build the host development preset
 cargo xtask example ui-demo    # Run the 2D showcase
+cargo xtask example scene3d    # Run the shadowed 3D mesh example
 cargo xtask example gltf3d     # Run the textured 3D example
+cargo xtask bench meshshadows  # Measure the optional mesh-shadow lane
 cargo xtask test               # Run the spec suite
 cargo xtask check              # Type-check Teal sources
 cargo xtask format             # Format sources
