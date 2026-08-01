@@ -74,12 +74,16 @@ local record DirectoryEntry
     symlink: boolean
 end
 
---- Controls pattern matching in a streamed glob.
+--- Controls pattern matching and traversal depth in a streamed glob.
 local record FileGlobOptions
     --- Caller-writable. Matches ASCII letters without regard to case when
     --- true. Defaults to false, which compares every UTF-8 codepoint exactly
     --- on every platform including the ones whose filesystem is not.
     caseInsensitive: boolean
+    --- Caller-writable. Limits traversal to this many levels below the root.
+    --- Zero yields no entries, one yields immediate children, and nil permits
+    --- unlimited traversal. Defaults to nil.
+    maxDepth: integer
 end
 
 --- Pulls matching directory entries without retaining the complete tree.
@@ -167,7 +171,7 @@ local record files
     --- folder.
     type UserFolder = storagebackend.UserFolder
 
-    --- `GlobOptions` controls pattern matching.
+    --- `GlobOptions` controls pattern matching and traversal depth.
     type GlobOptions = FileGlobOptions
 
     --- `WriteMode` selects replacement or append behavior.
@@ -248,6 +252,7 @@ local record DirectoryStreamState
     frames: {DirectoryFrame}
     pattern: {string}
     caseInsensitive: boolean
+    maxDepth: integer
     pendingDirectory: DirectoryFrame
     closed: boolean
 end
@@ -679,6 +684,7 @@ function DirectoryStream:next(): DirectoryEntry, string
                 or matchesGlob(name, state.pattern[depth], state.caseInsensitive)
             local descends <const> = kind == "directory"
                 and not symlink
+                and depth < state.maxDepth
                 and (state.pattern == nil or (matches and depth < #state.pattern))
             local child: DirectoryFrame = nil
             if descends then
@@ -749,15 +755,25 @@ end
 --- `toArray` to consume and close the stream when every remaining entry should
 --- be retained.
 ---
+--- A fixed bound belongs in `maxDepth`; `skipDirectory` remains useful when
+--- descent depends on the entry itself. The checked example combines both.
+---
 --- @param path The caller supplies the directory to enumerate.
 --- @param pattern The caller supplies `/`-separated `*` and `?` wildcards, or
 ---     nil to include every descendant recursively.
---- @param options The caller supplies matching options or omits them for a
----     case-sensitive match.
+--- @param options The caller supplies matching and depth options, or omits
+---     them for case-sensitive, unlimited traversal.
 --- @return Returns a caller-owned stream, or nil when enumeration cannot start.
 --- @return Returns the platform reason when the first return is nil.
 function files.glob(path: PathInput, pattern?: string, options?: GlobOptions): DirectoryStream, string
     local root <const> = Path.new(required(path, "glob"))
+    local maxDepth = 2147483647
+    if options ~= nil and options.maxDepth ~= nil then
+        maxDepth = options.maxDepth
+        if type(maxDepth) ~= "number" or maxDepth ~= floor(maxDepth) or maxDepth < 0 then
+            error("tecs: io.files.glob maxDepth must be a non-negative integer", 2)
+        end
+    end
     local names <const>, reason = listDirectory(root)
     if names == nil then
         return nil, reason
@@ -768,9 +784,10 @@ function files.glob(path: PathInput, pattern?: string, options?: GlobOptions): D
         segments = splitGlob(pattern)
     end
     directoryStates[stream] = {
-        frames = {{path = root, depth = 1, names = names, at = 1}},
+        frames = maxDepth == 0 and {} or {{path = root, depth = 1, names = names, at = 1}},
         pattern = segments,
         caseInsensitive = options ~= nil and options.caseInsensitive or false,
+        maxDepth = maxDepth,
         closed = false,
     }
     return stream

@@ -1568,9 +1568,11 @@ pending and its futures participate in the ordinary runtime pump. `glob` takes
 the complementary approach for directory reads: its caller-owned stream pulls
 entries a level at a time instead of materializing the complete tree, never
 follows symbolic links, and lets a caller prune a yielded directory before the
-next pull enters it. A pattern confines that same traversal, so separate open,
-walk, and glob constructors would only be aliases, and eager collection
-belongs to `DirectoryStream:toArray` rather than a second path operation.
+next pull enters it. `maxDepth` applies a fixed traversal bound; pruning stays
+on the stream for entry-dependent decisions. A pattern confines that same
+traversal, so separate open, walk, and glob constructors would only be aliases,
+and eager collection belongs to `DirectoryStream:toArray` rather than a second
+path operation.
 Temporary files and directories are native-owned resources with finalizers as
 a leak safety net, but deterministic cleanup still runs through
 `tecs.scoped`; persistence moves an owned temporary path to an absent permanent

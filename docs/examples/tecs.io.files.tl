@@ -1,3 +1,27 @@
+-- #region tecs.io.files.glob
+local files <const> = tecs.io.files
+tecs.scoped(function(scope: tecs.Scope)
+    local stream, reason = files.glob(files.assetPath("levels"), nil, {maxDepth = 2})
+    if stream == nil then
+        error(reason)
+    end
+    scope:own(stream)
+    while true do
+        local entry, nextReason = stream:next()
+        if entry == nil then
+            if nextReason ~= nil then
+                error(nextReason)
+            end
+            break
+        end
+        print(entry.depth, entry.path)
+        if entry.kind == "directory" and entry.name == "generated" then
+            stream:skipDirectory()
+        end
+    end
+end)
+-- #endregion tecs.io.files.glob
+
 -- #region tecs.io.files.lines
 local files <const> = require("tecs.io.files")
 local nextLine <const> = assert(files.lines("save.txt"))

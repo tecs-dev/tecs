@@ -327,6 +327,18 @@ describe("io.files", function()
             }, sorted(globPaths(temp)))
         end)
 
+        it("limits recursive traversal depth without another constructor", function()
+            tree()
+            assert.are.same({}, globPaths(temp, nil, { maxDepth = 0 }))
+            assert.are.same({ "a", "top.txt" }, sorted(globPaths(temp, nil, { maxDepth = 1 })))
+            assert.are.same({
+                "a",
+                "a/b",
+                "a/mid.txt",
+                "top.txt",
+            }, sorted(globPaths(temp, nil, { maxDepth = 2 })))
+        end)
+
         it("confines a wildcard to one level, because it never matches a separator", function()
             tree()
             assert.are.same({ "a", "top.txt" }, sorted(globPaths(temp, "*")))
@@ -963,6 +975,14 @@ describe("io.files", function()
     end)
 
     describe("arguments", function()
+        it("refuses an invalid glob depth before enumeration", function()
+            for _, maxDepth in ipairs({ -1, 1.5, "one" }) do
+                assert.has_error(function()
+                    files.glob(temp, nil, { maxDepth = maxDepth })
+                end, "tecs: io.files.glob maxDepth must be a non-negative integer")
+            end
+        end)
+
         it("refuses a call with no path", function()
             -- LuaJIT hands a Lua nil to a `const char *` as a null pointer, so
             -- one that reached SDL would be a call against an invalid path
