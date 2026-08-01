@@ -179,11 +179,9 @@
     --tealdoc-hero-name-size-narrow: 2.4rem;
 
     /* 1.35rem is what puts the tagline on one line: it needs 562px of the
-     * copy column's 607. Fitting a line is not something a fixed size can
-     * promise, since the column narrows with the window, so this holds from
-     * the design width up and wraps below it. Sizing it to fit at every width
-     * means sizing it against the viewport, which is the thing this file
-     * removed. */
+     * copy column's 607. Phones scale it against the space their one-column
+     * layout leaves, rather than allowing a second line to take over the
+     * hero. The ordinary size remains fixed once that space is available. */
     --tealdoc-hero-text-size: 1.35rem;
     --tealdoc-hero-text-size-narrow: 1.25rem;
     --tealdoc-hero-glow-size: 192px;
@@ -296,6 +294,21 @@
     .tealdoc-home-hero .tealdoc-hero-image {
         top: 0;
         margin-bottom: 0;
+    }
+}
+
+/* A phone has one column, so the desktop cap makes the illustration nearly
+ * full-width and lets it dominate the first screen. Keep it present without
+ * making the introduction start below the fold. */
+@media (max-width: 760px) {
+    .tealdoc-home-hero .tealdoc-hero-image img {
+        width: min(72vw, 260px);
+        max-height: 220px;
+    }
+
+    .tealdoc-hero-text {
+        font-size: clamp(0.6rem, calc(5.2vw - 0.105rem), var(--tealdoc-hero-text-size-narrow));
+        white-space: nowrap;
     }
 }
 
