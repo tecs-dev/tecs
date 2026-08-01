@@ -52,8 +52,8 @@ pub const HARFBUZZ_REVISION: &str = "564bf9818a18709776856533829c0c04950773d6";
 // what the tree pins. Homebrew tracks the tip of `v2.1` and states the
 // revision behind each of its versions, so `brew cat luajit` is where the pair
 // comes from.
-pub const LUAJIT_REVISION: &str = "faaf663340347a78b22ed94c63c24fe090bd9784";
-pub const LUAJIT_ROLLING: &str = "2.1.1785192264";
+pub const LUAJIT_REVISION: &str = "4886b676a698acc4bbdf54adfabb3e33a8c020e8";
+pub const LUAJIT_ROLLING: &str = "2.1.1785577137";
 pub const SHADERC_VERSION: &str = "2026.3";
 pub const SHADERC_REVISION: &str = "2c8cae778eec0283b44acbe7ed1a386865d78799";
 pub const GLSLANG_REVISION: &str = "168d452a4f460d24b588fed08477a81c44ee27a1";
