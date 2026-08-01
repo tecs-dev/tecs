@@ -1,8 +1,8 @@
 --- Headless extraction benchmark for the mesh domain.
 ---
---- This drives the real `MeshExtractor` into retained instance and sphere
---- staging and fills a retained `MeshFramePacket`. It measures no drawing and
---- loads no sprite renderer.
+--- This drives the real `MeshExtractor` into retained instance, sphere, and
+--- indexed-command staging and fills a retained `MeshFramePacket`. It measures
+--- no drawing and loads no sprite renderer.
 ---
 ---   BENCH_MESH_COUNT     Entities per sample. Defaults to 100000.
 ---   BENCH_MESH_WARMUP    Untimed extractions. Defaults to 120.
@@ -33,6 +33,7 @@ local Transform3D <const> = tecs.Transform3D
 local Mesh <const> = components.Mesh
 local Bounds3D <const> = components.Bounds3D
 local Material <const> = components.Material
+local Tint <const> = components.Tint
 local Renderable3D <const> = components.Renderable3D
 
 local function positiveInteger(name: string, default: integer): integer
@@ -55,12 +56,13 @@ local world <const> = tecs.ecs.newWorld()
 local asset <const> = components.meshId("bench://unit-mesh")
 world:batchSpawn(
     COUNT,
-    {Transform3D, Mesh, Bounds3D, Material, Renderable3D},
+    {Transform3D, Mesh, Bounds3D, Material, Tint, Renderable3D},
     function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
         local transforms = archetype:getMut(Transform3D)
         local meshes = archetype:getMut(Mesh)
         local bounds = archetype:getMut(Bounds3D)
         local materials = archetype:getMut(Material)
+        local tints = archetype:getMut(Tint)
         for row = firstRow, lastRow do
             local transform = transforms[row]
             transform.x = (row % 512) * 2.0
@@ -87,6 +89,12 @@ world:batchSpawn(
             local material = materials[row]
             material.id = 0
             material.param = 0.25
+
+            local tint = tints[row]
+            tint.r = 1.0
+            tint.g = 1.0
+            tint.b = 1.0
+            tint.a = 1.0
         end
     end
 )
@@ -94,9 +102,11 @@ world:commit()
 
 local instances <const> = loader.newArray("float[?]", COUNT * meshlayout.INSTANCE_FLOATS)
 local spheres <const> = loader.newArray("float[?]", COUNT * meshlayout.BOUND_FLOATS)
+local commands <const> = loader.newArray("SDL_GPUIndexedIndirectDrawCommand[?]", COUNT)
 local packet <const> = MeshFramePacket.create()
 local extractor <const> = MeshExtractor.create({capacity = COUNT})
-extractor:setStaging(0, instances, spheres)
+extractor:setStaging(0, instances, spheres, commands)
+extractor:registerMesh(asset, 0, 0, 0, 3)
 extractor:install(world, packet, nil)
 
 local function extract(): integer

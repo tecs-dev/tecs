@@ -29,7 +29,8 @@ shadows.
 
 The 3D mesh contract is separate from the sprite lane. `tecs.Transform3D`,
 [`Mesh`](tealdoc:tecs.components.Mesh),
-[`Bounds3D`](tealdoc:tecs.components.Bounds3D), and
+[`Bounds3D`](tealdoc:tecs.components.Bounds3D),
+[`Tint`](tealdoc:tecs.components.Tint), and
 [`Renderable3D`](tealdoc:tecs.components.Renderable3D) describe an opaque mesh
 for the optional mesh domain.
 [`Material`](tealdoc:tecs.components.Material) is shared by both domains.
@@ -117,6 +118,10 @@ ecs.newFFIComponent({
 --- blended entities than it holds draws the ones earliest in the buffer and
 --- drops the rest. An entity meant to be solid should say so with an alpha of
 --- exactly one.
+---
+--- The opaque mesh domain reads rgb as its untextured base color. It ignores
+--- alpha until a mesh forward lane exists, so a mesh remains opaque at every
+--- alpha value.
 local record Tint is Component
     --- Caller-writable. Sets the red channel from zero to one.
     r: number
@@ -124,8 +129,8 @@ local record Tint is Component
     g: number
     --- Caller-writable. Sets the blue channel from zero to one.
     b: number
-    --- Caller-writable. Sets coverage from transparent at zero to opaque at
-    --- one.
+    --- Caller-writable. Sets sprite coverage from transparent at zero to
+    --- opaque at one. The opaque mesh lane currently ignores it.
     a: number
 end
 

@@ -54,6 +54,11 @@ local MAX_BUFFER_BINDINGS <const> = 8
 --- kind on it. Every method here is only legal in that window, and the handle
 --- is nil outside it.
 local record RenderPass
+    --- Selects unsigned 16-bit index elements.
+    INDEX_UINT16: integer
+    --- Selects unsigned 32-bit index elements.
+    INDEX_UINT32: integer
+
     --- A color a pass clears an attachment to before it draws.
     record ClearColor
         --- In 0..1 per channel. A field left out is zero, except `a`, which is
@@ -241,14 +246,12 @@ local record RenderPass
 
     --- Binds the index buffer subsequent indexed draws read.
     ---
-    --- 16-bit indices: a quad needs four distinct corners, so the values never
-    --- approach the limit and the buffer stays half the size of a 32-bit one.
-    --- An index buffer holding 32-bit values read through this is silently
-    --- misinterpreted rather than rejected.
     --- @param buffer A device buffer created with the index usage bit.
-    --- @param offset Bytes from the start of the buffer to index zero.
-    ---     Defaults to zero.
-    bindIndexBuffer: function(self, buffer: loader.CValue, offset?: integer)
+    --- @param elementSize `INDEX_UINT16` or `INDEX_UINT32`. Defaults to
+    ---     `INDEX_UINT16`.
+    --- @param offset Bytes from the start of the buffer to index zero and
+    ---     defaults to zero.
+    bindIndexBuffer: function(self, buffer: loader.CValue, elementSize?: integer, offset?: integer)
 
     --- Issues an indexed draw whose parameters the GPU wrote.
     --- @param buffer A device buffer created with the indirect usage bit,
@@ -268,6 +271,9 @@ local record RenderPass
 end
 
 local RenderPassMT <const>: metatable<RenderPass> = {__index = RenderPass}
+
+RenderPass.INDEX_UINT16 = tonumber(C.SDL_GPU_INDEXELEMENTSIZE_16BIT) as integer
+RenderPass.INDEX_UINT32 = tonumber(C.SDL_GPU_INDEXELEMENTSIZE_32BIT) as integer
 
 -- Reused across passes; a pass is begun and bound far too often to allocate
 -- for either. SDL copies out of these during the call it is given them in, so
@@ -421,11 +427,15 @@ function RenderPass:drawIndirect(buffer: loader.CValue, offset: integer, drawCou
     C.SDL_DrawGPUPrimitivesIndirect(self.handle, buffer, offset or 0, drawCount or 1)
 end
 
-function RenderPass:bindIndexBuffer(buffer: loader.CValue, offset?: integer)
+function RenderPass:bindIndexBuffer(buffer: loader.CValue, elementSize?: integer, offset?: integer)
+    elementSize = elementSize or RenderPass.INDEX_UINT16
+    if elementSize ~= RenderPass.INDEX_UINT16 and elementSize ~= RenderPass.INDEX_UINT32 then
+        error(("tecs: invalid index element size %s"):format(tostring(elementSize)), 2)
+    end
     local slot = indexBinding[0] as loader.CStruct
     slot.buffer = buffer
     slot.offset = offset or 0
-    C.SDL_BindGPUIndexBuffer(self.handle, indexBinding, C.SDL_GPU_INDEXELEMENTSIZE_16BIT)
+    C.SDL_BindGPUIndexBuffer(self.handle, indexBinding, elementSize)
 end
 
 function RenderPass:drawIndexedIndirect(buffer: loader.CValue, offset: integer, drawCount: integer)

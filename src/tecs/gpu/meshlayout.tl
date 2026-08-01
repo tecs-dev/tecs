@@ -13,6 +13,7 @@ local record meshlayout
     INSTANCE_BYTES: integer
     BOUND_FLOATS: integer
     BOUND_BYTES: integer
+    COMMAND_BYTES: integer
 end
 
 -- position.xyz, normal.xyz, tangent.xyzw, uv.xy
@@ -20,12 +21,15 @@ meshlayout.VERTEX_FLOATS = 12
 meshlayout.VERTEX_BYTES = meshlayout.VERTEX_FLOATS * 4
 
 -- position.xyz, rotation.xyzw, scale.xyz, mesh slot, material id and param,
--- then three lanes reserved for the first drawing contract.
+-- then opaque base color rgb from Tint.
 meshlayout.INSTANCE_FLOATS = 16
 meshlayout.INSTANCE_BYTES = meshlayout.INSTANCE_FLOATS * 4
 
 -- World-space bounding sphere: center.xyz and radius.
 meshlayout.BOUND_FLOATS = 4
 meshlayout.BOUND_BYTES = meshlayout.BOUND_FLOATS * 4
+
+-- SDL_GPUIndexedIndirectDrawCommand: four uints and one signed int.
+meshlayout.COMMAND_BYTES = 20
 
 return meshlayout

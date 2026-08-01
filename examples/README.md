@@ -10,8 +10,7 @@ cargo xtask example scene3d
 `ui-demo.tl` is the complete engine showcase. It exercises the sprite renderer,
 lighting, text, UI, input, animation, audio, and debug tools together.
 
-`scene3d.tl` demonstrates the 3D scene contract that exists before mesh
-rendering. It creates a mesh entity and projects its bounds through `Camera3D`
-as a 2D debug wireframe. The wireframe is deliberately not a substitute for
-`MeshDomain`: the example becomes a rendered mesh demo only after that domain
-loads geometry and submits its own draw work.
+`scene3d.tl` registers an indexed cube, spawns it as a 3D entity, and draws it
+through `MeshDomain` into the shared deferred G-buffer. It disables the sprite
+domain, so the image proves the mesh lane owns its complete extraction,
+staging, pipeline, and draw path.

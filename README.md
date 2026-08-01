@@ -2136,14 +2136,21 @@ the backend's mapped addresses to the extractor, and centers `Camera2D` on the
 first frame that draws. `Renderer` rotates the one frame slot and explicitly
 prepares each domain before executing the graph.
 
-`MeshDomain` is the 3D peer. Its first stage owns mesh extraction, its packet,
-immutable geometry residency, and separate instance and bounds buffers. It
-does not draw yet. The next stage can consume those resident buffers in an
-opaque deferred pass without changing the asset or entity contract. No
-2D-or-3D branch sits in either per-entity loop, and neither lane is forced
-through a generic callback. Shared device, pipeline, material, pass and
-lighting mechanisms remain under `tecs.gpu`; domain-specific hot paths remain
-concrete.
+`MeshDomain` is the 3D peer. It owns mesh extraction, its packet, immutable
+geometry residency, separate instance and bounds buffers, and an opaque
+indexed contribution to the shared deferred geometry pass. `Renderer` calls
+the two concrete domain contributions in a fixed order. No 2D-or-3D branch
+sits in either per-entity loop, and neither lane is forced through an allocated
+callback registry. Shared device, material, pass, graph and lighting
+mechanisms remain under `tecs.gpu`; domain-specific hot paths and pipelines
+remain concrete.
+
+The first mesh command stream contains one unculled indexed command per
+extracted entity. That is a deliberately temporary producer behind the draw
+boundary, not a per-triangle submission path: a million-triangle mesh remains
+one immutable region and one command. A later mesh cull can write a compacted
+stream with the same command shape without changing the asset, component, or
+domain contribution contracts.
 
 Both domains are construction choices rather than permanent renderer weight.
 Omitting `meshes` loads no mesh implementation and allocates no mesh buffers;

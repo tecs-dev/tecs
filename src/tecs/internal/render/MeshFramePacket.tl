@@ -44,6 +44,8 @@ local record MeshFramePacket
     instanceRanges: dirtyranges
     --- Dirty byte ranges in the bounding-sphere staging buffer.
     boundsRanges: dirtyranges
+    --- Dirty byte ranges in the indexed-command staging buffer.
+    commandRanges: dirtyranges
 
     --- Creates a reusable empty packet.
     --- @return A packet with allocated matrix and range storage.
@@ -76,6 +78,7 @@ function MeshFramePacket.create(): MeshFramePacket
     self.viewProjection = loader.newArray("float[16]")
     self.instanceRanges = dirtyranges.create()
     self.boundsRanges = dirtyranges.create()
+    self.commandRanges = dirtyranges.create()
     return self
 end
 
@@ -83,6 +86,7 @@ function MeshFramePacket:begin(slot: integer)
     self.slot = slot
     self.instanceRanges:clear()
     self.boundsRanges:clear()
+    self.commandRanges:clear()
 end
 
 function MeshFramePacket:setCamera(camera: Camera3D, width: number, height: number)

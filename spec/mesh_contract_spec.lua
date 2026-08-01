@@ -201,20 +201,22 @@ describe("the 3D scene contract", function()
             local extractor = MeshExtractor.create({ capacity = capacity })
             local instances = loader.newArray("float[?]", capacity * 16)
             local bounds = loader.newArray("float[?]", capacity * 4)
-            extractor:setStaging(0, instances, bounds)
+            local commands = loader.newArray("SDL_GPUIndexedIndirectDrawCommand[?]", capacity)
+            extractor:setStaging(0, instances, bounds, commands)
             extractor:install(world, packet, nil)
-            return world, extractor, packet, instances, bounds
+            return world, extractor, packet, instances, bounds, commands
         end
 
         it("resolves residency once and writes mesh-owned staging", function()
-            local world, extractor, packet, instances, bounds = extractorScene(2)
+            local world, extractor, packet, instances, bounds, commands = extractorScene(2)
             local asset = components.meshId("procedural://triangle")
-            extractor:registerMesh(asset, 7)
+            extractor:registerMesh(asset, 7, 11, 13, 15)
             local entity = world:spawn(
                 tecs.Transform3D.new({ x = 4, y = 5, z = 6, scaleX = 2 }),
                 components.Mesh(asset),
                 components.Bounds3D(1, 0, 0, 0.5),
                 components.Material(3, 0.25),
+                components.Tint(0.2, 0.4, 0.6, 1),
                 components.Renderable3D()
             )
 
@@ -226,23 +228,32 @@ describe("the 3D scene contract", function()
             assert.are.equal(7, instances[10])
             assert.are.equal(3, instances[11])
             near(instances[12], 0.25)
+            near(instances[13], 0.2)
+            near(instances[14], 0.4)
+            near(instances[15], 0.6)
             near(bounds[0], 6)
             near(bounds[1], 5)
             near(bounds[2], 6)
             near(bounds[3], 1)
+            assert.are.equal(15, commands[0].num_indices)
+            assert.are.equal(1, commands[0].num_instances)
+            assert.are.equal(13, commands[0].first_index)
+            assert.are.equal(11, commands[0].vertex_offset)
+            assert.are.equal(0, commands[0].first_instance)
             assert.are.equal(7, world:get(entity, components.Mesh).slot)
         end)
 
         it("drops over capacity without leaving the world deferred", function()
             local world, extractor, packet = extractorScene(1)
             local asset = components.meshId("procedural://triangle")
-            extractor:registerMesh(asset, 0)
+            extractor:registerMesh(asset, 0, 0, 0, 3)
             for _ = 1, 3 do
                 world:spawn(
                     tecs.Transform3D(),
                     components.Mesh(asset, 0),
                     components.Bounds3D(),
                     components.Material(),
+                    components.Tint(),
                     components.Renderable3D()
                 )
             end
@@ -268,6 +279,7 @@ describe("the 3D scene contract", function()
                 components.Mesh(asset),
                 components.Bounds3D(),
                 components.Material(),
+                components.Tint(),
                 components.Renderable3D()
             )
             assert.has_error(function()
@@ -357,16 +369,20 @@ describe("the 3D scene contract", function()
             local packet = MeshFramePacket.create()
             local instanceRanges = packet.instanceRanges
             local boundsRanges = packet.boundsRanges
+            local commandRanges = packet.commandRanges
             instanceRanges:mark(16, 32)
             boundsRanges:mark(8, 16)
+            commandRanges:mark(0, 20)
 
             packet:begin(2)
 
             assert.are.equal(2, packet.slot)
             assert.are.equal(0, packet.instanceRanges.count)
             assert.are.equal(0, packet.boundsRanges.count)
+            assert.are.equal(0, packet.commandRanges.count)
             assert.is_true(rawequal(instanceRanges, packet.instanceRanges))
             assert.is_true(rawequal(boundsRanges, packet.boundsRanges))
+            assert.is_true(rawequal(commandRanges, packet.commandRanges))
         end)
     end)
 end)

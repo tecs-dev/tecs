@@ -245,11 +245,19 @@ describe("ecs.Renderer", function()
         assert.are.equal(mesh.slot, same.slot)
         assert.are.equal(1, renderer.meshes.meshCount)
 
-        world:spawn(tecs.Transform3D(), mesh, bounds, components.Material(), components.Renderable3D())
+        renderer.meshes.camera.z = 2
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5 }),
+            mesh,
+            bounds,
+            components.Material(),
+            components.Tint(1, 0, 0, 1),
+            components.Renderable3D()
+        )
         local pixels = frameOnce(world, renderer)
         assert.are.equal(1, renderer.meshes.count)
         assert.are.equal(1, renderer.meshes.rewritten)
-        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r)
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2 - 6, SIZE / 2 + 6).r)
         renderer:destroy()
     end)
 

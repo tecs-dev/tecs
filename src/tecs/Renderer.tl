@@ -84,35 +84,22 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
 
     local ambient <const> = options.ambient or {DEFAULT_AMBIENT[1], DEFAULT_AMBIENT[2], DEFAULT_AMBIENT[3]}
     local sprites: SpriteDomain = nil
-    local deferred = Deferred.create(
-        device,
-        swapchainFormat,
-        {
-            ambient = ambient,
-            shadows = options.shadows,
-            shadowActive = function(): boolean return sprites ~= nil and sprites:_castsThisFrame() end,
-            occluders = function(context: Deferred.PassContext)
-                if sprites ~= nil then
-                    sprites:_recordOccluders(context)
-                end
-            end,
-            dropShadows = function(context: Deferred.PassContext)
-                if sprites ~= nil then
-                    sprites:_recordDropShadows(context)
-                end
-            end,
-            geometry = function(context: Deferred.PassContext)
-                if sprites ~= nil then
-                    sprites:_recordGeometry(context)
-                end
-            end,
-            forward = function(context: Deferred.PassContext)
-                if sprites ~= nil then
-                    sprites:_recordForward(context)
-                end
-            end,
-        }
-    )
+    local meshes: MeshDomain = nil
+    -- Deferred retains this options table in its graph closures. The temporary
+    -- no-op functions make the graph constructible before the domains that
+    -- borrow it; the concrete functions replace them once, below. A frame then
+    -- calls exactly the enabled domains without probing a registry or testing
+    -- absent domains on the render path.
+    local contributions = {
+        ambient = ambient,
+        shadows = options.shadows,
+        shadowActive = function(): boolean return false end,
+        occluders = function(_context: Deferred.PassContext) end,
+        dropShadows = function(_context: Deferred.PassContext) end,
+        geometry = function(_context: Deferred.PassContext) end,
+        forward = function(_context: Deferred.PassContext) end,
+    }
+    local deferred = Deferred.create(device, swapchainFormat, contributions)
     self.deferred = deferred
     if options.sprites ~= false then
         local SpriteDomainValue <const> = require("tecs.internal.render.SpriteDomain")
@@ -122,9 +109,26 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
     end
     if options.meshes ~= nil then
         local MeshDomainValue <const> = require("tecs.internal.render.MeshDomain")
-        local meshes <const> = MeshDomainValue._create(device, options.meshes)
+        meshes = MeshDomainValue._create(device, deferred, options.meshes)
         self.meshes = meshes
         meshes:_setStaging(self._slot)
+    end
+
+    if sprites ~= nil then
+        contributions.shadowActive = function(): boolean return sprites:_castsThisFrame() end
+        contributions.occluders = function(context: Deferred.PassContext) sprites:_recordOccluders(context) end
+        contributions.dropShadows = function(context: Deferred.PassContext) sprites:_recordDropShadows(context) end
+        contributions.forward = function(context: Deferred.PassContext) sprites:_recordForward(context) end
+    end
+    if sprites ~= nil and meshes ~= nil then
+        contributions.geometry = function(context: Deferred.PassContext)
+            sprites:_recordGeometry(context)
+            meshes:_recordGeometry(context)
+        end
+    elseif sprites ~= nil then
+        contributions.geometry = function(context: Deferred.PassContext) sprites:_recordGeometry(context) end
+    elseif meshes ~= nil then
+        contributions.geometry = function(context: Deferred.PassContext) meshes:_recordGeometry(context) end
     end
     return self
 end
@@ -144,6 +148,9 @@ end
 function Renderer:rebuildPipelines()
     if self.sprites ~= nil then
         self.sprites:_rebuildPipelines()
+    end
+    if self.meshes ~= nil then
+        self.meshes:_rebuildPipelines(self.deferred)
     end
 end
 

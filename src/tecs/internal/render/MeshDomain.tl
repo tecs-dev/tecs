@@ -1,14 +1,15 @@
 --[=[
 Owns the complete 3D mesh rendering lane.
 
-The domain joins mesh extraction to geometry residency and device staging. It
-does not own the deferred graph, presentation, capture, or frame-slot rotation.
+The domain joins mesh extraction to geometry residency, device staging, and an
+opaque deferred contribution. It does not own the deferred graph,
+presentation, capture, or frame-slot rotation.
 `Renderer` creates it only when `meshes` options are present, so a 2D-only
 application loads no mesh implementation and allocates none of these buffers.
 
-This first stage prepares packets but contributes no draw pass. Opaque mesh
-geometry can be added against the resident buffers without changing the public
-asset or entity contract.
+The backend currently records every extracted instance. Visibility compaction
+can replace its command stream later without changing the public asset or
+entity contract.
 ]=]
 
 local type types = require("tecs.types")
@@ -16,6 +17,7 @@ local type assets = require("tecs.assets")
 local loader <const> = require("tecs.ffi.loader")
 local Buffer <const> = require("tecs.gpu.Buffer")
 local Frame <const> = require("tecs.gpu.Frame")
+local Deferred <const> = require("tecs.gpu.Deferred")
 local Camera3D <const> = require("tecs.gfx.Camera3D")
 local MeshExtractor <const> = require("tecs.internal.render.MeshExtractor")
 local MeshBackend <const> = require("tecs.internal.render.MeshBackend")
@@ -61,14 +63,14 @@ local record MeshDomain
     vertexCount: integer
     --- Read-only. Reports indices registered for immutable residency.
     indexCount: integer
-    --- Engine-owned. Exposes immutable vertex storage to the future opaque
+    --- Engine-owned. Exposes immutable vertex storage to the opaque
     --- mesh pass. Ordinary game code should ignore it.
     vertices: Buffer
-    --- Engine-owned. Exposes immutable 32-bit index storage to the future
+    --- Engine-owned. Exposes immutable 32-bit index storage to the
     --- opaque mesh pass. Ordinary game code should ignore it.
     indices: Buffer
-    --- Engine-owned. Exposes mesh instances to the future cull and draw
-    --- passes. Ordinary game code should ignore it.
+    --- Engine-owned. Exposes mesh instances to the opaque draw and future
+    --- cull passes. Ordinary game code should ignore it.
     instances: Buffer
 
     _extractor: MeshExtractor
@@ -89,7 +91,7 @@ local function positive(name: string, value: integer): integer
     return value
 end
 
-function MeshDomain._create(device: loader.CPtr, options: MeshDomainOptions): MeshDomain
+function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: MeshDomainOptions): MeshDomain
     options = options or {}
     local capacity <const> = positive("mesh capacity", options.capacity or DEFAULT_CAPACITY)
     local vertexCapacity <const> = positive("mesh vertex capacity", options.vertexCapacity or DEFAULT_VERTEX_CAPACITY)
@@ -113,6 +115,7 @@ function MeshDomain._create(device: loader.CPtr, options: MeshDomainOptions): Me
 
     local backend <const> = MeshBackend.create(
         device,
+        deferred,
         {
             capacity = capacity,
             vertexCapacity = vertexCapacity,
@@ -145,6 +148,14 @@ end
 
 function MeshDomain:_setStaging(slot: integer)
     self._extractor:setStaging(slot, self._backend:mapSlot(slot))
+end
+
+function MeshDomain:_recordGeometry(context: Deferred.PassContext)
+    self._backend:recordGeometry(context)
+end
+
+function MeshDomain:_rebuildPipelines(deferred: Deferred)
+    self._backend:rebuildPipeline(deferred)
 end
 
 function MeshDomain:_prepare(frame: Frame)
@@ -181,7 +192,7 @@ function MeshDomain:registerMesh(mesh: assets.Mesh): components.Mesh, components
         self._centerZByAsset[asset] = centerZ
         self._radiusByAsset[asset] = radius
     end
-    self._extractor:registerMesh(asset, region.slot)
+    self._extractor:registerMesh(asset, region.slot, region.firstVertex, region.firstIndex, region.indexCount)
     self.meshCount = self._backend.meshCount
     self.vertexCount = self._backend.vertexCount
     self.indexCount = self._backend.indexCount

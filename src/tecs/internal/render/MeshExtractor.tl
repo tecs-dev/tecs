@@ -27,6 +27,13 @@ local record MeshExtractorOptions
     capacity: integer
 end
 
+local record MeshDraw
+    slot: integer
+    firstVertex: integer
+    firstIndex: integer
+    indexCount: integer
+end
+
 local record MeshExtractor
     type Options = MeshExtractorOptions
 
@@ -37,8 +44,9 @@ local record MeshExtractor
     _renderables: types.Query
     _instances: loader.CArray
     _bounds: loader.CArray
+    _commands: loader.CArray
     _slot: integer
-    _slotByAsset: {integer: integer}
+    _drawByAsset: {integer: MeshDraw}
     _extractSeconds: number
 end
 
@@ -49,19 +57,29 @@ function MeshExtractor.create(options: MeshExtractorOptions): MeshExtractor
     self.camera = Camera3D.newCamera3D()
     self.capacity = options.capacity
     self._slot = 0
-    self._slotByAsset = {}
+    self._drawByAsset = {}
     self._extractSeconds = 0.0
     return self
 end
 
-function MeshExtractor:setStaging(slot: integer, instances: loader.CArray, bounds: loader.CArray)
+function MeshExtractor:setStaging(
+    slot: integer, instances: loader.CArray, bounds: loader.CArray, commands: loader.CArray
+)
     self._slot = slot
     self._instances = instances
     self._bounds = bounds
+    self._commands = commands
 end
 
-function MeshExtractor:registerMesh(asset: integer, slot: integer)
-    self._slotByAsset[asset] = slot
+function MeshExtractor:registerMesh(
+    asset: integer, slot: integer, firstVertex: integer, firstIndex: integer, indexCount: integer
+)
+    self._drawByAsset[asset] = {
+        slot = slot,
+        firstVertex = firstVertex,
+        firstIndex = firstIndex,
+        indexCount = indexCount,
+    }
 end
 
 local function missingMeshMessage(asset: integer): string
@@ -78,6 +96,7 @@ function MeshExtractor:extract(packet: MeshFramePacket)
 
     local instances <const> = self._instances
     local spheres <const> = self._bounds
+    local commands <const> = self._commands
     local written = 0
     local dropped = 0
     local missing = 0
@@ -87,6 +106,7 @@ function MeshExtractor:extract(packet: MeshFramePacket)
         local meshes <const> = archetype:get(components.Mesh)
         local bounds <const> = archetype:get(components.Bounds3D)
         local materials <const> = archetype:get(components.Material)
+        local tints <const> = archetype:get(components.Tint)
         local resolved = false
 
         for row = 1, length do
@@ -95,21 +115,21 @@ function MeshExtractor:extract(packet: MeshFramePacket)
             else
                 local mesh = meshes[row]
                 local meshSlot = mesh.slot as integer
-                if meshSlot < 0 then
-                    meshSlot = self._slotByAsset[mesh.asset as integer]
-                    if meshSlot == nil then
-                        if missing == 0 then
-                            missing = mesh.asset as integer
-                        end
-                    else
-                        mesh.slot = meshSlot
-                        resolved = true
+                local draw = self._drawByAsset[mesh.asset as integer]
+                if draw == nil then
+                    if missing == 0 then
+                        missing = mesh.asset as integer
                     end
+                elseif meshSlot < 0 then
+                    meshSlot = draw.slot
+                    mesh.slot = meshSlot
+                    resolved = true
                 end
 
-                if meshSlot ~= nil and meshSlot >= 0 then
+                if draw ~= nil and meshSlot >= 0 then
                     local transform = transforms[row]
                     local material = materials[row]
+                    local tint = tints[row]
                     local base <const> = written * meshlayout.INSTANCE_FLOATS
                     instances[base] = transform.x
                     instances[base + 1] = transform.y
@@ -124,9 +144,16 @@ function MeshExtractor:extract(packet: MeshFramePacket)
                     instances[base + 10] = meshSlot
                     instances[base + 11] = material.id
                     instances[base + 12] = material.param
-                    instances[base + 13] = 0.0
-                    instances[base + 14] = 0.0
-                    instances[base + 15] = 0.0
+                    instances[base + 13] = tint.r
+                    instances[base + 14] = tint.g
+                    instances[base + 15] = tint.b
+
+                    local command = commands[written] as loader.CStruct
+                    command.num_indices = draw.indexCount
+                    command.num_instances = 1
+                    command.first_index = draw.firstIndex
+                    command.vertex_offset = draw.firstVertex
+                    command.first_instance = written
 
                     local bound = bounds[row]
                     local boundBase <const> = written * meshlayout.BOUND_FLOATS
@@ -158,6 +185,7 @@ function MeshExtractor:extract(packet: MeshFramePacket)
     if written > 0 then
         packet.instanceRanges:mark(0, written * meshlayout.INSTANCE_BYTES)
         packet.boundsRanges:mark(0, written * meshlayout.BOUND_BYTES)
+        packet.commandRanges:mark(0, written * meshlayout.COMMAND_BYTES)
     end
     packet.count = written
     packet.dropped = dropped
@@ -177,6 +205,7 @@ function MeshExtractor:install(world: types.World, packet: MeshFramePacket, publ
             components.Mesh,
             components.Bounds3D,
             components.Material,
+            components.Tint,
             components.Renderable3D,
         },
     })
