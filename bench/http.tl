@@ -140,14 +140,8 @@ end
 function ChunkSource:isReplayable(): boolean
     return true
 end
-function ChunkSource:isAvailable(): boolean
-    return not self.closed
-end
 function ChunkSource:close()
     self.closed = true
-end
-function ChunkSource:hasBuffer(): boolean
-    return false
 end
 function ChunkSource:newReader(): Reader, string
     if self.closed then
@@ -228,9 +222,6 @@ function BufferSink:isWritable(): boolean
 end
 function BufferSink:isReplayable(): boolean
     return false
-end
-function BufferSink:isAvailable(): boolean
-    return not self.closed
 end
 function BufferSink:close()
     self.closed = true

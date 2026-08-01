@@ -250,7 +250,6 @@ local function checkedStream<T is Stream>(value: T, what: string, level: integer
         or type(dynamic.isReadable) ~= "function"
         or type(dynamic.isWritable) ~= "function"
         or type(dynamic.isReplayable) ~= "function"
-        or type(dynamic.isAvailable) ~= "function"
         or type(dynamic.close) ~= "function"
     then
         error(("tecs: %s needs a Stream implementation"):format(what), level)
@@ -258,8 +257,7 @@ local function checkedStream<T is Stream>(value: T, what: string, level: integer
     if
         (dynamic.isReadable as function(any): boolean)(value)
         and (
-            type(dynamic.hasBuffer) ~= "function"
-            or type(dynamic.newReader) ~= "function"
+            type(dynamic.newReader) ~= "function"
             or type(dynamic.readAll) ~= "function"
             or type(dynamic.transferToBuffer) ~= "function"
             or type(dynamic.transferTo) ~= "function"
@@ -298,12 +296,15 @@ local function metadataBacking(stream: Stream): Stream
 end
 
 local function borrowedBytes(source: ReadableStream): BorrowedBytes
-    if source == nil or not source:isReadable() or not source:isAvailable() then
+    if source == nil or not source:isReadable() then
         return nil
     end
     local backing <const> = metadataBacking(source)
     local mt <const> = getmetatable(backing as any) as any
     if mt == (StringStreamMT as any) then
+        if (backing as StringStream)._closed then
+            return nil
+        end
         local text <const> = (backing as StringStream)._text
         return {
             pointer = ffi.cast("const uint8_t *", text),
@@ -312,7 +313,7 @@ local function borrowedBytes(source: ReadableStream): BorrowedBytes
         }
     elseif mt == (BufferStreamMT as any) then
         local sourceBuffer <const> = (backing as BufferStream)._buffer
-        if sourceBuffer:isReleased() then
+        if (backing as BufferStream)._closed or sourceBuffer:isReleased() then
             return nil
         end
         return {
@@ -322,6 +323,9 @@ local function borrowedBytes(source: ReadableStream): BorrowedBytes
         }
     elseif mt == (ByteStreamMT as any) then
         local bytes <const> = backing as ByteStream
+        if bytes._closed then
+            return nil
+        end
         return {
             pointer = bytes._pointer,
             length = bytes._length,
@@ -329,7 +333,7 @@ local function borrowedBytes(source: ReadableStream): BorrowedBytes
         }
     elseif mt == (ViewStreamMT as any) then
         local view <const> = (backing as ViewStream)._view
-        if view:isReleased() then
+        if (backing as ViewStream)._closed or view == nil or view:isReleased() then
             return nil
         end
         return {
@@ -911,14 +915,8 @@ end
 function StringStream:isReplayable(): boolean
     return true
 end
-function StringStream:isAvailable(): boolean
-    return not unavailable(self)
-end
 function StringStream:close()
     close(self)
-end
-function StringStream:hasBuffer(): boolean
-    return false
 end
 
 function StringStream:newReader(): Reader, string
@@ -978,9 +976,6 @@ end
 function BufferStream:isReplayable(): boolean
     return true
 end
-function BufferStream:isAvailable(): boolean
-    return not unavailable(self) and not self._buffer:isReleased()
-end
 function BufferStream:close()
     if not self._closed then
         self._closed = true
@@ -989,19 +984,15 @@ function BufferStream:close()
         end
     end
 end
-function BufferStream:hasBuffer(): boolean
-    return self:isAvailable()
-end
-
 function BufferStream:newReader(): Reader, string
-    if not self:isAvailable() then
+    if unavailable(self) or self._buffer:isReleased() then
         return nil, "stream is closed or its buffer is released"
     end
     return self._buffer:newReader()
 end
 
 function BufferStream:newWriter(): Writer, string
-    if not self:isAvailable() then
+    if unavailable(self) or self._buffer:isReleased() then
         return nil, "stream is closed or its buffer is released"
     end
     return self._buffer:newWriter()
@@ -1032,7 +1023,7 @@ function BufferStream:transferToBuffer(maxBytes?: integer): IOBuffer, string
 end
 
 function BufferStream:transferTo(destination: WritableStream): integer, string
-    if not self:isAvailable() then
+    if unavailable(self) or self._buffer:isReleased() then
         return nil, "stream is closed or its buffer is released"
     end
     if sharesBacking(self, destination) then
@@ -1085,14 +1076,8 @@ end
 function ByteStream:isReplayable(): boolean
     return true
 end
-function ByteStream:isAvailable(): boolean
-    return not unavailable(self)
-end
 function ByteStream:close()
     close(self)
-end
-function ByteStream:hasBuffer(): boolean
-    return false
 end
 
 function ByteStream:newReader(): Reader, string
@@ -1138,7 +1123,7 @@ end
 -- Retained view stream
 
 function ViewStream:contentLength(): integer | nil
-    return self:isAvailable() and self._view:length() or nil
+    return not unavailable(self) and self._view ~= nil and not self._view:isReleased() and self._view:length() or nil
 end
 function ViewStream:contentType(): string | nil
     return contentType(self)
@@ -1152,9 +1137,6 @@ end
 function ViewStream:isReplayable(): boolean
     return true
 end
-function ViewStream:isAvailable(): boolean
-    return not unavailable(self) and self._view ~= nil and not self._view:isReleased()
-end
 function ViewStream:close()
     if self._view ~= nil then
         self._view:close()
@@ -1162,11 +1144,8 @@ function ViewStream:close()
     end
     close(self)
 end
-function ViewStream:hasBuffer(): boolean
-    return false
-end
 function ViewStream:newReader(): Reader, string
-    if not self:isAvailable() then
+    if unavailable(self) or self._view == nil or self._view:isReleased() then
         return nil, "stream is closed"
     end
     local retained <const> = self._view:view()
@@ -1187,7 +1166,7 @@ function ViewStream:transferToBuffer(maxBytes?: integer): IOBuffer, string
     return transferToBuffer(self, maxBytes)
 end
 function ViewStream:transferTo(destination: WritableStream): integer, string
-    if not self:isAvailable() then
+    if unavailable(self) or self._view == nil or self._view:isReleased() then
         return nil, "stream is closed"
     end
     return destination:writeView(self._view)
@@ -1221,14 +1200,8 @@ end
 function FileStream:isReplayable(): boolean
     return true
 end
-function FileStream:isAvailable(): boolean
-    return not unavailable(self)
-end
 function FileStream:close()
     close(self)
-end
-function FileStream:hasBuffer(): boolean
-    return false
 end
 
 function FileStream:newReader(): Reader, string
@@ -1287,18 +1260,12 @@ end
 function HandleStream:isReplayable(): boolean
     return false
 end
-function HandleStream:isAvailable(): boolean
-    return not unavailable(self) and not self._state.consumed
-end
 function HandleStream:close()
     close(self)
 end
-function HandleStream:hasBuffer(): boolean
-    return false
-end
 
 function HandleStream:newReader(): Reader, string
-    if not self:isAvailable() then
+    if unavailable(self) or self._state.consumed then
         return nil, "stream handle is no longer available"
     end
     self._state.consumed = true
@@ -1312,7 +1279,7 @@ function HandleStream:newReader(): Reader, string
 end
 
 function HandleStream:newWriter(): Writer, string
-    if not self:isAvailable() then
+    if unavailable(self) or self._state.consumed then
         return nil, "stream handle is no longer available"
     end
     self._state.consumed = true
@@ -1502,16 +1469,8 @@ local function metadataIsReplayable(self: MetadataState): boolean
     return self._source:isReplayable()
 end
 
-local function metadataIsAvailable(self: MetadataState): boolean
-    return self._source:isAvailable()
-end
-
 local function metadataClose(self: MetadataState)
     self._source:close()
-end
-
-local function metadataHasBuffer(self: MetadataState): boolean
-    return (self._source as ReadableStream):hasBuffer()
 end
 
 local function metadataNewReader(self: MetadataState): Reader, string
@@ -1563,7 +1522,6 @@ MetadataStream.contentLength = metadataContentLength
 MetadataStream.isReadable = metadataIsReadable
 MetadataStream.isWritable = metadataIsWritable
 MetadataStream.isReplayable = metadataIsReplayable
-MetadataStream.isAvailable = metadataIsAvailable
 MetadataStream.close = metadataClose
 
 MetadataReadableStream.contentType = metadataContentType
@@ -1571,9 +1529,7 @@ MetadataReadableStream.contentLength = metadataContentLength
 MetadataReadableStream.isReadable = metadataIsReadable
 MetadataReadableStream.isWritable = metadataIsWritable
 MetadataReadableStream.isReplayable = metadataIsReplayable
-MetadataReadableStream.isAvailable = metadataIsAvailable
 MetadataReadableStream.close = metadataClose
-MetadataReadableStream.hasBuffer = metadataHasBuffer
 MetadataReadableStream.newReader = metadataNewReader
 MetadataReadableStream.readAll = metadataReadAll
 MetadataReadableStream.transferToBuffer = metadataTransferToBuffer
@@ -1586,7 +1542,6 @@ MetadataWritableStream.contentLength = metadataContentLength
 MetadataWritableStream.isReadable = metadataIsReadable
 MetadataWritableStream.isWritable = metadataIsWritable
 MetadataWritableStream.isReplayable = metadataIsReplayable
-MetadataWritableStream.isAvailable = metadataIsAvailable
 MetadataWritableStream.close = metadataClose
 MetadataWritableStream.newWriter = metadataNewWriter
 MetadataWritableStream.writeAll = metadataWriteAll
@@ -1598,9 +1553,7 @@ MetadataReadWriteStream.contentLength = metadataContentLength
 MetadataReadWriteStream.isReadable = metadataIsReadable
 MetadataReadWriteStream.isWritable = metadataIsWritable
 MetadataReadWriteStream.isReplayable = metadataIsReplayable
-MetadataReadWriteStream.isAvailable = metadataIsAvailable
 MetadataReadWriteStream.close = metadataClose
-MetadataReadWriteStream.hasBuffer = metadataHasBuffer
 MetadataReadWriteStream.newReader = metadataNewReader
 MetadataReadWriteStream.readAll = metadataReadAll
 MetadataReadWriteStream.transferToBuffer = metadataTransferToBuffer

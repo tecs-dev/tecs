@@ -440,13 +440,6 @@ local interface Stream is Closeable
     --- @return Returns true when opening a later reader replays all bytes.
     isReplayable: function(self: Stream): boolean
 
-    --- Returns whether the descriptor can currently open an endpoint.
-    ---
-    --- @param self The descriptor to inspect.
-    --- @return Returns false after `close`, after a backing buffer is
-    ---     released, or after a one-shot endpoint has been claimed.
-    isAvailable: function(self: Stream): boolean
-
     --- Closes the descriptor.
     ---
     --- Closing a descriptor never closes endpoints already opened from it.
@@ -459,16 +452,6 @@ end
 
 --- Describes binary storage that can create readers.
 local interface ReadableStream is Stream
-    --- Returns whether `transferToBuffer` can return stable backing storage.
-    ---
-    --- True is a zero-copy guarantee: `transferToBuffer` returns the same
-    --- borrowed buffer whose `newStream` method created the stream. The
-    --- stream and caller share that object; the caller retains ownership and
-    --- closes it.
-    --- @param self The readable descriptor.
-    --- @return Returns true only for a buffer-backed stream.
-    hasBuffer: function(self: ReadableStream): boolean
-
     --- Opens a reader with a new cursor.
     ---
     --- @param self The readable descriptor.
@@ -487,9 +470,9 @@ local interface ReadableStream is Stream
 
     --- Transfers the complete source into an owned buffer.
     ---
-    --- When `hasBuffer` is true, this returns the same borrowed buffer rather
-    --- than a copy and does not transfer ownership. Otherwise it returns a
-    --- newly allocated buffer owned by the caller.
+    --- A stream created by `Buffer:newStream` returns that same borrowed
+    --- buffer without copying and does not transfer ownership. Other streams
+    --- return a newly allocated buffer owned by the caller.
     --- @param self The readable descriptor.
     --- @param maxBytes The caller supplies a non-negative limit or omits it
     ---     for no explicit limit.

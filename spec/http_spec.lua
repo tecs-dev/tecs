@@ -243,9 +243,6 @@ describe("http.newClient", function()
         function sink:isReplayable()
             return false
         end
-        function sink:isAvailable()
-            return not closed
-        end
         function sink:close()
             closed = true
         end
@@ -294,13 +291,7 @@ describe("http.newClient", function()
         function source:isReplayable()
             return true
         end
-        function source:isAvailable()
-            return true
-        end
         function source:close() end
-        function source:hasBuffer()
-            return false
-        end
         function source:newReader()
             local at = 0
             local closed = false
@@ -405,7 +396,6 @@ describe("http.newClient", function()
         -- One field holding the body whatever it is, rather than a `body` and
         -- a `path` where exactly one is meaningful.
         assert.is_true(response.body:isReadable())
-        assert.is_false(response.body:hasBuffer())
         assert.are.equal(BODY, response.body:readAll())
         assert.are.equal(#BODY, response.body:contentLength())
         assert.are.equal("text/plain", response.body:contentType())

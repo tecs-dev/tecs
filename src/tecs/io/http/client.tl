@@ -234,9 +234,6 @@ local function sourceOf(given: string | ReadableStream): ReadableStream
     if not checked:isReadable() then
         error("tecs: an HTTP request body needs a ReadableStream", 3)
     end
-    if not checked:isAvailable() then
-        error("tecs: the HTTP request body is unavailable", 3)
-    end
     return checked as ReadableStream
 end
 
@@ -250,9 +247,6 @@ local function sinkOf(given: string | WritableStream): WritableStream
     local checked <const> = stream._check(given as Stream, "an HTTP response destination", 3)
     if not checked:isWritable() then
         error("tecs: an HTTP response destination needs a WritableStream", 3)
-    end
-    if not checked:isAvailable() then
-        error("tecs: the HTTP response destination is unavailable", 3)
     end
     return checked as WritableStream
 end

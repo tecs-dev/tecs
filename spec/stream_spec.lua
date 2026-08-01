@@ -261,14 +261,12 @@ describe("tecs.io stream endpoints", function()
         buffer:close()
     end)
 
-    it("distinguishes zero-copy buffers and source-only empty streams", function()
+    it("returns buffer stream backing without copying", function()
         local buffer = ioModule.newBuffer("owned")
         local buffered = buffer:newStream()
-        assert.is_true(buffered:hasBuffer())
         assert.is_true(rawequal(buffer, buffered:transferToBuffer()))
 
         local empty = ioModule.newEmptyStream()
-        assert.is_false(empty:hasBuffer())
         assert.is_false(empty:isWritable())
         assert.is_nil(rawget(empty, "newWriter"))
         assert.are.equal("", empty:readAll())
@@ -282,9 +280,7 @@ describe("tecs.io stream endpoints", function()
         assert(handle:seek("set", 0))
 
         local stream = ioModule.newHandleStream(handle, 6)
-        assert.is_true(stream:isAvailable())
         local reader = assert(stream:newReader())
-        assert.is_false(stream:isAvailable())
         assert.is_nil(stream:newReader())
         assert.are.equal("handle", reader:read(20))
         reader:close()
@@ -307,7 +303,7 @@ describe("tecs.io stream endpoints", function()
         assert.is_nil(view.newWriter)
 
         view:close()
-        assert.is_false(source:isAvailable())
+        assert.is_nil(source:newReader())
         assert.has_error(function()
             ioModule.newStreamWithMetadata({}, nil, 1)
         end)
@@ -336,10 +332,6 @@ describe("tecs.io stream endpoints", function()
                 assert.is_true(rawequal(source, self))
                 return true
             end,
-            isAvailable = function(self)
-                assert.is_true(rawequal(source, self))
-                return true
-            end,
             close = function(self)
                 assert.is_true(rawequal(source, self))
             end,
@@ -348,7 +340,6 @@ describe("tecs.io stream endpoints", function()
         assert.is_nil(view.hasKnownLength)
         assert.are.equal("custom/type", view:contentType())
         assert.are.equal(4, view:contentLength())
-        assert.is_true(view:isAvailable())
         assert.is_nil(view.newReader)
         assert.is_nil(view.newWriter)
         view:close()
@@ -370,9 +361,6 @@ describe("tecs.io stream endpoints", function()
             end,
             isReplayable = function()
                 return false
-            end,
-            isAvailable = function()
-                return true
             end,
             close = function() end,
         }
@@ -626,9 +614,6 @@ describe("tecs.io transfers", function()
             end,
             isReplayable = function()
                 return false
-            end,
-            isAvailable = function()
-                return true
             end,
             close = function() end,
             newWriter = function()

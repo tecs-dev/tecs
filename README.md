@@ -1458,8 +1458,8 @@ stream transfer into scheduled main-thread state. `openWrite` accepts explicit
 replacement and append modes. A platform backend without it accumulates
 replacement chunks, while append mode flushes only bytes not already appended.
 Stable buffer sources bypass the scratch copy, strings retain their immutable
-Lua storage, and `hasBuffer` says exactly when `transferToBuffer` returns the
-retained object instead of materializing a new one.
+Lua storage, and `transferToBuffer` returns the retained object for a stream
+created by `Buffer:newStream` instead of materializing a new one.
 
 The descriptor owns no cursor and does not take policy away from its backing:
 paths still open through `tecs.io.files`, TCP and UDP handles are constructed

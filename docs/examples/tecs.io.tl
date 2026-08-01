@@ -426,28 +426,11 @@ print(source:isReplayable())
 source:close()
 -- #endregion tecs.io.Stream.isReplayable
 
--- #region tecs.io.Stream.isAvailable
-local source <const> = tecs.io.newStringStream("data")
-print(source:isAvailable())
-
-source:close()
-print(source:isAvailable())
--- #endregion tecs.io.Stream.isAvailable
-
 -- #region tecs.io.Stream.close
 local source <const> = tecs.io.newStringStream("data")
 
 source:close()
 -- #endregion tecs.io.Stream.close
-
--- #region tecs.io.ReadableStream.hasBuffer
-local bytes <const> = tecs.io.newBuffer("data")
-local source <const> = bytes:newStream()
-print(source:hasBuffer())
-
-source:close()
-bytes:close()
--- #endregion tecs.io.ReadableStream.hasBuffer
 
 -- #region tecs.io.ReadableStream.newReader
 local source <const> = tecs.io.newStringStream("data")
