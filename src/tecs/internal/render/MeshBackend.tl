@@ -33,7 +33,10 @@ local frustum <const> = require("tecs.internal.render.frustum")
 
 local C <const> = sdl.C
 local CULL_GROUP <const> = 256
+local SORT_BUCKETS <const> = 256
 local MATERIAL_FLOATS <const> = 40
+local CULL_FLOATS <const> = 44
+local CULL_BYTES <const> = CULL_FLOATS * 4
 
 local record MeshRegion
     slot: integer
@@ -52,11 +55,13 @@ local record MeshBackendOptions
     textureHeight: integer
     textureLayers: integer
     packTextures: boolean
+    transparency: boolean
 end
 
 local record MeshMaterialData
     name: string
     model: integer
+    alphaMode: integer
     baseColorTexture: integer
     normalTexture: integer
     metallicRoughnessTexture: integer
@@ -95,6 +100,7 @@ local record MeshBackend
     images: TextureArray
     sampler: Sampler
     pipeline: GraphicsPipeline
+    blendPipeline: GraphicsPipeline
     materialCapacity: integer
     materialCount: integer
     textureCount: integer
@@ -106,27 +112,54 @@ local record MeshBackend
     _markPipeline: ComputePipeline
     _scanPipeline: ComputePipeline
     _compactPipeline: ComputePipeline
+    _rankPipeline: ComputePipeline
+    _placePipeline: ComputePipeline
     _markPass: ComputePass
     _scanPass: ComputePass
     _compactPass: ComputePass
+    _blendScanPass: ComputePass
+    _blendCompactPass: ComputePass
+    _rankPass: ComputePass
+    _bucketScanPass: ComputePass
+    _placePass: ComputePass
     _cullUniform: loader.CArray
     _markWrites: {loader.CValue}
     _markReads: {loader.CValue}
     _scanWrites: {loader.CValue}
     _compactWrites: {loader.CValue}
     _compactReads: {loader.CValue}
+    _blendSlots: Buffer
+    _blendBlocks: Buffer
+    _blendCommands: Buffer
+    _blendSorted: Buffer
+    _blendBuckets: Buffer
+    _blendRanks: Buffer
+    _blendCounts: Buffer
+    _blendScanWrites: {loader.CValue}
+    _blendCompactWrites: {loader.CValue}
+    _blendCompactReads: {loader.CValue}
+    _rankWrites: {loader.CValue}
+    _rankReads: {loader.CValue}
+    _bucketScanWrites: {loader.CValue}
+    _placeWrites: {loader.CValue}
+    _placeReads: {loader.CValue}
     _regions: {MeshRegion}
     _regionByAsset: {integer: MeshRegion}
     _materialSlotByAsset: {integer: integer}
     _textureRegions: {TextureArray.Region}
     _textureByName: {string: integer}
     _device: loader.CPtr
+    _deferred: Deferred
     _destroyed: boolean
     _count: integer
     _viewProjection: loader.CArray
     _geometryBuffers: {loader.CValue}
     _fragmentBuffers: {loader.CValue}
     _fragmentTextures: {loader.CValue}
+    _forwardBuffers: {loader.CValue}
+    _forwardTextures: {loader.CValue}
+    _transparent: boolean
+    _blending: boolean
 end
 
 local MeshBackendMT <const>: metatable<MeshBackend> = {__index = MeshBackend}
@@ -151,6 +184,26 @@ local function buildGeometry(device: loader.CPtr, deferred: Deferred): GraphicsP
     return pipeline
 end
 
+local function buildForward(device: loader.CPtr, deferred: Deferred): GraphicsPipeline
+    local vertex = Shader.load(device, "mesh.vert", {})
+    local fragment = Shader.load(device, "mesh.forward.frag", {})
+    local pipeline = GraphicsPipeline.create(
+        device,
+        {
+            vertexShader = vertex,
+            fragmentShader = fragment,
+            colorFormat = deferred:forwardFormat(),
+            depth = deferred:forwardDepth(),
+            cull = GraphicsPipeline.CULL_BACK,
+            blendMode = GraphicsPipeline.BLEND_PREMULTIPLIED,
+            name = "mesh.forward",
+        }
+    )
+    vertex:destroy()
+    fragment:destroy()
+    return pipeline
+end
+
 function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: MeshBackendOptions): MeshBackend
     local self = setmetatable({} as MeshBackend, MeshBackendMT)
     self.capacity = options.capacity
@@ -163,6 +216,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self.materialCount = 1
     self.textureCount = 0
     self._device = device
+    self._deferred = deferred
     self._destroyed = false
     self._regions = {}
     self._regionByAsset = {}
@@ -170,9 +224,13 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._textureRegions = {}
     self._textureByName = {}
     self._count = 0
+    self._transparent = options.transparency
+    self._blending = false
     self._geometryBuffers = {}
     self._fragmentBuffers = {}
     self._fragmentTextures = {}
+    self._forwardBuffers = {}
+    self._forwardTextures = {}
     self.vertices = Buffer.create(
         device,
         {
@@ -241,6 +299,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
         neutral[lane] = -1
     end
     neutral[6] = 0.5
+    neutral[7] = 0
     neutral[28], neutral[29], neutral[30], neutral[31] = 1, 1, 1, 1
     neutral[32], neutral[33], neutral[34] = 0, 0, 0
     neutral[36], neutral[37], neutral[38], neutral[39] = 0, 0.65, 1, 1
@@ -264,16 +323,64 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
             name = "mesh.visibleCommands",
         }
     )
-    self._markPipeline = ComputePipeline.load(device, "mesh.mark.comp", {})
+    self._markPipeline = ComputePipeline.load(
+        device, self._transparent and "mesh.lanes.mark.comp" or "mesh.mark.comp", {}
+    )
     self._scanPipeline = ComputePipeline.load(device, "mesh.scan.comp", {})
     self._compactPipeline = ComputePipeline.load(device, "mesh.compact.comp", {})
-    self._cullUniform = loader.newArray("float[28]")
+    self._cullUniform = loader.newArray("float[?]", CULL_FLOATS)
     self._markWrites = {}
     self._markReads = {}
     self._scanWrites = {}
     self._compactWrites = {}
     self._compactReads = {}
+    self._blendScanWrites = {}
+    self._blendCompactWrites = {}
+    self._blendCompactReads = {}
+    self._rankWrites = {}
+    self._rankReads = {}
+    self._bucketScanWrites = {}
+    self._placeWrites = {}
+    self._placeReads = {}
     self.pipeline = buildGeometry(device, deferred)
+    if self._transparent then
+        local groups <const> = math.ceil(self.capacity / CULL_GROUP)
+        self._blendSlots = Buffer.create(
+            device, {usage = {"computeRead", "computeWrite"}, size = self.capacity * 4, name = "mesh.blend.slots"}
+        )
+        self._blendBlocks = Buffer.create(
+            device, {usage = {"computeRead", "computeWrite"}, size = groups * 4, name = "mesh.blend.blocks"}
+        )
+        self._blendCommands = Buffer.create(
+            device,
+            {
+                usage = {"computeRead", "computeWrite"},
+                size = self.capacity * meshlayout.COMMAND_BYTES,
+                name = "mesh.blend.commands",
+            }
+        )
+        self._blendSorted = Buffer.create(
+            device,
+            {
+                usage = {"indirect", "computeWrite"},
+                size = self.capacity * meshlayout.COMMAND_BYTES,
+                name = "mesh.blend.sorted",
+            }
+        )
+        self._blendBuckets = Buffer.create(
+            device, {usage = {"computeRead", "computeWrite"}, size = self.capacity * 4, name = "mesh.blend.buckets"}
+        )
+        self._blendRanks = Buffer.create(
+            device, {usage = {"computeRead", "computeWrite"}, size = self.capacity * 4, name = "mesh.blend.ranks"}
+        )
+        self._blendCounts = Buffer.create(
+            device,
+            {usage = {"computeRead", "computeWrite"}, size = groups * SORT_BUCKETS * 4, name = "mesh.blend.counts"}
+        )
+        self._rankPipeline = ComputePipeline.load(device, "mesh.rank.comp", {})
+        self._placePipeline = ComputePipeline.load(device, "mesh.place.comp", {})
+        self.blendPipeline = buildForward(device, deferred)
+    end
     return self
 end
 
@@ -346,6 +453,7 @@ function MeshBackend:registerMaterial(asset: integer, data: MeshMaterialData): i
         end
     end
     values[6] = data.alphaCutoff
+    values[7] = data.alphaMode
     values[28], values[29], values[30], values[31] = data.baseR, data.baseG, data.baseB, data.baseA
     values[32], values[33], values[34] = data.emissiveR, data.emissiveG, data.emissiveB
     values[36], values[37] = data.metallic, data.roughness
@@ -430,6 +538,7 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame)
     self.commands:flushSlot(slot, frame.commandBuffer)
     self._count = packet.count
     self._viewProjection = packet.viewProjection
+    self._blending = self._transparent and packet.blendCount > 0
     if self._count == 0 then
         return
     end
@@ -441,6 +550,11 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame)
     uniform[25] = groups
     uniform[26] = self.capacity
     uniform[27] = 0.0
+    if self._transparent then
+        for lane = 0, 15 do
+            uniform[28 + lane] = packet.viewProjection[lane]
+        end
+    end
 
     local markWrites <const> = self._markWrites
     markWrites[1] = self._slots.handle
@@ -448,11 +562,18 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame)
     markWrites[3] = self._visibleCommands.handle
     local markReads <const> = self._markReads
     markReads[1] = self._bounds.handle
+    if self._transparent then
+        markReads[2] = self.instances.handle
+        markWrites[4] = self._blendSlots.handle
+        markWrites[5] = self._blendBlocks.handle
+        markWrites[6] = self._blendCommands.handle
+        markWrites[7] = self._blendSorted.handle
+    end
     local mark <const> = ComputePass.begin(frame.commandBuffer, markWrites, self._markPass)
     self._markPass = mark
     mark:bindPipeline(self._markPipeline.handle)
     mark:bindStorageBuffers(0, markReads)
-    C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+    C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, self._transparent and CULL_BYTES or 112)
     mark:dispatch(groups)
     mark:finish()
 
@@ -478,6 +599,72 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame)
     C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
     compact:dispatch(groups)
     compact:finish()
+
+    if self._blending then
+        local blendScanWrites <const> = self._blendScanWrites
+        blendScanWrites[1] = self._blendBlocks.handle
+        local blendScan <const> = ComputePass.begin(frame.commandBuffer, blendScanWrites, self._blendScanPass)
+        self._blendScanPass = blendScan
+        blendScan:bindPipeline(self._scanPipeline.handle)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+        blendScan:dispatch(1)
+        blendScan:finish()
+
+        local blendCompactWrites <const> = self._blendCompactWrites
+        blendCompactWrites[1] = self._blendCommands.handle
+        local blendCompactReads <const> = self._blendCompactReads
+        blendCompactReads[1] = self._blendSlots.handle
+        blendCompactReads[2] = self._blendBlocks.handle
+        blendCompactReads[3] = self.commands.handle
+        local blendCompact <const> = ComputePass.begin(frame.commandBuffer, blendCompactWrites, self._blendCompactPass)
+        self._blendCompactPass = blendCompact
+        blendCompact:bindPipeline(self._compactPipeline.handle)
+        blendCompact:bindStorageBuffers(0, blendCompactReads)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+        blendCompact:dispatch(groups)
+        blendCompact:finish()
+
+        local rankWrites <const> = self._rankWrites
+        rankWrites[1] = self._blendBuckets.handle
+        rankWrites[2] = self._blendRanks.handle
+        rankWrites[3] = self._blendCounts.handle
+        local rankReads <const> = self._rankReads
+        rankReads[1] = self._bounds.handle
+        rankReads[2] = self._blendCommands.handle
+        local rank <const> = ComputePass.begin(frame.commandBuffer, rankWrites, self._rankPass)
+        self._rankPass = rank
+        rank:bindPipeline(self._rankPipeline.handle)
+        rank:bindStorageBuffers(0, rankReads)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, CULL_BYTES)
+        rank:dispatch(groups)
+        rank:finish()
+
+        uniform[25] = groups * SORT_BUCKETS
+        local bucketScanWrites <const> = self._bucketScanWrites
+        bucketScanWrites[1] = self._blendCounts.handle
+        local bucketScan <const> = ComputePass.begin(frame.commandBuffer, bucketScanWrites, self._bucketScanPass)
+        self._bucketScanPass = bucketScan
+        bucketScan:bindPipeline(self._scanPipeline.handle)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+        bucketScan:dispatch(1)
+        bucketScan:finish()
+
+        uniform[25] = groups
+        local placeWrites <const> = self._placeWrites
+        placeWrites[1] = self._blendSorted.handle
+        local placeReads <const> = self._placeReads
+        placeReads[1] = self._blendCommands.handle
+        placeReads[2] = self._blendBuckets.handle
+        placeReads[3] = self._blendRanks.handle
+        placeReads[4] = self._blendCounts.handle
+        local place <const> = ComputePass.begin(frame.commandBuffer, placeWrites, self._placePass)
+        self._placePass = place
+        place:bindPipeline(self._placePipeline.handle)
+        place:bindStorageBuffers(0, placeReads)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, CULL_BYTES)
+        place:dispatch(groups)
+        place:finish()
+    end
 end
 
 function MeshBackend:recordGeometry(context: Deferred.PassContext)
@@ -500,16 +687,54 @@ function MeshBackend:recordGeometry(context: Deferred.PassContext)
     context.pass:drawIndexedIndirect(self._visibleCommands.handle, 0, self._count)
 end
 
+function MeshBackend:recordForward(context: Deferred.PassContext)
+    if not self._blending then
+        return
+    end
+    context.pass:bindPipeline(self.blendPipeline.handle)
+    context.pass:pushVertexUniform(0, self._viewProjection, 64)
+    local buffers <const> = self._forwardBuffers
+    buffers[1] = self.vertices.handle
+    buffers[2] = self.instances.handle
+    context.pass:bindVertexStorageBuffers(0, buffers)
+    local fragmentBuffers <const> = self._fragmentBuffers
+    fragmentBuffers[1] = self.materials.handle
+    context.pass:bindFragmentStorageBuffers(0, fragmentBuffers)
+    self._deferred:bindLighting(context, 1)
+    local textures <const> = self._forwardTextures
+    textures[1] = self.images.handle
+    context.pass:bindTextures(0, textures, self.sampler.handle)
+    context.pass:bindIndexBuffer(self.indices.handle, RenderPass.INDEX_UINT32)
+    context.pass:drawIndexedIndirect(self._blendSorted.handle, 0, self._count)
+end
+
 function MeshBackend:rebuildPipeline(deferred: Deferred)
     local geometry <const> = buildGeometry(self._device, deferred)
-    local mark <const> = ComputePipeline.load(self._device, "mesh.mark.comp", {})
+    local mark <const> = ComputePipeline.load(
+        self._device, self._transparent and "mesh.lanes.mark.comp" or "mesh.mark.comp", {}
+    )
     local scan <const> = ComputePipeline.load(self._device, "mesh.scan.comp", {})
     local compact <const> = ComputePipeline.load(self._device, "mesh.compact.comp", {})
+    local blend: GraphicsPipeline = nil
+    local rank: ComputePipeline = nil
+    local place: ComputePipeline = nil
+    if self._transparent then
+        blend = buildForward(self._device, deferred)
+        rank = ComputePipeline.load(self._device, "mesh.rank.comp", {})
+        place = ComputePipeline.load(self._device, "mesh.place.comp", {})
+    end
     local oldGeometry, oldMark, oldScan, oldCompact <const> = self.pipeline,
         self._markPipeline,
         self._scanPipeline,
         self._compactPipeline
     self.pipeline, self._markPipeline, self._scanPipeline, self._compactPipeline = geometry, mark, scan, compact
+    if self._transparent then
+        local oldBlend, oldRank, oldPlace <const> = self.blendPipeline, self._rankPipeline, self._placePipeline
+        self.blendPipeline, self._rankPipeline, self._placePipeline = blend, rank, place
+        oldBlend:destroy()
+        oldRank:destroy()
+        oldPlace:destroy()
+    end
     oldGeometry:destroy()
     oldMark:destroy()
     oldScan:destroy()
@@ -540,6 +765,18 @@ function MeshBackend:destroy()
     self._scanPipeline:destroy()
     self._compactPipeline:destroy()
     self.pipeline:destroy()
+    if self._transparent then
+        self._blendSlots:destroy()
+        self._blendBlocks:destroy()
+        self._blendCommands:destroy()
+        self._blendSorted:destroy()
+        self._blendBuckets:destroy()
+        self._blendRanks:destroy()
+        self._blendCounts:destroy()
+        self._rankPipeline:destroy()
+        self._placePipeline:destroy()
+        self.blendPipeline:destroy()
+    end
 end
 
 return MeshBackend

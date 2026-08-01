@@ -638,8 +638,16 @@ function gltf.decodeFile(path: string): {string: any}
 
     local materials: {{string: any}} = {}
     for index, source in ipairs(document.materials as {{string: any}} or {}) do
-        if source.alphaMode == "BLEND" then
-            error(("tecs: %s material %d needs the future transparent mesh lane"):format(path, index - 1), 0)
+        if
+            source.alphaMode ~= nil
+            and source.alphaMode ~= "OPAQUE"
+            and source.alphaMode ~= "MASK"
+            and source.alphaMode ~= "BLEND"
+        then
+            error(
+                ("tecs: %s material %d has invalid alpha mode %s"):format(path, index - 1, tostring(source.alphaMode)),
+                0
+            )
         end
         if source.doubleSided == true then
             error(("tecs: %s material %d needs unsupported double-sided rendering"):format(path, index - 1), 0)
@@ -661,6 +669,7 @@ function gltf.decodeFile(path: string): {string: any}
                 .. (source.name ~= nil and (":" .. (source.name as string)) or ""),
             model = source.extensions ~= nil and (source.extensions as {string: any}).KHR_materials_unlit ~= nil and 1
                 or 0,
+            alphaMode = source.alphaMode == "BLEND" and 2 or source.alphaMode == "MASK" and 1 or 0,
             baseColorImage = textureImage(pbr.baseColorTexture as {string: any}),
             normalImage = textureImage(source.normalTexture as {string: any}),
             metallicRoughnessImage = textureImage(pbr.metallicRoughnessTexture as {string: any}),

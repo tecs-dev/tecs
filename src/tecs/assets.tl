@@ -30,9 +30,11 @@ texture residency. Audio follows the same split between decoded clips and
 voices.
 
 `newMesh` constructs immutable procedural geometry synchronously. `loadGLTF`
-decodes static glTF 2.0 and GLB scenes on the worker, including their images
-and metallic-roughness materials. Both produce CPU-owned data that the mesh
-domain consumes when it becomes resident.
+decodes static glTF 2.0 and GLB scenes on the worker, including their images,
+metallic-roughness materials, alpha masks, and `BLEND` modes. Both produce
+CPU-owned data that the mesh domain consumes when it becomes resident. A model
+with a `BLEND` material requires a mesh domain created with
+`transparency = true`.
 
 ## Lifetime
 
@@ -347,6 +349,9 @@ local record ModelMaterial
     name: string
     --- Read-only. Selects metallic-roughness PBR at zero or unlit at one.
     model: integer
+    --- Read-only. Selects opaque, masked, or blended rendering with a
+    --- `MeshDomain.ALPHA_*` integer constant.
+    alphaMode: integer
     --- Read-only. Selects a one-based entry in `Model.images`, or zero.
     baseColorImage: integer
     --- Read-only. Selects a tangent-space normal image, or zero.
@@ -417,7 +422,7 @@ end
 --- Meshes use the same fixed vertex layout as `newMesh`. Images remain
 --- decoded CPU pixels. `renderer.meshes:registerModel` consumes all of them
 --- and returns spawnable primitive records. Skinning, morph targets,
---- animation, and alpha blending are deliberately outside this opaque lane.
+--- animation are deliberately outside this static lane.
 local record Model
     --- Read-only. Contains the requested `.gltf` or `.glb` path unchanged.
     path: string
@@ -465,9 +470,11 @@ local record assets
     --- External buffers and images resolve relative to the model path. Data
     --- URIs and embedded GLB resources are supported. Triangle primitives,
     --- static node transforms, metallic-roughness PBR, normal, occlusion,
-    --- emissive, alpha-mask, and unlit materials are decoded. A transparent,
-    --- skinned, morphed, animated, sparse-accessor, or non-triangle input
-    --- settles as failed instead of being loaded incompletely.
+    --- emissive, alpha-mask, alpha-blended, and unlit materials are decoded.
+    --- A skinned, morphed, animated, sparse-accessor, or non-triangle input
+    --- settles as failed instead of being loaded incompletely. Registering a
+    --- model containing alpha blending requires a mesh domain created with
+    --- `transparency = true`.
     --- @param path The caller supplies a `.gltf` or `.glb` asset path.
     --- @return Returns a pending future that owns its ready model.
     loadGLTF: function(path: string): Future<Model>

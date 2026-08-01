@@ -1,4 +1,4 @@
---- Loads and draws a textured glTF 2.0 scene through the opaque mesh domain.
+--- Loads and draws a textured glTF 2.0 scene through both mesh lanes.
 
 local root = os.getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
 if root:sub(-1) == "/" then
@@ -31,7 +31,7 @@ local function game(world: tecs.World, app: tecs.Application)
                 Renderable3D()
             )
         end
-        print("gltf3d: loaded textured glTF geometry, images, and PBR material data")
+        print("gltf3d: loaded textured glTF geometry and transparent PBR material data")
     end)
 end
 
@@ -48,6 +48,7 @@ return tecs.newApplication({
         textureHeight = 64,
         textureLayers = 4,
         packTextures = true,
+        transparency = true,
     },
     maxEntities = 16,
     debug = true,

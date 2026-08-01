@@ -1,14 +1,18 @@
 --[=[
 Owns the complete 3D mesh rendering lane.
 
-The domain joins mesh extraction to geometry residency, device staging, and an
-opaque deferred contribution. It does not own the deferred graph,
-presentation, capture, or frame-slot rotation.
+The domain joins mesh extraction to geometry residency, device staging, an
+opaque deferred contribution, and an optional transparent forward
+contribution. It does not own the deferred graph, presentation, capture, or
+frame-slot rotation.
 `Renderer` creates it only when `meshes` options are present, so a 2D-only
 application loads no mesh implementation and allocates none of these buffers.
 
 The backend culls world-space bounding spheres and compacts indexed commands
-on the GPU. That work and every buffer it touches remain private to this lane.
+on the GPU. A domain created with `transparency = true` also classifies glTF
+`BLEND` materials, compacts them separately, and stably sorts their complete
+commands back to front. A domain without that option creates none of the
+sorting buffers, compute pipelines, or forward graphics pipeline.
 ]=]
 
 local type types = require("tecs.types")
@@ -39,6 +43,9 @@ local record MeshMaterialOptions
     --- Caller-writable. Selects one of the domain's `MATERIAL_*` integer
     --- constants and defaults to `MATERIAL_METALLIC_ROUGHNESS`.
     model: integer
+    --- Caller-writable. Selects opaque, masked, or blended rendering with an
+    --- `ALPHA_*` integer constant and defaults to `ALPHA_OPAQUE`.
+    alphaMode: integer
     --- Caller-writable. Selects a texture returned by `registerTexture`, or
     --- zero for the white fallback.
     baseColorTexture: integer
@@ -104,6 +111,9 @@ local record MeshDomainOptions
     --- Caller-writable. Packs multiple images into each texture layer and
     --- defaults to true.
     packTextures: boolean
+    --- Caller-writable. Enables the independently allocated transparent mesh
+    --- lane and defaults to false.
+    transparency: boolean
 end
 
 --- Contains the complete component bundle for one registered model primitive.
@@ -127,6 +137,12 @@ local record MeshDomain
     MATERIAL_METALLIC_ROUGHNESS: integer
     --- Read-only. Selects unlit material dispatch.
     MATERIAL_UNLIT: integer
+    --- Read-only. Selects an opaque material that ignores base alpha.
+    ALPHA_OPAQUE: integer
+    --- Read-only. Selects an opaque material that discards below `alphaCutoff`.
+    ALPHA_MASK: integer
+    --- Read-only. Selects a material drawn in the sorted forward lane.
+    ALPHA_BLEND: integer
 
     --- Caller-writable. Controls the perspective view used by this domain.
     camera: Camera3D
@@ -153,6 +169,9 @@ local record MeshDomain
     materialCount: integer
     --- Read-only. Reports unique images uploaded to the mesh texture array.
     textureCount: integer
+    --- Read-only. Reports whether this domain owns the optional transparent
+    --- command and pipeline resources.
+    transparency: boolean
     --- Engine-owned. Exposes immutable vertex storage to the opaque
     --- mesh pass. Ordinary game code should ignore it.
     vertices: Buffer
@@ -185,6 +204,9 @@ local MeshDomainMT <const>: metatable<MeshDomain> = {__index = MeshDomain}
 
 MeshDomain.MATERIAL_METALLIC_ROUGHNESS = 0
 MeshDomain.MATERIAL_UNLIT = 1
+MeshDomain.ALPHA_OPAQUE = 0
+MeshDomain.ALPHA_MASK = 1
+MeshDomain.ALPHA_BLEND = 2
 
 local function positive(name: string, value: integer): integer
     if value < 1 or value ~= math.floor(value) then
@@ -217,6 +239,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self.indexCount = 0
     self.materialCount = 1
     self.textureCount = 0
+    self.transparency = options.transparency == true
     self._centerXByAsset = {}
     self._centerYByAsset = {}
     self._centerZByAsset = {}
@@ -235,6 +258,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
             textureHeight = textureHeight,
             textureLayers = textureLayers,
             packTextures = options.packTextures ~= false,
+            transparency = self.transparency,
         }
     )
     self._backend = backend
@@ -243,7 +267,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self.instances = backend.instances
     self.materials = backend.materials
 
-    local extractor <const> = MeshExtractor.create({capacity = capacity})
+    local extractor <const> = MeshExtractor.create({capacity = capacity, transparency = self.transparency})
     self._extractor = extractor
     self.camera = extractor.camera
     return self
@@ -276,16 +300,32 @@ function MeshDomain:registerMaterial(options: MeshMaterialOptions): components.M
     if options == nil or options.name == nil or options.name == "" then
         error("tecs: mesh material name cannot be empty", 2)
     end
+    local asset <const> = components.meshMaterialId(options.name)
+    local existing <const> = self._backend:materialSlot(asset)
+    if existing ~= nil then
+        return components.MeshMaterial(asset, existing)
+    end
     local model <const> = options.model or MeshDomain.MATERIAL_METALLIC_ROUGHNESS
     if model ~= MeshDomain.MATERIAL_METALLIC_ROUGHNESS and model ~= MeshDomain.MATERIAL_UNLIT then
         error(("tecs: invalid mesh material model %s"):format(tostring(model)), 2)
     end
-    local asset <const> = components.meshMaterialId(options.name)
+    local alphaMode <const> = options.alphaMode or MeshDomain.ALPHA_OPAQUE
+    if
+        alphaMode ~= MeshDomain.ALPHA_OPAQUE
+        and alphaMode ~= MeshDomain.ALPHA_MASK
+        and alphaMode ~= MeshDomain.ALPHA_BLEND
+    then
+        error(("tecs: invalid mesh material alpha mode %s"):format(tostring(alphaMode)), 2)
+    end
+    if alphaMode == MeshDomain.ALPHA_BLEND and not self.transparency then
+        error("tecs: alpha-blended mesh materials require meshes.transparency = true", 2)
+    end
     local slot <const> = self._backend:registerMaterial(
         asset,
         {
             name = options.name,
             model = model,
+            alphaMode = alphaMode,
             baseColorTexture = options.baseColorTexture or 0,
             normalTexture = options.normalTexture or 0,
             metallicRoughnessTexture = options.metallicRoughnessTexture or 0,
@@ -305,7 +345,7 @@ function MeshDomain:registerMaterial(options: MeshMaterialOptions): components.M
             occlusionStrength = options.occlusionStrength or 1.0,
         }
     )
-    self._extractor:registerMaterial(asset, slot)
+    self._extractor:registerMaterial(asset, slot, alphaMode)
     self.materialCount = self._backend.materialCount
     return components.MeshMaterial(asset, slot)
 end
@@ -337,6 +377,13 @@ function MeshDomain:registerModel(model: assets.Model): {RegisteredPrimitive}
     end
     local registered: {RegisteredPrimitive} = nil
     local ok, reason = pcall(function()
+        if not self.transparency then
+            for _, material in ipairs(model.materials) do
+                if material.alphaMode == MeshDomain.ALPHA_BLEND then
+                    error("tecs: alpha-blended mesh materials require meshes.transparency = true", 0)
+                end
+            end
+        end
         local textures: {integer} = {}
         local function texture(index: integer): integer
             if index == 0 then
@@ -359,6 +406,7 @@ function MeshDomain:registerModel(model: assets.Model): {RegisteredPrimitive}
             materials[index] = self:registerMaterial({
                 name = material.name,
                 model = material.model,
+                alphaMode = material.alphaMode,
                 baseColorTexture = texture(material.baseColorImage),
                 normalTexture = texture(material.normalImage),
                 metallicRoughnessTexture = texture(material.metallicRoughnessImage),
@@ -437,6 +485,10 @@ end
 
 function MeshDomain:_recordGeometry(context: Deferred.PassContext)
     self._backend:recordGeometry(context)
+end
+
+function MeshDomain:_recordForward(context: Deferred.PassContext)
+    self._backend:recordForward(context)
 end
 
 function MeshDomain:_rebuildPipelines(deferred: Deferred)

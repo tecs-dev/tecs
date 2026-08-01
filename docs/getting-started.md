@@ -118,6 +118,46 @@ Keep three rules visible when writing systems:
 The [mutation model](/modules/ecs/mutation-model) covers deferred changes and dirty
 tracking.
 
+## Optional transparent meshes
+
+Opaque mesh rendering keeps its original three-pass cull chain. Enable the
+separate transparent resources only when a game needs glTF `BLEND` materials
+or registers an `ALPHA_BLEND` material itself:
+
+```teal
+return tecs.newApplication({
+    sprites = false,
+    meshes = {
+        transparency = true,
+    },
+    plugin = function(world: tecs.World, app: tecs.Application)
+        tecs.assets.loadGLTF(
+            tecs.io.files.assetPath("models/glass.gltf")
+        ):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)
+            if loaded.status ~= "ready" then
+                error(loaded.error, 0)
+            end
+            for _, primitive in ipairs(
+                app.renderer.meshes:registerModel(loaded.value)
+            ) do
+                world:spawn(
+                    primitive.transform,
+                    primitive.mesh,
+                    primitive.bounds,
+                    primitive.material,
+                    tecs.gfx.Tint(),
+                    tecs.gfx.Renderable3D()
+                )
+            end
+        end)
+    end,
+})
+```
+
+The mesh domain frustum-culls and depth-sorts complete indexed commands on the
+GPU. It draws transparent meshes before the sprite forward lane, so sprites
+retain deterministic overlay ordering in a renderer that enables both domains.
+
 ## Game modules
 
 Split a game into plugins and install them from the entry plugin:

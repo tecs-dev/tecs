@@ -26,9 +26,11 @@
   }],
   "textures": [{"source": 0}],
   "materials": [{
-    "name": "example://orange-pbr",
+    "name": "example://orange-glass",
+    "alphaMode": "BLEND",
     "pbrMetallicRoughness": {
       "baseColorTexture": {"index": 0},
+      "baseColorFactor": [1.0, 1.0, 1.0, 0.65],
       "metallicFactor": 0.0,
       "roughnessFactor": 0.7
     }

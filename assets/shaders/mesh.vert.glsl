@@ -17,6 +17,7 @@ layout(location = 1) flat out vec3 vColor;
 layout(location = 2) out vec2 vUV;
 layout(location = 3) out vec4 vTangent;
 layout(location = 4) flat out int vMaterial;
+layout(location = 5) out vec3 vWorld;
 
 vec3 rotateBy(vec4 rotation, vec3 value) {
     vec3 twice = 2.0 * cross(rotation.xyz, value);
@@ -55,6 +56,7 @@ void main() {
         instances.value[instanceBase + 9]);
 
     vec3 world = position + rotateBy(rotation, localPosition * scale);
+    vWorld = world;
     gl_Position = view.viewProjection * vec4(world, 1.0);
 
     vec3 inverseScale = vec3(
