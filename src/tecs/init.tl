@@ -29,6 +29,7 @@ local type audio = require("tecs.audio")
 local type Renderer = require("tecs.Renderer")
 local type Camera2D = require("tecs.gfx.Camera2D")
 local type Camera3D = require("tecs.gfx.Camera3D")
+local type Model3D = require("tecs.gfx.Model3D")
 local type animation = require("tecs.gfx.animation")
 local type events = require("tecs.events")
 local type input = require("tecs.input")
@@ -99,6 +100,15 @@ local record gfx
     --- The perspective view used by the 3D mesh domain.
     Camera3D: Camera3D
     type Camera3DOptions = Camera3D.Options
+
+    --- The resident shared resources for one registered glTF model.
+    type Model3D = Model3D
+    --- One independently posed copy of a registered glTF model.
+    type ModelInstance3D = Model3D.Instance
+    --- One spawnable component bundle in a model instance.
+    type ModelPrimitive3D = Model3D.Primitive
+    --- Playback options accepted by `ModelInstance3D:play`.
+    type ModelPlayOptions3D = Model3D.PlayOptions
 
     --- A world to a frame, through an extractor and a backend.
     Renderer: Renderer

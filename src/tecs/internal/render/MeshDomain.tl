@@ -24,17 +24,17 @@ instance layouts and creates none of those resources.
 
 local type types = require("tecs.types")
 local type assets = require("tecs.assets")
-local ecs <const> = require("tecs.ecs")
 local loader <const> = require("tecs.ffi.loader")
 local Buffer <const> = require("tecs.gpu.Buffer")
 local Frame <const> = require("tecs.gpu.Frame")
 local Deferred <const> = require("tecs.gpu.Deferred")
 local Camera3D <const> = require("tecs.gfx.Camera3D")
+local Model3D <const> = require("tecs.gfx.Model3D")
 local MeshExtractor <const> = require("tecs.internal.render.MeshExtractor")
 local MeshBackend <const> = require("tecs.internal.render.MeshBackend")
 local MeshFramePacket <const> = require("tecs.internal.render.MeshFramePacket")
+local type modeltypes = require("tecs.internal.render.modeltypes")
 local components <const> = require("tecs.components")
-local Transform3D <const> = ecs.Transform3D
 
 local DEFAULT_CAPACITY <const> = 65536
 local DEFAULT_VERTEX_CAPACITY <const> = 1048576
@@ -186,20 +186,7 @@ local record MeshDomainOptions
     skinning: MeshSkinningOptions
 end
 
---- Contains the complete component bundle for one registered model primitive.
-local record RegisteredPrimitive
-    --- Caller-writable. Contains the static scene transform decoded from glTF.
-    transform: ecs.Transform3D
-    --- Caller-writable. Selects the primitive's resident geometry.
-    mesh: components.Mesh
-    --- Caller-writable. Supplies its local-space bounding sphere.
-    bounds: components.Bounds3D
-    --- Caller-writable. Selects its resident PBR material.
-    material: components.MeshMaterial
-    --- Caller-writable. Selects the primitive's initial joint palette, or nil
-    --- for rigid geometry.
-    skin: components.MeshSkin
-end
+local type RegisteredPrimitive = Model3D.Primitive
 
 local record MeshDomain
     type Options = MeshDomainOptions
@@ -208,6 +195,7 @@ local record MeshDomain
     type Shadow = MeshShadowTuning
     type SkinningOptions = MeshSkinningOptions
     type RegisteredPrimitive = RegisteredPrimitive
+    type Model3D = Model3D
 
     --- Read-only. Selects metallic-roughness PBR material dispatch.
     MATERIAL_METALLIC_ROUGHNESS: integer
@@ -287,6 +275,11 @@ local record MeshDomain
     --- @param matrices The caller supplies the same matrix count used at registration.
     updateSkin: function(self, skin: components.MeshSkin, matrices: {number})
 
+    --- Registers shared residency for one decoded glTF model.
+    --- @param model The caller supplies model data that this call consumes.
+    --- @return Returns resident resources that create independent instances.
+    registerModel: function(self, model: assets.Model): Model3D
+
     _extractor: MeshExtractor
     _backend: MeshBackend
     _packet: MeshFramePacket
@@ -294,6 +287,7 @@ local record MeshDomain
     _centerYByAsset: {integer: number}
     _centerZByAsset: {integer: number}
     _radiusByAsset: {integer: number}
+    _modelCount: integer
 end
 
 local MeshDomainMT <const>: metatable<MeshDomain> = {__index = MeshDomain}
@@ -337,6 +331,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self.dropped = 0
     self.rewritten = 0
     self.meshCount = 0
+    self._modelCount = 0
     self.vertexCount = 0
     self.indexCount = 0
     self.materialCount = 1
@@ -490,20 +485,11 @@ function MeshDomain:material(name: string): components.MeshMaterial
     return components.MeshMaterial(asset, slot)
 end
 
---- Registers every image, material, and primitive in a decoded static model.
----
---- Registration consumes the model's CPU geometry and image holds. The
---- returned records are caller-owned templates: spawn each record's transform,
---- mesh, bounds, and material beside `Tint` and `Renderable3D`.
---- @param model The caller supplies a ready `assets.Model` that this call
----     consumes.
---- @return Returns one registered record per primitive instance in the glTF
----     scene selected by the file.
-function MeshDomain:registerModel(model: assets.Model): {RegisteredPrimitive}
+function MeshDomain:registerModel(model: assets.Model): Model3D
     if model == nil then
         error("tecs: model data is required", 2)
     end
-    local registered: {RegisteredPrimitive} = nil
+    local registered: Model3D = nil
     local ok, reason = pcall(function()
         if not self.transparency then
             for _, material in ipairs(model.materials) do
@@ -559,12 +545,7 @@ function MeshDomain:registerModel(model: assets.Model): {RegisteredPrimitive}
         for index, mesh in ipairs(model.meshes) do
             meshes[index], bounds[index] = self:registerMesh(mesh)
         end
-        local skins: {components.MeshSkin} = {}
-        for index, skin in ipairs(model.skins) do
-            skins[index] = self:registerSkin(skin.name, skin.matrices)
-        end
-        registered = {}
-        for index, draw in ipairs(model.draws) do
+        for _, draw in ipairs(model.draws) do
             if meshes[draw.mesh] == nil then
                 error(("tecs: model draw names missing mesh %d"):format(draw.mesh), 0)
             end
@@ -572,29 +553,14 @@ function MeshDomain:registerModel(model: assets.Model): {RegisteredPrimitive}
             if draw.material ~= 0 and material == nil then
                 error(("tecs: model draw names missing material %d"):format(draw.material), 0)
             end
-            local skin = skins[draw.skin]
-            if draw.skin ~= 0 and skin == nil then
+            if draw.skin ~= 0 and model.skins[draw.skin] == nil then
                 error(("tecs: model draw names missing skin %d"):format(draw.skin), 0)
             end
-            registered[index] = {
-                transform = Transform3D.new({
-                    x = draw.x,
-                    y = draw.y,
-                    z = draw.z,
-                    rotationX = draw.rotationX,
-                    rotationY = draw.rotationY,
-                    rotationZ = draw.rotationZ,
-                    rotationW = draw.rotationW,
-                    scaleX = draw.scaleX,
-                    scaleY = draw.scaleY,
-                    scaleZ = draw.scaleZ,
-                }),
-                mesh = meshes[draw.mesh],
-                bounds = bounds[draw.mesh],
-                material = material or components.MeshMaterial(),
-                skin = skin,
-            }
         end
+        self._modelCount = self._modelCount + 1
+        registered = Model3D._create(
+            self as modeltypes.Domain, model.path .. "#residency-" .. self._modelCount, model, meshes, bounds, materials
+        )
     end) as (boolean, any)
     model:release()
     if not ok then

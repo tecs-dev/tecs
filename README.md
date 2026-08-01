@@ -33,14 +33,14 @@ start a graphics stack.
 - GPU-driven 2D rendering with materials, lights, shadows, layers, text,
   sprite animation, and particles.
 - Optional 3D rendering with indexed mesh residency, ordered GPU frustum
-  culling, texture and PBR material residency, initial-pose glTF/GLB skinning,
+  culling, texture and PBR material residency, glTF/GLB skinning and animation,
   and independently allocated transparent, directional-shadow, and skeletal
   deformation lanes.
 - Input, audio, physics, assets, workers, async I/O, HTTP, file watching, and
   a debug server.
 
-glTF animation clips and morph targets, post-processing, tiled maps, and
-multi-camera are not yet built.
+glTF morph targets, post-processing, tiled maps, and multi-camera are not yet
+built.
 
 Mesh shadows use one camera-centered directional map, not the 2D occluder-mask
 pipeline. Their mark, scan, compact, map, and shader resources exist only when
@@ -57,6 +57,14 @@ a skinned vertex-shader variant. That costs no additional vertex bandwidth or
 shader branch in a domain that omits the option, and it adds nothing to a 2D
 renderer.
 
+Animated glTF models keep shared geometry, material, texture, hierarchy, and
+clip data in one `Model3D`. Each `newInstance` allocates only its own reusable
+CPU pose and fixed GPU joint palettes, so instances can play different clips.
+Sampling supports linear, step, and cubic-spline channels, stages palettes
+through the existing skin upload, and writes only explicitly bound entity
+transforms. It adds no system or per-frame work to a model that is never
+sampled.
+
 ## Build
 
 Cargo and `xtask` own the build, generated bindings, tests, and packaging.
@@ -68,8 +76,10 @@ cargo xtask example ui-demo    # Run the 2D showcase
 cargo xtask example scene3d    # Run the shadowed 3D mesh example
 cargo xtask example gltf3d     # Run the textured 3D example
 cargo xtask example skinning3d # Run the GPU skeletal-deformation example
+cargo xtask example animated3d # Run decoded glTF node animation
 cargo xtask bench meshshadows  # Measure the optional mesh-shadow lane
 cargo xtask bench meshskinning # Measure the optional mesh-skinning lane
+cargo xtask bench modelanimation  # Measure CPU pose and palette sampling
 cargo xtask test               # Run the spec suite
 cargo xtask check              # Type-check Teal sources
 cargo xtask format             # Format sources
