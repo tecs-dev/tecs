@@ -284,6 +284,7 @@ Inside one of those, one level and no deeper:
 - [`tecs.io.Process`](/modules/io/Process) - streaming child processes with backpressured standard I/O
 - [`tecs.io.URI`](/modules/io/URI) - immutable general-purpose URIs with component-aware modification
 - [`tecs.io.watcher`](/modules/io/watcher) - watching files for change
+- [`tecs.math.noise`](/modules/math/noise) - native procedural scalar fields and bulk grids
 - [`tecs.math.vec2`](/modules/math/vec2) - allocation-free two-dimensional vector and point math
 - [`tecs.platform.events`](/modules/platform/events) - typed platform events routed through the world
 - [`tecs.platform.os`](/modules/platform/os) - capabilities, process signals, the clipboard, and desktop services

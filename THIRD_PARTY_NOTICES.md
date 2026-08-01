@@ -150,10 +150,11 @@ Vulkan headers (Apache-2.0).
 ### Rust native build foundation
 
 The static native archive includes `clap` for CLI parsing and `clap_complete`
-for shell completion generation, `image` for PNG and JPEG decoding and PNG
-encoding, `resvg` for static SVG rasterization, `reqwest` with Rustls for HTTP,
-`rmcp` for the official MCP protocol and Streamable HTTP server, `rapier2d` for
-physics, `regex` for compiled regular expressions, and `taffy` for UI layout.
+for shell completion generation, FastNoise Lite for procedural fields, `image`
+for PNG and JPEG decoding and PNG encoding, `resvg` for static SVG
+rasterization, `reqwest` with Rustls for HTTP, `rmcp` for the official MCP
+protocol and Streamable HTTP server, `rapier2d` for physics, `regex` for
+compiled regular expressions, and `taffy` for UI layout.
 It also owns the host lifecycle, worker channels, logging, dialogs, Lua module
 registration, LuaJIT's machine-code arena, and the single-file payload loader.
 SDL still owns the application loop and LuaJIT still owns game execution.
@@ -181,8 +182,8 @@ release for that target compiles them:
 `core-foundation-sys`, `core_maths`, `crc32fast`, `crossbeam-deque`,
 `crossbeam-epoch`, `crossbeam-utils`, `crypto-common`, `data-url`, `digest`,
 `displaydoc`, `downcast-rs`, `either`, `ena`, `equivalent`, `errno`, `euclid`,
-`fdeflate`, `find-msvc-tools`, `flate2`, `float-cmp`, `foldhash`, `fontdb`,
-`form_urlencoded`,
+`fastnoise-lite`, `fdeflate`, `find-msvc-tools`, `flate2`, `float-cmp`,
+`foldhash`, `fontdb`, `form_urlencoded`,
 `futures-channel`, `futures-core`, `futures-io`, `futures-macro`,
 `futures-sink`, `futures-task`, `futures-util`, `generic-array`, `getrandom`,
 `glam`, `glamx`, `grid`,

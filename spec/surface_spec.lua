@@ -340,9 +340,11 @@ describe("the public surface", function()
     end)
 
     describe("a module inside a module", function()
-        it("hangs vector math below angle math", function()
+        it("hangs subordinate math below angle math", function()
             assert.is_true(rawequal(tecs.math, require("tecs.math")))
+            assert.is_true(rawequal(tecs.math.noise, require("tecs.math.noise")))
             assert.is_true(rawequal(tecs.math.vec2, require("tecs.math.vec2")))
+            assert.is_true(rawequal(rawget(tecs.math, "noise"), require("tecs.math.noise")))
             assert.is_true(rawequal(rawget(tecs.math, "vec2"), require("tecs.math.vec2")))
         end)
 

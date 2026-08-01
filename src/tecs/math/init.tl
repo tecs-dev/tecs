@@ -3,7 +3,7 @@ Angle math and the two-dimensional geometry beneath it.
 
 `wrapAngle` and `deltaAngle` operate on angles rather than vectors, so they
 remain directly on `tecs.math`. Vector and point operations live under
-`tecs.math.vec2`.
+`tecs.math.vec2`; native procedural fields live under `tecs.math.noise`.
 
 ```teal
 local correction <const> = tecs.math.deltaAngle(rotation, targetRotation)
@@ -16,14 +16,15 @@ local directionX, directionY =
 Every angle uses radians. Both functions return a value in `[-pi, pi)`, so an
 exact positive half-turn becomes negative pi.
 
-Naming `tecs.math` does not load `tecs.math.vec2`. Reading `vec2` loads that
-child once and returns its module table.
+Naming `tecs.math` does not load either subordinate module. Reading `vec2` or
+`noise` loads that child once and returns its module table.
 ]=]
 
--- Type-only, so naming `tecs.math` leaves the vector module unloaded.
--- `tecs.math.vec2` does not require this parent, which keeps the dependency
+-- Type-only, so naming `tecs.math` leaves its subordinate modules unloaded.
+-- Neither subordinate requires this parent, which keeps the dependency
 -- direction free of the cycle Teal rejects.
 local type vec2Module = require("tecs.math.vec2")
+local type noiseModule = require("tecs.math.noise")
 
 local PI <const> = math.pi
 local TWO_PI <const> = PI * 2.0
@@ -34,6 +35,10 @@ local record angleMath
     --- Read-only. `vec2` provides allocation-free vector and point operations
     --- over separate coordinates.
     vec2: vec2Module
+
+    --- Read-only. `noise` provides native procedural scalar fields over two
+    --- and three-dimensional coordinates.
+    noise: noiseModule
 
     --- Wraps an angle to one turn centered on zero.
     ---

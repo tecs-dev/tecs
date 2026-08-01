@@ -17,6 +17,7 @@ bytes.workspace = true
 camino.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
+fastnoise-lite.workspace = true
 flate2 = { workspace = true, optional = true }
 image.workspace = true
 libc.workspace = true
