@@ -17,6 +17,7 @@ local tecsIO = require("tecs.io")
 local files = require("tecs.io.files")
 local buffer = require("tecs.io.buffer")
 local content = require("tecs.platform.content")
+local adapter = require("tecs.platform.adapter")
 local assets = require("tecs.assets")
 local workers = require("tecs.workers")
 
@@ -82,6 +83,24 @@ local function sorted(list)
     return list
 end
 
+--- Collects the relative paths from a glob when a test needs an eager comparison.
+local function globPaths(path, pattern, options)
+    local stream, reason = files.glob(path, pattern, options)
+    if stream == nil then
+        return nil, reason
+    end
+    local found
+    found, reason = stream:toArray()
+    if found == nil then
+        return nil, reason
+    end
+    local entries = {}
+    for _, entry in ipairs(found) do
+        entries[#entries + 1] = assert(entry.path:relativeTo(path)):toString()
+    end
+    return entries
+end
+
 --- Empties and removes a tree, deepest entry first.
 ---
 --- The composition the module documents rather than providing: a recursive
@@ -89,7 +108,7 @@ end
 --- takes an empty directory once its contents are gone. A path that is not a
 --- directory globs as nil and is simply removed.
 local function removeTree(path)
-    local entries = files.glob(path)
+    local entries = globPaths(path)
     if entries ~= nil then
         table.sort(entries, function(a, b)
             return #a > #b
@@ -175,10 +194,10 @@ describe("io.files", function()
     end)
 
     before_each(function()
-        for _, entry in ipairs(files.list(temp)) do
+        for _, entry in ipairs(globPaths(temp, "*")) do
             removeTree(at(entry))
         end
-        assert.are.same({}, files.list(temp))
+        assert.are.same({}, globPaths(temp, "*"))
     end)
 
     describe("asking what is there", function()
@@ -289,16 +308,15 @@ describe("io.files", function()
             files.write(at("a/b/deep.txt"), "3")
         end
 
-        it("lists one level, as names rather than paths", function()
+        it("collects one level from the same stream", function()
             tree()
-            assert.are.same({ "a", "top.txt" }, sorted(files.list(temp)))
-            assert.are.same({ "b", "mid.txt" }, sorted(files.list(at("a"))))
+            assert.are.same({ "a", "top.txt" }, sorted(globPaths(temp, "*")))
+            assert.are.same({ "b", "mid.txt" }, sorted(globPaths(at("a"), "*")))
         end)
 
         it("walks the whole tree when no pattern stops it", function()
-            -- The surprise the module leads with. `SDL_GlobDirectory` with a
-            -- null pattern is recursive, and answers descendants as paths
-            -- relative to the root, joined with '/'.
+            -- Nil leaves the public stream unconstrained, so it recursively
+            -- answers every descendant relative to the requested root.
             tree()
             assert.are.same({
                 "a",
@@ -306,40 +324,49 @@ describe("io.files", function()
                 "a/b/deep.txt",
                 "a/mid.txt",
                 "top.txt",
-            }, sorted(files.glob(temp)))
+            }, sorted(globPaths(temp)))
         end)
 
         it("confines a wildcard to one level, because it never matches a separator", function()
             tree()
-            assert.are.same({ "a", "top.txt" }, sorted(files.glob(temp, "*")))
-            assert.are.same({ "top.txt" }, sorted(files.glob(temp, "*.txt")))
-            assert.are.same({ "a/mid.txt" }, sorted(files.glob(temp, "*/*.txt")))
-            assert.are.same({ "a/b/deep.txt" }, sorted(files.glob(temp, "*/*/*.txt")))
+            assert.are.same({ "a", "top.txt" }, sorted(globPaths(temp, "*")))
+            assert.are.same({ "top.txt" }, sorted(globPaths(temp, "*.txt")))
+            assert.are.same({ "a/mid.txt" }, sorted(globPaths(temp, "*/*.txt")))
+            assert.are.same({ "a/b/deep.txt" }, sorted(globPaths(temp, "*/*/*.txt")))
         end)
 
-        it("includes directories beside files, unmarked", function()
+        it("includes directories beside files with their kinds", function()
             tree()
-            local entries = files.glob(temp, "*")
+            local stream = assert(files.glob(temp, "*"))
             local kinds = {}
-            for _, entry in ipairs(entries) do
-                kinds[entry] = files.info(at(entry)).kind
+            while true do
+                local entry = stream:next()
+                if entry == nil then
+                    break
+                end
+                kinds[entry.name] = entry.kind
             end
             assert.are.same({ ["a"] = "directory", ["top.txt"] = "file" }, kinds)
         end)
 
         it("matches without regard to case only when asked", function()
             files.write(at("Mixed.PNG"), "x")
-            assert.are.same({}, files.glob(temp, "*.png"))
-            assert.are.same({ "Mixed.PNG" }, files.glob(temp, "*.png", { caseInsensitive = true }))
+            assert.are.same({}, globPaths(temp, "*.png"))
+            assert.are.same({ "Mixed.PNG" }, globPaths(temp, "*.png", { caseInsensitive = true }))
+        end)
+
+        it("matches one UTF-8 codepoint with a question mark", function()
+            files.write(at("café.txt"), "x")
+            assert.are.same({ "café.txt" }, globPaths(temp, "caf?.txt"))
         end)
 
         it("keeps an empty directory apart from one it could not open", function()
             -- The reason the answer is nil rather than an empty list. A caller
             -- that cannot tell these apart retries forever or gives up wrongly.
             files.createDirectory(at("hollow"))
-            assert.are.same({}, files.list(at("hollow")))
+            assert.are.same({}, globPaths(at("hollow"), "*"))
 
-            local entries, reason = files.list(at("absent"))
+            local entries, reason = files.glob(at("absent"), "*")
             assert.is_nil(entries)
             assert.is_string(reason)
             assert.is_true(#reason > 0)
@@ -347,14 +374,14 @@ describe("io.files", function()
 
         it("refuses a file, since a file is not a directory", function()
             files.write(at("plain.txt"), "x")
-            local entries, reason = files.list(at("plain.txt"))
+            local entries, reason = files.glob(at("plain.txt"), "*")
             assert.is_nil(entries)
             assert.is_true(#reason > 0)
         end)
 
         it("streams one directory and closes idempotently", function()
             tree()
-            local stream = assert(files.openDirectory(temp))
+            local stream = assert(files.glob(temp, "*"))
             local entries = {}
             while true do
                 local entry, reason = stream:next()
@@ -366,14 +393,23 @@ describe("io.files", function()
                 assert.are.equal(1, entry.depth)
             end
             assert.are.same({ "a", "top.txt" }, sorted(entries))
-            assert.is_true(stream:close())
+            stream:close()
+            assert.is_nil(stream:next())
+        end)
+
+        it("collects only the entries remaining in a stream", function()
+            tree()
+            local stream = assert(files.glob(temp, "*"))
+            assert.is_not_nil(stream:next())
+            local remaining = assert(stream:toArray())
+            assert.are.equal(1, #remaining)
             assert.is_nil(stream:next())
         end)
 
         it("walks depth first without following symbolic links", function()
             tree()
             assert.is_true(files.createSymlink("a", at("linked-a"), "directory"))
-            local stream = assert(files.walk(temp))
+            local stream = assert(files.glob(temp))
             local entries = {}
             while true do
                 local entry, reason = stream:next()
@@ -389,18 +425,25 @@ describe("io.files", function()
             assert.is_nil(entries["linked-a/mid.txt"])
         end)
 
-        it("limits walk depth", function()
+        it("prunes the directory returned by the preceding next call", function()
             tree()
-            local stream = assert(files.walk(temp, { maxDepth = 1 }))
-            local names = {}
+            local stream = assert(files.glob(temp))
+            local paths = {}
             while true do
                 local entry = stream:next()
                 if entry == nil then
                     break
                 end
-                names[#names + 1] = entry.name
+                local relative = assert(entry.path:relativeTo(temp)):toString()
+                paths[#paths + 1] = relative
+                if relative == "a" then
+                    assert.is_true(stream:skipDirectory())
+                    assert.is_false(stream:skipDirectory())
+                else
+                    assert.is_false(stream:skipDirectory())
+                end
             end
-            assert.are.same({ "a", "top.txt" }, sorted(names))
+            assert.are.same({ "a", "top.txt" }, sorted(paths))
         end)
     end)
 
@@ -477,7 +520,7 @@ describe("io.files", function()
             assert.is_false(ok)
             assert.is_true(#reason > 0)
             assert.are.equal("original", files.read(destination .. "/kept"))
-            assert.are.same({ "occupied", "occupied/kept" }, sorted(files.glob(temp)))
+            assert.are.same({ "occupied", "occupied/kept" }, sorted(globPaths(temp)))
         end)
 
         it("pairs with the read beside it", function()
@@ -932,7 +975,6 @@ describe("io.files", function()
                 { "isFile", files.isFile },
                 { "isDirectory", files.isDirectory },
                 { "isSymlink", files.isSymlink },
-                { "list", files.list },
                 { "glob", files.glob },
                 { "createDirectory", files.createDirectory },
                 { "remove", files.remove },
@@ -994,7 +1036,7 @@ describe("io.files", function()
 
             local before = settled()
             for _ = 1, GLOBS do
-                files.list(at("many"))
+                adapter.storage().list(at("many"))
             end
             local grew = settled() - before
             assert.is_true(
@@ -1039,8 +1081,13 @@ describe("io.files", function()
                     local files = require("tecs.io.files")
                     local self = workers.current()
                     local job = self:receive(5000)
-                    local entries = files.glob(job.root)
-                    self:send({ count = #entries })
+                    local stream = assert(files.glob(job.root))
+                    local count = 0
+                    while stream:next() ~= nil do
+                        count = count + 1
+                    end
+                    stream:close()
+                    self:send({ count = count })
                 ]==],
                 luaPath = package.path,
             })
@@ -1091,7 +1138,7 @@ describe("io.files with no video", function()
         assert.is_true(files.copy(base .. "/nested/one.txt", base .. "/nested/two.txt"))
         assert.is_true(files.rename(base .. "/nested/two.txt", base .. "/nested/three.txt"))
 
-        assert.are.same({ "deeper", "one.txt", "three.txt" }, sorted(files.list(base .. "/nested")))
+        assert.are.same({ "deeper", "one.txt", "three.txt" }, sorted(globPaths(base .. "/nested", "*")))
         assert.are.equal(8, files.info(base .. "/nested/one.txt").size)
         assert.is_true(files.isDirectory(base .. "/nested/deeper"))
         assert.is_string(files.currentDirectory())
@@ -1113,8 +1160,7 @@ describe("io.files with no video", function()
         files.exists(base .. "/sweep")
         files.isFile(base .. "/sweep/x.txt")
         files.isDirectory(base .. "/sweep")
-        files.list(base .. "/sweep")
-        files.glob(base .. "/sweep")
+        assert(files.glob(base .. "/sweep", "*")):toArray()
         files.copy(base .. "/sweep/x.txt", base .. "/sweep/y.txt")
         files.rename(base .. "/sweep/y.txt", base .. "/sweep/z.txt")
         files.remove(base .. "/sweep/z.txt")

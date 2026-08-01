@@ -1533,8 +1533,9 @@ so neither public child has to require the other. It is one backend call per
 primitive and nothing composed out of several, and on SDL each of those is the
 obvious call: `SDL_GetPathInfo` behind `info`, `exists`, `isFile` and
 `isDirectory`, Rust filesystem metadata behind `isSymlink`,
-`SDL_GlobDirectory` behind `list` and `glob`, `SDL_LoadFile` behind `read`,
-then `createDirectory`, `remove`, `rename`, `copy`, `write`, `writeAtomic`, `append`,
+`SDL_GlobDirectory` behind one-level backend enumeration, `SDL_LoadFile`
+behind `read`, then `createDirectory`, `remove`, `rename`, `copy`, `write`,
+`writeAtomic`, `append`,
 `currentDirectory` and `userFolder`. `lines` and `load` compose over the one
 watched whole-file read rather than opening a second path around it. No virtual
 filesystem and no invented path scheme, so a failure is the platform's failure
@@ -1563,14 +1564,18 @@ to `write` plus `rename` and claiming a guarantee it cannot make.
 
 `writeAtomicAsync` copies its input into the worker channel and performs that
 same commit away from the frame. The shared worker exists only while writes are
-pending and its futures participate in the ordinary runtime pump. Directory
-streams take the complementary approach for reads: `openDirectory` and `walk`
-pull entries a level at a time instead of materializing the complete tree, and
-never follow symbolic links. Temporary files and directories are native-owned
-resources with finalizers as a leak safety net, but deterministic cleanup still
-runs through `tecs.scoped`; persistence moves an owned temporary path to an
-absent permanent destination before relinquishing cleanup. Portable permissions
-stop at a read-only bit. POSIX modes and platform ACLs would pretend to have a
+pending and its futures participate in the ordinary runtime pump. `glob` takes
+the complementary approach for directory reads: its caller-owned stream pulls
+entries a level at a time instead of materializing the complete tree, never
+follows symbolic links, and lets a caller prune a yielded directory before the
+next pull enters it. A pattern confines that same traversal, so separate open,
+walk, and glob constructors would only be aliases, and eager collection
+belongs to `DirectoryStream:toArray` rather than a second path operation.
+Temporary files and directories are native-owned resources with finalizers as
+a leak safety net, but deterministic cleanup still runs through
+`tecs.scoped`; persistence moves an owned temporary path to an absent permanent
+destination before relinquishing cleanup. Portable permissions stop at a
+read-only bit. POSIX modes and platform ACLs would pretend to have a
 cross-platform meaning they do not share.
 
 `openRead` returns a `SeekableReader`, not merely the basic directional
@@ -1609,13 +1614,13 @@ their own. Bytes are bytes, so nothing at this layer can tell a font's metrics
 from a level: whatever asked for them names the kind, and an unnamed read is a
 document.
 
-Enumeration is glob rather than `SDL_EnumerateDirectory`, so no FFI callback is
-installed for a walk; the list comes back as one allocation holding the array
-and its strings, freed in one place the way the clipboard's mime list is.
-**`SDL_GlobDirectory` recurses when nothing stops it**: with no pattern it
-walks the whole tree and returns `/`-joined relative paths, and `"*"` is one
-level only because a wildcard never matches a separator, which is what `list`
-is. The other surprises are documented rather than smoothed over:
+Enumeration asks `SDL_GlobDirectory` for `"*"` one directory at a time, so no
+FFI callback is installed for a walk and no complete tree is retained. Each
+level comes back as one allocation holding its array and strings, freed in one
+place the way the clipboard's mime list is. The public `glob` stream performs
+component matching while it descends: no pattern means every descendant, while
+`*` and `?` never cross `/`, so `"*"` is one level and `"*/*"` is exactly two.
+The other surprises are documented rather than smoothed over:
 `createDirectory` makes parents and leaves an SDL error set even when it
 succeeds, `remove` reports success when there was nothing there, `rename` and
 `copy` overwrite silently, and `userFolder` is legitimately nil on a platform
@@ -1624,10 +1629,11 @@ with no such folder.
 Everything blocks, and that is the whole of stage one. A path call is one
 syscall rather than another program's lifetime, which is what put the process
 runner on a
-worker, and `SDL_LoadFileAsync` reads a file rather than a directory, so it
-would leave the one unbounded case, a recursive glob over a large tree, exactly
-where it was. That case runs on a worker instead: every function takes a path
-and returns a value, so nothing crosses a thread that must not.
+worker. A glob no longer allocates for every descendant, but a pull that opens
+one directory and reads its metadata can still block a frame. A consumer that
+must finish a large traversal without frame-time work runs the complete stream
+loop on a worker and sends only its result across; the stream itself remains
+owned by the Lua state that opened it.
 
 `SDL_Storage` is deliberately not what the SDL backend is written against. Its
 readiness model has no equivalent in a path call and, on a desktop, no test:

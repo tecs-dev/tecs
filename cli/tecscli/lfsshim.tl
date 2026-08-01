@@ -13,7 +13,7 @@
 ---  LuaFileSystem            Reached through          Called by
 ---  ───────────────────────  ───────────────────────  ──────────────────────
 ---  attributes(path, mode)   tecs.io.files.info       Cerulean's discovery
----  dir(path)                tecs.io.files.list       Cerulean's discovery
+---  dir(path)                tecs.io.files.glob       Cerulean's discovery
 ---  mkdir(path)              tecs.io.files.create...  Teal's generator
 --- ```
 ---
@@ -61,13 +61,14 @@ end
 --- and every caller filters them out; a shim that omitted them would be right
 --- about the filesystem and wrong about the interface.
 function lfsshim.dir(path: string): function(): string
-    local entries = tecs.io.files.list(path)
+    local stream = tecs.io.files.glob(path, "*")
+    local entries = stream ~= nil and stream:toArray() or nil
     if entries == nil then
         error(("cannot list %s"):format(path), 2)
     end
     local names <const>: {string} = {".", ".."}
     for _, entry in ipairs(entries) do
-        names[#names + 1] = entry
+        names[#names + 1] = entry.name
     end
     local index = 0
     return function(): string index = index + 1; return names[index] end

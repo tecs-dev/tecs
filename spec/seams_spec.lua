@@ -378,11 +378,20 @@ local STDIO = {
 --- goes around the storage backend gets there through it.
 local function modules()
     local found = {}
-    for _, entry in ipairs(assert(files.glob(root .. "/tecs"))) do
-        if entry:sub(-4) == ".lua" and entry:sub(1, 4) ~= "ffi/" then
-            found[#found + 1] = "tecs/" .. entry
+    local moduleRoot = root .. "/tecs"
+    local stream = assert(files.glob(moduleRoot))
+    while true do
+        local entry, reason = stream:next()
+        assert.is_nil(reason)
+        if entry == nil then
+            break
+        end
+        local relative = assert(entry.path:relativeTo(moduleRoot)):toString()
+        if relative:sub(-4) == ".lua" and relative:sub(1, 4) ~= "ffi/" then
+            found[#found + 1] = "tecs/" .. relative
         end
     end
+    stream:close()
     table.sort(found)
     return found
 end
