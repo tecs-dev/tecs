@@ -46,10 +46,10 @@ struct MaterialOutput {
     // occlusion, green is roughness, blue is metallic, and alpha is reserved.
     //
     // Ambient occlusion multiplies ambient light and nothing a point light
-    // contributes. Roughness and metallic are carried now for the
-    // Cook-Torrance term that consumes them; until that term lands they do not
-    // change the Lambert resolve. The neutral default is fully unoccluded,
-    // medium roughness and non-metallic.
+    // contributes. Metallic-roughness mesh pixels consume the next two
+    // channels through Cook-Torrance. Sprite pixels intentionally retain
+    // Lambert diffuse lighting and ignore them. The neutral default is fully
+    // unoccluded, medium roughness and non-metallic.
     vec4 orm;
     // Zero leaves the fragment out of the lighting pass entirely, so it draws
     // at its own color. Whether a thing takes light is what it is rather than

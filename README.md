@@ -96,7 +96,7 @@ cargo xtask example ui-demo    # Run the 2D showcase
 cargo xtask example scene3d    # Run the split-screen Cook-Torrance example
 cargo xtask example gltf3d     # Run the textured 3D example
 cargo xtask example skinning3d # Run the GPU skeletal-deformation example
-cargo xtask example animated3d # Run decoded glTF node animation
+cargo xtask example animated3d # Run the CC0 animated and lit glTF hero
 cargo xtask example morph3d    # Run decoded glTF morph-weight animation
 cargo xtask bench meshshadows  # Measure the optional mesh-shadow lane
 cargo xtask bench meshskinning # Measure the optional mesh-skinning lane

@@ -256,7 +256,9 @@ Opaque and transparent metallic-roughness meshes use the same Cook-Torrance
 direct-light function. Opaque meshes reconstruct world position from the
 geometry depth target; transparent meshes already carry it from the vertex
 stage. Roughness uses GGX, visibility uses Smith-Schlick, and Fresnel uses the
-Schlick approximation.
+Schlick approximation. Sprite materials keep Lambert diffuse lighting: their
+shape normals and one scalar parameter do not define a metallic-roughness PBR
+surface, and the cheaper term stays isolated from every mesh shader variant.
 
 ## Optional mesh shadows
 
@@ -419,7 +421,8 @@ Call `instance:update(dt)` from a system to advance playback, or
 reuses its tables, updates bound `Transform3D` components, and stages complete
 joint palettes without submitting a command buffer. The `Bounds3D` component
 is still caller-owned and must enclose every pose. Run
-`cargo xtask example animated3d` for the complete worker-to-GPU path and
+`cargo xtask example animated3d` to see a CC0 character cycle skeletal clips
+under a shadowed Cook-Torrance directional light, and run
 `cargo xtask bench modelanimation` for CPU sampling cost and heap growth.
 
 ## Game modules

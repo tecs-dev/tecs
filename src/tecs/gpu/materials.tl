@@ -75,8 +75,9 @@ unoccluded, medium roughness, and non-metallic.
 Ambient occlusion multiplies ambient lighting only. A point light is a known
 directional contribution and keeps its own brightness; shadow components
 control whether that light reaches a fragment. Roughness and metallic are
-stored in the G-buffer for the physically based light term. The current Lambert
-term does not consume them yet.
+stored in the shared G-buffer. Metallic-roughness mesh pixels consume them
+through Cook-Torrance. Sprite pixels intentionally keep Lambert diffuse
+lighting and therefore ignore those two channels.
 
 ```glsl
 MaterialOutput material(MaterialInput frag) {

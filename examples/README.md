@@ -28,9 +28,10 @@ lane in one small example.
 directly. It isolates the optional GPU vertex-deformation path from file
 loading and clip sampling.
 
-`animated3d.tl` loads a skinned glTF clip, creates an independently posed model
-instance, binds its primitive to an ECS entity, and samples the clip into both
-the entity transform and the instance-owned GPU palette.
+`animated3d.tl` loads Robin Lamb's CC0 low-poly hero, creates an independently
+posed model instance, and cycles authored skeletal clips under a shadowed
+Cook-Torrance directional light. It demonstrates public glTF loading, PBR
+materials, animation sampling, GPU skinning, and lighting in one scene.
 
 `morph3d.tl` loads a glTF morph target and weight animation, then samples it
 into an instance-owned GPU weight vector. Geometry and clip data remain shared;

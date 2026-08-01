@@ -90,7 +90,12 @@ ecs.newComponent({
         if view.enabled == nil then
             view.enabled = true
         end
-        if view.x < 0.0 or view.y < 0.0 or view.width <= 0.0 or view.height <= 0.0 or view.x + view.width > 1.0
+        if
+            view.x < 0.0
+            or view.y < 0.0
+            or view.width <= 0.0
+            or view.height <= 0.0
+            or view.x + view.width > 1.0
             or view.y + view.height > 1.0
         then
             error("tecs: View viewport must be positive and contained within the frame", 3)

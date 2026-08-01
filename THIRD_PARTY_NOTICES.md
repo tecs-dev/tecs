@@ -103,6 +103,14 @@ was sourced, is `assets/fonts/JetBrainsMono-NOTICE.md`. The sprite benchmark
 also retains a derived atlas under `assets/bench/sprites.png`. These are
 installed with the assets, so a package carries them.
 
+### Animated low-poly hero
+
+`assets/models/hero.glb` is adapted from Robin Lamb's "Animated Low Poly Hero
+with Sword and Shield" pack. The model, rig, and animation clips are dedicated
+to the public domain under CC0 1.0 Universal. The source, original archive
+checksum, and exact compatibility edit are recorded in
+`assets/models/hero-NOTICE.md`.
+
 ### Jersey 15
 
 `docs/public/fonts/jersey-15` carries the Latin and Latin-extended WOFF2
