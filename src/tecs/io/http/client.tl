@@ -26,8 +26,6 @@ local stream <const> = require("tecs.io.stream")
 local clients <const> = require("tecs.io.http.clients")
 local uri <const> = require("tecs.io.uri")
 local type iotypes = require("tecs.io.types")
-local type coretypes = require("tecs.types")
-local type Closeable = coretypes.Closeable
 local type URI = uri.URI
 
 loader.declare("http")
@@ -165,7 +163,7 @@ local record client
     end
 
     --- A reqwest connection pool and `Future.Source`.
-    record Client is Closeable
+    record Client
         --- Maximum duration of one blocking future-wait slice.
         sliceMs: number
         --- Default budget for a future wait without an explicit timeout.

@@ -581,6 +581,57 @@ local function bufferedSeekableWriter(
         at = at + #piece
         return true
     end
+    writer.writeFrom = function(
+        _self: Writer, sourceBuffer: IOBuffer, offset?: integer, count?: integer
+    ): integer, string
+        if closed then
+            return nil, "the writer is closed"
+        end
+        offset = offset or 0
+        local length <const> = sourceBuffer:length()
+        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 or offset > length then
+            error("tecs: Writer:writeFrom offset is outside the buffer", 2)
+        end
+        if count == nil then
+            count = length - offset
+        elseif type(count) ~= "number" or count ~= floor(count) or count < 0 or count > length - offset then
+            error("tecs: Writer:writeFrom count is outside the buffer", 2)
+        end
+        if count == 0 then
+            return 0
+        end
+        local output <const>, previousLength = buffer.prepareWrite(bytes, at, count)
+        ffi.copy(output as ffi.CData, (sourceBuffer:getFFIPointer() + offset) as ffi.CData, count)
+        buffer.commitWrite(bytes, at, count, previousLength)
+        at = at + count
+        return count
+    end
+    writer.writeView = function(_self: Writer, sourceView: ByteView, offset?: integer, count?: integer): integer, string
+        if closed then
+            return nil, "the writer is closed"
+        end
+        if sourceView == nil or sourceView:isReleased() then
+            error("tecs: Writer:writeView needs an open io.ByteView", 2)
+        end
+        offset = offset or 0
+        local length <const> = sourceView:length()
+        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 or offset > length then
+            error("tecs: Writer:writeView offset is outside the view", 2)
+        end
+        if count == nil then
+            count = length - offset
+        elseif type(count) ~= "number" or count ~= floor(count) or count < 0 or count > length - offset then
+            error("tecs: Writer:writeView count is outside the view", 2)
+        end
+        if count == 0 then
+            return 0
+        end
+        local output <const>, previousLength = buffer.prepareWrite(bytes, at, count)
+        ffi.copy(output as ffi.CData, (sourceView:getFFIPointer() + offset) as ffi.CData, count)
+        buffer.commitWrite(bytes, at, count, previousLength)
+        at = at + count
+        return count
+    end
     writer.flush = function(_self: Writer): boolean, string
         if closed then
             return false, "the writer is closed"

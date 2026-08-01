@@ -111,7 +111,6 @@ local filters <const> = require("tecs.io.filters")
 local pump <const> = require("tecs.io.pump")
 local stream <const> = require("tecs.io.stream")
 local type types = require("tecs.io.types")
-local type coretypes = require("tecs.types")
 local type IOBuffer = types.Buffer
 
 -- Type-only, so nothing loads here and HTTP is not initialized by a program
@@ -129,7 +128,6 @@ local type watcher = require("tecs.io.watcher")
 
 local type FutureType<T> = Future<T>
 local type Source = Future.Source
-local type Closeable = coretypes.Closeable
 
 local C <const> = binding.C
 local floor <const> = math.floor
@@ -428,7 +426,7 @@ local record binaryIO
     ): T
 
     --- An `Address` owns one resolved network address.
-    record Address is Closeable
+    record Address
         --- Read-only. Networking sets `host` at resolution or peer lookup. It
         --- contains the requested hostname or numeric peer address.
         host: string
@@ -447,7 +445,7 @@ local record binaryIO
     end
 
     --- A `TCPSocket` owns one connected TCP byte stream.
-    record TCPSocket is Closeable
+    record TCPSocket
         _handle: loader.CPtr
         _buffer: loader.CArray
         _closed: boolean
@@ -562,7 +560,7 @@ local record binaryIO
     end
 
     --- A `TCPListener` listens for TCP clients.
-    record TCPListener is Closeable
+    record TCPListener
         --- Read-only. Networking sets `port` from the value passed to `listen`
         --- and never changes it. Zero remains zero.
         port: integer
@@ -597,7 +595,7 @@ local record binaryIO
     end
 
     --- A `UDPPacket` owns one received UDP datagram and its source address.
-    record UDPPacket is Closeable
+    record UDPPacket
         --- Read-only. Networking sets `address` when receiving the packet. The
         --- packet owns it until `close`.
         address: Address
@@ -616,7 +614,7 @@ local record binaryIO
     end
 
     --- A `UDPSocket` sends and receives UDP packets.
-    record UDPSocket is Closeable
+    record UDPSocket
         --- Read-only. Networking sets `port` from the value passed to `bind`
         --- and never changes it. Zero remains zero.
         port: integer

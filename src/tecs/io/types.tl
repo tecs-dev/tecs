@@ -8,17 +8,15 @@ requiring their public parent.
 ]=]
 
 local type loader = require("tecs.ffi.loader")
-local type coretypes = require("tecs.types")
 local type Future = require("tecs.Future")
 local type pathModule = require("tecs.io.path")
-local type Closeable = coretypes.Closeable
 
 --- An immutable, zero-copy range retained from a [`Buffer`](tealdoc:tecs.io.Buffer).
 ---
 --- A view is a snapshot: changing its source buffer first detaches that
 --- buffer's allocation, so the view keeps seeing the bytes it was created
 --- from. `getString` is the explicit copying boundary.
-local interface ByteView is Closeable
+local interface ByteView
     --- Creates a replayable read-only stream retaining this view.
     ---
     --- The stream retains its own view, so the caller may close this view
@@ -82,7 +80,7 @@ local interface ByteView is Closeable
 end
 
 --- An exclusive, zero-copy writable range reserved from a [`Buffer`](tealdoc:tecs.io.Buffer).
-local interface WriteRange is Closeable
+local interface WriteRange
     --- Borrows the reserved range's writable address.
     ---
     --- @param self The open range whose storage to borrow.
@@ -114,7 +112,7 @@ end
 --- Its logical length is separate from capacity. Offsets are zero-based, and
 --- `clear` retains the allocation for reuse. Readers retain immutable
 --- snapshots independently. Writers borrow the buffer and never close it.
-local interface Buffer is Closeable
+local interface Buffer
     type WriteRange = WriteRange
 
     --- Creates a stream sharing this buffer.
@@ -245,7 +243,7 @@ end
 --- borrows externally owned storage. A consumer reads forward until `read`
 --- returns an empty string or `readInto` returns zero, then closes the reader.
 --- A failure returns nil and a reason instead of raising.
-local interface Reader is Closeable
+local interface Reader
     --- Caller-writable. Supplies the operation that reads the next bytes.
     ---
     --- @param self The reader whose cursor advances.
@@ -275,7 +273,10 @@ local interface Reader is Closeable
 
     --- Caller-writable. Supplies the operation that releases the source.
     ---
-    --- Closing more than once must be a no-op.
+    --- Closing more than once must be a no-op. Closing a reader only gives up
+    --- local read-side state, so it does not flush, validate completion, or
+    --- report a source failure. Failures discovered while consuming bytes are
+    --- returned by `read` and `readInto` instead.
     ---
     --- @param self The reader to close.
     close: function(self: Reader)
@@ -331,7 +332,7 @@ end
 --- `write` succeeds. The close can report a delayed flush failure that no
 --- individual write observed. The constructor documents whether closing the
 --- writer also closes or merely releases its destination.
-local interface Writer is Closeable
+local interface Writer
     --- Caller-writable. Supplies the operation that writes the next bytes.
     ---
     --- @param self The writer receiving the bytes.
@@ -378,7 +379,10 @@ local interface Writer is Closeable
 
     --- Caller-writable. Supplies the operation that finishes the destination.
     ---
-    --- Closing more than once must succeed.
+    --- Closing more than once must succeed. Unlike `Reader:close`, this
+    --- operation reports delayed flush or finalization failures because a
+    --- successful earlier write does not prove that its bytes reached the
+    --- destination.
     ---
     --- @param self The writer to finish and close.
     --- @return Returns whether buffered bytes reached the destination and its
@@ -398,6 +402,10 @@ end
 --- destination when it starts at or reaches the end.
 local interface SeekableWriter is Writer
     --- Returns the destination's current byte length.
+    ---
+    --- The result is the writer's logical length, including every write the
+    --- writer has accepted even when those bytes have not been flushed to the
+    --- underlying destination yet.
     ---
     --- @param self The open writer to inspect.
     --- @return Returns the current byte length.
@@ -432,7 +440,7 @@ end
 --- A stream carries no cursor. `newReader` and `newWriter` create directional
 --- endpoints that own their cursor and must be closed. Metadata is queried
 --- through methods because a file may change between calls.
-local interface Stream is Closeable
+local interface Stream
     --- Returns the byte length when it is known.
     ---
     --- @param self The descriptor to inspect.
@@ -460,6 +468,11 @@ local interface Stream is Closeable
 
     --- Returns whether each reader starts from the beginning.
     ---
+    --- True means the descriptor can open independent readers repeatedly.
+    --- False means opening an endpoint or running a whole-source operation may
+    --- claim the descriptor permanently; `newReader` reports when it can no
+    --- longer open one.
+    ---
     --- @param self The descriptor to inspect.
     --- @return Returns true when opening a later reader replays all bytes.
     isReplayable: function(self: Stream): boolean
@@ -485,6 +498,9 @@ local interface ReadableStream is Stream
 
     --- Reads the complete source into a Lua string.
     ---
+    --- The operation opens, consumes, and closes one reader. On a
+    --- non-replayable stream, this claims its one endpoint.
+    ---
     --- @param self The readable descriptor.
     --- @param maxBytes The caller supplies a non-negative limit or omits it
     ---     for no explicit limit.
@@ -497,6 +513,8 @@ local interface ReadableStream is Stream
     --- A stream created by `Buffer:newStream` returns that same borrowed
     --- buffer without copying and does not transfer ownership. Other streams
     --- return a newly allocated buffer owned by the caller.
+    --- The operation opens, consumes, and closes one reader when it must copy.
+    --- On a non-replayable stream, this claims its one endpoint.
     --- @param self The readable descriptor.
     --- @param maxBytes The caller supplies a non-negative limit or omits it
     ---     for no explicit limit.
@@ -505,6 +523,9 @@ local interface ReadableStream is Stream
     transferToBuffer: function(self: ReadableStream, maxBytes?: integer): Buffer, string
 
     --- Copies every source byte into `destination`.
+    ---
+    --- The operation opens and closes one source reader and one destination
+    --- writer. Either non-replayable descriptor is claimed by the call.
     ---
     --- @param self The readable descriptor.
     --- @param destination The caller supplies an available writable stream.
@@ -515,6 +536,9 @@ local interface ReadableStream is Stream
 
     --- Copies every source byte into a file.
     ---
+    --- The operation opens and closes one source reader. On a non-replayable
+    --- stream, this claims its one endpoint.
+    ---
     --- @param self The readable descriptor.
     --- @param path The caller supplies the destination path to replace.
     --- @return Returns the bytes written.
@@ -522,6 +546,9 @@ local interface ReadableStream is Stream
     transferToFile: function(self: ReadableStream, path: string): integer, string
 
     --- Reads and discards every source byte.
+    ---
+    --- The operation opens, consumes, and closes one reader. On a
+    --- non-replayable stream, this claims its one endpoint.
     ---
     --- @param self The readable descriptor.
     --- @return Returns the bytes discarded.
@@ -541,6 +568,9 @@ local interface WritableStream is Stream
 
     --- Replaces the destination with a Lua string.
     ---
+    --- The operation opens, finishes, and closes one writer. On a
+    --- non-replayable stream, this claims its one endpoint.
+    ---
     --- @param self The writable descriptor.
     --- @param bytes The caller supplies the complete binary contents.
     --- @return Returns the bytes written.
@@ -548,6 +578,9 @@ local interface WritableStream is Stream
     writeAll: function(self: WritableStream, bytes: string): integer, string
 
     --- Replaces the destination with a buffer range.
+    ---
+    --- The operation opens, finishes, and closes one writer. On a
+    --- non-replayable stream, this claims its one endpoint.
     ---
     --- @param self The writable descriptor.
     --- @param buffer The caller keeps the source buffer open and unchanged
@@ -561,6 +594,9 @@ local interface WritableStream is Stream
     writeBuffer: function(self: WritableStream, buffer: Buffer, offset?: integer, count?: integer): integer, string
 
     --- Replaces the destination with a retained immutable byte range.
+    ---
+    --- The operation opens, finishes, and closes one writer. On a
+    --- non-replayable stream, this claims its one endpoint.
     ---
     --- The caller keeps `view` open through the call.
     --- @param self The writable descriptor.
@@ -801,7 +837,7 @@ end
 --- The process owns every non-nil endpoint. Closing an endpoint closes only
 --- that pipe; closing the process closes all three, forcibly terminates and
 --- reaps a live child, and settles `finished`.
-local interface Process is Closeable
+local interface Process
     --- Read-only. Reports the operating-system process identifier.
     pid: integer
 

@@ -25,6 +25,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local sdl = require("tecs.ffi.sdl3")
 local adapter = require("tecs.platform.adapter")
 local content = require("tecs.platform.content")
+local tecsIO = require("tecs.io")
 local files = require("tecs.io.files")
 local events = require("tecs.platform.events")
 local newInput = require("tecs.input").newInput
@@ -386,10 +387,16 @@ describe("platform contract", function()
 
         local path = "/dev/content/levels/1.json"
         local writer = assert(files.openSeekableWrite(path, "update"))
+        local source = tecsIO.newBuffer("xxkeepyy")
+        local view = source:view(2, 4)
 
         assert.are.equal(15, writer:size())
         assert.are.equal(9, writer:seek("end", -6))
-        assert.is_true(writer:write("keep"))
+        assert.are.equal(4, writer:writeFrom(source, 2, 4))
+        assert.are.equal(15, writer:size())
+        assert.are.equal(9, writer:seek("start", 9))
+        assert.are.equal(4, writer:writeView(view))
+        assert.are.equal(15, writer:size())
 
         assert.is_true(writer:close())
 
@@ -399,6 +406,9 @@ describe("platform contract", function()
             "write " .. path,
             "read " .. path,
         }, platform.storage.calls)
+
+        view:close()
+        source:close()
     end)
 
     it("records what the platform opened, so a watcher sees it", function()
