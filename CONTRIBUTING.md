@@ -91,7 +91,7 @@ AddressSanitizer and UndefinedBehaviorSanitizer under it. Run the host through
 them, which means the demo or any benchmark:
 
 ```bash
-cargo xtask run --preset macos-arm64-sanitize
+cargo xtask example demo --preset macos-arm64-sanitize
 cargo xtask bench physics --preset macos-arm64-sanitize
 ```
 

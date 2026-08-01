@@ -38,19 +38,12 @@ enum Task {
         #[arg(long)]
         preset: Option<Preset>,
     },
-    /// Type-check engine, CLI, benchmark, and demo Teal sources.
+    /// Type-check engine, CLI, benchmark, and example Teal sources.
     Check,
     /// Run the Rust workspace tests and complete spec suite.
     Test {
         #[arg(long)]
         preset: Option<Preset>,
-    },
-    /// Run the demo through the native SDL host.
-    Run {
-        #[arg(long)]
-        preset: Option<Preset>,
-        #[arg(last = true)]
-        arguments: Vec<OsString>,
     },
     /// Run a named example through the native SDL host.
     Example {
@@ -255,9 +248,6 @@ fn main() -> Result<()> {
         Task::Check => product::check(&root)?,
         Task::Test { preset } => {
             product::test(&root, preset.map_or_else(host_default, Ok)?)?;
-        }
-        Task::Run { preset, arguments } => {
-            product::run_demo(&root, preset.map_or_else(host_default, Ok)?, &arguments)?;
         }
         Task::Example {
             name,

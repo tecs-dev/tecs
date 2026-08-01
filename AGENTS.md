@@ -29,7 +29,7 @@ cargo xtask test           # Run the spec suite, headless specs first
 cargo xtask check          # Type-check Teal sources
 cargo xtask format         # Format sources in place
 cargo xtask format-check   # Report unformatted sources
-cargo xtask run            # Run the demo
+cargo xtask example demo   # Run the engine showcase
 cargo xtask bench shapes   # Run a native-host benchmark
 cargo xtask abi-check      # Verify generated cdefs against the C ABI
 cargo xtask shaders        # Build the shader pack
@@ -61,7 +61,7 @@ dependencies from the system, which is convenient and not shippable. A packaged 
 from source. `cargo xtask check-package` is the gate on the difference, and only a packaged install can pass it.
 
 `macos-arm64-sanitize` and `linux-x64-sanitize` are development presets with AddressSanitizer and
-UndefinedBehaviorSanitizer under the C. Run the host through them with `cargo xtask run --preset <name>` or a
+UndefinedBehaviorSanitizer under the C. Run the host through them with `cargo xtask example demo --preset <name>` or a
 benchmark; `cargo xtask test` cannot use them, and CONTRIBUTING.md says why and what to do instead.
 
 ## Project Structure
@@ -264,7 +264,7 @@ alignment and every field offset. A static assert only checks a header against i
   `cargo xtask test`, with headless specs first in a fresh Busted process.
 - Teal specs are compiled by `scripts/compile_specs.lua`, which emits code even when a file does not type-check.
   That is deliberate: their type errors are in the test code, and refusing to build them would take real coverage
-  away over that. `cargo xtask check` therefore covers `src`, `main.tl` and `bench`.
+  away over that. `cargo xtask check` therefore covers `src`, `examples` and `bench`.
 
 ### Documentation
 

@@ -3,8 +3,12 @@
 Each file is a complete application. Run one from the repository root with:
 
 ```bash
+cargo xtask example demo
 cargo xtask example scene3d
 ```
+
+`demo.tl` is the complete engine showcase. It exercises the sprite renderer,
+lighting, text, UI, input, animation, audio, and debug tools together.
 
 `scene3d.tl` demonstrates the 3D scene contract that exists before mesh
 rendering. It creates a mesh entity and projects its bounds through `Camera3D`

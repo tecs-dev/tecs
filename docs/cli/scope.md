@@ -7,8 +7,9 @@ outline: deep
 
 ## Project and engine builds
 
-Cargo builds the engine and the CLI. The CLI builds games. `cargo xtask run`
-runs this repository's demo; `tecs run` builds and runs a project.
+Cargo builds the engine and the CLI. The CLI builds games.
+`cargo xtask example demo` runs this repository's showcase; `tecs run` builds
+and runs a project.
 
 The CLI builds for its host platform. It does not cross-compile or package
 releases.

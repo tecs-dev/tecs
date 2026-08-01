@@ -1075,7 +1075,7 @@ asynchronously loaded image, nested clipping, wheel scrolling, pointer
 capture, bubbling events, and keyboard navigation:
 
 ```bash
-cargo xtask run
+cargo xtask example demo
 ```
 
 <img src="/images/ui-example.png" alt="The standalone retained UI example with a centered panel and scrollable controls" />

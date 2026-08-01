@@ -180,7 +180,6 @@ pub fn check(root: &Path) -> Result<()> {
     sources.extend(teal_sources(&root.join("bench"))?);
     sources.extend(teal_sources(&root.join("examples"))?);
     sources.extend(cli_sources(&root.join("cli"))?);
-    sources.push(root.join("main.tl"));
     let mut command = Command::new(root.join("vendor/bin/tl"));
     command
         .arg("check")
@@ -231,20 +230,6 @@ pub fn run_example(root: &Path, preset: Preset, name: &str, arguments: &[OsStrin
         .current_dir(root);
     apply_development_environment(&mut command, &paths);
     run(&mut command, &format!("{name} example"))
-}
-
-pub fn run_demo(root: &Path, preset: Preset, arguments: &[OsString]) -> Result<()> {
-    let executable = build(root, preset)?;
-    let paths = Paths::new(root, preset);
-    compile_teal_file(root, &paths, &root.join("main.tl"), "lua/main.lua")?;
-    let mut command = Command::new(executable);
-    command
-        .arg("--entry")
-        .arg(paths.lua.join("main.lua"))
-        .args(arguments)
-        .current_dir(root);
-    apply_development_environment(&mut command, &paths);
-    run(&mut command, "Tecs demo")
 }
 
 pub fn test(root: &Path, preset: Preset) -> Result<()> {
@@ -341,7 +326,7 @@ pub fn install_package(root: &Path, preset: Preset) -> Result<PathBuf> {
     }
     build(root, preset)?;
     let paths = Paths::new(root, preset);
-    compile_teal_file(root, &paths, &root.join("main.tl"), "lua/main.lua")?;
+    compile_teal_file(root, &paths, &root.join("examples/demo.tl"), "lua/main.lua")?;
     let shader_host = crate::presets::host_default()?;
     shaders(root, shader_host)?;
     let host_paths = Paths::new(root, shader_host);

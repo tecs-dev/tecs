@@ -33,7 +33,7 @@ cd tecs
 cargo xtask deps
 cargo xtask build
 cargo xtask test
-cargo xtask run
+cargo xtask example demo
 ```
 
 `cargo xtask deps` installs system development dependencies. The repository
