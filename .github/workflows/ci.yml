@@ -28,6 +28,7 @@ jobs:
             id-token: write
         steps:
             - uses: actions/checkout@v4
+            - run: brew update
             - run: cargo xtask deps
             - run: cargo xtask check
             - run: cargo xtask format-check
