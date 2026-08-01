@@ -31,7 +31,7 @@ Every operation runs synchronously. Send large tree walks to
 
 Every operation that accepts a filesystem location accepts either a string or
 an immutable [`Path`](tealdoc:tecs.io.path.Path). String results remain useful
-at Lua and platform boundaries; wrap one with `tecs.io.newPath` when the next
+at Lua and platform boundaries; wrap one with `tecs.io.path.newPath` when the next
 operation benefits from component-aware manipulation.
 
 `tecs.io.watcher` polls paths recorded by `read` and the built-in asset
@@ -87,10 +87,6 @@ local record files
     --- [`ByteView`](/modules/io/#tecs.io.ByteView).
     type ByteInput = storagebackend.ByteInput
 
-    --- [`SeekOrigin`](tealdoc:tecs.io.SeekOrigin) selects the reference point
-    --- for a seek.
-    type SeekOrigin = types.SeekOrigin
-
     --- A [`SeekableReader`](tealdoc:tecs.io.SeekableReader) reads a file
     --- through a repositionable cursor.
     type SeekableReader = types.SeekableReader
@@ -113,7 +109,7 @@ local type LineIterator = files.LineIterator
 local type Writer = types.Writer
 local type SeekableWriter = types.SeekableWriter
 local type Reader = types.Reader
-local type SeekOrigin = types.SeekOrigin
+local type SeekOrigin = types.Seekable.Origin
 local type SeekableReader = types.SeekableReader
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView

@@ -7,7 +7,7 @@ HTTP client separately restricts the schemes it can use. Components are
 parsed once and copied into Lua, so accessors do not reparse or allocate:
 
 ```teal
-local endpoint <const> = tecs.io.newURI("https://api.example.com/v1")
+local endpoint <const> = tecs.io.uri.newURI("https://api.example.com/v1")
 local scores <const> = endpoint:concatPath("scores"):withQuery("limit=20")
 
 print(scores:scheme(), scores:host(), scores:path())
@@ -16,7 +16,7 @@ print(scores)
 
 URI values are immutable. Every `with` method and `concatPath` returns a new
 value and leaves its receiver unchanged. Supplying a component record to
-`tecs.io.newURI` constructs the complete initial value without intermediate
+`tecs.io.uri.newURI` constructs the complete initial value without intermediate
 copies. A modifier clones the retained parsed value and validates only the
 replacement component; supplying the existing value returns the receiver.
 `withEndpoint` replaces the scheme,

@@ -85,7 +85,7 @@ local max <const> = math.max
 
 local type Reader = types.Reader
 local type SeekableReader = types.SeekableReader
-local type SeekOrigin = types.SeekOrigin
+local type SeekOrigin = types.Seekable.Origin
 local type Writer = types.Writer
 local type SeekableWriter = types.SeekableWriter
 local type IOBuffer = types.Buffer

@@ -1,7 +1,7 @@
 -- Checked examples attached to the tecs.io.uri reference.
 
--- #region tecs.io.newURI
-local endpoint, reason = tecs.io.newURI("https://user@example.com:8443/assets/list.json?page=2")
+-- #region tecs.io.uri.newURI
+local endpoint, reason = tecs.io.uri.newURI("https://user@example.com:8443/assets/list.json?page=2")
 if endpoint == nil then
     error(reason)
 end
@@ -11,10 +11,10 @@ assert(endpoint:host() == "example.com")
 assert(endpoint:port() == 8443)
 assert(endpoint:path() == "/assets/list.json")
 assert(endpoint:query() == "page=2")
--- #endregion tecs.io.newURI
+-- #endregion tecs.io.uri.newURI
 
 -- #region tecs.io.uri.Components
-local endpoint, reason = tecs.io.newURI({
+local endpoint, reason = tecs.io.uri.newURI({
     scheme = "https",
     userInfo = "builder:secret",
     host = "api.example.com",
@@ -30,7 +30,7 @@ assert(endpoint:toString() == "https://builder:secret@api.example.com:8443/v2/sc
 -- #endregion tecs.io.uri.Components
 
 -- #region tecs.io.uri.URI.withQuery
-local scores, reason = tecs.io.newURI("https://example.com/scores")
+local scores, reason = tecs.io.uri.newURI("https://example.com/scores")
 if scores == nil then
     error(reason)
 end
@@ -41,7 +41,7 @@ assert(firstPage:query() == "limit=20&offset=0")
 -- #endregion tecs.io.uri.URI.withQuery
 
 -- #region tecs.io.uri.URI.concatPath
-local api, reason = tecs.io.newURI("https://example.com/v1/")
+local api, reason = tecs.io.uri.newURI("https://example.com/v1/")
 if api == nil then
     error(reason)
 end
@@ -51,11 +51,11 @@ assert(manifest:path() == "/v1/games/42/manifest.json")
 -- #endregion tecs.io.uri.URI.concatPath
 
 -- #region tecs.io.uri.URI.withEndpoint
-local resource, resourceReason = tecs.io.newURI("smithy:/games/42/scores?limit=10")
+local resource, resourceReason = tecs.io.uri.newURI("smithy:/games/42/scores?limit=10")
 if resource == nil then
     error(resourceReason)
 end
-local endpoint, endpointReason = tecs.io.newURI("https://api.example.com/v2")
+local endpoint, endpointReason = tecs.io.uri.newURI("https://api.example.com/v2")
 if endpoint == nil then
     error(endpointReason)
 end
@@ -65,7 +65,7 @@ assert(request:toString() == "https://api.example.com/v2/games/42/scores?limit=1
 -- #endregion tecs.io.uri.URI.withEndpoint
 
 -- #region tecs.io.uri.URI.resolve
-local page, reason = tecs.io.newURI("https://example.com/games/current/")
+local page, reason = tecs.io.uri.newURI("https://example.com/games/current/")
 if page == nil then
     error(reason)
 end

@@ -2,7 +2,7 @@
 Asynchronous HTTP and HTTPS.
 
 ```teal no-format
-local endpoint <const> = tecs.io.newURI(
+local endpoint <const> = tecs.io.uri.newURI(
     "https://example.com/manifest.json"
 )
 tecs.io.http.newClient({userAgent = "mygame/1.0"})

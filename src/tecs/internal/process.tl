@@ -3,10 +3,10 @@ Implements caller-owned child processes and their nonblocking SDL pipes.
 
 SDL creates, reads, writes, polls, terminates, and reaps every child. No Lua
 callback crosses the native boundary, and no worker state copies accumulated
-output back into this one. The public declarations live in `tecs.io.types` so
-this implementation can sit below the public process module without a require
-cycle. `tecs.io.process` exposes only the constructor; the runtime lifecycle
-hooks remain internal here.
+output back into this one. The public declarations live in
+`tecs.io.processtypes` so this implementation can sit below the public process
+module without a require cycle. `tecs.io.process` exposes only the constructor;
+the runtime lifecycle hooks remain internal here.
 ]=]
 
 local ffi <const> = require("ffi")
@@ -17,6 +17,7 @@ local runtime <const> = require("tecs.internal.runtime")
 local time <const> = require("tecs.platform.time")
 local buffer <const> = require("tecs.io.buffer")
 local type types = require("tecs.io.types")
+local type processtypes = require("tecs.io.processtypes")
 local type pathModule = require("tecs.io.path")
 
 local C <const> = sdl.C
@@ -26,13 +27,13 @@ local min <const> = math.min
 
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
-local type ProcessOptions = types.ProcessOptions
-local type CommunicateOptions = types.CommunicateOptions
-local type ProcessExit = types.ProcessExit
-local type ProcessResult = types.ProcessResult
-local type ProcessReader = types.ProcessReader
-local type ProcessWriter = types.ProcessWriter
-local type Process = types.Process
+local type ProcessOptions = processtypes.ProcessOptions
+local type CommunicateOptions = processtypes.CommunicateOptions
+local type ProcessExit = processtypes.ProcessExit
+local type ProcessResult = processtypes.ProcessResult
+local type ProcessReader = processtypes.ProcessReader
+local type ProcessWriter = processtypes.ProcessWriter
+local type Process = processtypes.Process
 local type FutureExit = Future<ProcessExit>
 local type Source = Future.Source
 
@@ -701,19 +702,19 @@ function ProcessImpl:communicate(options?: CommunicateOptions): ProcessResult, s
     return answer as ProcessResult
 end
 
-local INPUT_MODES <const>: {types.ProcessInputMode: loader.CValue} = {
+local INPUT_MODES <const>: {processtypes.ProcessInputMode: loader.CValue} = {
     pipe = C.SDL_PROCESS_STDIO_APP,
     inherit = C.SDL_PROCESS_STDIO_INHERITED,
     null = C.SDL_PROCESS_STDIO_NULL,
 }
 
-local OUTPUT_MODES <const>: {types.ProcessOutputMode: loader.CValue} = {
+local OUTPUT_MODES <const>: {processtypes.ProcessOutputMode: loader.CValue} = {
     pipe = C.SDL_PROCESS_STDIO_APP,
     inherit = C.SDL_PROCESS_STDIO_INHERITED,
     null = C.SDL_PROCESS_STDIO_NULL,
 }
 
-local ERROR_MODES <const>: {types.ProcessErrorMode: loader.CValue} = {
+local ERROR_MODES <const>: {processtypes.ProcessErrorMode: loader.CValue} = {
     pipe = C.SDL_PROCESS_STDIO_APP,
     inherit = C.SDL_PROCESS_STDIO_INHERITED,
     null = C.SDL_PROCESS_STDIO_NULL,

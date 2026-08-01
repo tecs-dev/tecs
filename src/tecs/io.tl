@@ -89,8 +89,7 @@ handle as a last resort, but cannot report a close error. Closing is
 idempotent; using a closed value returns a failure.
 
 Naming `tecs.io` loads none of its children. Reading `files`, `http`, `mcp`,
-`path`, `process`, `uri`, or `watcher` loads only that child. Calling `newPath`
-or `newURI` loads the same module as reading its corresponding child.
+`path`, `process`, `uri`, or `watcher` loads only that child.
 ]=]
 
 -- Implementation details:
@@ -111,7 +110,9 @@ local filters <const> = require("tecs.io.filters")
 local pump <const> = require("tecs.io.pump")
 local stream <const> = require("tecs.io.stream")
 local type types = require("tecs.io.types")
+local type coretypes = require("tecs.types")
 local type IOBuffer = types.Buffer
+local type Closeable = coretypes.Closeable
 
 -- Type-only, so nothing loads here and HTTP is not initialized by a program
 -- that only opens a socket: the field below declares the name and `tecs.init`
@@ -170,35 +171,12 @@ local record binaryIO
     --- notifications.
     watcher: watcher
 
-    --- Creates an immutable platform-native filesystem path.
-    ---
-    --- Construction validates UTF-8 and NUL bytes but does not access the
-    --- filesystem. Path operations live on
-    --- [`Path`](tealdoc:tecs.io.path.Path).
-    --- @param first The caller supplies the first platform-native path
-    ---     component or complete path.
-    --- @param ... The caller supplies additional path components in order.
-    --- @return Returns a new immutable path.
-    newPath: function(first: string, ...: string): path.Path
-
-    --- Parses and normalizes an absolute URI.
-    ---
-    --- URI operations live on [`URI`](tealdoc:tecs.io.uri.URI). Protocols
-    --- separately restrict which schemes they accept.
-    --- A component record constructs the final value directly, without a
-    --- chain of intermediate immutable URI values.
-    --- @param value The caller supplies absolute UTF-8 text or URI components.
-    --- @return Returns a new immutable URI, or nil when the text is invalid or
-    ---     relative.
-    --- @return Returns the parser's reason when the first return is nil.
-    newURI: function(value: string | uri.Components): uri.URI, string
-
     --- A `Reader` supplies bytes in order and releases its owned state on `close`.
     type Reader = types.Reader
 
-    --- [`SeekOrigin`](tealdoc:tecs.io.SeekOrigin) selects the reference point
-    --- for a seekable reader.
-    type SeekOrigin = types.SeekOrigin
+    --- [`Seekable`](tealdoc:tecs.io.Seekable) supplies random-access cursor
+    --- operations shared by readers and writers.
+    type Seekable = types.Seekable
 
     --- A [`SeekableReader`](tealdoc:tecs.io.SeekableReader) supplies bytes
     --- through a repositionable cursor.
@@ -229,9 +207,6 @@ local record binaryIO
 
     --- A `ByteView` retains an immutable zero-copy range from a buffer.
     type ByteView = types.ByteView
-
-    --- A `WriteRange` reserves an exclusive zero-copy buffer range for a native writer.
-    type WriteRange = types.WriteRange
 
     --- Options control an incremental inflate reader.
     type InflateReaderOptions = types.InflateReaderOptions
@@ -306,10 +281,11 @@ local record binaryIO
     ---
     --- Readers open the current path through `tecs.io.files`; writers replace
     --- it. A descriptor keeps no open file between endpoints.
-    --- @param path The caller supplies the source or destination path.
+    --- @param path The caller supplies the source or destination as a string
+    ---     or [`Path`](tealdoc:tecs.io.path.Path).
     --- @param contentType The caller supplies optional media type metadata.
     --- @return Returns a readable and writable stream.
-    newFileStream: function(path: string, contentType?: string): types.ReadWriteStream
+    newFileStream: function(path: string | path.Path, contentType?: string): types.ReadWriteStream
 
     --- Creates a one-shot stream over a borrowed Lua file handle.
     ---
@@ -408,25 +384,9 @@ local record binaryIO
         destination: types.Writer | FILE, fromEncoding: string, toEncoding: string
     ): types.Writer
 
-    --- Creates a lazy metadata view over a stream.
-    ---
-    --- Nil inherits each value from `source`. The view retains and delegates
-    --- to the source, preserves its static and runtime directional interface,
-    --- and closes the source when it closes. If every supplied value already
-    --- matches, this returns `source` itself.
-    --- @param source The caller supplies any structural stream
-    ---     implementation.
-    --- @param contentType The caller overrides the media type or omits it.
-    --- @param contentLength The caller overrides the non-negative byte length
-    ---     or omits it.
-    --- @param isReplayable The caller overrides replayability or omits it.
-    --- @return Returns a metadata view with the same type as `source`.
-    newStreamWithMetadata: function<T is types.Stream>(
-        source: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
-    ): T
-
-    --- An `Address` owns one resolved network address.
-    record Address
+    --- An `Address` owns one resolved network address. Closing it releases the
+    --- address and remains safe to repeat.
+    record Address is Closeable
         --- Read-only. Networking sets `host` at resolution or peer lookup. It
         --- contains the requested hostname or numeric peer address.
         host: string
@@ -440,12 +400,12 @@ local record binaryIO
         ---
         --- @return Returns true after `close`.
         isClosed: function(self: Address): boolean
-        --- Releases the address. Safe to call repeatedly.
-        close: function(self: Address)
     end
 
-    --- A `TCPSocket` owns one connected TCP byte stream.
-    record TCPSocket
+    --- A `TCPSocket` owns one connected TCP byte stream. Closing it may
+    --- discard queued writes, so a caller drains delivery-sensitive output
+    --- first. Repeated closure remains safe.
+    record TCPSocket is Closeable
         _handle: loader.CPtr
         _buffer: loader.CArray
         _closed: boolean
@@ -554,13 +514,11 @@ local record binaryIO
         --- @return Returns the reason on failure. Timeout returns false without
         ---     a reason.
         wait: function(self: TCPSocket, timeoutMs?: integer): boolean, string
-        --- Releases the connection. `close` may discard queued writes, so call
-        --- `drain` first when delivery matters. Repeated calls remain safe.
-        close: function(self: TCPSocket)
     end
 
-    --- A `TCPListener` listens for TCP clients.
-    record TCPListener
+    --- A `TCPListener` listens for TCP clients. Closing it stops listening,
+    --- leaves accepted streams open, and remains safe to repeat.
+    record TCPListener is Closeable
         --- Read-only. Networking sets `port` from the value passed to `listen`
         --- and never changes it. Zero remains zero.
         port: integer
@@ -589,13 +547,12 @@ local record binaryIO
         --- @return Returns the reason on failure. Timeout returns false without
         ---     a reason.
         wait: function(self: TCPListener, timeoutMs?: integer): boolean, string
-        --- Stops listening and leaves accepted streams open. Repeated calls
-        --- remain safe.
-        close: function(self: TCPListener)
     end
 
     --- A `UDPPacket` owns one received UDP datagram and its source address.
-    record UDPPacket
+    --- Closing it releases both the address and byte buffer and remains safe
+    --- to repeat.
+    record UDPPacket is Closeable
         --- Read-only. Networking sets `address` when receiving the packet. The
         --- packet owns it until `close`.
         address: Address
@@ -608,13 +565,11 @@ local record binaryIO
         --- releases it.
         bytes: IOBuffer
 
-        --- Releases the packet's source address and byte buffer. Safe to call
-        --- repeatedly.
-        close: function(self: UDPPacket)
     end
 
-    --- A `UDPSocket` sends and receives UDP packets.
-    record UDPSocket
+    --- A `UDPSocket` sends and receives UDP packets. Closing it releases the
+    --- socket and remains safe to repeat.
+    record UDPSocket is Closeable
         --- Read-only. Networking sets `port` from the value passed to `bind`
         --- and never changes it. Zero remains zero.
         port: integer
@@ -650,8 +605,6 @@ local record binaryIO
         --- @return Returns the reason on failure. Timeout returns false without
         ---     a reason.
         wait: function(self: UDPSocket, timeoutMs?: integer): boolean, string
-        --- Releases the socket. Safe to call repeatedly.
-        close: function(self: UDPSocket)
     end
 
     --- Starts networking for this module. Safe to call repeatedly.
@@ -723,7 +676,6 @@ binaryIO.newStringStream = stream.newStringStream
 binaryIO.newByteStream = stream.newByteStream
 binaryIO.newFileStream = stream.newFileStream
 binaryIO.newHandleStream = stream.newHandleStream
-binaryIO.newStreamWithMetadata = stream.newStreamWithMetadata
 binaryIO.newInflateReader = filters.newInflateReader
 binaryIO.newDeflateWriter = filters.newDeflateWriter
 binaryIO.newBase64DecodeReader = filters.newBase64DecodeReader

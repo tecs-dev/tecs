@@ -6,6 +6,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local ffi = require("ffi")
 local tecs = require("tecs")
 local adapter = require("tecs.platform.adapter")
+local streamModule = require("tecs.io.stream")
 
 local ioModule = tecs.io
 local paths = {}
@@ -292,20 +293,21 @@ describe("tecs.io stream endpoints", function()
 
     it("keeps metadata lazy and preserves false replayability", function()
         local source = ioModule.newStringStream("four", "text/plain")
-        assert.is_nil(ioModule.withMetadata)
-        assert.is_true(rawequal(source, ioModule.newStreamWithMetadata(source)))
+        assert.is_nil(ioModule.newStreamWithMetadata)
+        assert.is_true(rawequal(source, source:withMetadata()))
 
-        local view = ioModule.newStreamWithMetadata(source, "custom/type", 9, false)
+        local view = source:withMetadata("custom/type", 9, false)
         assert.are.equal("custom/type", view:contentType())
         assert.are.equal(9, view:contentLength())
         assert.is_false(view:isReplayable())
         assert.is_function(view.newReader)
         assert.is_nil(view.newWriter)
+        assert.are.equal(10, view:withMetadata(nil, 10):contentLength())
 
         view:close()
         assert.is_nil(source:newReader())
         assert.has_error(function()
-            ioModule.newStreamWithMetadata({}, nil, 1)
+            source:withMetadata(nil, -1)
         end)
     end)
 
@@ -336,7 +338,7 @@ describe("tecs.io stream endpoints", function()
                 assert.is_true(rawequal(source, self))
             end,
         }
-        local view = ioModule.newStreamWithMetadata(source, "custom/type")
+        local view = streamModule.withMetadata(source, "custom/type")
         assert.is_nil(view.hasKnownLength)
         assert.are.equal("custom/type", view:contentType())
         assert.are.equal(4, view:contentLength())
@@ -365,14 +367,14 @@ describe("tecs.io stream endpoints", function()
             close = function() end,
         }
         assert.has_error(function()
-            ioModule.newStreamWithMetadata(source, "custom/type")
-        end, "tecs: io.newStreamWithMetadata claims ReadableStream without its methods")
+            streamModule.withMetadata(source, "custom/type")
+        end, "tecs: io.Stream:withMetadata claims ReadableStream without its methods")
     end)
 
     it("rejects transfers between metadata views of one shared buffer", function()
         local buffer = ioModule.newBuffer("shared")
-        local source = ioModule.newStreamWithMetadata(buffer:newStream(), "application/source")
-        local destination = ioModule.newStreamWithMetadata(buffer:newStream(), "application/destination")
+        local source = buffer:newStream():withMetadata("application/source")
+        local destination = buffer:newStream():withMetadata("application/destination")
         local copied, reason = source:transferTo(destination)
 
         assert.is_nil(copied)
@@ -385,7 +387,8 @@ describe("tecs.io stream endpoints", function()
     it("rejects exact file paths and borrowed handles sharing one backing", function()
         local path = temporary()
         assert.is_true(tecs.io.files.write(path, "kept"))
-        local fileCopy, fileReason = ioModule.newFileStream(path):transferTo(ioModule.newFileStream(path))
+        local fileCopy, fileReason =
+            ioModule.newFileStream(path):transferTo(ioModule.newFileStream(tecs.io.path.newPath(path)))
 
         assert.is_nil(fileCopy)
         assert.are.equal("cannot transfer between streams sharing one backing", fileReason)
@@ -399,6 +402,17 @@ describe("tecs.io stream endpoints", function()
         assert.are.equal(0, assert(handle:seek()))
 
         handle:close()
+    end)
+
+    it("accepts Path values for file streams", function()
+        local path = tecs.io.path.newPath(temporary())
+        local file = ioModule.newFileStream(path, "text/plain")
+
+        assert.are.equal(4, file:writeAll("path"))
+        assert.are.equal("path", file:readAll())
+        assert.are.equal("text/plain", file:contentType())
+
+        file:close()
     end)
 end)
 

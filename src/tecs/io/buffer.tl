@@ -11,7 +11,7 @@ local loader <const> = require("tecs.ffi.loader")
 local type types = require("tecs.io.types")
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
-local type WriteRange = types.WriteRange
+local type WriteRange = types.Buffer.WriteRange
 local type Reader = types.Reader
 local type Writer = types.Writer
 local type ReadableStream = types.ReadableStream
@@ -326,23 +326,23 @@ function OwnedView:close()
 end
 function OwnedWriteRange:getFFIPointer(): loader.BytePointer
     if self._released then
-        error("tecs: io.WriteRange is released", 2)
+        error("tecs: io.Buffer.WriteRange is released", 2)
     end
     return self._pointer
 end
 function OwnedWriteRange:capacity(): integer
     if self._released then
-        error("tecs: io.WriteRange is released", 2)
+        error("tecs: io.Buffer.WriteRange is released", 2)
     end
     return self._capacity
 end
 function OwnedWriteRange:commit(used: integer)
     if self._released then
-        error("tecs: io.WriteRange is released", 2)
+        error("tecs: io.Buffer.WriteRange is released", 2)
     end
-    used = integer(used, "io.WriteRange commit", 2)
+    used = integer(used, "io.Buffer.WriteRange commit", 2)
     if used > self._capacity then
-        error("tecs: io.WriteRange commit is past its capacity", 2)
+        error("tecs: io.Buffer.WriteRange commit is past its capacity", 2)
     end
     commitWrite(self._buffer, self._offset, used)
     self:close()

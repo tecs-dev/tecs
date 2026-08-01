@@ -113,13 +113,6 @@ bytes:close()
 assert(bytes:isReleased())
 -- #endregion tecs.io.Buffer.isReleased
 
--- #region tecs.io.Buffer.close
-local bytes <const> = tecs.io.newBuffer("secret")
-
-bytes:close()
-bytes:close()
--- #endregion tecs.io.Buffer.close
-
 -- #region tecs.io.Buffer.newReader
 local bytes <const> = tecs.io.newBuffer("snapshot")
 local reader <const> = bytes:newReader()
@@ -205,7 +198,8 @@ source:close()
 -- #endregion tecs.io.newByteStream
 
 -- #region tecs.io.newFileStream
-local save <const> = tecs.io.newFileStream("save.bin", "application/octet-stream")
+local path <const> = tecs.io.path.newPath("save.bin")
+local save <const> = tecs.io.newFileStream(path, "application/octet-stream")
 
 assert(save:writeAll("save data"))
 print(save:readAll())
@@ -318,13 +312,13 @@ tecs.scoped(function(scope: tecs.Scope)
 end)
 -- #endregion tecs.io.newTranscodeWriter
 
--- #region tecs.io.newStreamWithMetadata
+-- #region tecs.io.Stream.withMetadata
 local source <const> = tecs.io.newStringStream("{}")
-local json <const> = tecs.io.newStreamWithMetadata(source, "application/json")
+local json <const> = source:withMetadata("application/json")
 print(json:contentType())
 
 json:close()
--- #endregion tecs.io.newStreamWithMetadata
+-- #endregion tecs.io.Stream.withMetadata
 
 -- #region tecs.io.Reader.read
 local source <const> = tecs.io.newStringStream("abcdefgh")
@@ -362,14 +356,6 @@ assert(count, reason)
 source:close()
 destination:close()
 -- #endregion tecs.io.transfer
-
--- #region tecs.io.Reader.close
-local source <const> = tecs.io.newStringStream("data")
-local reader <const> = assert(source:newReader())
-
-reader:close()
-source:close()
--- #endregion tecs.io.Reader.close
 
 -- #region tecs.io.Writer.write
 local bytes <const> = tecs.io.newBuffer()
@@ -469,12 +455,6 @@ print(source:isReplayable())
 
 source:close()
 -- #endregion tecs.io.Stream.isReplayable
-
--- #region tecs.io.Stream.close
-local source <const> = tecs.io.newStringStream("data")
-
-source:close()
--- #endregion tecs.io.Stream.close
 
 -- #region tecs.io.ReadableStream.newReader
 local source <const> = tecs.io.newStringStream("data")
@@ -614,7 +594,7 @@ listener:close()
 
 -- #region tecs.io.http.newClient
 local http <const> = tecs.io.http
-local endpoint, reason = tecs.io.newURI("https://example.com/status")
+local endpoint, reason = tecs.io.uri.newURI("https://example.com/status")
 if endpoint == nil then
     error(reason)
 end

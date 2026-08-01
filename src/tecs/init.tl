@@ -486,8 +486,6 @@ local SURFACE <const>: {string: Namespace} = {
             files = {module = "tecs.io.files"},
             http = {module = "tecs.io.http"},
             mcp = {module = "tecs.io.mcp"},
-            newPath = {module = "tecs.io.path", member = "newPath"},
-            newURI = {module = "tecs.io.uri", member = "newURI"},
             path = {module = "tecs.io.path"},
             process = {module = "tecs.io.process"},
             uri = {module = "tecs.io.uri"},

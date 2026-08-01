@@ -312,24 +312,29 @@ describe("tecs headless", function()
                     end
                 end
                 local newPath = tecsIO.newPath
+                local pathLoadedByAlias = package.loaded["tecs.io.path"] ~= nil
+                local path = tecsIO.path
                 local pathLoadedProcess = package.loaded["tecs.io.process"] ~= nil
                 local process = tecsIO.process
                 local newURI = tecsIO.newURI
+                local uriLoadedByAlias = package.loaded["tecs.io.uri"] ~= nil
                 local uri = tecsIO.uri
 
-                print(("%s %s %s %s %s %s %s %s"):format(
+                print(("%s %s %s %s %s %s %s %s %s %s"):format(
                     tostring(rawequal(tecsIO, require("tecs.io"))),
                     #eager == 0 and "none" or table.concat(eager, " "),
-                    tostring(rawequal(newPath, require("tecs.io.path").newPath)),
+                    tostring(newPath == nil),
+                    tostring(not pathLoadedByAlias and rawequal(path, require("tecs.io.path"))),
                     tostring(pathLoadedProcess),
                     tostring(rawequal(process, require("tecs.io.process"))),
-                    tostring(rawequal(newURI, require("tecs.io.uri").newURI)),
+                    tostring(newURI == nil),
+                    tostring(not uriLoadedByAlias),
                     tostring(rawequal(uri, require("tecs.io.uri"))),
                     tostring(package.loaded["tecs.io.http"] == nil)))
             ]],
                 true
             )
-            assert.are.equal("true none true false true true true true\n", output)
+            assert.are.equal("true none true true false true true true true true\n", output)
         end)
 
         it("loads one io protocol without its sibling", function()

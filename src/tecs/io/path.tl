@@ -7,7 +7,7 @@ according to the operating system running Tecs. They return new paths rather
 than mutating their receiver:
 
 ```teal
-local root <const> = tecs.io.newPath("assets")
+local root <const> = tecs.io.path.newPath("assets")
 local shader <const> = root:join("shaders", "sprite.glsl")
 
 print(shader:fileName())

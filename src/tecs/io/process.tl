@@ -76,7 +76,7 @@ and a reason. Deadlines and explicit kills set the exit's `killed` fields.
 ]=]
 
 local implementation <const> = require("tecs.internal.process")
-local type types = require("tecs.io.types")
+local type types = require("tecs.io.processtypes")
 
 local record process
     --- `InputMode` selects where a child reads standard input.

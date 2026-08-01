@@ -1465,7 +1465,7 @@ by `tecs.io`, and media type and length are lazy metadata methods.
 `contentLength() ~= nil` is the one known-length test; a mirrored
 `hasKnownLength` method lost because it could only repeat that answer and add
 another operation every structural implementation had to keep consistent.
-`newStreamWithMetadata` wraps those methods without eagerly opening or reading
+`Stream:withMetadata` wraps those methods without eagerly opening or reading
 the source.
 
 Byte transforms compose at the endpoint layer. An `InflateReader` pulls
@@ -1506,7 +1506,7 @@ distinction without adding another organizational root or a third module level.
 `tecs.io.files` answers both halves: where a path is, and what to do once
 you have one. They are one module because they are one task. Every path a game
 touches is resolved and then acted on in the same breath.
-`tecs.io.newPath(first, ...)` is the component-aware form for carrying that
+`tecs.io.path.newPath(first, ...)` is the component-aware form for carrying that
 location between calls. It wraps a Camino UTF-8 path and returns immutable
 values, so joining, replacing an extension, and finding a relative path do not
 turn string slicing into a second platform-path implementation in Lua. Joining
@@ -1518,7 +1518,7 @@ libraries while Tecs gives them one object-shaped Lua contract. Unix names
 containing invalid UTF-8 are deliberately outside that contract, matching the
 UTF-8 strings accepted by the rest of the engine.
 
-`tecs.io.newURI` is the corresponding component-aware value for protocol and
+`tecs.io.uri.newURI` is the corresponding component-aware value for protocol and
 resource identifiers, but it is not an HTTP type. The Rust `url` crate parses
 one absolute URI into an immutable Lua value; accessors then read copied
 components without reparsing. Modification is expressed as new values through

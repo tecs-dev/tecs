@@ -400,7 +400,7 @@ local function completeTransfer(
     response.url = responseURI
     local prepared <const>, body = protect(function(): Stream
         if transfer.sink ~= nil then
-            return stream.newStreamWithMetadata(
+            return stream.withMetadata(
                 transfer.sink, response.headers["content-type"], transfer.transferred
             ) as Stream
         end
@@ -708,7 +708,7 @@ function Client:send(request: Request): Future<Response>
         error("tecs: this http client is closed", 2)
     end
     if request == nil or not uri.isURI(request.url) then
-        error("tecs: http send needs a request with a URI from tecs.io.newURI", 2)
+        error("tecs: http send needs a request with a URI from tecs.io.uri.newURI", 2)
     end
 
     local requestURI <const> = request.url

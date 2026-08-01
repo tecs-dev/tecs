@@ -9,7 +9,7 @@ react to, something that dies when the entity that asked for it does.
     world:addPlugin(tecs.io.http.plugin.install)
 
     world:spawn(http.plugin.Request, {
-        url = tecs.io.newURI("https://example.com/scores"),
+        url = tecs.io.uri.newURI("https://example.com/scores"),
     })
 
 Some frames later the entity carries a `Response` instead, and a system

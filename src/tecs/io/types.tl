@@ -8,15 +8,17 @@ requiring their public parent.
 ]=]
 
 local type loader = require("tecs.ffi.loader")
-local type Future = require("tecs.Future")
-local type pathModule = require("tecs.io.path")
+local type coretypes = require("tecs.types")
+local type Closeable = coretypes.Closeable
 
 --- An immutable, zero-copy range retained from a [`Buffer`](tealdoc:tecs.io.Buffer).
 ---
 --- A view is a snapshot: changing its source buffer first detaches that
 --- buffer's allocation, so the view keeps seeing the bytes it was created
---- from. `getString` is the explicit copying boundary.
-local interface ByteView
+--- from. `getString` is the explicit copying boundary. Closing releases the
+--- retained allocation, remains safe to repeat, and makes every operation
+--- except `isReleased` unusable.
+local interface ByteView is Closeable
     --- Creates a replayable read-only stream retaining this view.
     ---
     --- The stream retains its own view, so the caller may close this view
@@ -71,16 +73,11 @@ local interface ByteView
     --- @return Returns true after `close`.
     isReleased: function(self: ByteView): boolean
 
-    --- Releases this view's reference to the retained allocation.
-    ---
-    --- Repeated calls are safe. Every method except `isReleased` and
-    --- `close` raises afterwards.
-    --- @param self The view to close.
-    close: function(self: ByteView)
 end
 
 --- An exclusive, zero-copy writable range reserved from a [`Buffer`](tealdoc:tecs.io.Buffer).
-local interface WriteRange
+--- Closing abandons the range without changing the buffer's logical length.
+local interface WriteRange is Closeable
     --- Borrows the reserved range's writable address.
     ---
     --- @param self The open range whose storage to borrow.
@@ -101,10 +98,6 @@ local interface WriteRange
     --- @param used The caller supplies the written count up to `capacity`.
     commit: function(self: WriteRange, used: integer)
 
-    --- Closes the range without changing the buffer's logical length.
-    ---
-    --- @param self The range to close.
-    close: function(self: WriteRange)
 end
 
 --- An owned, growable sequence of bytes.
@@ -112,7 +105,9 @@ end
 --- Its logical length is separate from capacity. Offsets are zero-based, and
 --- `clear` retains the allocation for reuse. Readers retain immutable
 --- snapshots independently. Writers borrow the buffer and never close it.
-local interface Buffer
+--- Closing releases the allocation, remains safe to repeat, and makes every
+--- operation except `isReleased` unusable.
+local interface Buffer is Closeable
     type WriteRange = WriteRange
 
     --- Creates a stream sharing this buffer.
@@ -229,12 +224,6 @@ local interface Buffer
     --- @return Returns true after `close`.
     isReleased: function(self: Buffer): boolean
 
-    --- Closes the buffer, gives up its allocation, and makes it unusable.
-    ---
-    --- Repeated calls are safe. Every method except `isReleased` and
-    --- `close` raises afterwards.
-    --- @param self The buffer to close.
-    close: function(self: Buffer)
 end
 
 --- A caller-owned binary source.
@@ -242,8 +231,10 @@ end
 --- The constructor documents whether the reader owns retained state or
 --- borrows externally owned storage. A consumer reads forward until `read`
 --- returns an empty string or `readInto` returns zero, then closes the reader.
---- A failure returns nil and a reason instead of raising.
-local interface Reader
+--- A failure returns nil and a reason instead of raising. Closing only gives
+--- up local read-side state and remains safe to repeat; failures discovered
+--- while consuming bytes are returned by the read operation instead.
+local interface Reader is Closeable
     --- Caller-writable. Supplies the operation that reads the next bytes.
     ---
     --- @param self The reader whose cursor advances.
@@ -271,44 +262,35 @@ local interface Reader
     --- @return Returns the source's reason when the first return is nil.
     readInto: function(self: Reader, destination: Buffer, offset?: integer, count?: integer): integer, string
 
-    --- Caller-writable. Supplies the operation that releases the source.
-    ---
-    --- Closing more than once must be a no-op. Closing a reader only gives up
-    --- local read-side state, so it does not flush, validate completion, or
-    --- report a source failure. Failures discovered while consuming bytes are
-    --- returned by `read` and `readInto` instead.
-    ---
-    --- @param self The reader to close.
-    close: function(self: Reader)
 end
 
---- The origin used to position a seekable reader or writer.
-local enum SeekOrigin
-    "start"
-    "current"
-    "end"
-end
-
---- A reader with a random-access cursor.
+--- Describes a random-access byte cursor.
 ---
---- Unlike the basic `Reader` contract, this capability is limited to sources
---- that can determine and reposition their cursor. Offsets and returned
---- positions are zero-based byte counts. A seek must land from byte zero
---- through the current end position, inclusive.
-local interface SeekableReader is Reader
-    --- Returns the source's current byte length.
+--- Offsets and returned positions are zero-based byte counts. A seek must
+--- land from byte zero through the current end position, inclusive.
+local interface Seekable
+    --- `Origin` selects the reference point for a seek.
+    enum Origin
+        "start"
+        "current"
+        "end"
+    end
+
+    --- Returns the storage's current byte length.
     ---
-    --- @param self The open reader to inspect.
+    --- The result includes every write already accepted even when buffered
+    --- bytes have not reached the underlying destination yet.
+    --- @param self The open cursor to inspect.
     --- @return Returns the current byte length.
-    --- @return Returns the source's reason when the first return is nil.
-    size: function(self: SeekableReader): integer, string
+    --- @return Returns the storage reason when the first return is nil.
+    size: function(self: Seekable): integer, string
 
     --- Returns the current zero-based cursor position.
     ---
-    --- @param self The open reader to inspect.
+    --- @param self The open cursor to inspect.
     --- @return Returns the cursor's byte position.
-    --- @return Returns the source's reason when the first return is nil.
-    tell: function(self: SeekableReader): integer, string
+    --- @return Returns the storage reason when the first return is nil.
+    tell: function(self: Seekable): integer, string
 
     --- Repositions the cursor and returns its new absolute position.
     ---
@@ -317,13 +299,22 @@ local interface SeekableReader is Reader
     --- The offset defaults to zero and may be negative for the latter two
     --- origins. A result before byte zero or past the current end fails
     --- without moving the cursor.
-    --- @param self The open reader whose cursor moves.
-    --- @param origin The caller selects the unambiguous reference point.
+    --- @param self The open cursor to reposition.
+    --- @param origin The caller selects the reference point.
     --- @param offset The caller supplies a signed integer byte offset or omits
     ---     it for zero.
     --- @return Returns the new zero-based cursor position.
-    --- @return Returns the source's reason when the first return is nil.
-    seek: function(self: SeekableReader, origin: SeekOrigin, offset?: integer): integer, string
+    --- @return Returns the storage reason when the first return is nil.
+    seek: function(self: Seekable, origin: Origin, offset?: integer): integer, string
+end
+
+--- A reader with a random-access cursor.
+---
+--- Unlike the basic `Reader` contract, this capability is limited to sources
+--- that can determine and reposition their cursor. Offsets and returned
+--- positions are zero-based byte counts. A seek must land from byte zero
+--- through the current end position, inclusive.
+local interface SeekableReader is Reader, Seekable
 end
 
 --- A caller-owned binary destination.
@@ -400,47 +391,33 @@ end
 --- inclusive; this interface does not create sparse holes. The inherited
 --- `write` replaces bytes at the cursor and advances it, extending the
 --- destination when it starts at or reaches the end.
-local interface SeekableWriter is Writer
-    --- Returns the destination's current byte length.
-    ---
-    --- The result is the writer's logical length, including every write the
-    --- writer has accepted even when those bytes have not been flushed to the
-    --- underlying destination yet.
-    ---
-    --- @param self The open writer to inspect.
-    --- @return Returns the current byte length.
-    --- @return Returns the destination's reason when the first return is nil.
-    size: function(self: SeekableWriter): integer, string
-
-    --- Returns the current zero-based cursor position.
-    ---
-    --- @param self The open writer to inspect.
-    --- @return Returns the cursor's byte position.
-    --- @return Returns the destination's reason when the first return is nil.
-    tell: function(self: SeekableWriter): integer, string
-
-    --- Repositions the cursor and returns its new absolute position.
-    ---
-    --- `"start"` measures `offset` from byte zero, `"current"` measures it
-    --- from the cursor, and `"end"` measures it from the current byte length.
-    --- The offset defaults to zero and may be negative for the latter two
-    --- origins. A result before byte zero or past the current end fails
-    --- without moving the cursor.
-    --- @param self The open writer whose cursor moves.
-    --- @param origin The caller selects the unambiguous reference point.
-    --- @param offset The caller supplies a signed integer byte offset or omits
-    ---     it for zero.
-    --- @return Returns the new zero-based cursor position.
-    --- @return Returns the destination's reason when the first return is nil.
-    seek: function(self: SeekableWriter, origin: SeekOrigin, offset?: integer): integer, string
+local interface SeekableWriter is Writer, Seekable
 end
 
 --- Describes reopenable or one-shot binary storage.
 ---
 --- A stream carries no cursor. `newReader` and `newWriter` create directional
 --- endpoints that own their cursor and must be closed. Metadata is queried
---- through methods because a file may change between calls.
-local interface Stream
+--- through methods because a file may change between calls. Closing the
+--- descriptor remains safe to repeat and never closes endpoints already
+--- opened from it.
+local interface Stream is Closeable
+    --- Creates a lazy view that overrides this descriptor's metadata.
+    ---
+    --- Nil inherits each value from the receiver. The view retains and
+    --- delegates to the receiver, preserves its static and runtime
+    --- directional interface, and closes the receiver when it closes. If
+    --- every supplied value already matches, this returns the receiver.
+    --- @param self The stream whose storage and operations the view retains.
+    --- @param contentType The caller overrides the media type or omits it.
+    --- @param contentLength The caller overrides the non-negative byte length
+    ---     or omits it.
+    --- @param isReplayable The caller overrides replayability or omits it.
+    --- @return Returns a metadata view with the receiver's stream type.
+    withMetadata: function<T is Stream>(
+        self: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
+    ): T
+
     --- Returns the byte length when it is known.
     ---
     --- @param self The descriptor to inspect.
@@ -477,14 +454,6 @@ local interface Stream
     --- @return Returns true when opening a later reader replays all bytes.
     isReplayable: function(self: Stream): boolean
 
-    --- Closes the descriptor.
-    ---
-    --- Closing a descriptor never closes endpoints already opened from it.
-    --- Each constructor documents whether those endpoints retain or borrow
-    --- separately owned backing storage.
-    --- Repeated calls are safe.
-    --- @param self The descriptor to close.
-    close: function(self: Stream)
 end
 
 --- Describes binary storage that can create readers.
@@ -615,288 +584,6 @@ end
 local interface ReadWriteStream is ReadableStream, WritableStream
 end
 
---- `ProcessInputMode` selects where a child reads standard input.
-local enum ProcessInputMode
-    "pipe"
-    "inherit"
-    "null"
-end
-
---- `ProcessOutputMode` selects where a child writes standard output.
-local enum ProcessOutputMode
-    "pipe"
-    "inherit"
-    "null"
-end
-
---- `ProcessErrorMode` selects where a child writes standard error.
-local enum ProcessErrorMode
-    "pipe"
-    "inherit"
-    "null"
-    "stdout"
-end
-
---- `ProcessOptions` configures a child and its standard streams.
-local record ProcessOptions
-    --- Caller-writable. Supplies the program in `args[1]` followed by its
-    --- arguments. A program without a separator resolves through `PATH`.
-    args: {string}
-
-    --- Caller-writable. Selects the child's working directory as a string or
-    --- [`Path`](tealdoc:tecs.io.path.Path), or omits it to inherit the current
-    --- directory.
-    cwd: string | pathModule.Path
-
-    --- Caller-writable. Overlays environment variables on the inherited
-    --- environment, or supplies the complete environment with `clearEnv`.
-    env: {string: string}
-
-    --- Caller-writable. Starts with an empty environment when true. Defaults
-    --- to false.
-    clearEnv: boolean
-
-    --- Caller-writable. Selects `"pipe"`, `"inherit"`, or `"null"` for
-    --- standard input. Defaults to `"pipe"`.
-    stdin: ProcessInputMode
-
-    --- Caller-writable. Selects `"pipe"`, `"inherit"`, or `"null"` for
-    --- standard output. Defaults to `"pipe"`.
-    stdout: ProcessOutputMode
-
-    --- Caller-writable. Selects `"pipe"`, `"inherit"`, `"null"`, or
-    --- `"stdout"` for standard error. Defaults to `"pipe"`.
-    stderr: ProcessErrorMode
-
-    --- Caller-writable. Forcibly terminates the child after this many
-    --- milliseconds, or omits the deadline. The deadline begins when the
-    --- process is created.
-    timeoutMs: integer
-end
-
---- `CommunicateOptions` controls a complete duplex process exchange.
-local record CommunicateOptions
-    --- Caller-writable. Supplies complete standard-input bytes as a string,
-    --- open [`Buffer`](tealdoc:tecs.io.Buffer), or open
-    --- [`ByteView`](tealdoc:tecs.io.ByteView). Omitted input sends EOF
-    --- immediately.
-    input: string | ByteView
-
-    --- Caller-writable. Limits stdout and stderr together. Defaults to
-    --- 268,435,456 bytes. Exceeding it forcibly terminates the child and
-    --- returns a failure.
-    maxOutputBytes: integer
-end
-
---- `ProcessExit` describes how a child stopped without retaining its output.
-local record ProcessExit
-    --- Read-only. Reports the platform exit code, or the platform's best
-    --- answer after termination.
-    exitCode: integer
-
-    --- Read-only. Reports whether Tecs requested termination.
-    killed: boolean
-
-    --- Read-only. Reports whether the configured deadline requested that
-    --- termination.
-    timedOut: boolean
-
-    --- Returns whether the child exited normally with code zero.
-    ---
-    --- @param self The completed exit to inspect.
-    --- @return Returns true only for a normal zero exit.
-    succeeded: function(self: ProcessExit): boolean
-end
-
---- `ProcessResult` contains a completed duplex exchange.
-local record ProcessResult
-    --- Read-only. Contains the child's exit description.
-    exit: ProcessExit
-
-    --- Read-only. Contains every captured standard-output byte. It is empty
-    --- when stdout was inherited or discarded.
-    output: string
-
-    --- Read-only. Contains every captured standard-error byte. It is empty
-    --- when stderr was inherited, discarded, or merged into stdout.
-    errorOutput: string
-
-    --- Returns whether the child exited normally with code zero.
-    ---
-    --- @param self The completed exchange to inspect.
-    --- @return Returns true only for a normal zero exit.
-    succeeded: function(self: ProcessResult): boolean
-end
-
---- A caller-owned reader over one live child-process output pipe.
----
---- Blocking `read` and `readInto` satisfy the ordinary reader workflow.
---- `readAvailable` and `readAvailableInto` never wait and distinguish a pipe
---- with no bytes ready from end of file.
-local interface ProcessReader is Reader
-    --- Returns whether this endpoint has been closed.
-    ---
-    --- @param self The process reader to inspect.
-    --- @return Returns true after `close`.
-    isClosed: function(self: ProcessReader): boolean
-
-    --- Returns whether the child closed its end and every byte was consumed.
-    ---
-    --- @param self The process reader to inspect.
-    --- @return Returns true after end of file.
-    isEOF: function(self: ProcessReader): boolean
-
-    --- Reads immediately available bytes without waiting.
-    ---
-    --- Nil without a reason means the pipe remains open but has no bytes
-    --- ready. An empty string means end of file.
-    --- @param self The process reader whose pipe advances.
-    --- @param maxBytes The caller supplies 1 through 65,536 bytes or omits it
-    ---     for 16,384.
-    --- @return Returns available bytes, nil when none are ready, or an empty
-    ---     string at end of file.
-    --- @return Returns a reason only when reading fails.
-    readAvailable: function(self: ProcessReader, maxBytes?: integer): string, string
-
-    --- Reads immediately available bytes into reusable storage.
-    ---
-    --- Nil without a reason means no bytes are ready. Zero means end of file.
-    --- @param self The process reader whose pipe advances.
-    --- @param destination The caller supplies an open destination buffer and
-    ---     retains ownership.
-    --- @param offset The caller supplies a non-negative destination offset or
-    ---     omits it for zero.
-    --- @param maxBytes The caller supplies 1 through 65,536 bytes or omits it
-    ---     for 16,384.
-    --- @return Returns bytes read, nil when none are ready, or zero at end of
-    ---     file.
-    --- @return Returns a reason only when reading fails.
-    readAvailableInto: function(
-        self: ProcessReader, destination: Buffer, offset?: integer, maxBytes?: integer
-    ): integer, string
-end
-
---- A caller-owned writer over one live child-process input pipe.
----
---- Blocking `write`, `writeFrom`, and `writeView` wait for OS-pipe capacity.
---- The available forms return immediately and may accept only a prefix, so a
---- frame loop can apply backpressure without accumulating an unbounded queue.
-local interface ProcessWriter is Writer
-    --- Returns whether this endpoint has sent EOF or been closed.
-    ---
-    --- @param self The process writer to inspect.
-    --- @return Returns true after `close`.
-    isClosed: function(self: ProcessWriter): boolean
-
-    --- Writes as many immediately acceptable string bytes as possible.
-    ---
-    --- Nil without a reason means the pipe has no capacity yet.
-    --- @param self The process writer whose pipe advances.
-    --- @param bytes The caller supplies binary bytes including embedded NULs.
-    --- @param offset The caller supplies a zero-based string offset or omits
-    ---     it for zero.
-    --- @param count The caller supplies a byte count or omits it for the
-    ---     remainder.
-    --- @return Returns bytes accepted, or nil when none fit immediately.
-    --- @return Returns a reason only when writing fails.
-    writeAvailable: function(self: ProcessWriter, bytes: string, offset?: integer, count?: integer): integer, string
-
-    --- Writes an immediately acceptable buffer prefix without a Lua string.
-    ---
-    --- @param self The process writer whose pipe advances.
-    --- @param source The caller supplies an open source buffer and retains
-    ---     ownership.
-    --- @param offset The caller supplies a zero-based source offset or omits
-    ---     it for zero.
-    --- @param count The caller supplies a byte count or omits it for the
-    ---     remainder.
-    --- @return Returns bytes accepted, or nil when none fit immediately.
-    --- @return Returns a reason only when writing fails.
-    writeAvailableFrom: function(
-        self: ProcessWriter, source: Buffer, offset?: integer, count?: integer
-    ): integer, string
-
-    --- Writes an immediately acceptable immutable-view prefix.
-    ---
-    --- @param self The process writer whose pipe advances.
-    --- @param source The caller supplies an open source view and retains
-    ---     ownership.
-    --- @param offset The caller supplies a zero-based source offset or omits
-    ---     it for zero.
-    --- @param count The caller supplies a byte count or omits it for the
-    ---     remainder.
-    --- @return Returns bytes accepted, or nil when none fit immediately.
-    --- @return Returns a reason only when writing fails.
-    writeAvailableView: function(
-        self: ProcessWriter, source: ByteView, offset?: integer, count?: integer
-    ): integer, string
-end
-
---- A caller-owned child process and its independently closable pipes.
----
---- The process owns every non-nil endpoint. Closing an endpoint closes only
---- that pipe; closing the process closes all three, forcibly terminates and
---- reaps a live child, and settles `finished`.
-local interface Process
-    --- Read-only. Reports the operating-system process identifier.
-    pid: integer
-
-    --- Read-only. Provides standard input when its mode is `"pipe"`, or nil
-    --- when input is inherited or discarded. The process owns it.
-    stdin: ProcessWriter
-
-    --- Read-only. Provides standard output when its mode is `"pipe"`, or nil
-    --- when output is inherited or discarded. The process owns it.
-    stdout: ProcessReader
-
-    --- Read-only. Provides standard error when its mode is `"pipe"`, or nil
-    --- when error output is inherited, discarded, or merged into stdout. The
-    --- process owns it.
-    stderr: ProcessReader
-
-    --- Read-only. Settles ready with the exit description after the child
-    --- stops. Canceling this future does not terminate the separately owned
-    --- process.
-    finished: Future<ProcessExit>
-
-    --- Returns whether the child has not stopped yet.
-    ---
-    --- @param self The process to inspect.
-    --- @return Returns true while the child remains live.
-    isRunning: function(self: Process): boolean
-
-    --- Requests that the child terminate.
-    ---
-    --- @param self The process to terminate.
-    --- @param force The caller requests an unhandleable termination when true
-    ---     or a graceful request when false or omitted.
-    --- @return Returns whether the request was delivered or the child had
-    ---     already stopped.
-    --- @return Returns the platform reason when the first return is false.
-    kill: function(self: Process, force?: boolean): boolean, string
-
-    --- Feeds stdin and captures stdout and stderr without pipe deadlock.
-    ---
-    --- The call blocks the current Lua thread, drains both output pipes while
-    --- feeding input, closes stdin after the final byte, and returns only
-    --- after the child exits and both captured pipes reach EOF. Run it in a
-    --- worker when blocking is inappropriate.
-    --- @param self The open process whose piped endpoints are consumed.
-    --- @param options The caller supplies complete input and an output limit,
-    ---     or omits both.
-    --- @return Returns the complete exchange result.
-    --- @return Returns a reason when communication fails or exceeds its
-    ---     output limit.
-    communicate: function(self: Process, options?: CommunicateOptions): ProcessResult, string
-
-    --- Closes every pipe and ends this process.
-    ---
-    --- A live child is forcibly terminated and synchronously reaped. Repeated
-    --- calls are safe.
-    --- @param self The process to close.
-    close: function(self: Process)
-end
-
 --- Options controlling an incremental inflate reader.
 local record InflateReaderOptions
     --- Caller-writable. Selects raw DEFLATE when true and zlib framing when
@@ -922,9 +609,8 @@ end
 local record types
     type Buffer = Buffer
     type ByteView = ByteView
-    type WriteRange = WriteRange
     type Reader = Reader
-    type SeekOrigin = SeekOrigin
+    type Seekable = Seekable
     type SeekableReader = SeekableReader
     type Writer = Writer
     type SeekableWriter = SeekableWriter
@@ -932,16 +618,6 @@ local record types
     type ReadableStream = ReadableStream
     type WritableStream = WritableStream
     type ReadWriteStream = ReadWriteStream
-    type ProcessInputMode = ProcessInputMode
-    type ProcessOutputMode = ProcessOutputMode
-    type ProcessErrorMode = ProcessErrorMode
-    type ProcessOptions = ProcessOptions
-    type CommunicateOptions = CommunicateOptions
-    type ProcessExit = ProcessExit
-    type ProcessResult = ProcessResult
-    type ProcessReader = ProcessReader
-    type ProcessWriter = ProcessWriter
-    type Process = Process
     type InflateReaderOptions = InflateReaderOptions
     type DeflateWriterOptions = DeflateWriterOptions
 end

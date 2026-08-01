@@ -17,6 +17,7 @@ local pump <const> = require("tecs.io.pump")
 local loader <const> = require("tecs.ffi.loader")
 local type types = require("tecs.io.types")
 local type Files = require("tecs.io.files")
+local type pathModule = require("tecs.io.path")
 
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
@@ -26,6 +27,8 @@ local type Stream = types.Stream
 local type ReadableStream = types.ReadableStream
 local type WritableStream = types.WritableStream
 local type ReadWriteStream = types.ReadWriteStream
+local type Path = pathModule.Path
+local type PathInput = string | Path
 
 local floor <const> = math.floor
 local max <const> = math.max
@@ -40,8 +43,8 @@ end
 local newStringStream: function(text: string, contentType?: string): ReadableStream
 local makeBufferStream: function(sourceBuffer: IOBuffer, contentType?: string, ownsBuffer?: boolean): ReadWriteStream
 local makeViewStream: function(sourceView: ByteView, contentType?: string): ReadableStream
-local newFileStream: function(path: string, contentType?: string): ReadWriteStream
-local newStreamWithMetadata: function<T is Stream>(
+local newFileStream: function(path: PathInput, contentType?: string): ReadWriteStream
+local withMetadata: function<T is Stream>(
     source: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
 ): T
 local CHUNK <const> = 64 * 1024
@@ -397,7 +400,7 @@ local function snapshotStream(source: Stream, what: string): {string: any}
 end
 
 local function restoredMetadata<T is Stream>(source: T, saved: {string: any}): T
-    return newStreamWithMetadata(
+    return withMetadata(
         source, saved.contentType as string, saved.contentLength as integer, saved.isReplayable as boolean
     )
 end
@@ -1411,13 +1414,19 @@ local function newByteStream(pointer: loader.CValue, length: integer, contentTyp
     ) as ReadableStream
 end
 
-newFileStream = function(path: string, contentTypeValue?: string): ReadWriteStream
-    if type(path) ~= "string" or path == "" then
+newFileStream = function(path: PathInput, contentTypeValue?: string): ReadWriteStream
+    local rendered: string
+    if type(path) == "string" then
+        rendered = path as string
+    elseif type(path) == "table" and type((path as {string: any}).toString) == "function" then
+        rendered = (path as Path):toString()
+    end
+    if type(rendered) ~= "string" or rendered == "" then
         error("tecs: io.newFileStream needs a path", 2)
     end
     return rawSetMetatable(
         {
-            _path = path,
+            _path = rendered,
             _contentType = contentTypeValue,
             _closed = false,
         } as FileStream,
@@ -1567,18 +1576,18 @@ MetadataReadWriteStream.writeBuffer = metadataWriteBuffer
 MetadataReadWriteStream.writeView = metadataWriteView
 
 --- Returns a lazy metadata view preserving the source's concrete interface.
-newStreamWithMetadata = function<T is Stream>(
+withMetadata = function<T is Stream>(
     source: T, contentTypeValue?: string, contentLengthValue?: integer, replayableValue?: boolean
 ): T
-    source = checkedStream(source, "io.newStreamWithMetadata", 2)
+    source = checkedStream(source, "io.Stream:withMetadata", 2)
     if contentTypeValue ~= nil and type(contentTypeValue) ~= "string" then
-        error("tecs: io.newStreamWithMetadata content type must be a string", 2)
+        error("tecs: io.Stream:withMetadata content type must be a string", 2)
     end
     if replayableValue ~= nil and type(replayableValue) ~= "boolean" then
-        error("tecs: io.newStreamWithMetadata replayability must be boolean", 2)
+        error("tecs: io.Stream:withMetadata replayability must be boolean", 2)
     end
     if contentLengthValue ~= nil then
-        contentLengthValue = nonNegative(contentLengthValue, "io.newStreamWithMetadata content length", 2)
+        contentLengthValue = nonNegative(contentLengthValue, "io.Stream:withMetadata content length", 2)
     end
     if
         (contentTypeValue == nil or contentTypeValue == source:contentType())
@@ -1615,6 +1624,17 @@ newStreamWithMetadata = function<T is Stream>(
     return view as T
 end
 
+StringStream.withMetadata = withMetadata
+BufferStream.withMetadata = withMetadata
+ByteStream.withMetadata = withMetadata
+ViewStream.withMetadata = withMetadata
+FileStream.withMetadata = withMetadata
+HandleStream.withMetadata = withMetadata
+MetadataStream.withMetadata = withMetadata
+MetadataReadableStream.withMetadata = withMetadata
+MetadataWritableStream.withMetadata = withMetadata
+MetadataReadWriteStream.withMetadata = withMetadata
+
 local record stream
     type Reader = Reader
     type Writer = Writer
@@ -1629,9 +1649,9 @@ local record stream
     newEmptyStream: function(contentType?: string): ReadableStream
     newStringStream: function(text: string, contentType?: string): ReadableStream
     newByteStream: function(pointer: loader.CValue, length: integer, contentType?: string): ReadableStream
-    newFileStream: function(path: string, contentType?: string): ReadWriteStream
+    newFileStream: function(path: PathInput, contentType?: string): ReadWriteStream
     newHandleStream: function(handle: FILE, length?: integer, contentType?: string): ReadWriteStream
-    newStreamWithMetadata: function<T is Stream>(
+    withMetadata: function<T is Stream>(
         source: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
     ): T
     _check: function<T is Stream>(value: T, what: string, level: integer): T
@@ -1649,7 +1669,7 @@ return {
     newByteStream = newByteStream,
     newFileStream = newFileStream,
     newHandleStream = newHandleStream,
-    newStreamWithMetadata = newStreamWithMetadata,
+    withMetadata = withMetadata,
     _check = checkedStream,
     _borrowBytes = borrowedBytes,
     _snapshot = snapshotStream,
