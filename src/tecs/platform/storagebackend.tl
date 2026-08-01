@@ -148,11 +148,18 @@ end
 
 --- How a file cursor opens its destination.
 local enum FileMode
+    --- Read-only. The mode opens an existing file for reading at byte zero.
     "r"
+    --- Read-only. The mode creates or truncates a file for writing at byte zero.
     "w"
+    --- Read-only. The mode creates or preserves a file and writes only at its end.
     "a"
+    --- Read-only. The mode opens an existing file for reading and writing at byte zero.
     "r+"
+    --- Read-only. The mode creates or truncates a file for reading and writing at byte zero.
     "w+"
+    --- Read-only. The mode creates or preserves a file, starts reads at byte zero,
+    --- and writes only at its end.
     "a+"
 end
 
