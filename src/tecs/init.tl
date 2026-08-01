@@ -103,6 +103,10 @@ local record gfx
     --- A world to a frame, through an extractor and a backend.
     Renderer: Renderer
     type RendererOptions = Renderer.Options
+    type SpriteDomain = Renderer.SpriteDomain
+    type SpriteOptions = Renderer.SpriteOptions
+    type MeshDomain = Renderer.MeshDomain
+    type MeshOptions = Renderer.MeshOptions
     type SpriteInstanceProducer = Renderer.SpriteInstanceProducer
     type SpriteClipRegion = Renderer.SpriteClipRegion
     type SpriteComputeStage = Renderer.SpriteComputeStage
@@ -177,7 +181,7 @@ local record gfx
     --- negative value means the asset has not been made resident.
     Mesh: components.Mesh
 
-    --- Supplies a mesh's local-space bounding sphere. The future mesh cull
+    --- Supplies a mesh's local-space bounding sphere. The mesh cull
     --- transforms its center and scales its radius by the largest absolute
     --- scale axis.
     Bounds3D: components.Bounds3D
@@ -220,7 +224,7 @@ local record gfx
     --- is what most entities in a world are.
     Renderable2D: components.Renderable2D
 
-    --- Marks an entity as contributing geometry to the future mesh domain.
+    --- Marks an entity as contributing geometry to the mesh domain.
     --- Without it, a `Transform3D` and `Mesh` remain ordinary world state.
     Renderable3D: components.Renderable3D
 

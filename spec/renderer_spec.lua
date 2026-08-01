@@ -93,6 +93,51 @@ describe("ecs.Renderer", function()
         }
     end
 
+    local function triangleMesh(name)
+        return assets.newMesh({
+            name = name,
+            vertices = {
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                0,
+                1,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                0,
+                1,
+                1,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                0,
+                1,
+                0,
+                1,
+            },
+            indices = { 0, 1, 2 },
+        })
+    end
+
     -- Two texels side by side, the left one opaque and the right one cut away.
     -- Both carry the same color, because that is what a cut-out looks like
     -- when a paint program keeps the pixels it made transparent: a coverage
@@ -159,6 +204,14 @@ describe("ecs.Renderer", function()
         return target:readback()
     end
 
+    it("does not load the mesh domain for a sprite-only renderer", function()
+        assert.is_nil(package.loaded["tecs.internal.render.MeshDomain"])
+        local _, renderer = newScene()
+        assert.is_nil(renderer.meshes)
+        assert.is_nil(package.loaded["tecs.internal.render.MeshDomain"])
+        renderer:destroy()
+    end)
+
     it("draws nothing when the world is empty", function()
         local world, renderer = newScene()
         local pixels = frameOnce(world, renderer)
@@ -166,6 +219,37 @@ describe("ecs.Renderer", function()
 
         assert.are.equal(0, renderer.sprites.count)
         assert.are.equal(0, center.r)
+        renderer:destroy()
+    end)
+
+    it("prepares a mesh-only domain without creating sprite resources", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = { capacity = 4, vertexCapacity = 16, indexCapacity = 24 },
+        })
+        renderer:install(world)
+        assert.is_nil(renderer.sprites)
+        assert.is_not_nil(renderer.meshes)
+
+        local source = triangleMesh("spec://triangle")
+        local mesh, bounds = renderer.meshes:registerMesh(source)
+        assert.is_nil(source.vertices)
+        assert.are.equal(1, renderer.meshes.meshCount)
+        assert.are.equal(3, renderer.meshes.vertexCount)
+        assert.are.equal(3, renderer.meshes.indexCount)
+
+        local duplicate = triangleMesh("spec://triangle")
+        local same = renderer.meshes:registerMesh(duplicate)
+        assert.is_nil(duplicate.vertices)
+        assert.are.equal(mesh.slot, same.slot)
+        assert.are.equal(1, renderer.meshes.meshCount)
+
+        world:spawn(tecs.Transform3D(), mesh, bounds, components.Material(), components.Renderable3D())
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(1, renderer.meshes.count)
+        assert.are.equal(1, renderer.meshes.rewritten)
+        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r)
         renderer:destroy()
     end)
 

@@ -180,7 +180,7 @@ describe("a scaffolded project", function()
         end
     end)
 
-    it("stages development assets without compiling source", function()
+    it("compiles source and stages development assets", function()
         write(project .. "/assets/example.txt", "asset")
         local built = tecs({ "build" }, project)
         assert.are.equal(0, built.exit.exitCode, built.output)
@@ -188,14 +188,6 @@ describe("a scaffolded project", function()
         local asset = io.open(project .. "/build/assets/example.txt", "r")
         assert.is_not_nil(asset, "no staged asset: " .. built.output)
         asset:close()
-
-        local entry = io.open(project .. "/build/main.lua", "r")
-        assert.is_nil(entry, "tecs build compiled a source entry")
-    end)
-
-    it("distributes", function()
-        local built = tecs({ "dist" }, project)
-        assert.are.equal(0, built.exit.exitCode, built.output)
 
         local entry = io.open(project .. "/build/main.lua", "r")
         assert.is_not_nil(entry, "no build/main.lua: " .. built.output)

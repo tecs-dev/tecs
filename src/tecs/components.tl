@@ -31,7 +31,7 @@ The 3D mesh contract is separate from the sprite lane. `tecs.Transform3D`,
 [`Mesh`](tealdoc:tecs.components.Mesh),
 [`Bounds3D`](tealdoc:tecs.components.Bounds3D), and
 [`Renderable3D`](tealdoc:tecs.components.Renderable3D) describe an opaque mesh
-without loading or running the future mesh renderer.
+for the optional mesh domain.
 [`Material`](tealdoc:tecs.components.Material) is shared by both domains.
 
 [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) remains at `tecs.Transform2D` because
@@ -373,7 +373,7 @@ ecs.newFFIComponent({
     end,
 })
 
---- Selects immutable geometry for the future 3D mesh domain.
+--- Selects immutable geometry for the 3D mesh domain.
 ---
 --- `asset` is the process-local index returned by `meshId`. `slot` is
 --- engine-owned residency state and starts negative so a mesh domain can
@@ -590,7 +590,7 @@ ecs.newComponent({
     container = Renderable2D,
 })
 
---- Marks an entity as contributing geometry to the future 3D mesh domain.
+--- Marks an entity as contributing geometry to the 3D mesh domain.
 --- Without it, a `tecs.Transform3D` and [`Mesh`](tealdoc:tecs.components.Mesh)
 --- describe state but enter no render query.
 local record Renderable3D is Component
@@ -685,7 +685,7 @@ local record components
 
     --- Read-only. Exposes the tag that admits an entity carrying
     --- `tecs.Transform3D`, [`Mesh`](tealdoc:tecs.components.Mesh), and
-    --- [`Bounds3D`](tealdoc:tecs.components.Bounds3D) to the future mesh domain.
+    --- [`Bounds3D`](tealdoc:tecs.components.Bounds3D) to the mesh domain.
     Renderable3D: Renderable3D
 
     --- Returns the index of an image name and assigns one on first use.

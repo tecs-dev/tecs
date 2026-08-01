@@ -76,18 +76,6 @@ package.path = table.concat({
     package.path,
 }, ";")
 
--- The private host entry is an implementation detail, not a game argument.
--- Only operands after `tecs run ... --` are visible to the application.
-local forwarded = {[0] = arg[0]}
-local at = 1
-while arg[at] ~= nil and arg[at] ~= "--entry" do at = at + 1 end
-if arg[at] == "--entry" then at = at + 2 else at = 1 end
-while arg[at] ~= nil do
-    forwarded[#forwarded + 1] = arg[at]
-    at = at + 1
-end
-arg = forwarded
-
 -- Requiring the engine is what installs the `tecs` global the game is written
 -- against, so it comes before the game rather than being left to it.
 require("tecs")

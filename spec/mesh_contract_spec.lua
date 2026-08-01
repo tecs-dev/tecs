@@ -1,13 +1,62 @@
--- The 3D contract exists before MeshDomain does. These specs hold that seam
--- without opening a GPU device or letting the sprite extractor participate.
+-- The mesh contract stays independent of the sprite lane. These specs hold
+-- that seam without opening a GPU device or letting the sprite extractor
+-- participate.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
+local assets = require("tecs.assets")
+local loader = require("tecs.ffi.loader")
 local components = require("tecs.components")
 local Camera3D = require("tecs.gfx.Camera3D")
+local MeshExtractor = require("tecs.internal.render.MeshExtractor")
 local MeshFramePacket = require("tecs.internal.render.MeshFramePacket")
+
+local function triangle(name)
+    return assets.newMesh({
+        name = name,
+        vertices = {
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            0,
+            1,
+        },
+        indices = { 0, 1, 2 },
+    })
+end
 
 local function near(actual, expected, message)
     assert.is_true(
@@ -95,6 +144,135 @@ describe("the 3D scene contract", function()
         it("keeps the 2D and 3D admission tags distinct", function()
             assert.are_not.equal(components.Renderable2D, components.Renderable3D)
             assert.are.equal("Renderable3D", components.Renderable3D.componentName)
+        end)
+    end)
+
+    describe("mesh assets", function()
+        it("builds the fixed vertex layout with 32-bit indices and bounds", function()
+            local mesh = triangle("procedural://triangle")
+            assert.are.equal("procedural://triangle", mesh.name)
+            assert.are.equal(3, mesh.vertexCount)
+            assert.are.equal(3, mesh.indexCount)
+            assert.are.equal(2, mesh.indices[2])
+            near(mesh.centerX, 0.5)
+            near(mesh.centerY, 0.5)
+            near(mesh.centerZ, 0)
+            near(mesh.radius, math.sqrt(0.5))
+
+            mesh:release()
+            assert.is_nil(mesh.vertices)
+            assert.is_nil(mesh.indices)
+            mesh:release()
+        end)
+
+        it("rejects malformed procedural geometry at the call site", function()
+            assert.has_error(function()
+                assets.newMesh({ name = "bad://stride", vertices = { 0, 1, 2 }, indices = { 0, 0, 0 } })
+            end, "tecs: mesh 'bad://stride' needs a non-empty multiple of 12 vertex floats")
+            assert.has_error(function()
+                local mesh = triangle("bad://index")
+                mesh:release()
+                assets.newMesh({
+                    name = "bad://index",
+                    vertices = {
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        1,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                    },
+                    indices = { 0, 0, 1 },
+                })
+            end, "tecs: mesh 'bad://index' index 3 is outside 0..0")
+        end)
+    end)
+
+    describe("MeshExtractor", function()
+        local function extractorScene(capacity)
+            local world = tecs.ecs.newWorld()
+            local packet = MeshFramePacket.create()
+            local extractor = MeshExtractor.create({ capacity = capacity })
+            local instances = loader.newArray("float[?]", capacity * 16)
+            local bounds = loader.newArray("float[?]", capacity * 4)
+            extractor:setStaging(0, instances, bounds)
+            extractor:install(world, packet, nil)
+            return world, extractor, packet, instances, bounds
+        end
+
+        it("resolves residency once and writes mesh-owned staging", function()
+            local world, extractor, packet, instances, bounds = extractorScene(2)
+            local asset = components.meshId("procedural://triangle")
+            extractor:registerMesh(asset, 7)
+            local entity = world:spawn(
+                tecs.Transform3D.new({ x = 4, y = 5, z = 6, scaleX = 2 }),
+                components.Mesh(asset),
+                components.Bounds3D(1, 0, 0, 0.5),
+                components.Material(3, 0.25),
+                components.Renderable3D()
+            )
+
+            extractor:extract(packet)
+
+            assert.are.equal(1, packet.count)
+            assert.are.equal(0, packet.dropped)
+            assert.are.equal(1, packet.rewritten)
+            assert.are.equal(7, instances[10])
+            assert.are.equal(3, instances[11])
+            near(instances[12], 0.25)
+            near(bounds[0], 6)
+            near(bounds[1], 5)
+            near(bounds[2], 6)
+            near(bounds[3], 1)
+            assert.are.equal(7, world:get(entity, components.Mesh).slot)
+        end)
+
+        it("drops over capacity without leaving the world deferred", function()
+            local world, extractor, packet = extractorScene(1)
+            local asset = components.meshId("procedural://triangle")
+            extractor:registerMesh(asset, 0)
+            for _ = 1, 3 do
+                world:spawn(
+                    tecs.Transform3D(),
+                    components.Mesh(asset, 0),
+                    components.Bounds3D(),
+                    components.Material(),
+                    components.Renderable3D()
+                )
+            end
+
+            extractor:extract(packet)
+            assert.are.equal(1, packet.count)
+            assert.are.equal(2, packet.dropped)
+
+            local marker = tecs.ecs.newTagComponent({ name = "MeshExtractorAfterCapacity" })
+            world:spawn(marker)
+            local found = 0
+            for _, length in world:newQuery({ include = { marker } }):iter() do
+                found = found + length
+            end
+            assert.are.equal(1, found)
+        end)
+
+        it("raises for unregistered geometry after exhausting the query", function()
+            local world, extractor, packet = extractorScene(1)
+            local asset = components.meshId("procedural://missing")
+            world:spawn(
+                tecs.Transform3D(),
+                components.Mesh(asset),
+                components.Bounds3D(),
+                components.Material(),
+                components.Renderable3D()
+            )
+            assert.has_error(function()
+                extractor:extract(packet)
+            end, "tecs: no mesh is registered as 'procedural://missing'")
         end)
     end)
 

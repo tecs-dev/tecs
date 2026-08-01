@@ -237,6 +237,13 @@ local record Application
         --- and one text entity needs
         --- one instance per character.
         capacity: integer
+        --- Caller-writable. Enables the 2D sprite domain unless set to false.
+        --- Defaults to true. Disabling it creates no sprite image array,
+        --- packet, buffers, or world queries, and makes `renderer.sprites` nil.
+        sprites: boolean
+        --- Caller-writable. Enables and configures the 3D mesh domain. Nil,
+        --- the default, loads no mesh renderer and allocates no mesh buffers.
+        meshes: Renderer.MeshOptions
         --- Caller-writable. Sets the seconds one fixed step covers. Must be greater than zero. Defaults
         --- to 1/60.
         timestep: number
@@ -726,18 +733,23 @@ function Application:_init(): boolean
         fixedMaxSteps = config.fixedMaxSteps,
         fixedOverload = config.fixedOverload,
     })
+    local spriteOptions: Renderer.SpriteOptions | boolean = false
+    if config.sprites ~= false then
+        spriteOptions = {
+            capacity = config.capacity,
+            reserveRuns = config.reserveRuns,
+            partialRewrites = config.partialRewrites,
+            packImages = config.packImages,
+        }
+    end
     self.renderer = Renderer.newRenderer(
         self.device.handle,
         self.device:getSwapchainFormat(),
         {
             ambient = config.ambientLight,
             shadows = config.shadows,
-            sprites = {
-                capacity = config.capacity,
-                reserveRuns = config.reserveRuns,
-                partialRewrites = config.partialRewrites,
-                packImages = config.packImages,
-            },
+            sprites = spriteOptions,
+            meshes = config.meshes,
         }
     )
     self.renderer:install(self.world)

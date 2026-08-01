@@ -124,7 +124,7 @@ Working today:
   through the instance stream and the cull that were already there, blending
   over the composited image or adding to it as the effect asks
 
-Not built yet: post-processing, tiled maps and multi-camera.
+Not built yet: opaque 3D drawing, post-processing, tiled maps and multi-camera.
 
 Design notes live in `../tecs-plans`, kept outside this repository so plans and
 code have separate histories.
@@ -2136,13 +2136,28 @@ the backend's mapped addresses to the extractor, and centers `Camera2D` on the
 first frame that draws. `Renderer` rotates the one frame slot and explicitly
 prepares each domain before executing the graph.
 
-This is also the 3D extension seam. A later `MeshDomain` will be a peer of
-`SpriteDomain`, with its own extraction, packet, buffers, culling and pass
-bodies. The renderer will call each domain once and each will record into the
-same PBR deferred graph. It will not put a 2D-or-3D branch in a per-entity loop,
-and it will not force either lane through a generic callback. Shared device,
-pipeline, material, pass and lighting mechanisms remain under `tecs.gpu`.
-Domain-specific hot paths remain concrete.
+`MeshDomain` is the 3D peer. Its first stage owns mesh extraction, its packet,
+immutable geometry residency, and separate instance and bounds buffers. It
+does not draw yet. The next stage can consume those resident buffers in an
+opaque deferred pass without changing the asset or entity contract. No
+2D-or-3D branch sits in either per-entity loop, and neither lane is forced
+through a generic callback. Shared device, pipeline, material, pass and
+lighting mechanisms remain under `tecs.gpu`; domain-specific hot paths remain
+concrete.
+
+Both domains are construction choices rather than permanent renderer weight.
+Omitting `meshes` loads no mesh implementation and allocates no mesh buffers;
+setting `sprites` false allocates no sprite image array, packet, buffers or
+queries. That makes a sprite-only application pay one construction check for
+the existence of 3D support and no per-frame or per-entity mesh work.
+
+A CPU `assets.Mesh` has one fixed interleaved vertex format and zero-based
+32-bit indices. `renderer.meshes:registerMesh` copies those arrays once into
+append-only device-local storage, releases the CPU copy, and returns a `Mesh`
+component carrying the resident slot plus its derived `Bounds3D`. One such
+range may contain millions of triangles. Entity count follows independently
+transformable scene objects, not triangle count; later spatial partitioning or
+meshlets can remain a backend detail behind the same asset identity.
 
 Dimensional names make the boundary visible where it matters:
 `Transform2D`, `Camera2D`, `Renderable2D`, `PointLight2D`, `Occluder2D` and

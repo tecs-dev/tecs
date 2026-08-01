@@ -198,7 +198,7 @@ local REACH = {
             .. "semantics shared by every platform. The Lua object adds no "
             .. "operating-system service for a port to replace.",
         modules = {
-            "tecs/io/path.lua",
+            "tecs/io/Path.lua",
         },
     },
     {
@@ -206,7 +206,7 @@ local REACH = {
         reason = "The pinned Rust url crate provides general URI parsing and "
             .. "component modification without an operating-system service.",
         modules = {
-            "tecs/io/uri.lua",
+            "tecs/io/URI.lua",
         },
     },
     {
@@ -254,7 +254,7 @@ local REACH = {
             .. "library calls over caller-owned bytes rather than platform "
             .. "services. No storage or input seam decides their answers.",
         modules = {
-            "tecs/data/utf8/init.lua",
+            "tecs/data/utf8.lua",
             "tecs/io/filters.lua",
         },
     },

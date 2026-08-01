@@ -29,6 +29,10 @@ The loader decodes pixels but creates no GPU resource. The renderer decides
 texture residency. Audio follows the same split between decoded clips and
 voices.
 
+`newMesh` constructs immutable procedural geometry synchronously. It copies
+vertices and indices into CPU-owned arrays that a mesh domain consumes when
+the geometry becomes resident. Mesh file decoding is not part of this stage.
+
 ## Lifetime
 
 [`Application`](tealdoc:tecs.Application) installs and shuts down the process-wide worker, and
@@ -66,6 +70,7 @@ local workers <const> = require("tecs.workers")
 local content <const> = require("tecs.platform.content")
 local Future <const> = require("tecs.Future")
 local runtime <const> = require("tecs.internal.runtime")
+local meshlayout <const> = require("tecs.gpu.meshlayout")
 
 local runtimePoll: function(): integer
 local function pollRuntime(): integer
@@ -276,12 +281,69 @@ local record Sound
     release: function(self: Sound)
 end
 
+--- Describes one immutable indexed triangle mesh before GPU registration.
+---
+--- Vertices use one fixed interleaved layout: position xyz, normal xyz,
+--- tangent xyzw, and texture uv. Indices are zero-based unsigned 32-bit
+--- values. A mesh may therefore contain far more than 65,535 vertices, and a
+--- primitive is one indexed range rather than one triangle.
+---
+--- `renderer.meshes:registerMesh` copies both arrays into device-local
+--- storage and releases this object. The Lua-number constructor is intended
+--- for procedural and example geometry. A file decoder can build the same
+--- record directly without expanding a large mesh into Lua tables.
+local record Mesh
+    --- Read-only. Contains the stable name used by `meshId` and snapshots.
+    name: string
+    --- Read-only. Contains interleaved vertex floats until `release` runs.
+    vertices: loader.CArray
+    --- Read-only. Contains zero-based unsigned 32-bit indices until `release`
+    --- runs.
+    indices: loader.CArray
+    --- Read-only. Reports the number of vertices, not floats.
+    vertexCount: integer
+    --- Read-only. Reports the number of indices. It is always a multiple of
+    --- three.
+    indexCount: integer
+    --- Read-only. Reports the local-space bounding-sphere center x.
+    centerX: number
+    --- Read-only. Reports the local-space bounding-sphere center y.
+    centerY: number
+    --- Read-only. Reports the local-space bounding-sphere center z.
+    centerZ: number
+    --- Read-only. Reports the non-negative local-space bounding-sphere radius.
+    radius: number
+    --- Gives up the CPU geometry. Calling it again does nothing.
+    release: function(self: Mesh)
+end
+
+--- Supplies procedural geometry to `newMesh`.
+local record MeshOptions
+    --- Caller-writable. Supplies the stable non-empty mesh name.
+    name: string
+    --- Caller-writable. Supplies interleaved position xyz, normal xyz,
+    --- tangent xyzw, and texture uv floats.
+    vertices: {number}
+    --- Caller-writable. Supplies zero-based triangle indices.
+    indices: {integer}
+end
+
 local record assets
     --- Read-only. Exposes the decoded image type.
     Image: Image
 
     --- Read-only. Exposes the loaded sound type.
     Sound: Sound
+
+    --- Read-only. Exposes the immutable CPU mesh type.
+    Mesh: Mesh
+
+    --- Builds procedural mesh data in the renderer's fixed vertex layout.
+    --- @param options The caller supplies a name, interleaved vertices, and
+    ---     zero-based triangle indices.
+    --- @return Returns CPU geometry that `renderer.meshes:registerMesh`
+    ---     consumes or the caller releases.
+    newMesh: function(options: MeshOptions): Mesh
 
     --- Reports whether the loading worker is running.
     ---
@@ -296,6 +358,97 @@ end
 
 local ImageMT <const>: metatable<Image> = {__index = Image}
 local SoundMT <const>: metatable<Sound> = {__index = Sound}
+local MeshMT <const>: metatable<Mesh> = {__index = Mesh}
+
+function Mesh:release()
+    self.vertices = nil
+    self.indices = nil
+end
+
+function assets.newMesh(options: MeshOptions): Mesh
+    if options == nil then
+        error("tecs: mesh options are required", 2)
+    end
+    local name <const> = options.name
+    if name == nil or name == "" then
+        error("tecs: a mesh name cannot be empty", 2)
+    end
+
+    local sourceVertices <const> = options.vertices
+    local sourceIndices <const> = options.indices
+    local vertexFloats <const> = sourceVertices and #sourceVertices or 0
+    if vertexFloats == 0 or vertexFloats % meshlayout.VERTEX_FLOATS ~= 0 then
+        error(
+            ("tecs: mesh '%s' needs a non-empty multiple of %d vertex floats"):format(name, meshlayout.VERTEX_FLOATS), 2
+        )
+    end
+    local indexCount <const> = sourceIndices and #sourceIndices or 0
+    if indexCount == 0 or indexCount % 3 ~= 0 then
+        error(("tecs: mesh '%s' needs a non-empty multiple of 3 indices"):format(name), 2)
+    end
+
+    local vertexCount <const>: integer = math.floor(vertexFloats / meshlayout.VERTEX_FLOATS)
+    local vertices <const> = loader.newArray("float[?]", vertexFloats)
+    local minX, minY, minZ = math.huge, math.huge, math.huge
+    local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+    for index = 1, vertexFloats do
+        local value <const> = sourceVertices[index]
+        if value == nil then
+            error(("tecs: mesh '%s' has a missing vertex float at %d"):format(name, index), 2)
+        end
+        vertices[index - 1] = value
+        local lane <const> = (index - 1) % meshlayout.VERTEX_FLOATS
+        if lane == 0 then
+            minX = math.min(minX, value)
+            maxX = math.max(maxX, value)
+        elseif lane == 1 then
+            minY = math.min(minY, value)
+            maxY = math.max(maxY, value)
+        elseif lane == 2 then
+            minZ = math.min(minZ, value)
+            maxZ = math.max(maxZ, value)
+        end
+    end
+
+    local indices <const> = loader.newArray("uint32_t[?]", indexCount)
+    for index = 1, indexCount do
+        local value <const> = sourceIndices[index]
+        if value == nil or value < 0 or value >= vertexCount or value ~= math.floor(value) then
+            error(("tecs: mesh '%s' index %d is outside 0..%d"):format(name, index, vertexCount - 1), 2)
+        end
+        indices[index - 1] = value
+    end
+
+    local centerX <const> = (minX + maxX) * 0.5
+    local centerY <const> = (minY + maxY) * 0.5
+    local centerZ <const> = (minZ + maxZ) * 0.5
+    local radiusSquared: number = 0.0
+    for vertex = 0, vertexCount - 1 do
+        local base <const> = vertex * meshlayout.VERTEX_FLOATS
+        local dx <const>: number = (vertices[base] as number) - centerX
+        local dy <const>: number = (vertices[base + 1] as number) - centerY
+        local dz <const>: number = (vertices[base + 2] as number) - centerZ
+        local distanceSquared <const>: number = dx * dx + dy * dy + dz * dz
+        if distanceSquared > radiusSquared then
+            radiusSquared = distanceSquared
+        end
+    end
+
+    return setmetatable(
+        {
+            name = name,
+            vertices = vertices,
+            indices = indices,
+            vertexCount = vertexCount,
+            indexCount = indexCount,
+            centerX = centerX,
+            centerY = centerY,
+            centerZ = centerZ,
+            radius = math.sqrt(radiusSquared),
+        } as Mesh,
+        MeshMT
+    )
+end
 
 --- One load the worker has been given and has not answered for.
 ---

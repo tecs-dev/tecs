@@ -1,9 +1,9 @@
 --[=[
 One frame's immutable 3D mesh metadata at the world-to-GPU boundary.
 
-The future mesh extractor writes instance and bounding-sphere bytes directly
-into domain-owned mapped staging, then records only their ranges here. The
-future mesh backend consumes this packet without reaching back into a world.
+The mesh extractor writes instance and bounding-sphere bytes directly into
+domain-owned mapped staging, then records only their ranges here. The mesh
+backend consumes this packet without reaching back into a world.
 The sprite packet and its image, light, and 2D camera state remain separate.
 
 One packet is allocated per mesh domain and reused. `begin` clears range state,

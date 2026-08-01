@@ -1,9 +1,8 @@
---- Headless extraction baseline for the future mesh domain.
+--- Headless extraction benchmark for the mesh domain.
 ---
---- This walks the 3D component contract into retained instance and sphere
---- staging and fills a retained `MeshFramePacket`. It measures no drawing.
---- The future `MeshExtractor` replaces this synthetic loop and is compared
---- against these numbers.
+--- This drives the real `MeshExtractor` into retained instance and sphere
+--- staging and fills a retained `MeshFramePacket`. It measures no drawing and
+--- loads no sprite renderer.
 ---
 ---   BENCH_MESH_COUNT     Entities per sample. Defaults to 100000.
 ---   BENCH_MESH_WARMUP    Untimed extractions. Defaults to 120.
@@ -11,7 +10,6 @@
 
 local getenv <const> = os.getenv
 local floor <const> = math.floor
-local abs <const> = math.abs
 local max <const> = math.max
 local ceil <const> = math.ceil
 local sort <const> = table.sort
@@ -27,7 +25,9 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs <const> = require("tecs")
 local loader <const> = require("tecs.ffi.loader")
 local components <const> = require("tecs.components")
+local MeshExtractor <const> = require("tecs.internal.render.MeshExtractor")
 local MeshFramePacket <const> = require("tecs.internal.render.MeshFramePacket")
+local meshlayout <const> = require("tecs.gpu.meshlayout")
 
 local Transform3D <const> = tecs.Transform3D
 local Mesh <const> = components.Mesh
@@ -50,11 +50,6 @@ end
 local COUNT <const> = positiveInteger("BENCH_MESH_COUNT", 100000)
 local WARMUP <const> = positiveInteger("BENCH_MESH_WARMUP", 120)
 local SAMPLES <const> = positiveInteger("BENCH_MESH_SAMPLES", 61)
-
--- Provisional staging widths, not renderer ABIs. They carry the component
--- values whose cost this baseline measures.
-local INSTANCE_FLOATS <const> = 16
-local BOUND_FLOATS <const> = 4
 
 local world <const> = tecs.ecs.newWorld()
 local asset <const> = components.meshId("bench://unit-mesh")
@@ -97,67 +92,16 @@ world:batchSpawn(
 )
 world:commit()
 
-local query <const> = world:newQuery({include = {Transform3D, Mesh, Bounds3D, Material, Renderable3D}})
-local instances <const> = loader.newArray("float[?]", COUNT * INSTANCE_FLOATS)
-local spheres <const> = loader.newArray("float[?]", COUNT * BOUND_FLOATS)
+local instances <const> = loader.newArray("float[?]", COUNT * meshlayout.INSTANCE_FLOATS)
+local spheres <const> = loader.newArray("float[?]", COUNT * meshlayout.BOUND_FLOATS)
 local packet <const> = MeshFramePacket.create()
+local extractor <const> = MeshExtractor.create({capacity = COUNT})
+extractor:setStaging(0, instances, spheres)
+extractor:install(world, packet, nil)
 
 local function extract(): integer
-    packet:begin(0)
-    local written = 0
-    for archetype, length in query:iter() do
-        local transforms <const> = archetype:get(Transform3D)
-        local meshes <const> = archetype:get(Mesh)
-        local bounds <const> = archetype:get(Bounds3D)
-        local materials <const> = archetype:get(Material)
-        local first <const> = written
-
-        for row = 1, length do
-            local transform = transforms[row]
-            local mesh = meshes[row]
-            local material = materials[row]
-            local base <const> = written * INSTANCE_FLOATS
-            instances[base] = transform.x
-            instances[base + 1] = transform.y
-            instances[base + 2] = transform.z
-            instances[base + 3] = transform.rotationX
-            instances[base + 4] = transform.rotationY
-            instances[base + 5] = transform.rotationZ
-            instances[base + 6] = transform.rotationW
-            instances[base + 7] = transform.scaleX
-            instances[base + 8] = transform.scaleY
-            instances[base + 9] = transform.scaleZ
-            instances[base + 10] = mesh.asset
-            instances[base + 11] = mesh.slot
-            instances[base + 12] = material.id
-            instances[base + 13] = material.param
-            instances[base + 14] = 0.0
-            instances[base + 15] = 0.0
-
-            local bound = bounds[row]
-            local boundBase <const> = written * BOUND_FLOATS
-            local centerX <const> = bound.centerX * transform.scaleX
-            local centerY <const> = bound.centerY * transform.scaleY
-            local centerZ <const> = bound.centerZ * transform.scaleZ
-            local twiceX <const> = 2.0 * (transform.rotationY * centerZ - transform.rotationZ * centerY)
-            local twiceY <const> = 2.0 * (transform.rotationZ * centerX - transform.rotationX * centerZ)
-            local twiceZ <const> = 2.0 * (transform.rotationX * centerY - transform.rotationY * centerX)
-            spheres[boundBase] = transform.x + centerX + transform.rotationW * twiceX + transform.rotationY * twiceZ - transform.rotationZ * twiceY
-            spheres[boundBase + 1] = transform.y + centerY + transform.rotationW * twiceY + transform.rotationZ * twiceX - transform.rotationX * twiceZ
-            spheres[boundBase + 2] = transform.z + centerZ + transform.rotationW * twiceZ + transform.rotationX * twiceY - transform.rotationY * twiceX
-            spheres[boundBase + 3] = bound.radius * max(
-                abs(transform.scaleX), max(abs(transform.scaleY), abs(transform.scaleZ))
-            )
-            written = written + 1
-        end
-
-        packet.instanceRanges:mark(first * INSTANCE_FLOATS * 4, (written - first) * INSTANCE_FLOATS * 4)
-        packet.boundsRanges:mark(first * BOUND_FLOATS * 4, (written - first) * BOUND_FLOATS * 4)
-    end
-    packet.count = written
-    packet.dropped = COUNT - written
-    packet.rewritten = written
-    return written
+    extractor:extract(packet)
+    return packet.count
 end
 
 for _ = 1, WARMUP do
@@ -187,7 +131,7 @@ local p95 <const> = samples[max(1, ceil(SAMPLES * 0.95))]
 local heapPerFrame <const> = max(0.0, heapAfter - heapBefore) / SAMPLES
 print(
     format(
-        "mesh contract: %d entities  p50 %.3f ms  p95 %.3f ms  %.1f ns/entity  heap %.0f B/frame",
+        "mesh extract: %d entities  p50 %.3f ms  p95 %.3f ms  %.1f ns/entity  heap %.0f B/frame",
         COUNT,
         p50 * 1000.0,
         p95 * 1000.0,

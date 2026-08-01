@@ -1,10 +1,10 @@
---- Demonstrates the 3D scene contract before mesh rendering exists.
+--- Demonstrates mesh residency and extraction before mesh drawing exists.
 ---
 --- The cube is a real 3D entity carrying `Transform3D`, `Mesh`, `Bounds3D`,
---- `Material`, and `Renderable3D`. Until `MeshDomain` lands, the engine does
---- not submit that entity to the GPU. This example projects the cube's local
---- bounds through `Camera3D` and draws the result through the existing 2D
---- sprite domain so the transform and camera contract can be inspected now.
+--- `Material`, and `Renderable3D`. Its indexed geometry is registered in the
+--- mesh domain and extracted into mesh-owned GPU staging. Until the opaque
+--- mesh pass lands, the example also projects the cube through `Camera3D` and
+--- draws that result through the existing 2D sprite domain.
 
 local root = os.getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
 if root:sub(-1) == "/" then
@@ -15,8 +15,6 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs <const> = require("tecs")
 local Transform2D <const> = tecs.Transform2D
 local Transform3D <const> = tecs.Transform3D
-local Mesh <const> = tecs.gfx.Mesh
-local Bounds3D <const> = tecs.gfx.Bounds3D
 local Material <const> = tecs.gfx.Material
 local Tint <const> = tecs.gfx.Tint
 local Renderable2D <const> = tecs.gfx.Renderable2D
@@ -48,6 +46,45 @@ local EDGES <const>: {{integer}} = {
     {4, 8},
 }
 
+local TRIANGLES <const>: {integer} = {
+    0,
+    2,
+    1,
+    0,
+    3,
+    2,
+    4,
+    5,
+    6,
+    4,
+    6,
+    7,
+    0,
+    1,
+    5,
+    0,
+    5,
+    4,
+    3,
+    7,
+    6,
+    3,
+    6,
+    2,
+    0,
+    4,
+    7,
+    0,
+    7,
+    3,
+    1,
+    2,
+    6,
+    1,
+    6,
+    5,
+}
+
 local projectedX: {number} = {}
 local projectedY: {number} = {}
 for index = 1, #VERTICES do
@@ -58,19 +95,39 @@ end
 local function game(world: tecs.World, app: tecs.Application)
     tecs.gfx.layers.configure(1, {sort = "z", screenSpace = true, unlit = true})
 
-    local camera <const> = tecs.gfx.newCamera3D({
-        z = 6,
-        verticalFov = math.rad(55),
-        near = 0.1,
-        far = 100,
-    })
-    local cube <const> = world:spawn(
-        Transform3D(),
-        Mesh(tecs.gfx.meshId("example://unit-cube")),
-        Bounds3D(0, 0, 0, math.sqrt(3)),
-        Material(),
-        Renderable3D()
-    )
+    local meshDomain <const> = app.renderer.meshes
+    local camera <const> = meshDomain.camera
+    camera.z = 6
+    camera.verticalFov = math.rad(55)
+    camera.near = 0.1
+    camera.far = 100
+
+    local meshVertices: {number} = {}
+    for index = 1, #VERTICES do
+        local vertex <const> = VERTICES[index]
+        local base <const> = #meshVertices
+        local inverseLength <const> = 1.0 / math.sqrt(
+            vertex[1] * vertex[1] + vertex[2] * vertex[2] + vertex[3] * vertex[3]
+        )
+        meshVertices[base + 1] = vertex[1]
+        meshVertices[base + 2] = vertex[2]
+        meshVertices[base + 3] = vertex[3]
+        meshVertices[base + 4] = vertex[1] * inverseLength
+        meshVertices[base + 5] = vertex[2] * inverseLength
+        meshVertices[base + 6] = vertex[3] * inverseLength
+        meshVertices[base + 7] = 1
+        meshVertices[base + 8] = 0
+        meshVertices[base + 9] = 0
+        meshVertices[base + 10] = 1
+        meshVertices[base + 11] = vertex[1] * 0.5 + 0.5
+        meshVertices[base + 12] = vertex[2] * 0.5 + 0.5
+    end
+    local mesh, bounds = meshDomain:registerMesh(tecs.assets.newMesh({
+        name = "example://unit-cube",
+        vertices = meshVertices,
+        indices = TRIANGLES,
+    }))
+    local cube <const> = world:spawn(Transform3D(), mesh, bounds, Material(), Renderable3D())
 
     local edgeEntities: {integer} = {}
     for index = 1, #EDGES do
@@ -86,8 +143,9 @@ local function game(world: tecs.World, app: tecs.Application)
         )
     end
 
-    print("scene3d: the cyan wireframe is a 2D projection of one 3D mesh entity")
-    print("scene3d: MeshDomain does not draw the mesh yet")
+    print("scene3d: one 8-vertex, 36-index mesh is resident in MeshDomain")
+    print("scene3d: the cyan wireframe remains its transitional 2D projection")
+    print("scene3d: the next stage records the resident geometry into the G-buffer")
     print("scene3d: escape or close the window to quit")
 
     local elapsed = 0.0
@@ -163,6 +221,11 @@ return tecs.newApplication({
     },
     ambientLight = {1, 1, 1},
     capacity = 64,
+    meshes = {
+        capacity = 64,
+        vertexCapacity = 1024,
+        indexCapacity = 3072,
+    },
     maxEntities = 64,
     debug = true,
     debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
