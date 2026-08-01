@@ -618,17 +618,40 @@ return {
             site_url = "https://tecs.dev",
             -- The mark is a 32 by 32 pixel cactus, drawn on a grid to
             -- match Jersey 15, the pixel face the wordmark beside it is set
-            -- in. One file is both logo and favicon: at 32 and at 16 the grid
-            -- is the artwork, so there is no separately drawn small version
-            -- to keep in step with this one.
+            -- in. The grid is the artwork at 32 and at 16, so the small sizes
+            -- are the same drawing rather than a separate one kept in step.
+            --
+            -- The favicon is the PNG rather than the SVG, and the SVG is
+            -- offered beside it in `head` below. An SVG icon on its own is
+            -- the whole icon or nothing: a browser that will not render one
+            -- has no second choice and falls back to its default globe, and
+            -- there is no /favicon.ico here to catch it.
             logo = "/images/cactus.svg",
-            favicon = "/images/cactus.svg",
+            favicon = "/images/cactus-32.png",
             github = "https://github.com/tecs-dev/tecs",
             public = "docs/public",
             -- The wordmark is visible in the first paint. Start its tiny local
             -- Latin face with the document instead of discovering it after
             -- the stylesheet arrives.
             head = {
+                -- Offered to browsers that render SVG icons, which scale it
+                -- cleanly past 32. The PNG above is what everything else gets.
+                {
+                    tag = "link",
+                    attributes = {
+                        rel = "icon",
+                        type = "image/svg+xml",
+                        href = "/images/cactus.svg",
+                    },
+                },
+                {
+                    tag = "link",
+                    attributes = {
+                        rel = "apple-touch-icon",
+                        sizes = "180x180",
+                        href = "/images/cactus-180.png",
+                    },
+                },
                 {
                     tag = "link",
                     attributes = {
