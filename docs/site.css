@@ -54,12 +54,17 @@
      * needs almost none: its controls are already light on a dark scene. */
     --tecs-header-wash: rgba(240, 231, 210, 0.55);
 
-    /* How far the hero art rides up, and the space that move gives back. It is
-     * 20% of the art's 330px height, written in pixels rather than as a
-     * percentage because the two need to stay equal: `top` takes a percentage
-     * of the row's height, while a percentage margin resolves against its
-     * width, so the pair would drift apart at every width but one. */
-    --tecs-hero-lift: 66px;
+    /* How far the hero art rides up, and the space that move gives back.
+     * Written in pixels rather than as a percentage because the two need to
+     * stay equal: `top` takes a percentage of the row's height, while a
+     * percentage margin resolves against its width, so the pair would drift
+     * apart at every width but one.
+     *
+     * It is small now because most of the gap it was compensating for was
+     * inside the artwork: the source had 41px of transparent margin above the
+     * cactus, which is 27px of nothing once it is scaled into its box. The
+     * file is cropped to its artwork, so this only has to do the rest. */
+    --tecs-hero-lift: 20px;
 
     /* One root size, at every width. Pico steps this from 100% to 131.25%
      * across five breakpoints, which makes `rem` a function of the viewport,
@@ -240,8 +245,7 @@
  * entirely: at that width the icons sit where the mountains are. */
 .tealdoc-header {
     background-image:
-        linear-gradient(var(--tecs-header-wash), var(--tecs-header-wash)),
-        url("/images/header-desert.svg");
+        linear-gradient(var(--tecs-header-wash), var(--tecs-header-wash)), url("/images/header-desert.svg");
     background-repeat: no-repeat;
     background-position: right center;
     background-size: auto 100%;
@@ -276,6 +280,14 @@
     }
 }
 
+/* Tealdoc's main column carries 4rem of top padding, which is right for a page
+ * that opens on a heading and too much for one that opens on a hero: it pushed
+ * the headline and the art far enough below the bar to read as a gap rather
+ * than as breathing room. Only the home page has a hero, so only it is cut. */
+main:has(.tealdoc-home-hero) {
+    padding-top: 2rem;
+}
+
 /* Close the gap under the hero. Tealdoc's 4rem plus a 2rem features gap was
  * tuned for art that filled its row. The art now rides 20% higher and leaves
  * its slot behind, so that vacated band is added to both of them and the three
@@ -286,7 +298,7 @@
 }
 
 :root {
-    --tealdoc-hero-features-gap: 0.5rem;
+    --tealdoc-hero-features-gap: 1rem;
 }
 
 .tealdoc-feature-details a,
