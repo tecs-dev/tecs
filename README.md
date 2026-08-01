@@ -1506,19 +1506,16 @@ distinction without adding another organizational root or a third module level.
 `tecs.io.files` answers both halves: where a path is, and what to do once
 you have one. They are one module because they are one task. Every path a game
 touches is resolved and then acted on in the same breath.
-`tecs.io.path.newPath(first, ...)` is the component-aware form for carrying that
-location between calls. It wraps a Camino UTF-8 path and returns immutable
-values, so joining, replacing an extension, and finding a relative path do not
-turn string slicing into a second platform-path implementation in Lua. Joining
-and normalization are lexical and work before an output exists; canonicalizing
-is the explicit filesystem operation that requires an existing object and
-follows symbolic links. `path-clean` supplies lexical normalization and
-`pathdiff` supplies relative paths, keeping those edge cases in focused Rust
-libraries while Tecs gives them one object-shaped Lua contract. Unix names
-containing invalid UTF-8 are deliberately outside that contract, matching the
-UTF-8 strings accepted by the rest of the engine.
+`tecs.io.Path.new(first, ...)` is the component-aware form for carrying that
+location between calls. It validates UTF-8 and returns immutable values, so
+joining, replacing an extension, and finding a relative path do not turn
+string slicing into a second platform-path implementation in Lua. Joining and
+normalization are lexical and work before an output exists; canonicalizing is
+the explicit filesystem operation that requires an existing object and follows
+symbolic links. Unix names containing invalid UTF-8 are deliberately outside
+that contract, matching the UTF-8 strings accepted by the rest of the engine.
 
-`tecs.io.uri.newURI` is the corresponding component-aware value for protocol and
+`tecs.io.URI.new` is the corresponding component-aware value for protocol and
 resource identifiers, but it is not an HTTP type. The Rust `url` crate parses
 one absolute URI into an immutable Lua value; accessors then read copied
 components without reparsing. Modification is expressed as new values through
@@ -1640,7 +1637,7 @@ process, a request. [`Future.tl`](src/tecs/Future.tl) gives all of them one
 settle-once state, failure, cancellation, listener and wait vocabulary.
 
 ```lua
-local process, reason = tecs.io.process.new({ args = { "git", "status", "--porcelain" } })
+local process, reason = tecs.io.Process.new({ args = { "git", "status", "--porcelain" } })
 if process == nil then error(reason) end
 
 process.finished
@@ -1821,7 +1818,7 @@ and stderr endpoints. It initializes no SDL subsystem and works from a plain
 interpreter as well as from the game host.
 
 ```lua
-local process, reason = tecs.io.process.new({
+local process, reason = tecs.io.Process.new({
     args = { "asset-compiler", "--watch" },
     stderr = "stdout",
 })
@@ -1853,7 +1850,7 @@ startup step, or worker. No Lua callback enters from native code.
 
 **Exit and I/O are separate facts.** `finished` is a future because a child
 settles once, while stdout and stderr may yield any number of chunks first.
-A nonzero exit is still a ready `tecs.io.process.Exit`; `succeeded` is the separate
+A nonzero exit is still a ready `tecs.io.Process.Exit`; `succeeded` is the separate
 exit-code check. A spawn failure returns nil and a reason synchronously because
 there is no process or future to own.
 

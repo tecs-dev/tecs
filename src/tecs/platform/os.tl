@@ -30,11 +30,7 @@ instead. `tecs.runtime.poll` transfers signals out of the native handler, and
 
 ```teal
 tecs.scoped(function(scope: tecs.Scope)
-    local signals, reason = tecs.platform.os.newSignalListener()
-    if signals == nil then
-        error(reason)
-    end
-    scope:own(signals)
+    local signals <const> = scope:own(tecs.platform.os.newSignalListener())
 
     local running = true
     while running do
@@ -73,9 +69,11 @@ local shaderpack <const> = require("tecs.gpu.shaderpack")
 local Future <const> = require("tecs.Future")
 local runtime <const> = require("tecs.internal.runtime")
 local buffer <const> = require("tecs.io.buffer")
+local type coretypes = require("tecs.types")
 local type iotypes = require("tecs.io.types")
 local type Window = require("tecs.platform.window").Window
 local type IOBuffer = iotypes.Buffer
+local type Closeable = coretypes.Closeable
 
 local dialogRuntimePoll: function(): integer
 local function pollDialogs(): integer
@@ -162,8 +160,9 @@ end
 ---
 --- [`runtime.poll`](/modules/runtime/#tecs.runtime.poll) fills the queue. The
 --- listener owns no thread and invokes no callback. Close it to stop
---- interception after the last listener closes.
-local interface SignalListener
+--- interception after the last listener closes. Repeated closure remains
+--- safe.
+local interface SignalListener is Closeable
     --- Returns whether this listener has been closed.
     ---
     --- @param self The listener to inspect.
@@ -187,12 +186,6 @@ local interface SignalListener
     --- @return Returns one selected signal, or nil when none is pending.
     next: function(self: SignalListener): ProcessSignal
 
-    --- Stops this listener and discards its queued signals.
-    ---
-    --- Repeated calls are safe. Closing the final listener unregisters the
-    --- runtime source and re-enables the platform's termination behavior.
-    --- @param self The listener to close.
-    close: function(self: SignalListener)
 end
 
 --- Describes what this build can do on the current target.

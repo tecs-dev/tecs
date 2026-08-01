@@ -5,7 +5,7 @@ SDL creates, reads, writes, polls, terminates, and reaps every child. No Lua
 callback crosses the native boundary, and no worker state copies accumulated
 output back into this one. The public declarations live in
 `tecs.io.processtypes` so this implementation can sit below the public process
-module without a require cycle. `tecs.io.process` exposes only the constructor;
+module without a require cycle. `tecs.io.Process` exposes only the constructor;
 the runtime lifecycle hooks remain internal here.
 ]=]
 
@@ -18,7 +18,7 @@ local time <const> = require("tecs.platform.time")
 local buffer <const> = require("tecs.io.buffer")
 local type types = require("tecs.io.types")
 local type processtypes = require("tecs.io.processtypes")
-local type pathModule = require("tecs.io.path")
+local type Path = require("tecs.io.Path")
 
 local C <const> = sdl.C
 local K <const> = sdl.K
@@ -771,11 +771,11 @@ end
 
 function process.new(options: ProcessOptions): Process, string
     if options == nil or options.args == nil or #options.args == 0 then
-        error("tecs: io.process.new needs args beginning with the program", 2)
+        error("tecs: io.Process.new needs args beginning with the program", 2)
     end
     for index = 1, #options.args do
         if type(options.args[index]) ~= "string" then
-            error(("tecs: io.process.new args[%d] must be a string"):format(index), 2)
+            error(("tecs: io.Process.new args[%d] must be a string"):format(index), 2)
         end
     end
     local stdinMode <const> = options.stdin or "pipe"
@@ -816,7 +816,7 @@ function process.new(options: ProcessOptions): Process, string
     if options.cwd ~= nil then
         local cwd = options.cwd
         if type(cwd) ~= "string" then
-            cwd = (cwd as pathModule.Path):toString()
+            cwd = (cwd as Path):toString()
         end
         C.SDL_SetStringProperty(properties, K.SDL_PROP_PROCESS_CREATE_WORKING_DIRECTORY_STRING, cwd)
     end

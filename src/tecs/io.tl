@@ -29,7 +29,7 @@ end)
 TCP is an ordered byte stream: one write may take several reads to receive,
 several writes may arrive in one read, and message framing belongs to the
 caller. UDP preserves one send as one datagram, but the network may lose,
-duplicate, or reorder it. General immutable URIs live under `tecs.io.uri`;
+duplicate, or reorder it. General immutable URIs live under `tecs.io.URI`;
 HTTP and HTTPS live under `tecs.io.http`; the MCP debug server lives under
 `tecs.io.mcp`.
 
@@ -89,7 +89,7 @@ handle as a last resort, but cannot report a close error. Closing is
 idempotent; using a closed value returns a failure.
 
 Naming `tecs.io` loads none of its children. Reading `files`, `http`, `mcp`,
-`path`, `process`, `uri`, or `watcher` loads only that child.
+`Path`, `Process`, `URI`, or `watcher` loads only that child.
 ]=]
 
 -- Implementation details:
@@ -122,9 +122,9 @@ local type Closeable = coretypes.Closeable
 local type files = require("tecs.io.files")
 local type http = require("tecs.io.http")
 local type mcp = require("tecs.io.mcp")
-local type path = require("tecs.io.path")
-local type process = require("tecs.io.process")
-local type uri = require("tecs.io.uri")
+local type Path = require("tecs.io.Path")
+local type Process = require("tecs.io.Process")
+local type URI = require("tecs.io.URI")
 local type watcher = require("tecs.io.watcher")
 
 local type FutureType<T> = Future<T>
@@ -158,14 +158,14 @@ local record binaryIO
     --- Read-only. `mcp` provides the debug server and tool registry.
     mcp: mcp
 
-    --- Read-only. `path` constructs immutable platform-native paths.
-    path: path
+    --- Read-only. `Path` constructs immutable platform-native paths.
+    Path: Path
 
-    --- Read-only. `process` starts children with streaming standard I/O.
-    process: process
+    --- Read-only. `Process` starts children with streaming standard I/O.
+    Process: Process
 
-    --- Read-only. `uri` parses and modifies immutable absolute URIs.
-    uri: uri
+    --- Read-only. `URI` parses and modifies immutable absolute URIs.
+    URI: URI
 
     --- Read-only. `watcher` provides loaded-content polling and reload
     --- notifications.
@@ -282,10 +282,10 @@ local record binaryIO
     --- Readers open the current path through `tecs.io.files`; writers replace
     --- it. A descriptor keeps no open file between endpoints.
     --- @param path The caller supplies the source or destination as a string
-    ---     or [`Path`](tealdoc:tecs.io.path.Path).
+    ---     or [`Path`](tealdoc:tecs.io.Path).
     --- @param contentType The caller supplies optional media type metadata.
     --- @return Returns a readable and writable stream.
-    newFileStream: function(path: string | path.Path, contentType?: string): types.ReadWriteStream
+    newFileStream: function(path: string | Path, contentType?: string): types.ReadWriteStream
 
     --- Creates a one-shot stream over a borrowed Lua file handle.
     ---

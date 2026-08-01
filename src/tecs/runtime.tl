@@ -8,7 +8,7 @@ iteration. A headless program calls the same function from its own loop:
 tecs.scoped(function(scope)
     local client <const> = scope:own(tecs.io.http.newClient())
     local request <const> = client:send({
-        url = assert(tecs.io.uri.newURI("https://example.com/data")),
+        url = assert(tecs.io.URI.new("https://example.com/data")),
     })
 
     while request.status == "pending" do

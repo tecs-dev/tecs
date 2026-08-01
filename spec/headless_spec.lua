@@ -123,7 +123,7 @@ describe("tecs headless", function()
                     "tecs.platform.events",
                     "tecs.platform.os",
                     "tecs.platform.time", "tecs.platform.window",
-                    "tecs.io.files", "tecs.io.path", "tecs.io.process", "tecs.io.uri",
+                    "tecs.io.files", "tecs.io.Path", "tecs.io.Process", "tecs.io.URI",
                     "tecs.internal.process", "tecs.io.watcher",
                     "tecs.io", "tecs.io.http", "tecs.io.http.client",
                 }
@@ -173,7 +173,7 @@ describe("tecs headless", function()
                 local settled = tecs.runtime.poll()
                 local facilities = {
                     "tecs.assets", "tecs.io", "tecs.io.http",
-                    "tecs.io.path", "tecs.io.process", "tecs.io.uri", "tecs.internal.process",
+                    "tecs.io.Path", "tecs.io.Process", "tecs.io.URI", "tecs.internal.process",
                     "tecs.io.watcher", "tecs.platform.os",
                 }
                 local loaded = {}
@@ -303,7 +303,7 @@ describe("tecs headless", function()
                 local tecsIO = tecs.io
                 local children = {
                     "tecs.io.files", "tecs.io.http", "tecs.io.mcp",
-                    "tecs.io.path", "tecs.io.process", "tecs.io.uri", "tecs.io.watcher",
+                    "tecs.io.Path", "tecs.io.Process", "tecs.io.URI", "tecs.io.watcher",
                 }
                 local eager = {}
                 for _, name in ipairs(children) do
@@ -312,24 +312,24 @@ describe("tecs headless", function()
                     end
                 end
                 local newPath = tecsIO.newPath
-                local pathLoadedByAlias = package.loaded["tecs.io.path"] ~= nil
-                local path = tecsIO.path
-                local pathLoadedProcess = package.loaded["tecs.io.process"] ~= nil
-                local process = tecsIO.process
+                local pathLoadedByAlias = package.loaded["tecs.io.Path"] ~= nil
+                local path = tecsIO.Path
+                local pathLoadedProcess = package.loaded["tecs.io.Process"] ~= nil
+                local process = tecsIO.Process
                 local newURI = tecsIO.newURI
-                local uriLoadedByAlias = package.loaded["tecs.io.uri"] ~= nil
-                local uri = tecsIO.uri
+                local uriLoadedByAlias = package.loaded["tecs.io.URI"] ~= nil
+                local uri = tecsIO.URI
 
                 print(("%s %s %s %s %s %s %s %s %s %s"):format(
                     tostring(rawequal(tecsIO, require("tecs.io"))),
                     #eager == 0 and "none" or table.concat(eager, " "),
                     tostring(newPath == nil),
-                    tostring(not pathLoadedByAlias and rawequal(path, require("tecs.io.path"))),
+                    tostring(not pathLoadedByAlias and rawequal(path, require("tecs.io.Path"))),
                     tostring(pathLoadedProcess),
-                    tostring(rawequal(process, require("tecs.io.process"))),
+                    tostring(rawequal(process, require("tecs.io.Process"))),
                     tostring(newURI == nil),
                     tostring(not uriLoadedByAlias),
-                    tostring(rawequal(uri, require("tecs.io.uri"))),
+                    tostring(rawequal(uri, require("tecs.io.URI"))),
                     tostring(package.loaded["tecs.io.http"] == nil)))
             ]],
                 true

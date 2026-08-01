@@ -100,7 +100,7 @@ end
 local BESIDE = {
     ["tecs.gfx.animation"] = { "tecs.gfx.sheet" },
     ["tecs.input"] = { "tecs.platform.Gamepad", "tecs.platform.sensors" },
-    ["tecs.io"] = { "tecs.io.types" },
+    ["tecs.io"] = { "tecs.io.types", "tecs.io.Path", "tecs.io.Process", "tecs.io.URI" },
 }
 
 --- Orders names the way a listing presents them: alphabetically, ignoring

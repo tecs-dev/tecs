@@ -30,8 +30,8 @@ Every operation runs synchronously. Send large tree walks to
 `tecs.workers`, and decode images or sounds through `tecs.assets`.
 
 Every operation that accepts a filesystem location accepts either a string or
-an immutable [`Path`](tealdoc:tecs.io.path.Path). String results remain useful
-at Lua and platform boundaries; wrap one with `tecs.io.path.newPath` when the next
+an immutable [`Path`](tealdoc:tecs.io.Path). String results remain useful
+at Lua and platform boundaries; wrap one with `tecs.io.Path.new` when the next
 operation benefits from component-aware manipulation.
 
 `tecs.io.watcher` polls paths recorded by `read` and the built-in asset
@@ -51,7 +51,7 @@ local loader <const> = require("tecs.ffi.loader")
 local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
 local type types = require("tecs.io.types")
-local type pathModule = require("tecs.io.path")
+local type Path = require("tecs.io.Path")
 
 local floor <const> = math.floor
 local max <const> = math.max
@@ -82,19 +82,6 @@ local record files
     --- `SeekableWriteMode` selects replacement or in-place update behavior.
     type SeekableWriteMode = storagebackend.SeekableWriteMode
 
-    --- `ByteInput` supplies a string or open
-    --- [`Buffer`](/modules/io/#tecs.io.Buffer) or
-    --- [`ByteView`](/modules/io/#tecs.io.ByteView).
-    type ByteInput = storagebackend.ByteInput
-
-    --- A [`SeekableReader`](tealdoc:tecs.io.SeekableReader) reads a file
-    --- through a repositionable cursor.
-    type SeekableReader = types.SeekableReader
-
-    --- A [`SeekableWriter`](tealdoc:tecs.io.SeekableWriter) patches a file
-    --- through a repositionable cursor.
-    type SeekableWriter = types.SeekableWriter
-
     --- `LineIterator` yields each line in a file and returns nil at the end.
     type LineIterator = function(): string
 end
@@ -104,7 +91,7 @@ local type UserFolder = files.UserFolder
 local type GlobOptions = files.GlobOptions
 local type WriteMode = files.WriteMode
 local type SeekableWriteMode = files.SeekableWriteMode
-local type ByteInput = files.ByteInput
+local type ByteInput = storagebackend.ByteInput
 local type LineIterator = files.LineIterator
 local type Writer = types.Writer
 local type SeekableWriter = types.SeekableWriter
@@ -113,7 +100,6 @@ local type SeekOrigin = types.Seekable.Origin
 local type SeekableReader = types.SeekableReader
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
-local type Path = pathModule.Path
 local type PathInput = string | Path
 
 --- Raises when a required string argument is missing.
@@ -133,7 +119,7 @@ local function required(value: PathInput, what: string): string
     end
     local rendered <const> = (value as Path):toString()
     if type(rendered) ~= "string" then
-        error(("tecs: io.files.%s received an invalid io.path.Path"):format(what), 3)
+        error(("tecs: io.files.%s received an invalid io.Path"):format(what), 3)
     end
     return rendered
 end

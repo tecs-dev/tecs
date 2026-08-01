@@ -3,8 +3,8 @@ Streaming child processes.
 
 `new` starts the child immediately and returns its live standard-stream
 endpoints. Piped stdin is a
-[`ProcessWriter`](tealdoc:tecs.io.process.ProcessWriter); piped stdout and
-stderr are [`ProcessReader`](tealdoc:tecs.io.process.ProcessReader) values. The
+[`Writer`](tealdoc:tecs.io.Process.Writer); piped stdout and stderr are
+[`Reader`](tealdoc:tecs.io.Process.Reader) values. The
 process owns all three endpoints. Closing one endpoint closes only that pipe;
 closing the process closes every endpoint, terminates a live child, and reaps
 it. Buffers and byte views passed to an endpoint remain caller-owned.
@@ -15,14 +15,12 @@ output pipe can fill and deadlock the child:
 
 ```teal
 tecs.scoped(function(scope: tecs.Scope)
-    local child, startReason = tecs.io.process.new({
-        args = {"git", "status", "--porcelain"},
-        timeoutMs = 2000,
-    })
-    if child == nil then
-        error(startReason)
-    end
-    scope:own(child)
+    local child <const> = scope:own(
+        tecs.io.Process.new({
+            args = {"git", "status", "--porcelain"},
+            timeoutMs = 2000,
+        })
+    )
 
     local result, communicateReason = child:communicate()
     if result == nil then
@@ -42,11 +40,7 @@ buffers, and transforms. Closing stdin sends EOF:
 
 ```teal
 tecs.scoped(function(scope: tecs.Scope)
-    local child, startReason = tecs.io.process.new({args = {"/bin/cat"}})
-    if child == nil then
-        error(startReason)
-    end
-    scope:own(child)
+    local child <const> = scope:own(tecs.io.Process.new({args = {"/bin/cat"}}))
 
     local written, writeReason = child.stdin:write("one request\n")
     if written == nil then
@@ -70,15 +64,17 @@ byte-view variants avoid constructing Lua strings.
 
 Use `"inherit"` for a CLI that should share the terminal, `"null"` to discard
 a stream, and `stderr = "stdout"` for one ordered transcript. A nonzero child
-exit still produces a ready [`Exit`](tealdoc:tecs.io.process.Exit);
+exit still produces a ready [`Exit`](tealdoc:tecs.io.Process.Exit);
 `succeeded` performs the separate exit-code check. Spawn failures return nil
 and a reason. Deadlines and explicit kills set the exit's `killed` fields.
 ]=]
 
 local implementation <const> = require("tecs.internal.process")
 local type types = require("tecs.io.processtypes")
+local type Closeable = require("tecs.types").Closeable
+local type Future = require("tecs.Future")
 
-local record process
+local record Process is Closeable
     --- `InputMode` selects where a child reads standard input.
     type InputMode = types.ProcessInputMode
 
@@ -100,14 +96,62 @@ local record process
     --- `Result` contains a completed duplex exchange.
     type Result = types.ProcessResult
 
-    --- `ProcessReader` reads one live child-process output pipe.
-    type ProcessReader = types.ProcessReader
+    --- `Reader` reads one live child-process output pipe.
+    type Reader = types.ProcessReader
 
-    --- `ProcessWriter` writes one live child-process input pipe.
-    type ProcessWriter = types.ProcessWriter
+    --- `Writer` writes one live child-process input pipe.
+    type Writer = types.ProcessWriter
 
-    --- `Process` owns a child and its standard-stream endpoints.
-    type Process = types.Process
+    --- Read-only. Reports the operating-system process identifier.
+    pid: integer
+
+    --- Read-only. Provides standard input when its mode is `"pipe"`, or nil
+    --- when input is inherited or discarded. The process owns it.
+    stdin: Writer
+
+    --- Read-only. Provides standard output when its mode is `"pipe"`, or nil
+    --- when output is inherited or discarded. The process owns it.
+    stdout: Reader
+
+    --- Read-only. Provides standard error when its mode is `"pipe"`, or nil
+    --- when error output is inherited, discarded, or merged into stdout. The
+    --- process owns it.
+    stderr: Reader
+
+    --- Read-only. Settles ready with the exit description after the child
+    --- stops. Canceling this future does not terminate the separately owned
+    --- process.
+    finished: Future<Exit>
+
+    --- Returns whether the child has not stopped yet.
+    ---
+    --- @param self The process to inspect.
+    --- @return Returns true while the child remains live.
+    isRunning: function(self: Process): boolean
+
+    --- Requests that the child terminate.
+    ---
+    --- @param self The process to terminate.
+    --- @param force The caller requests an unhandleable termination when true
+    ---     or a graceful request when false or omitted.
+    --- @return Returns whether the request was delivered or the child had
+    ---     already stopped.
+    --- @return Returns the platform reason when the first return is false.
+    kill: function(self: Process, force?: boolean): boolean, string
+
+    --- Feeds stdin and captures stdout and stderr without pipe deadlock.
+    ---
+    --- The call blocks the current Lua thread, drains both output pipes while
+    --- feeding input, closes stdin after the final byte, and returns only
+    --- after the child exits and both captured pipes reach EOF. Run it in a
+    --- worker when blocking is inappropriate.
+    --- @param self The open process whose piped endpoints are consumed.
+    --- @param options The caller supplies complete input and an output limit,
+    ---     or omits both.
+    --- @return Returns the complete exchange result.
+    --- @return Returns a reason when communication fails or exceeds its
+    ---     output limit.
+    communicate: function(self: Process, options?: CommunicateOptions): Result, string
 
     --- Starts a caller-owned child process with streaming standard I/O.
     ---
@@ -118,9 +162,9 @@ local record process
     ---     working directory, standard-stream modes, and optional deadline.
     --- @return Returns a caller-owned process when the platform starts it.
     --- @return Returns the platform reason when the first return is nil.
-    new: function(options: types.ProcessOptions): types.Process, string
+    new: function(options: Options): Process, string
 end
 
-process.new = implementation.new
+Process.new = implementation.new as function(options: types.ProcessOptions): Process, string
 
-return process
+return Process

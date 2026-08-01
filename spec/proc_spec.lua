@@ -12,8 +12,8 @@ local ffi = require("ffi")
 local Application = require("tecs.Application")
 local Future = require("tecs.Future")
 local processModule = require("tecs.internal.process")
-local path = require("tecs.io.path")
-local process = require("tecs.io.process")
+local path = require("tecs.io.Path")
+local process = require("tecs.io.Process")
 local runtime = require("tecs.runtime")
 local sdl = require("tecs.ffi.sdl3")
 local tecsIO = require("tecs.io")
@@ -104,7 +104,7 @@ describe("streaming processes", function()
     end)
 
     it("runs in the requested working directory", function()
-        local result = shell("pwd", { cwd = path.newPath("/") })
+        local result = shell("pwd", { cwd = path.new("/") })
 
         assert.are.equal("/", trimmed(result.output))
     end)
@@ -345,7 +345,7 @@ describe("streaming processes", function()
         file:write(([[
             package.path = %q .. "/?.lua;" .. %q .. "/?/init.lua;;"
             local tecs = require("tecs")
-            local child, reason = tecs.io.process.new({args = {"/bin/echo", "headless"}})
+            local child, reason = tecs.io.Process.new({args = {"/bin/echo", "headless"}})
             if child == nil then error(reason) end
             local result, communicateReason = child:communicate()
             if result == nil then error(communicateReason) end

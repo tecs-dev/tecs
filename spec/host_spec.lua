@@ -14,7 +14,7 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local process = require("tecs.io.process")
+local process = require("tecs.io.Process")
 
 --- The host binary, found by walking up from the tree the suite was pointed at.
 ---

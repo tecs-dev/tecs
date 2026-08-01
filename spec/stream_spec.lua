@@ -388,7 +388,7 @@ describe("tecs.io stream endpoints", function()
         local path = temporary()
         assert.is_true(tecs.io.files.write(path, "kept"))
         local fileCopy, fileReason =
-            ioModule.newFileStream(path):transferTo(ioModule.newFileStream(tecs.io.path.newPath(path)))
+            ioModule.newFileStream(path):transferTo(ioModule.newFileStream(tecs.io.Path.new(path)))
 
         assert.is_nil(fileCopy)
         assert.are.equal("cannot transfer between streams sharing one backing", fileReason)
@@ -405,7 +405,7 @@ describe("tecs.io stream endpoints", function()
     end)
 
     it("accepts Path values for file streams", function()
-        local path = tecs.io.path.newPath(temporary())
+        local path = tecs.io.Path.new(temporary())
         local file = ioModule.newFileStream(path, "text/plain")
 
         assert.are.equal(4, file:writeAll("path"))

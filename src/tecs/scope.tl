@@ -43,14 +43,19 @@ local interface Scope
     --- Calling a captured scope after that callback returns, raises, or begins
     --- cleanup raises instead of creating an ownership obligation nobody will
     --- run.
-    --- Passing nil or a value without a `close` method raises immediately.
+    --- Passing nil raises with `reason` when one is supplied, which lets a
+    --- constructor's `value, reason` result pass directly to `own`. Without a
+    --- supplied reason, or with a value that has no `close` method, `own`
+    --- raises its own argument error.
     ---
     --- @param self The active scope that will own the value.
     --- @param value An open [`Closeable`](tealdoc:tecs.Closeable) or Lua file.
     ---     Each call adds one cleanup obligation, including repeated calls
     ---     with the same value.
+    --- @param reason The operational failure returned beside a nil value.
+    ---     `own` raises this string at the call site.
     --- @return The same value with its concrete type unchanged.
-    own: function<T>(self, value: T): T
+    own: function<T is Closeable>(self, value: T, reason?: string): T
 end
 
 local record ScopeImpl is Scope
@@ -130,11 +135,14 @@ function scope.scoped(body: function(Scope))
     end
 end
 
-function ScopeImpl:own<T>(value: T): T
+function ScopeImpl:own<T is Closeable>(value: T, reason?: string): T
     if not self.active then
         error("tecs: Scope is no longer active", 2)
     end
     if value == nil then
+        if reason ~= nil then
+            error(reason, 2)
+        end
         error("tecs: Scope:own needs a non-nil value", 2)
     end
 

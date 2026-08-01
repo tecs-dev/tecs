@@ -1,13 +1,13 @@
 --[=[
 Immutable absolute URIs for protocols, resources, and application links.
 
-[`URI`](tealdoc:tecs.io.uri.URI) is not tied to HTTP. It accepts every
+[`URI`](tealdoc:tecs.io.URI) is not tied to HTTP. It accepts every
 absolute scheme supported by the native URL parser, while an API such as the
 HTTP client separately restricts the schemes it can use. Components are
 parsed once and copied into Lua, so accessors do not reparse or allocate:
 
 ```teal
-local endpoint <const> = tecs.io.uri.newURI("https://api.example.com/v1")
+local endpoint <const> = tecs.io.URI.new("https://api.example.com/v1")
 local scores <const> = endpoint:concatPath("scores"):withQuery("limit=20")
 
 print(scores:scheme(), scores:host(), scores:path())
@@ -16,7 +16,7 @@ print(scores)
 
 URI values are immutable. Every `with` method and `concatPath` returns a new
 value and leaves its receiver unchanged. Supplying a component record to
-`tecs.io.uri.newURI` constructs the complete initial value without intermediate
+`tecs.io.URI.new` constructs the complete initial value without intermediate
 copies. A modifier clones the retained parsed value and validates only the
 replacement component; supplying the existing value returns the receiver.
 `withEndpoint` replaces the scheme,
@@ -164,9 +164,7 @@ local record URI
     --- @return Returns the resolved immutable URI.
     --- @return Returns the parser's reason when the reference is invalid.
     resolve: function(self: URI, reference: string): URI, string
-end
 
-local record uri
     --- `Components` constructs one URI without intermediate immutable copies.
     record Components
         --- Caller-writable. Supplies the required scheme without its colon.
@@ -187,9 +185,6 @@ local record uri
         fragment: string
     end
 
-    --- `URI` is one immutable normalized absolute URI.
-    type URI = URI
-
     --- Parses and normalizes an absolute URI.
     --- A component record performs one construction; it does not allocate an
     --- intermediate URI for each component.
@@ -197,11 +192,11 @@ local record uri
     --- @return Returns an immutable URI, or nil when the text is invalid or
     ---     relative.
     --- @return Returns the parser's reason when the first return is nil.
-    newURI: function(value: string | Components): URI, string
+    new: function(value: string | Components): URI, string
 
     --- Validates an absolute URI without retaining a value.
     --- @param text The caller supplies the UTF-8 text to validate.
-    --- @return Returns true when `newURI` can parse the text.
+    --- @return Returns true when `new` can parse the text.
     --- @return Returns the parser's reason when the first return is false.
     validate: function(text: string): boolean, string
 
@@ -407,7 +402,7 @@ end
 function URI:withEndpoint(endpoint: URI): URI
     local endpointState <const> = states[endpoint]
     if endpointState == nil then
-        error("tecs: URI endpoint must be an io.uri.URI", 2)
+        error("tecs: URI endpoint must be an io.URI", 2)
     end
     return changed(C.tecsUriWithEndpoint(states[self].handle, endpointState.handle), 2)
 end
@@ -423,9 +418,9 @@ function URI:resolve(reference: string): URI, string
     return make(handle)
 end
 
-local function componentText(components: uri.Components): string, string
+local function componentText(components: URI.Components): string, string
     if type(components) ~= "table" then
-        return nil, "tecs: newURI needs absolute text or URI components"
+        return nil, "tecs: URI.new needs absolute text or URI components"
     end
     local scheme <const> = components.scheme
     if type(scheme) ~= "string" or scheme == "" then
@@ -491,21 +486,21 @@ local function componentText(components: uri.Components): string, string
     return table.concat(parts)
 end
 
-function uri.newURI(value: string | uri.Components): URI, string
+function URI.new(value: string | URI.Components): URI, string
     local text: string
     if type(value) == "table" then
         local failure: string
-        text, failure = componentText(value as uri.Components)
+        text, failure = componentText(value as URI.Components)
         if text == nil then
             return nil, failure
         end
     elseif type(value) == "string" then
         text = value as string
     else
-        return nil, "tecs: newURI needs absolute text or URI components"
+        return nil, "tecs: URI.new needs absolute text or URI components"
     end
     if text == "" then
-        return nil, "tecs: newURI needs a non-empty absolute URI"
+        return nil, "tecs: URI.new needs a non-empty absolute URI"
     end
     local handle <const> = C.tecsUriParse(text, #text) as loader.CPtr
     if handle == nil then
@@ -514,7 +509,7 @@ function uri.newURI(value: string | uri.Components): URI, string
     return make(handle)
 end
 
-function uri.validate(text: string): boolean, string
+function URI.validate(text: string): boolean, string
     if type(text) ~= "string" or text == "" then
         return false, "tecs: URI text must be a non-empty string"
     end
@@ -526,8 +521,8 @@ function uri.validate(text: string): boolean, string
     return true
 end
 
-function uri.isURI(value: any): boolean
+function URI.isURI(value: any): boolean
     return type(value) == "table" and states[value as URI] ~= nil
 end
 
-return uri
+return URI

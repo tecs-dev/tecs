@@ -6,13 +6,13 @@ Assets, child processes, and HTTP requests return
 results without blocking a frame:
 
 ```teal no-format
-local process, reason = tecs.io.process.new({args = {"git", "status", "--porcelain"}})
+local process, reason = tecs.io.Process.new({args = {"git", "status", "--porcelain"}})
 if process == nil then
     error(reason)
 end
 
 process.finished
-    :map(function(exit: tecs.io.process.Exit): boolean
+    :map(function(exit: tecs.io.Process.Exit): boolean
         return exit:succeeded()
     end)
     :recover(function(): boolean
@@ -54,7 +54,7 @@ that automatically. `wait` pumps in blocking slices for startup, tools, and
 tests:
 
 ```teal no-format
-local process, reason = tecs.io.process.new({args = {"git", "status", "--porcelain"}})
+local process, reason = tecs.io.Process.new({args = {"git", "status", "--porcelain"}})
 if process == nil then
     error(reason)
 end

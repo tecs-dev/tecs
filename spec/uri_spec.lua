@@ -3,10 +3,10 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local uri = require("tecs.io.uri")
+local uri = require("tecs.io.URI")
 
 local function parsed(text)
-    local value, reason = uri.newURI(text)
+    local value, reason = uri.new(text)
     assert.is_not_nil(value, reason)
     return value
 end
@@ -54,8 +54,8 @@ describe("io.uri", function()
     end)
 
     it("reports invalid and relative constructor text", function()
-        local invalid, invalidReason = uri.newURI("not a URI")
-        local relative, relativeReason = uri.newURI("../save.bin")
+        local invalid, invalidReason = uri.new("not a URI")
+        local relative, relativeReason = uri.new("../save.bin")
 
         assert.is_nil(invalid)
         assert.is_string(invalidReason)

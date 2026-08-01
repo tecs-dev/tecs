@@ -1,13 +1,13 @@
 --[=[
 Immutable, platform-native filesystem paths.
 
-[`Path`](tealdoc:tecs.io.path.Path) wraps Camino's UTF-8 path type behind a
-Lua object. Methods interpret roots, separators, drive prefixes, and UNC paths
-according to the operating system running Tecs. They return new paths rather
-than mutating their receiver:
+[`Path`](tealdoc:tecs.io.Path) is an immutable platform-native UTF-8
+filesystem path. Methods interpret roots, separators, drive prefixes, and UNC
+paths according to the operating system running Tecs. They return new paths
+rather than mutating their receiver:
 
 ```teal
-local root <const> = tecs.io.path.newPath("assets")
+local root <const> = tecs.io.Path.new("assets")
 local shader <const> = root:join("shaders", "sprite.glsl")
 
 print(shader:fileName())
@@ -154,11 +154,6 @@ local record Path
     --- @param self The path to inspect without filesystem access.
     --- @return Returns true when the path is relative on this platform.
     isRelative: function(self: Path): boolean
-end
-
-local record path
-    --- `Path` is an immutable platform-native UTF-8 filesystem path.
-    type Path = Path
 
     --- Creates an immutable path from platform-native components.
     ---
@@ -169,7 +164,7 @@ local record path
     ---     or complete path, without a NUL byte.
     --- @param ... The caller supplies additional path components in order.
     --- @return Returns a new immutable path.
-    newPath: function(first: string, ...: string): Path
+    new: function(first: string, ...: string): Path
 
     --- Returns the process's current working directory.
     ---
@@ -220,7 +215,7 @@ local function valueOf(value: Part, level: integer): string
     end
     local stored <const> = values[value as Path]
     if stored == nil then
-        error("tecs: expected a string or io.path.Path", level)
+        error("tecs: expected a string or io.Path", level)
     end
     return stored
 end
@@ -350,7 +345,7 @@ function Path:isRelative(): boolean
     return not self:isAbsolute()
 end
 
-function path.newPath(first: string, ...: string): Path
+function Path.new(first: string, ...: string): Path
     local rest <const>: {string} = {...}
     local held <const>: {string} = {valueOf(first, 2)}
     for index = 1, #rest do
@@ -359,12 +354,12 @@ function path.newPath(first: string, ...: string): Path
     return joinValues(held)
 end
 
-function path.currentDirectory(): Path, string
-    return path.newPath("."):resolve()
+function Path.currentDirectory(): Path, string
+    return Path.new("."):resolve()
 end
 
-function path.separator(): string
+function Path.separator(): string
     return ffi.os == "Windows" and "\\" or "/"
 end
 
-return path
+return Path

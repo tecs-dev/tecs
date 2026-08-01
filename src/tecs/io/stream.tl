@@ -17,7 +17,7 @@ local pump <const> = require("tecs.io.pump")
 local loader <const> = require("tecs.ffi.loader")
 local type types = require("tecs.io.types")
 local type Files = require("tecs.io.files")
-local type pathModule = require("tecs.io.path")
+local type Path = require("tecs.io.Path")
 
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
@@ -27,7 +27,6 @@ local type Stream = types.Stream
 local type ReadableStream = types.ReadableStream
 local type WritableStream = types.WritableStream
 local type ReadWriteStream = types.ReadWriteStream
-local type Path = pathModule.Path
 local type PathInput = string | Path
 
 local floor <const> = math.floor

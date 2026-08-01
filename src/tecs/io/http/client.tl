@@ -24,9 +24,8 @@ local buffer <const> = require("tecs.io.buffer")
 local pump <const> = require("tecs.io.pump")
 local stream <const> = require("tecs.io.stream")
 local clients <const> = require("tecs.io.http.clients")
-local uri <const> = require("tecs.io.uri")
+local URI <const> = require("tecs.io.URI")
 local type iotypes = require("tecs.io.types")
-local type URI = uri.URI
 
 loader.declare("http")
 
@@ -95,8 +94,8 @@ local record client
         --- Caller-writable. Lists host names whose TLS certificates are not
         --- verified.
         insecureHosts: {string}
-        --- Caller-writable. Sets a proxy URL. Unset follows the environment;
-        --- empty forces a direct connection.
+        --- Caller-writable. Sets an absolute proxy URI as text. Nil follows
+        --- the environment; an empty string forces a direct connection.
         proxy: string
         --- Caller-writable. Lists hosts excluded from an explicitly configured
         --- proxy.
@@ -391,7 +390,7 @@ local function completeTransfer(
     local response <const> = transfer.response
     response.status = status
     response.headers = parseHeaders(rawHeaders)
-    local responseURI <const>, uriFailure = uri.newURI(effectiveUrl ~= "" and effectiveUrl or transfer.url)
+    local responseURI <const>, uriFailure = URI.new(effectiveUrl ~= "" and effectiveUrl or transfer.url)
     if responseURI == nil then
         releaseResponseBuffers(transfer)
         transfer.future:fail(("tecs: %s: invalid effective URI: %s"):format(transfer.url, uriFailure))
@@ -707,8 +706,8 @@ function Client:send(request: Request): Future<Response>
     if self._handle == nil then
         error("tecs: this http client is closed", 2)
     end
-    if request == nil or not uri.isURI(request.url) then
-        error("tecs: http send needs a request with a URI from tecs.io.uri.newURI", 2)
+    if request == nil or not URI.isURI(request.url) then
+        error("tecs: http send needs a request with a URI from tecs.io.URI.new", 2)
     end
 
     local requestURI <const> = request.url

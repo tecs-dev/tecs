@@ -1,5 +1,5 @@
 --[=[
-Declares the child-process contracts published by `tecs.io.process`.
+Declares the child-process contracts published by `tecs.io.Process`.
 
 Keeping these declarations beside the process module prevents the general
 `tecs.io` reference from publishing process-only types while the implementation
@@ -8,7 +8,7 @@ can still depend on them without requiring the public module.
 
 local type Future = require("tecs.Future")
 local type types = require("tecs.io.types")
-local type pathModule = require("tecs.io.path")
+local type Path = require("tecs.io.Path")
 local type coretypes = require("tecs.types")
 
 local type Buffer = types.Buffer
@@ -46,9 +46,9 @@ local record ProcessOptions
     args: {string}
 
     --- Caller-writable. Selects the child's working directory as a string or
-    --- [`Path`](tealdoc:tecs.io.path.Path), or omits it to inherit the current
+    --- [`Path`](tealdoc:tecs.io.Path), or omits it to inherit the current
     --- directory.
-    cwd: string | pathModule.Path
+    cwd: string | Path
 
     --- Caller-writable. Overlays environment variables on the inherited
     --- environment, or supplies the complete environment with `clearEnv`.
