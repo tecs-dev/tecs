@@ -189,7 +189,24 @@ local REACH = {
             .. "They expose the same Reader and Writer contract without a "
             .. "platform callback or an engine-lifecycle dependency.",
         modules = {
-            "tecs/io/process.lua",
+            "tecs/internal/process.lua",
+        },
+    },
+    {
+        bucket = "direct",
+        reason = "Camino, path-clean, and pathdiff are pinned pure-Rust path "
+            .. "semantics shared by every platform. The Lua object adds no "
+            .. "operating-system service for a port to replace.",
+        modules = {
+            "tecs/io/path.lua",
+        },
+    },
+    {
+        bucket = "direct",
+        reason = "The pinned Rust url crate provides general URI parsing and "
+            .. "component modification without an operating-system service.",
+        modules = {
+            "tecs/io/uri.lua",
         },
     },
     {

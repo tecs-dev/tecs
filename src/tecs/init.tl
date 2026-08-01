@@ -65,7 +65,8 @@ local type Closeable = types.Closeable
 -- A public name that one module answers needs none of this, and has none. It
 -- resolves to that module, is typed by the record the module declares, and
 -- carries the names one level down as fields of its own: `tecs.io` is
--- `src/tecs/io.tl`, `files`, `http`, `mcp`, and `watcher` included. That is
+-- `src/tecs/io.tl`, `files`, `http`, `mcp`, `path`, `process`, and `watcher`
+-- included. That is
 -- the shape to reach for, because a record here restates every signature and
 -- every docblock the module already carries and nothing checks the two against
 -- each other.
@@ -485,6 +486,11 @@ local SURFACE <const>: {string: Namespace} = {
             files = {module = "tecs.io.files"},
             http = {module = "tecs.io.http"},
             mcp = {module = "tecs.io.mcp"},
+            newPath = {module = "tecs.io.path", member = "newPath"},
+            newURI = {module = "tecs.io.uri", member = "newURI"},
+            path = {module = "tecs.io.path"},
+            process = {module = "tecs.io.process"},
+            uri = {module = "tecs.io.uri"},
             watcher = {module = "tecs.io.watcher"},
         },
     },

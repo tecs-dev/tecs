@@ -14,7 +14,7 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local tecsIO = require("tecs.io")
+local process = require("tecs.io.process")
 
 --- The host binary, found by walking up from the tree the suite was pointed at.
 ---
@@ -59,7 +59,7 @@ local out = findHost()
 --- spec independent of how the suite was launched.
 local function observations()
     assert.is_not_nil(out, "no bin/tecs above " .. root)
-    local child, startReason = tecsIO.newProcess({
+    local child, startReason = process.new({
         args = { out .. "/bin/tecs", "--entry", "spec/fixtures/hostlifecycle.lua" },
         env = {
             TECS_LUA = root,

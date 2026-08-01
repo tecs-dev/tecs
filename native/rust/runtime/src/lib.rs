@@ -28,6 +28,7 @@ mod luamods;
 mod mcodearena;
 mod mcp;
 mod net;
+mod path;
 #[cfg(feature = "payload")]
 mod payload;
 mod physics;
@@ -36,6 +37,7 @@ mod registry;
 mod sha256;
 mod signals;
 mod ui;
+mod uri;
 mod uuid;
 mod window;
 mod worker;

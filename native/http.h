@@ -17,7 +17,6 @@
 
 typedef struct TecsHttpClient TecsHttpClient;
 typedef struct TecsHttpEvent TecsHttpEvent;
-typedef struct TecsHttpUri TecsHttpUri;
 
 typedef struct TecsHttpSlice {
     const uint8_t *data;
@@ -59,21 +58,6 @@ typedef struct TecsHttpRequest {
     uint64_t maxBytes;
     int insecure;
 } TecsHttpRequest;
-
-/* Parses and normalizes one absolute URI through the same URL implementation
- * Reqwest uses. Every borrowed part remains valid until destroy. */
-TecsHttpUri *tecsHttpUriParse(const uint8_t *text, size_t length);
-const uint8_t *tecsHttpUriText(const TecsHttpUri *uri, size_t *length);
-const uint8_t *tecsHttpUriScheme(const TecsHttpUri *uri, size_t *length);
-const uint8_t *tecsHttpUriAuthority(const TecsHttpUri *uri, size_t *length);
-const uint8_t *tecsHttpUriUsername(const TecsHttpUri *uri, size_t *length);
-const uint8_t *tecsHttpUriPassword(const TecsHttpUri *uri, size_t *length);
-const uint8_t *tecsHttpUriHost(const TecsHttpUri *uri, size_t *length);
-int tecsHttpUriPort(const TecsHttpUri *uri, uint16_t *port);
-const uint8_t *tecsHttpUriPath(const TecsHttpUri *uri, size_t *length);
-const uint8_t *tecsHttpUriQuery(const TecsHttpUri *uri, size_t *length);
-const uint8_t *tecsHttpUriFragment(const TecsHttpUri *uri, size_t *length);
-void tecsHttpUriDestroy(TecsHttpUri *uri);
 
 enum TecsHttpBodyKind { TECS_HTTP_BODY_NONE = 0, TECS_HTTP_BODY_INLINE = 1, TECS_HTTP_BODY_UPLOAD = 2 };
 

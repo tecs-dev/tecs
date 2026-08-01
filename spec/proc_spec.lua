@@ -11,7 +11,9 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local ffi = require("ffi")
 local Application = require("tecs.Application")
 local Future = require("tecs.Future")
-local processModule = require("tecs.io.process")
+local processModule = require("tecs.internal.process")
+local path = require("tecs.io.path")
+local process = require("tecs.io.process")
 local runtime = require("tecs.runtime")
 local sdl = require("tecs.ffi.sdl3")
 local tecsIO = require("tecs.io")
@@ -29,7 +31,7 @@ local function trimmed(text)
 end
 
 local function newProcess(options)
-    local child, reason = tecsIO.newProcess(options)
+    local child, reason = process.new(options)
     assert.is_not_nil(child, reason)
     return child
 end
@@ -82,7 +84,7 @@ describe("streaming processes", function()
     end)
 
     it("returns a creation failure without allocating a process", function()
-        local child, reason = tecsIO.newProcess({ args = { "/no/such/tecs-program" } })
+        local child, reason = process.new({ args = { "/no/such/tecs-program" } })
 
         assert.is_nil(child)
         assert.is_string(reason)
@@ -91,18 +93,18 @@ describe("streaming processes", function()
 
     it("validates programmer input by raising", function()
         assert.has_error(function()
-            tecsIO.newProcess({ args = {} })
+            process.new({ args = {} })
         end)
         assert.has_error(function()
-            tecsIO.newProcess({ args = { "/bin/echo", 7 } })
+            process.new({ args = { "/bin/echo", 7 } })
         end)
         assert.has_error(function()
-            tecsIO.newProcess({ args = { "/bin/echo" }, stderr = "invalid" })
+            process.new({ args = { "/bin/echo" }, stderr = "invalid" })
         end)
     end)
 
     it("runs in the requested working directory", function()
-        local result = shell("pwd", { cwd = "/" })
+        local result = shell("pwd", { cwd = path.newPath("/") })
 
         assert.are.equal("/", trimmed(result.output))
     end)
@@ -343,7 +345,7 @@ describe("streaming processes", function()
         file:write(([[
             package.path = %q .. "/?.lua;" .. %q .. "/?/init.lua;;"
             local tecs = require("tecs")
-            local child, reason = tecs.io.newProcess({args = {"/bin/echo", "headless"}})
+            local child, reason = tecs.io.process.new({args = {"/bin/echo", "headless"}})
             if child == nil then error(reason) end
             local result, communicateReason = child:communicate()
             if result == nil then error(communicateReason) end

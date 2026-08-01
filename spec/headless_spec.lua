@@ -123,7 +123,8 @@ describe("tecs headless", function()
                     "tecs.platform.events",
                     "tecs.platform.os",
                     "tecs.platform.time", "tecs.platform.window",
-                    "tecs.io.files", "tecs.io.watcher",
+                    "tecs.io.files", "tecs.io.path", "tecs.io.process", "tecs.io.uri",
+                    "tecs.internal.process", "tecs.io.watcher",
                     "tecs.io", "tecs.io.http", "tecs.io.http.client",
                 }
                 local loaded = {}
@@ -172,6 +173,7 @@ describe("tecs headless", function()
                 local settled = tecs.runtime.poll()
                 local facilities = {
                     "tecs.assets", "tecs.io", "tecs.io.http",
+                    "tecs.io.path", "tecs.io.process", "tecs.io.uri", "tecs.internal.process",
                     "tecs.io.watcher", "tecs.platform.os",
                 }
                 local loaded = {}
@@ -292,35 +294,42 @@ describe("tecs headless", function()
             assert.are.equal("table true none\n", output)
         end)
 
-        -- `tecs.io` now owns the socket transport, so naming the parent reaches
-        -- the Rust FFI. Its four children remain independent and lazy.
+        -- `tecs.io` owns socket transport, so naming the parent reaches the
+        -- Rust FFI. Its children remain independent and lazy.
         it("hangs io children on their parent without loading siblings", function()
             local output = run(
                 [[
                 local tecs = require("tecs")
                 local tecsIO = tecs.io
-                local parentLoadedFiles = package.loaded["tecs.io.files"] ~= nil
-                local parentLoadedHTTP = package.loaded["tecs.io.http"] ~= nil
-                local parentLoadedMCP = package.loaded["tecs.io.mcp"] ~= nil
-                local parentLoadedWatcher = package.loaded["tecs.io.watcher"] ~= nil
-                local files = tecsIO.files
-                local filesLoadedWatcher = package.loaded["tecs.io.watcher"] ~= nil
-                local watcher = tecsIO.watcher
+                local children = {
+                    "tecs.io.files", "tecs.io.http", "tecs.io.mcp",
+                    "tecs.io.path", "tecs.io.process", "tecs.io.uri", "tecs.io.watcher",
+                }
+                local eager = {}
+                for _, name in ipairs(children) do
+                    if package.loaded[name] ~= nil then
+                        eager[#eager + 1] = name
+                    end
+                end
+                local newPath = tecsIO.newPath
+                local pathLoadedProcess = package.loaded["tecs.io.process"] ~= nil
+                local process = tecsIO.process
+                local newURI = tecsIO.newURI
+                local uri = tecsIO.uri
 
-                print(("%s %s %s %s %s %s %s %s %s"):format(
+                print(("%s %s %s %s %s %s %s %s"):format(
                     tostring(rawequal(tecsIO, require("tecs.io"))),
-                    tostring(parentLoadedFiles),
-                    tostring(parentLoadedHTTP),
-                    tostring(parentLoadedMCP),
-                    tostring(parentLoadedWatcher),
-                    tostring(rawequal(files, require("tecs.io.files"))),
-                    tostring(filesLoadedWatcher),
-                    tostring(rawequal(watcher, require("tecs.io.watcher"))),
+                    #eager == 0 and "none" or table.concat(eager, " "),
+                    tostring(rawequal(newPath, require("tecs.io.path").newPath)),
+                    tostring(pathLoadedProcess),
+                    tostring(rawequal(process, require("tecs.io.process"))),
+                    tostring(rawequal(newURI, require("tecs.io.uri").newURI)),
+                    tostring(rawequal(uri, require("tecs.io.uri"))),
                     tostring(package.loaded["tecs.io.http"] == nil)))
             ]],
                 true
             )
-            assert.are.equal("true false false false false true false true true\n", output)
+            assert.are.equal("true none true false true true true true\n", output)
         end)
 
         it("loads one io protocol without its sibling", function()

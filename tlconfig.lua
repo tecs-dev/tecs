@@ -174,8 +174,8 @@ local function modulePages()
     for _, name in ipairs(ordered(modules)) do
         table.insert(pages, modulePage(name, SURFACE[name]))
         local below = {}
-        for key in pairs(SURFACE[name].within or {}) do
-            if key:match("^[a-z]") then
+        for key, spec in pairs(SURFACE[name].within or {}) do
+            if key:match("^[a-z]") and not spec.member then
                 table.insert(below, key)
             end
         end
@@ -326,8 +326,8 @@ local function publicNames()
 
     local sub = {}
     for name, spec in pairs(SURFACE) do
-        for key in pairs(spec.within or {}) do
-            if key:match("^[a-z]") then
+        for key, child in pairs(spec.within or {}) do
+            if key:match("^[a-z]") and not child.member then
                 table.insert(sub, name .. "." .. key)
             end
         end
@@ -531,7 +531,23 @@ local function checkPages(context)
             0
         )
     end
+end
 
+--- Gives documentation examples the preloaded `tecs` global used by games.
+---
+--- Engine sources deliberately do not inherit that global: modules below
+--- `src/tecs` must keep declaring every dependency. Tealdoc validates examples
+--- after this hook, so replacing only its parser environment keeps those two
+--- compilation contexts separate.
+local function prepareExampleTypes(context)
+    local parser = context.env.parser_registry[".tl"]
+    if not parser then
+        error("Tealdoc did not register its Teal parser", 0)
+    end
+    local validate = parser.validate
+    parser.validate = function(self, text, path)
+        return validate(self, 'local tecs <const> = require("tecs")\n' .. text, path)
+    end
 end
 
 local pages = { "docs" }
@@ -631,6 +647,7 @@ return {
             before_build = function(context)
                 checkWriting(context)
                 checkPages(context)
+                prepareExampleTypes(context)
             end,
         },
     },
