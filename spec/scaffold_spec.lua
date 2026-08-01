@@ -19,7 +19,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local files = require("tecs.io.files")
-local tecsIO = require("tecs.io")
+local process = require("tecs.io.process")
 
 -- Absolute, because every child below is given a working directory of its own
 -- and a relative path would then resolve against the scaffolded project rather
@@ -70,7 +70,7 @@ local function tecs(args, cwd)
         argv[#argv + 1] = argument
     end
 
-    local child, startReason = tecsIO.newProcess({
+    local child, startReason = process.new({
         args = argv,
         cwd = cwd,
         env = {

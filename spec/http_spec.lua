@@ -18,6 +18,7 @@ local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
 local http = require("tecs.io.http")
 local httpClients = require("tecs.io.http.clients")
+local uri = require("tecs.io.uri")
 local tecsIO = tecs.io
 
 local min = math.min
@@ -131,34 +132,6 @@ local function listenSomewhere()
     error("no free port in " .. table.concat(failures, ", "))
 end
 
-describe("http.newURI", function()
-    it("normalizes an absolute URI and exposes its parts", function()
-        local parsed, reason = http.newURI("HTTPS://user:pass@Example.COM:8443/a%20b?q=two#part")
-        assert.is_not_nil(parsed, reason)
-        assert.are.equal("https://user:pass@example.com:8443/a%20b?q=two#part", parsed.text)
-        assert.are.equal(parsed.text, tostring(parsed))
-        assert.are.equal("https", parsed.scheme)
-        assert.are.equal("user:pass@example.com:8443", parsed.authority)
-        assert.are.equal("user", parsed.username)
-        assert.are.equal("pass", parsed.password)
-        assert.are.equal("example.com", parsed.host)
-        assert.are.equal(8443, parsed.port)
-        assert.are.equal("/a%20b", parsed.path)
-        assert.are.equal("q=two", parsed.query)
-        assert.are.equal("part", parsed.fragment)
-    end)
-
-    it("reports invalid and relative references", function()
-        local invalid, invalidReason = http.newURI("not a URI")
-        assert.is_nil(invalid)
-        assert.is_string(invalidReason)
-
-        local relative, relativeReason = http.newURI("../save.bin")
-        assert.is_nil(relative)
-        assert.is_string(relativeReason)
-    end)
-end)
-
 describe("http.newClient", function()
     local server, port, client
     local silent, silentPort
@@ -207,12 +180,12 @@ describe("http.newClient", function()
     end)
 
     local function url(path)
-        return http.newURI(("http://127.0.0.1:%d%s"):format(port, path))
+        return uri.newURI(("http://127.0.0.1:%d%s"):format(port, path))
     end
 
     --- A URL that connects and is never answered.
     local function silentUrl(path)
-        return http.newURI(("http://127.0.0.1:%d%s"):format(silentPort, path))
+        return uri.newURI(("http://127.0.0.1:%d%s"):format(silentPort, path))
     end
 
     --- Writes an exact HTTP response for protocol cases `respond` hides.
@@ -437,7 +410,7 @@ describe("http.newClient", function()
         assert.are.equal(#BODY, response.body:contentLength())
         assert.are.equal("text/plain", response.body:contentType())
         assert.are.equal("text/plain", response.headers["content-type"])
-        assert.are.equal(url("/body").text, response.url.text)
+        assert.are.equal(url("/body"):toString(), response.url:toString())
     end)
 
     it("keeps only the final response headers", function()
@@ -973,7 +946,7 @@ describe("http.newClient", function()
         -- Port 1 on loopback with nothing on it, so this fails without ever
         -- leaving the machine. Reqwest reports the transport error through the
         -- same queue as completions.
-        local pending = client:send({ url = http.newURI("http://127.0.0.1:1/") })
+        local pending = client:send({ url = uri.newURI("http://127.0.0.1:1/") })
         drive(pending, nil)
 
         assert.are.equal("failed", pending.status)
@@ -987,7 +960,7 @@ describe("http.newClient", function()
     it("refuses a url that is not http or https", function()
         -- Data rather than a mistake in the program: a URL out of a manifest
         -- settles the future instead of raising at the call site.
-        local pending = client:send({ url = http.newURI("file:///etc/passwd") })
+        local pending = client:send({ url = uri.newURI("file:///etc/passwd") })
         assert.are.equal("failed", pending.status)
         assert.is_truthy(pending.error:find("not an http", 1, true))
     end)
@@ -1011,7 +984,7 @@ describe("http.newClient", function()
     it("returns from wait as soon as the transfer settles", function()
         -- The other direction: the work finishes well inside the budget, so
         -- `wait` returns because of the settlement rather than the clock.
-        local pending = client:send({ url = http.newURI("http://127.0.0.1:1/") })
+        local pending = client:send({ url = uri.newURI("http://127.0.0.1:1/") })
 
         local before = sdl.C.SDL_GetTicks()
         pending:wait(5000)
@@ -1128,7 +1101,7 @@ describe("http.newClient", function()
 
         assert.are.equal("failed", pending.status)
         assert.is_string(pending.error)
-        assert.is_truthy(pending.error:find(url("/too-big").text, 1, true))
+        assert.is_truthy(pending.error:find(url("/too-big"):toString(), 1, true))
         assert.has_error(function()
             return pending.value
         end)
@@ -1290,7 +1263,7 @@ describe("http.newClient", function()
 
             -- Nothing on port 1, so the transfer fails rather than answering.
             local entity = world:spawn(http.plugin.Request({
-                url = http.newURI("http://127.0.0.1:1/"),
+                url = uri.newURI("http://127.0.0.1:1/"),
             }))
             local response = turn(entity, http.plugin.Response)
 
@@ -1300,7 +1273,7 @@ describe("http.newClient", function()
             assert.is_true(response.body:isReadable())
             assert.are.equal(0, response.body:contentLength())
             assert.are.equal("", response.body:readAll())
-            assert.are.equal("http://127.0.0.1:1/", response.url.text)
+            assert.are.equal("http://127.0.0.1:1/", response.url:toString())
         end)
 
         -- What a save does with a request that has not answered yet. The future
@@ -1417,7 +1390,7 @@ describe("http.plugin snapshots", function()
                 local handle = assert(io.tmpfile())
                 local stream = tecsIO.newHandleStream(handle)
                 local request = {
-                    url = http.newURI("https://example.com/upload"),
+                    url = uri.newURI("https://example.com/upload"),
                     [field] = stream,
                 }
                 world:spawn(http.plugin.Request(request))
@@ -1438,7 +1411,7 @@ describe("http.plugin snapshots", function()
             local requestHeaders = { ["authorization"] = "before-save" }
             local responseHeaders = { ["content-type"] = "text/plain", ["x-state"] = "before-save" }
             world:spawn(http.plugin.Request({
-                url = http.newURI("https://example.test/upload"),
+                url = uri.newURI("https://example.test/upload"),
                 method = "POST",
                 headers = requestHeaders,
                 body = tecsIO.newStringStream(BODY, "text/plain"),
@@ -1447,7 +1420,7 @@ describe("http.plugin snapshots", function()
                 status = 0,
                 headers = responseHeaders,
                 body = tecsIO.newEmptyStream(),
-                url = http.newURI("https://example.test/upload"),
+                url = uri.newURI("https://example.test/upload"),
                 error = "saved failure",
             }))
             local saved = world:saveSnapshot({ format = format })

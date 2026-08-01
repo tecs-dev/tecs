@@ -234,10 +234,14 @@ describe("the public surface", function()
                 for member in pairs(described[name] or {}) do
                     local held = value[member]
                     assert.is_not_nil(held, "tecs." .. name .. "." .. member .. " resolves to nil")
-                    assert.is_true(
-                        endsIn(pathsOf(held), member),
-                        "tecs." .. name .. "." .. member .. " is not the module it names"
-                    )
+                    if type(held) == "function" then
+                        assert.is_function(held, "tecs." .. name .. "." .. member .. " is not a function")
+                    else
+                        assert.is_true(
+                            endsIn(pathsOf(held), member),
+                            "tecs." .. name .. "." .. member .. " is not the module it names"
+                        )
+                    end
                 end
                 return
             end
@@ -343,15 +347,23 @@ describe("the public surface", function()
             assert.is_true(rawequal(tecs.io, require("tecs.io")))
         end)
 
-        it("hangs both names below it on the parent, once", function()
+        it("hangs child modules and constructors below the parent, once", function()
             assert.is_true(rawequal(tecs.io.files, require("tecs.io.files")))
+            assert.is_true(rawequal(tecs.io.path, require("tecs.io.path")))
+            assert.is_true(rawequal(tecs.io.process, require("tecs.io.process")))
+            assert.is_true(rawequal(tecs.io.uri, require("tecs.io.uri")))
             assert.is_true(rawequal(tecs.io.watcher, require("tecs.io.watcher")))
             -- Written onto the module after the first read, which a namespace
             -- cannot do: there the table has to stay empty so `__index` keeps
             -- firing. A module owns every name it answers, so there is nothing
             -- to route and nothing to keep consulting.
             assert.is_true(rawequal(rawget(tecs.io, "files"), require("tecs.io.files")))
+            assert.is_true(rawequal(rawget(tecs.io, "path"), require("tecs.io.path")))
+            assert.is_true(rawequal(rawget(tecs.io, "process"), require("tecs.io.process")))
+            assert.is_true(rawequal(rawget(tecs.io, "uri"), require("tecs.io.uri")))
             assert.is_true(rawequal(rawget(tecs.io, "watcher"), require("tecs.io.watcher")))
+            assert.is_true(rawequal(tecs.io.newPath, tecs.io.path.newPath))
+            assert.is_true(rawequal(tecs.io.newURI, tecs.io.uri.newURI))
             assert.is_function(tecs.io.watcher.isInstalled)
             assert.is_nil(tecs.io.watcher.installed)
         end)

@@ -25,6 +25,7 @@ typedef struct TecsNetDatagram TecsNetDatagram;
 typedef struct TecsNetPacket TecsNetPacket;
 typedef struct TecsRegex TecsRegex;
 typedef struct TecsUiTree TecsUiTree;
+typedef struct TecsUri TecsUri;
 
 /* Taffy-backed retained UI layout. An entity id is the tree key, so Lua keeps
  * ownership of the ECS hierarchy and Rust owns only the derived layout cache.
@@ -104,6 +105,11 @@ typedef struct TecsRegexSpan {
     bool matched;
 } TecsRegexSpan;
 
+typedef struct TecsStringView {
+    const uint8_t *data;
+    size_t length;
+} TecsStringView;
+
 typedef struct TecsWindowHitRegion {
     int32_t x;
     int32_t y;
@@ -115,6 +121,26 @@ typedef struct TecsWindowHitRegion {
 typedef struct SDL_Window SDL_Window;
 
 const char *tecsRustError(void);
+
+/* Immutable absolute URIs. Every borrowed component remains valid until the
+ * parsed value is destroyed. Modifier functions return a new parsed value. */
+TecsUri *tecsUriParse(const uint8_t *text, size_t length);
+const uint8_t *tecsUriText(const TecsUri *uri, size_t *length);
+const uint8_t *tecsUriScheme(const TecsUri *uri, size_t *length);
+const uint8_t *tecsUriAuthority(const TecsUri *uri, size_t *length);
+const uint8_t *tecsUriUsername(const TecsUri *uri, size_t *length);
+const uint8_t *tecsUriPassword(const TecsUri *uri, size_t *length);
+const uint8_t *tecsUriHost(const TecsUri *uri, size_t *length);
+int tecsUriPort(const TecsUri *uri, uint16_t *port);
+const uint8_t *tecsUriPath(const TecsUri *uri, size_t *length);
+const uint8_t *tecsUriQuery(const TecsUri *uri, size_t *length);
+const uint8_t *tecsUriFragment(const TecsUri *uri, size_t *length);
+TecsUri *tecsUriWithText(const TecsUri *uri, uint32_t kind, const uint8_t *value, size_t value_length, int present);
+TecsUri *tecsUriWithPort(const TecsUri *uri, int32_t port);
+TecsUri *tecsUriConcatPath(const TecsUri *uri, const uint8_t *suffix, size_t suffix_length);
+TecsUri *tecsUriResolve(const TecsUri *uri, const uint8_t *reference, size_t reference_length);
+TecsUri *tecsUriWithEndpoint(const TecsUri *uri, const TecsUri *endpoint);
+void tecsUriDestroy(TecsUri *uri);
 
 TecsUiTree *tecsUiTreeCreate(void);
 void tecsUiTreeDestroy(TecsUiTree *tree);
@@ -144,6 +170,20 @@ int tecsCliMcp(void);
 TecsBytes *tecsSystemCachePath(const uint8_t *organization, size_t organization_length, const uint8_t *application,
                                size_t application_length);
 int tecsPathIsSymlink(const uint8_t *path, size_t path_length);
+bool tecsPathValidate(const uint8_t *path, size_t path_length);
+TecsBytes *tecsPathJoin(const TecsStringView *parts, size_t count);
+TecsBytes *tecsPathNormalize(const uint8_t *path, size_t path_length);
+TecsBytes *tecsPathAbsolute(const uint8_t *path, size_t path_length);
+TecsBytes *tecsPathCanonicalize(const uint8_t *path, size_t path_length);
+TecsBytes *tecsPathRelative(const uint8_t *path, size_t path_length, const uint8_t *base, size_t base_length);
+TecsBytes *tecsPathParent(const uint8_t *path, size_t path_length);
+TecsBytes *tecsPathFileName(const uint8_t *path, size_t path_length);
+TecsBytes *tecsPathStem(const uint8_t *path, size_t path_length);
+TecsBytes *tecsPathExtension(const uint8_t *path, size_t path_length);
+TecsBytes *tecsPathWithFileName(const uint8_t *path, size_t path_length, const uint8_t *name, size_t name_length);
+TecsBytes *tecsPathWithExtension(const uint8_t *path, size_t path_length, const uint8_t *extension,
+                                 size_t extension_length);
+bool tecsPathIsAbsolute(const uint8_t *path, size_t path_length);
 bool tecsFileWriteAtomic(const uint8_t *path, size_t path_length, const uint8_t *bytes, size_t length);
 
 TecsImage *tecsImageDecode(const uint8_t *bytes, size_t length);

@@ -24,7 +24,7 @@ local buffer <const> = require("tecs.io.buffer")
 local pump <const> = require("tecs.io.pump")
 local stream <const> = require("tecs.io.stream")
 local clients <const> = require("tecs.io.http.clients")
-local uri <const> = require("tecs.io.http.uri")
+local uri <const> = require("tecs.io.uri")
 local type iotypes = require("tecs.io.types")
 local type coretypes = require("tecs.types")
 local type Closeable = coretypes.Closeable
@@ -399,7 +399,7 @@ local function completeTransfer(
     local response <const> = transfer.response
     response.status = status
     response.headers = parseHeaders(rawHeaders)
-    local responseURI <const>, uriFailure = uri.new(effectiveUrl ~= "" and effectiveUrl or transfer.url)
+    local responseURI <const>, uriFailure = uri.newURI(effectiveUrl ~= "" and effectiveUrl or transfer.url)
     if responseURI == nil then
         releaseResponseBuffers(transfer)
         transfer.future:fail(("tecs: %s: invalid effective URI: %s"):format(transfer.url, uriFailure))
@@ -716,12 +716,12 @@ function Client:send(request: Request): Future<Response>
         error("tecs: this http client is closed", 2)
     end
     if request == nil or not uri.isURI(request.url) then
-        error("tecs: http send needs a request with a URI from tecs.io.http.newURI", 2)
+        error("tecs: http send needs a request with a URI from tecs.io.newURI", 2)
     end
 
     local requestURI <const> = request.url
-    local url <const> = requestURI.text
-    local scheme <const> = requestURI.scheme
+    local url <const> = requestURI:toString()
+    local scheme <const> = requestURI:scheme()
     if scheme ~= "http" and scheme ~= "https" then
         return Future.failed(("tecs: %s is not an http or https url"):format(url)) as Future<Response>
     end
@@ -824,7 +824,7 @@ function Client:send(request: Request): Future<Response>
     native.timeoutMs = request.timeoutMs or self._options.timeoutMs
     native.stallTimeoutMs = request.stallTimeoutMs or self._options.stallTimeoutMs
     native.maxBytes = request.maxBytes ~= nil and request.maxBytes or self._options.maxBytes
-    local host <const> = requestURI.host
+    local host <const> = requestURI:host()
     native.insecure = host ~= nil and self._insecure[host] and 1 or 0
 
     if (tonumber(H.tecsHttpClientSend(self._handle, nativeArray)) or 0) == 0 then

@@ -15,11 +15,14 @@ rust-version = "1.88"
 anyhow = "1.0"
 bincode = "1.3"
 bytes = "1"
+camino = "1.2"
 clap = { version = "4.6.4", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
 clap_complete = { version = "4.6.4", default-features = false }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 libc = "0.2"
+path-clean = "1.0"
+pathdiff = { version = "0.2", features = ["camino"] }
 rapier2d = { version = "0.34.0", default-features = false, features = ["dim2", "enhanced-determinism", "f32", "parallel", "serde-serialize"] }
 rayon = "1.12"
 reqwest = { version = "0.13.4", default-features = false, features = ["deflate", "gzip", "rustls-no-provider", "socks", "stream"] }
@@ -39,6 +42,7 @@ tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 toml = "0.9"
 uuid = { version = "1.24", features = ["v4", "v7"] }
+url = "2.5"
 walkdir = "2.5"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 

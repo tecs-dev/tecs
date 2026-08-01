@@ -2,7 +2,7 @@
 Asynchronous HTTP and HTTPS.
 
 ```teal no-format
-local endpoint <const> = tecs.io.http.newURI(
+local endpoint <const> = tecs.io.newURI(
     "https://example.com/manifest.json"
 )
 tecs.io.http.newClient({userAgent = "mygame/1.0"})
@@ -38,17 +38,8 @@ last Lua reference does not cancel its requests. A headless tool calls
 local client <const> = require("tecs.io.http.client")
 local clients <const> = require("tecs.io.http.clients")
 local plugin <const> = require("tecs.io.http.plugin")
-local uri <const> = require("tecs.io.http.uri")
 
 local record http
-    --- One parsed absolute URI.
-    ---
-    --- `text` contains the normalized URI. `scheme`, `authority`, `username`,
-    --- `password`, `host`, `port`, `path`, `query`, and `fragment` expose its
-    --- parsed parts without reparsing. Optional parts are nil. `tostring`
-    --- returns `text`.
-    type URI = uri.URI
-
     --- Settings copied when an HTTP client is built.
     ---
     --- `userAgent` and `headers` set request defaults. `timeoutMs` defaults to
@@ -79,17 +70,6 @@ local record http
     --- Read-only. `plugin` exposes requests and responses as ECS components.
     plugin: plugin
 
-    --- Parses and normalizes an absolute URI.
-    ---
-    --- This uses Rust's `url::Url`, the same parser Reqwest uses. It accepts
-    --- non-HTTP schemes too; `Client:send` separately requires `http` or
-    --- `https`.
-    --- @param text The caller supplies an absolute UTF-8 URI.
-    --- @return Returns a parsed URI, or nil when the text is invalid or
-    ---     relative.
-    --- @return Returns the parser's reason when the first return is nil.
-    newURI: function(text: string): URI, string
-
     --- Builds a client.
     ---
     --- @param options The caller supplies client defaults or omits this record
@@ -104,7 +84,6 @@ local record http
 end
 
 http.plugin = plugin
-http.newURI = uri.new
 http.newClient = client.newClient
 http.getOpenClientCount = clients.count
 

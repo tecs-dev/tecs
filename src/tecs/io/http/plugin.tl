@@ -9,7 +9,7 @@ react to, something that dies when the entity that asked for it does.
     world:addPlugin(tecs.io.http.plugin.install)
 
     world:spawn(http.plugin.Request, {
-        url = http.newURI("https://example.com/scores"),
+        url = tecs.io.newURI("https://example.com/scores"),
     })
 
 Some frames later the entity carries a `Response` instead, and a system
@@ -59,7 +59,7 @@ local type types = require("tecs.types")
 local storekeys <const> = require("tecs.internal.storekeys")
 local Future <const> = require("tecs.Future")
 local client <const> = require("tecs.io.http.client")
-local uri <const> = require("tecs.io.http.uri")
+local uri <const> = require("tecs.io.uri")
 local stream <const> = require("tecs.io.stream")
 local type iotypes = require("tecs.io.types")
 
@@ -77,7 +77,7 @@ local record plugin
     --- because there is no second vocabulary for the same thing.
     record Request is Component
         --- Caller-writable. Sets an absolute HTTP or HTTPS
-        --- [`URI`](tealdoc:tecs.io.http.URI).
+        --- [`URI`](tealdoc:tecs.io.uri.URI).
         url: URI
         --- Caller-writable. Sets the method. Defaults to `"GET"`.
         method: string
@@ -173,7 +173,7 @@ local function serializeRequest(request: Request): {string: any}
             if key == "headers" and valueType == "table" then
                 data.headers = copyHeaders(value as {string: string})
             elseif key == "url" and uri.isURI(value) then
-                data.url = (value as URI).text
+                data.url = (value as URI):toString()
             elseif (key == "body" or key == "into") and valueType == "table" then
                 data[key] = stream._snapshot(value as Stream, ("tecs.http.Request %s"):format(key))
             elseif valueType == "number" or valueType == "string" or valueType == "boolean" then
@@ -190,7 +190,7 @@ local function deserializeRequest(_world: World, data: {string: any}): Request
         if key == "headers" and type(value) == "table" then
             restored.headers = copyHeaders(value as {string: string})
         elseif key == "url" and type(value) == "string" then
-            local parsed <const>, reason = uri.new(value as string)
+            local parsed <const>, reason = uri.newURI(value as string)
             if parsed == nil then
                 error(("tecs: cannot restore tecs.http.Request URL: %s"):format(reason), 0)
             end
@@ -208,7 +208,7 @@ local function serializeResponse(response: Response): {string: any}
     local data: {string: any} = {
         status = response.status,
         headers = copyHeaders(response.headers),
-        url = response.url ~= nil and response.url.text or nil,
+        url = response.url ~= nil and response.url:toString() or nil,
         error = response.error,
     }
     if response.body ~= nil then
@@ -223,7 +223,7 @@ local function deserializeResponse(_world: World, data: {string: any}): Response
         if key == "headers" and type(value) == "table" then
             restored.headers = copyHeaders(value as {string: string})
         elseif key == "url" and type(value) == "string" then
-            local parsed <const>, reason = uri.new(value as string)
+            local parsed <const>, reason = uri.newURI(value as string)
             if parsed == nil then
                 error(("tecs: cannot restore tecs.http.Response URL: %s"):format(reason), 0)
             end

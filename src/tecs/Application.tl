@@ -124,7 +124,7 @@ local type Audio = audio.Audio
 local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
 local files <const> = require("tecs.io.files")
-local process <const> = require("tecs.io.process")
+local process <const> = require("tecs.internal.process")
 local runtime <const> = require("tecs.runtime")
 
 -- Host-only event conversion operations. The public events record omits these

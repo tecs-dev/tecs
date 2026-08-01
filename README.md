@@ -237,8 +237,9 @@ table. That is not a detail: `layers.maxY` and `layers.maxZ` are assigned by a
 game, and two tables would mean a write through one that nothing reads.
 
 **A namespace with one principal module is that module.** `tecs.io` is the
-table `require("tecs.io")` answers with, and `files`, `http`, `mcp`, and
-`watcher` are hung off it when each name is first read. A separate proxy table
+table `require("tecs.io")` answers with, and `files`, `http`, `mcp`, `path`,
+`process`, `uri`, and `watcher` are hung off it when each name is first read. A
+separate proxy table
 would need a second record that restates every member's type and documentation,
 and writes would need routing to the module that owns each name. Using the
 principal module avoids both copies, while
@@ -1497,6 +1498,29 @@ distinction without adding another organizational root or a third module level.
 `tecs.io.files` answers both halves: where a path is, and what to do once
 you have one. They are one module because they are one task. Every path a game
 touches is resolved and then acted on in the same breath.
+`tecs.io.newPath(first, ...)` is the component-aware form for carrying that
+location between calls. It wraps a Camino UTF-8 path and returns immutable
+values, so joining, replacing an extension, and finding a relative path do not
+turn string slicing into a second platform-path implementation in Lua. Joining
+and normalization are lexical and work before an output exists; canonicalizing
+is the explicit filesystem operation that requires an existing object and
+follows symbolic links. `path-clean` supplies lexical normalization and
+`pathdiff` supplies relative paths, keeping those edge cases in focused Rust
+libraries while Tecs gives them one object-shaped Lua contract. Unix names
+containing invalid UTF-8 are deliberately outside that contract, matching the
+UTF-8 strings accepted by the rest of the engine.
+
+`tecs.io.newURI` is the corresponding component-aware value for protocol and
+resource identifiers, but it is not an HTTP type. The Rust `url` crate parses
+one absolute URI into an immutable Lua value; accessors then read copied
+components without reparsing. Modification is expressed as new values through
+`with` methods, path concatenation, relative-reference resolution, and endpoint
+replacement. Keeping the value general lets HTTP enforce `http` and `https`
+at its own boundary while files, custom schemes, application links, and future
+protocols use the same validated representation. Relative references remain
+operation inputs rather than stored values, because only the operation knows
+the base that makes them meaningful.
+
 `platform/content.tl` sits below it and its watcher sibling. It holds the roots
 the shader and material loaders read and the loaded-path set the watcher polls,
 so neither public child has to require the other. It is one backend call per
@@ -1597,7 +1621,7 @@ process, a request. [`Future.tl`](src/tecs/Future.tl) gives all of them one
 settle-once state, failure, cancellation, listener and wait vocabulary.
 
 ```lua
-local process, reason = tecs.io.newProcess({ args = { "git", "status", "--porcelain" } })
+local process, reason = tecs.io.process.new({ args = { "git", "status", "--porcelain" } })
 if process == nil then error(reason) end
 
 process.finished
@@ -1778,7 +1802,7 @@ and stderr endpoints. It initializes no SDL subsystem and works from a plain
 interpreter as well as from the game host.
 
 ```lua
-local process, reason = tecs.io.newProcess({
+local process, reason = tecs.io.process.new({
     args = { "asset-compiler", "--watch" },
     stderr = "stdout",
 })
@@ -1810,7 +1834,7 @@ startup step, or worker. No Lua callback enters from native code.
 
 **Exit and I/O are separate facts.** `finished` is a future because a child
 settles once, while stdout and stderr may yield any number of chunks first.
-A nonzero exit is still a ready `ProcessExit`; `succeeded` is the separate
+A nonzero exit is still a ready `tecs.io.process.Exit`; `succeeded` is the separate
 exit-code check. A spawn failure returns nil and a reason synchronously because
 there is no process or future to own.
 

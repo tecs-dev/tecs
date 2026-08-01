@@ -357,7 +357,7 @@ local function begin()
     end
     local name <const> = MODES[mode]
     local request: tecs.io.http.Request = {
-        url = tecs.io.http.newURI(("http://127.0.0.1:%d/%s"):format(port, name)),
+        url = tecs.io.newURI(("http://127.0.0.1:%d/%s"):format(port, name)),
         method = "POST",
     }
     if name == "upload-string" then

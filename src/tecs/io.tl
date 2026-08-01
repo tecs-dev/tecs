@@ -29,8 +29,9 @@ end)
 TCP is an ordered byte stream: one write may take several reads to receive,
 several writes may arrive in one read, and message framing belongs to the
 caller. UDP preserves one send as one datagram, but the network may lose,
-duplicate, or reorder it. HTTP and HTTPS live under `tecs.io.http`; the MCP
-debug server lives under `tecs.io.mcp`.
+duplicate, or reorder it. General immutable URIs live under `tecs.io.uri`;
+HTTP and HTTPS live under `tecs.io.http`; the MCP debug server lives under
+`tecs.io.mcp`.
 
 Hot TCP loops can reuse a `Buffer`. `TCPSocket:readInto` lets the native
 socket fill its FFI allocation directly, and `TCPSocket:writeFrom` queues a
@@ -57,107 +58,6 @@ ownership of the endpoint they wrap and close it with themselves. Opening a
 buffer or byte-view reader retains an immutable snapshot that outlives later
 closure; opening a buffer writer borrows the mutable buffer, clears its
 logical length, and requires it to remain open through the writer's close.
-
-## Child processes
-
-`newProcess` returns the live child immediately. Its `stdin`, `stdout`, and
-`stderr` fields are ordinary caller-visible endpoints when their modes are
-`"pipe"`. The process owns those endpoints. Closing one closes only that pipe;
-closing the process closes all of them, forcibly terminates a live child, and
-reaps it. Buffers and views passed to a pipe remain caller-owned.
-
-`communicate` is the complete-exchange form for tools and build steps. It feeds
-stdin while draining stdout and stderr concurrently, so neither output pipe
-can fill and deadlock the child:
-
-```teal
-tecs.scoped(function(scope: tecs.Scope)
-    local process, startReason = tecs.io.newProcess({
-        args = {"git", "status", "--porcelain"},
-        timeoutMs = 2000,
-    })
-    if process == nil then
-        error(startReason)
-    end
-    scope:own(process)
-
-    local result, communicateReason = process:communicate()
-    if result == nil then
-        error(communicateReason)
-    end
-
-    if not result:succeeded() then
-        io.stderr:write(result.errorOutput)
-    else
-        print(result.output)
-    end
-end)
-```
-
-Interactive children use the same `Reader` and `Writer` methods as files,
-buffers, and transforms. Closing stdin sends EOF. Read stdout and stderr
-concurrently when either may produce enough bytes to fill an operating-system
-pipe:
-
-```teal
-tecs.scoped(function(scope: tecs.Scope)
-    local process, startReason = tecs.io.newProcess({args = {"/bin/cat"}})
-    if process == nil then
-        error(startReason)
-    end
-    scope:own(process)
-
-    local written, writeReason = process.stdin:write("one request\n")
-    if not written then
-        error(writeReason)
-    end
-    process.stdin:close()
-
-    local reply, readReason = process.stdout:read(4096)
-    if reply == nil then
-        error(readReason)
-    end
-
-    print(reply)
-end)
-```
-
-Frame-driven code uses `readAvailable`, `readAvailableInto`, and the matching
-writer methods. Nil without a reason means an open pipe has no bytes or
-capacity right now; an empty string or zero means output EOF. These methods
-make backpressure visible instead of growing an implicit queue. Buffer and
-byte-view variants avoid constructing Lua strings:
-
-```teal
-local tecsIO <const> = tecs.io
-local process, startReason = tecsIO.newProcess({args = {"asset-compiler", "--watch"}})
-if process == nil then
-    error(startReason)
-end
-local output <const> = tecsIO.newBuffer()
-
-local function update()
-    output:clear()
-    local count <const>, readReason = process.stdout:readAvailableInto(output)
-    if readReason ~= nil then
-        error(readReason)
-    elseif count ~= nil and count > 0 then
-        print(output:getString())
-    end
-end
-
-local function shutdown()
-    process:close()
-    output:close()
-end
-```
-
-Use `"inherit"` for a CLI that should share the terminal, `"null"` to discard
-a stream, and `stderr = "stdout"` for one ordered transcript. A nonzero child
-exit still produces a ready `ProcessExit`; `succeeded` is the separate exit-code
-check. Spawn failures return nil and a reason. Deadlines and explicit kills set
-the exit's `killed` fields rather than turning a process that did run into a
-constructor failure.
 
 Resolution and client connection return asynchronous
 [`Future`](tealdoc:tecs.Future) values. An
@@ -188,8 +88,9 @@ resource. Close it explicitly. A GC finalizer releases an abandoned network
 handle as a last resort, but cannot report a close error. Closing is
 idempotent; using a closed value returns a failure.
 
-Naming `tecs.io` loads none of its children. Reading `files`, `http`, `mcp`, or
-`watcher` loads only that child.
+Naming `tecs.io` loads none of its children. Reading `files`, `http`, `mcp`,
+`path`, `process`, `uri`, or `watcher` loads only that child. Calling `newPath`
+or `newURI` loads the same module as reading its corresponding child.
 ]=]
 
 -- Implementation details:
@@ -208,7 +109,6 @@ local runtime <const> = require("tecs.internal.runtime")
 local buffer <const> = require("tecs.io.buffer")
 local filters <const> = require("tecs.io.filters")
 local pump <const> = require("tecs.io.pump")
-local process <const> = require("tecs.io.process")
 local stream <const> = require("tecs.io.stream")
 local type types = require("tecs.io.types")
 local type coretypes = require("tecs.types")
@@ -222,6 +122,9 @@ local type IOBuffer = types.Buffer
 local type files = require("tecs.io.files")
 local type http = require("tecs.io.http")
 local type mcp = require("tecs.io.mcp")
+local type path = require("tecs.io.path")
+local type process = require("tecs.io.process")
+local type uri = require("tecs.io.uri")
 local type watcher = require("tecs.io.watcher")
 
 local type FutureType<T> = Future<T>
@@ -256,9 +159,41 @@ local record binaryIO
     --- Read-only. `mcp` provides the debug server and tool registry.
     mcp: mcp
 
+    --- Read-only. `path` constructs immutable platform-native paths.
+    path: path
+
+    --- Read-only. `process` starts children with streaming standard I/O.
+    process: process
+
+    --- Read-only. `uri` parses and modifies immutable absolute URIs.
+    uri: uri
+
     --- Read-only. `watcher` provides loaded-content polling and reload
     --- notifications.
     watcher: watcher
+
+    --- Creates an immutable platform-native filesystem path.
+    ---
+    --- Construction validates UTF-8 and NUL bytes but does not access the
+    --- filesystem. Path operations live on
+    --- [`Path`](tealdoc:tecs.io.path.Path).
+    --- @param first The caller supplies the first platform-native path
+    ---     component or complete path.
+    --- @param ... The caller supplies additional path components in order.
+    --- @return Returns a new immutable path.
+    newPath: function(first: string, ...: string): path.Path
+
+    --- Parses and normalizes an absolute URI.
+    ---
+    --- URI operations live on [`URI`](tealdoc:tecs.io.uri.URI). Protocols
+    --- separately restrict which schemes they accept.
+    --- A component record constructs the final value directly, without a
+    --- chain of intermediate immutable URI values.
+    --- @param value The caller supplies absolute UTF-8 text or URI components.
+    --- @return Returns a new immutable URI, or nil when the text is invalid or
+    ---     relative.
+    --- @return Returns the parser's reason when the first return is nil.
+    newURI: function(value: string | uri.Components): uri.URI, string
 
     --- A `Reader` supplies bytes in order and releases its owned state on `close`.
     type Reader = types.Reader
@@ -301,47 +236,6 @@ local record binaryIO
 
     --- Options control an incremental deflate writer.
     type DeflateWriterOptions = types.DeflateWriterOptions
-
-    --- `ProcessInputMode` selects where a child reads standard input.
-    type ProcessInputMode = types.ProcessInputMode
-
-    --- `ProcessOutputMode` selects where a child writes standard output.
-    type ProcessOutputMode = types.ProcessOutputMode
-
-    --- `ProcessErrorMode` selects where a child writes standard error.
-    type ProcessErrorMode = types.ProcessErrorMode
-
-    --- `ProcessOptions` configures a child and its standard streams.
-    type ProcessOptions = types.ProcessOptions
-
-    --- `CommunicateOptions` controls a complete duplex process exchange.
-    type CommunicateOptions = types.CommunicateOptions
-
-    --- `ProcessExit` describes how a child stopped.
-    type ProcessExit = types.ProcessExit
-
-    --- `ProcessResult` contains a completed duplex exchange.
-    type ProcessResult = types.ProcessResult
-
-    --- `ProcessReader` reads one live child-process output pipe.
-    type ProcessReader = types.ProcessReader
-
-    --- `ProcessWriter` writes one live child-process input pipe.
-    type ProcessWriter = types.ProcessWriter
-
-    --- `Process` owns a child and its standard-stream endpoints.
-    type Process = types.Process
-
-    --- Starts a caller-owned child process with streaming standard I/O.
-    ---
-    --- Piped endpoints are nonblocking at their `readAvailable` and
-    --- `writeAvailable` boundaries. The process owns them, while buffers and
-    --- byte views passed to endpoint methods remain caller-owned.
-    --- @param options The caller supplies the program, arguments, environment,
-    ---     working directory, standard-stream modes, and optional deadline.
-    --- @return Returns a caller-owned process when the platform starts it.
-    --- @return Returns the platform reason when the first return is nil.
-    newProcess: function(options: types.ProcessOptions): types.Process, string
 
     --- Creates an owned growable byte buffer.
     ---
@@ -815,7 +709,6 @@ local record binaryIO
 end
 
 binaryIO.newBuffer = stream.newBuffer
-binaryIO.newProcess = process.new
 binaryIO.newStringReader = stream.newStringReader
 binaryIO.newByteReader = stream.newByteReader
 binaryIO.transfer = pump.transfer

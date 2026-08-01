@@ -10,6 +10,7 @@ requiring their public parent.
 local type loader = require("tecs.ffi.loader")
 local type coretypes = require("tecs.types")
 local type Future = require("tecs.Future")
+local type pathModule = require("tecs.io.path")
 local type Closeable = coretypes.Closeable
 
 --- An immutable, zero-copy range retained from a [`Buffer`](tealdoc:tecs.io.Buffer).
@@ -560,9 +561,10 @@ local record ProcessOptions
     --- arguments. A program without a separator resolves through `PATH`.
     args: {string}
 
-    --- Caller-writable. Selects the child's working directory or omits it to
-    --- inherit the current directory.
-    cwd: string
+    --- Caller-writable. Selects the child's working directory as a string or
+    --- [`Path`](tealdoc:tecs.io.path.Path), or omits it to inherit the current
+    --- directory.
+    cwd: string | pathModule.Path
 
     --- Caller-writable. Overlays environment variables on the inherited
     --- environment, or supplies the complete environment with `clearEnv`.

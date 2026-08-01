@@ -29,6 +29,11 @@ arguments raise because they indicate a defect in the calling program.
 Every operation runs synchronously. Send large tree walks to
 `tecs.workers`, and decode images or sounds through `tecs.assets`.
 
+Every operation that accepts a filesystem location accepts either a string or
+an immutable [`Path`](tealdoc:tecs.io.path.Path). String results remain useful
+at Lua and platform boundaries; wrap one with `tecs.io.newPath` when the next
+operation benefits from component-aware manipulation.
+
 `tecs.io.watcher` polls paths recorded by `read` and the built-in asset
 loaders. It does not walk the whole asset tree.
 
@@ -46,6 +51,7 @@ local loader <const> = require("tecs.ffi.loader")
 local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
 local type types = require("tecs.io.types")
+local type pathModule = require("tecs.io.path")
 
 local floor <const> = math.floor
 local max <const> = math.max
@@ -101,6 +107,8 @@ local type SeekOrigin = types.SeekOrigin
 local type SeekableReader = types.SeekableReader
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
+local type Path = pathModule.Path
+local type PathInput = string | Path
 
 --- Raises when a required string argument is missing.
 ---
@@ -110,10 +118,18 @@ local type ByteView = types.ByteView
 --- every function below needs, and a missing one is a defect in the caller.
 --- Checked once, here, so a port's backend inherits it rather than repeating
 --- it in ten functions.
-local function required(value: string, what: string)
-    if value == nil then
+local function required(value: PathInput, what: string): string
+    if type(value) == "string" then
+        return value as string
+    end
+    if type(value) ~= "table" or type((value as {string: any}).toString) ~= "function" then
         error(("tecs: io.files.%s needs a path"):format(what), 3)
     end
+    local rendered <const> = (value as Path):toString()
+    if type(rendered) ~= "string" then
+        error(("tecs: io.files.%s received an invalid io.path.Path"):format(what), 3)
+    end
+    return rendered
 end
 
 local preferenceOrganization = "tecs"
@@ -200,24 +216,24 @@ end
 --- @param relative The caller supplies a path under the content root with `/`
 ---     separators. The function joins it without checking existence.
 --- @return Returns the absolute path.
-function files.assetPath(relative: string): string
-    return content.assetPath(relative)
+function files.assetPath(relative: PathInput): string
+    return content.assetPath(required(relative, "assetPath"))
 end
 
 --- Resolves `relative` against the writable root.
 ---
 --- @param relative The caller supplies a path under the preference directory.
 --- @return Returns the absolute path.
-function files.writablePath(relative: string): string
-    return files.preferencePath() .. relative
+function files.writablePath(relative: PathInput): string
+    return files.preferencePath() .. required(relative, "writablePath")
 end
 
 --- Overrides the asset root, for a test or a tool.
 ---
 --- @param root The caller supplies the new content directory. The function
 ---     adds a trailing separator only when needed.
-function files.setAssetRoot(root: string)
-    content.setAssetRoot(root)
+function files.setAssetRoot(root: PathInput)
+    content.setAssetRoot(required(root, "setAssetRoot"))
 end
 
 --- Returns information about `path`, or nil when nothing occupies it.
@@ -228,27 +244,24 @@ end
 --- @param path The caller supplies an absolute or platform-resolvable path.
 --- @return Returns the path information, or nil when unavailable.
 --- @return Returns the platform reason when the first return is nil.
-function files.info(path: string): Info, string
-    required(path, "info")
-    return adapter.storage().info(path)
+function files.info(path: PathInput): Info, string
+    return adapter.storage().info(required(path, "info"))
 end
 
 --- Returns whether anything occupies `path`.
 ---
 --- @param path The caller supplies an absolute or platform-resolvable path.
 --- @return Returns true when the platform finds any object.
-function files.exists(path: string): boolean
-    required(path, "exists")
-    return adapter.storage().info(path) ~= nil
+function files.exists(path: PathInput): boolean
+    return adapter.storage().info(required(path, "exists")) ~= nil
 end
 
 --- Returns whether `path` resolves to a regular file.
 ---
 --- @param path The caller supplies an absolute or platform-resolvable path.
 --- @return Returns true when the resolved object is a regular file.
-function files.isFile(path: string): boolean
-    required(path, "isFile")
-    local info <const> = adapter.storage().info(path)
+function files.isFile(path: PathInput): boolean
+    local info <const> = adapter.storage().info(required(path, "isFile"))
     return info ~= nil and info.kind == "file"
 end
 
@@ -256,9 +269,8 @@ end
 ---
 --- @param path The caller supplies an absolute or platform-resolvable path.
 --- @return Returns true when the resolved object is a directory.
-function files.isDirectory(path: string): boolean
-    required(path, "isDirectory")
-    local info <const> = adapter.storage().info(path)
+function files.isDirectory(path: PathInput): boolean
+    local info <const> = adapter.storage().info(required(path, "isDirectory"))
     return info ~= nil and info.kind == "directory"
 end
 
@@ -271,9 +283,8 @@ end
 ---
 --- @param path The caller supplies an absolute or platform-resolvable path.
 --- @return Returns true when the final path itself is a symbolic link.
-function files.isSymlink(path: string): boolean
-    required(path, "isSymlink")
-    return adapter.storage().isSymlink(path)
+function files.isSymlink(path: PathInput): boolean
+    return adapter.storage().isSymlink(required(path, "isSymlink"))
 end
 
 --- Returns entries under `path` that match `pattern`.
@@ -295,9 +306,8 @@ end
 ---     fails.
 --- @return Returns the platform reason when the first return is nil.
 ---     An empty list means an empty directory, which nil does not.
-function files.glob(path: string, pattern?: string, options?: GlobOptions): {string}, string
-    required(path, "glob")
-    return adapter.storage().glob(path, pattern, options)
+function files.glob(path: PathInput, pattern?: string, options?: GlobOptions): {string}, string
+    return adapter.storage().glob(required(path, "glob"), pattern, options)
 end
 
 --- Returns names directly inside `path`.
@@ -307,9 +317,8 @@ end
 --- @param path The caller supplies the directory to enumerate.
 --- @return Returns immediate child names, or nil when enumeration fails.
 --- @return Returns the platform reason when the first return is nil.
-function files.list(path: string): {string}, string
-    required(path, "list")
-    return files.glob(path, "*")
+function files.list(path: PathInput): {string}, string
+    return files.glob(required(path, "list"), "*")
 end
 
 --- Creates `path`, and any parents it needs.
@@ -319,9 +328,8 @@ end
 --- @param path The caller supplies the directory to create.
 --- @return Returns whether the platform created or found the directory.
 --- @return Returns the platform reason when the first return is false.
-function files.createDirectory(path: string): boolean, string
-    required(path, "createDirectory")
-    return adapter.storage().createDirectory(path)
+function files.createDirectory(path: PathInput): boolean, string
+    return adapter.storage().createDirectory(required(path, "createDirectory"))
 end
 
 --- Removes a file, or an empty directory.
@@ -342,9 +350,8 @@ end
 --- @param path The caller supplies the file or empty directory to remove.
 --- @return Returns true when nothing remains at `path`.
 --- @return Returns the platform reason when the first return is false.
-function files.remove(path: string): boolean, string
-    required(path, "remove")
-    return adapter.storage().remove(path)
+function files.remove(path: PathInput): boolean, string
+    return adapter.storage().remove(required(path, "remove"))
 end
 
 --- Moves `from` to `to`, replacing whatever was at `to`.
@@ -357,10 +364,8 @@ end
 --- @param to The caller supplies the destination path to replace.
 --- @return Returns whether the platform moved the path.
 --- @return Returns the platform reason when the first return is false.
-function files.rename(from: string, to: string): boolean, string
-    required(from, "rename")
-    required(to, "rename")
-    return adapter.storage().rename(from, to)
+function files.rename(from: PathInput, to: PathInput): boolean, string
+    return adapter.storage().rename(required(from, "rename"), required(to, "rename"))
 end
 
 --- Copies the file at `from` to `to`, replacing whatever was at `to`.
@@ -372,10 +377,8 @@ end
 --- @param to The caller supplies the destination file to replace.
 --- @return Returns whether the platform copied the file.
 --- @return Returns the platform reason when the first return is false.
-function files.copy(from: string, to: string): boolean, string
-    required(from, "copy")
-    required(to, "copy")
-    return adapter.storage().copy(from, to)
+function files.copy(from: PathInput, to: PathInput): boolean, string
+    return adapter.storage().copy(required(from, "copy"), required(to, "copy"))
 end
 
 --- Reads a whole file and returns its bytes, or nil when there is none there.
@@ -388,9 +391,8 @@ end
 --- @param kind The caller supplies the content kind for watching, or omits it
 ---     to record a document.
 --- @return Returns the file bytes, or nil when the platform cannot read them.
-function files.read(path: string, kind?: string): string
-    required(path, "read")
-    return content.read(path, kind)
+function files.read(path: PathInput, kind?: string): string
+    return content.read(required(path, "read"), kind)
 end
 
 --- Iterates over the lines in a whole file.
@@ -406,11 +408,11 @@ end
 ---     [`LineIterator`](tealdoc:tecs.io.files.LineIterator) that yields each
 ---     line in order, or nil when the platform cannot read the file.
 --- @return Returns the failure reason when the first return is nil.
-function files.lines(path: string): LineIterator, string
-    required(path, "lines")
-    local bytes <const> = files.read(path)
+function files.lines(path: PathInput): LineIterator, string
+    local rendered <const> = required(path, "lines")
+    local bytes <const> = files.read(rendered)
     if bytes == nil then
-        return nil, ("cannot read %s"):format(path)
+        return nil, ("cannot read %s"):format(rendered)
     end
     local at = 1
     local length <const> = #bytes
@@ -448,13 +450,13 @@ end
 --- @return Returns the compiled chunk, or nil when reading or compilation
 ---     fails. Calling the returned function executes the file.
 --- @return Returns the read or compiler reason when the first return is nil.
-function files.load(path: string, environment?: {string: any}): function(...: any): any..., string
-    required(path, "load")
-    local bytes <const> = files.read(path)
+function files.load(path: PathInput, environment?: {string: any}): function(...: any): any..., string
+    local rendered <const> = required(path, "load")
+    local bytes <const> = files.read(rendered)
     if bytes == nil then
-        return nil, ("cannot read %s"):format(path)
+        return nil, ("cannot read %s"):format(rendered)
     end
-    local chunk <const>, reason = loadstring(bytes, "@" .. path)
+    local chunk <const>, reason = loadstring(bytes, "@" .. rendered)
     if chunk ~= nil and environment ~= nil then
         setfenv(chunk, environment)
     end
@@ -642,12 +644,12 @@ end
 --- @param bytes The caller supplies the complete binary contents.
 --- @return Returns whether the platform wrote the complete file.
 --- @return Returns the platform reason when the first return is false.
-function files.write(path: string, bytes: string): boolean, string
-    required(path, "write")
+function files.write(path: PathInput, bytes: string): boolean, string
+    local rendered <const> = required(path, "write")
     if bytes == nil then
         error("tecs: io.files.write needs bytes to write", 2)
     end
-    return adapter.storage().write(path, bytes)
+    return adapter.storage().write(rendered, bytes)
 end
 
 --- Durably writes `bytes` and atomically replaces `path`.
@@ -676,8 +678,8 @@ end
 ---     synchronous call and are not copied or closed.
 --- @return Returns whether the platform confirmed the atomic durable write.
 --- @return Returns the platform or unsupported reason when the first return is false.
-function files.writeAtomic(path: string, bytes: ByteInput): boolean, string
-    required(path, "writeAtomic")
+function files.writeAtomic(path: PathInput, bytes: ByteInput): boolean, string
+    local rendered <const> = required(path, "writeAtomic")
     if bytes == nil then
         error("tecs: io.files.writeAtomic needs bytes to write", 2)
     end
@@ -697,7 +699,7 @@ function files.writeAtomic(path: string, bytes: ByteInput): boolean, string
     if backend.writeAtomic == nil then
         return false, ("atomic durable writes are not supported by the %s storage backend"):format(backend.name)
     end
-    return backend.writeAtomic(path, bytes)
+    return backend.writeAtomic(rendered, bytes)
 end
 
 --- Appends `bytes` to `path`, creating the file when absent.
@@ -710,12 +712,12 @@ end
 --- @param bytes The caller supplies the binary contents to append.
 --- @return Returns whether the platform appended every byte.
 --- @return Returns the platform reason when the first return is false.
-function files.append(path: string, bytes: string): boolean, string
-    required(path, "append")
+function files.append(path: PathInput, bytes: string): boolean, string
+    local rendered <const> = required(path, "append")
     if bytes == nil then
         error("tecs: io.files.append needs bytes to append", 2)
     end
-    return adapter.storage().append(path, bytes)
+    return adapter.storage().append(rendered, bytes)
 end
 
 --- Opens `path` for writing in pieces.
@@ -732,17 +734,17 @@ end
 ---     replace the destination.
 --- @return Returns a caller-owned writer, or nil when it cannot open.
 --- @return Returns the platform reason when the first return is nil.
-function files.openWrite(path: string, mode?: WriteMode): Writer, string
-    required(path, "openWrite")
+function files.openWrite(path: PathInput, mode?: WriteMode): Writer, string
+    local rendered <const> = required(path, "openWrite")
     mode = mode or "replace"
     if mode ~= "replace" and mode ~= "append" then
         error("tecs: io.files.openWrite mode must be 'replace' or 'append'", 2)
     end
     local backend <const> = adapter.storage()
     if backend.openWrite ~= nil then
-        return backend.openWrite(path, mode)
+        return backend.openWrite(rendered, mode)
     end
-    return bufferedWriter(backend, path, mode)
+    return bufferedWriter(backend, rendered, mode)
 end
 
 --- Opens `path` for reading in pieces through a repositionable cursor.
@@ -758,15 +760,15 @@ end
 ---     [`SeekableReader`](tealdoc:tecs.io.SeekableReader) at byte zero, or nil
 ---     when the platform cannot open the file.
 --- @return Returns the platform reason when the first return is nil.
-function files.openRead(path: string): SeekableReader, string
-    required(path, "openRead")
+function files.openRead(path: PathInput): SeekableReader, string
+    local rendered <const> = required(path, "openRead")
     local backend <const> = adapter.storage()
     if backend.openRead ~= nil then
-        return backend.openRead(path)
+        return backend.openRead(rendered)
     end
-    local bytes <const> = backend.read(path)
+    local bytes <const> = backend.read(rendered)
     if bytes == nil then
-        return nil, ("cannot read %s"):format(path)
+        return nil, ("cannot read %s"):format(rendered)
     end
     return slicingReader(bytes)
 end

@@ -7,10 +7,8 @@ returns it unchanged, so its concrete type is preserved:
 
 ```teal
 tecs.scoped(function(scope: tecs.Scope)
-    local input <const> = assert(tecs.io.files.openRead("save.bin"))
-    local output <const> = assert(tecs.io.files.openWrite("save.copy"))
-    scope:own(input)
-    scope:own(output)
+    local input <const> = scope:own(tecs.io.files.openRead("save.bin"))
+    local output <const> = scope:own(tecs.io.files.openWrite("save.copy"))
 
     assert(tecs.io.transfer(input, output))
 end)
