@@ -49,15 +49,19 @@ readiness wait included, in a module the engine never sees.
 
 ## Port contract
 
-Ten functions that take a path, three that open one for streaming, and two that
-ask about the host. The ten are required and are called without
-checking. `currentDirectory` and `userFolder` are optional and answer nil
+The core path operations are required and are called without checking.
+`currentDirectory` and `userFolder` are optional and answer nil
 with a reason when the platform has no such notion, which is already what
 SDL answers for a folder a desktop does not have, so a caller that handled
 SDL's nil handles a port's. `openWrite` and `openRead` are optional in a
 different sense: `tecs.io.files` builds them and `openSeekableWrite` out of
 `write`, `append`, and `read` when a backend leaves them out. Every caller has
 all three, and only the memory a large file costs differs.
+
+Symbolic-link creation and reading, portable read-only mutation, and temporary
+resources are optional platform capabilities. The public module reports an
+unsupported reason when a backend leaves one out. Enumeration streams need no
+extra seam: they pull one level at a time through the required `glob` operation.
 
 `writeAtomic` is optional without a fallback. A title storage may have a
 transaction or commit operation that provides the same guarantee, but
@@ -95,6 +99,14 @@ local type ByteView = types.ByteView
 -- public types pass it without a copy.
 local type ByteInput = string | ByteView
 
+--- An operating-system temporary path owned by the storage backend.
+local record TemporaryPath
+    path: string
+    handle: loader.CPtr
+    persist: function(self: TemporaryPath, destination: string): boolean, string
+    close: function(self: TemporaryPath): boolean, string
+end
+
 --- What a path is. Symbolic links are followed where the platform has them, so
 --- a link never reports as one: "other" is a socket, a fifo or a device.
 local enum PathType
@@ -116,6 +128,8 @@ local record Info
     modifiedAt: number
     --- Read-only. Reports access time in nanoseconds since the epoch.
     accessedAt: number
+    --- Read-only. Reports the portable read-only state of the resolved path.
+    readOnly: boolean
 end
 
 --- Which of the platform's well-known folders to ask for.
@@ -196,6 +210,12 @@ local record Backend
     --- Whether the final path itself is a symbolic link. Parent links are
     --- followed.
     isSymlink: function(path: string): boolean
+    --- Returns the target spelling stored in a symbolic link. Optional.
+    readLink: function(path: string): string, string
+    --- Creates a file or directory symbolic link. Optional.
+    createSymlink: function(target: string, link: string, directory: boolean): boolean, string
+    --- Changes the portable read-only state. Optional.
+    setReadOnly: function(path: string, readOnly: boolean): boolean, string
     --- Entries under `path` matching `pattern`, as paths relative to `path`.
     --- A nil pattern walks the whole tree. `*` and `?` do not match a
     --- separator, so `"*"` is one level. Nil and a reason when `path` cannot
@@ -213,6 +233,11 @@ local record Backend
     --- Copies the file at `from` to `to`, replacing whatever was at `to`.
     --- Files only.
     copy: function(from: string, to: string): boolean, string
+
+    --- Creates an exclusively owned temporary file. Optional.
+    createTemporaryFile: function(directory: string, prefix: string, suffix: string): TemporaryPath, string
+    --- Creates an exclusively owned temporary directory. Optional.
+    createTemporaryDirectory: function(directory: string, prefix: string, suffix: string): TemporaryPath, string
 
     --- The process working directory, with a trailing separator. Optional: a
     --- platform with no such notion leaves it nil and callers get nil and a
@@ -244,6 +269,8 @@ local record storagebackend
     SeekableWriteMode: SeekableWriteMode
     --- Complete bytes accepted by an atomic write without an intermediate copy.
     ByteInput: ByteInput
+    --- An internal temporary resource returned by a backend.
+    TemporaryPath: TemporaryPath
     --- The seam a port implements.
     Backend: Backend
     --- The SDL backend, and the default everywhere.
@@ -314,6 +341,69 @@ local function byteRange(bytes: ByteInput): loader.BytePointer, integer
     end
     local input <const> = bytes as ByteView
     return input:getFFIPointer(), input:length()
+end
+
+--- Copies a Rust-owned byte result and releases it.
+local function takeRustBytes(handle: loader.CPtr): string
+    if handle == nil then
+        return nil
+    end
+    local length <const> = tonumber(R.tecsBytesLength(handle)) as integer
+    local value <const> = loader.toBytes(R.tecsBytesData(handle), length)
+    R.tecsBytesDestroy(handle)
+    return value
+end
+
+local TEMPORARY_MT <const>: metatable<TemporaryPath> = {__index = TemporaryPath}
+
+function TemporaryPath:persist(destination: string): boolean, string
+    if self.handle == nil then
+        return false, "the temporary path is closed"
+    end
+    if not R.tecsTemporaryPathPersist(self.handle, destination, #destination) then
+        return false, loader.toString(R.tecsRustError())
+    end
+    local held <const> = self.handle
+    self.handle = nil
+    ffi.gc(held as ffi.CData, nil)
+    R.tecsTemporaryPathDestroy(held)
+    return true
+end
+
+function TemporaryPath:close(): boolean, string
+    if self.handle == nil then
+        return true
+    end
+    if not R.tecsTemporaryPathClose(self.handle) then
+        return false, loader.toString(R.tecsRustError())
+    end
+    local held <const> = self.handle
+    self.handle = nil
+    ffi.gc(held as ffi.CData, nil)
+    R.tecsTemporaryPathDestroy(held)
+    return true
+end
+
+local function sdlTemporary(
+    directory: string, prefix: string, suffix: string, isDirectory: boolean
+): TemporaryPath, string
+    local handle: loader.CPtr
+    if isDirectory then
+        handle = R.tecsTemporaryDirectoryCreate(directory, #directory, prefix, #prefix, suffix, #suffix)
+    else
+        handle = R.tecsTemporaryFileCreate(directory, #directory, prefix, #prefix, suffix, #suffix)
+    end
+    if handle == nil then
+        return nil, loader.toString(R.tecsRustError())
+    end
+    handle = ffi.gc(handle as ffi.CData, R.tecsTemporaryPathDestroy as function(ffi.CData)) as loader.CPtr
+    local pathHandle <const> = R.tecsTemporaryPathGet(handle)
+    if pathHandle == nil then
+        ffi.gc(handle as ffi.CData, nil)
+        R.tecsTemporaryPathDestroy(handle)
+        return nil, loader.toString(R.tecsRustError())
+    end
+    return setmetatable({path = takeRustBytes(pathHandle), handle = handle} as TemporaryPath, TEMPORARY_MT)
 end
 
 --- Opens an `SDL_IOStream` and wraps it as a `Writer`.
@@ -665,16 +755,43 @@ local sdlBackend <const>: Backend = {
         if not C.SDL_GetPathInfo(path, INFO) then
             return nil, sdl.error()
         end
+        local readOnly <const> = tonumber(R.tecsPathIsReadOnly(path, #path)) as integer
+        if readOnly < 0 then
+            return nil, loader.toString(R.tecsRustError())
+        end
         return {
             kind = PATH_TYPES[tonumber(FIELDS.type) as integer],
             size = tonumber(FIELDS.size) as integer,
             createdAt = tonumber(FIELDS.create_time),
             modifiedAt = tonumber(FIELDS.modify_time),
             accessedAt = tonumber(FIELDS.access_time),
+            readOnly = readOnly == 1,
         }
     end,
 
     isSymlink = function(path: string): boolean return tonumber(R.tecsPathIsSymlink(path, #path)) == 1 end,
+
+    readLink = function(path: string): string, string
+        local handle <const> = R.tecsPathReadLink(path, #path)
+        if handle == nil then
+            return nil, loader.toString(R.tecsRustError())
+        end
+        return takeRustBytes(handle)
+    end,
+
+    createSymlink = function(target: string, link: string, directory: boolean): boolean, string
+        if R.tecsPathCreateSymlink(target, #target, link, #link, directory) then
+            return true
+        end
+        return false, loader.toString(R.tecsRustError())
+    end,
+
+    setReadOnly = function(path: string, readOnly: boolean): boolean, string
+        if R.tecsPathSetReadOnly(path, #path, readOnly) then
+            return true
+        end
+        return false, loader.toString(R.tecsRustError())
+    end,
 
     glob = function(path: string, pattern: string, options: GlobOptions): {string}, string
         local flags = 0
@@ -726,6 +843,14 @@ local sdlBackend <const>: Backend = {
             return true
         end
         return false, sdl.error()
+    end,
+
+    createTemporaryFile = function(directory: string, prefix: string, suffix: string): TemporaryPath, string
+        return sdlTemporary(directory, prefix, suffix, false)
+    end,
+
+    createTemporaryDirectory = function(directory: string, prefix: string, suffix: string): TemporaryPath, string
+        return sdlTemporary(directory, prefix, suffix, true)
     end,
 
     currentDirectory = function(): string, string

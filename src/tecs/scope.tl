@@ -15,9 +15,10 @@ end)
 ```
 
 The scope closes registrations in reverse order after the callback returns or
-raises. It attempts every close even when one raises. A callback failure stays
-the primary failure, with cleanup failures appended as secondary context; when
-the callback succeeds, cleanup failures make `scoped` raise.
+raises. It attempts every close even when one raises or returns `false,
+reason`. A callback failure stays the primary failure, with cleanup failures
+appended as secondary context; when the callback succeeds, cleanup failures
+make `scoped` raise.
 
 The scope owns each registration rather than each distinct value. Registering
 one value twice closes it twice. A scope becomes inactive before cleanup starts
@@ -119,11 +120,15 @@ function scope.scoped(body: function(Scope))
     for index = owned.count, 1, -1 do
         local registration <const> = owned.registrations[index]
         owned.registrations[index] = nil
-        local closed <const>, closeFailure = xpcall(
-            function() registration.close(registration.value) end, traceback
-        ) as (boolean, string)
-        if not closed then
-            cleanupFailures[#cleanupFailures + 1] = ("Resource %d failed to close:\n%s"):format(index, closeFailure)
+        local invoked <const>, closeResult, closeReason = xpcall(
+            function(): any, string return registration.close(registration.value) end, traceback
+        ) as (boolean, any, string)
+        if not invoked then
+            cleanupFailures[#cleanupFailures + 1] = ("Resource %d failed to close:\n%s"):format(index, closeResult)
+        elseif closeResult == false then
+            cleanupFailures[#cleanupFailures + 1] = ("Resource %d failed to close:\n%s"):format(
+                index, closeReason or "close returned false"
+            )
         end
     end
 

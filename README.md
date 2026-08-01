@@ -1561,6 +1561,18 @@ not a composition: a console backend may map it to its own transaction, and a
 backend with no equivalent reports unsupported rather than quietly falling back
 to `write` plus `rename` and claiming a guarantee it cannot make.
 
+`writeAtomicAsync` copies its input into the worker channel and performs that
+same commit away from the frame. The shared worker exists only while writes are
+pending and its futures participate in the ordinary runtime pump. Directory
+streams take the complementary approach for reads: `openDirectory` and `walk`
+pull entries a level at a time instead of materializing the complete tree, and
+never follow symbolic links. Temporary files and directories are native-owned
+resources with finalizers as a leak safety net, but deterministic cleanup still
+runs through `tecs.scoped`; persistence moves an owned temporary path to an
+absent permanent destination before relinquishing cleanup. Portable permissions
+stop at a read-only bit. POSIX modes and platform ACLs would pretend to have a
+cross-platform meaning they do not share.
+
 `openRead` returns a `SeekableReader`, not merely the basic directional
 `Reader`. Files have an addressable byte space even when a platform's storage
 API can only return their complete contents, so a backend with a real seek

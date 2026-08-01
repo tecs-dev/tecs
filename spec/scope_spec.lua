@@ -80,6 +80,28 @@ describe("resource scopes", function()
         assert.is_truthy(reason:find("second close failed", 1, true))
     end)
 
+    it("reports false close results and continues cleanup", function()
+        local closed = {}
+        local failed = resource("failed", closed)
+        function failed:close()
+            closed[#closed + 1] = self.name
+            return false, "flush failed"
+        end
+
+        local ok, reason = pcall(function()
+            tecs.scoped(function(scope)
+                scope:own(resource("first", closed))
+                scope:own(failed)
+                scope:own(resource("last", closed))
+            end)
+        end)
+
+        assert.is_false(ok)
+        assert.same({ "last", "failed", "first" }, closed)
+        assert.is_truthy(tostring(reason):find("Resource 2 failed to close", 1, true))
+        assert.is_truthy(tostring(reason):find("flush failed", 1, true))
+    end)
+
     it("keeps the body failure primary when cleanup also fails", function()
         local closed = {}
         local ok, reason = pcall(function()

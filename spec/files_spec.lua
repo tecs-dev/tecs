@@ -257,6 +257,28 @@ describe("io.files", function()
             assert.is_true(files.isSymlink(at("linked")))
             assert.is_false(files.isSymlink(at("linked/inside.txt")))
         end)
+
+        it("creates and reads file and directory symbolic links", function()
+            files.write(at("target.txt"), "target")
+            files.createDirectory(at("target-dir"))
+
+            assert.is_true(files.createSymlink("target.txt", at("file-link"), "file"))
+            assert.is_true(files.createSymlink("target-dir", at("dir-link"), "directory"))
+            assert.are.equal("target.txt", files.readLink(at("file-link")):toString())
+            assert.are.equal("target-dir", files.readLink(at("dir-link")):toString())
+            assert.is_true(files.isFile(at("file-link")))
+            assert.is_true(files.isDirectory(at("dir-link")))
+        end)
+
+        it("reports and changes the portable read-only state", function()
+            local path = at("permissions.txt")
+            files.write(path, "kept")
+            assert.is_false(files.info(path).readOnly)
+            assert.is_true(files.setReadOnly(path, true))
+            assert.is_true(files.info(path).readOnly)
+            assert.is_true(files.setReadOnly(path, false))
+            assert.is_false(files.info(path).readOnly)
+        end)
     end)
 
     describe("enumerating", function()
@@ -329,6 +351,57 @@ describe("io.files", function()
             assert.is_nil(entries)
             assert.is_true(#reason > 0)
         end)
+
+        it("streams one directory and closes idempotently", function()
+            tree()
+            local stream = assert(files.openDirectory(temp))
+            local entries = {}
+            while true do
+                local entry, reason = stream:next()
+                assert.is_nil(reason)
+                if entry == nil then
+                    break
+                end
+                entries[#entries + 1] = entry.name
+                assert.are.equal(1, entry.depth)
+            end
+            assert.are.same({ "a", "top.txt" }, sorted(entries))
+            assert.is_true(stream:close())
+            assert.is_nil(stream:next())
+        end)
+
+        it("walks depth first without following symbolic links", function()
+            tree()
+            assert.is_true(files.createSymlink("a", at("linked-a"), "directory"))
+            local stream = assert(files.walk(temp))
+            local entries = {}
+            while true do
+                local entry, reason = stream:next()
+                assert.is_nil(reason)
+                if entry == nil then
+                    break
+                end
+                local relative = entry.path:relativeTo(temp):toString()
+                entries[relative] = { depth = entry.depth, symlink = entry.symlink }
+            end
+            assert.are.same({ depth = 3, symlink = false }, entries["a/b/deep.txt"])
+            assert.are.same({ depth = 1, symlink = true }, entries["linked-a"])
+            assert.is_nil(entries["linked-a/mid.txt"])
+        end)
+
+        it("limits walk depth", function()
+            tree()
+            local stream = assert(files.walk(temp, { maxDepth = 1 }))
+            local names = {}
+            while true do
+                local entry = stream:next()
+                if entry == nil then
+                    break
+                end
+                names[#names + 1] = entry.name
+            end
+            assert.are.same({ "a", "top.txt" }, sorted(names))
+        end)
     end)
 
     describe("creating and writing", function()
@@ -372,6 +445,27 @@ describe("io.files", function()
 
             view:close()
             source:close()
+        end)
+
+        it("atomically writes copied bytes on a worker", function()
+            local source = buffer.new("before")
+            local future = files.writeAtomicAsync(at("async.bin"), source)
+            source:setString("after")
+            source:close()
+
+            future:wait(5000)
+            assert.are.equal("ready", future.status)
+            assert.is_true(future.value)
+            assert.are.equal("before", files.read(at("async.bin")))
+        end)
+
+        it("settles an asynchronous write failure as failed", function()
+            files.createDirectory(at("async-occupied"))
+            local future = files.writeAtomicAsync(at("async-occupied"), "replacement")
+            future:wait(5000)
+            assert.are.equal("failed", future.status)
+            assert.is_string(future.error)
+            assert.is_true(#future.error > 0)
         end)
 
         it("leaves no temporary file when atomic replacement fails", function()
@@ -421,6 +515,41 @@ describe("io.files", function()
             assert.is_false(ok)
             assert.is_true(#reason > 0)
             assert.is_false(files.exists(at("still-nowhere")))
+        end)
+    end)
+
+    describe("temporary resources", function()
+        it("removes a temporary file when its scope ends", function()
+            local path
+            require("tecs").scoped(function(scope)
+                local temporary = scope:own(files.createTemporaryFile({
+                    directory = temp,
+                    prefix = "save-",
+                    suffix = ".tmp",
+                }))
+                path = temporary.path:toString()
+                assert.is_true(files.isFile(path))
+                assert.is_true(files.write(path, "draft"))
+            end)
+            assert.is_false(files.exists(path))
+        end)
+
+        it("recursively removes a temporary directory", function()
+            local temporary = assert(files.createTemporaryDirectory({ directory = temp }))
+            local path = temporary.path:toString()
+            assert.is_true(files.createDirectory(path .. "/nested"))
+            assert.is_true(files.write(path .. "/nested/file", "content"))
+            assert.is_true(temporary:close())
+            assert.is_false(files.exists(path))
+            assert.is_true(temporary:close())
+        end)
+
+        it("persists a temporary resource to an absent destination", function()
+            local temporary = assert(files.createTemporaryFile({ directory = temp }))
+            assert.is_true(files.write(temporary.path, "complete"))
+            assert.is_true(temporary:persist(at("kept.bin")))
+            assert.are.equal("complete", files.read(at("kept.bin")))
+            assert.is_true(temporary:close())
         end)
     end)
 

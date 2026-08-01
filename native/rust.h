@@ -14,6 +14,7 @@
 
 typedef struct TecsImage TecsImage;
 typedef struct TecsBytes TecsBytes;
+typedef struct TecsTemporaryPath TecsTemporaryPath;
 typedef struct TecsWindowHitRegions TecsWindowHitRegions;
 typedef struct TecsMcpServer TecsMcpServer;
 typedef struct TecsMcpRequest TecsMcpRequest;
@@ -184,7 +185,21 @@ TecsBytes *tecsPathWithFileName(const uint8_t *path, size_t path_length, const u
 TecsBytes *tecsPathWithExtension(const uint8_t *path, size_t path_length, const uint8_t *extension,
                                  size_t extension_length);
 bool tecsPathIsAbsolute(const uint8_t *path, size_t path_length);
+TecsBytes *tecsPathReadLink(const uint8_t *path, size_t path_length);
+bool tecsPathCreateSymlink(const uint8_t *target, size_t target_length, const uint8_t *link, size_t link_length,
+                           bool directory);
+int tecsPathIsReadOnly(const uint8_t *path, size_t path_length);
+bool tecsPathSetReadOnly(const uint8_t *path, size_t path_length, bool read_only);
 bool tecsFileWriteAtomic(const uint8_t *path, size_t path_length, const uint8_t *bytes, size_t length);
+TecsTemporaryPath *tecsTemporaryFileCreate(const uint8_t *directory, size_t directory_length, const uint8_t *prefix,
+                                           size_t prefix_length, const uint8_t *suffix, size_t suffix_length);
+TecsTemporaryPath *tecsTemporaryDirectoryCreate(const uint8_t *directory, size_t directory_length,
+                                                const uint8_t *prefix, size_t prefix_length, const uint8_t *suffix,
+                                                size_t suffix_length);
+TecsBytes *tecsTemporaryPathGet(const TecsTemporaryPath *temporary);
+bool tecsTemporaryPathPersist(TecsTemporaryPath *temporary, const uint8_t *destination, size_t destination_length);
+bool tecsTemporaryPathClose(TecsTemporaryPath *temporary);
+void tecsTemporaryPathDestroy(TecsTemporaryPath *temporary);
 
 bool tecsSignalsInstall(void);
 uint32_t tecsSignalsPoll(void);

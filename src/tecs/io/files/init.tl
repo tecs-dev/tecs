@@ -1,5 +1,5 @@
 --[=[
-Resolves game paths and performs synchronous file operations.
+Resolves game paths and performs complete filesystem operations.
 
 Use `assetPath` for shipped content, `writablePath` for persistent mutable
 state, and `cachePath` for data the application can reconstruct.
@@ -24,10 +24,13 @@ if not ok then
 end
 ```
 
-Filesystem outcomes return a status and a platform reason. Invalid
-arguments raise because they indicate a defect in the calling program.
-Every operation runs synchronously. Send large tree walks to
-`tecs.workers`, and decode images or sounds through `tecs.assets`.
+Filesystem outcomes return a status and a platform reason. Invalid arguments
+raise because they indicate a defect in the calling program. Operations are
+synchronous except `writeAtomicAsync`, whose worker-backed future is advanced
+by `tecs.runtime.poll`. `openDirectory` and `walk` expose caller-owned pull
+streams so enumeration does not retain a complete tree. Temporary files,
+temporary directories, and streams are [`Closeable`](tealdoc:tecs.Closeable)
+and fit directly in `tecs.scoped`.
 
 Every operation that accepts a filesystem location accepts either a string or
 an immutable [`Path`](tealdoc:tecs.io.Path). String results remain useful
@@ -50,8 +53,84 @@ local buffer <const> = require("tecs.io.buffer")
 local loader <const> = require("tecs.ffi.loader")
 local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
+local workers <const> = require("tecs.workers")
+local Future <const> = require("tecs.Future")
+local runtime <const> = require("tecs.internal.runtime")
 local type types = require("tecs.io.types")
+local type Closeable = require("tecs.types").Closeable
 local type Path = require("tecs.io.Path")
+
+--- One entry yielded by a [`DirectoryStream`](tealdoc:tecs.io.files.DirectoryStream).
+local record DirectoryEntry
+    --- Read-only. Contains the complete immutable path to this entry.
+    path: Path
+    --- Read-only. Contains the entry name relative to its immediate parent.
+    name: string
+    --- Read-only. Identifies the resolved object's kind.
+    kind: storagebackend.PathType
+    --- Read-only. Reports one for an immediate child and increases during a walk.
+    depth: integer
+    --- Read-only. Reports whether the final path itself is a symbolic link.
+    symlink: boolean
+end
+
+--- Controls a recursive directory walk.
+local record WalkOptions
+    --- Caller-writable. Limits yielded depth when supplied. One means only
+    --- immediate children. Defaults to no depth limit.
+    maxDepth: integer
+end
+
+--- Pulls directory entries without retaining the complete tree.
+local record DirectoryStream is Closeable
+    --- Returns the next entry.
+    ---
+    --- @param self The open stream to advance.
+    --- @return Returns the next entry, or nil at the end or after close.
+    --- @return Returns a platform reason when traversal fails. Nil means end of stream.
+    next: function(self: DirectoryStream): DirectoryEntry, string
+    --- Releases traversal state. Repeated calls succeed.
+    ---
+    --- @param self The stream to close.
+    --- @return Returns true.
+    close: function(self: DirectoryStream): boolean, string
+end
+
+--- Controls creation of a temporary file or directory.
+local record TemporaryOptions
+    --- Caller-writable. Selects the parent directory. Nil uses the operating
+    --- system's temporary directory.
+    directory: string | Path
+    --- Caller-writable. Prefixes the generated name. Defaults to `"tecs-"`.
+    prefix: string
+    --- Caller-writable. Suffixes the generated name. Defaults to an empty string.
+    suffix: string
+end
+
+--- Identifies the target kind required when creating a symbolic link.
+local enum SymlinkKind
+    "file"
+    "directory"
+end
+
+--- Owns a temporary file or directory until close or persistence.
+local record TemporaryPath is Closeable
+    --- Read-only. Contains the exclusively created path.
+    path: Path
+    --- Moves the resource to a permanent, absent destination and relinquishes cleanup.
+    ---
+    --- @param self The open temporary resource.
+    --- @param destination The caller supplies a destination which must not exist.
+    --- @return Returns whether the resource became permanent.
+    --- @return Returns the platform reason when the first return is false.
+    persist: function(self: TemporaryPath, destination: string | Path): boolean, string
+    --- Removes the file or the complete directory tree. Repeated calls succeed.
+    ---
+    --- @param self The temporary resource to release.
+    --- @return Returns whether cleanup completed.
+    --- @return Returns the platform reason when the first return is false.
+    close: function(self: TemporaryPath): boolean, string
+end
 
 local floor <const> = math.floor
 local max <const> = math.max
@@ -84,6 +163,24 @@ local record files
 
     --- `LineIterator` yields each line in a file and returns nil at the end.
     type LineIterator = function(): string
+
+    --- `DirectoryEntry` describes one streamed child.
+    type DirectoryEntry = DirectoryEntry
+
+    --- `WalkOptions` limits recursive traversal.
+    type WalkOptions = WalkOptions
+
+    --- `DirectoryStream` is a caller-owned pull cursor over directory entries.
+    type DirectoryStream = DirectoryStream
+
+    --- `TemporaryOptions` selects generated-name details.
+    type TemporaryOptions = TemporaryOptions
+
+    --- `TemporaryPath` owns an automatically removed file or directory.
+    type TemporaryPath = TemporaryPath
+
+    --- `SymlinkKind` selects a file or directory symbolic link.
+    type SymlinkKind = SymlinkKind
 end
 
 local type Info = files.Info
@@ -101,6 +198,55 @@ local type SeekableReader = types.SeekableReader
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
 local type PathInput = string | Path
+
+local ATOMIC_WRITER <const> = [[
+local tecs = require("tecs")
+local self = tecs.workers.current()
+while true do
+    local task = self:receive()
+    if task == nil then break end
+    local ok, reason = tecs.io.files.writeAtomic(task.path, task.bytes)
+    self:send({id = task.id, ok = ok, reason = reason})
+end
+]]
+
+local record AtomicEntry
+    future: Future<boolean>
+end
+
+local record AtomicSource
+    sliceMs: number
+    defaultWaitMs: number
+end
+
+local ATOMIC_SOURCE_MT <const>: metatable<AtomicSource> = {__index = AtomicSource}
+local atomicEntries: {integer: AtomicEntry} = {}
+local atomicWorker: workers.Worker = nil
+local atomicPending = 0
+local nextAtomicId = 1
+
+local record DirectoryFrame
+    path: Path
+    depth: integer
+    names: {string}
+    at: integer
+end
+
+local record DirectoryStreamState
+    frames: {DirectoryFrame}
+    recursive: boolean
+    maxDepth: integer
+    closed: boolean
+end
+
+local DIRECTORY_STREAM_MT <const>: metatable<DirectoryStream> = {__index = DirectoryStream}
+local directoryStates <const>: {DirectoryStream: DirectoryStreamState} = setmetatable(
+    {}, {__mode = "k"} as metatable<{DirectoryStream: DirectoryStreamState}>
+)
+local TEMPORARY_PATH_MT <const>: metatable<TemporaryPath> = {__index = TemporaryPath}
+local temporaryBackings <const>: {TemporaryPath: storagebackend.TemporaryPath} = setmetatable(
+    {}, {__mode = "k"} as metatable<{TemporaryPath: storagebackend.TemporaryPath}>
+)
 
 --- Raises when a required string argument is missing.
 ---
@@ -122,6 +268,80 @@ local function required(value: PathInput, what: string): string
         error(("tecs: io.files.%s received an invalid io.Path"):format(what), 3)
     end
     return rendered
+end
+
+local function stopAtomicWorker()
+    if atomicWorker == nil or atomicPending ~= 0 then
+        return
+    end
+    runtime.unregister("file-writes")
+    local held <const> = atomicWorker
+    atomicWorker = nil
+    held:stop()
+end
+
+local function settleAtomic(result: {string: any}): boolean
+    local id <const> = result.id as integer
+    local entry <const> = atomicEntries[id]
+    if entry == nil then
+        return false
+    end
+    atomicEntries[id] = nil
+    atomicPending = atomicPending - 1
+    if result.ok then
+        entry.future:complete(true)
+    else
+        entry.future:fail(tostring(result.reason or "atomic write failed"))
+    end
+    stopAtomicWorker()
+    return true
+end
+
+function AtomicSource:poll(): integer
+    local settled = 0
+    while atomicWorker ~= nil do
+        local result <const> = atomicWorker:receive()
+        if result == nil then
+            break
+        end
+        if settleAtomic(result as {string: any}) then
+            settled = settled + 1
+        end
+    end
+    return settled
+end
+
+function AtomicSource:advance(ms: number): integer
+    if atomicWorker == nil then
+        return 0
+    end
+    local result <const> = atomicWorker:receive(ms)
+    if result == nil then
+        return 0
+    end
+    return settleAtomic(result as {string: any}) and 1 or 0
+end
+
+function AtomicSource:cancel(_future: Future<any>)
+    -- An operating-system write cannot be interrupted safely. Its result is
+    -- still drained so the worker and copied task bytes can be released.
+end
+
+local atomicSource <const> = setmetatable({sliceMs = 16, defaultWaitMs = 5000} as AtomicSource, ATOMIC_SOURCE_MT)
+
+local function ensureAtomicWorker(): boolean, string
+    if atomicWorker ~= nil then
+        return true
+    end
+    local ok <const>, made = pcall(function(): workers.Worker
+        return workers.spawn({source = ATOMIC_WRITER, luaPath = package.path})
+    end) as (boolean, workers.Worker)
+    if not ok then
+        return false, tostring(made)
+    end
+    atomicWorker = made
+    runtime.register("file-writes", 40, function(): integer return atomicSource:poll() end)
+    return true
 end
 
 local preferenceOrganization = "tecs"
@@ -279,6 +499,72 @@ function files.isSymlink(path: PathInput): boolean
     return adapter.storage().isSymlink(required(path, "isSymlink"))
 end
 
+--- Returns the target spelling stored in a symbolic link.
+---
+--- A relative target remains relative. The function does not resolve it
+--- against the link's parent and fails when `path` is not a symbolic link.
+---
+--- @param path The caller supplies the symbolic link to inspect.
+--- @return Returns the stored target as an immutable [`Path`](tealdoc:tecs.io.Path).
+--- @return Returns the platform or unsupported reason when the first return is nil.
+function files.readLink(path: PathInput): Path, string
+    local backend <const> = adapter.storage()
+    if backend.readLink == nil then
+        return nil, ("symbolic links are not supported by the %s storage backend"):format(backend.name)
+    end
+    local target <const>, reason = backend.readLink(required(path, "readLink"))
+    if target == nil then
+        return nil, reason
+    end
+    return Path.new(target)
+end
+
+--- Creates a symbolic link to a file or directory.
+---
+--- The target spelling is stored unchanged, so a relative target is resolved
+--- from the link's parent when later opened. `kind` is required because
+--- Windows must choose a file or directory link even for a dangling target.
+---
+--- @param target The caller supplies the target spelling to store.
+--- @param link The caller supplies the new link path.
+--- @param kind The caller supplies `"file"` or `"directory"`.
+--- @return Returns whether the platform created the link.
+--- @return Returns the platform or unsupported reason when the first return is false.
+function files.createSymlink(target: PathInput, link: PathInput, kind: SymlinkKind): boolean, string
+    local renderedTarget <const> = required(target, "createSymlink")
+    local renderedLink <const> = required(link, "createSymlink")
+    if kind ~= "file" and kind ~= "directory" then
+        error("tecs: io.files.createSymlink kind must be 'file' or 'directory'", 2)
+    end
+    local backend <const> = adapter.storage()
+    if backend.createSymlink == nil then
+        return false, ("symbolic links are not supported by the %s storage backend"):format(backend.name)
+    end
+    return backend.createSymlink(renderedTarget, renderedLink, kind == "directory")
+end
+
+--- Changes the portable read-only state of a path.
+---
+--- On Unix, making a path read-only clears every write bit and making it
+--- writable restores only the owner's write bit. The API deliberately does
+--- not model platform ACLs, ownership, or executable bits.
+---
+--- @param path The caller supplies the existing path to change.
+--- @param readOnly The caller supplies true to prevent ordinary writes.
+--- @return Returns whether the platform changed the state.
+--- @return Returns the platform or unsupported reason when the first return is false.
+function files.setReadOnly(path: PathInput, readOnly: boolean): boolean, string
+    local rendered <const> = required(path, "setReadOnly")
+    if type(readOnly) ~= "boolean" then
+        error("tecs: io.files.setReadOnly needs a boolean state", 2)
+    end
+    local backend <const> = adapter.storage()
+    if backend.setReadOnly == nil then
+        return false, ("read-only permissions are not supported by the %s storage backend"):format(backend.name)
+    end
+    return backend.setReadOnly(rendered, readOnly)
+end
+
 --- Returns entries under `path` that match `pattern`.
 ---
 --- **Recursive unless the pattern stops it**: with no pattern this walks the
@@ -311,6 +597,104 @@ end
 --- @return Returns the platform reason when the first return is nil.
 function files.list(path: PathInput): {string}, string
     return files.glob(required(path, "list"), "*")
+end
+
+function DirectoryStream:next(): DirectoryEntry, string
+    local state <const> = directoryStates[self]
+    if state == nil or state.closed then
+        return nil
+    end
+    while #state.frames > 0 do
+        local frame <const> = state.frames[#state.frames]
+        if frame.at > #frame.names then
+            state.frames[#state.frames] = nil
+        else
+            local name <const> = frame.names[frame.at]
+            frame.at = frame.at + 1
+            local path <const> = frame.path:join(name)
+            local symlink <const> = files.isSymlink(path)
+            local info <const>, reason = files.info(path)
+            if info == nil and not symlink then
+                self:close()
+                return nil, reason
+            end
+            local kind <const>: files.PathType = info ~= nil and info.kind or "other"
+            local depth <const> = frame.depth
+            if state.recursive and kind == "directory" and not symlink and depth < state.maxDepth then
+                local names <const>, listReason = files.list(path)
+                if names == nil then
+                    self:close()
+                    return nil, listReason
+                end
+                state.frames[#state.frames + 1] = {path = path, depth = depth + 1, names = names, at = 1}
+            end
+            return {path = path, name = name, kind = kind, depth = depth, symlink = symlink}
+        end
+    end
+    state.closed = true
+    return nil
+end
+
+function DirectoryStream:close(): boolean, string
+    local state <const> = directoryStates[self]
+    if state == nil or state.closed then
+        return true
+    end
+    state.closed = true
+    state.frames = {}
+    return true
+end
+
+local function directoryStream(
+    path: PathInput, recursive: boolean, maxDepth: integer, operation: string
+): DirectoryStream, string
+    local root <const> = Path.new(required(path, operation))
+    local names <const>, reason = files.list(root)
+    if names == nil then
+        return nil, reason
+    end
+    local stream <const> = setmetatable({} as DirectoryStream, DIRECTORY_STREAM_MT)
+    directoryStates[stream] = {
+        frames = maxDepth == 0 and {} or {{path = root, depth = 1, names = names, at = 1}},
+        recursive = recursive,
+        maxDepth = maxDepth,
+        closed = false,
+    }
+    return stream
+end
+
+--- Opens a pull stream over the immediate children of a directory.
+---
+--- The backend may retain the names from this one directory, but the stream
+--- never materializes a complete recursive tree. Results use platform order.
+---
+--- @param path The caller supplies the directory to enumerate.
+--- @return Returns a caller-owned stream, or nil when enumeration cannot start.
+--- @return Returns the platform reason when the first return is nil.
+function files.openDirectory(path: PathInput): DirectoryStream, string
+    return directoryStream(path, false, 1, "openDirectory")
+end
+
+--- Opens a depth-first pull stream over a directory tree.
+---
+--- Symbolic links are yielded but never followed, which prevents link cycles
+--- and keeps traversal inside the spelling of the requested tree. Close the
+--- stream when leaving early. The backend retains at most the unvisited names
+--- in each directory on the current descent, not every descendant.
+---
+--- @param path The caller supplies the root directory. The root is not yielded.
+--- @param options The caller may limit depth; one yields immediate children only.
+--- @return Returns a caller-owned stream, or nil when enumeration cannot start.
+--- @return Returns the platform reason when the first return is nil.
+function files.walk(path: PathInput, options?: WalkOptions): DirectoryStream, string
+    local maxDepth = 2147483647
+    if options ~= nil and options.maxDepth ~= nil then
+        maxDepth = options.maxDepth
+        if type(maxDepth) ~= "number" or maxDepth ~= floor(maxDepth) or maxDepth < 0 then
+            error("tecs: io.files.walk maxDepth must be a non-negative integer", 2)
+        end
+    end
+    return directoryStream(path, true, maxDepth, "walk")
 end
 
 --- Creates `path`, and any parents it needs.
@@ -371,6 +755,88 @@ end
 --- @return Returns the platform reason when the first return is false.
 function files.copy(from: PathInput, to: PathInput): boolean, string
     return adapter.storage().copy(required(from, "copy"), required(to, "copy"))
+end
+
+function TemporaryPath:persist(destination: string | Path): boolean, string
+    local backing <const> = temporaryBackings[self]
+    if backing == nil then
+        return false, "the temporary path is closed"
+    end
+    local ok <const>, reason = backing:persist(required(destination, "persist"))
+    if ok then
+        temporaryBackings[self] = nil
+    end
+    return ok, reason
+end
+
+function TemporaryPath:close(): boolean, string
+    local backing <const> = temporaryBackings[self]
+    if backing == nil then
+        return true
+    end
+    local ok <const>, reason = backing:close()
+    if ok then
+        temporaryBackings[self] = nil
+    end
+    return ok, reason
+end
+
+local function temporaryNamePart(value: string, default: string, field: string): string
+    value = value or default
+    if
+        type(value) ~= "string" or value:find("/", 1, true) or value:find("\\", 1, true) or value:find("\0", 1, true)
+    then
+        error(("tecs: io.files temporary %s must be a path-separator-free string"):format(field), 3)
+    end
+    return value
+end
+
+local function createTemporary(options: TemporaryOptions, directory: boolean): TemporaryPath, string
+    options = options or {} as TemporaryOptions
+    local parent = ""
+    if options.directory ~= nil then
+        parent = required(options.directory, directory and "createTemporaryDirectory" or "createTemporaryFile")
+    end
+    local prefix <const> = temporaryNamePart(options.prefix, "tecs-", "prefix")
+    local suffix <const> = temporaryNamePart(options.suffix, "", "suffix")
+    local backend <const> = adapter.storage()
+    local create <const> = directory and backend.createTemporaryDirectory or backend.createTemporaryFile
+    if create == nil then
+        return nil, ("temporary paths are not supported by the %s storage backend"):format(backend.name)
+    end
+    local backing <const>, reason = create(parent, prefix, suffix)
+    if backing == nil then
+        return nil, reason
+    end
+    local temporary <const> = setmetatable({path = Path.new(backing.path)} as TemporaryPath, TEMPORARY_PATH_MT)
+    temporaryBackings[temporary] = backing
+    return temporary
+end
+
+--- Creates an empty temporary file owned by the returned resource.
+---
+--- Creation is exclusive. Closing removes the file; garbage collection is a
+--- leak safety net, while [`tecs.scoped`](/modules/#tecs.scoped) provides
+--- deterministic cleanup. Call `persist` to keep the file under an absent
+--- permanent destination.
+---
+--- @param options The caller may select the parent, prefix, and suffix.
+--- @return Returns the caller-owned temporary file.
+--- @return Returns the platform or unsupported reason when creation fails.
+function files.createTemporaryFile(options?: TemporaryOptions): TemporaryPath, string
+    return createTemporary(options, false)
+end
+
+--- Creates an empty temporary directory owned by the returned resource.
+---
+--- Closing recursively removes its contents without following symbolic links.
+--- Call `persist` to keep the complete tree under an absent destination.
+---
+--- @param options The caller may select the parent, prefix, and suffix.
+--- @return Returns the caller-owned temporary directory.
+--- @return Returns the platform or unsupported reason when creation fails.
+function files.createTemporaryDirectory(options?: TemporaryOptions): TemporaryPath, string
+    return createTemporary(options, true)
 end
 
 --- Reads a whole file and returns its bytes, or nil when there is none there.
@@ -822,6 +1288,65 @@ function files.writeAtomic(path: PathInput, bytes: ByteInput): boolean, string
         return false, ("atomic durable writes are not supported by the %s storage backend"):format(backend.name)
     end
     return backend.writeAtomic(rendered, bytes)
+end
+
+--- Durably and atomically writes a complete file on a worker.
+---
+--- The returned [`Future`](tealdoc:tecs.Future) becomes ready with true after
+--- the same commit performed by `writeAtomic`, or fails with its platform
+--- reason. The call copies a buffer or byte view before returning, so the
+--- caller may mutate or close it immediately. String bytes cross the worker
+--- channel by value as well. `tecs.runtime.poll` advances the future each
+--- frame; `Future:wait` advances it in headless code.
+---
+--- Canceling the future stops interest in its result but cannot safely
+--- interrupt a filesystem commit already in progress. The shared worker exits
+--- automatically after its last queued result is drained. A non-SDL storage
+--- backend receives a failed future because a separate worker state cannot
+--- inherit the main state's installed Lua backend.
+---
+--- @param path The caller supplies the destination file.
+--- @param bytes The caller supplies the complete binary contents.
+--- @return Returns a future which becomes ready with true or fails.
+function files.writeAtomicAsync(path: PathInput, bytes: ByteInput): Future<boolean>
+    local rendered <const> = required(path, "writeAtomicAsync")
+    if bytes == nil then
+        error("tecs: io.files.writeAtomicAsync needs bytes to write", 2)
+    end
+    local copied: string
+    if type(bytes) == "string" then
+        copied = bytes as string
+    else
+        local dynamic <const> = bytes as {string: any}
+        if
+            type(bytes) ~= "table"
+            or type(dynamic.length) ~= "function"
+            or type(dynamic.getFFIPointer) ~= "function"
+            or type(dynamic.isReleased) ~= "function"
+            or (dynamic.isReleased as function(any): boolean)(bytes)
+        then
+            error("tecs: io.files.writeAtomicAsync needs a byte string or open io.Buffer or io.ByteView", 2)
+        end
+        local input <const> = bytes as ByteView
+        copied = loader.toBytes(input:getFFIPointer() as loader.CValue, input:length())
+    end
+    local backend <const> = adapter.storage()
+    if backend.writeAtomic == nil or backend ~= storagebackend.sdl then
+        return Future.failed(
+            ("asynchronous atomic durable writes are not supported by the %s storage backend"):format(backend.name)
+        ) as Future<boolean>
+    end
+    local started <const>, reason = ensureAtomicWorker()
+    if not started then
+        return Future.failed(reason) as Future<boolean>
+    end
+    local id <const> = nextAtomicId
+    nextAtomicId = nextAtomicId + 1
+    local future <const> = Future.pending(atomicSource as Future.Source) as Future<boolean>
+    atomicEntries[id] = {future = future}
+    atomicPending = atomicPending + 1
+    atomicWorker:send({id = id, path = rendered, bytes = copied})
+    return future
 end
 
 --- Appends `bytes` to `path`, creating the file when absent.
