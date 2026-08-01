@@ -65,7 +65,7 @@ local type Path = require("tecs.io.Path")
 --- operations succeed. Files implement [`Closeable`](tealdoc:tecs.Closeable),
 --- [`SeekableReader`](tealdoc:tecs.io.SeekableReader), and
 --- [`SeekableWriter`](tealdoc:tecs.io.SeekableWriter).
-local interface File is types.File
+local interface File is storagebackend.File
 end
 
 --- One entry yielded by a [`DirectoryStream`](tealdoc:tecs.io.files.DirectoryStream).

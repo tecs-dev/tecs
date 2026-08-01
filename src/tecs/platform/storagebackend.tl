@@ -91,7 +91,6 @@ local type Reader = types.Reader
 local type SeekOrigin = types.Seekable.Origin
 local type Writer = types.Writer
 local type SeekableWriter = types.SeekableWriter
-local type File = types.File
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
 -- Buffer structurally satisfies ByteView's read-only byte-range operations.
@@ -155,6 +154,10 @@ local enum FileMode
     "r+"
     "w+"
     "a+"
+end
+
+--- A seekable file cursor shared by the public files module and its backend.
+local interface File is types.SeekableReader, types.SeekableWriter
 end
 
 local record Backend
@@ -238,6 +241,8 @@ local record storagebackend
     folders: {UserFolder: boolean}
     --- How `Backend.open` opens its file cursor.
     FileMode: FileMode
+    --- The internal cursor contract returned by `Backend.open`.
+    File: File
     --- Complete bytes accepted by an atomic write without an intermediate copy.
     ByteInput: ByteInput
     --- An internal temporary resource returned by a backend.

@@ -376,15 +376,6 @@ end
 local interface SeekableWriter is Writer, Seekable
 end
 
---- A seekable file cursor that can read, write, flush, and close.
----
---- The mode passed to `tecs.io.files.open` decides which directional
---- operations are available. Read-only and write-only files still carry the
---- complete interface so one type covers every standard file mode; an
---- operation forbidden by the mode returns a reason.
-local interface File is SeekableReader, SeekableWriter
-end
-
 --- Describes reopenable or one-shot binary storage.
 ---
 --- A stream carries no cursor. `newReader` and `newWriter` create directional
@@ -604,7 +595,6 @@ local record types
     type SeekableReader = SeekableReader
     type Writer = Writer
     type SeekableWriter = SeekableWriter
-    type File = File
     type Stream = Stream
     type ReadableStream = ReadableStream
     type WritableStream = WritableStream
