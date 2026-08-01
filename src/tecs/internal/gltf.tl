@@ -209,6 +209,159 @@ local function value(access: Access, row: integer, lane: integer): number
     )
 end
 
+local function finite(item: number): boolean
+    return item ~= nil and item == item and item ~= math.huge and item ~= -math.huge
+end
+
+local function decodeAnimations(
+    document: {string: any}, buffers: {string}, nodes: {{string: any}}, path: string
+): {{string: any}}
+    local animations: {{string: any}} = {}
+    for animationIndex, source in ipairs(document.animations as {{string: any}} or {}) do
+        local samplers <const> = source.samplers as {{string: any}} or {}
+        local channels <const> = source.channels as {{string: any}} or {}
+        if #channels == 0 then
+            error(("tecs: %s animation %d has no channels"):format(path, animationIndex - 1), 0)
+        end
+        local decoded: {{string: any}} = {}
+        local duration = 0.0
+        local targets: {string: boolean} = {}
+        for channelIndex, channel in ipairs(channels) do
+            local samplerIndex <const> = channel.sampler as integer
+            local sampler = samplerIndex ~= nil and samplers[samplerIndex + 1] or nil
+            if sampler == nil or sampler.input == nil or sampler.output == nil then
+                error(
+                    ("tecs: %s animation %d channel %d names a missing sampler"):format(
+                        path, animationIndex - 1, channelIndex - 1
+                    ),
+                    0
+                )
+            end
+            local target <const> = channel.target as {string: any}
+            local nodeIndex <const> = target ~= nil and target.node as integer or nil
+            local targetPath <const> = target ~= nil and target.path as string or nil
+            if targetPath == "weights" then
+                error(("tecs: %s uses unsupported morph-weight animation"):format(path), 0)
+            end
+            local pathCode: integer
+            local components: integer
+            if targetPath == "translation" then
+                pathCode, components = 0, 3
+            elseif targetPath == "rotation" then
+                pathCode, components = 1, 4
+            elseif targetPath == "scale" then
+                pathCode, components = 2, 3
+            else
+                error(
+                    ("tecs: %s animation %d channel %d has an unsupported target"):format(
+                        path, animationIndex - 1, channelIndex - 1
+                    ),
+                    0
+                )
+            end
+            local node = nodeIndex ~= nil and nodes[nodeIndex + 1] or nil
+            if node == nil then
+                error(
+                    ("tecs: %s animation %d channel %d names a missing node"):format(
+                        path, animationIndex - 1, channelIndex - 1
+                    ),
+                    0
+                )
+            end
+            if node.matrix ~= nil then
+                error(("tecs: %s animates node %d, which uses a fixed matrix"):format(path, nodeIndex), 0)
+            end
+            local targetKey <const> = tostring(nodeIndex) .. ":" .. tostring(pathCode)
+            if targets[targetKey] then
+                error(
+                    ("tecs: %s animation %d targets one node path more than once"):format(path, animationIndex - 1), 0
+                )
+            end
+            targets[targetKey] = true
+
+            local interpolationName <const> = sampler.interpolation as string or "LINEAR"
+            local interpolation: integer
+            if interpolationName == "LINEAR" then
+                interpolation = 0
+            elseif interpolationName == "STEP" then
+                interpolation = 1
+            elseif interpolationName == "CUBICSPLINE" then
+                interpolation = 2
+            else
+                error(
+                    ("tecs: %s animation %d uses interpolation %s"):format(
+                        path, animationIndex - 1, tostring(interpolationName)
+                    ),
+                    0
+                )
+            end
+            local input <const> = accessor(document, buffers, sampler.input as integer)
+            local output <const> = accessor(document, buffers, sampler.output as integer)
+            if input.components ~= 1 or input.componentType ~= 5126 or input.normalized or input.count == 0 then
+                error(
+                    ("tecs: %s animation %d key times are not non-empty float scalars"):format(
+                        path, animationIndex - 1
+                    ),
+                    0
+                )
+            end
+            local outputRows <const> = input.count * (interpolation == 2 and 3 or 1)
+            if
+                output.components ~= components
+                or output.count ~= outputRows
+                or output.componentType ~= 5126
+                or output.normalized
+            then
+                error(
+                    ("tecs: %s animation %d channel %d has the wrong output shape"):format(
+                        path, animationIndex - 1, channelIndex - 1
+                    ),
+                    0
+                )
+            end
+            local times: {number} = {}
+            local values: {number} = {}
+            local previous = -math.huge
+            for row = 0, input.count - 1 do
+                local time <const> = value(input, row, 0)
+                if not finite(time) or time < 0 or time <= previous then
+                    error(
+                        ("tecs: %s animation %d key times are not finite and increasing"):format(
+                            path, animationIndex - 1
+                        ),
+                        0
+                    )
+                end
+                times[row + 1] = time
+                previous = time
+                duration = math.max(duration, time)
+            end
+            for row = 0, output.count - 1 do
+                for lane = 0, components - 1 do
+                    local item <const> = value(output, row, lane)
+                    if not finite(item) then
+                        error(("tecs: %s animation %d contains a non-finite value"):format(path, animationIndex - 1), 0)
+                    end
+                    values[#values + 1] = item
+                end
+            end
+            decoded[#decoded + 1] = {
+                node = nodeIndex + 1,
+                path = pathCode,
+                interpolation = interpolation,
+                times = times,
+                values = values,
+            }
+        end
+        animations[#animations + 1] = {
+            name = source.name as string or ("animation-%d"):format(animationIndex - 1),
+            duration = duration,
+            channels = decoded,
+        }
+    end
+    return animations
+end
+
 local function normalize3(x: number, y: number, z: number): number, number, number
     local length <const> = math.sqrt(x * x + y * y + z * z)
     if length <= 1e-20 then
@@ -642,9 +795,6 @@ function gltf.decodeFile(path: string): {string: any}
             error(("tecs: %s requires unsupported extension %s"):format(path, extension), 0)
         end
     end
-    if #(document.animations as {{string: any}} or {}) > 0 then
-        error(("tecs: %s uses unsupported animation clips"):format(path), 0)
-    end
     local base <const> = directory(path)
     local buffers: {string} = {}
     for index, source in ipairs(document.buffers as {{string: any}} or {}) do
@@ -803,6 +953,57 @@ function gltf.decodeFile(path: string): {string: any}
         end
     end
 
+    local modelNodes: {{string: any}} = {}
+    local function vector(source: any, count: integer, defaults: {number}, label: string): {number}
+        local values <const> = source as {number} or defaults
+        if #values ~= count then
+            error(("tecs: %s node %s has the wrong shape"):format(path, label), 0)
+        end
+        local copy: {number} = {}
+        for index = 1, count do
+            local item <const> = values[index]
+            if not finite(item) then
+                error(("tecs: %s node %s contains a non-finite value"):format(path, label), 0)
+            end
+            copy[index] = item
+        end
+        return copy
+    end
+    for index, node in ipairs(nodes) do
+        if node.matrix ~= nil and (node.translation ~= nil or node.rotation ~= nil or node.scale ~= nil) then
+            error(("tecs: %s node %d combines matrix and TRS transforms"):format(path, index - 1), 0)
+        end
+        local translation <const> = vector(node.translation, 3, {0, 0, 0}, ("%d translation"):format(index - 1))
+        local rotation <const> = vector(node.rotation, 4, {0, 0, 0, 1}, ("%d rotation"):format(index - 1))
+        local scale <const> = vector(node.scale, 3, {1, 1, 1}, ("%d scale"):format(index - 1))
+        local length <const> = math.sqrt(
+            rotation[1] * rotation[1] + rotation[2] * rotation[2] + rotation[3] * rotation[3] + rotation[4] * rotation[4]
+        )
+        if length <= 1e-20 then
+            error(("tecs: %s node %d has a zero rotation quaternion"):format(path, index - 1), 0)
+        end
+        local matrix: {number} = nil
+        if node.matrix ~= nil then
+            matrix = vector(node.matrix, 16, {}, ("%d matrix"):format(index - 1))
+        end
+        local parent <const> = parents[index - 1]
+        modelNodes[index] = {
+            parent = parent ~= nil and parent + 1 or 0,
+            x = translation[1],
+            y = translation[2],
+            z = translation[3],
+            rotationX = rotation[1] / length,
+            rotationY = rotation[2] / length,
+            rotationZ = rotation[3] / length,
+            rotationW = rotation[4] / length,
+            scaleX = scale[1],
+            scaleY = scale[2],
+            scaleZ = scale[3],
+            matrix = matrix,
+        }
+    end
+    local animations <const> = decodeAnimations(document, buffers, nodes, path)
+
     local worlds: {integer: {number}} = {}
     local resolving: {integer: boolean} = {}
     local function worldOf(index: integer): {number}
@@ -823,6 +1024,9 @@ function gltf.decodeFile(path: string): {string: any}
         resolving[index] = nil
         worlds[index] = existing
         return existing
+    end
+    for index = 0, #nodes - 1 do
+        worldOf(index)
     end
 
     local skinByNode: {integer: integer} = {}
@@ -850,12 +1054,18 @@ function gltf.decodeFile(path: string): {string: any}
         end
         local inverseMesh <const> = inverseAffine(meshWorld)
         local matrices: {number} = {}
+        local inverseBindMatrices: {number} = {}
+        local modelJoints: {integer} = {}
         for jointIndex, jointNode in ipairs(joints) do
             local inverseBind = identity()
             if inverseBinds ~= nil then
                 for lane = 0, 15 do
                     inverseBind[lane + 1] = value(inverseBinds, jointIndex - 1, lane)
                 end
+            end
+            modelJoints[jointIndex] = jointNode + 1
+            for lane = 1, 16 do
+                inverseBindMatrices[#inverseBindMatrices + 1] = inverseBind[lane]
             end
             local matrix <const> = multiply(multiply(inverseMesh, worldOf(jointNode)), inverseBind)
             for lane = 1, 16 do
@@ -865,6 +1075,9 @@ function gltf.decodeFile(path: string): {string: any}
         skins[#skins + 1] = {
             name = path .. "#skin-" .. skinIndex .. "-node-" .. nodeIndex,
             matrices = matrices,
+            node = nodeIndex + 1,
+            joints = modelJoints,
+            inverseBindMatrices = inverseBindMatrices,
         }
         skinByNode[nodeIndex] = #skins
         return #skins
@@ -905,6 +1118,7 @@ function gltf.decodeFile(path: string): {string: any}
                 transform.mesh = mesh
                 transform.material = geometry.material as number
                 transform.skin = skin
+                transform.node = index + 1
                 draws[#draws + 1] = transform
             end
         end
@@ -932,7 +1146,16 @@ function gltf.decodeFile(path: string): {string: any}
             end
         end
     end
-    return {path = path, meshes = meshes, images = images, materials = materials, skins = skins, draws = draws}
+    return {
+        path = path,
+        meshes = meshes,
+        images = images,
+        materials = materials,
+        skins = skins,
+        nodes = modelNodes,
+        animations = animations,
+        draws = draws,
+    }
 end
 
 return gltf

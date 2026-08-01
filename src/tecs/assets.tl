@@ -30,9 +30,9 @@ texture residency. Audio follows the same split between decoded clips and
 voices.
 
 `newMesh` constructs immutable procedural geometry synchronously. `loadGLTF`
-decodes glTF 2.0 and GLB scenes in their initial pose on the worker, including
-images, metallic-roughness materials, alpha masks, `BLEND` modes, and skins.
-Both produce
+decodes glTF 2.0 and GLB scenes on the worker, including images,
+metallic-roughness materials, alpha masks, `BLEND` modes, skins, and node
+animation clips. Both produce
 CPU-owned data that the mesh domain consumes when it becomes resident. A model
 with a `BLEND` material requires a mesh domain created with
 `transparency = true`.
@@ -408,6 +408,8 @@ local record ModelDraw
     --- Read-only. Selects a one-based entry in `Model.skins`, or zero for a
     --- rigid primitive.
     skin: integer
+    --- Read-only. Selects the one-based scene node this primitive follows.
+    node: integer
     --- Read-only. Reports world translation x from the selected glTF scene.
     x: number
     --- Read-only. Reports world translation y.
@@ -437,14 +439,80 @@ local record ModelSkin
     --- Read-only. Contains column-major joint matrices, sixteen floats per
     --- joint, in the skinned mesh's local coordinate space.
     matrices: {number}
+    --- Read-only. Selects the one-based mesh node whose local space contains
+    --- this palette.
+    node: integer
+    --- Read-only. Contains one-based joint-node indices in palette order.
+    joints: {integer}
+    --- Read-only. Contains column-major inverse bind matrices, sixteen floats
+    --- per joint.
+    inverseBindMatrices: {number}
 end
 
---- Represents one decoded glTF 2.0 scene in its initial pose.
+--- Describes one node in a decoded glTF transform hierarchy.
+local record ModelNode
+    --- Read-only. Selects the one-based parent node, or zero for a root.
+    parent: integer
+    --- Read-only. Contains the base translation x.
+    x: number
+    --- Read-only. Contains the base translation y.
+    y: number
+    --- Read-only. Contains the base translation z.
+    z: number
+    --- Read-only. Contains the base quaternion x.
+    rotationX: number
+    --- Read-only. Contains the base quaternion y.
+    rotationY: number
+    --- Read-only. Contains the base quaternion z.
+    rotationZ: number
+    --- Read-only. Contains the base quaternion scalar component.
+    rotationW: number
+    --- Read-only. Contains the base x scale.
+    scaleX: number
+    --- Read-only. Contains the base y scale.
+    scaleY: number
+    --- Read-only. Contains the base z scale.
+    scaleZ: number
+    --- Read-only. Contains a fixed column-major local matrix when the source
+    --- node used `matrix`, or nil when its local matrix is composed from TRS.
+    matrix: {number}
+end
+
+--- Describes one decoded glTF animation channel.
+local record ModelAnimationChannel
+    --- Read-only. Selects a one-based target node.
+    node: integer
+    --- Read-only. Selects `ANIMATION_TRANSLATION`, `ANIMATION_ROTATION`, or
+    --- `ANIMATION_SCALE`.
+    path: integer
+    --- Read-only. Selects `ANIMATION_LINEAR`, `ANIMATION_STEP`, or
+    --- `ANIMATION_CUBIC`.
+    interpolation: integer
+    --- Read-only. Contains strictly increasing key times in seconds.
+    times: {number}
+    --- Read-only. Contains packed key values. Cubic keys contain incoming
+    --- tangent, value, and outgoing tangent rows.
+    values: {number}
+end
+
+--- Describes one decoded glTF node-animation clip.
+local record ModelAnimation
+    --- Read-only. Contains the authored clip name or a stable generated name.
+    name: string
+    --- Read-only. Reports the last key time in seconds.
+    duration: number
+    --- Read-only. Contains translation, rotation, and scale channels.
+    channels: {ModelAnimationChannel}
+end
+
+--- Represents one decoded glTF 2.0 scene and its node animations.
 ---
 --- Meshes use the same fixed vertex layout as `newMesh`. Images remain
 --- decoded CPU pixels. `renderer.meshes:registerModel` consumes all of them
---- and returns spawnable primitive records. Skinning includes the initial
---- joint pose; morph targets and animation clips remain separate lanes.
+--- and returns shared residency that creates independently posed instances.
+--- Skinning includes the initial
+--- joint pose. Animation clips retain allocation-stable CPU sampling data;
+--- morph targets remain a separate lane.
 local record Model
     --- Read-only. Contains the requested `.gltf` or `.glb` path unchanged.
     path: string
@@ -456,6 +524,10 @@ local record Model
     materials: {ModelMaterial}
     --- Read-only. Contains initial joint palettes referenced by model draws.
     skins: {ModelSkin}
+    --- Read-only. Contains every node in source-index order.
+    nodes: {ModelNode}
+    --- Read-only. Contains decoded translation, rotation, and scale clips.
+    animations: {ModelAnimation}
     --- Read-only. Contains the selected scene's flattened static draws.
     draws: {ModelDraw}
     --- Releases every CPU mesh and image not already consumed. Calling it
@@ -464,6 +536,19 @@ local record Model
 end
 
 local record assets
+    --- Read-only. Selects a translation animation channel.
+    ANIMATION_TRANSLATION: integer
+    --- Read-only. Selects a rotation animation channel.
+    ANIMATION_ROTATION: integer
+    --- Read-only. Selects a scale animation channel.
+    ANIMATION_SCALE: integer
+    --- Read-only. Selects linear interpolation.
+    ANIMATION_LINEAR: integer
+    --- Read-only. Selects held-key interpolation.
+    ANIMATION_STEP: integer
+    --- Read-only. Selects cubic-spline interpolation.
+    ANIMATION_CUBIC: integer
+
     --- Read-only. Exposes the decoded image type.
     Image: Image
 
@@ -473,7 +558,7 @@ local record assets
     --- Read-only. Exposes the immutable CPU mesh type.
     Mesh: Mesh
 
-    --- Read-only. Exposes the decoded initial-pose glTF scene type.
+    --- Read-only. Exposes the decoded glTF scene type.
     Model: Model
 
     --- Read-only. Exposes one glTF material description.
@@ -485,6 +570,15 @@ local record assets
     --- Read-only. Exposes one decoded initial joint palette.
     ModelSkin: ModelSkin
 
+    --- Read-only. Exposes one decoded model node.
+    ModelNode: ModelNode
+
+    --- Read-only. Exposes one decoded node-animation clip.
+    ModelAnimation: ModelAnimation
+
+    --- Read-only. Exposes one decoded animation channel.
+    ModelAnimationChannel: ModelAnimationChannel
+
     --- Builds procedural mesh data in the renderer's fixed vertex layout.
     --- @param options The caller supplies a name, interleaved vertices, and
     ---     zero-based triangle indices.
@@ -492,15 +586,15 @@ local record assets
     ---     consumes or the caller releases.
     newMesh: function(options: MeshOptions): Mesh
 
-    --- Queues initial-pose glTF 2.0 or GLB decoding on the asset worker.
+    --- Queues glTF 2.0 or GLB decoding on the asset worker.
     ---
     --- External buffers and images resolve relative to the model path. Data
     --- URIs and embedded GLB resources are supported. Triangle primitives,
     --- static node transforms, metallic-roughness PBR, normal, occlusion,
     --- emissive, alpha-mask, alpha-blended, and unlit materials are decoded.
-    --- JOINTS_0, WEIGHTS_0, skins, and inverse bind matrices are decoded into
-    --- initial GPU-ready palettes. A morphed, animated, sparse-accessor, or
-    --- non-triangle input settles as failed instead of loading incompletely.
+    --- JOINTS_0, WEIGHTS_0, skins, inverse bind matrices, and node animation
+    --- clips are decoded. A morphed, sparse-accessor, or non-triangle input
+    --- settles as failed instead of loading incompletely.
     --- Registering a
     --- model containing alpha blending requires a mesh domain created with
     --- `transparency = true`.
@@ -518,6 +612,13 @@ local record assets
     ---     so this is the guard rather than an optimization.
     installed: function(): boolean
 end
+
+assets.ANIMATION_TRANSLATION = 0
+assets.ANIMATION_ROTATION = 1
+assets.ANIMATION_SCALE = 2
+assets.ANIMATION_LINEAR = 0
+assets.ANIMATION_STEP = 1
+assets.ANIMATION_CUBIC = 2
 
 local ImageMT <const>: metatable<Image> = {__index = Image}
 local SoundMT <const>: metatable<Sound> = {__index = Sound}
@@ -609,6 +710,8 @@ local function modelFromWorker(result: {string: any}): Model
                 images = images,
                 materials = result.materials as {ModelMaterial},
                 skins = result.skins as {ModelSkin},
+                nodes = result.nodes as {ModelNode},
+                animations = result.animations as {ModelAnimation},
                 draws = result.draws as {ModelDraw},
             } as Model,
             ModelMT

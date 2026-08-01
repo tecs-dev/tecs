@@ -138,9 +138,10 @@ return tecs.newApplication({
             if loaded.status ~= "ready" then
                 error(loaded.error, 0)
             end
-            for _, primitive in ipairs(
-                app.renderer.meshes:registerModel(loaded.value)
-            ) do
+            local instance <const> = app.renderer.meshes
+                :registerModel(loaded.value)
+                :newInstance()
+            for _, primitive in ipairs(instance.primitives) do
                 world:spawn(
                     primitive.transform,
                     primitive.mesh,
@@ -231,9 +232,9 @@ return tecs.newApplication({
 `assets.newMesh` accepts four joint indices and four weights per vertex through
 its separate `joints` and `weights` arrays. `assets.loadGLTF` decodes
 `JOINTS_0`, `WEIGHTS_0`, skins, and inverse bind matrices. `registerModel`
-returns `primitive.skin` for a skinned primitive; spawn that component beside
-the rest of the primitive bundle. Animation clips and morph targets still fail
-loading instead of being ignored.
+returns shared residency, and each `newInstance` registers independent
+palettes. Spawn `primitive.skin` beside the rest of a skinned primitive bundle.
+Morph targets still fail loading instead of being ignored.
 
 `updateSkin` stages complete column-major palettes into the next frame rather
 than submitting a GPU command buffer per call. Joint matrices deform positions,
@@ -246,6 +247,39 @@ allocates no skin attributes, palette offsets, joint matrices, or skinned
 shader variants. Run `cargo xtask example skinning3d` for a two-joint example
 and `cargo xtask bench meshskinning` with `BENCH_MESH_SKINNING=0` and `=1` to
 measure the isolated lane.
+
+## Animated glTF instances
+
+`loadGLTF` decodes translation, rotation, and scale channels using core glTF
+linear, step, and cubic-spline interpolation. A resident `Model3D` shares that
+immutable clip data while each instance keeps its own reusable pose and joint
+palettes:
+
+```teal
+local model <const> = app.renderer.meshes:registerModel(loaded.value)
+local instance <const> = model:newInstance()
+for index, primitive in ipairs(instance.primitives) do
+    local entity <const> = world:spawn(
+        primitive.transform,
+        primitive.mesh,
+        primitive.bounds,
+        primitive.material,
+        primitive.skin,
+        tecs.gfx.Tint(),
+        tecs.gfx.Renderable3D()
+    )
+    instance:bind(world, index, entity)
+end
+instance:play("Walk")
+```
+
+Call `instance:update(dt)` from a system to advance playback, or
+`instance:sample("Walk", time)` for deterministic explicit sampling. Sampling
+reuses its tables, updates bound `Transform3D` components, and stages complete
+joint palettes without submitting a command buffer. The `Bounds3D` component
+is still caller-owned and must enclose every pose. Run
+`cargo xtask example animated3d` for the complete worker-to-GPU path and
+`cargo xtask bench modelanimation` for CPU sampling cost and heap growth.
 
 ## Game modules
 

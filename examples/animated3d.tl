@@ -1,4 +1,4 @@
---- Loads and draws a textured glTF 2.0 scene through both mesh lanes.
+--- Loads, instantiates, binds, and plays one skinned glTF animation clip.
 
 local root = os.getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
 if root:sub(-1) == "/" then
@@ -14,56 +14,63 @@ local Renderable3D <const> = tecs.gfx.Renderable3D
 
 local function game(world: tecs.World, app: tecs.Application)
     local meshes <const> = app.renderer.meshes
-    meshes.camera.z = 2.5
-    meshes.camera.verticalFov = math.rad(55)
+    meshes.camera.z = 3
+    meshes.camera.verticalFov = math.rad(50)
 
-    assets.loadGLTF(files.assetPath("models/triangle.gltf")):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)
+    assets.loadGLTF(files.assetPath("models/animated.gltf")):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)
         if loaded.status ~= "ready" then
             error(loaded.error, 0)
         end
-        local instance <const> = meshes:registerModel(loaded.value):newInstance()
-        for _, primitive in ipairs(instance.primitives) do
+        local model <const> = meshes:registerModel(loaded.value)
+        local instance <const> = model:newInstance()
+        for index, primitive in ipairs(instance.primitives) do
+            local entity: integer
             if primitive.skin ~= nil then
-                world:spawn(
+                entity = world:spawn(
                     primitive.transform,
                     primitive.mesh,
                     primitive.bounds,
                     primitive.material,
                     primitive.skin,
-                    Tint(1, 1, 1, 1),
+                    Tint(0.2, 0.72, 1, 1),
                     Renderable3D()
                 )
             else
-                world:spawn(
+                entity = world:spawn(
                     primitive.transform,
                     primitive.mesh,
                     primitive.bounds,
                     primitive.material,
-                    Tint(1, 1, 1, 1),
+                    Tint(0.2, 0.72, 1, 1),
                     Renderable3D()
                 )
             end
+            instance:bind(world, index, entity)
         end
-        print("gltf3d: loaded textured glTF geometry and transparent PBR material data")
+        instance:play("Wave")
+        world:addSystem({
+            name = "example.AnimateGLTF",
+            phase = tecs.ecs.phases.Update,
+            run = function(dt: number)
+                instance:update(dt)
+            end,
+        })
+        print("animated3d: sampling the glTF Wave clip into an instance-owned GPU palette")
+        print("animated3d: escape or close the window to quit")
     end)
 end
 
 return tecs.newApplication({
-    window = {title = "Tecs glTF 3D", width = 960, height = 640},
+    window = {title = "Tecs animated glTF", width = 960, height = 640},
     ambientLight = {1, 1, 1},
     sprites = false,
     meshes = {
-        capacity = 64,
-        vertexCapacity = 1024,
-        indexCapacity = 3072,
-        materialCapacity = 32,
-        textureWidth = 64,
-        textureHeight = 64,
-        textureLayers = 4,
-        packTextures = true,
-        transparency = true,
+        capacity = 16,
+        vertexCapacity = 256,
+        indexCapacity = 768,
+        skinning = {jointCapacity = 32},
     },
-    maxEntities = 16,
+    maxEntities = 8,
     debug = true,
     debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
     quitOnEscape = true,

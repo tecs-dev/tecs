@@ -32,10 +32,54 @@ local function game(world: tecs.World, app: tecs.Application)
     local mesh, sourceBounds = meshes:registerMesh(tecs.assets.newMesh({
         name = "example://two-joint-strip",
         vertices = {
-            -0.35, -1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0,
-            0.35, -1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0,
-            0.35, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1,
-            -0.35, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1,
+            -0.35,
+            -1,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0.35,
+            -1,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0.35,
+            1,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            1,
+            -0.35,
+            1,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            0,
+            1,
         },
         indices = {0, 1, 2, 0, 2, 3},
         joints = {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0},
@@ -43,20 +87,9 @@ local function game(world: tecs.World, app: tecs.Application)
     }))
     local skin <const> = meshes:registerSkin("example://two-joint-palette", palette(0))
     local bounds <const> = tecs.gfx.Bounds3D(
-        sourceBounds.centerX,
-        sourceBounds.centerY,
-        sourceBounds.centerZ,
-        sourceBounds.radius + 0.5
+        sourceBounds.centerX, sourceBounds.centerY, sourceBounds.centerZ, sourceBounds.radius + 0.5
     )
-    world:spawn(
-        Transform3D(),
-        mesh,
-        bounds,
-        MeshMaterial(),
-        skin,
-        Tint(0.2, 0.72, 1, 1),
-        Renderable3D()
-    )
+    world:spawn(Transform3D(), mesh, bounds, MeshMaterial(), skin, Tint(0.2, 0.72, 1, 1), Renderable3D())
 
     local elapsed = 0.0
     world:addSystem({
