@@ -1,4 +1,4 @@
---- Loads, instantiates, binds, and plays one skinned glTF animation clip.
+--- Loads, instantiates, binds, and plays one glTF morph-weight animation.
 
 local root = os.getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
 if root:sub(-1) == "/" then
@@ -17,56 +17,46 @@ local function game(world: tecs.World, app: tecs.Application)
     meshes.camera.z = 3
     meshes.camera.verticalFov = math.rad(50)
 
-    assets.loadGLTF(files.assetPath("models/animated.gltf")):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)
+    assets.loadGLTF(files.assetPath("models/morphed.gltf")):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)
         if loaded.status ~= "ready" then
             error(loaded.error, 0)
         end
         local model <const> = meshes:registerModel(loaded.value)
         local instance <const> = model:newInstance()
         for index, primitive in ipairs(instance.primitives) do
-            local entity: integer
-            if primitive.skin ~= nil then
-                entity = world:spawn(
-                    primitive.transform,
-                    primitive.mesh,
-                    primitive.bounds,
-                    primitive.material,
-                    primitive.skin,
-                    Tint(0.2, 0.72, 1, 1),
-                    Renderable3D()
-                )
-            else
-                entity = world:spawn(
-                    primitive.transform,
-                    primitive.mesh,
-                    primitive.bounds,
-                    primitive.material,
-                    Tint(0.2, 0.72, 1, 1),
-                    Renderable3D()
-                )
-            end
+            local entity <const> = world:spawn(
+                primitive.transform,
+                primitive.mesh,
+                primitive.bounds,
+                primitive.material,
+                primitive.morph,
+                Tint(0.9, 0.3, 0.22, 1),
+                Renderable3D()
+            )
             instance:bind(world, index, entity)
         end
-        instance:play("Wave")
+        instance:play("Stretch")
         world:addSystem({
-            name = "example.AnimateGLTF",
+            name = "example.AnimateMorph",
             phase = tecs.ecs.phases.Update,
-            run = function(dt: number) instance:update(dt) end,
+            run = function(dt: number)
+                instance:update(dt)
+            end,
         })
-        print("animated3d: sampling the glTF Wave clip into an instance-owned GPU palette")
-        print("animated3d: escape or close the window to quit")
+        print("morph3d: sampling glTF weights into an instance-owned GPU morph vector")
+        print("morph3d: escape or close the window to quit")
     end)
 end
 
 return tecs.newApplication({
-    window = {title = "Tecs animated glTF", width = 960, height = 640},
+    window = {title = "Tecs glTF morph targets", width = 960, height = 640},
     ambientLight = {1, 1, 1},
     sprites = false,
     meshes = {
         capacity = 16,
         vertexCapacity = 256,
         indexCapacity = 768,
-        skinning = {jointCapacity = 32},
+        morphing = {vertexCapacity = 256, weightCapacity = 32},
     },
     maxEntities = 8,
     debug = true,

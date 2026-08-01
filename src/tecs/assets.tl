@@ -32,7 +32,7 @@ voices.
 `newMesh` constructs immutable procedural geometry synchronously. `loadGLTF`
 decodes glTF 2.0 and GLB scenes on the worker, including images,
 metallic-roughness materials, alpha masks, `BLEND` modes, skins, and node
-animation clips. Both produce
+animation clips including morph weights. Both produce
 CPU-owned data that the mesh domain consumes when it becomes resident. A model
 with a `BLEND` material requires a mesh domain created with
 `transparency = true`.
@@ -319,6 +319,14 @@ local record Mesh
     --- Read-only. Contains optional joint indices and weights as eight floats
     --- per vertex until `release` runs. Nil means rigid geometry.
     skinVertices: loader.CArray
+    --- Read-only. Contains optional position, normal, and tangent deltas as
+    --- nine floats per target vertex until `release` runs. Nil means the
+    --- geometry has no morph targets.
+    morphVertices: loader.CArray
+    --- Read-only. Reports the number of consecutive morph targets.
+    morphTargetCount: integer
+    --- Read-only. Contains one default weight per morph target.
+    morphWeights: {number}
     --- Read-only. Reports the number of vertices, not floats.
     vertexCount: integer
     --- Read-only. Reports the number of indices. It is always a multiple of
@@ -336,6 +344,18 @@ local record Mesh
     release: function(self: Mesh)
 end
 
+--- Supplies one procedural morph target to `newMesh`.
+local record MeshMorphTarget
+    --- Caller-writable. Supplies three position deltas per vertex.
+    positions: {number}
+    --- Caller-writable. Supplies three normal deltas per vertex, or nil for
+    --- zero deltas.
+    normals: {number}
+    --- Caller-writable. Supplies three tangent deltas per vertex, or nil for
+    --- zero deltas. Tangent handedness is unchanged.
+    tangents: {number}
+end
+
 --- Supplies procedural geometry to `newMesh`.
 local record MeshOptions
     --- Caller-writable. Supplies the stable non-empty mesh name.
@@ -351,6 +371,13 @@ local record MeshOptions
     --- Caller-writable. Supplies four non-negative joint weights per vertex.
     --- Each group is normalized by `newMesh` and requires `joints`.
     weights: {number}
+    --- Caller-writable. Supplies morph targets in file order. Each target
+    --- carries vertex-count-matched position deltas and optional normal and
+    --- tangent deltas.
+    morphTargets: {MeshMorphTarget}
+    --- Caller-writable. Supplies one finite default weight per morph target.
+    --- Omitted weights default to zero.
+    morphWeights: {number}
 end
 
 --- Describes one decoded glTF material before GPU registration.
@@ -410,6 +437,8 @@ local record ModelDraw
     skin: integer
     --- Read-only. Selects the one-based scene node this primitive follows.
     node: integer
+    --- Read-only. Contains this node's initial morph weights in target order.
+    weights: {number}
     --- Read-only. Reports world translation x from the selected glTF scene.
     x: number
     --- Read-only. Reports world translation y.
@@ -482,12 +511,15 @@ end
 local record ModelAnimationChannel
     --- Read-only. Selects a one-based target node.
     node: integer
-    --- Read-only. Selects `ANIMATION_TRANSLATION`, `ANIMATION_ROTATION`, or
-    --- `ANIMATION_SCALE`.
+    --- Read-only. Selects `ANIMATION_TRANSLATION`, `ANIMATION_ROTATION`,
+    --- `ANIMATION_SCALE`, or `ANIMATION_WEIGHTS`.
     path: integer
     --- Read-only. Selects `ANIMATION_LINEAR`, `ANIMATION_STEP`, or
     --- `ANIMATION_CUBIC`.
     interpolation: integer
+    --- Read-only. Reports packed values per key. It is three for translation
+    --- and scale, four for rotation, and the target count for morph weights.
+    width: integer
     --- Read-only. Contains strictly increasing key times in seconds.
     times: {number}
     --- Read-only. Contains packed key values. Cubic keys contain incoming
@@ -501,7 +533,8 @@ local record ModelAnimation
     name: string
     --- Read-only. Reports the last key time in seconds.
     duration: number
-    --- Read-only. Contains translation, rotation, and scale channels.
+    --- Read-only. Contains translation, rotation, scale, and morph-weight
+    --- channels.
     channels: {ModelAnimationChannel}
 end
 
@@ -510,9 +543,9 @@ end
 --- Meshes use the same fixed vertex layout as `newMesh`. Images remain
 --- decoded CPU pixels. `renderer.meshes:registerModel` consumes all of them
 --- and returns shared residency that creates independently posed instances.
---- Skinning includes the initial
---- joint pose. Animation clips retain allocation-stable CPU sampling data;
---- morph targets remain a separate lane.
+--- Skinning includes the initial joint pose. Morph data includes immutable
+--- deltas and default weights. Animation clips retain allocation-stable CPU
+--- sampling data for node transforms and morph weights.
 local record Model
     --- Read-only. Contains the requested `.gltf` or `.glb` path unchanged.
     path: string
@@ -542,6 +575,8 @@ local record assets
     ANIMATION_ROTATION: integer
     --- Read-only. Selects a scale animation channel.
     ANIMATION_SCALE: integer
+    --- Read-only. Selects a morph-weight animation channel.
+    ANIMATION_WEIGHTS: integer
     --- Read-only. Selects linear interpolation.
     ANIMATION_LINEAR: integer
     --- Read-only. Selects held-key interpolation.
@@ -557,6 +592,9 @@ local record assets
 
     --- Read-only. Exposes the immutable CPU mesh type.
     Mesh: Mesh
+
+    --- Read-only. Exposes one procedural morph-target description.
+    MeshMorphTarget: MeshMorphTarget
 
     --- Read-only. Exposes the decoded glTF scene type.
     Model: Model
@@ -592,9 +630,10 @@ local record assets
     --- URIs and embedded GLB resources are supported. Triangle primitives,
     --- static node transforms, metallic-roughness PBR, normal, occlusion,
     --- emissive, alpha-mask, alpha-blended, and unlit materials are decoded.
-    --- JOINTS_0, WEIGHTS_0, skins, inverse bind matrices, and node animation
-    --- clips are decoded. A morphed, sparse-accessor, or non-triangle input
-    --- settles as failed instead of loading incompletely.
+    --- JOINTS_0, WEIGHTS_0, skins, inverse bind matrices, morph targets, mesh
+    --- and node weights, and node animation clips are decoded. A
+    --- sparse-accessor or non-triangle input settles as failed instead of
+    --- loading incompletely.
     --- Registering a
     --- model containing alpha blending requires a mesh domain created with
     --- `transparency = true`.
@@ -616,6 +655,7 @@ end
 assets.ANIMATION_TRANSLATION = 0
 assets.ANIMATION_ROTATION = 1
 assets.ANIMATION_SCALE = 2
+assets.ANIMATION_WEIGHTS = 3
 assets.ANIMATION_LINEAR = 0
 assets.ANIMATION_STEP = 1
 assets.ANIMATION_CUBIC = 2
@@ -629,6 +669,7 @@ function Mesh:release()
     self.vertices = nil
     self.indices = nil
     self.skinVertices = nil
+    self.morphVertices = nil
 end
 
 function Model:release()
@@ -673,6 +714,7 @@ local function modelFromWorker(result: {string: any}): Model
             local vertices <const> = loader.newArray("float[?]", vertexCount * meshlayout.VERTEX_FLOATS)
             local indices <const> = loader.newArray("uint32_t[?]", indexCount)
             local skinVertices: loader.CArray = nil
+            local morphVertices: loader.CArray = nil
             loader.copyTo(
                 loader.bytePointer(vertices as loader.CValue),
                 source.vertices as loader.CValue,
@@ -687,12 +729,26 @@ local function modelFromWorker(result: {string: any}): Model
                     vertexCount * meshlayout.SKIN_VERTEX_BYTES
                 )
             end
+            local morphTargetCount <const> = source.morphTargetCount as integer or 0
+            if source.morphVertices ~= nil then
+                morphVertices = loader.newArray(
+                    "float[?]", vertexCount * morphTargetCount * meshlayout.MORPH_VERTEX_FLOATS
+                )
+                loader.copyTo(
+                    loader.bytePointer(morphVertices as loader.CValue),
+                    source.morphVertices as loader.CValue,
+                    vertexCount * morphTargetCount * meshlayout.MORPH_VERTEX_BYTES
+                )
+            end
             meshes[index] = setmetatable(
                 {
                     name = source.name as string,
                     vertices = vertices,
                     indices = indices,
                     skinVertices = skinVertices,
+                    morphVertices = morphVertices,
+                    morphTargetCount = morphTargetCount,
+                    morphWeights = source.morphWeights as {number} or {},
                     vertexCount = vertexCount,
                     indexCount = indexCount,
                     centerX = source.centerX as number,
@@ -820,6 +876,92 @@ function assets.newMesh(options: MeshOptions): Mesh
         end
     end
 
+    local morphTargets <const> = options.morphTargets or {}
+    local morphTargetCount <const> = #morphTargets
+    local morphWeights <const> = options.morphWeights or {}
+    if #morphWeights ~= 0 and #morphWeights ~= morphTargetCount then
+        error(("tecs: mesh '%s' needs one default weight per morph target"):format(name), 2)
+    end
+    local morphVertices: loader.CArray = nil
+    local morphRadius = 0.0
+    if morphTargetCount > 0 then
+        morphVertices = loader.newArray("float[?]", vertexCount * morphTargetCount * meshlayout.MORPH_VERTEX_FLOATS)
+        for targetIndex, target in ipairs(morphTargets) do
+            local positions <const> = target.positions
+            local normals <const> = target.normals
+            local tangents <const> = target.tangents
+            if positions == nil or #positions ~= vertexCount * 3 then
+                error(
+                    ("tecs: mesh '%s' morph target %d needs three position deltas per vertex"):format(
+                        name, targetIndex
+                    ),
+                    2
+                )
+            end
+            if normals ~= nil and #normals ~= vertexCount * 3 then
+                error(
+                    ("tecs: mesh '%s' morph target %d needs three normal deltas per vertex"):format(name, targetIndex),
+                    2
+                )
+            end
+            if tangents ~= nil and #tangents ~= vertexCount * 3 then
+                error(
+                    ("tecs: mesh '%s' morph target %d needs three tangent deltas per vertex"):format(
+                        name, targetIndex
+                    ),
+                    2
+                )
+            end
+            for vertex = 0, vertexCount - 1 do
+                local sourceBase <const> = vertex * 3
+                local destination <const> = ((targetIndex - 1) * vertexCount + vertex) * meshlayout.MORPH_VERTEX_FLOATS
+                for lane = 0, 2 do
+                    local position <const> = positions[sourceBase + lane + 1]
+                    local normal <const> = normals ~= nil and normals[sourceBase + lane + 1] or 0.0
+                    local tangent <const> = tangents ~= nil and tangents[sourceBase + lane + 1] or 0.0
+                    if
+                        position == nil
+                        or position ~= position
+                        or position == math.huge
+                        or position == -math.huge
+                        or normal ~= normal
+                        or normal == math.huge
+                        or normal == -math.huge
+                        or tangent ~= tangent
+                        or tangent == math.huge
+                        or tangent == -math.huge
+                    then
+                        error(
+                            ("tecs: mesh '%s' morph target %d contains a non-finite delta"):format(name, targetIndex), 2
+                        )
+                    end
+                    morphVertices[destination + lane] = position
+                    morphVertices[destination + 3 + lane] = normal
+                    morphVertices[destination + 6 + lane] = tangent
+                end
+            end
+        end
+        for vertex = 0, vertexCount - 1 do
+            local displacement = 0.0
+            for targetIndex = 1, morphTargetCount do
+                local source <const> = ((targetIndex - 1) * vertexCount + vertex) * meshlayout.MORPH_VERTEX_FLOATS
+                local dx, dy, dz <const> = morphVertices[source] as number,
+                    morphVertices[source + 1] as number,
+                    morphVertices[source + 2] as number
+                displacement = displacement + math.sqrt(dx * dx + dy * dy + dz * dz)
+            end
+            morphRadius = math.max(morphRadius, displacement)
+        end
+    end
+    local defaultMorphWeights: {number} = {}
+    for index = 1, morphTargetCount do
+        local weight <const> = #morphWeights == 0 and 0.0 or morphWeights[index]
+        if weight == nil or weight ~= weight or weight == math.huge or weight == -math.huge then
+            error(("tecs: mesh '%s' morph weight %d is not finite"):format(name, index), 2)
+        end
+        defaultMorphWeights[index] = weight
+    end
+
     local centerX <const> = (minX + maxX) * 0.5
     local centerY <const> = (minY + maxY) * 0.5
     local centerZ <const> = (minZ + maxZ) * 0.5
@@ -841,12 +983,15 @@ function assets.newMesh(options: MeshOptions): Mesh
             vertices = vertices,
             indices = indices,
             skinVertices = skinVertices,
+            morphVertices = morphVertices,
+            morphTargetCount = morphTargetCount,
+            morphWeights = defaultMorphWeights,
             vertexCount = vertexCount,
             indexCount = indexCount,
             centerX = centerX,
             centerY = centerY,
             centerZ = centerZ,
-            radius = math.sqrt(radiusSquared),
+            radius = math.sqrt(radiusSquared) + morphRadius,
         } as Mesh,
         MeshMT
     )

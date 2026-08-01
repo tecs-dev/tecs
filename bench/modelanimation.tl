@@ -93,6 +93,7 @@ local source <const>: assets.Model = {
                 {
                     node = JOINTS + 1,
                     path = assets.ANIMATION_ROTATION,
+                    width = 4,
                     interpolation = assets.ANIMATION_LINEAR,
                     times = {0, 1},
                     values = {0, 0, 0, 1, 0, 0, 1, 0},
@@ -109,7 +110,7 @@ local source <const>: assets.Model = {
             inverseBindMatrices = inverseBinds,
         },
     },
-    draws = {{mesh = 1, material = 0, skin = 1, node = 1}},
+    draws = {{mesh = 1, material = 0, skin = 1, node = 1, weights = {}}},
 } as assets.Model
 
 local checksum = 0.0
@@ -164,13 +165,15 @@ sort(samples)
 local p50 <const> = samples[max(1, ceil(SAMPLES * 0.50))]
 local p95 <const> = samples[max(1, ceil(SAMPLES * 0.95))]
 local heapPerSample <const> = max(0.0, heapAfter - heapBefore) / SAMPLES
-print(format(
-    "model animation: %d instances x %d joints  p50 %.3f ms  p95 %.3f ms  %.1f ns/instance  heap %.0f B/sample  check %.1f",
-    COUNT,
-    JOINTS,
-    p50 * 1000,
-    p95 * 1000,
-    p50 * 1000000000 / COUNT,
-    heapPerSample,
-    checksum
-))
+print(
+    format(
+        "model animation: %d instances x %d joints  p50 %.3f ms  p95 %.3f ms  %.1f ns/instance  heap %.0f B/sample  check %.1f",
+        COUNT,
+        JOINTS,
+        p50 * 1000,
+        p95 * 1000,
+        p50 * 1000000000 / COUNT,
+        heapPerSample,
+        checksum
+    )
+)

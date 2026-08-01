@@ -69,6 +69,7 @@ local function source(channels)
                 material = 0,
                 skin = 1,
                 node = 1,
+                weights = {},
             },
         },
     }
@@ -77,6 +78,7 @@ end
 local function domain()
     local nextSlot = 0
     local updates = {}
+    local morphUpdates = {}
     local value = {}
     function value:registerSkin(name, matrices)
         local skin = components.MeshSkin(components.meshSkinId(name), nextSlot)
@@ -87,11 +89,20 @@ local function domain()
     function value:updateSkin(skin, matrices)
         updates[skin.asset] = matrices
     end
-    return value, updates
+    function value:registerMorph(name, weights)
+        local morph = components.MeshMorph(components.meshMorphId(name), nextSlot)
+        nextSlot = nextSlot + #weights
+        morphUpdates[morph.asset] = copy(weights)
+        return morph
+    end
+    function value:updateMorph(morph, weights)
+        morphUpdates[morph.asset] = copy(weights)
+    end
+    return value, updates, morphUpdates
 end
 
 local function registered(channels)
-    local owner, updates = domain()
+    local owner, updates, morphUpdates = domain()
     local model = Model3D._create(
         owner,
         "spec://animated-model#residency-1",
@@ -100,7 +111,7 @@ local function registered(channels)
         { components.Bounds3D(0, 0, 0, 4) },
         {}
     )
-    return model, updates
+    return model, updates, morphUpdates
 end
 
 describe("Model3D", function()
@@ -109,6 +120,7 @@ describe("Model3D", function()
             {
                 node = 1,
                 path = assets.ANIMATION_TRANSLATION,
+                width = 3,
                 interpolation = assets.ANIMATION_LINEAR,
                 times = { 0, 1 },
                 values = { 0, 0, 0, 0, 1, 0 },
@@ -116,6 +128,7 @@ describe("Model3D", function()
             {
                 node = 2,
                 path = assets.ANIMATION_TRANSLATION,
+                width = 3,
                 interpolation = assets.ANIMATION_LINEAR,
                 times = { 0, 1 },
                 values = { 0, 0, 0, 1, 0, 0 },
@@ -140,6 +153,7 @@ describe("Model3D", function()
             {
                 node = 1,
                 path = assets.ANIMATION_TRANSLATION,
+                width = 3,
                 interpolation = assets.ANIMATION_STEP,
                 times = { 0, 1 },
                 values = { 0, 0, 0, 0, 2, 0 },
@@ -164,6 +178,7 @@ describe("Model3D", function()
             {
                 node = 1,
                 path = assets.ANIMATION_ROTATION,
+                width = 4,
                 interpolation = assets.ANIMATION_LINEAR,
                 times = { 0, 1 },
                 values = { 0, 0, 0, 1, 0, 0, 1, 0 },
@@ -182,15 +197,28 @@ describe("Model3D", function()
             {
                 node = 1,
                 path = assets.ANIMATION_TRANSLATION,
+                width = 3,
                 interpolation = assets.ANIMATION_CUBIC,
                 times = { 0, 1 },
                 values = {
-                    0, 0, 0,
-                    0, 0, 0,
-                    1, 0, 0,
-                    1, 0, 0,
-                    1, 0, 0,
-                    0, 0, 0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
                 },
             },
         })
@@ -203,11 +231,36 @@ describe("Model3D", function()
         assert.near(0.5, instance.primitives[1].transform.x, 1e-6)
     end)
 
+    it("samples morph weights independently from transforms and skins", function()
+        local model, _, morphUpdates = registered({
+            {
+                node = 1,
+                path = assets.ANIMATION_WEIGHTS,
+                width = 1,
+                interpolation = assets.ANIMATION_LINEAR,
+                times = { 0, 1 },
+                values = { 0, 1 },
+            },
+        })
+        model._draws[1].weights = { 0 }
+        local first = model:newInstance()
+        local second = model:newInstance()
+
+        first:sample("Move", 0.25)
+        second:sample("Move", 0.75)
+
+        assert.near(0.25, morphUpdates[first.primitives[1].morph.asset][1], 1e-6)
+        assert.near(0.75, morphUpdates[second.primitives[1].morph.asset][1], 1e-6)
+        assert.are_not.equal(first.primitives[1].morph.asset, second.primitives[1].morph.asset)
+        assert.near(0, first.primitives[1].transform.x, 1e-6)
+    end)
+
     it("rejects ambiguous names and invalid playback values", function()
         local model = registered({
             {
                 node = 1,
                 path = assets.ANIMATION_TRANSLATION,
+                width = 3,
                 interpolation = assets.ANIMATION_LINEAR,
                 times = { 0, 1 },
                 values = { 0, 0, 0, 1, 0, 0 },

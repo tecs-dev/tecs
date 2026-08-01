@@ -2,9 +2,9 @@
 Resident glTF models and allocation-stable node animation.
 
 `renderer.meshes:registerModel` consumes decoded CPU assets and returns a
-`Model3D`. Each `newInstance` owns its joint palettes and primitive templates,
-so copies of one model can play different poses without duplicating geometry,
-materials, or textures.
+`Model3D`. Each `newInstance` owns its joint palettes, morph weights, and
+primitive templates, so copies of one model can play different poses without
+duplicating geometry, materials, textures, morph deltas, or clips.
 
 ```teal
 local model <const> = app.renderer.meshes:registerModel(loaded.value)
@@ -16,6 +16,7 @@ for index, primitive in ipairs(instance.primitives) do
         primitive.bounds,
         primitive.material,
         primitive.skin,
+        primitive.morph,
         tecs.gfx.Tint(1, 1, 1, 1),
         tecs.gfx.Renderable3D()
     )
@@ -34,8 +35,9 @@ world:addSystem({
 
 Sampling resets the reusable pose to the file's base TRS, applies one clip,
 builds node world matrices in parent order, updates bound `Transform3D`
-components, and stages each instance-owned skin palette. No table or cdata is
-allocated per sample. Bounds remain caller-owned and must enclose every pose.
+components, and stages each instance-owned skin palette and morph vector. No
+table or cdata is allocated per sample. Bounds remain caller-owned and must
+enclose every pose.
 ]=]
 
 local ecs <const> = require("tecs.ecs")
@@ -62,6 +64,9 @@ local record Primitive
     --- Caller-writable. Selects this instance's joint palette, or nil for
     --- rigid geometry.
     skin: components.MeshSkin
+    --- Caller-writable. Selects this instance's morph weights, or nil for
+    --- geometry without morph targets.
+    morph: components.MeshMorph
 end
 
 --- Configures `Instance:play`.
@@ -152,6 +157,8 @@ local record Instance
     _worldMatrices: {number}
     _palettes: {{number}}
     _skins: {components.MeshSkin}
+    _morphs: {components.MeshMorph}
+    _morphWeights: {{number}}
     _temporary: {number}
     _inverse: {number}
 end
@@ -162,7 +169,8 @@ local record Model3D is ModelOwner
     type PlayOptions = PlayOptions
 
     --- Creates an independently animated instance.
-    --- @return Returns reusable primitive templates and private joint palettes.
+    --- @return Returns reusable primitive templates plus private joint
+    ---     palettes and morph-weight vectors.
     newInstance: function(self): Instance
 end
 
@@ -206,22 +214,16 @@ local function inverseAffine(source: {number}, offset: integer, out: {number})
     local a00, a01, a02 <const> = source[offset], source[offset + 4], source[offset + 8]
     local a10, a11, a12 <const> = source[offset + 1], source[offset + 5], source[offset + 9]
     local a20, a21, a22 <const> = source[offset + 2], source[offset + 6], source[offset + 10]
-    local determinant <const> = a00 * (a11 * a22 - a12 * a21)
-        - a01 * (a10 * a22 - a12 * a20)
-        + a02 * (a10 * a21 - a11 * a20)
+    local determinant <const> = a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) + a02 * (
+        a10 * a21 - a11 * a20
+    )
     if math.abs(determinant) <= 1e-20 then
         error("tecs: an animated mesh transform is not invertible", 3)
     end
     local d <const> = 1.0 / determinant
-    local i00, i01, i02 <const> = (a11 * a22 - a12 * a21) * d,
-        (a02 * a21 - a01 * a22) * d,
-        (a01 * a12 - a02 * a11) * d
-    local i10, i11, i12 <const> = (a12 * a20 - a10 * a22) * d,
-        (a00 * a22 - a02 * a20) * d,
-        (a02 * a10 - a00 * a12) * d
-    local i20, i21, i22 <const> = (a10 * a21 - a11 * a20) * d,
-        (a01 * a20 - a00 * a21) * d,
-        (a00 * a11 - a01 * a10) * d
+    local i00, i01, i02 <const> = (a11 * a22 - a12 * a21) * d, (a02 * a21 - a01 * a22) * d, (a01 * a12 - a02 * a11) * d
+    local i10, i11, i12 <const> = (a12 * a20 - a10 * a22) * d, (a00 * a22 - a02 * a20) * d, (a02 * a10 - a00 * a12) * d
+    local i20, i21, i22 <const> = (a10 * a21 - a11 * a20) * d, (a01 * a20 - a00 * a21) * d, (a00 * a11 - a01 * a10) * d
     local tx, ty, tz <const> = source[offset + 12], source[offset + 13], source[offset + 14]
     out[1], out[2], out[3], out[4] = i00, i10, i20, 0
     out[5], out[6], out[7], out[8] = i01, i11, i21, 0
@@ -239,9 +241,7 @@ local function writeTransform(matrix: {number}, offset: integer, target: ecs.Tra
         matrix[offset + 5] * matrix[offset + 10] - matrix[offset + 6] * matrix[offset + 9]
     ) - matrix[offset + 4] * (
         matrix[offset + 1] * matrix[offset + 10] - matrix[offset + 2] * matrix[offset + 9]
-    ) + matrix[offset + 8] * (
-        matrix[offset + 1] * matrix[offset + 6] - matrix[offset + 2] * matrix[offset + 5]
-    )
+    ) + matrix[offset + 8] * (matrix[offset + 1] * matrix[offset + 6] - matrix[offset + 2] * matrix[offset + 5])
     if sx <= 1e-20 or sy <= 1e-20 or sz <= 1e-20 then
         error("tecs: an animated node has a zero scale axis", 3)
     end
@@ -249,12 +249,8 @@ local function writeTransform(matrix: {number}, offset: integer, target: ecs.Tra
         sx = -sx
     end
     local r00, r01, r02 <const> = matrix[offset] / sx, matrix[offset + 4] / sy, matrix[offset + 8] / sz
-    local r10, r11, r12 <const> = matrix[offset + 1] / sx,
-        matrix[offset + 5] / sy,
-        matrix[offset + 9] / sz
-    local r20, r21, r22 <const> = matrix[offset + 2] / sx,
-        matrix[offset + 6] / sy,
-        matrix[offset + 10] / sz
+    local r10, r11, r12 <const> = matrix[offset + 1] / sx, matrix[offset + 5] / sy, matrix[offset + 9] / sz
+    local r20, r21, r22 <const> = matrix[offset + 2] / sx, matrix[offset + 6] / sy, matrix[offset + 10] / sz
     if
         math.abs(r00 * r01 + r10 * r11 + r20 * r21) > 1e-4
         or math.abs(r00 * r02 + r10 * r12 + r20 * r22) > 1e-4
@@ -317,10 +313,10 @@ local function normalizeRotation(pose: {number}, offset: integer)
         pose[offset + 3] / length
 end
 
-local function sampleChannel(channel: assets.ModelAnimationChannel, time: number, pose: {number})
-    local width <const> = channel.path == assets.ANIMATION_ROTATION and 4 or 3
-    local target <const> = (channel.node - 1) * 10
-        + (channel.path == assets.ANIMATION_TRANSLATION and 1 or channel.path == assets.ANIMATION_ROTATION and 4 or 8)
+local function sampleChannel(
+    channel: assets.ModelAnimationChannel, time: number, target: {number}, targetOffset: integer
+)
+    local width <const> = channel.width
     local times <const> = channel.times
     local values <const> = channel.values
     local key <const> = findKey(times, time)
@@ -329,7 +325,7 @@ local function sampleChannel(channel: assets.ModelAnimationChannel, time: number
         local row <const> = channel.interpolation == assets.ANIMATION_CUBIC and ((key - 1) * 3 + 1) or key - 1
         local source <const> = row * width
         for lane = 0, width - 1 do
-            pose[target + lane] = values[source + lane + 1]
+            target[targetOffset + lane] = values[source + lane + 1]
         end
     elseif channel.interpolation == assets.ANIMATION_CUBIC then
         local span <const> = times[key + 1] - times[key]
@@ -344,7 +340,7 @@ local function sampleChannel(channel: assets.ModelAnimationChannel, time: number
             local m0 <const> = values[left + width * 2 + lane + 1] * span
             local p1 <const> = values[right + width + lane + 1]
             local m1 <const> = values[right + lane + 1] * span
-            pose[target + lane] = h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1
+            target[targetOffset + lane] = h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1
         end
     elseif channel.path == assets.ANIMATION_ROTATION then
         local left <const> = (key - 1) * 4
@@ -366,7 +362,7 @@ local function sampleChannel(channel: assets.ModelAnimationChannel, time: number
             a, b = math.sin((1.0 - alpha) * angle) * inverse, math.sin(alpha * angle) * inverse
         end
         for lane = 0, 3 do
-            pose[target + lane] = values[left + lane + 1] * a + values[right + lane + 1] * sign * b
+            target[targetOffset + lane] = values[left + lane + 1] * a + values[right + lane + 1] * sign * b
         end
     else
         local alpha <const> = (time - times[key]) / (times[key + 1] - times[key])
@@ -374,11 +370,11 @@ local function sampleChannel(channel: assets.ModelAnimationChannel, time: number
         local right <const> = key * width
         for lane = 0, width - 1 do
             local a, b <const> = values[left + lane + 1], values[right + lane + 1]
-            pose[target + lane] = a + (b - a) * alpha
+            target[targetOffset + lane] = a + (b - a) * alpha
         end
     end
     if channel.path == assets.ANIMATION_ROTATION then
-        normalizeRotation(pose, target)
+        normalizeRotation(target, targetOffset)
     end
 end
 
@@ -386,7 +382,9 @@ local function animationIndex(model: ModelOwner, animation: string | integer): i
     if type(animation) == "number" then
         local index <const> = animation as integer
         if index < 1 or index > model.animationCount or index ~= math.floor(index) then
-            error(("tecs: model animation index %s is outside 1..%d"):format(tostring(animation), model.animationCount), 3)
+            error(
+                ("tecs: model animation index %s is outside 1..%d"):format(tostring(animation), model.animationCount), 3
+            )
         end
         return index
     end
@@ -409,9 +407,32 @@ local function evaluate(self: Instance, animation: integer, time: number)
             node.rotationW
         pose[offset + 8], pose[offset + 9], pose[offset + 10] = node.scaleX, node.scaleY, node.scaleZ
     end
+    for index = 1, #model._draws do
+        local weights = self._morphWeights[index]
+        if weights ~= nil then
+            local defaults <const> = model._draws[index].weights
+            for target, weight in ipairs(defaults) do
+                weights[target] = weight
+            end
+        end
+    end
     if animation ~= 0 then
         for _, channel in ipairs(model.animations[animation].channels) do
-            sampleChannel(channel, time, pose)
+            if channel.path == assets.ANIMATION_WEIGHTS then
+                for index, draw in ipairs(model._draws) do
+                    local weights = self._morphWeights[index]
+                    if draw.node == channel.node and weights ~= nil then
+                        sampleChannel(channel, time, weights, 1)
+                    end
+                end
+            else
+                local offset <const> = (channel.node - 1) * 10 + (
+                    channel.path == assets.ANIMATION_TRANSLATION and 1
+                    or channel.path == assets.ANIMATION_ROTATION and 4
+                    or 8
+                )
+                sampleChannel(channel, time, pose, offset)
+            end
         end
     end
     local locals <const> = self._localMatrices
@@ -462,6 +483,12 @@ local function evaluate(self: Instance, animation: integer, time: number)
         end
         model._domain:updateSkin(self._skins[index], palette)
     end
+    for index = 1, #model._draws do
+        local weights = self._morphWeights[index]
+        if weights ~= nil then
+            model._domain:updateMorph(self._morphs[index], weights)
+        end
+    end
 end
 
 function Model3D:animationIndex(name: string): integer
@@ -486,37 +513,54 @@ function Model3D:newInstance(): Instance
         end
         palettes[index] = palette
         skins[index] = self._domain:registerSkin(
-            self._registration .. "#instance-" .. self._nextInstance .. "-skin-" .. index,
-            palette
+            self._registration .. "#instance-" .. self._nextInstance .. "-skin-" .. index, palette
         )
     end
     local primitives: {Primitive} = {}
+    local morphs: {components.MeshMorph} = {}
+    local morphWeights: {{number}} = {}
     for index, draw in ipairs(self._draws) do
+        if #draw.weights > 0 then
+            local weights: {number} = {}
+            for target, weight in ipairs(draw.weights) do
+                weights[target] = weight
+            end
+            morphWeights[index] = weights
+            morphs[index] = self._domain:registerMorph(
+                self._registration .. "#instance-" .. self._nextInstance .. "-morph-" .. index, weights
+            )
+        end
         primitives[index] = {
             transform = Transform3D(),
             mesh = self._meshes[draw.mesh],
             bounds = self._bounds[draw.mesh],
             material = self._materials[draw.material] or components.MeshMaterial(),
             skin = skins[draw.skin],
+            morph = morphs[index],
         }
     end
-    local instance <const> = setmetatable({
-        primitives = primitives,
-        animation = 0,
-        time = 0.0,
-        speed = 1.0,
-        loop = true,
-        playing = false,
-        _model = self,
-        _entities = {},
-        _pose = {},
-        _localMatrices = {},
-        _worldMatrices = {},
-        _palettes = palettes,
-        _skins = skins,
-        _temporary = {},
-        _inverse = {},
-    } as Instance, InstanceMT)
+    local instance <const> = setmetatable(
+        {
+            primitives = primitives,
+            animation = 0,
+            time = 0.0,
+            speed = 1.0,
+            loop = true,
+            playing = false,
+            _model = self,
+            _entities = {},
+            _pose = {},
+            _localMatrices = {},
+            _worldMatrices = {},
+            _palettes = palettes,
+            _skins = skins,
+            _morphs = morphs,
+            _morphWeights = morphWeights,
+            _temporary = {},
+            _inverse = {},
+        } as Instance,
+        InstanceMT
+    )
     evaluate(instance, 0, 0.0)
     return instance
 end
@@ -650,22 +694,25 @@ function Model3D._create(
         local existing <const> = byName[animation.name]
         byName[animation.name] = existing ~= nil and 0 or index
     end
-    return setmetatable({
-        path = source.path,
-        animations = source.animations,
-        animationCount = #source.animations,
-        _domain = domain,
-        _registration = registration,
-        _draws = source.draws,
-        _nodes = source.nodes,
-        _skins = source.skins,
-        _meshes = meshes,
-        _bounds = bounds,
-        _materials = materials,
-        _order = orderOf(source.nodes),
-        _animationByName = byName,
-        _nextInstance = 0,
-    } as Model3D, Model3DMT)
+    return setmetatable(
+        {
+            path = source.path,
+            animations = source.animations,
+            animationCount = #source.animations,
+            _domain = domain,
+            _registration = registration,
+            _draws = source.draws,
+            _nodes = source.nodes,
+            _skins = source.skins,
+            _meshes = meshes,
+            _bounds = bounds,
+            _materials = materials,
+            _order = orderOf(source.nodes),
+            _animationByName = byName,
+            _nextInstance = 0,
+        } as Model3D,
+        Model3DMT
+    )
 end
 
 return Model3D

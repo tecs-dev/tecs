@@ -36,6 +36,7 @@ cargo xtask test
 cargo xtask example ui-demo
 cargo xtask example scene3d
 cargo xtask example gltf3d
+cargo xtask example morph3d
 ```
 
 `cargo xtask deps` installs system development dependencies. The repository
@@ -234,7 +235,6 @@ its separate `joints` and `weights` arrays. `assets.loadGLTF` decodes
 `JOINTS_0`, `WEIGHTS_0`, skins, and inverse bind matrices. `registerModel`
 returns shared residency, and each `newInstance` registers independent
 palettes. Spawn `primitive.skin` beside the rest of a skinned primitive bundle.
-Morph targets still fail loading instead of being ignored.
 
 `updateSkin` stages complete column-major palettes into the next frame rather
 than submitting a GPU command buffer per call. Joint matrices deform positions,
@@ -248,12 +248,55 @@ shader variants. Run `cargo xtask example skinning3d` for a two-joint example
 and `cargo xtask bench meshskinning` with `BENCH_MESH_SKINNING=0` and `=1` to
 measure the isolated lane.
 
+## Optional GPU morphing
+
+Enable morph deformation independently from rigid meshes and skinning:
+
+```teal
+return tecs.newApplication({
+    sprites = false,
+    meshes = {
+        morphing = {
+            vertexCapacity = 1048576,
+            weightCapacity = 65536,
+        },
+    },
+    plugin = function(_world: tecs.World, app: tecs.Application)
+        local morph <const> = app.renderer.meshes:registerMorph(
+            "models/face#expression",
+            {0, 0, 0}
+        )
+        -- Spawn `morph` beside a mesh with three registered targets. Later,
+        -- update the same three weights with `updateMorph`.
+    end,
+})
+```
+
+`assets.newMesh` accepts target-order position deltas and optional normal and
+tangent deltas. `assets.loadGLTF` decodes the equivalent glTF targets, mesh and
+node default weights, and linear, step, or cubic-spline weight animation.
+`registerModel` gives every `newInstance` private reusable weight vectors; spawn
+`primitive.morph` beside each morphed primitive.
+
+Morph deltas are immutable GPU residency. A five-float record locates each
+instance's geometry and weights, and complete weight vectors are staged only
+when registered or updated. Morphing runs before skinning when both options are
+enabled. `newMesh` and the glTF decoder conservatively enlarge bounds for
+weights from zero through one; negative or extrapolated weights require a
+larger caller-supplied `Bounds3D`.
+
+Omitting `meshes.morphing` preserves the rigid and skin-only layouts and
+allocates no target, locator, weight, or morph-shader resources. Run
+`cargo xtask example morph3d` for the worker-to-GPU path and compare
+`BENCH_MESH_MORPHING=0` with `=1` under
+`cargo xtask bench meshmorphing` to measure the isolated lane.
+
 ## Animated glTF instances
 
-`loadGLTF` decodes translation, rotation, and scale channels using core glTF
-linear, step, and cubic-spline interpolation. A resident `Model3D` shares that
-immutable clip data while each instance keeps its own reusable pose and joint
-palettes:
+`loadGLTF` decodes translation, rotation, scale, and morph-weight channels
+using core glTF linear, step, and cubic-spline interpolation. A resident
+`Model3D` shares that immutable clip data while each instance keeps its own
+reusable pose, joint palettes, and morph vectors:
 
 ```teal
 local model <const> = app.renderer.meshes:registerModel(loaded.value)
@@ -265,6 +308,7 @@ for index, primitive in ipairs(instance.primitives) do
         primitive.bounds,
         primitive.material,
         primitive.skin,
+        primitive.morph,
         tecs.gfx.Tint(),
         tecs.gfx.Renderable3D()
     )

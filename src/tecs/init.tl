@@ -195,6 +195,10 @@ local record gfx
     --- mesh domain. Omit it for rigid geometry.
     MeshSkin: components.MeshSkin
 
+    --- Selects a resident morph-weight vector for an entity in a
+    --- morphing-enabled mesh domain. Omit it for the undeformed base mesh.
+    MeshMorph: components.MeshMorph
+
     --- Selects resident PBR data for the mesh domain. `asset` is a
     --- `meshMaterialId` identity and `slot` is engine-owned residency state.
     MeshMaterial: components.MeshMaterial

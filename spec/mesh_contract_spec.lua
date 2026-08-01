@@ -235,24 +235,64 @@ describe("the 3D scene contract", function()
                 })
             end, "tecs: mesh 'bad://skin-pair' joints and weights must be supplied together")
         end)
+
+        it("packs optional morph targets outside the rigid vertex stream", function()
+            local source = triangle("procedural://morph-source")
+            local vertices = {}
+            for index = 0, source.vertexCount * 12 - 1 do
+                vertices[index + 1] = source.vertices[index]
+            end
+            source:release()
+            local mesh = assets.newMesh({
+                name = "procedural://morphed-triangle",
+                vertices = vertices,
+                indices = { 0, 1, 2 },
+                morphTargets = {
+                    {
+                        positions = { 0, 0, 0, 0, 0, 0, 0, 0.5, 0 },
+                        normals = { 0, 0, 0, 0, 0, 0, 0, 0.25, 0 },
+                    },
+                },
+                morphWeights = { 0.75 },
+            })
+            assert.are.equal(1, mesh.morphTargetCount)
+            assert.are.equal(0.5, mesh.morphVertices[2 * 9 + 1])
+            assert.are.equal(0.25, mesh.morphVertices[2 * 9 + 4])
+            assert.are.equal(0, mesh.morphVertices[2 * 9 + 7])
+            assert.are.same({ 0.75 }, mesh.morphWeights)
+            near(mesh.radius, math.sqrt(0.5) + 0.5)
+            mesh:release()
+            assert.is_nil(mesh.morphVertices)
+
+            assert.has_error(function()
+                assets.newMesh({
+                    name = "bad://morph-position-count",
+                    vertices = vertices,
+                    indices = { 0, 1, 2 },
+                    morphTargets = { { positions = { 0, 0, 0 } } },
+                })
+            end, "tecs: mesh 'bad://morph-position-count' morph target 1 needs three position deltas per vertex")
+        end)
     end)
 
     describe("MeshExtractor", function()
-        local function extractorScene(capacity, transparency, skinning)
+        local function extractorScene(capacity, transparency, skinning, morphing)
             local world = tecs.ecs.newWorld()
-            local packet = MeshFramePacket.create(skinning)
+            local packet = MeshFramePacket.create(skinning, morphing)
             local extractor = MeshExtractor.create({
                 capacity = capacity,
                 transparency = transparency,
                 skinning = skinning,
+                morphing = morphing,
             })
             local instances = loader.newArray("float[?]", capacity * 16)
             local bounds = loader.newArray("float[?]", capacity * 4)
             local commands = loader.newArray("SDL_GPUIndexedIndirectDrawCommand[?]", capacity)
             local skins = skinning and loader.newArray("float[?]", capacity) or nil
-            extractor:setStaging(0, instances, bounds, commands, skins)
+            local morphs = morphing and loader.newArray("float[?]", capacity * 5) or nil
+            extractor:setStaging(0, instances, bounds, commands, skins, morphs)
             extractor:install(world, packet, nil)
-            return world, extractor, packet, instances, bounds, commands, skins
+            return world, extractor, packet, instances, bounds, commands, skins, morphs
         end
 
         it("resolves residency once and writes mesh-owned staging", function()
@@ -319,6 +359,36 @@ describe("the 3D scene contract", function()
             assert.are.equal(12, skins[0])
             assert.are.equal(-1, skins[1])
             assert.are.equal(8, packet.skinRanges.bytes)
+        end)
+
+        it("writes optional morph metadata without changing rigid instances", function()
+            local world, extractor, packet, _, _, _, _, morphs = extractorScene(2, false, false, true)
+            local meshAsset = components.meshId("procedural://morphed")
+            local morphAsset = components.meshMorphId("procedural://weights")
+            extractor:registerMesh(meshAsset, 0, 7, 0, 3, 20, 3, 2)
+            extractor:registerMorph(morphAsset, 12, 2)
+            world:spawn(
+                tecs.Transform3D(),
+                components.Mesh(meshAsset, 0),
+                components.Bounds3D(),
+                components.MeshMaterial(),
+                components.MeshMorph(morphAsset),
+                components.Tint(),
+                components.Renderable3D()
+            )
+            world:spawn(
+                tecs.Transform3D(),
+                components.Mesh(meshAsset, 0),
+                components.Bounds3D(),
+                components.MeshMaterial(),
+                components.Tint(),
+                components.Renderable3D()
+            )
+
+            extractor:extract(packet)
+            assert.are.same({ 20, 7, 3, 12, 2 }, { morphs[0], morphs[1], morphs[2], morphs[3], morphs[4] })
+            assert.are.same({ -1, 7, 3, -1, 0 }, { morphs[5], morphs[6], morphs[7], morphs[8], morphs[9] })
+            assert.are.equal(40, packet.morphRanges.bytes)
         end)
 
         it("drops over capacity without leaving the world deferred", function()

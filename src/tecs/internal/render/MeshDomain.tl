@@ -20,6 +20,10 @@ A domain created with `skinning` adds separate vertex influence,
 per-instance palette-offset, and joint-matrix buffers plus skinned geometry and
 shadow shader variants. A rigid domain retains the original vertex and
 instance layouts and creates none of those resources.
+A domain created with `morphing` adds immutable position, normal, and tangent
+deltas, per-instance locators, retained weight vectors, and morph shader
+variants. A domain without it creates none of those resources. When both
+deformation lanes exist, morphing runs before skinning.
 ]=]
 
 local type types = require("tecs.types")
@@ -43,6 +47,8 @@ local DEFAULT_MATERIAL_CAPACITY <const> = 1024
 local DEFAULT_TEXTURE_SIZE <const> = 1024
 local DEFAULT_TEXTURE_LAYERS <const> = 16
 local DEFAULT_JOINT_CAPACITY <const> = 4096
+local DEFAULT_MORPH_VERTEX_CAPACITY <const> = 1048576
+local DEFAULT_MORPH_WEIGHT_CAPACITY <const> = 65536
 
 local record MeshMaterialOptions
     --- Caller-writable. Supplies the stable, non-empty material name used by
@@ -149,6 +155,16 @@ local record MeshSkinningOptions
     jointCapacity: integer
 end
 
+--- Configures independently allocated GPU morph-deformation resources.
+local record MeshMorphingOptions
+    --- Caller-writable. Sets the resident target-vertex ceiling and defaults
+    --- to 1,048,576. One target on a 1,000-vertex mesh consumes 1,000.
+    vertexCapacity: integer
+    --- Caller-writable. Sets the total per-instance weight ceiling and
+    --- defaults to 65,536.
+    weightCapacity: integer
+end
+
 local record MeshDomainOptions
     --- Caller-writable. Sets the maximum resident mesh-instance count and
     --- defaults to 65,536.
@@ -184,6 +200,10 @@ local record MeshDomainOptions
     --- per-instance palette offsets, joint matrices, and shader variants. Nil
     --- disables GPU skinning.
     skinning: MeshSkinningOptions
+    --- Caller-writable. Enables independently allocated morph deltas,
+    --- per-instance metadata and weights, and shader variants. Nil disables
+    --- GPU morphing.
+    morphing: MeshMorphingOptions
 end
 
 local type RegisteredPrimitive = Model3D.Primitive
@@ -194,6 +214,7 @@ local record MeshDomain
     type ShadowOptions = MeshShadowOptions
     type Shadow = MeshShadowTuning
     type SkinningOptions = MeshSkinningOptions
+    type MorphingOptions = MeshMorphingOptions
     type RegisteredPrimitive = RegisteredPrimitive
     type Model3D = Model3D
 
@@ -235,6 +256,10 @@ local record MeshDomain
     textureCount: integer
     --- Read-only. Reports resident joint matrices in the optional skin lane.
     jointCount: integer
+    --- Read-only. Reports resident target vertices in the optional morph lane.
+    morphVertexCount: integer
+    --- Read-only. Reports resident per-instance weights in the optional morph lane.
+    morphWeightCount: integer
     --- Read-only. Reports whether this domain owns the optional transparent
     --- command and pipeline resources.
     transparency: boolean
@@ -242,6 +267,8 @@ local record MeshDomain
     shadows: boolean
     --- Read-only. Reports whether this domain owns GPU skinning resources.
     skinning: boolean
+    --- Read-only. Reports whether this domain owns GPU morph resources.
+    morphing: boolean
     --- Caller-writable. Controls the enabled directional light and shadow map.
     --- Nil while shadows are disabled.
     shadow: MeshShadowTuning
@@ -274,6 +301,17 @@ local record MeshDomain
     --- @param skin The caller supplies the component returned by `registerSkin`.
     --- @param matrices The caller supplies the same matrix count used at registration.
     updateSkin: function(self, skin: components.MeshSkin, matrices: {number})
+
+    --- Registers one fixed-size morph-weight vector.
+    --- @param name The caller supplies a stable non-empty weight-vector name.
+    --- @param weights The caller supplies one finite value per target.
+    --- @return Returns a morph component ready to spawn.
+    registerMorph: function(self, name: string, weights: {number}): components.MeshMorph
+
+    --- Replaces every value in a registered morph-weight vector.
+    --- @param morph The caller supplies the component returned by `registerMorph`.
+    --- @param weights The caller supplies the same count used at registration.
+    updateMorph: function(self, morph: components.MeshMorph, weights: {number})
 
     --- Registers shared residency for one decoded glTF model.
     --- @param model The caller supplies model data that this call consumes.
@@ -322,6 +360,17 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
             "mesh joint capacity", (options.skinning as MeshSkinningOptions).jointCapacity or DEFAULT_JOINT_CAPACITY
         )
     end
+    local morphVertexCapacity = 0
+    local morphWeightCapacity = 0
+    if options.morphing ~= nil then
+        local morphing <const> = options.morphing as MeshMorphingOptions
+        morphVertexCapacity = positive(
+            "mesh morph vertex capacity", morphing.vertexCapacity or DEFAULT_MORPH_VERTEX_CAPACITY
+        )
+        morphWeightCapacity = positive(
+            "mesh morph weight capacity", morphing.weightCapacity or DEFAULT_MORPH_WEIGHT_CAPACITY
+        )
+    end
 
     local self = setmetatable({} as MeshDomain, MeshDomainMT)
     self.capacity = capacity
@@ -337,9 +386,12 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self.materialCount = 1
     self.textureCount = 0
     self.jointCount = 0
+    self.morphVertexCount = 0
+    self.morphWeightCount = 0
     self.transparency = options.transparency == true
     self.shadows = options.shadows ~= nil
     self.skinning = options.skinning ~= nil
+    self.morphing = options.morphing ~= nil
     if self.shadows then
         local shadow <const> = options.shadows or {}
         self.shadow = {
@@ -360,7 +412,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self._centerYByAsset = {}
     self._centerZByAsset = {}
     self._radiusByAsset = {}
-    self._packet = MeshFramePacket.create(self.skinning)
+    self._packet = MeshFramePacket.create(self.skinning, self.morphing)
 
     local backend <const> = MeshBackend.create(
         device,
@@ -378,6 +430,9 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
             shadows = self.shadow as MeshBackend.ShadowOptions,
             skinning = self.skinning,
             jointCapacity = jointCapacity,
+            morphing = self.morphing,
+            morphVertexCapacity = morphVertexCapacity,
+            morphWeightCapacity = morphWeightCapacity,
         }
     )
     self._backend = backend
@@ -390,6 +445,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
         capacity = capacity,
         transparency = self.transparency,
         skinning = self.skinning,
+        morphing = self.morphing,
     })
     self._extractor = extractor
     self.camera = extractor.camera
@@ -644,6 +700,39 @@ function MeshDomain:updateSkin(skin: components.MeshSkin, matrices: {number})
     self._backend:updateSkin(region, matrices)
 end
 
+function MeshDomain:registerMorph(name: string, weights: {number}): components.MeshMorph
+    if not self.morphing then
+        error("tecs: mesh morphing is not enabled", 2)
+    end
+    local asset <const> = components.meshMorphId(name)
+    local region = self._backend:morphRegion(asset)
+    if region == nil then
+        region = self._backend:registerMorph(asset, weights)
+    end
+    self._extractor:registerMorph(asset, region.firstWeight, region.weightCount)
+    self.morphWeightCount = self._backend.morphWeightCount
+    return components.MeshMorph(asset, region.firstWeight)
+end
+
+function MeshDomain:updateMorph(morph: components.MeshMorph, weights: {number})
+    if not self.morphing then
+        error("tecs: mesh morphing is not enabled", 2)
+    end
+    if morph == nil then
+        error("tecs: a mesh morph component is required", 2)
+    end
+    local region <const> = self._backend:morphRegion(morph.asset as integer)
+    if region == nil then
+        error(
+            ("tecs: no mesh morph is registered as '%s'"):format(
+                tostring(components.meshMorphName(morph.asset as integer))
+            ),
+            2
+        )
+    end
+    self._backend:updateMorph(region, weights)
+end
+
 --- Registers immutable CPU geometry in this domain.
 ---
 --- Registration uploads vertices and 32-bit indices once, releases the CPU
@@ -659,6 +748,9 @@ function MeshDomain:registerMesh(mesh: assets.Mesh): components.Mesh, components
     end
     if mesh.skinVertices ~= nil and not self.skinning then
         error("tecs: skinned geometry requires meshes.skinning", 2)
+    end
+    if mesh.morphVertices ~= nil and not self.morphing then
+        error("tecs: morphed geometry requires meshes.morphing", 2)
     end
     local asset <const> = components.meshId(mesh.name)
     local radius = self._radiusByAsset[asset]
@@ -676,10 +768,20 @@ function MeshDomain:registerMesh(mesh: assets.Mesh): components.Mesh, components
         self._centerZByAsset[asset] = centerZ
         self._radiusByAsset[asset] = radius
     end
-    self._extractor:registerMesh(asset, region.slot, region.firstVertex, region.firstIndex, region.indexCount)
+    self._extractor:registerMesh(
+        asset,
+        region.slot,
+        region.firstVertex,
+        region.firstIndex,
+        region.indexCount,
+        region.firstMorphVertex,
+        region.vertexCount,
+        region.morphTargetCount
+    )
     self.meshCount = self._backend.meshCount
     self.vertexCount = self._backend.vertexCount
     self.indexCount = self._backend.indexCount
+    self.morphVertexCount = self._backend.morphVertexCount
     return components.Mesh(asset, region.slot), components.Bounds3D(centerX, centerY, centerZ, radius)
 end
 

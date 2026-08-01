@@ -113,6 +113,26 @@ describe("assets", function()
         model:release()
     end)
 
+    it("decodes morph deltas, defaults, and weight animation", function()
+        local loading = assets.loadGLTF("spec/fixtures/morphed.gltf")
+        assets.waitAll(2000)
+
+        assert.are.equal("ready", loading.status, loading.error)
+        local model = loading.value
+        local mesh = model.meshes[1]
+        assert.are.equal(1, mesh.morphTargetCount)
+        assert.is_not_nil(mesh.morphVertices)
+        assert.near(0.8, mesh.morphVertices[19], 1e-6)
+        assert.are.same({ 0 }, mesh.morphWeights)
+        assert.are.same({ 0 }, model.draws[1].weights)
+        local channel = model.animations[1].channels[1]
+        assert.are.equal(assets.ANIMATION_WEIGHTS, channel.path)
+        assert.are.equal(1, channel.width)
+        assert.are.same({ 0, 1 }, channel.values)
+        model:release()
+        assert.is_nil(mesh.morphVertices)
+    end)
+
     it("rejects invalid glTF alpha modes instead of treating them as opaque", function()
         local loading = assets.loadGLTF("spec/fixtures/invalid-alpha.gltf")
         assets.waitAll(2000)

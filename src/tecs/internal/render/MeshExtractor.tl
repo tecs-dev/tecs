@@ -6,6 +6,10 @@ writes a fixed mesh instance record and a world-space bounding sphere directly
 into mapped staging. The first version rewrites the resident mesh range each
 frame, matching the headless contract benchmark; retained dirty-gated runs can
 replace that policy without changing the packet or backend.
+
+Optional skin and morph columns write separate compact locator records. A
+domain that omits either feature never queries that component and owns no
+corresponding staging array.
 ]=]
 
 local ecs <const> = require("tecs.ecs")
@@ -27,6 +31,7 @@ local record MeshExtractorOptions
     capacity: integer
     transparency: boolean
     skinning: boolean
+    morphing: boolean
 end
 
 local record MeshDraw
@@ -34,6 +39,14 @@ local record MeshDraw
     firstVertex: integer
     firstIndex: integer
     indexCount: integer
+    firstMorphVertex: integer
+    vertexCount: integer
+    morphTargetCount: integer
+end
+
+local record MorphRegion
+    firstWeight: integer
+    weightCount: integer
 end
 
 local record MeshExtractor
@@ -48,13 +61,16 @@ local record MeshExtractor
     _bounds: loader.CArray
     _commands: loader.CArray
     _skins: loader.CArray
+    _morphs: loader.CArray
     _slot: integer
     _drawByAsset: {integer: MeshDraw}
     _materialSlotByAsset: {integer: integer}
     _alphaModeBySlot: {integer: integer}
     _transparency: boolean
     _skinning: boolean
+    _morphing: boolean
     _skinSlotByAsset: {integer: integer}
+    _morphByAsset: {integer: MorphRegion}
     _extractSeconds: number
 end
 
@@ -70,7 +86,9 @@ function MeshExtractor.create(options: MeshExtractorOptions): MeshExtractor
     self._alphaModeBySlot = {[0] = 0}
     self._transparency = options.transparency
     self._skinning = options.skinning
+    self._morphing = options.morphing
     self._skinSlotByAsset = {}
+    self._morphByAsset = {}
     self._extractSeconds = 0.0
     return self
 end
@@ -81,27 +99,47 @@ function MeshExtractor:registerMaterial(asset: integer, slot: integer, alphaMode
 end
 
 function MeshExtractor:setStaging(
-    slot: integer, instances: loader.CArray, bounds: loader.CArray, commands: loader.CArray, skins?: loader.CArray
+    slot: integer,
+    instances: loader.CArray,
+    bounds: loader.CArray,
+    commands: loader.CArray,
+    skins?: loader.CArray,
+    morphs?: loader.CArray
 )
     self._slot = slot
     self._instances = instances
     self._bounds = bounds
     self._commands = commands
     self._skins = skins
+    self._morphs = morphs
 end
 
 function MeshExtractor:registerSkin(asset: integer, slot: integer)
     self._skinSlotByAsset[asset] = slot
 end
 
+function MeshExtractor:registerMorph(asset: integer, firstWeight: integer, weightCount: integer)
+    self._morphByAsset[asset] = {firstWeight = firstWeight, weightCount = weightCount}
+end
+
 function MeshExtractor:registerMesh(
-    asset: integer, slot: integer, firstVertex: integer, firstIndex: integer, indexCount: integer
+    asset: integer,
+    slot: integer,
+    firstVertex: integer,
+    firstIndex: integer,
+    indexCount: integer,
+    firstMorphVertex?: integer,
+    vertexCount?: integer,
+    morphTargetCount?: integer
 )
     self._drawByAsset[asset] = {
         slot = slot,
         firstVertex = firstVertex,
         firstIndex = firstIndex,
         indexCount = indexCount,
+        firstMorphVertex = firstMorphVertex or 0,
+        vertexCount = vertexCount or 0,
+        morphTargetCount = morphTargetCount or 0,
     }
 end
 
@@ -121,6 +159,7 @@ function MeshExtractor:extract(packet: MeshFramePacket)
     local spheres <const> = self._bounds
     local commands <const> = self._commands
     local instanceSkins <const> = self._skins
+    local instanceMorphs <const> = self._morphs
     local written = 0
     local dropped = 0
     local missing = 0
@@ -133,8 +172,10 @@ function MeshExtractor:extract(packet: MeshFramePacket)
         local materials <const> = archetype:get(components.MeshMaterial)
         local tints <const> = archetype:get(components.Tint)
         local skins = self._skinning and archetype:get(components.MeshSkin) or nil
+        local morphs = self._morphing and archetype:get(components.MeshMorph) or nil
         local resolved = false
         local skinResolved = false
+        local morphResolved = false
 
         for row = 1, length do
             if written >= self.capacity then
@@ -213,6 +254,46 @@ function MeshExtractor:extract(packet: MeshFramePacket)
                         end
                         instanceSkins[written] = skinSlot
                     end
+                    if self._morphing then
+                        local morphBase <const> = written * meshlayout.MORPH_INSTANCE_FLOATS
+                        local firstWeight = -1
+                        local weightCount = 0
+                        if morphs ~= nil then
+                            local morph = morphs[row]
+                            firstWeight = morph.slot as integer
+                            local region = self._morphByAsset[morph.asset as integer]
+                            if firstWeight < 0 then
+                                if region == nil then
+                                    error(
+                                        ("tecs: no mesh morph is registered as '%s'"):format(
+                                            components.meshMorphName(morph.asset as integer)
+                                        ),
+                                        2
+                                    )
+                                end
+                                firstWeight = region.firstWeight
+                                morph.slot = firstWeight
+                                morphResolved = true
+                            end
+                            if region == nil then
+                                region = self._morphByAsset[morph.asset as integer]
+                            end
+                            weightCount = region ~= nil and region.weightCount or 0
+                        end
+                        if firstWeight >= 0 and weightCount ~= draw.morphTargetCount then
+                            error(
+                                ("tecs: mesh morph has %d weights, but geometry needs %d"):format(
+                                    weightCount, draw.morphTargetCount
+                                ),
+                                2
+                            )
+                        end
+                        instanceMorphs[morphBase] = firstWeight >= 0 and draw.firstMorphVertex or -1
+                        instanceMorphs[morphBase + 1] = draw.firstVertex
+                        instanceMorphs[morphBase + 2] = draw.vertexCount
+                        instanceMorphs[morphBase + 3] = firstWeight
+                        instanceMorphs[morphBase + 4] = firstWeight >= 0 and draw.morphTargetCount or 0
+                    end
 
                     local command = commands[written] as loader.CStruct
                     command.num_indices = draw.indexCount
@@ -249,6 +330,9 @@ function MeshExtractor:extract(packet: MeshFramePacket)
         if skinResolved then
             archetype:getMut(components.MeshSkin)
         end
+        if morphResolved then
+            archetype:getMut(components.MeshMorph)
+        end
     end
 
     if written > 0 then
@@ -257,6 +341,9 @@ function MeshExtractor:extract(packet: MeshFramePacket)
         packet.commandRanges:mark(0, written * meshlayout.COMMAND_BYTES)
         if self._skinning then
             packet.skinRanges:mark(0, written * 4)
+        end
+        if self._morphing then
+            packet.morphRanges:mark(0, written * meshlayout.MORPH_INSTANCE_BYTES)
         end
     end
     packet.count = written
