@@ -17,7 +17,7 @@ describe(
         local Velocity: TestHelpers.Vel
         local Health: TestHelpers.Health
         local Sprite: TestHelpers.Sprite
-        local Transform: TestHelpers.Transform
+        local Transform2D: TestHelpers.Transform2D
         local testId = 0
 
         before_each(function()
@@ -30,7 +30,7 @@ describe(
             Velocity = provider.VelComponent
             Health = provider.HealthComponent
             Sprite = provider.SpriteComponent
-            Transform = provider.TransformComponent
+            Transform2D = provider.TransformComponent
 
             -- Verify components are set up correctly
             assert(Position.componentType == Position, "Position componentType should point to itself")
@@ -164,7 +164,7 @@ describe(
                     "handles empty results",
                     function()
                         -- Create a query with no matching entities
-                        local query = world:newQuery({include = {Position, Velocity, Health, Sprite, Transform}})
+                        local query = world:newQuery({include = {Position, Velocity, Health, Sprite, Transform2D}})
 
                         luassert.is_not_nil(query, "Query should be created even with no matches")
 
@@ -721,27 +721,27 @@ describe(
                             Velocity(10, 10),
                             Health(100),
                             Sprite("player.png", 32, 32),
-                            Transform(1.5, 45)
+                            Transform2D(1.5, 45)
                         )
                         world:spawn(
                             Position(2, 2), Velocity(20, 20), Health(80), Sprite("enemy.png", 16, 16)
                         ) -- No transform
                         world:update(0)
 
-                        local query = world:newQuery({include = {Position, Velocity, Health, Sprite, Transform}})
+                        local query = world:newQuery({include = {Position, Velocity, Health, Sprite, Transform2D}})
 
                         local entities = {}
                         local positions = {} as {TestHelpers.Pos}
                         local velocities = {} as {TestHelpers.Vel}
                         local healths = {} as {TestHelpers.Health}
                         local sprites = {} as {TestHelpers.Sprite}
-                        local transforms = {} as {TestHelpers.Transform}
+                        local transforms = {} as {TestHelpers.Transform2D}
                         for archetype, len, entityList in query:iter() do
                             local poss = archetype:get(Position)
                             local vels = archetype:get(Velocity)
                             local hths = archetype:get(Health)
                             local sprs = archetype:get(Sprite)
-                            local trns = archetype:get(Transform)
+                            local trns = archetype:get(Transform2D)
                             for row = 1, len do
                                 local id = entityList[row]
                                 local pos = poss[row]
@@ -754,7 +754,7 @@ describe(
                                 table.insert(velocities, vel as TestHelpers.Vel)
                                 table.insert(healths, health as TestHelpers.Health)
                                 table.insert(sprites, sprite as TestHelpers.Sprite)
-                                table.insert(transforms, transform as TestHelpers.Transform)
+                                table.insert(transforms, transform as TestHelpers.Transform2D)
                             end
                         end
 

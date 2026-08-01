@@ -16,7 +16,7 @@ local components = require("tecs.components")
 local ecs = require("tecs.ecs")
 local physics = require("tecs.physics")
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local Paused = tecs.ecs.Paused
 
 -- Every world built here, so teardown can shut all of them down. The
@@ -42,7 +42,7 @@ end)
 describe("ecs.physics snapshots", function()
     it("reconnects bodies and secondary colliders without duplicating them", function()
         local first = newWorld()
-        local body = first:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local body = first:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(first, body, { type = "static", radius = 5 })
         local secondary = first:spawn()
         physics.attachCollider(first, secondary, body, {
@@ -66,7 +66,7 @@ describe("ecs.physics snapshots", function()
 
     it("falls back to declarations for an incompatible native snapshot", function()
         local first = newWorld()
-        local entity = first:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = first:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
         first:update(1 / 60)
         physics.setVelocity(first, entity, 120, -40)
@@ -94,10 +94,10 @@ describe("ecs.physics snapshots", function()
     -- reuses a slot the moment its body is gone, so a file that carried one
     -- would name whichever body the loading run happened to put there, and
     -- the sync would follow it: one body's pose written into a different
-    -- entity's Transform, silently.
+    -- entity's Transform2D, silently.
     it("does not follow a stranger's body after a load", function()
         local first = newWorld()
-        local saved = first:spawn(Transform(100, 100, 0, 1, 0, 16, 16))
+        local saved = first:spawn(Transform2D(100, 100, 0, 1, 0, 16, 16))
         physics.attach(first, saved, { type = "static", halfWidth = 8, halfHeight = 8 })
         first:update(1 / 60)
         assert.equal(1, first:get(saved, physics.RigidBody).index1)
@@ -106,7 +106,7 @@ describe("ecs.physics snapshots", function()
         -- A second world in the same process, whose first body takes the
         -- same slot the saved one had.
         local second = newWorld()
-        local stranger = second:spawn(Transform(900, 50, 0, 1, 0, 16, 16))
+        local stranger = second:spawn(Transform2D(900, 50, 0, 1, 0, 16, 16))
         physics.attach(second, stranger, { type = "dynamic", radius = 8, density = 1 })
         second:update(1 / 60)
         assert.equal(1, second:get(stranger, physics.RigidBody).index1)
@@ -117,7 +117,7 @@ describe("ecs.physics snapshots", function()
         end
 
         local restored
-        for _, length, entities in second:newQuery({ include = { Transform, physics.RigidBody } }):iter() do
+        for _, length, entities in second:newQuery({ include = { Transform2D, physics.RigidBody } }):iter() do
             for row = 1, length do
                 restored = entities[row]
             end
@@ -126,7 +126,7 @@ describe("ecs.physics snapshots", function()
 
         -- The stranger was falling from y=50. Reading its pose here is the
         -- failure this spec exists for.
-        local transform = second:get(restored, Transform)
+        local transform = second:get(restored, Transform2D)
         assert.is_true(
             math.abs(transform.x - 100) < 1e-3 and math.abs(transform.y - 100) < 1e-3,
             ("restored entity must stay where it was saved, got (%.1f, %.1f)"):format(transform.x, transform.y)
@@ -136,7 +136,7 @@ describe("ecs.physics snapshots", function()
     it("reconnects transient handles from both snapshot formats", function()
         for _, options in ipairs({ { format = "table" }, {} }) do
             local first = newWorld()
-            local entity = first:spawn(Transform(40, 60, 0, 1, 0, 16, 16))
+            local entity = first:spawn(Transform2D(40, 60, 0, 1, 0, 16, 16))
             physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
             first:update(1 / 60)
             assert.is_true(physics.hasBody(first, entity))
@@ -158,7 +158,7 @@ describe("ecs.physics snapshots", function()
 
     it("reports the native body restored with an entity", function()
         local first = newWorld()
-        local entity = first:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = first:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
         first:update(1 / 60)
         assert.is_true(physics.hasBody(first, entity))
@@ -174,12 +174,12 @@ describe("ecs.physics snapshots", function()
             end
         end
         assert.is_true(physics.hasBody(second, restored))
-        assert.is_false(physics.hasBody(second, second:spawn(Transform(0, 0, 0, 1, 0, 16, 16))))
+        assert.is_false(physics.hasBody(second, second:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))))
     end)
 
     it("rebuilds before body controls reach a restored entity", function()
         local first = newWorld()
-        local entity = first:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = first:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
         first:update(1 / 60)
         local snapshot = first:saveSnapshot({ format = "table" }).snapshot
@@ -206,7 +206,7 @@ describe("ecs.physics despawn", function()
         local world = newWorld()
         local baseline = physics.of(world):bodyCount()
 
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
         world:update(1 / 60)
         assert.equal(baseline + 1, physics.of(world):bodyCount())
@@ -221,7 +221,7 @@ describe("ecs.physics despawn", function()
         local baseline = physics.of(world):bodyCount()
 
         for index = 1, 8 do
-            local entity = world:spawn(Transform(index * 40, 0, 0, 1, 0, 16, 16))
+            local entity = world:spawn(Transform2D(index * 40, 0, 0, 1, 0, 16, 16))
             physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
         end
         world:update(1 / 60)
@@ -240,7 +240,7 @@ describe("ecs.physics despawn", function()
         local world = newWorld()
         local baseline = physics.of(world):bodyCount()
 
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
 
         local killed = false
@@ -265,8 +265,8 @@ describe("ecs.physics despawn", function()
         local world = newWorld()
         local baseline = physics.of(world):bodyCount()
 
-        local kept = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        local gone = world:spawn(Transform(200, 0, 0, 1, 0, 16, 16))
+        local kept = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
+        local gone = world:spawn(Transform2D(200, 0, 0, 1, 0, 16, 16))
         physics.attach(world, kept, { type = "dynamic", radius = 8, density = 1 })
         physics.attach(world, gone, { type = "dynamic", radius = 8, density = 1 })
 
@@ -278,15 +278,15 @@ describe("ecs.physics despawn", function()
         for _ = 1, 30 do
             world:update(1 / 60)
         end
-        assert.is_true(world:get(kept, Transform).y > 10, "the surviving body must still be simulated")
+        assert.is_true(world:get(kept, Transform2D).y > 10, "the surviving body must still be simulated")
     end)
 end)
 
 describe("ecs.physics pausing", function()
     it("stops writing a paused entity's transform", function()
         local world = newWorld()
-        local free = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        local held = world:spawn(Transform(200, 0, 0, 1, 0, 16, 16))
+        local free = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
+        local held = world:spawn(Transform2D(200, 0, 0, 1, 0, 16, 16))
         physics.attach(world, free, { type = "dynamic", radius = 8, density = 1 })
         physics.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
         world:set(held, Paused)
@@ -295,14 +295,14 @@ describe("ecs.physics pausing", function()
             world:update(1 / 60)
         end
 
-        assert.is_true(world:get(free, Transform).y > 10, "an unpaused body must be followed")
-        assert.equal(0, world:get(held, Transform).y)
+        assert.is_true(world:get(free, Transform2D).y > 10, "an unpaused body must be followed")
+        assert.equal(0, world:get(held, Transform2D).y)
     end)
 
     it("holds a paused body in place and resumes from there", function()
         local world = newWorld()
-        local free = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        local held = world:spawn(Transform(200, 0, 0, 1, 0, 16, 16))
+        local free = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
+        local held = world:spawn(Transform2D(200, 0, 0, 1, 0, 16, 16))
         physics.attach(world, free, { type = "dynamic", radius = 8, density = 1 })
         physics.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
         world:set(held, Paused)
@@ -310,13 +310,13 @@ describe("ecs.physics pausing", function()
         for _ = 1, 30 do
             world:update(1 / 60)
         end
-        assert.equal(0, world:get(held, Transform).y)
+        assert.equal(0, world:get(held, Transform2D).y)
 
         world:remove(held, Paused)
         world:update(1 / 60)
 
-        local resumed = world:get(held, Transform).y
-        local never = world:get(free, Transform).y
+        local resumed = world:get(held, Transform2D).y
+        local never = world:get(free, Transform2D).y
         assert.is_true(resumed < 10, ("a held body resumes where it paused, got %.1f"):format(resumed))
         assert.is_true(never > 100)
     end)
@@ -325,7 +325,7 @@ describe("ecs.physics pausing", function()
         local world = newWorld()
         local baseline = physics.of(world):bodyCount()
 
-        local held = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local held = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
         world:set(held, Paused)
         world:update(1 / 60)

@@ -13,7 +13,7 @@
 ---            passes carry their worst case rather than their steady one
 ---
 --- Read against `cargo xtask bench particles`, which is the gate on whether a pool costs a
---- scene with no particles in it. Nothing here has a Renderable, so what the
+--- scene with no particles in it. Nothing here has a Renderable2D, so what the
 --- frame stage measures is the three compute passes, the cull over the pool's
 --- run and the one draw that consumes what survives.
 
@@ -27,7 +27,7 @@ local tecs <const> = require("tecs")
 local particles <const> = require("tecs.gfx.particles")
 local timing <const> = require("tecs.timing")
 
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 
 local REGIME <const> = os.getenv("BENCH_REGIME") or "large"
 local WARMUP <const> = math.floor(tonumber(os.getenv("BENCH_WARMUP")) or 120)
@@ -112,7 +112,7 @@ local function spawnEmitters(world: tecs.World)
         local column <const> = index % columns
         local row <const> = math.floor(index / columns)
         world:spawn(
-            Transform((column + 0.5) * WIDTH / columns, (row + 0.5) * HEIGHT / columns),
+            Transform2D((column + 0.5) * WIDTH / columns, (row + 0.5) * HEIGHT / columns),
             particles.ParticleEmitter({effect = effect, seed = index + 1})
         )
     end
@@ -160,7 +160,7 @@ return tecs.newApplication({
             name = "bench.Report",
             phase = tecs.ecs.phases.Shutdown,
             run = function()
-                print(("frames after %d warmup, %d instances resident"):format(WARMUP, renderer.count))
+                print(("frames after %d warmup, %d instances resident"):format(WARMUP, renderer.sprites.count))
                 local report = timing.format()
                 if report ~= "" then
                     print(report)

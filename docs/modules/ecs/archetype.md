@@ -15,7 +15,7 @@ One row index selects an entity ID and every component value for that entity:
 
 ```teal
 for archetype, length, entities in movers:iter() do
-    local transforms <const> = archetype:getMut(tecs.Transform)
+    local transforms <const> = archetype:getMut(tecs.Transform2D)
     local velocities <const> = archetype:get(Velocity)
 
     for row = 1, length do

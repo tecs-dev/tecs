@@ -54,8 +54,9 @@ Working today:
   another, deciding how its contents sort within that band, where they are
   positioned (by the camera, in screen pixels, in a virtual resolution, at
   their own parallax, or at a fixed size under zoom) and whether they are lit
-- An ECS binding: the builtin `Transform` plus Tint, Sprite, Material,
-  PointLight, Clip, Occluder, DropShadow and Renderable components, with a sync
+- An ECS binding: the builtin `Transform2D` plus Tint, Sprite, Material,
+  PointLight2D, Clip, Occluder2D, DropShadow2D and Renderable2D components, with
+  a sync
   that walks archetype columns straight into mapped GPU staging, and a
   depth-tested G-buffer
 - Physics in the world through Rapier: a RigidBody component holding a
@@ -95,9 +96,9 @@ Working today:
   JSON export; with playback resolved in the vertex shader against a shared
   frame table, so a frame changing writes nothing and two hundred thousand
   animating sprites cost what two hundred thousand still ones do
-- Two shadows: an `Occluder` puts its silhouette into one mask that every light
+- Two shadows: an `Occluder2D` puts its silhouette into one mask that every light
   marches, so blocking a light costs one drawing of the caster rather than one
-  per light, and a `DropShadow` throws a stretched copy along the ground, which
+  per light, and a `DropShadow2D` throws a stretched copy along the ground, which
   is the half that reaches ambient. Both arrive through the renderer's
   `shadows` option and cost nothing without it
 - Sound: clips read on the asset worker through SDL_mixer's decoders, a voice
@@ -140,7 +141,7 @@ local Velocity = tecs.ecs.newComponent({
     fields = { "x", "y" },
     defaults = { 0, 0 },
 })
-world:spawn(tecs.Transform(0, 0), Velocity(1, 0))
+world:spawn(tecs.Transform2D(0, 0), Velocity(1, 0))
 ```
 
 `require("tecs")` is equally supported and returns exactly the same table, so a
@@ -284,14 +285,14 @@ SDL through the FFI. Making one principal would require a graphics stack merely
 to read `tecs.gfx.layers`. A separate lazy `gfx/init.tl` would duplicate the
 resolver one directory down, so the namespace record stays with the resolver.
 
-What `tecs.gfx` does not carry is `Transform`. Grouping by the task a game is
+What `tecs.gfx` does not carry is `Transform2D`. Grouping by the task a game is
 doing puts a name where it is used, and a transform is used by the hierarchy,
 by physics, by the sequencer and by the extractor, so filing it under drawing
 would tell three of those four that they were moving a graphics component. It
-is written `tecs.Transform`, at the root, because it is the one component
+is written `tecs.Transform2D`, at the root, because it is the one component
 every subsystem moves and so belongs to none of them.
 
-The root carries what crosses subsystems, and nothing else. `Transform` is one
+The root carries what crosses subsystems, and nothing else. `Transform2D` is one
 of them; the others are `Application` and its `ApplicationConfig`, `Future`,
 `newApplication`, `version`, and the four ECS types every subsystem writes into
 its own signatures: `World`, `Query`, `System` and `Plugin`. An application is
@@ -1277,7 +1278,7 @@ released and recreated, and they are not: they belong to the backend, the
 deferred pipeline, the image array and every buffer, and a recreation that
 missed one is a use-after-free rather than a black frame. The image array would
 have to be refillable, and the pixels behind it are released at
-`Renderer:registerImage` because the array holds them, so there is nothing on
+`renderer.sprites:registerImage` because the array holds them, so there is nothing on
 the CPU to upload again. And it would have to be testable, and none of these
 events fires on a platform the suite runs on, so a recovery path written now is
 one whose first execution is on a player's phone.
@@ -2098,15 +2099,17 @@ uses. That runs one way on purpose, because the surface exports the engine
 modules and a module that also depended on the surface would be a cycle, which
 Teal rejects even through a type-only require.
 
-`Renderer` is where the two meet, and the only module that knows about both
-archetypes and GPU buffers.
+`Renderer` coordinates rendering domains and owns only work shared by a whole
+frame: the deferred graph, presentation and capture targets, and staging-slot
+rotation. `SpriteDomain` is the concrete 2D lane. It owns the image array and
+the two halves that move sprites from a world to the renderer-owned graph.
 
-It is two halves and the seam between them. `Extractor` is world-facing:
-queries, archetype runs, relayout detection, dirty gating, producers and the
-interpolation alpha, writing instances straight into mapped staging and never
-touching a device. `Backend` is device-facing: the buffers, the flush, the
-mark/scan/compact cull, the deferred pass graph and the image array, and it
-names no world, query, archetype or component.
+`SpriteExtractor` is world-facing: queries, archetype runs, relayout detection,
+dirty gating, producers and the interpolation alpha, writing instances straight
+into mapped staging and never touching a device. `SpriteBackend` is
+device-facing: the buffers, the flush, the mark/scan/compact cull and the sprite
+pass bodies, and it names no world, query, archetype or component. It borrows
+the deferred pipeline and records into passes the renderer owns.
 
 Both halves run on the main thread, one after the other, and the seam is not a
 thread boundary. It earns its place without being one: a world extracts with no
@@ -2115,16 +2118,38 @@ against a device with no world behind it; the dirty bits a frame consumes are
 consumed in one place rather than wherever a draw happened to read them; and no
 GPU handle ever lands in ECS storage.
 
-`FramePacket` is everything that crosses. It carries the staging slot that was
-written, the byte ranges within it, the counts, a copy of the camera and the
-frame's lights, and it carries no instance bytes at all: those are already in
-the staging the backend owns, and copying them into a packet would be the
-intermediate copy the design exists to avoid.
+`SpriteFramePacket` is everything that crosses. It carries the staging slot
+that was written, the byte ranges within it, the lane counts, a copy of the 2D
+camera and the frame's lights, and it carries no instance bytes at all: those
+are already in the staging the backend owns, and copying them into a packet
+would be the intermediate copy the design exists to avoid.
 
-`Renderer` is what still sees both. It owns the packet, rotates the staging
-slot, hands the backend's mapped addresses to the extractor, and centers the
-camera on the first frame that draws, which is the one thing needing a target
-size on the side that has no device.
+`SpriteDomain` is what still sees both sprite halves. It owns the packet, hands
+the backend's mapped addresses to the extractor, and centers `Camera2D` on the
+first frame that draws. `Renderer` rotates the one frame slot and explicitly
+prepares each domain before executing the graph.
+
+This is also the 3D extension seam. A later `MeshDomain` will be a peer of
+`SpriteDomain`, with its own extraction, packet, buffers, culling and pass
+bodies. The renderer will call each domain once and each will record into the
+same PBR deferred graph. It will not put a 2D-or-3D branch in a per-entity loop,
+and it will not force either lane through a generic callback. Shared device,
+pipeline, material, pass and lighting mechanisms remain under `tecs.gpu`.
+Domain-specific hot paths remain concrete.
+
+Dimensional names make the boundary visible where it matters:
+`Transform2D`, `Camera2D`, `Renderable2D`, `PointLight2D`, `Occluder2D` and
+`DropShadow2D`. The public namespace stays organized by subject rather than
+dimension, so these do not create parallel `tecs.gfx.2d` and `tecs.gfx.3d`
+trees. A camera is still graphics, a transform is still cross-subsystem state,
+and a dimensional suffix says which coordinate model its data obeys.
+
+Fixed GPU state is typed as integer constants rather than strings.
+`GraphicsPipeline.COMPARE_LESS_OR_EQUAL`, `GraphicsPipeline.CULL_BACK` and
+`Sampler.FILTER_LINEAR` are examples. Constants owned by SDL come from the
+generated bindings, while engine-only choices such as blend recipes use a
+small integer enum. Pipeline creation therefore performs no string lookup and
+cannot quietly accept a misspelled state.
 
 Images live in one array texture, so the texture is a per-instance layer index
 and the whole scene is one draw. That is also what frees the instance layout:
@@ -2229,7 +2254,7 @@ rewrite marks. The upload is therefore bounded by the covering span and shrinks
 when the changed rows are few or clustered.
 
 Two regimes get nothing from it, both because something wider is genuinely
-dirty. An archetype carrying `PreviousTransform` is interpolated, so its drawn
+dirty. An archetype carrying `PreviousTransform2D` is interpolated, so its drawn
 positions move on every frame landing at a new point in the fixed step. And a
 `batchSpawn` fill callback takes `getMut` on the columns it initializes, which
 declares the whole column: correct, and the reason a bulk load resyncs whole.
@@ -2495,7 +2520,7 @@ frame is written in pixels, because that is how an image is cut up. What a
 `Sprite` carries is a region of a texture-array layer, which is the frame's
 fraction of the image scaled by the fraction of the layer the image occupies.
 That second fraction is the renderer's answer, so `sheet:bind` takes what
-`Renderer:sprite` returns for a whole image and rescales every frame once.
+`renderer.sprites:sprite` returns for a whole image and rescales every frame once.
 Before it, a frame's region is its plain fraction of the image, which is what a
 sheet can say without a renderer and what makes one testable headless.
 
@@ -3129,7 +3154,7 @@ by the light's own attenuation to four, and skipped entirely below a twentieth.
 
 ## Layers
 
-A `Transform` carries a layer, and a layer is a band of that depth range.
+A `Transform2D` carries a layer, and a layer is a band of that depth range.
 Everything on a layer sorts within its band and never against another one, so a
 HUD on layer 8 covers a world on layer 1 whatever the world contains.
 `layers.configure` says what a layer does with its contents: how they sort
@@ -3166,7 +3191,7 @@ layer that does not ask, which is where the entities are.
 ## Clip regions
 
 A `Clip` names a rectangle an instance's fragments are kept inside, and
-`Renderer:setClipRegion` says what that rectangle is. The rectangle is in
+`renderer.sprites:setClipRegion` says what that rectangle is. The rectangle is in
 target pixels, tested against `gl_FragCoord`, which is what a scrollable list
 inside a panel means and what is right for world contents and screen-space
 layers alike. Regions do not nest: a region is one rectangle, so a panel within
@@ -3365,9 +3390,9 @@ spans in hand costs nothing while nothing is being removed.
 The producer keeps its own copy of the instances, so a layout writes into
 ordinary memory and the renderer's sync is a bulk copy of the ranges that moved.
 A glyph carries an absolute position, so a text composes its own transform onto
-the glyph offsets and a text whose `Transform` moved is as stale as one whose
+the glyph offsets and a text whose `Transform2D` moved is as stale as one whose
 string changed. Layout runs every frame and almost no text changes, so it is
-gated twice: an archetype whose `Text`, `Tint` and `Transform` columns are all
+gated twice: an archetype whose `Text`, `Tint` and `Transform2D` columns are all
 clean is skipped whole, and within a dirty archetype a row whose authored fields
 and transform match what its glyphs were built from is skipped too.
 
@@ -3916,10 +3941,8 @@ src/tecs/platform/        window, events, input backends, sensors, OS services
 src/tecs/gpu/             device, frame, passes, shaders, pipelines, buffers
 src/tecs/components.tl    components the engine renders and simulates
 src/tecs/gfx/             camera, layers, sheets and playback, text, particles
-src/tecs/Renderer.tl      the world-to-GPU bridge, owning both halves below
-src/tecs/Extractor.tl     the world-facing half: a world to a frame packet
-src/tecs/Backend.tl       the device-facing half: a frame packet to a frame
-src/tecs/FramePacket.tl   what crosses between the two
+src/tecs/Renderer.tl      frame graph, domain orchestration, capture, present
+src/tecs/internal/render/ rendering domains and their extractor/backend seams
 src/tecs/audio.tl         clips, voices, groups, and the Sound component
 src/tecs/physics/         Rapier binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it

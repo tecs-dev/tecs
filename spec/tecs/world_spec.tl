@@ -626,7 +626,7 @@ describe(
                         luassert.equals("TestEntity", component, "Component should have the correct value")
 
                         -- Get a non-existent component
-                        luassert.is_nil(w2:get(entity, tecs.Transform), "Non-existent component should return nil")
+                        luassert.is_nil(w2:get(entity, tecs.Transform2D), "Non-existent component should return nil")
                     end
                 )
 

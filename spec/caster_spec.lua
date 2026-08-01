@@ -17,18 +17,18 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local loader = require("tecs.ffi.loader")
-local Extractor = require("tecs.Extractor")
-local FramePacket = require("tecs.FramePacket")
+local SpriteExtractor = require("tecs.internal.render.SpriteExtractor")
+local SpriteFramePacket = require("tecs.internal.render.SpriteFramePacket")
 local components = require("tecs.components")
 local ecs = require("tecs.ecs")
 local instancelayout = require("tecs.gpu.instancelayout")
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local Tint = components.Tint
-local Renderable = components.Renderable
+local Renderable2D = components.Renderable2D
 local Clip = components.Clip
-local Occluder = components.Occluder
-local DropShadow = components.DropShadow
+local Occluder2D = components.Occluder2D
+local DropShadow2D = components.DropShadow2D
 
 local INSTANCE_FLOATS = instancelayout.FLOATS
 local BOUND_FLOATS = instancelayout.BOUND_FLOATS
@@ -41,14 +41,14 @@ describe("what an entity casts", function()
     -- plain C array is the whole of what a device supplies it with.
     local function newExtraction()
         local world = tecs.ecs.newWorld()
-        local extractor = Extractor.create({
+        local extractor = SpriteExtractor.create({
             capacity = CAPACITY,
             whiteU0 = 0.0,
             whiteV0 = 0.0,
             whiteU1 = 1.0,
             whiteV1 = 1.0,
         })
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         local instances = loader.newArray("float[?]", CAPACITY * INSTANCE_FLOATS)
         local bounds = loader.newArray("float[?]", CAPACITY * BOUND_FLOATS)
         extractor:setStaging(0, instances, bounds)
@@ -69,12 +69,12 @@ describe("what an entity casts", function()
 
     -- A 40 by 60 quad, so a half width is twenty and a half height thirty.
     local function quad()
-        return Transform(100, 200, 0, 1, 0, 40, 60)
+        return Transform2D(100, 200, 0, 1, 0, 40, 60)
     end
 
     it("says opaque with two positive extents", function()
         local world, _, _, bounds = newExtraction()
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable())
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D())
 
         world:update(1 / 60)
 
@@ -85,7 +85,7 @@ describe("what an entity casts", function()
 
     it("says occluder by negating the second extent alone", function()
         local world, _, _, bounds = newExtraction()
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Occluder(1.0))
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), Occluder2D(1.0))
 
         world:update(1 / 60)
 
@@ -98,7 +98,7 @@ describe("what an entity casts", function()
 
     it("says drop shadow by negating both", function()
         local world, _, _, bounds = newExtraction()
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), DropShadow(1.0))
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), DropShadow2D(1.0))
 
         world:update(1 / 60)
 
@@ -109,11 +109,11 @@ describe("what an entity casts", function()
 
     it("is an occluder when an entity asks to be both", function()
         local world, _, _, bounds = newExtraction()
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Occluder(1.0), DropShadow(1.0))
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), Occluder2D(1.0), DropShadow2D(1.0))
 
         world:update(1 / 60)
 
-        -- Occluder, because it is the half that changes what a light does and
+        -- Occluder2D, because it is the half that changes what a light does and
         -- dropping it would unblock the light without saying so.
         local ex, ey = extentsAt(bounds, 0)
         assert.are.equal(20.0, ex)
@@ -122,7 +122,7 @@ describe("what an entity casts", function()
 
     it("blends instead of casting when the tint is not opaque", function()
         local world, packet, _, bounds = newExtraction()
-        world:spawn(quad(), Tint(1, 1, 1, 0.5), Renderable(), Occluder(1.0))
+        world:spawn(quad(), Tint(1, 1, 1, 0.5), Renderable2D(), Occluder2D(1.0))
 
         world:update(1 / 60)
 
@@ -136,7 +136,7 @@ describe("what an entity casts", function()
 
     it("quantises the height into the slot the layer already shared", function()
         local world, _, instances = newExtraction()
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Occluder(0.5))
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), Occluder2D(0.5))
 
         world:update(1 / 60)
 
@@ -146,7 +146,7 @@ describe("what an entity casts", function()
 
     it("keeps the clip region and the layer beside the height", function()
         local world, _, instances = newExtraction()
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Clip(3), Occluder(1.0))
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), Clip(3), Occluder2D(1.0))
 
         world:update(1 / 60)
 
@@ -157,8 +157,8 @@ describe("what an entity casts", function()
         local world, _, instances = newExtraction()
         -- Two above the top step would land two clip regions along, drawing
         -- the entity through a rectangle nothing asked for.
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Occluder(3.0))
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Occluder(-1.0))
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), Occluder2D(3.0))
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), Occluder2D(-1.0))
 
         world:update(1 / 60)
 
@@ -168,7 +168,7 @@ describe("what an entity casts", function()
 
     it("resyncs a run when only the height changed", function()
         local world, packet, instances = newExtraction()
-        local entity = world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Occluder(1.0))
+        local entity = world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), Occluder2D(1.0))
 
         world:update(1 / 60)
         -- The frame after, with nothing touched: the gate holds the run still,
@@ -176,7 +176,7 @@ describe("what an entity casts", function()
         world:update(1 / 60)
         assert.are.equal(0, packet.rewritten)
 
-        world:getMut(entity, Occluder).height = 0.0
+        world:getMut(entity, Occluder2D).height = 0.0
         world:update(1 / 60)
 
         assert.are.equal(1, packet.rewritten)
@@ -185,7 +185,7 @@ describe("what an entity casts", function()
 
     it("writes what it always wrote for an entity that casts nothing", function()
         local world, _, instances = newExtraction()
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Clip(3))
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), Clip(3))
 
         world:update(1 / 60)
 

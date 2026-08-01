@@ -24,7 +24,7 @@ tecs.ecs.newFFIComponent({
 return tecs.newApplication({
     plugin = function(world: tecs.World)
         local homing <const> = world:newQuery({
-            include = {tecs.Transform, Homing},
+            include = {tecs.Transform2D, Homing},
         })
 
         world:addSystem({
@@ -33,7 +33,7 @@ return tecs.newApplication({
             run = function(dt: number)
                 for archetype, length in homing:iter() do
                     local transforms <const> =
-                        archetype:getMut(tecs.Transform)
+                        archetype:getMut(tecs.Transform2D)
                     local targets <const> = archetype:get(Homing)
 
                     for row = 1, length do
@@ -59,7 +59,7 @@ return tecs.newApplication({
 })
 ```
 
-The writable [`Transform`](/modules/ecs/#tecs.ecs.Transform) column comes from `getMut`; the read-only target
+The writable [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) column comes from `getMut`; the read-only target
 column comes from `get`. Taking both through `getMut` would dirty `Homing`
 every frame and defeat consumers that skip clean columns.
 

@@ -15,7 +15,7 @@ local ecs <const> = require("tecs.ecs")
 -- The engine half, named for its types and loaded on demand.
 --
 -- `local type` is erased at codegen, so these lines cost nothing at runtime and
--- the module below can still name `tecs.gfx.Camera` as a type. The values
+-- the module below can still name `tecs.gfx.Camera2D` as a type. The values
 -- arrive through the metatable further down.
 --
 -- Loading them here instead would end headless use. The engine reaches SDL,
@@ -27,7 +27,7 @@ local type Future = require("tecs.Future")
 local type scopeModule = require("tecs.scope")
 local type audio = require("tecs.audio")
 local type Renderer = require("tecs.Renderer")
-local type Camera = require("tecs.gfx.Camera")
+local type Camera2D = require("tecs.gfx.Camera2D")
 local type animation = require("tecs.gfx.animation")
 local type events = require("tecs.events")
 local type input = require("tecs.input")
@@ -92,15 +92,15 @@ local type Closeable = types.Closeable
 --- the rest.
 local record gfx
     --- The view a frame is drawn from.
-    Camera: Camera
-    type CameraOptions = Camera.Options
+    Camera2D: Camera2D
+    type Camera2DOptions = Camera2D.Options
 
     --- A world to a frame, through an extractor and a backend.
     Renderer: Renderer
     type RendererOptions = Renderer.Options
-    type InstanceProducer = Renderer.InstanceProducer
-    type ClipRegion = Renderer.ClipRegion
-    type ComputeStage = Renderer.ComputeStage
+    type SpriteInstanceProducer = Renderer.SpriteInstanceProducer
+    type SpriteClipRegion = Renderer.SpriteClipRegion
+    type SpriteComputeStage = Renderer.SpriteComputeStage
 
     --- Builds a view onto the world.
     ---
@@ -109,9 +109,9 @@ local record gfx
     ---     never moves it. No field is validated.
     --- @return A camera whose fields are plain and meant to be assigned to
     ---     frame by frame. It is not attached to anything: a renderer draws
-    ---     from the one on `renderer.camera`, so a second is for a calculation
+    ---     from the one on `renderer.sprites.camera`, so a second is for a calculation
     ---     rather than a second view.
-    newCamera: function(options?: Camera.Options): Camera
+    newCamera2D: function(options?: Camera2D.Options): Camera2D
 
     --- Builds a renderer against an open GPU device.
     ---
@@ -127,21 +127,21 @@ local record gfx
     newRenderer: function(device: loader.CPtr, swapchainFormat: integer, options: Renderer.Options): Renderer
 
     -- The components a game spawns to put something on screen. All but
-    -- `Renderable` are FFI components, so their columns are contiguous C
+    -- `Renderable2D` are FFI components, so their columns are contiguous C
     -- memory the sync walks row by row into mapped GPU staging: writing one
     -- through `world:get` needs an explicit `world:markComponentDirty`, since
     -- only `getMut` marks the column on its own.
     --
-    -- `Transform` is not among them. It positions everything a world holds
+    -- `Transform2D` is not among them. It positions everything a world holds
     -- rather than only what draws, so it is the ECS builtin and is reached as
-    -- `tecs.Transform`, at the root.
+    -- `tecs.Transform2D`, at the root.
 
     --- The transform as it stood before the current fixed step. Presence is
     --- the opt-in to interpolation: an entity carrying it is drawn between
     --- this and its current transform, so physics does not step visibly.
     --- Carries `x`, `y` and `rotation` (radians) only, because scale and
     --- layer change by assignment rather than by integration.
-    PreviousTransform: components.PreviousTransform
+    PreviousTransform2D: components.PreviousTransform2D
 
     --- Base color and coverage, each channel 0 to 1, defaulting to opaque
     --- white. The alpha decides which pass draws the entity: exactly 1 goes
@@ -170,14 +170,14 @@ local record gfx
     Material: components.Material
 
     --- A light the deferred lighting pass resolves, positioned by the
-    --- entity's Transform and in the same world units. `height` is above the
+    --- entity's Transform2D and in the same world units. `height` is above the
     --- surface plane and at 0 the light contributes nothing at all;
     --- `radius` is its reach in world units; `r`, `g`, `b` and `intensity`
     --- default to white at 1.
-    PointLight: components.PointLight
+    PointLight2D: components.PointLight2D
 
     --- Keeps a renderable's fragments inside one rectangle. `index` names a
-    --- region set with `Renderer:setClipRegion`, and 0, the default, means
+    --- region set with `renderer.sprites:setClipRegion`, and 0, the default, means
     --- no clipping. A region is a single rectangle, so nesting is the
     --- caller's job: intersect the two and set that.
     Clip: components.Clip
@@ -187,18 +187,18 @@ local record gfx
     --- wall and 0 is something lying flat that blocks nothing. Needs
     --- `shadows` on the renderer; without it the entity draws and casts
     --- nothing.
-    Occluder: components.Occluder
+    Occluder2D: components.Occluder2D
 
     --- Darkens the ground away from each of the nearest lights, ambient
     --- included, and blocks no light. `height` is 0 to 1 and decides how far
-    --- the copy is thrown, under the same reading as `Occluder.height`. An
+    --- the copy is thrown, under the same reading as `Occluder2D.height`. An
     --- entity carrying both is an occluder.
-    DropShadow: components.DropShadow
+    DropShadow2D: components.DropShadow2D
 
     --- Marks an entity as contributing geometry. A tag, so it costs a
-    --- column of nothing; without it a Transform is only a position, which
+    --- column of nothing; without it a Transform2D is only a position, which
     --- is what most entities in a world are.
-    Renderable: components.Renderable
+    Renderable2D: components.Renderable2D
 
     --- Index of an image name, assigning one the first time it is seen.
     ---
@@ -376,7 +376,7 @@ local record tecs
     ---
     --- Published here off `tecs.ecs`, which costs nothing that naming it one
     --- level down would not: `ecs` is loaded by the time `tecs` is.
-    Transform: ecs.Transform
+    Transform2D: ecs.Transform2D
 
     assets: assets
     audio: audio
@@ -403,7 +403,7 @@ tecs.ecs = ecs
 
 -- Assigned rather than resolved, for the same reason `ecs` is: the module it
 -- comes off is already loaded here, so there is nothing to defer.
-tecs.Transform = ecs.Transform
+tecs.Transform2D = ecs.Transform2D
 
 --- How one public name resolves, at whatever depth it is written.
 ---
@@ -470,9 +470,9 @@ local SURFACE <const>: {string: Namespace} = {
     events = {module = "tecs.events"},
     input = {module = "tecs.input"},
     gfx = {
-        beside = {"tecs.components", "tecs.gfx.Camera", "tecs.Renderer", "tecs.gfx.text"},
+        beside = {"tecs.components", "tecs.gfx.Camera2D", "tecs.Renderer", "tecs.gfx.text"},
         within = {
-            Camera = {module = "tecs.gfx.Camera"},
+            Camera2D = {module = "tecs.gfx.Camera2D"},
             Renderer = {module = "tecs.Renderer"},
             animation = {module = "tecs.gfx.animation"},
             layers = {module = "tecs.gfx.layers"},

@@ -33,8 +33,8 @@ Sprite samples it and textured and untextured geometry share one path.
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
 local loader <const> = require("tecs.ffi.loader")
-local Camera <const> = require("tecs.gfx.Camera")
-local FramePacket <const> = require("tecs.FramePacket")
+local Camera2D <const> = require("tecs.gfx.Camera2D")
+local SpriteFramePacket <const> = require("tecs.internal.render.SpriteFramePacket")
 local components <const> = require("tecs.components")
 local layers <const> = require("tecs.gfx.layers")
 local sheet <const> = require("tecs.gfx.sheet")
@@ -54,7 +54,7 @@ local EXTRACT <const> = timing.stage("extract")
 
 --- The pose every drawn row is written from, bound once rather than read
 --- off the module at each of the seven places below that name it.
-local Transform <const> = ecs.Transform
+local Transform2D <const> = ecs.Transform2D
 
 local INSTANCE_FLOATS <const> = instancelayout.FLOATS
 local INSTANCE_BYTES <const> = instancelayout.BYTES
@@ -117,7 +117,7 @@ local RESERVE_NONE <const> = 0
 
 --- A layer no row carries, for the band cache a run starts empty.
 ---
---- `Transform.layer` is an `int32_t`, so anything outside that width is a
+--- `Transform2D.layer` is an `int32_t`, so anything outside that width is a
 --- value the first row can never match and the cache is always cold on the
 --- first comparison rather than on a flag tested once a row.
 local NO_LAYER <const> = 2 ^ 31
@@ -157,6 +157,15 @@ local record InstanceProducer
     --- to expect, which is the safe direction; under-reporting drops the whole
     --- lane, which is not.
     blended: function(self: InstanceProducer): integer
+
+    --- Caller-writable. Reports instances of its run that may reach the shadow
+    --- lane.
+    ---
+    --- This has the same upper-bound contract as `blended`: a CPU producer
+    --- answers exactly, while a compute producer may conservatively report
+    --- every slot that can carry a caster. Under-reporting would skip the
+    --- lane and lose shadows; over-reporting only runs an empty compaction.
+    casting: function(self: InstanceProducer): integer
 
     --- Writes instances `first` through `last` of its run. `base` is the
     --- instance index the run starts at, so instance `first` is written at
@@ -219,7 +228,7 @@ local record Run
     valueAt: integer
 end
 
-local record ExtractorOptions
+local record SpriteExtractorOptions
     --- Instances the buffers are sized for. Rows beyond it are dropped rather
     --- than growing anything mid-frame.
     capacity: integer
@@ -252,13 +261,13 @@ local record ExtractorOptions
     whiteV1: number
 end
 
-local record Extractor
+local record SpriteExtractor
     type InstanceProducer = InstanceProducer
-    type Options = ExtractorOptions
+    type Options = SpriteExtractorOptions
 
     --- What the view is looking at. The game's camera: read here, written by
     --- whoever is playing, and copied into every packet.
-    camera: Camera
+    camera: Camera2D
     capacity: integer
 
     --- Seconds the last extraction took. Zero unless timing is on.
@@ -315,12 +324,12 @@ local record Extractor
     _missingImage: integer
 end
 
-local ExtractorMT <const>: metatable<Extractor> = {__index = Extractor}
+local SpriteExtractorMT <const>: metatable<SpriteExtractor> = {__index = SpriteExtractor}
 
 --- Builds an extractor. Nothing here needs a device.
-function Extractor.create(options: ExtractorOptions): Extractor
-    local self = setmetatable({} as Extractor, ExtractorMT)
-    self.camera = Camera.newCamera()
+function SpriteExtractor.create(options: SpriteExtractorOptions): SpriteExtractor
+    local self = setmetatable({} as SpriteExtractor, SpriteExtractorMT)
+    self.camera = Camera2D.newCamera2D()
     self.capacity = options.capacity
     self._extractSeconds = 0.0
     self._alpha = 1.0
@@ -348,7 +357,7 @@ end
 --- The backend owns the buffers, because the device does. What crosses is an
 --- address and the slot it belongs to, which is the same thing that crosses
 --- once the two halves are on different threads.
-function Extractor:setStaging(slot: integer, instances: loader.CArray, bounds: loader.CArray)
+function SpriteExtractor:setStaging(slot: integer, instances: loader.CArray, bounds: loader.CArray)
     self._slot = slot
     self._instances = instances
     self._bounds = bounds
@@ -357,7 +366,8 @@ end
 local function missingImageMessage(image: integer): string
     local name = components.imageName(image)
     if name == nil then
-        return "tecs: a Sprite names no image; build one with " .. "Renderer:registerImage or Renderer:sprite"
+        return "tecs: a Sprite names no image; build one with "
+            .. "renderer.sprites:registerImage or renderer.sprites:sprite"
     end
     return ("tecs: no image is registered as '%s'"):format(name)
 end
@@ -368,7 +378,7 @@ end
 --- renderer has never seen has no layer to sample, and every layer that does
 --- exist holds some other image, so there is nothing to fall back to that is
 --- not a wrong picture on the quad.
-local function slotOf(self: Extractor, image: integer): integer
+local function slotOf(self: SpriteExtractor, image: integer): integer
     local slot = self._slotByImage[image]
     if slot ~= nil then
         return slot
@@ -382,7 +392,7 @@ end
 --- expected reservations and did not get them sized its capacity too tightly
 --- to leave anything to reserve out of, which looks like the setting being
 --- ignored rather than the buffer being full.
-function Extractor:reservesRuns(): boolean
+function SpriteExtractor:reservesRuns(): boolean
     return self._reserve
 end
 
@@ -391,13 +401,13 @@ end
 --- The upload itself belongs to whoever owns the device. What comes back is
 --- the answer this side resolves names with, which is plain numbers and is
 --- what a snapshot's name has to be turned into again on the next run.
-function Extractor:registerImage(image: integer, region: TextureArray.Region)
+function SpriteExtractor:registerImage(image: integer, region: TextureArray.Region)
     self._slotByImage[image] = region.layer
     self._regionByImage[image] = region
 end
 
 --- The region an image name occupies, or nil if it was never registered.
-function Extractor:regionOf(image: integer): TextureArray.Region
+function SpriteExtractor:regionOf(image: integer): TextureArray.Region
     return self._regionByImage[image]
 end
 
@@ -410,7 +420,7 @@ end
 ---
 --- Fails on a name nothing is registered under, because the alternative is a
 --- quad that draws whichever image happens to hold that layer.
-function Extractor:sprite(name: string, u0?: number, v0?: number, u1?: number, v1?: number): components.Sprite
+function SpriteExtractor:sprite(name: string, u0?: number, v0?: number, u1?: number, v1?: number): components.Sprite
     local image = components.imageId(name)
     local slot = slotOf(self, image)
     local region = self._regionByImage[image]
@@ -433,13 +443,13 @@ end
 --- A producer draws instances it owns rather than entities, which is what lets
 --- a subsystem whose items are not entities take part in the one draw
 --- everything else goes through.
-function Extractor:addProducer(producer: InstanceProducer)
+function SpriteExtractor:addProducer(producer: InstanceProducer)
     self._producers[#self._producers + 1] = producer
 end
 
 --- Releases the producers retained by this extractor. Safe to call more than
 --- once.
-function Extractor:destroy()
+function SpriteExtractor:destroy()
     local producers <const> = self._producers
     self._producers = {}
     for index = 1, #producers do
@@ -466,7 +476,7 @@ end
 --- would mark these components dirty on every archetype every frame, which
 --- would make the gate below always true and defeat its own purpose.
 local function writeRows(
-    self: Extractor, archetype: ecs.Archetype, first: integer, last: integer, offset: integer
+    self: SpriteExtractor, archetype: ecs.Archetype, first: integer, last: integer, offset: integer
 ): integer
     local floats = self._instances
     local bounds = self._bounds
@@ -474,7 +484,7 @@ local function writeRows(
     -- derived later because the sign that carries it is written here, so the
     -- count and the lane are right together or wrong together.
     local blended = 0
-    local transforms = archetype:get(Transform)
+    local transforms = archetype:get(Transform2D)
     local tints = archetype:get(components.Tint)
     local sprites = archetype:get(components.Sprite)
     local materialColumn = archetype:get(components.Material)
@@ -493,24 +503,24 @@ local function writeRows(
     -- An occluder before a drop-shadow caster, because an entity carrying both
     -- has asked for the one that changes what a light does, and taking the
     -- other would unblock the light without saying so.
-    local casts = archetype:get(components.Occluder)
+    local casts = archetype:get(components.Occluder2D)
     local castSignX = 1.0
     if casts == nil then
         -- Read as the other column because the only field either carries is
         -- the same height at the same offset, and the rows below want one
         -- name for it rather than a branch per row over which of the two the
         -- run turned out to be.
-        casts = archetype:get(components.DropShadow) as {components.Occluder}
+        casts = archetype:get(components.DropShadow2D) as {components.Occluder2D}
         castSignX = -1.0
     end
     -- Loop invariant: an archetype either carries the previous transform or it
     -- does not, so an entity that is not interpolated costs one test per run
     -- rather than anything per row.
-    local previous = archetype:get(components.PreviousTransform)
+    local previous = archetype:get(components.PreviousTransform2D)
     local alpha <const> = self._alpha
 
     -- What the layer decides, resolved when the layer changes rather than
-    -- once a row. A layer is a Transform field and so a row's own, but an
+    -- once a row. A layer is a Transform2D field and so a row's own, but an
     -- archetype is a set of components and a game moves whole archetypes
     -- between layers rather than single rows: a run almost always resolves
     -- this once and the rows after it pay one comparison.
@@ -761,7 +771,7 @@ local function writeRows(
 end
 
 --- Marks the bytes a run of instances occupies, in both range lists.
-local function markRun(packet: FramePacket, offset: integer, count: integer)
+local function markRun(packet: SpriteFramePacket, offset: integer, count: integer)
     if count <= 0 then
         return
     end
@@ -774,7 +784,7 @@ end
 --- @return Rows of it the forward pass draws, which for a whole run is the run's
 ---     own total and needs nothing else to complete it.
 local function writeRun(
-    self: Extractor, packet: FramePacket, archetype: ecs.Archetype, length: integer, offset: integer
+    self: SpriteExtractor, packet: SpriteFramePacket, archetype: ecs.Archetype, length: integer, offset: integer
 ): integer
     local blended <const> = writeRows(self, archetype, 1, length, offset)
     markRun(packet, offset, length)
@@ -810,7 +820,7 @@ end
 --- that reached the draw could occlude, and a cull bound out where no finite
 --- view overlaps it. The mark pass rejects it on that bound, so a hidden slot
 --- costs a bounds read and a scan lane and never reaches the draw.
-local function hideRun(self: Extractor, packet: FramePacket, offset: integer, count: integer)
+local function hideRun(self: SpriteExtractor, packet: SpriteFramePacket, offset: integer, count: integer)
     if count <= 0 then
         return
     end
@@ -889,7 +899,7 @@ end
 --- The slack is opportunistic: what does not fit is not reserved and a run
 --- that does not fit at all is truncated, so reserving never drops a row a
 --- packed layout would have kept.
-local function allocateRun(self: Extractor, run: Run, length: integer)
+local function allocateRun(self: SpriteExtractor, run: Run, length: integer)
     local high <const> = self._high
     local want = reservedFor(length, run.grown)
     local room <const> = self.capacity - high
@@ -911,7 +921,7 @@ end
 --- scene with one growing archetype does, and moved to the end otherwise. The
 --- slots a move leaves behind stay inside the extent the cull walks until a
 --- compaction reclaims them, so they are hidden on the way out.
-local function growRun(self: Extractor, packet: FramePacket, run: Run, length: integer)
+local function growRun(self: SpriteExtractor, packet: SpriteFramePacket, run: Run, length: integer)
     if run.offset + run.capacity == self._high then
         local want = reservedFor(length, true)
         local room <const> = self.capacity - run.offset
@@ -938,7 +948,7 @@ end
 --- the interaction between reserving and `capacity`: room to grow is what is
 --- left over after the rows, never taken from them, so a world sized to fit
 --- exactly still fits exactly and drops exactly what it dropped.
-local function compactRuns(self: Extractor)
+local function compactRuns(self: SpriteExtractor)
     local runs <const> = self._runs
     local seen <const> = self._seen
     local capacity <const> = self.capacity
@@ -984,7 +994,7 @@ end
 --- Returns the slots the runs cover, the rows past the ceiling, and whether
 --- the layout moved. A run cannot grow without shifting its neighbors, so any
 --- length or offset that changed rewrites every run this sync.
-local function layoutPacked(self: Extractor): integer, integer, boolean
+local function layoutPacked(self: SpriteExtractor): integer, integer, boolean
     local runs <const> = self._runs
     local seen <const> = self._seen
     local capacity <const> = self.capacity
@@ -1047,7 +1057,7 @@ end
 --- for another one: the moment it runs the gap it triggers on is zero, and it
 --- cannot open again until growth and shrinkage have put `RECLAIM_RATIO` of
 --- that same layout back into it.
-local function layoutReserved(self: Extractor, packet: FramePacket): integer, integer, boolean
+local function layoutReserved(self: SpriteExtractor, packet: SpriteFramePacket): integer, integer, boolean
     local runs <const> = self._runs
     local seen <const> = self._seen
     local capacity <const> = self.capacity
@@ -1154,14 +1164,14 @@ end
 --- rather than a set of columns and `structuralCount`, `structuralAdded` and
 --- `structuralTouched` are where that is answered.
 local COUNTED_COLUMNS <const>: {types.components.Component} = {
-    Transform,
+    Transform2D,
     components.Tint,
     components.Sprite,
     components.Material,
     components.Clip,
     Pivot,
-    components.Occluder,
-    components.DropShadow,
+    components.Occluder2D,
+    components.DropShadow2D,
 }
 
 for index = 1, #COUNTED_COLUMNS do
@@ -1185,8 +1195,8 @@ end
 ---     the run's, because the rows this did not write are not in it: what
 ---     completes it is the caller's, and `countBlended` is the other half.
 local function writeResidue(
-    self: Extractor,
-    packet: FramePacket,
+    self: SpriteExtractor,
+    packet: SpriteFramePacket,
     archetype: internal.ArchetypeInternal,
     run: Run,
     pending: integer,
@@ -1250,9 +1260,9 @@ end
 ---
 --- Which runs can be left alone is the layout's answer: packed, a length that
 --- moved rewrites everything, and reserved, it rewrites the run it moved.
---- Short of that, an archetype whose Transform, Tint, and Sprite columns are
+--- Short of that, an archetype whose Transform2D, Tint, and Sprite columns are
 --- all clean is skipped entirely: its bytes are already resident and correct.
-local function syncInstances(self: Extractor, packet: FramePacket)
+local function syncInstances(self: SpriteExtractor, packet: SpriteFramePacket)
     local runs = self._runs
     local seen = self._seen
     for archetype in pairs(seen) do
@@ -1312,6 +1322,10 @@ local function syncInstances(self: Extractor, packet: FramePacket)
     -- the count it was written with, which is what makes the total a description
     -- of the scene as it stands rather than of every frame there has ever been.
     local blended = 0
+    -- Resident casters, derived per archetype after its blended total is
+    -- settled. Casting and blending are exclusive, so a caster archetype owns
+    -- exactly `pending - run.blended` caster rows without another row walk.
+    local casting = 0
     -- Runs to exhaustion, which is what `iter` requires and what makes it the
     -- right traversal: a cursor is allocated per call, and this is the frame
     -- path. Nothing below breaks or returns, an archetype the layout could not
@@ -1342,7 +1356,7 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         local dirty = relayout
             or run.moved
             or valueAt ~= run.valueAt
-            or (interpolating and archetype:get(components.PreviousTransform) ~= nil)
+            or (interpolating and archetype:get(components.PreviousTransform2D) ~= nil)
 
         local residue = false
         local addedFrom = 0
@@ -1406,6 +1420,9 @@ local function syncInstances(self: Extractor, packet: FramePacket)
             end
         end
         blended = blended + run.blended
+        if archetype:get(components.Occluder2D) ~= nil or archetype:get(components.DropShadow2D) ~= nil then
+            casting = casting + pending - run.blended
+        end
 
         if reserve then
             -- Slots the run holds and is not drawing from. A run that moved
@@ -1456,6 +1473,7 @@ local function syncInstances(self: Extractor, packet: FramePacket)
             -- by compute never rewrites anything through here at all.
             if count > 0 then
                 blended = blended + producer:blended()
+                casting = casting + producer:casting()
             end
 
             local ranges = producer:takeDirty()
@@ -1484,13 +1502,14 @@ local function syncInstances(self: Extractor, packet: FramePacket)
     packet.dropped = dropped
     packet.rewritten = rewritten
     packet.blendCount = blended
+    packet.castCount = casting
 end
 
 --- Collects lights from the world into the packet.
-local function syncLights(self: Extractor, packet: FramePacket)
+local function syncLights(self: SpriteExtractor, packet: SpriteFramePacket)
     for archetype, length in self._lightSources:iter() do
-        local transforms = archetype:get(Transform)
-        local sources = archetype:get(components.PointLight)
+        local transforms = archetype:get(Transform2D)
+        local sources = archetype:get(components.PointLight2D)
         for row = 1, length do
             local transform = transforms[row]
             local source = sources[row]
@@ -1506,7 +1525,7 @@ end
 --- Everything a frame is drawn from is settled here: the instance and bounds
 --- bytes go into the staging the backend mapped, and where they went, how many
 --- there are, where the view was and what is lighting it go into the packet.
-function Extractor:extract(packet: FramePacket)
+function SpriteExtractor:extract(packet: SpriteFramePacket)
     local started = timing.begin()
     packet:begin(self._slot)
 
@@ -1547,24 +1566,24 @@ end
 --- were cleared of before it looked.
 --- @param published Called once the packet is filled, which is the moment it
 ---     would be handed over. What flips a slot's state when there is one.
-function Extractor:install(world: types.World, packet: FramePacket, published: function())
+function SpriteExtractor:install(world: types.World, packet: SpriteFramePacket, published: function())
     self._world = world
 
     -- Snapshotting before anything in the step moves is what makes the pair a
     -- pair: taken later, the two would be the same value and every frame would
     -- draw the entity where the step left it.
     local interpolated = world:newQuery({
-        include = {Transform, components.PreviousTransform},
+        include = {Transform2D, components.PreviousTransform2D},
     })
     world:addSystem({
         name = "tecs.SnapshotTransforms",
         phase = ecs.phases.FixedFirst,
         run = function()
             for archetype, length in interpolated:iter() do
-                local transforms = archetype:get(Transform)
+                local transforms = archetype:get(Transform2D)
                 -- Mutable, because this writes every row it visits: the whole
                 -- column is what the next frame interpolates from.
-                local before = archetype:getMut(components.PreviousTransform)
+                local before = archetype:getMut(components.PreviousTransform2D)
                 for row = 1, length do
                     local transform = transforms[row]
                     local target = before[row]
@@ -1577,10 +1596,10 @@ function Extractor:install(world: types.World, packet: FramePacket, published: f
     })
 
     self._renderables = world:newQuery({
-        include = {Transform, components.Tint, components.Renderable},
+        include = {Transform2D, components.Tint, components.Renderable2D},
     })
     self._lightSources = world:newQuery({
-        include = {Transform, components.PointLight},
+        include = {Transform2D, components.PointLight2D},
     })
 
     world:addSystem({
@@ -1596,8 +1615,8 @@ function Extractor:install(world: types.World, packet: FramePacket, published: f
 end
 
 --- Seconds the last extraction took, or zero when nothing is being measured.
-function Extractor:extractSeconds(): number
+function SpriteExtractor:extractSeconds(): number
     return self._extractSeconds or 0.0
 end
 
-return Extractor
+return SpriteExtractor

@@ -18,10 +18,10 @@ local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 256
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local Tint = components.Tint
 local ChildOf = tecs.ecs.ChildOf
-local RelativeTransform = tecs.ecs.RelativeTransform
+local RelativeTransform2D = tecs.ecs.RelativeTransform2D
 
 describe("gfx.text", function()
     local window, device, screen, font, alphaFont
@@ -65,7 +65,7 @@ describe("gfx.text", function()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {
             ambient = { 1.0, 1.0, 1.0 },
-            capacity = 4096,
+            sprites = { capacity = 4096 },
         })
         renderer:install(world)
         world:addPlugin(text.textPlugin({ renderer = renderer }))
@@ -99,7 +99,7 @@ describe("gfx.text", function()
 
     local function spawnText(world, x, y, body, size, align)
         return world:spawn(
-            Transform(x, y, 0, 1),
+            Transform2D(x, y, 0, 1),
             Tint(0.0, 1.0, 0.0, 1.0),
             text.Text.new({
                 text = body,
@@ -130,7 +130,7 @@ describe("gfx.text", function()
         local world, renderer = newScene()
         tecs.gfx.layers.configure(16, { sort = "z", screenSpace = true, unlit = true })
         local entity = world:spawn(
-            Transform(32.2, 32.2, 0, 16),
+            Transform2D(32.2, 32.2, 0, 16),
             Tint(0.0, 1.0, 0.0, 1.0),
             text.Text.new({ text = "Aligned", font = alphaFont, size = 16 })
         )
@@ -138,7 +138,7 @@ describe("gfx.text", function()
         local firstX, firstY = text.glyphAt(world, entity, 1)
         assert.is_true(ink(pixels) > 10)
 
-        local transform = world:getMut(entity, Transform)
+        local transform = world:getMut(entity, Transform2D)
         transform.x, transform.y = 32.4, 32.4
         frame(world, renderer)
         local secondX, secondY = text.glyphAt(world, entity, 1)
@@ -154,7 +154,7 @@ describe("gfx.text", function()
 
         local item = world:get(entity, text.Text)
         assert.is_true(item._spanCount > 0)
-        assert.are.equal(item._spanCount, renderer.count)
+        assert.are.equal(item._spanCount, renderer.sprites.count)
         assert.is_true(ink(pixels) > 100)
         renderer:destroy()
     end)
@@ -184,7 +184,7 @@ describe("gfx.text", function()
 
         local item = world:get(entity, text.Text)
         assert.are.equal(2, item._spanCount)
-        assert.are.equal(2, renderer.count)
+        assert.are.equal(2, renderer.sprites.count)
         assert.is_not_nil(text.glyphAt(world, entity, 2))
         assert.is_nil(text.glyphAt(world, entity, 3))
         renderer:destroy()
@@ -206,16 +206,16 @@ describe("gfx.text", function()
         local world, renderer = newScene()
         local first = spawnText(world, 16, 32, "Cache", 32)
         frame(world, renderer)
-        local occupied = renderer.images:usage()
+        local occupied = renderer.sprites.images:usage()
 
         spawnText(world, 16, 96, "Cache", 80)
         frame(world, renderer)
-        local afterSecond = renderer.images:usage()
+        local afterSecond = renderer.sprites.images:usage()
         assert.are.equal(occupied, afterSecond, "a second size reuses the same SDF glyphs")
 
         world:getMut(first, text.Text).size = 52
         frame(world, renderer)
-        local afterResize = renderer.images:usage()
+        local afterResize = renderer.sprites.images:usage()
         assert.are.equal(occupied, afterResize, "resizing changes instances, not native glyph generation")
         renderer:destroy()
     end)
@@ -271,7 +271,7 @@ describe("gfx.text", function()
         local entity = world:spawn(
             ui.Style({ maxWidth = "100%" }),
             ui.Intrinsic("text", { wrap = true }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity),
             Tint(0.0, 1.0, 0.0, 1.0),
             text.Text.new({ text = "alpha beta gamma", font = font, size = 32 })
@@ -298,11 +298,11 @@ describe("gfx.text", function()
         local edited = spawnText(world, 10, 160, "BBBBBBBB", 24)
         frame(world, renderer)
         frame(world, renderer)
-        assert.are.equal(0, renderer.rewritten)
+        assert.are.equal(0, renderer.sprites.rewritten)
 
         world:getMut(edited, text.Text).text = "CCCCCCCC"
         frame(world, renderer)
-        assert.are.equal(8, renderer.rewritten)
+        assert.are.equal(8, renderer.sprites.rewritten)
         renderer:destroy()
     end)
 
@@ -310,11 +310,11 @@ describe("gfx.text", function()
         local world, renderer = newScene()
         local entity = spawnText(world, 24, 48, "Gone", 48)
         frame(world, renderer)
-        assert.is_true(renderer.count > 0)
+        assert.is_true(renderer.sprites.count > 0)
 
         world:despawn(entity)
         local pixels = frame(world, renderer)
-        assert.are.equal(0, renderer.count)
+        assert.are.equal(0, renderer.sprites.count)
         assert.are.equal(0, ink(pixels))
         renderer:destroy()
     end)

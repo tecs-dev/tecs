@@ -18,16 +18,16 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local loader = require("tecs.ffi.loader")
-local Extractor = require("tecs.Extractor")
-local FramePacket = require("tecs.FramePacket")
+local SpriteExtractor = require("tecs.internal.render.SpriteExtractor")
+local SpriteFramePacket = require("tecs.internal.render.SpriteFramePacket")
 local components = require("tecs.components")
 local ecs = require("tecs.ecs")
 local sheet = require("tecs.gfx.sheet")
 local instancelayout = require("tecs.gpu.instancelayout")
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local Tint = components.Tint
-local Renderable = components.Renderable
+local Renderable2D = components.Renderable2D
 local Pivot = sheet.Pivot
 
 local INSTANCE_FLOATS = instancelayout.FLOATS
@@ -49,14 +49,14 @@ describe("a pivoted quad", function()
     -- plain C array is the whole of what a device supplies it with.
     local function newExtraction()
         local world = tecs.ecs.newWorld()
-        local extractor = Extractor.create({
+        local extractor = SpriteExtractor.create({
             capacity = CAPACITY,
             whiteU0 = 0.0,
             whiteV0 = 0.0,
             whiteU1 = 1.0,
             whiteV1 = 1.0,
         })
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         local instances = loader.newArray("float[?]", CAPACITY * INSTANCE_FLOATS)
         local bounds = loader.newArray("float[?]", CAPACITY * BOUND_FLOATS)
         extractor:setStaging(0, instances, bounds)
@@ -79,14 +79,14 @@ describe("a pivoted quad", function()
     -- A 40 by 60 quad at 100, 200, so a half height is thirty and a half
     -- width twenty.
     local function quad(rotation)
-        return Transform(100, 200, 0, 1, rotation or 0, 40, 60)
+        return Transform2D(100, 200, 0, 1, rotation or 0, 40, 60)
     end
 
     it("hangs the quad off the point the pivot names", function()
         local world, _, instances = newExtraction()
         -- The foot of the frame. Standing that point on the entity lifts the
         -- middle half a height up the screen, so to a smaller Y.
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Pivot(0.5, 1.0))
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), Pivot(0.5, 1.0))
 
         world:update(1 / 60)
 
@@ -97,7 +97,7 @@ describe("a pivoted quad", function()
 
     it("draws an entity carrying no pivot on its own position", function()
         local world, _, instances = newExtraction()
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable())
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D())
 
         world:update(1 / 60)
 
@@ -111,7 +111,7 @@ describe("a pivoted quad", function()
         -- A quarter turn. Unpivoted the middle would not move at all; pivoted
         -- it swings a half height round the entity, from thirty up the screen
         -- to thirty along X.
-        world:spawn(quad(math.pi / 2), Tint(1, 1, 1, 1), Renderable(), Pivot(0.5, 1.0))
+        world:spawn(quad(math.pi / 2), Tint(1, 1, 1, 1), Renderable2D(), Pivot(0.5, 1.0))
 
         world:update(1 / 60)
 
@@ -125,7 +125,7 @@ describe("a pivoted quad", function()
         -- The frame's top left, which is off the quad's middle on both axes.
         -- Unturned the middle would land at 120, 230; a half turn negates the
         -- offset and puts it at 80, 170 instead.
-        world:spawn(quad(math.pi), Tint(1, 1, 1, 1), Renderable(), Pivot(0.0, 0.0))
+        world:spawn(quad(math.pi), Tint(1, 1, 1, 1), Renderable2D(), Pivot(0.0, 0.0))
 
         world:update(1 / 60)
 
@@ -136,8 +136,8 @@ describe("a pivoted quad", function()
 
     it("moves the cull bound with the quad and leaves its size alone", function()
         local world, _, _, bounds = newExtraction()
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Pivot(0.5, 1.0))
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable())
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), Pivot(0.5, 1.0))
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D())
 
         world:update(1 / 60)
 
@@ -175,7 +175,7 @@ describe("a pivoted quad", function()
         local world, _, _, bounds = newExtraction()
         -- A tenth of the frame across and a quarter down, on a 40 by 60 quad,
         -- which is four world units and fifteen.
-        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Pivot(0.5, 1.0, 0, 0, 0.1, 0.25))
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), Pivot(0.5, 1.0, 0, 0, 0.1, 0.25))
 
         world:update(1 / 60)
 
@@ -188,7 +188,7 @@ describe("a pivoted quad", function()
 
     it("grows a turned bound in the safe direction", function()
         local world, _, _, bounds = newExtraction()
-        world:spawn(quad(math.pi / 4), Tint(1, 1, 1, 1), Renderable(), Pivot(0.5, 1.0, 0, 0, 0.1, 0.25))
+        world:spawn(quad(math.pi / 4), Tint(1, 1, 1, 1), Renderable2D(), Pivot(0.5, 1.0, 0, 0, 0.1, 0.25))
 
         world:update(1 / 60)
 
@@ -209,8 +209,8 @@ describe("a pivoted quad", function()
         -- world units across a sixteenth of the depth range, so a shift small
         -- enough to be a sprite moves the depth by less than a float shows.
         -- Four thousand of it does.
-        world:spawn(Transform(100, 200, 0, 1, 0, 40, 8000), Tint(1, 1, 1, 1), Renderable(), Pivot(0.5, 1.0))
-        world:spawn(Transform(100, 200, 0, 1, 0, 40, 8000), Tint(1, 1, 1, 1), Renderable())
+        world:spawn(Transform2D(100, 200, 0, 1, 0, 40, 8000), Tint(1, 1, 1, 1), Renderable2D(), Pivot(0.5, 1.0))
+        world:spawn(Transform2D(100, 200, 0, 1, 0, 40, 8000), Tint(1, 1, 1, 1), Renderable2D())
 
         world:update(1 / 60)
 
@@ -222,7 +222,7 @@ describe("a pivoted quad", function()
 
     it("rewrites the row when only the pivot moved", function()
         local world, packet, instances = newExtraction()
-        local entity = world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Pivot(0.5, 1.0))
+        local entity = world:spawn(quad(), Tint(1, 1, 1, 1), Renderable2D(), Pivot(0.5, 1.0))
 
         world:update(1 / 60)
         world:update(1 / 60)

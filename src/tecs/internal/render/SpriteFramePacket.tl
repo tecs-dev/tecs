@@ -20,7 +20,7 @@ local loader <const> = require("tecs.ffi.loader")
 local dirtyranges <const> = require("tecs.gpu.dirtyranges")
 local lightlayout <const> = require("tecs.gpu.lightlayout")
 
-local type Camera = require("tecs.gfx.Camera")
+local type Camera2D = require("tecs.gfx.Camera2D")
 
 local LIGHT_FLOATS <const> = lightlayout.FLOATS
 local MAX_LIGHTS <const> = lightlayout.MAX
@@ -31,7 +31,7 @@ local MAX_LIGHTS <const> = lightlayout.MAX
 --- rewritten each frame between `begin` and the extraction that fills it, and
 --- is only meaningful to the backend consuming that same frame: nothing here
 --- describes a frame other than the last one extracted.
-local record FramePacket
+local record SpriteFramePacket
     --- Staging slot the instance and bounds bytes were written into. The
     --- backend flushes this slot and no other.
     slot: integer
@@ -65,6 +65,14 @@ local record FramePacket
     --- `assets/shaders/include/cull.glsl`. This number and that sign come from
     --- one test and are wrong together or right together.
     blendCount: integer
+
+    --- Resident instances the shadow lane may draw.
+    ---
+    --- Exact for entity-backed runs and an upper bound for producers, by the
+    --- same rule as `blendCount`. Zero lets the sprite backend skip caster
+    --- compaction and all sprite recording inside the renderer's shadow
+    --- passes without inspecting a GPU result.
+    castCount: integer
 
     --- Where the view was when the frame was extracted, copied rather than
     --- referenced: the camera the game holds keeps moving, and a frame is
@@ -106,20 +114,21 @@ local record FramePacket
     boundsRanges: dirtyranges
 end
 
-local FramePacketMT <const>: metatable<FramePacket> = {__index = FramePacket}
+local SpriteFramePacketMT <const>: metatable<SpriteFramePacket> = {__index = SpriteFramePacket}
 
 --- Builds an empty packet, with its storage allocated once.
 ---
 --- @return A packet reporting nothing drawn, at the origin and unzoomed. The
 ---     light array and the two range lists are allocated here and are the same
 ---     objects for the life of it.
-function FramePacket.create(): FramePacket
-    local self = setmetatable({} as FramePacket, FramePacketMT)
+function SpriteFramePacket.create(): SpriteFramePacket
+    local self = setmetatable({} as SpriteFramePacket, SpriteFramePacketMT)
     self.slot = 0
     self.count = 0
     self.dropped = 0
     self.rewritten = 0
     self.blendCount = 0
+    self.castCount = 0
     self.cameraX = 0.0
     self.cameraY = 0.0
     self.cameraZoom = 1.0
@@ -145,7 +154,7 @@ end
 ---
 --- @param slot The staging slot this frame's bytes are going into, zero-based
 ---     and below `Buffer.slotCount`. Recorded rather than checked.
-function FramePacket:begin(slot: integer)
+function SpriteFramePacket:begin(slot: integer)
     self.slot = slot
     self.lightCount = 0
     self.instanceRanges:clear()
@@ -156,7 +165,7 @@ end
 ---
 --- @param camera Read here and not retained, so moving it afterwards does not
 ---     move the frame this packet describes.
-function FramePacket:setCamera(camera: Camera)
+function SpriteFramePacket:setCamera(camera: Camera2D)
     self.cameraX = camera.x
     self.cameraY = camera.y
     self.cameraZoom = camera.zoom
@@ -172,7 +181,7 @@ end
 --- that raises over a light nobody would have picked out of the image. Order
 --- decides which are kept, so the first `lightlayout.MAX` offered survive and
 --- the rest of the frame's are lost.
-function FramePacket:addLight(
+function SpriteFramePacket:addLight(
     x: number, y: number, z: number, radius: number, r: number, g: number, b: number, intensity: number
 )
     local index = self.lightCount
@@ -193,4 +202,4 @@ function FramePacket:addLight(
     lights[base + 7] = intensity
 end
 
-return FramePacket
+return SpriteFramePacket

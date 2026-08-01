@@ -6,7 +6,7 @@ outline: deep
 # Builtins
 
 Every world registers the same core components, relationship, events, and
-systems. Games use them directly from `tecs.ecs`, except for `tecs.Transform`,
+systems. Games use them directly from `tecs.ecs`, except for `tecs.Transform2D`,
 which sits at the root because every subsystem moves it.
 
 The durable entity-key component uses the public name `EntityKey` and the
@@ -69,9 +69,9 @@ Tecs owns the relationship target field; callers treat it as read-only and
 replace the edge through `world:set`. [Relationships](/modules/ecs/relationships/)
 covers storage and traversal.
 
-## Transform {#transform}
+## Transform2D {#transform}
 
-`Transform` holds world position, layer, rotation, and scale in one FFI
+`Transform2D` holds world position, layer, rotation, and scale in one FFI
 component. Positions use world units, which map to pixels with the origin at
 the top left. Rotation uses radians. Layer starts at 1 and rejects values below 1.
 
@@ -80,10 +80,10 @@ The positional constructor orders values as `x`, `y`, `z`, `layer`,
 
 ```teal
 local entity <const> = world:spawn(
-    tecs.Transform(10, 11, 1, 2)
+    tecs.Transform2D(10, 11, 1, 2)
 )
 
-local transform <const> = world:getMut(entity, tecs.Transform)
+local transform <const> = world:getMut(entity, tecs.Transform2D)
 transform.rotation = math.pi / 4
 transform.scaleX = 2
 transform.scaleY = 2
@@ -91,27 +91,27 @@ transform.scaleY = 2
 
 Callers may write transform fields through `getMut`. Tecs owns storage and
 dirty marks. A write through `world:get` changes the cdata but marks nothing,
-so that path requires `world:markComponentDirty(entity, tecs.Transform)`.
+so that path requires `world:markComponentDirty(entity, tecs.Transform2D)`.
 
 The hierarchy, sequencer, physics, and renderer share this component.
-Rendering additionally requires `Tint` and `Renderable`.
+Rendering additionally requires `Tint` and `Renderable2D`.
 
-## RelativeTransform {#relativetransform}
+## RelativeTransform2D {#relativetransform}
 
-`RelativeTransform` expresses a child pose relative to its `ChildOf` parent:
+`RelativeTransform2D` expresses a child pose relative to its `ChildOf` parent:
 
 ```teal
-local parent <const> = world:spawn(tecs.Transform(100, 100))
+local parent <const> = world:spawn(tecs.Transform2D(100, 100))
 local child <const> = world:spawn(
     tecs.ecs.ChildOf(parent),
-    tecs.ecs.RelativeTransform(50, 30)
+    tecs.ecs.RelativeTransform2D(50, 30)
 )
 ```
 
-The component requires `Transform`, so both enter the same archetype
+The component requires `Transform2D`, so both enter the same archetype
 transition. Callers own and may mutate the relative fields through `getMut`.
-The builtin hierarchy system owns the resulting world `Transform` while the
-entity carries both `ChildOf` and `RelativeTransform`; a later composition
+The builtin hierarchy system owns the resulting world `Transform2D` while the
+entity carries both `ChildOf` and `RelativeTransform2D`; a later composition
 overwrites direct edits to that derived transform.
 
 Composition rotates and scales the offset by the parent, adds rotations,
@@ -206,9 +206,9 @@ World construction installs three systems:
 | System                          | Phase         | Work                                               |
 | ------------------------------- | ------------- | -------------------------------------------------- |
 | `ttl`                           | `FixedUpdate` | Decrement `TTL.remaining` and despawn at zero      |
-| `RelativeTransform`             | `PostUpdate`  | Compose child world transforms                     |
+| `RelativeTransform2D`           | `PostUpdate`  | Compose child world transforms                     |
 | `RelativeTransformDirtySampler` | `RenderLast`  | Carry late hierarchy dirtiness into the next frame |
 
 The `ttl` query uses `type = "logic"`, so paused entities keep their remaining
 time. Hierarchy composition runs before `RenderFirst` extraction and only
-writes a child `Transform` when the composed values differ.
+writes a child `Transform2D` when the composed values differ.

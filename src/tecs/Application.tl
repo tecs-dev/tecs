@@ -14,7 +14,7 @@ return tecs.newApplication({
     },
     plugin = function(world: tecs.World, app: tecs.Application)
         local transforms <const> = world:newQuery({
-            include = {tecs.Transform},
+            include = {tecs.Transform2D},
         })
 
         world:addSystem({
@@ -23,7 +23,7 @@ return tecs.newApplication({
             run = function(dt: number)
                 for archetype, length in transforms:iter() do
                     local column <const> =
-                        archetype:getMut(tecs.Transform)
+                        archetype:getMut(tecs.Transform2D)
                     for row = 1, length do
                         column[row].x = column[row].x + 120 * dt
                     end
@@ -31,7 +31,7 @@ return tecs.newApplication({
             end,
         })
 
-        world:spawn(tecs.Transform(100, 100))
+        world:spawn(tecs.Transform2D(100, 100))
     end,
 })
 ```
@@ -229,11 +229,11 @@ local record Application
         --- writes into a run of its own rather than spawning an entity per
         --- glyph. This is a ceiling rather than a hint. Rows past it are
         --- dropped rather than growing a buffer mid-frame, and
-        --- `renderer.dropped` counts them.
+        --- `renderer.sprites.dropped` counts them.
         ---
         --- Sized independently of `maxEntities` beside it, because the two
         --- count different things: a world full of entities that carry no
-        --- [`Renderable`](tealdoc:tecs.components.Renderable) needs no instances at all,
+        --- [`Renderable2D`](tealdoc:tecs.components.Renderable2D) needs no instances at all,
         --- and one text entity needs
         --- one instance per character.
         capacity: integer
@@ -294,7 +294,7 @@ local record Application
         --- row, so it still rewrites the run; that includes a
         --- `batchSpawn` fill callback, which declares intent on the whole
         --- column it writes new rows into. And an archetype carrying
-        --- [`PreviousTransform`](tealdoc:tecs.components.PreviousTransform) is
+        --- [`PreviousTransform2D`](tealdoc:tecs.components.PreviousTransform2D) is
         --- interpolated, so its drawn positions move on every frame that falls
         --- at a new point in the fixed step whatever the world did.
         partialRewrites: boolean
@@ -304,8 +304,8 @@ local record Application
         --- cell. On, the ceiling is the array's area instead.
         packImages: boolean
         --- Caller-writable. Enables entity shadows and configures their cost. Nil, the
-        --- default, means an [`Occluder`](tealdoc:tecs.components.Occluder) or a
-        --- [`DropShadow`](tealdoc:tecs.components.DropShadow) on an entity draws
+        --- default, means an [`Occluder2D`](tealdoc:tecs.components.Occluder2D) or a
+        --- [`DropShadow2D`](tealdoc:tecs.components.DropShadow2D) on an entity draws
         --- the entity and casts nothing, because the targets that would hold a
         --- shadow are never built. An empty table turns them on with every
         --- default; see `Deferred.ShadowOptions` for the seven numbers.
@@ -724,11 +724,13 @@ function Application:_init(): boolean
         self.device:getSwapchainFormat(),
         {
             ambient = config.ambientLight,
-            capacity = config.capacity,
-            reserveRuns = config.reserveRuns,
-            partialRewrites = config.partialRewrites,
-            packImages = config.packImages,
             shadows = config.shadows,
+            sprites = {
+                capacity = config.capacity,
+                reserveRuns = config.reserveRuns,
+                partialRewrites = config.partialRewrites,
+                packImages = config.packImages,
+            },
         }
     )
     self.renderer:install(self.world)
@@ -1151,7 +1153,7 @@ end
 --- recreated: they are not, they belong to the backend, the deferred pipeline,
 --- the image array and every buffer, and a recreation that missed one is a
 --- use-after-free rather than a black frame. The image array would have to be
---- the image array would need to support refilling, but `Renderer:registerImage`
+--- the image array would need to support refilling, but `renderer.sprites:registerImage`
 --- releases the source pixels,
 --- because the array holds them, so there is nothing on the CPU to upload
 --- again. And it would have to be testable: none of these events fires on the

@@ -10,9 +10,9 @@ matching archetype, reads through `get`, and takes writable columns through
 `getMut`:
 
 ```teal
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 local movers <const> = world:newQuery({
-    include = {Transform, Velocity},
+    include = {Transform2D, Velocity},
 })
 
 world:addSystem({
@@ -20,7 +20,7 @@ world:addSystem({
     phase = tecs.ecs.phases.Update,
     run = function(dt: number)
         for archetype, length in movers:iter() do
-            local transforms <const> = archetype:getMut(Transform)
+            local transforms <const> = archetype:getMut(Transform2D)
             local velocities <const> = archetype:get(Velocity)
 
             for row = 1, length do
@@ -34,7 +34,7 @@ world:addSystem({
 })
 ```
 
-`getMut` marks the `Transform` column dirty. The renderer and other
+`getMut` marks the `Transform2D` column dirty. The renderer and other
 incremental consumers use that mark to skip unchanged columns.
 
 Component values belong to callers. Callers may replace them with `world:set`
@@ -50,8 +50,8 @@ around those values.
 | [Scalar](/modules/ecs/components/scalar-components) | One `number`, `boolean`, or `string` per entity              |
 | [Tag](/modules/ecs/components/tag-components)       | Presence with no per-entity value                            |
 
-The engine uses the same factories. `Transform`, `Sprite`, `Tint`, `Material`,
-`Clip`, and `PointLight` use FFI storage; `Renderable` uses table-component
+The engine uses the same factories. `Transform2D`, `Sprite`, `Tint`, `Material`,
+`Clip`, and `PointLight2D` use FFI storage; `Renderable2D` uses table-component
 registration as a presence marker.
 
 ## Entity access
@@ -60,14 +60,14 @@ registration as a presence marker.
 component returns its raw value:
 
 ```teal
-local transform <const> = world:get(entity, tecs.Transform)
+local transform <const> = world:get(entity, tecs.Transform2D)
 local name <const> = world:get(entity, tecs.ecs.Name)
 ```
 
 Call `world:getMut` before an in-place write:
 
 ```teal
-local transform <const> = world:getMut(entity, tecs.Transform)
+local transform <const> = world:getMut(entity, tecs.Transform2D)
 if transform then
     transform.x = transform.x + 10
 end
@@ -91,7 +91,7 @@ Pass instances to `world:spawn` and `world:set`:
 ```teal
 local entity <const> = world:spawn(
     tecs.ecs.Name("Frank"),
-    tecs.Transform(100, 200)
+    tecs.Transform2D(100, 200)
 )
 
 world:set(entity, tecs.ecs.Name("Grace"))
@@ -128,11 +128,11 @@ tecs.ecs.newFFIComponent({
         {"y", "float"},
     },
     defaults = {0, 0},
-    requires = {tecs.Transform},
+    requires = {tecs.Transform2D},
 })
 
 local entity <const> = world:spawn(Velocity(10, 20))
-assert(world:has(entity, tecs.Transform))
+assert(world:has(entity, tecs.Transform2D))
 ```
 
 A `requires` entry may hold a component type, which Tecs calls with no
@@ -140,7 +140,7 @@ arguments, or a component instance shared by every automatic addition.
 `newComponent`, `newFFIComponent`, `newScalarComponent`, `newTagComponent`,
 and both relationship factories accept the option.
 
-`tecs.ecs.RelativeTransform` requires `tecs.Transform`, so a relative
+`tecs.ecs.RelativeTransform2D` requires `tecs.Transform2D`, so a relative
 transform and the world transform it feeds enter the same archetype together.
 
 Use [query callbacks](/modules/ecs/queries/callbacks) for work that must run when a

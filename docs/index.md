@@ -82,18 +82,18 @@ owns the loop: an entry file returns an application, so game code registers
 work instead of driving frames itself.
 
 ```teal
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 
 return tecs.newApplication({
     plugin = function(world: tecs.World, app: tecs.Application)
-        local movers = world:newQuery({ include = { Transform } })
+        local movers = world:newQuery({ include = { Transform2D } })
 
         world:addSystem({
             name = "game.Spin",
             phase = tecs.ecs.phases.Update,
             run = function(dt: number)
                 for archetype, length in movers:iter() do
-                    local transforms = archetype:getMut(Transform)
+                    local transforms = archetype:getMut(Transform2D)
                     for row = 1, length do
                         transforms[row].rotation = transforms[row].rotation + dt
                     end
@@ -101,7 +101,7 @@ return tecs.newApplication({
             end,
         })
 
-        world:spawn(Transform(100, 100))
+        world:spawn(Transform2D(100, 100))
     end,
 })
 ```
@@ -164,18 +164,18 @@ local ChildOf = tecs.ecs.ChildOf
 -- Create a parent entity
 local parent: integer = world:spawn(
     tecs.ecs.Name("parent"),
-    tecs.Transform(100, 100)
+    tecs.Transform2D(100, 100)
 )
 
 -- ChildOf has cascadeDelete; despawning parent despawns children too.
 local child1: integer = world:spawn(
     ChildOf(parent),
-    tecs.ecs.RelativeTransform(20, 0)
+    tecs.ecs.RelativeTransform2D(20, 0)
 )
 
 local child2: integer = world:spawn(
     ChildOf(parent),
-    tecs.ecs.RelativeTransform(-20, 0)
+    tecs.ecs.RelativeTransform2D(-20, 0)
 )
 
 -- Walk children of a specific parent
@@ -272,7 +272,7 @@ On `tecs` itself, because no one module owns them:
 - [`tecs.Future`](/modules/Future) - a value that settles once
 - [`tecs.newApplication`](/modules/Application) - builds the application an entry file returns
 - [`tecs.scoped`](/modules/#tecs.scoped) - closes explicitly owned resources when one callback ends
-- [`tecs.Transform`](/modules/ecs/builtins#transform) - where an entity is, and the one component every subsystem moves
+- [`tecs.Transform2D`](/modules/ecs/builtins#transform) - where an entity is, and the one component every subsystem moves
 - [`tecs.version`](/modules/) - the version of this build, as a string
 
 :::

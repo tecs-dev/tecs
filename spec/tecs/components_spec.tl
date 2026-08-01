@@ -776,13 +776,13 @@ describe(
             "FFI components",
             function()
                 describe(
-                    "Transform component",
+                    "Transform2D component",
                     function()
                         it(
                             "should default layer to 1 when not provided",
                             function()
-                                local transform = tecs.Transform()
-                                luassert.is_equal(transform.layer, 1, "Transform should default layer to 1")
+                                local transform = tecs.Transform2D()
+                                luassert.is_equal(transform.layer, 1, "Transform2D should default layer to 1")
                             end
                         )
 
@@ -790,8 +790,8 @@ describe(
                             "should reject layer 0 as invalid",
                             function()
                                 luassert.has_error(
-                                    function() tecs.Transform(10, 20, 30, 0) end,
-                                    "Transform layer must be greater than 0, got: 0"
+                                    function() tecs.Transform2D(10, 20, 30, 0) end,
+                                    "Transform2D layer must be greater than 0, got: 0"
                                 )
                             end
                         )
@@ -799,11 +799,11 @@ describe(
                         it(
                             "should preserve valid layer values",
                             function()
-                                local transform = tecs.Transform(5, 10, 15, 3)
-                                luassert.is_equal(transform.layer, 3, "Transform should preserve valid layer")
-                                luassert.is_equal(transform.x, 5, "Transform should preserve x value")
-                                luassert.is_equal(transform.y, 10, "Transform should preserve y value")
-                                luassert.is_equal(transform.z, 15, "Transform should preserve z value")
+                                local transform = tecs.Transform2D(5, 10, 15, 3)
+                                luassert.is_equal(transform.layer, 3, "Transform2D should preserve valid layer")
+                                luassert.is_equal(transform.x, 5, "Transform2D should preserve x value")
+                                luassert.is_equal(transform.y, 10, "Transform2D should preserve y value")
+                                luassert.is_equal(transform.z, 15, "Transform2D should preserve z value")
                             end
                         )
 
@@ -811,8 +811,8 @@ describe(
                             "should reject negative layer values",
                             function()
                                 luassert.has_error(
-                                    function() tecs.Transform(0, 0, 0, -1) end,
-                                    "Transform layer must be greater than 0, got: -1"
+                                    function() tecs.Transform2D(0, 0, 0, -1) end,
+                                    "Transform2D layer must be greater than 0, got: -1"
                                 )
                             end
                         )
@@ -821,8 +821,8 @@ describe(
                             "should reject negative layer values with table argument",
                             function()
                                 luassert.has_error(
-                                    function() tecs.Transform.new({x = 0, y = 0, z = 0, layer = -5}) end,
-                                    "Transform layer must be greater than 0, got: -5"
+                                    function() tecs.Transform2D.new({x = 0, y = 0, z = 0, layer = -5}) end,
+                                    "Transform2D layer must be greater than 0, got: -5"
                                 )
                             end
                         )
@@ -830,13 +830,13 @@ describe(
                         it(
                             "should default layer to 1 with table argument when layer is nil",
                             function()
-                                local transform = tecs.Transform.new({x = 100, y = 200, z = 300})
+                                local transform = tecs.Transform2D.new({x = 100, y = 200, z = 300})
                                 luassert.is_equal(
-                                    transform.layer, 1, "Transform should default layer to 1 with table argument"
+                                    transform.layer, 1, "Transform2D should default layer to 1 with table argument"
                                 )
-                                luassert.is_equal(transform.x, 100, "Transform should preserve x from table")
-                                luassert.is_equal(transform.y, 200, "Transform should preserve y from table")
-                                luassert.is_equal(transform.z, 300, "Transform should preserve z from table")
+                                luassert.is_equal(transform.x, 100, "Transform2D should preserve x from table")
+                                luassert.is_equal(transform.y, 200, "Transform2D should preserve y from table")
+                                luassert.is_equal(transform.z, 300, "Transform2D should preserve z from table")
                             end
                         )
 
@@ -844,8 +844,8 @@ describe(
                             "should reject layer 0 with table argument",
                             function()
                                 luassert.has_error(
-                                    function() tecs.Transform.new({x = 50, y = 60, z = 70, layer = 0}) end,
-                                    "Transform layer must be greater than 0, got: 0"
+                                    function() tecs.Transform2D.new({x = 50, y = 60, z = 70, layer = 0}) end,
+                                    "Transform2D layer must be greater than 0, got: 0"
                                 )
                             end
                         )
@@ -853,39 +853,39 @@ describe(
                         it(
                             "should default coordinates to 0 when not provided",
                             function()
-                                local transform = tecs.Transform()
-                                luassert.is_equal(transform.x, 0, "Transform should default x to 0")
-                                luassert.is_equal(transform.y, 0, "Transform should default y to 0")
-                                luassert.is_equal(transform.z, 0, "Transform should default z to 0")
-                                luassert.is_equal(transform.layer, 1, "Transform should default layer to 1")
+                                local transform = tecs.Transform2D()
+                                luassert.is_equal(transform.x, 0, "Transform2D should default x to 0")
+                                luassert.is_equal(transform.y, 0, "Transform2D should default y to 0")
+                                luassert.is_equal(transform.z, 0, "Transform2D should default z to 0")
+                                luassert.is_equal(transform.layer, 1, "Transform2D should default layer to 1")
                             end
                         )
 
                         it(
                             "should default rotation to 0",
                             function()
-                                local transform = tecs.Transform()
-                                luassert.is_equal(transform.rotation, 0, "Transform should default rotation to 0")
+                                local transform = tecs.Transform2D()
+                                luassert.is_equal(transform.rotation, 0, "Transform2D should default rotation to 0")
                             end
                         )
 
                         it(
                             "should default scale to 1",
                             function()
-                                local transform = tecs.Transform()
-                                luassert.is_equal(transform.scaleX, 1, "Transform should default scaleX to 1")
-                                luassert.is_equal(transform.scaleY, 1, "Transform should default scaleY to 1")
+                                local transform = tecs.Transform2D()
+                                luassert.is_equal(transform.scaleX, 1, "Transform2D should default scaleX to 1")
+                                luassert.is_equal(transform.scaleY, 1, "Transform2D should default scaleY to 1")
                             end
                         )
 
                         it(
                             "should preserve rotation when set",
                             function()
-                                local transform = tecs.Transform()
+                                local transform = tecs.Transform2D()
                                 transform.rotation = math.pi / 4
                                 luassert.is_true(
                                     math.abs(transform.rotation - math.pi / 4) < 0.0001,
-                                    "Transform should preserve rotation"
+                                    "Transform2D should preserve rotation"
                                 )
                             end
                         )
@@ -893,24 +893,24 @@ describe(
                         it(
                             "should preserve scale when set",
                             function()
-                                local transform = tecs.Transform()
+                                local transform = tecs.Transform2D()
                                 transform.scaleX = 2.5
                                 transform.scaleY = 0.5
-                                luassert.is_equal(transform.scaleX, 2.5, "Transform should preserve scaleX")
-                                luassert.is_equal(transform.scaleY, 0.5, "Transform should preserve scaleY")
+                                luassert.is_equal(transform.scaleX, 2.5, "Transform2D should preserve scaleX")
+                                luassert.is_equal(transform.scaleY, 0.5, "Transform2D should preserve scaleY")
                             end
                         )
 
                         it(
                             "should support rotation with position and layer",
                             function()
-                                local transform = tecs.Transform(10, 20, 30, 2)
+                                local transform = tecs.Transform2D(10, 20, 30, 2)
                                 transform.rotation = math.pi / 2
-                                luassert.is_equal(transform.x, 10, "Transform should preserve x")
-                                luassert.is_equal(transform.y, 20, "Transform should preserve y")
+                                luassert.is_equal(transform.x, 10, "Transform2D should preserve x")
+                                luassert.is_equal(transform.y, 20, "Transform2D should preserve y")
                                 luassert.is_true(
                                     math.abs(transform.rotation - math.pi / 2) < 0.0001,
-                                    "Transform should preserve rotation"
+                                    "Transform2D should preserve rotation"
                                 )
                             end
                         )
@@ -918,12 +918,12 @@ describe(
                         it(
                             "should support scale with position and layer",
                             function()
-                                local transform = tecs.Transform(5, 15, 25, 3)
+                                local transform = tecs.Transform2D(5, 15, 25, 3)
                                 transform.scaleX = 3
                                 transform.scaleY = 3
-                                luassert.is_equal(transform.x, 5, "Transform should preserve x")
-                                luassert.is_equal(transform.scaleX, 3, "Transform should preserve scaleX")
-                                luassert.is_equal(transform.scaleY, 3, "Transform should preserve scaleY")
+                                luassert.is_equal(transform.x, 5, "Transform2D should preserve x")
+                                luassert.is_equal(transform.scaleX, 3, "Transform2D should preserve scaleX")
+                                luassert.is_equal(transform.scaleY, 3, "Transform2D should preserve scaleY")
                             end
                         )
                     end

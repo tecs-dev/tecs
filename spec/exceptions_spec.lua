@@ -34,9 +34,9 @@ local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local Tint = components.Tint
-local Renderable = components.Renderable
+local Renderable2D = components.Renderable2D
 
 describe("exception safety", function()
     local window, device, screen
@@ -74,7 +74,7 @@ describe("exception safety", function()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {
             ambient = { 1.0, 1.0, 1.0 },
-            capacity = 4096,
+            sprites = { capacity = 4096 },
         })
         renderer:install(world)
         return world, renderer
@@ -183,11 +183,11 @@ describe("exception safety", function()
 
     it("ends a compute pass a stage left open, and draws the next frame", function()
         local world, renderer = newScene()
-        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(1, 0, 0, 1), Renderable())
+        world:spawn(Transform2D(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(1, 0, 0, 1), Renderable2D())
 
         local explode = true
         local openInside = -1
-        renderer:addComputeStage({
+        renderer.sprites:addComputeStage({
             active = function()
                 return true
             end,
@@ -232,7 +232,7 @@ describe("exception safety", function()
     it("leaves the world applying mutations after a producer threw", function()
         local world, renderer = newScene()
         local explode = true
-        renderer:addProducer({
+        renderer.sprites:addProducer({
             count = function()
                 return 4
             end,
@@ -240,6 +240,9 @@ describe("exception safety", function()
                 return explode and { 1, 4 } or {}
             end,
             blended = function()
+                return 0
+            end,
+            casting = function()
                 return 0
             end,
             write = function()
@@ -382,16 +385,16 @@ describe("exception safety", function()
     -- crashed loop could render again, and reachable now that it can.
     it("rotates the staging slot even when the recording throws", function()
         local world, renderer = newScene()
-        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 16, 16), Tint(1, 0, 0, 1), Renderable())
+        world:spawn(Transform2D(SIZE / 2, SIZE / 2, 0, 1, 0, 16, 16), Tint(1, 0, 0, 1), Renderable2D())
 
-        local backend = renderer._backend
-        local consume = backend.consume
-        backend.consume = function()
+        local backend = renderer.sprites._backend
+        local prepare = backend.prepare
+        backend.prepare = function()
             error("spec: the recording threw")
         end
 
         world:update(1 / 60)
-        local wrote = renderer._packet.slot
+        local wrote = renderer.sprites._packet.slot
         local frame = newFrame()
         local ok, reason = pcall(renderer.render, renderer, frame)
         assert.is_false(ok)
@@ -402,9 +405,9 @@ describe("exception safety", function()
 
         -- And the extractor was actually repointed, rather than the renderer
         -- having moved a number nothing consults.
-        backend.consume = consume
+        backend.prepare = prepare
         world:update(1 / 60)
-        assert.are_not.equal(wrote, renderer._packet.slot)
+        assert.are_not.equal(wrote, renderer.sprites._packet.slot)
 
         local next_ = drawFrame(world, renderer)
         assert.are.equal("submitted", next_.state)

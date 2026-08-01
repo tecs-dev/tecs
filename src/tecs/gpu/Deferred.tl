@@ -128,6 +128,10 @@ local MASK <const> = 0
 local SHADOW <const> = 1
 local STAMP <const> = 2
 
+local function alwaysEnabled(): boolean
+    return true
+end
+
 --- One point light, positioned in the world the camera is looking at.
 ---
 --- World units rather than target pixels, because a light is a thing in the
@@ -184,7 +188,7 @@ local record ShadowOptions
     margin: number
     --- World height a caster at `height` one stands, which is the one number
     --- that puts a light's height and a caster's zero-to-one height in the
-    --- same space. Defaults to 64, which is `PointLight`'s own default height,
+    --- same space. Defaults to 64, which is `PointLight2D`'s own default height,
     --- so an occluder at height one and a light at its default are level and
     --- the shadow runs to the horizon.
     height: number
@@ -240,15 +244,19 @@ local record DeferredOptions
     ---
     --- Nil, which is the default, costs a pipeline nothing: three targets go
     --- unallocated, four passes go undeclared, and the resolve is built from
-    --- the variant of its shader that samples neither. Present, a scene that
-    --- casts nothing still pays the four passes, which draw no instances over
-    --- targets that clear to "no occluder" and "nothing shadowed". An empty
-    --- table turns shadows on with every default.
+    --- the variant of its shader that samples neither. An empty table turns
+    --- shadows on with every default. `shadowActive` can skip all four passes
+    --- on a frame with no casters while retaining those fixed resources.
     ---
     --- A setting rather than a count taken off a frame, because the alternative
     --- is a pass graph whose shape depends on what a world happens to hold this
     --- frame, and a resolve pipeline rebuilt the first time something casts.
     shadows: ShadowOptions
+    --- Reports whether this frame has shadow casters. Defaults to true.
+    ---
+    --- Returning false skips all four shadow passes and makes lighting ignore
+    --- their retained targets. Ignored unless `shadows` is set.
+    shadowActive: function(): boolean
     --- Draws the shadow lane's list into the occluder mask, at the mask's own
     --- widened projection. Called with the pass begun; `castUniform` is what
     --- says where to put a caster. Ignored unless `shadows` is set.
@@ -360,6 +368,8 @@ local record Deferred
     --- was told. Read by everything that would otherwise have to test for a
     --- target that is not there.
     _shadows: boolean
+    --- Reports whether the current frame should build and sample shadows.
+    _shadowActive: function(): boolean
     --- Size of the mask relative to the frame, as the targets were declared
     --- with. Kept because the mask's projection is derived from it.
     _shadowMaskScale: number
@@ -475,7 +485,7 @@ local function sceneUniform(self: Deferred, width: number, height: number): load
     scene[0] = self.ambient[1]
     scene[1] = self.ambient[2]
     scene[2] = self.ambient[3]
-    scene[3] = 0.0
+    scene[3] = self._shadows and self._shadowActive() and 1.0 or 0.0
     scene[4] = width
     scene[5] = height
     -- Out to the vec4 the block is laid out in. The light count is not here:
@@ -494,7 +504,7 @@ local function sceneUniform(self: Deferred, width: number, height: number): load
     scene[14] = self._boundsMaxX
     scene[15] = self._boundsMaxY
 
-    -- World to mask UV, which is `Camera:toScreen` against the mask's own
+    -- World to mask UV, which is `Camera2D:toScreen` against the mask's own
     -- projection divided through by the size that projection was built for.
     -- Clip space is what the two have in common, and it carries no resolution,
     -- so the mask's own scale drops out of this entirely: a mask at half size
@@ -546,6 +556,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     local tuning <const> = options.shadows or {}
     local shadows <const> = options.shadows ~= nil
     self._shadows = shadows
+    self._shadowActive = options.shadowActive or alwaysEnabled
     self._shadowMaskScale = tuning.maskScale or 1.0
     self._shadowSteps = tuning.steps or 24
     self._shadowMargin = tuning.margin or 200.0
@@ -713,14 +724,14 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     graph:pass({
         name = "geometry",
         outputs = {"albedo", "normal", "orm", "emission"},
-        -- Cleared to the far plane every frame, and "lessOrEqual" rather than
+        -- Cleared to the far plane every frame, and less-or-equal rather than
         -- "less" so equal depths still resolve to whatever drew last. Draw
         -- order is deterministic and means something here, so depth decides
         -- between instances that differ and leaves the rest alone.
         depth = {
             test = true,
             write = true,
-            compare = "lessOrEqual",
+            compare = GraphicsPipeline.COMPARE_LESS_OR_EQUAL,
             clear = 1.0,
         },
         execute = function(context: PassGraph.PassContext)
@@ -738,6 +749,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
             -- something done to a finished image.
             name = "occluders",
             outputs = {"occluders"},
+            enabled = self._shadowActive,
             execute = function(context: PassGraph.PassContext)
                 if options.occluders ~= nil then
                     options.occluders(context)
@@ -748,6 +760,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
             name = "occluderBlurH",
             inputs = {"occluders"},
             outputs = {"occludersTemp"},
+            enabled = self._shadowActive,
             execute = function(context: PassGraph.PassContext)
                 local blur <const> = self._blurUniform
                 blur[0] = 1.0 / context.width
@@ -767,6 +780,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
             name = "occluderBlurV",
             inputs = {"occludersTemp"},
             outputs = {"occluders"},
+            enabled = self._shadowActive,
             execute = function(context: PassGraph.PassContext)
                 local blur <const> = self._blurUniform
                 blur[0] = 0.0
@@ -784,6 +798,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
             -- is here because that is where a reader looks for it.
             name = "dropShadowAO",
             outputs = {"dropShadowAO"},
+            enabled = self._shadowActive,
             execute = function(context: PassGraph.PassContext)
                 if options.dropShadows ~= nil then
                     options.dropShadows(context)

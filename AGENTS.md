@@ -110,7 +110,7 @@ tecs/
 ### The dependency rule
 
 `tecs` is what a game reaches, and every public name on it is `tecs.<module>.<thing>`: `tecs.ecs.newWorld`,
-`tecs.gfx.Camera`, `tecs.newApplication`. A module may sit inside another module, one level and no
+`tecs.gfx.Camera2D`, `tecs.newApplication`. A module may sit inside another module, one level and no
 deeper, so `tecs.gfx.layers.configure` is also a public name and nothing goes past it. The host loads `tecs`
 before a game's first line, so a game writes no require; a headless tool or a spec writes `require("tecs")`
 and gets the same table.
@@ -143,7 +143,7 @@ for `tecs.types`, which sits below both.
 - Queries iterate through archetypes with `query:iter()`.
 - Builtins are registered automatically and sit directly on `tecs.ecs`: `ChildOf`, `TTL`, `Paused`, `Disabled`,
   `EntityKey` and the state transition events. `Transform` is the exception and sits at the root, as
-  `tecs.Transform`, because every subsystem moves the same one.
+  `tecs.Transform2D`, because every 2D subsystem moves the same one.
 - The state model is a stack: `world:createState`, `world:pushState`, `world:popState`, `world:peekState`.
 
 ### Rendering
@@ -383,7 +383,7 @@ because import order is meaningful), comments sparse and informational, and the 
   `snake_case`.
 - **Filenames and their import bindings** follow a class/module split:
   - The file _is_ a class (one dominant type you construct and call methods on, including component records):
-    **PascalCase**, e.g. `Camera.tl` → `local Camera = require("tecs.gfx.Camera")`.
+    **PascalCase**, e.g. `Camera2D.tl` → `local Camera2D = require("tecs.gfx.Camera2D")`.
   - The file is a _module_ containing a class or a namespace of functions: **luacase** (all lowercase, no
     separators), e.g. `shaderpack.tl` → `local shaderpack = require("tecs.gpu.shaderpack")`. Multi-word module
     files drop their underscores.

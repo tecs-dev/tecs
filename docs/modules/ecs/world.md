@@ -78,9 +78,9 @@ despawn, and rebuilds it after snapshot load.
 
 ```teal
 local player <const> = world:spawn(
-    tecs.Transform(100, 100),
+    tecs.Transform2D(100, 100),
     tecs.gfx.Tint(1, 1, 1, 1),
-    tecs.gfx.Renderable,
+    tecs.gfx.Renderable2D,
     tecs.ecs.Name("Player")
 )
 ```
@@ -99,16 +99,16 @@ ensure that each chosen slot has no live entity.
 
 ```teal
 local signature <const> = {
-    tecs.Transform,
+    tecs.Transform2D,
     tecs.gfx.Tint,
-    tecs.gfx.Renderable,
+    tecs.gfx.Renderable2D,
 }
 
 local firstId, ids = world:batchSpawn(
     1000,
     signature,
     function(archetype, firstRow, lastRow)
-        local transforms <const> = archetype:getMut(tecs.Transform)
+        local transforms <const> = archetype:getMut(tecs.Transform2D)
         local tints <const> = archetype:getMut(tecs.gfx.Tint)
 
         for row = firstRow, lastRow do
@@ -188,8 +188,8 @@ one explicitly:
 local function extinguish(world: tecs.World, entity: integer)
     world:defer()
     world:set(entity, tecs.gfx.Tint(0.2, 0.2, 0.2, 1))
-    world:remove(entity, tecs.gfx.PointLight)
-    world:remove(entity, tecs.gfx.Renderable)
+    world:remove(entity, tecs.gfx.PointLight2D)
+    world:remove(entity, tecs.gfx.Renderable2D)
     world:commit()
 end
 ```

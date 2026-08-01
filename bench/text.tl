@@ -32,7 +32,7 @@ local tecs <const> = require("tecs")
 local timing <const> = require("tecs.timing")
 local time <const> = require("tecs.platform.time")
 local text <const> = require("tecs.gfx.text")
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 local Tint <const> = tecs.gfx.Tint
 
 --- Text entities on screen.
@@ -114,7 +114,7 @@ return tecs.newApplication({
             local column = (index - 1) % columns
             local row = math.floor((index - 1) / columns)
             entities[index] = world:spawn(
-                Transform(column * (WIDTH / columns), 8.0 + row * SIZE * 1.4, 0.0, 1, 0.0, 1.0, 1.0),
+                Transform2D(column * (WIDTH / columns), 8.0 + row * SIZE * 1.4, 0.0, 1, 0.0, 1.0, 1.0),
                 Tint(0.9, 0.95, 1.0, 1.0),
                 text.Text.new({
                     text = phrase(index, LENGTH),
@@ -153,7 +153,7 @@ return tecs.newApplication({
                 for index = 1, SPAWN_RATE do
                     local at = (frame * SPAWN_RATE + index) % 997
                     transient[#transient + 1] = world:spawn(
-                        Transform(8.0 + (at % 60) * 20.0, 8.0 + math.floor(at / 60) * 18.0, 0.0, 1, 0.0, 1.0, 1.0),
+                        Transform2D(8.0 + (at % 60) * 20.0, 8.0 + math.floor(at / 60) * 18.0, 0.0, 1, 0.0, 1.0, 1.0),
                         Tint(1.0, 0.8, 0.2, 1.0),
                         text.Text.new({
                             text = tostring(100 + at),
@@ -191,8 +191,8 @@ return tecs.newApplication({
                 end
 
                 if frame >= WARMUP then
-                    rewritten = rewritten + renderer.rewritten
-                    glyphs = renderer.count
+                    rewritten = rewritten + renderer.sprites.rewritten
+                    glyphs = renderer.sprites.count
                 end
                 frame = frame + 1
             end,

@@ -243,11 +243,13 @@ describe("mcp reload_image", function()
     -- from a default.
     local function stub(region)
         return {
-            replaceImage = function(_, handle)
-                handed = { path = handle.path, width = handle.width, height = handle.height }
-                handle:release()
-                return nil, region
-            end,
+            sprites = {
+                replaceImage = function(_, handle)
+                    handed = { path = handle.path, width = handle.width, height = handle.height }
+                    handle:release()
+                    return nil, region
+                end,
+            },
         }
     end
 

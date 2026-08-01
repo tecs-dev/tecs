@@ -31,7 +31,7 @@ local record TestHelpers
         height: number
     end
 
-    record Transform is tecs.ecs.Component
+    record Transform2D is tecs.ecs.Component
         scale: number
         rotation: number
     end
@@ -42,7 +42,7 @@ local record TestHelpers
         HealthComponent: Health
         DeadComponent: Dead
         SpriteComponent: Sprite
-        TransformComponent: Transform
+        TransformComponent: Transform2D
 
         -- Relationship creators
         createRelationship: function(self: ComponentProvider, name: string, exclusive: boolean): tecs.ecs.Relationship
@@ -92,7 +92,7 @@ function TestHelpers.createComponentProvider(prefix: string, testId: integer): T
     local healthContainer: TestHelpers.Health = {}
     local deadContainer: TestHelpers.Dead = {}
     local spriteContainer: TestHelpers.Sprite = {}
-    local transformContainer: TestHelpers.Transform = {}
+    local transformContainer: TestHelpers.Transform2D = {}
 
     provider.PosComponent = tecs.ecs.newComponent({
         name = prefix .. "Pos" .. testId,
@@ -128,7 +128,7 @@ function TestHelpers.createComponentProvider(prefix: string, testId: integer): T
     })
 
     provider.TransformComponent = tecs.ecs.newComponent({
-        name = prefix .. "Transform" .. testId,
+        name = prefix .. "Transform2D" .. testId,
         container = transformContainer,
         fields = {"scale", "rotation"},
         defaults = {1, 0},

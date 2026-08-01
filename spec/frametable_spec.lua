@@ -18,8 +18,8 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local loader = require("tecs.ffi.loader")
-local Extractor = require("tecs.Extractor")
-local FramePacket = require("tecs.FramePacket")
+local SpriteExtractor = require("tecs.internal.render.SpriteExtractor")
+local SpriteFramePacket = require("tecs.internal.render.SpriteFramePacket")
 local components = require("tecs.components")
 local ecs = require("tecs.ecs")
 local sheet = require("tecs.gfx.sheet")
@@ -27,9 +27,9 @@ local animation = require("tecs.gfx.animation")
 local frametable = require("tecs.gfx.frametable")
 local instancelayout = require("tecs.gpu.instancelayout")
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local Tint = components.Tint
-local Renderable = components.Renderable
+local Renderable2D = components.Renderable2D
 local Sprite = components.Sprite
 local Animation = animation.Animation
 
@@ -327,14 +327,14 @@ describe("playback resolved on the GPU", function()
     -- plain C array is the whole of what a device supplies it with.
     local function newExtraction(config)
         local world = tecs.ecs.newWorld(config)
-        local extractor = Extractor.create({
+        local extractor = SpriteExtractor.create({
             capacity = CAPACITY,
             whiteU0 = 0.0,
             whiteV0 = 0.0,
             whiteU1 = 1.0,
             whiteV1 = 1.0,
         })
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         local instances = loader.newArray("float[?]", CAPACITY * INSTANCE_FLOATS)
         local bounds = loader.newArray("float[?]", CAPACITY * BOUND_FLOATS)
         extractor:setStaging(0, instances, bounds)
@@ -356,9 +356,9 @@ describe("playback resolved on the GPU", function()
         local world, _, instances = newExtraction()
 
         world:spawn(
-            Transform(10, 20, 0, 1, 0, 16, 16),
+            Transform2D(10, 20, 0, 1, 0, 16, 16),
             Tint(1, 1, 1, 1),
-            Renderable(),
+            Renderable2D(),
             source:sprite(1),
             animation.of(source, "forward")
         )
@@ -383,9 +383,9 @@ describe("playback resolved on the GPU", function()
         local world, packet = newExtraction()
 
         world:spawn(
-            Transform(10, 20, 0, 1, 0, 16, 16),
+            Transform2D(10, 20, 0, 1, 0, 16, 16),
             Tint(1, 1, 1, 1),
-            Renderable(),
+            Renderable2D(),
             source:sprite(1),
             animation.of(source, "forward")
         )
@@ -407,9 +407,9 @@ describe("playback resolved on the GPU", function()
         local world, packet, instances = newExtraction()
 
         local entity = world:spawn(
-            Transform(10, 20, 0, 1, 0, 16, 16),
+            Transform2D(10, 20, 0, 1, 0, 16, 16),
             Tint(1, 1, 1, 1),
-            Renderable(),
+            Renderable2D(),
             source:sprite(1),
             animation.of(source, "forward")
         )
@@ -432,9 +432,9 @@ describe("playback resolved on the GPU", function()
         local world, _, instances = newExtraction()
 
         local entity = world:spawn(
-            Transform(10, 20, 0, 1, 0, 16, 16),
+            Transform2D(10, 20, 0, 1, 0, 16, 16),
             Tint(1, 1, 1, 1),
-            Renderable(),
+            Renderable2D(),
             source:sprite(1),
             animation.of(source, "forward")
         )
@@ -453,7 +453,7 @@ describe("playback resolved on the GPU", function()
         source:bind(Sprite(1, 0.0, 0.0, 1.0, 1.0, 3))
         local world, _, instances = newExtraction()
 
-        world:spawn(Transform(10, 20, 0, 1, 0, 16, 16), Tint(1, 1, 1, 1), Renderable(), source:sprite(2))
+        world:spawn(Transform2D(10, 20, 0, 1, 0, 16, 16), Tint(1, 1, 1, 1), Renderable2D(), source:sprite(2))
         world:update(STEP)
 
         local u0 = select(1, regionAt(instances, 0))
@@ -500,9 +500,9 @@ describe("playback resolved on the GPU", function()
             source:bind(Sprite(1, 0.0, 0.0, 1.0, 1.0, 3))
             local world, packet, instances = newExtraction({ fixedMaxSteps = REBASE * 2 })
             local entity = world:spawn(
-                Transform(10, 20, 0, 1, 0, 16, 16),
+                Transform2D(10, 20, 0, 1, 0, 16, 16),
                 Tint(1, 1, 1, 1),
-                Renderable(),
+                Renderable2D(),
                 source:sprite(1),
                 animation.of(source, tag, { loop = tag ~= nil })
             )

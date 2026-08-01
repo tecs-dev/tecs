@@ -71,8 +71,8 @@ describe("Application", function()
         })
         assert.is_true(app:_init())
 
-        assert.are.equal(32, app.renderer.capacity)
-        assert.is_true(app.renderer.images.packed)
+        assert.are.equal(32, app.renderer.sprites.capacity)
+        assert.is_true(app.renderer.sprites.images.packed)
         assert.is_true(app.renderer.deferred:castsShadows())
 
         app:_shutdown()
@@ -83,7 +83,7 @@ describe("Application", function()
         assert.is_true(app:_init())
 
         assert.is_false(app.renderer.deferred:castsShadows())
-        assert.is_false(app.renderer.images.packed)
+        assert.is_false(app.renderer.sprites.images.packed)
 
         app:_shutdown()
     end)
@@ -165,12 +165,12 @@ describe("Application", function()
         -- built here and never handed to the game before it exists.
         local packed = build({})
         assert.is_true(packed:_init())
-        assert.is_false(packed.renderer:reservesRuns())
+        assert.is_false(packed.renderer.sprites:reservesRuns())
         packed:_shutdown()
 
         local reserved = build({ reserveRuns = true })
         assert.is_true(reserved:_init())
-        assert.is_true(reserved.renderer:reservesRuns(), "a game asking for reserved runs gets them")
+        assert.is_true(reserved.renderer.sprites:reservesRuns(), "a game asking for reserved runs gets them")
         reserved:_shutdown()
     end)
 
@@ -378,7 +378,11 @@ describe("Application", function()
         -- One entity, so extraction has something to write and the frame does
         -- real work rather than returning early.
         local function scene(world)
-            world:spawn(tecs.Transform(32, 32, 0, 1, 0, 16, 16), components.Tint(1, 0, 0, 1), components.Renderable())
+            world:spawn(
+                tecs.Transform2D(32, 32, 0, 1, 0, 16, 16),
+                components.Tint(1, 0, 0, 1),
+                components.Renderable2D()
+            )
         end
 
         it("unwinds the scope a system threw out of", function()
@@ -466,7 +470,7 @@ describe("Application", function()
             local app = build({
                 plugin = function(world, self)
                     scene(world)
-                    self.renderer:addComputeStage({
+                    self.renderer.sprites:addComputeStage({
                         active = function()
                             return true
                         end,
@@ -504,7 +508,7 @@ describe("Application", function()
             local app = build({
                 plugin = function(world, self)
                     scene(world)
-                    self.renderer:addProducer({
+                    self.renderer.sprites:addProducer({
                         count = function()
                             return 4
                         end,
@@ -512,6 +516,9 @@ describe("Application", function()
                             return explode and { 1, 4 } or {}
                         end,
                         blended = function()
+                            return 0
+                        end,
+                        casting = function()
                             return 0
                         end,
                         write = function()
@@ -620,11 +627,11 @@ describe("Application", function()
                 debug = true,
                 plugin = function(world, self)
                     world:spawn(
-                        tecs.Transform(32, 32, 0, 1, 0, 16, 16),
+                        tecs.Transform2D(32, 32, 0, 1, 0, 16, 16),
                         components.Tint(1, 0, 0, 1),
-                        components.Renderable()
+                        components.Renderable2D()
                     )
-                    self.renderer:addComputeStage({
+                    self.renderer.sprites:addComputeStage({
                         active = function()
                             return true
                         end,
@@ -859,9 +866,9 @@ describe("Application", function()
             local app = build({
                 plugin = function(world)
                     world:spawn(
-                        tecs.Transform(32, 32, 0, 1, 0, 16, 16),
+                        tecs.Transform2D(32, 32, 0, 1, 0, 16, 16),
                         components.Tint(1, 0, 0, 1),
-                        components.Renderable()
+                        components.Renderable2D()
                     )
                 end,
             })

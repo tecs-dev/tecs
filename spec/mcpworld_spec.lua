@@ -78,7 +78,7 @@ describe("mcp world tools", function()
         -- resolve to anything is worse than no field at all.
         assert.are.same({ "material", "param" }, found.Material.fields)
         assert.is_false(found.Material.tag)
-        for _, field in ipairs(found.Transform.fields) do
+        for _, field in ipairs(found.Transform2D.fields) do
             assert.is_falsy(field:find("^_"))
             assert.are_not.equal("componentName", field)
             assert.are_not.equal("storageType", field)
@@ -92,35 +92,35 @@ describe("mcp world tools", function()
         for _, entry in ipairs(ok("components_info", {}).components) do
             found[entry.name] = entry
         end
-        assert.is_true(found.Renderable.tag)
+        assert.is_true(found.Renderable2D.tag)
 
-        local entity = world:spawn(components.Renderable())
-        assert.are.equal(true, ok("info", { entity = entity }).components.Renderable)
+        local entity = world:spawn(components.Renderable2D())
+        assert.are.equal(true, ok("info", { entity = entity }).components.Renderable2D)
     end)
 
     it("queries by component and reports what it did not return", function()
         for index = 1, 5 do
-            world:spawn(tecs.Transform(index, 0, 0, 1, 0, 1, 1), components.Renderable())
+            world:spawn(tecs.Transform2D(index, 0, 0, 1, 0, 1, 1), components.Renderable2D())
         end
-        local result = ok("query", { include = { "Transform", "Renderable" }, limit = 2 })
+        local result = ok("query", { include = { "Transform2D", "Renderable2D" }, limit = 2 })
 
         assert.are.equal(5, result.matched, "the total is not the page")
         assert.are.equal(2, result.returned)
         assert.are.equal(2, #result.entities)
-        assert.are.equal(1, result.entities[1].components.Transform.x)
+        assert.are.equal(1, result.entities[1].components.Transform2D.x)
     end)
 
     it("names the components it knows when given one it does not", function()
         local result = call("query", { include = { "Nonexistent" } })
         assert.is_true(result.isError)
-        assert.is_truthy(result.content[1].text:find("Transform", 1, true), "the error should list what can be named")
+        assert.is_truthy(result.content[1].text:find("Transform2D", 1, true), "the error should list what can be named")
     end)
 
     it("names a game's own components without having been told about them", function()
         -- The whole point of reading the ECS registry rather than keeping a
         -- second list. Nothing here registered SpecAmmo with the debug server,
         -- and every tool still resolves it.
-        local entity = world:spawn(components.Renderable(), Ammo(3))
+        local entity = world:spawn(components.Renderable2D(), Ammo(3))
         world:commit()
 
         local listed = {}
@@ -161,8 +161,8 @@ describe("mcp world tools", function()
     it("reports an entity's Name beside its id", function()
         -- A bare id says nothing about which entity it is, and Name is what
         -- the ECS provides for saying so.
-        local named = world:spawn(components.Renderable(), ecs.Name("player"))
-        local anonymous = world:spawn(components.Renderable())
+        local named = world:spawn(components.Renderable2D(), ecs.Name("player"))
+        local anonymous = world:spawn(components.Renderable2D())
         world:commit()
 
         assert.are.equal("player", ok("info", { entity = named }).name)
@@ -171,7 +171,7 @@ describe("mcp world tools", function()
         -- Including where the values are not asked for, which is the listing
         -- an agent reads before it picks an entity to look at.
         local found = {}
-        for _, row in ipairs(ok("query", { include = { "Renderable" }, values = false }).entities) do
+        for _, row in ipairs(ok("query", { include = { "Renderable2D" }, values = false }).entities) do
             found[row.entity] = row.name
         end
         assert.are.equal("player", found[named])
@@ -180,11 +180,11 @@ describe("mcp world tools", function()
     it("spawns with defaults for whatever the payload omits", function()
         local spawned = ok("spawn", {
             components = {
-                Transform = { x = 10, y = 20 },
-                Renderable = {},
+                Transform2D = { x = 10, y = 20 },
+                Renderable2D = {},
             },
         })
-        local transform = spawned.components.Transform
+        local transform = spawned.components.Transform2D
         assert.are.equal(10, transform.x)
         -- Not sent, so the component's own default rather than zero.
         assert.are.equal(1, transform.scaleX)
@@ -207,7 +207,7 @@ describe("mcp world tools", function()
     end)
 
     it("adds a component on set and says that it did", function()
-        local entity = world:spawn(components.Renderable())
+        local entity = world:spawn(components.Renderable2D())
         local result = ok("set", { entity = entity, component = "Tint", values = { r = 0.5 } })
         assert.is_true(result.added)
         assert.is_true(world:has(entity, components.Tint))
@@ -217,7 +217,7 @@ describe("mcp world tools", function()
         -- A typo in a component name is already refused; this is the other
         -- half, where the name is right but the entity does not carry it.
         -- Adding one would be a surprise an agent cannot undo.
-        local entity = world:spawn(components.Renderable())
+        local entity = world:spawn(components.Renderable2D())
         local result = ok("modify", { entity = entity, component = "Tint", values = { r = 0.5 } })
 
         assert.is_true(result.skipped)
@@ -225,7 +225,7 @@ describe("mcp world tools", function()
     end)
 
     it("removes and despawns, and says when there was nothing to do", function()
-        local entity = world:spawn(components.Renderable(), components.Tint())
+        local entity = world:spawn(components.Renderable2D(), components.Tint())
         assert.is_false(ok("remove", { entity = entity, component = "Tint" }).skipped)
         assert.is_false(world:has(entity, components.Tint))
 

@@ -30,7 +30,7 @@ without leaving this API reference.
 
 The plugin retains one native layout tree keyed by ECS entity ID. `ChildOf` is the
 layout hierarchy as well as the transform hierarchy. The layout system writes
-`Layout` only when the box changes and writes `RelativeTransform` only when
+`Layout` only when the box changes and writes `RelativeTransform2D` only when
 layout or scrolling changes its result. Query membership observers retain
 structural invalidation, the ECS dirty-archetype set gates value updates, and
 the native tree computes only dirty roots before returning a compact list of
@@ -126,10 +126,10 @@ intrinsically sized text:
 local tecs <const> = require("tecs")
 local ui <const> = tecs.ui
 local ChildOf <const> = tecs.ecs.ChildOf
-local RelativeTransform <const> = tecs.ecs.RelativeTransform
+local RelativeTransform2D <const> = tecs.ecs.RelativeTransform2D
 local Tint <const> = tecs.gfx.Tint
 local Material <const> = tecs.gfx.Material
-local Renderable <const> = tecs.gfx.Renderable
+local Renderable2D <const> = tecs.gfx.Renderable2D
 
 local function spawnInterface(
     world: tecs.World,
@@ -144,7 +144,7 @@ local function spawnInterface(
             alignItems = "center",
         }),
         ui.Root("screen"),
-        tecs.Transform(0, 0, 0, 16)
+        tecs.Transform2D(0, 0, 0, 16)
     )
 
     local panel <const> = world:spawn(
@@ -155,24 +155,24 @@ local function spawnInterface(
             padding = 20,
             gap = 12,
         }),
-        RelativeTransform(),
+        RelativeTransform2D(),
         ChildOf(root)
     )
 
     world:spawn(
         ui.Style({position = "absolute", inset = 0}),
         ui.Paint(true),
-        RelativeTransform(0, 0, 0),
+        RelativeTransform2D(0, 0, 0),
         Tint(0.035, 0.055, 0.09, 0.96),
         Material(tecs.gfx.materials.id("rounded"), 0.05),
-        Renderable(),
+        Renderable2D(),
         ChildOf(panel)
     )
 
     world:spawn(
         ui.Style({maxWidth = "100%"}),
         ui.Intrinsic("text", {wrap = true}),
-        RelativeTransform(0, 0, 1),
+        RelativeTransform2D(0, 0, 1),
         Tint(0.94, 0.97, 1.0, 1.0),
         tecs.gfx.Text.new({
             text = "This text and panel are ordinary ECS entities.",
@@ -231,17 +231,17 @@ container's descendants:
 ```teal
 local card <const> = world:spawn(
     ui.Style({width = 280, height = 120}),
-    RelativeTransform(),
+    RelativeTransform2D(),
     ChildOf(panel)
 )
 
 world:spawn(
     ui.Style({position = "absolute", inset = 0}),
     ui.Paint(true),
-    RelativeTransform(0, 0, 0),
+    RelativeTransform2D(0, 0, 0),
     Tint(0.10, 0.17, 0.27, 1.0),
     Material(tecs.gfx.materials.id("rounded"), 0.08),
-    Renderable(),
+    Renderable2D(),
     ChildOf(card)
 )
 ```
@@ -255,17 +255,17 @@ and returns the ordinary sprite consumed by `Intrinsic("image")`:
 tecs.assets.loadImage(
     tecs.io.files.assetPath("images/portrait.png")
 ):map(function(image: tecs.assets.Image): tecs.gfx.Sprite
-    return app.renderer:registerImage(image)
+    return app.renderer.sprites:registerImage(image)
 end):onSettle(function(loaded: tecs.Future<tecs.gfx.Sprite>)
     if loaded.status == "ready" then
         world:spawn(
             ui.Style({height = 64}),
             ui.Intrinsic("image"),
             ui.Paint(true),
-            RelativeTransform(0, 0, 2),
+            RelativeTransform2D(0, 0, 2),
             loaded.value,
             Tint(1, 1, 1, 1),
-            Renderable(),
+            Renderable2D(),
             ChildOf(panel)
         )
     end
@@ -282,7 +282,7 @@ or renderer primitive:
 local viewport <const> = world:spawn(
     ui.Style({width = "100%", height = 240}),
     ui.Scroll(),
-    RelativeTransform(),
+    RelativeTransform2D(),
     ChildOf(panel)
 )
 
@@ -293,17 +293,17 @@ local content <const> = world:spawn(
         flexDirection = "column",
         gap = 8,
     }),
-    RelativeTransform(),
+    RelativeTransform2D(),
     ChildOf(viewport)
 )
 
 world:spawn(
     ui.Scrollbar("vertical", 12, 4, 28),
     ui.Interaction({focusable = false, draggable = true, order = 100}),
-    RelativeTransform(0, 0, 10),
+    RelativeTransform2D(0, 0, 10),
     Tint(0.32, 0.82, 1.0, 1.0),
     Material(tecs.gfx.materials.id("rounded"), 0),
-    Renderable(),
+    Renderable2D(),
     ChildOf(viewport)
 )
 ```
@@ -321,7 +321,7 @@ local type UiEvent = uiTypes.Event
 local button <const> = world:spawn(
     ui.Style({width = 180, height = 44}),
     ui.Interaction({tabIndex = 1}),
-    RelativeTransform(),
+    RelativeTransform2D(),
     ChildOf(content)
 )
 
@@ -379,8 +379,8 @@ local type PlatformEvent = platformEventTypes.Event
 local type Renderer = require("tecs.Renderer")
 
 local C <const> = rust.C
-local Transform <const> = ecs.Transform
-local RelativeTransform <const> = ecs.RelativeTransform
+local Transform2D <const> = ecs.Transform2D
+local RelativeTransform2D <const> = ecs.RelativeTransform2D
 local ChildOf <const> = ecs.ChildOf
 local Clip <const> = components.Clip
 
@@ -546,7 +546,7 @@ end
 --- `Paint` controls how a drawing component consumes its layout box.
 local record Paint is Component
     --- Caller-writable. The caller enables `stretch` to copy the layout width
-    --- and height into `RelativeTransform.scaleX` and `scaleY`.
+    --- and height into `RelativeTransform2D.scaleX` and `scaleY`.
     stretch: boolean
 end
 --- `Intrinsic` supplies cached leaf metrics to layout without a Lua callback.
@@ -819,7 +819,7 @@ ecs.newComponent({
     container = Root,
     fields = {"space", "width", "height", "pixelDensity", "sizing"},
     defaults = {"screen", 0, 0, 1, "auto"},
-    requires = {Style, Transform},
+    requires = {Style, Transform2D},
 })
 
 -- Compatibility surface: snapshots and tools name this component "UiPaint".
@@ -886,7 +886,7 @@ ecs.newComponent({
     container = Scrollbar,
     fields = {"axis", "thickness", "inset", "minLength"},
     defaults = {"vertical", 6, 2, 18},
-    requires = {RelativeTransform},
+    requires = {RelativeTransform2D},
     init = function(instance: Scrollbar)
         if instance.axis ~= "horizontal" and instance.axis ~= "vertical" then
             error("tecs: Scrollbar.axis must be 'horizontal' or 'vertical'", 3)
@@ -1162,7 +1162,7 @@ local function nativeMeasure(world: World, renderer: Renderer, entity: integer, 
         if sprite == nil then
             error("tecs: an image Intrinsic requires tecs.components.Sprite", 3)
         end
-        local width, height = renderer:spriteSize(sprite)
+        local width, height = renderer.sprites:spriteSize(sprite)
         out.kind = 2
         out.width, out.height = width * scale, height * scale
         out.min_width = out.width
@@ -1265,7 +1265,7 @@ local function collectContentMinimum(entity: integer, context: ContentContext)
 end
 
 local function applyLayoutTransform(world: World, entity: integer, x: number, y: number, width: number, height: number)
-    local relative = world:get(entity, RelativeTransform)
+    local relative = world:get(entity, RelativeTransform2D)
     if relative == nil then
         return
     end
@@ -1281,7 +1281,7 @@ local function applyLayoutTransform(world: World, entity: integer, x: number, y:
     local scaleX = paint ~= nil and paint.stretch and width or relative.scaleX
     local scaleY = paint ~= nil and paint.stretch and height or relative.scaleY
     if relative.x ~= relativeX or relative.y ~= relativeY or relative.scaleX ~= scaleX or relative.scaleY ~= scaleY then
-        relative = world:getMut(entity, RelativeTransform)
+        relative = world:getMut(entity, RelativeTransform2D)
         relative.x, relative.y = relativeX, relativeY
         relative.scaleX, relative.scaleY = scaleX, scaleY
     end
@@ -1389,7 +1389,7 @@ local record ui
     ---
     --- The plugin owns every renderer clip index from `firstClip` through
     --- `lastClip`, inclusive. Reserve a smaller range when another system also
-    --- calls `Renderer:setClipRegion`. Exhausting the range raises rather than
+    --- calls `renderer.sprites:setClipRegion`. Exhausting the range raises rather than
     --- drawing unclipped content.
     ---
     --- Passing an [`Application`](tealdoc:tecs.Application) supplies its
@@ -1594,13 +1594,13 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
         })
         local scrollbars = world:newQuery({
             name = "tecs.UiScrollbars",
-            include = {Scrollbar, RelativeTransform},
+            include = {Scrollbar, RelativeTransform2D},
             onEntitiesAdded = invalidateGeometry,
             onEntitiesRemoved = invalidateGeometry,
         })
         local interactions = world:newQuery({
             name = "tecs.UiInteractions",
-            include = {Interaction, InteractionState, Transform},
+            include = {Interaction, InteractionState, Transform2D},
             onEntitiesAdded = invalidateGeometry,
             onEntitiesRemoved = invalidateGeometry,
         })
@@ -1694,7 +1694,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
         world:addSystem({
             name = "tecs.UiLayout",
             phase = ecs.phases.PostUpdate,
-            before = {"RelativeTransform"},
+            before = {"RelativeTransform2D"},
             run = function()
                 local layoutDirty = install.nodeMembershipDirty or install.rootMembershipDirty
                 local hierarchyDirty = install.nodeMembershipDirty
@@ -1715,7 +1715,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                         local styleDirty = archetype:isComponentDirty(Style)
                         local childDirty = archetype:isComponentDirty(ChildOf)
                         local rootDirty = archetype:isComponentDirty(Root)
-                        local relativeDirty = archetype:isComponentDirty(RelativeTransform)
+                        local relativeDirty = archetype:isComponentDirty(RelativeTransform2D)
                         local paintDirty = archetype:isComponentDirty(Paint)
                         local viewportDirty = archetype:isComponentDirty(Scroll)
                         local measureDirty = columns[Intrinsic] ~= nil
@@ -1756,7 +1756,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                     screenWidth, screenHeight = install.screenWidth, install.screenHeight
                     screenDensity = install.screenDensity
                 end
-                local camera = renderer.camera
+                local camera = renderer.sprites.camera
                 local cameraSizingDirty = install.hasCameraRoots
                     and (
                         install.layoutCameraX ~= camera.x
@@ -1812,7 +1812,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                                         layoutDirty = true
                                     end
                                     local x, y = camera:toWorld(0, 0, viewportWidth, viewportHeight)
-                                    local transform = world:get(entities[row], Transform)
+                                    local transform = world:get(entities[row], Transform2D)
                                     if
                                         transform.x ~= x
                                         or transform.y ~= y
@@ -1820,7 +1820,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                                         or transform.scaleX ~= 1
                                         or transform.scaleY ~= 1
                                     then
-                                        transform = world:getMut(entities[row], Transform)
+                                        transform = world:getMut(entities[row], Transform2D)
                                         transform.x, transform.y = x, y
                                         transform.rotation = camera.rotation
                                         transform.scaleX, transform.scaleY = 1, 1
@@ -1956,7 +1956,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                     end
                 end
 
-                -- Paint and direct RelativeTransform writes are uncommon and
+                -- Paint and direct RelativeTransform2D writes are uncommon and
                 -- may affect any row in their dirty archetype. They reuse ECS
                 -- layout boxes and never enter Taffy.
                 if transformDirty then
@@ -2053,7 +2053,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 if layoutDirty or scrollDirty or scrollbarDirty then
                     for archetype, length, entities in scrollbars:iter() do
                         local bars = archetype:get(Scrollbar)
-                        local relatives = archetype:get(RelativeTransform)
+                        local relatives = archetype:get(RelativeTransform2D)
                         for row = 1, length do
                             local parent = world:getFirstRelationship(entities[row], ChildOf)
                             local viewport = parent ~= nil and world:get(parent.target, Scroll) or nil
@@ -2090,7 +2090,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                                     or relative.scaleX ~= scaleX
                                     or relative.scaleY ~= scaleY
                                 then
-                                    relative = world:getMut(entities[row], RelativeTransform)
+                                    relative = world:getMut(entities[row], RelativeTransform2D)
                                     relative.x, relative.y = x, y
                                     relative.scaleX, relative.scaleY = scaleX, scaleY
                                 end
@@ -2141,17 +2141,17 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             local clipped = false
             for chainIndex = 1, #chain do
                 local viewport = chain[chainIndex]
-                local transform = world:get(viewport, Transform)
+                local transform = world:get(viewport, Transform2D)
                 local layout = world:get(viewport, Layout)
                 if transform ~= nil and layout ~= nil then
                     clipped = true
                     local left, top = transform.x, transform.y
                     local right, bottom = left + layout.width, top + layout.height
                     if rootSpace == "world" then
-                        local x1, y1 = renderer.camera:toScreen(left, top, rootWidth, rootHeight)
-                        local x2, y2 = renderer.camera:toScreen(right, top, rootWidth, rootHeight)
-                        local x3, y3 = renderer.camera:toScreen(left, bottom, rootWidth, rootHeight)
-                        local x4, y4 = renderer.camera:toScreen(right, bottom, rootWidth, rootHeight)
+                        local x1, y1 = renderer.sprites.camera:toScreen(left, top, rootWidth, rootHeight)
+                        local x2, y2 = renderer.sprites.camera:toScreen(right, top, rootWidth, rootHeight)
+                        local x3, y3 = renderer.sprites.camera:toScreen(left, bottom, rootWidth, rootHeight)
+                        local x4, y4 = renderer.sprites.camera:toScreen(right, bottom, rootWidth, rootHeight)
                         left, top = math.min(x1, x2, x3, x4), math.min(y1, y2, y3, y4)
                         right, bottom = math.max(x1, x2, x3, x4), math.max(y1, y2, y3, y4)
                     else
@@ -2198,7 +2198,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 install.keyByClip[index] = key
             end
             if install.clipRectByKey[key] ~= rectKey then
-                renderer:setClipRegion(index, {x = minX, y = minY, width = maxX - minX, height = maxY - minY})
+                renderer.sprites:setClipRegion(index, {x = minX, y = minY, width = maxX - minX, height = maxY - minY})
                 install.clipRectByKey[key] = rectKey
             end
             install.clipLeft[index], install.clipTop[index] = minX, minY
@@ -2207,7 +2207,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
         end
 
         local function screenRectFor(entity: integer): number, number, number, number, number, integer
-            local transform = world:get(entity, Transform)
+            local transform = world:get(entity, Transform2D)
             local layout = world:get(entity, Layout)
             local scrollbar = world:get(entity, Scrollbar)
             if transform == nil or (layout == nil and scrollbar == nil) then
@@ -2266,10 +2266,10 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                     viewportWidth = install.screenWidth * install.screenDensity
                     viewportHeight = install.screenHeight * install.screenDensity
                 end
-                ax, ay = renderer.camera:toScreen(ax, ay, viewportWidth, viewportHeight)
-                bx, by = renderer.camera:toScreen(bx, by, viewportWidth, viewportHeight)
-                cx, cy = renderer.camera:toScreen(cx, cy, viewportWidth, viewportHeight)
-                dx, dy = renderer.camera:toScreen(dx, dy, viewportWidth, viewportHeight)
+                ax, ay = renderer.sprites.camera:toScreen(ax, ay, viewportWidth, viewportHeight)
+                bx, by = renderer.sprites.camera:toScreen(bx, by, viewportWidth, viewportHeight)
+                cx, cy = renderer.sprites.camera:toScreen(cx, cy, viewportWidth, viewportHeight)
+                dx, dy = renderer.sprites.camera:toScreen(dx, dy, viewportWidth, viewportHeight)
                 ax, ay, bx, by = ax / density, ay / density, bx / density, by / density
                 cx, cy, dx, dy = cx / density, cy / density, dx / density, dy / density
             end
@@ -2339,7 +2339,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
         world:addSystem({
             name = "tecs.UiClip",
             phase = ecs.phases.PostUpdate,
-            after = {"RelativeTransform", "tecs.UiLayout"},
+            after = {"RelativeTransform2D", "tecs.UiLayout"},
             before = {"tecs.TextLayout"},
             run = function()
                 -- Keep the static-frame gate proportional to changed
@@ -2349,7 +2349,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 if not geometryDirty then
                     for archetype in pairs(worldImpl._dirtyArchetypes) do
                         if archetype.columns[Style] or archetype.columns[Scrollbar] then
-                            geometryDirty = archetype:isComponentDirty(Transform)
+                            geometryDirty = archetype:isComponentDirty(Transform2D)
                                 or archetype:isComponentDirty(ChildOf)
                                 or archetype:isComponentDirty(Root)
                                 or archetype:isComponentDirty(Scroll)
@@ -2362,7 +2362,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                     end
                 end
 
-                local camera = renderer.camera
+                local camera = renderer.sprites.camera
                 local cameraX = camera.x or 0
                 local cameraY = camera.y or 0
                 local cameraZoom = camera.zoom or 1
@@ -2448,7 +2448,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 install.scrollHitCount = scrollHitCount
                 for index, key in pairs(install.keyByClip) do
                     if not install.clipUsed[key] then
-                        renderer:clearClipRegion(index)
+                        renderer.sprites:clearClipRegion(index)
                         install.keyByClip[index] = nil
                         install.clipByKey[key] = nil
                         install.clipRectByKey[key] = nil

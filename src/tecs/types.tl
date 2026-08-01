@@ -947,7 +947,7 @@ local record types
             --- Caller-writable. Selects saved archetypes through a temporary
             --- query.
             filterQuery: Query.Descriptor
-            --- Caller-writable. Allows only the listed `Transform.layer`
+            --- Caller-writable. Allows only the listed `Transform2D.layer`
             --- values from 0 through 31.
             layers: {integer}
             --- Caller-writable. Adds keyed metadata to the snapshot.

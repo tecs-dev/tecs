@@ -1225,7 +1225,7 @@ end
 
 --- Re-reads a clip's file over the clip already loaded from it.
 ---
---- The counterpart to `Renderer:replaceImage`, and it keeps identity on the
+--- The counterpart to `renderer.sprites:replaceImage`, and it keeps identity on the
 --- same terms. A clip's index is its path's, so an edited file comes back under
 --- the index every [`Sound`](tealdoc:tecs.audio.Sound) row already carries and nothing in the world is
 --- touched.

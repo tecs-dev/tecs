@@ -19,9 +19,9 @@ end
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 local Tint <const> = tecs.gfx.Tint
-local Renderable <const> = tecs.gfx.Renderable
+local Renderable2D <const> = tecs.gfx.Renderable2D
 local Material <const> = tecs.gfx.Material
 local materials <const> = require("tecs.gpu.materials")
 local timing <const> = require("tecs.timing")
@@ -64,10 +64,10 @@ local function spawnField(world: tecs.World)
         local id = materials.id(material)
         world:batchSpawn(
             PER_KIND,
-            {Transform, Tint, Material, Renderable},
+            {Transform2D, Tint, Material, Renderable2D},
             function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
                 -- batchSpawn skips FFI defaults, so every field is written here.
-                local transforms = archetype:getMut(Transform)
+                local transforms = archetype:getMut(Transform2D)
                 local tints = archetype:getMut(Tint)
                 local materialColumn = archetype:getMut(Material)
 
@@ -130,7 +130,7 @@ return tecs.newApplication({
         -- Translation only, matching the reference scene. Rotation would make
         -- the sync recompute a basis per entity per frame, which is a different
         -- amount of work and would not be comparable.
-        local moving = world:newQuery({include = {Transform, Renderable}})
+        local moving = world:newQuery({include = {Transform2D, Renderable2D}})
         local phase = MODE == "fixed" and tecs.ecs.phases.FixedUpdate or tecs.ecs.phases.Update
 
         world:addSystem({
@@ -139,7 +139,7 @@ return tecs.newApplication({
             run = function(dt: number)
                 local step = dt * 40.0
                 for archetype, length in moving:iter() do
-                    local transforms = archetype:getMut(Transform)
+                    local transforms = archetype:getMut(Transform2D)
                     for row = 1, length do
                         local transform = transforms[row]
                         local x = transform.x + step
@@ -181,7 +181,9 @@ return tecs.newApplication({
             name = "bench.Report",
             phase = tecs.ecs.phases.Shutdown,
             run = function()
-                print(("frames after %d warmup, %d of %d instances synced"):format(WARMUP, renderer.count, COUNT))
+                print(
+                    ("frames after %d warmup, %d of %d instances synced"):format(WARMUP, renderer.sprites.count, COUNT)
+                )
                 local report = timing.format()
                 if report ~= "" then
                     print(report)

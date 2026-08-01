@@ -9,12 +9,12 @@ local components = require("tecs.components")
 local platformEvents = require("tecs.platform.events")
 
 local ChildOf = tecs.ecs.ChildOf
-local RelativeTransform = tecs.ecs.RelativeTransform
-local Transform = tecs.Transform
+local RelativeTransform2D = tecs.ecs.RelativeTransform2D
+local Transform2D = tecs.Transform2D
 local Clip = components.Clip
 
 local function fakeRenderer()
-    local renderer = {
+    local sprites = {
         clips = {},
         cleared = {},
         camera = {
@@ -25,20 +25,21 @@ local function fakeRenderer()
             calls = 0,
         },
     }
-    function renderer.camera:toScreen(x, y)
+    local renderer = { sprites = sprites }
+    function sprites.camera:toScreen(x, y)
         self.calls = self.calls + 1
         return x, y
     end
-    function renderer.camera:toWorld(x, y, width, height)
+    function sprites.camera:toWorld(x, y, width, height)
         local dx = (x - width * 0.5) / self.zoom
         local dy = (y - height * 0.5) / self.zoom
         local cosine, sine = math.cos(self.rotation), math.sin(self.rotation)
         return self.x + dx * cosine - dy * sine, self.y + dx * sine + dy * cosine
     end
-    function renderer:spriteSize()
+    function sprites:spriteSize()
         return self.spriteWidth or 0, self.spriteHeight or 0
     end
-    function renderer:setClipRegion(index, region)
+    function sprites:setClipRegion(index, region)
         self.clips[index] = {
             x = region.x,
             y = region.y,
@@ -46,7 +47,7 @@ local function fakeRenderer()
             height = region.height,
         }
     end
-    function renderer:clearClipRegion(index)
+    function sprites:clearClipRegion(index)
         self.clips[index] = nil
         self.cleared[index] = true
     end
@@ -126,7 +127,7 @@ describe("tecs.ui", function()
         local rootEntity =
             world:spawn(ui.Style({ width = "100%", height = "100%", padding = "10px" }), ui.Root("screen"))
         local child =
-            world:spawn(ui.Style({ width = "50%", height = "20px" }), RelativeTransform(), ChildOf(rootEntity))
+            world:spawn(ui.Style({ width = "50%", height = "20px" }), RelativeTransform2D(), ChildOf(rootEntity))
 
         world:update(1 / 60)
 
@@ -170,7 +171,7 @@ describe("tecs.ui", function()
 
     it("measures custom and image leaves without authored dimensions", function()
         local renderer = fakeRenderer()
-        renderer.spriteWidth, renderer.spriteHeight = 80, 40
+        renderer.sprites.spriteWidth, renderer.sprites.spriteHeight = 80, 40
         local world = tecs.ecs.newWorld()
         world:addPlugin(ui.plugin({ renderer = renderer }))
 
@@ -181,14 +182,14 @@ describe("tecs.ui", function()
         local custom = world:spawn(
             ui.Style(),
             ui.Intrinsic("custom", { width = 42, height = 17 }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
         local image = world:spawn(
             ui.Style({ width = 30 }),
             ui.Intrinsic("image"),
             components.Sprite(1),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
 
@@ -202,7 +203,7 @@ describe("tecs.ui", function()
 
     it("derives camera-sized world roots and preserves manual roots", function()
         local renderer = fakeRenderer()
-        renderer.camera.x, renderer.camera.y, renderer.camera.zoom = 10, 20, 2
+        renderer.sprites.camera.x, renderer.sprites.camera.y, renderer.sprites.camera.zoom = 10, 20, 2
         local window = fakeWindow(200, 100, 2)
         local world = tecs.ecs.newWorld()
         world:addPlugin(ui.plugin({ renderer = renderer, window = window }))
@@ -212,7 +213,7 @@ describe("tecs.ui", function()
         world:update(1 / 60)
 
         local root = world:get(cameraRoot, ui.Root)
-        local transform = world:get(cameraRoot, Transform)
+        local transform = world:get(cameraRoot, Transform2D)
         assert.are.equal(200, root.width)
         assert.are.equal(100, root.height)
         assert.are.equal(2, root.pixelDensity)
@@ -221,7 +222,7 @@ describe("tecs.ui", function()
         assert.are.equal(70, world:get(manualRoot, ui.Root).width)
 
         window.width = 300
-        renderer.camera.x = 30
+        renderer.sprites.camera.x = 30
         world:emit(0, platformEvents.on.windowResized)
         world:update(1 / 60)
         assert.are.equal(300, world:get(cameraRoot, ui.Root).width)
@@ -248,23 +249,23 @@ describe("tecs.ui", function()
 
         local rootEntity =
             world:spawn(ui.Style({ width = 100, height = 80 }), ui.Root("world", 100, 80, 1), ui.Scroll())
-        world:spawn(ui.Style({ width = 40, height = 20 }), ui.Interaction(), RelativeTransform(), ChildOf(rootEntity))
+        world:spawn(ui.Style({ width = 40, height = 20 }), ui.Interaction(), RelativeTransform2D(), ChildOf(rootEntity))
 
         world:update(1 / 60)
-        local calls = renderer.camera.calls
+        local calls = renderer.sprites.camera.calls
         assert.is_true(calls > 0)
 
         world:update(1 / 60)
-        assert.are.equal(calls, renderer.camera.calls)
+        assert.are.equal(calls, renderer.sprites.camera.calls)
 
-        local unrelated = world:spawn(Transform())
-        world:getMut(unrelated, Transform).x = 20
+        local unrelated = world:spawn(Transform2D())
+        world:getMut(unrelated, Transform2D).x = 20
         world:update(1 / 60)
-        assert.are.equal(calls, renderer.camera.calls)
+        assert.are.equal(calls, renderer.sprites.camera.calls)
 
-        renderer.camera.x = 10
+        renderer.sprites.camera.x = 10
         world:update(1 / 60)
-        assert.is_true(renderer.camera.calls > calls)
+        assert.is_true(renderer.sprites.camera.calls > calls)
     end)
 
     it("updates changed boxes across independent retained roots", function()
@@ -274,8 +275,8 @@ describe("tecs.ui", function()
 
         local firstRoot = world:spawn(ui.Style({ width = 100, height = 80 }), ui.Root("screen", 100, 80, 1))
         local secondRoot = world:spawn(ui.Style({ width = 120, height = 90 }), ui.Root("screen", 120, 90, 1))
-        local first = world:spawn(ui.Style({ width = 20, height = 10 }), RelativeTransform(), ChildOf(firstRoot))
-        local second = world:spawn(ui.Style({ width = 40, height = 15 }), RelativeTransform(), ChildOf(secondRoot))
+        local first = world:spawn(ui.Style({ width = 20, height = 10 }), RelativeTransform2D(), ChildOf(firstRoot))
+        local second = world:spawn(ui.Style({ width = 40, height = 15 }), RelativeTransform2D(), ChildOf(secondRoot))
 
         world:update(1 / 60)
         assert.are.equal(20, world:get(first, ui.Layout).width)
@@ -288,7 +289,8 @@ describe("tecs.ui", function()
 
         world:despawn(first)
         world:update(1 / 60)
-        local replacement = world:spawn(ui.Style({ width = 25, height = 12 }), RelativeTransform(), ChildOf(firstRoot))
+        local replacement =
+            world:spawn(ui.Style({ width = 25, height = 12 }), RelativeTransform2D(), ChildOf(firstRoot))
         world:update(1 / 60)
         assert.are.equal(25, world:get(replacement, ui.Layout).width)
         assert.are.equal(40, world:get(second, ui.Layout).width)
@@ -301,31 +303,34 @@ describe("tecs.ui", function()
 
         local viewport =
             world:spawn(ui.Style({ width = 100, height = 80 }), ui.Root("screen", 100, 80, 2), ui.Scroll(10, 12))
-        local child =
-            world:spawn(ui.Style({ width = 200, height = 100, flexShrink = 0 }), RelativeTransform(), ChildOf(viewport))
+        local child = world:spawn(
+            ui.Style({ width = 200, height = 100, flexShrink = 0 }),
+            RelativeTransform2D(),
+            ChildOf(viewport)
+        )
 
         world:update(1 / 60)
 
-        local relative = world:get(child, RelativeTransform)
+        local relative = world:get(child, RelativeTransform2D)
         assert.are.equal(-10, relative.x)
         assert.are.equal(-12, relative.y)
         local clip = world:get(child, Clip)
-        local region = renderer.clips[clip.index]
+        local region = renderer.sprites.clips[clip.index]
         assert.same({ x = 0, y = 0, width = 200, height = 160 }, region)
 
         world:getMut(viewport, ui.Scroll).x = 25
         world:update(1 / 60)
 
-        relative = world:get(child, RelativeTransform)
+        relative = world:get(child, RelativeTransform2D)
         assert.are.equal(-25, relative.x)
         assert.are.equal(-12, relative.y)
-        assert.same({ x = 0, y = 0, width = 200, height = 160 }, renderer.clips[clip.index])
+        assert.same({ x = 0, y = 0, width = 200, height = 160 }, renderer.sprites.clips[clip.index])
 
         world:despawn(viewport)
         world:update(1 / 60)
 
-        assert.is_nil(renderer.clips[clip.index])
-        assert.is_true(renderer.cleared[clip.index])
+        assert.is_nil(renderer.sprites.clips[clip.index])
+        assert.is_true(renderer.sprites.cleared[clip.index])
     end)
 
     it("centers a stretched drawing leaf over its Taffy box", function()
@@ -334,12 +339,16 @@ describe("tecs.ui", function()
         world:addPlugin(ui.plugin({ renderer = renderer }))
 
         local rootEntity = world:spawn(ui.Style({ width = 100, height = 80 }), ui.Root("screen", 100, 80, 1))
-        local visual =
-            world:spawn(ui.Style({ width = 30, height = 18 }), ui.Paint(true), RelativeTransform(), ChildOf(rootEntity))
+        local visual = world:spawn(
+            ui.Style({ width = 30, height = 18 }),
+            ui.Paint(true),
+            RelativeTransform2D(),
+            ChildOf(rootEntity)
+        )
 
         world:update(1 / 60)
 
-        local relative = world:get(visual, RelativeTransform)
+        local relative = world:get(visual, RelativeTransform2D)
         assert.are.equal(15, relative.x)
         assert.are.equal(9, relative.y)
         assert.are.equal(30, relative.scaleX)
@@ -360,22 +369,22 @@ describe("tecs.ui", function()
                 margin = { left = 30, top = 40 },
             }),
             ui.Scroll(),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
-        local content = world:spawn(ui.Style({ width = 120, height = 120 }), RelativeTransform(), ChildOf(nested))
+        local content = world:spawn(ui.Style({ width = 120, height = 120 }), RelativeTransform2D(), ChildOf(nested))
 
         world:update(1 / 60)
 
         local clip = world:get(content, Clip)
-        assert.same({ x = 30, y = 40, width = 70, height = 60 }, renderer.clips[clip.index])
+        assert.same({ x = 30, y = 40, width = 70, height = 60 }, renderer.sprites.clips[clip.index])
 
         world:getMut(rootEntity, ui.Scroll).x = 10
         world:update(1 / 60)
 
         local movedClip = world:get(content, Clip)
         assert.are.equal(clip.index, movedClip.index)
-        assert.same({ x = 20, y = 40, width = 80, height = 60 }, renderer.clips[movedClip.index])
+        assert.same({ x = 20, y = 40, width = 80, height = 60 }, renderer.sprites.clips[movedClip.index])
     end)
 
     it("captures clicks, bubbles events, and respects clipping", function()
@@ -389,13 +398,13 @@ describe("tecs.ui", function()
         local button = world:spawn(
             ui.Style({ width = 40, height = 24 }),
             ui.Interaction(),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
         world:spawn(
             ui.Style({ width = 20, height = 20, margin = { top = 100 } }),
             ui.Interaction(),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
 
@@ -464,7 +473,7 @@ describe("tecs.ui", function()
         world:addPlugin(ui.plugin(app, { wheelStep = 12 }))
 
         local viewport = world:spawn(ui.Style({ width = 100, height = 60 }), ui.Root("screen", 100, 60, 1), ui.Scroll())
-        local content = world:spawn(ui.Style({ width = 100, height = 180 }), RelativeTransform(), ChildOf(viewport))
+        local content = world:spawn(ui.Style({ width = 100, height = 180 }), RelativeTransform2D(), ChildOf(viewport))
 
         world:update(1 / 60)
         assert.are.equal(180, world:get(viewport, ui.Scroll).contentHeight)
@@ -474,7 +483,7 @@ describe("tecs.ui", function()
         world:update(1 / 60)
 
         assert.are.equal(12, world:get(viewport, ui.Scroll).y)
-        assert.are.equal(-12, world:get(content, RelativeTransform).y)
+        assert.are.equal(-12, world:get(content, RelativeTransform2D).y)
 
         input:clear()
         world:observe(viewport, ui.Event, function(event)
@@ -495,9 +504,9 @@ describe("tecs.ui", function()
 
         local outer = world:spawn(ui.Style({ width = 100, height = 100 }), ui.Root("screen", 100, 100, 1), ui.Scroll())
         local inner =
-            world:spawn(ui.Style({ width = 100, height = 60 }), ui.Scroll(), RelativeTransform(), ChildOf(outer))
-        world:spawn(ui.Style({ width = 100, height = 120 }), RelativeTransform(), ChildOf(inner))
-        world:spawn(ui.Style({ width = 100, height = 180 }), RelativeTransform(), ChildOf(outer))
+            world:spawn(ui.Style({ width = 100, height = 60 }), ui.Scroll(), RelativeTransform2D(), ChildOf(outer))
+        world:spawn(ui.Style({ width = 100, height = 120 }), RelativeTransform2D(), ChildOf(inner))
+        world:spawn(ui.Style({ width = 100, height = 180 }), RelativeTransform2D(), ChildOf(outer))
         world:update(1 / 60)
 
         world:getMut(inner, ui.Scroll).y = 60
@@ -517,7 +526,7 @@ describe("tecs.ui", function()
         world:addPlugin(ui.plugin({ renderer = renderer, input = input, wheelStep = 10 }))
 
         local viewport = world:spawn(ui.Style({ width = 100, height = 60 }), ui.Root("screen", 100, 60, 1), ui.Scroll())
-        world:spawn(ui.Style({ width = 100, height = 180 }), RelativeTransform(), ChildOf(viewport))
+        world:spawn(ui.Style({ width = 100, height = 180 }), RelativeTransform2D(), ChildOf(viewport))
         world:update(1 / 60)
 
         input.mouseX, input.mouseY = 20, 20
@@ -537,7 +546,7 @@ describe("tecs.ui", function()
         local viewport = world:spawn(ui.Style({ width = 100, height = 60 }), ui.Root("screen", 100, 60, 1), ui.Scroll())
         world:spawn(
             ui.Style({ position = "absolute", width = 40, height = 30, inset = { left = -25, top = -15 } }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(viewport)
         )
         world:update(1 / 60)
@@ -562,7 +571,7 @@ describe("tecs.ui", function()
 
         local viewport =
             world:spawn(ui.Style({ width = 100, height = 100 }), ui.Root("screen", 100, 100, 1), ui.Scroll())
-        world:spawn(ui.Style({ width = 100, height = 200 }), RelativeTransform(), ChildOf(viewport))
+        world:spawn(ui.Style({ width = 100, height = 200 }), RelativeTransform2D(), ChildOf(viewport))
         local thumb = world:spawn(
             ui.Scrollbar("vertical", 6, 2, 18),
             ui.Interaction({ draggable = true, focusable = false, order = 10 }),
@@ -570,7 +579,7 @@ describe("tecs.ui", function()
         )
         world:update(1 / 60)
 
-        local relative = world:get(thumb, RelativeTransform)
+        local relative = world:get(thumb, RelativeTransform2D)
         assert.are.equal(95, relative.x)
         assert.are.equal(26, relative.y)
         assert.are.equal(6, relative.scaleX)
@@ -597,13 +606,13 @@ describe("tecs.ui", function()
         local first = world:spawn(
             ui.Style({ width = 40, height = 30 }),
             ui.Interaction(),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
         local second = world:spawn(
             ui.Style({ width = 40, height = 30 }),
             ui.Interaction(),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
         local activated = 0
@@ -650,7 +659,7 @@ describe("tecs.ui", function()
             controls[index] = world:spawn(
                 ui.Style({ width = 40, height = 30 }),
                 ui.Interaction(),
-                RelativeTransform(),
+                RelativeTransform2D(),
                 ChildOf(rootEntity)
             )
         end
@@ -686,19 +695,19 @@ describe("tecs.ui", function()
         local outside = world:spawn(
             ui.Style({ width = 80, height = 30 }),
             ui.Interaction({ order = 1 }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
         local scope = world:spawn(
             ui.Style({ width = 80, height = 80 }),
             ui.FocusScope(),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
         local inside = world:spawn(
             ui.Style({ width = 70, height = 30, margin = { top = 40 } }),
             ui.Interaction({ order = 2 }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(scope)
         )
         world:update(1 / 60)
@@ -726,13 +735,13 @@ describe("tecs.ui", function()
         local first = world:spawn(
             ui.Style({ position = "absolute", width = 40, height = 30 }),
             ui.Interaction(),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
         local second = world:spawn(
             ui.Style({ position = "absolute", width = 40, height = 30 }),
             ui.Interaction(),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
         local clicked
@@ -779,13 +788,13 @@ describe("tecs.ui", function()
         local first = world:spawn(
             ui.Style({ width = 50, height = 40 }),
             ui.Interaction({ draggable = true }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
         local second = world:spawn(
             ui.Style({ width = 50, height = 40 }),
             ui.Interaction(),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(rootEntity)
         )
         local events = {}

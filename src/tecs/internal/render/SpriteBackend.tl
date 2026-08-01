@@ -31,9 +31,8 @@ local Sampler <const> = require("tecs.gpu.Sampler")
 local ComputePipeline <const> = require("tecs.gpu.ComputePipeline")
 local ComputePass <const> = require("tecs.gpu.ComputePass")
 local TextureArray <const> = require("tecs.gpu.TextureArray")
-local Texture <const> = require("tecs.gpu.Texture")
-local Camera <const> = require("tecs.gfx.Camera")
-local FramePacket <const> = require("tecs.FramePacket")
+local Camera2D <const> = require("tecs.gfx.Camera2D")
+local SpriteFramePacket <const> = require("tecs.internal.render.SpriteFramePacket")
 local layers <const> = require("tecs.gfx.layers")
 local frametable <const> = require("tecs.gfx.frametable")
 local instancelayout <const> = require("tecs.gpu.instancelayout")
@@ -180,9 +179,7 @@ end
 --- What a backend is built with. Required, unlike most options tables here:
 --- `capacity` has no default at this level and the renderer above always
 --- supplies one.
-local record BackendOptions
-    --- Ambient color applied everywhere, as red, green and blue.
-    ambient: {number}
+local record SpriteBackendOptions
     --- Instances the buffers are sized for. A ceiling: nothing grows to admit
     --- a row past it.
     capacity: integer
@@ -196,25 +193,15 @@ local record BackendOptions
     layers: integer
     --- Fit many images into each layer rather than one. Defaults to false.
     packImages: boolean
-    --- Build the occluder mask and the drop-shadow target, the shadow lane that
-    --- fills them, and tune all three. Nil, the default, spends none of the
-    --- three targets, four passes, four pipelines, two compute dispatches and
-    --- one list they cost.
-    ---
-    --- What it does not gate is the lane's share of the mark pass, which is one
-    --- more count in a scan that is already running and no more memory traffic
-    --- than the two lanes beside it. A world that never casts pays for that and
-    --- for nothing else.
-    shadows: Deferred.ShadowOptions
 end
 
 --- The device half of the renderer, as one object.
 ---
---- Built once against a device and a swapchain format, then handed one packet
---- per frame through `consume`. Everything below is created here and released
---- by `destroy`, including any compute stage that was added; nothing outlives
---- it except the device it was built on.
-local record Backend
+--- Built once against a device and renderer-owned deferred pipeline, then
+--- handed one packet per frame through `prepare`. Everything below is created
+--- here and released by `destroy`, including any compute stage that was added;
+--- nothing outlives it except the device and deferred pipeline it borrows.
+local record SpriteBackend
     --- Re-exported so a caller naming a rectangle types it from the module
     --- that takes one, rather than reaching for a second require.
     type ClipRegion = ClipRegion
@@ -222,10 +209,10 @@ local record Backend
     --- `addComputeStage`.
     type ComputeStage = ComputeStage
     --- Re-exported for whoever assembles the table `create` takes.
-    type Options = BackendOptions
+    type Options = SpriteBackendOptions
 
-    --- The pass graph a consumed packet is drawn through. Owned here, so
-    --- targets and passes a caller adds to it go when this backend does.
+    --- The renderer-owned deferred pipeline whose sprite passes this backend
+    --- records. The backend borrows it and never destroys it.
     deferred: Deferred
     --- The instance buffer the scene is drawn from, with the staging slots the
     --- extractor writes through behind it. A compute stage writes its own
@@ -357,7 +344,7 @@ local record Backend
     --- The camera the mask is drawn with, which is the scene's at another zoom.
     --- A second one rather than the scene's, because both are live within one
     --- frame and one of them would have to be put back.
-    _maskView: Camera
+    _maskView: Camera2D
     --- Blocks the forward list's own dispatches cover, which is its capacity
     --- rather than the frame's count: every block of the counts table has to be
     --- written every frame or the scan folds a stale one.
@@ -366,6 +353,10 @@ local record Backend
     --- lane is skipped when nothing is, so a world that blends nothing pays for
     --- this in one branch and one empty render pass.
     _blending: boolean
+    --- Whether the last packet reported any sprite caster. The renderer keeps
+    --- its shadow attachments valid every frame, but the sprite domain skips
+    --- both caster compaction and pass recording when this is false.
+    _casting: boolean
     --- Two triangles over four corners, uploaded once and never touched again.
     --- The only geometry either draw binds: there is no vertex stream, and a
     --- quad's corner comes from the vertex index while everything about the
@@ -386,7 +377,7 @@ local record Backend
     --- Where the packet said the view was. A calculator for the matrix and the
     --- view bounds rather than the camera a game holds, which lives on the
     --- other side of the boundary and is copied into every packet.
-    _view: Camera
+    _view: Camera2D
     --- The eight floats every cull dispatch is pushed from: the world
     --- rectangle the view covers as minimum xy then maximum xy, then the
     --- instance count, the workgroups to fold over, the destination list's
@@ -502,7 +493,7 @@ local record Backend
     _destroyed: boolean
 end
 
-local BackendMT <const>: metatable<Backend> = {__index = Backend}
+local SpriteBackendMT <const>: metatable<SpriteBackend> = {__index = SpriteBackend}
 
 --- Fills the uniform the vertex shader reads a layer's behavior from.
 ---
@@ -512,7 +503,7 @@ local BackendMT <const>: metatable<Backend> = {__index = Backend}
 --- way, the camera's position, its reciprocal zoom and two clip scales compose
 --- all four cases in a handful of shader instructions, and the sixteen entries
 --- stay what they were.
-local function layerUniform(self: Backend, width: number, height: number): loader.CArray
+local function layerUniform(self: SpriteBackend, width: number, height: number): loader.CArray
     local data = self._layerUniform
     local view = self._view
     data[0] = view.x
@@ -549,7 +540,7 @@ end
 ---
 --- One description of it, shared by creation and by a reload, so the pipeline a
 --- reload installs cannot disagree with the one the backend started with.
-local function buildGeometry(self: Backend): GraphicsPipeline
+local function buildGeometry(self: SpriteBackend): GraphicsPipeline
     local device <const> = self._device
     local albedoFormat, normalFormat, ormFormat, emissionFormat = self.deferred:geometryFormats()
     local vertex = Shader.load(device, "instance.vert", {})
@@ -581,7 +572,7 @@ end
 --- @param mode "max" for the mask and the stamp, "min" for the shadows
 ---     themselves, and neither may depend on which fragment the device
 ---     rasterised first.
-local function buildCast(self: Backend, format: integer, mode: string, name: string): GraphicsPipeline
+local function buildCast(self: SpriteBackend, format: integer, mode: integer, name: string): GraphicsPipeline
     local device <const> = self._device
     local vertex = Shader.load(device, "cast.vert", {})
     local fragment = Shader.load(device, "cast.frag", {})
@@ -608,7 +599,7 @@ end
 --- for, and the two it is not for reject it in the vertex shader at the cost of
 --- four invocations that return an off-screen position.
 local function recordCast(
-    self: Backend, context: Deferred.PassContext, pipeline: GraphicsPipeline, matrix: loader.CArray, mode: integer
+    self: SpriteBackend, context: Deferred.PassContext, pipeline: GraphicsPipeline, matrix: loader.CArray, mode: integer
 )
     context.pass:bindPipeline(pipeline.handle)
     context.pass:pushVertexUniform(0, self.deferred:castUniform(matrix, mode), Deferred.castUniformSize())
@@ -640,7 +631,7 @@ end
 --- out of this pipeline and are drawn in one indirect draw off one sorted list.
 --- Two pipelines would mean two draws, and an additive instance would then land
 --- after every alpha-blended one in the frame whatever their depths said.
-local function buildForward(self: Backend): GraphicsPipeline
+local function buildForward(self: SpriteBackend): GraphicsPipeline
     local device <const> = self._device
     local vertex = Shader.load(device, "instance.vert", {})
     local fragment = Shader.load(device, "instance.forward.frag", {})
@@ -651,7 +642,7 @@ local function buildForward(self: Backend): GraphicsPipeline
             fragmentShader = fragment,
             colorFormat = self.deferred:forwardFormat(),
             depth = self.deferred:forwardDepth(),
-            blendMode = "premultiplied",
+            blendMode = GraphicsPipeline.BLEND_PREMULTIPLIED,
             name = "ecs.forward",
         }
     )
@@ -660,21 +651,95 @@ local function buildForward(self: Backend): GraphicsPipeline
     return pipeline
 end
 
+--- Records sprite silhouettes into the renderer-owned occluder pass.
+--- @param context The deferred graph supplies the open pass and current frame.
+function SpriteBackend:recordOccluders(context: Deferred.PassContext)
+    if self.count == 0 or not self._casting then
+        return
+    end
+    local view <const> = self._maskView
+    view.x, view.y, view.zoom, view.rotation = self.deferred:maskView()
+    local frame <const> = context.frame
+    recordCast(self, context, self._maskPipeline, view:matrix(frame.width, frame.height), Deferred.MASK)
+end
+
+--- Records sprite drop shadows and their caster stamps.
+--- @param context The deferred graph supplies the open pass and current frame.
+function SpriteBackend:recordDropShadows(context: Deferred.PassContext)
+    if self.count == 0 or not self._casting then
+        return
+    end
+    local frame <const> = context.frame
+    local matrix <const> = self._view:matrix(frame.width, frame.height)
+    recordCast(self, context, self._shadowPipeline, matrix, Deferred.SHADOW)
+    recordCast(self, context, self._stampPipeline, matrix, Deferred.STAMP)
+end
+
+--- Records the opaque sprite geometry pass after `prepare` has culled it.
+--- @param context The deferred graph supplies the open pass and current frame.
+function SpriteBackend:recordGeometry(context: Deferred.PassContext)
+    if self.count == 0 then
+        return
+    end
+    context.pass:bindPipeline(self.pipeline.handle)
+    context.pass:pushVertexUniform(0, self._view:matrix(context.width, context.height), 64)
+    context.pass:pushVertexUniform(1, layerUniform(self, context.width, context.height), LAYER_BYTES)
+    context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
+
+    local buffers <const> = self._geometryBuffers
+    buffers[1] = self.instances.handle
+    buffers[2] = self._visible.handle
+    buffers[3] = self._playbacks.handle
+    context.pass:bindVertexStorageBuffers(0, buffers)
+
+    local textures <const> = self._geometryTextures
+    textures[1] = self.images.handle
+    context.pass:bindTextures(0, textures, self.sampler.handle)
+    context.pass:bindIndexBuffer(self._indices.handle)
+    context.pass:drawIndexedIndirect(self._drawArgs.handle, 0, 1)
+end
+
+--- Records the sorted forward sprite pass after `prepare` has culled it.
+--- @param context The deferred graph supplies the open pass and current frame.
+function SpriteBackend:recordForward(context: Deferred.PassContext)
+    if self.count == 0 or not self._blending then
+        return
+    end
+    context.pass:bindPipeline(self.blendPipeline.handle)
+    context.pass:pushVertexUniform(0, self._view:matrix(context.width, context.height), 64)
+    context.pass:pushVertexUniform(1, layerUniform(self, context.width, context.height), LAYER_BYTES)
+    context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
+    self.deferred:bindLighting(context)
+
+    local buffers <const> = self._forwardBuffers
+    buffers[1] = self.instances.handle
+    buffers[2] = self._blendSorted.handle
+    buffers[3] = self._playbacks.handle
+    context.pass:bindVertexStorageBuffers(0, buffers)
+
+    local textures <const> = self._forwardTextures
+    textures[1] = self.images.handle
+    context.pass:bindTextures(0, textures, self.sampler.handle)
+    context.pass:bindIndexBuffer(self._indices.handle)
+    context.pass:drawIndexedIndirect(self._blendArgs.handle, 0, 1)
+end
+
 --- Builds a backend for `device`.
 ---
---- @param swapchainFormat The `SDL_GPUTextureFormat` present copies into, which
----     the composite and present pipelines are built against.
+--- @param deferred The renderer-owned deferred pipeline this domain records into.
 --- @param options Required, and `capacity` with it: there is no default at this
 ---     level, and the buffers are sized once here and never resized.
-function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: BackendOptions): Backend
-    local self = setmetatable({} as Backend, BackendMT)
+function SpriteBackend.create(device: loader.CPtr, deferred: Deferred, options: SpriteBackendOptions): SpriteBackend
+    local self = setmetatable({} as SpriteBackend, SpriteBackendMT)
     self._device = device
+    self.deferred = deferred
     self.capacity = options.capacity
     self.blendCapacity = math.min(self.capacity, MAX_BLEND)
     self.castCapacity = math.min(self.capacity, MAX_CAST) * CAST_FANOUT
     self._blendGroups = math.ceil(self.blendCapacity / CULL_GROUP)
     self._blending = false
-    local shadows <const> = options.shadows ~= nil
+    self._casting = false
+    local shadows <const> = deferred:castsShadows()
     self.count = 0
     self._destroyed = false
 
@@ -686,7 +751,7 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
         error(("tecs: the image array holds at most %d layers"):format(instancelayout.LAYER_SLOTS), 3)
     end
 
-    self.sampler = Sampler.create(device, {filter = "nearest", address = "clamp"})
+    self.sampler = Sampler.create(device, {})
     self.images = TextureArray.create(
         device,
         {
@@ -896,8 +961,8 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
     quad[3], quad[4], quad[5] = 1, 3, 2
     self._indices:upload(quad, QUAD_INDICES * 2)
 
-    self._view = Camera.newCamera()
-    self._maskView = Camera.newCamera()
+    self._view = Camera2D.newCamera2D()
+    self._maskView = Camera2D.newCamera2D()
     -- Three vec4s: the world rectangle the camera sees, the counts, and what
     -- the shadow lane needs that the other two do not.
     self._cullUniform = loader.newArray("float[12]")
@@ -953,114 +1018,14 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
         self._blendArgs.handle,
     }
 
-    self.deferred = Deferred.create(
-        device,
-        swapchainFormat,
-        {
-            ambient = options.ambient,
-            shadows = options.shadows,
-            occluders = function(context: Deferred.PassContext)
-                if self.count == 0 then
-                    return
-                end
-                -- The mask's own projection rather than the scene's: it is the
-                -- same camera at a wider zoom, so an occluder just off the edge
-                -- of the view lands inside the mask and casts across the pixels
-                -- that can see it. The resolve inverts exactly this, which is
-                -- what makes one transform serve both directions.
-                local view <const> = self._maskView
-                view.x, view.y, view.zoom, view.rotation = self.deferred:maskView()
-                -- Built at the frame's size rather than the mask's, because the
-                -- resolve's inverse is and clip space carries no resolution: a
-                -- matrix built at the mask's size would apply the mask's scale
-                -- a second time and put every silhouette in the wrong place.
-                local frame <const> = context.frame
-                recordCast(self, context, self._maskPipeline, view:matrix(frame.width, frame.height), Deferred.MASK)
-            end,
-            dropShadows = function(context: Deferred.PassContext)
-                if self.count == 0 then
-                    return
-                end
-                -- The scene's own camera, because what this writes is read at
-                -- the fragment's own pixel rather than marched across, and at
-                -- the frame's size for the reason the mask is: the target is
-                -- half sized and covers the same world.
-                local frame <const> = context.frame
-                local matrix <const> = self._view:matrix(frame.width, frame.height)
-                -- The shadows first and the casters after: min then max, which
-                -- commute, so what a pixel ends up holding is a function of the
-                -- set of fragments that covered it rather than of their order.
-                -- The order here is only about which of the two answers wins
-                -- where they overlap, and the caster does.
-                recordCast(self, context, self._shadowPipeline, matrix, Deferred.SHADOW)
-                recordCast(self, context, self._stampPipeline, matrix, Deferred.STAMP)
-            end,
-            geometry = function(context: Deferred.PassContext)
-                if self.count == 0 then
-                    return
-                end
-                context.pass:bindPipeline(self.pipeline.handle)
-
-                context.pass:pushVertexUniform(0, self._view:matrix(context.width, context.height), 64)
-                context.pass:pushVertexUniform(1, layerUniform(self, context.width, context.height), LAYER_BYTES)
-                -- Once for the whole scene, and only the fragments of an instance
-                -- that named a region ever read it.
-                context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
-                local buffers <const> = self._geometryBuffers
-                buffers[1] = self.instances.handle
-                buffers[2] = self._visible.handle
-                buffers[3] = self._playbacks.handle
-                context.pass:bindVertexStorageBuffers(0, buffers)
-
-                local textures <const> = self._geometryTextures
-                textures[1] = self.images.handle
-                context.pass:bindTextures(0, textures, self.sampler.handle)
-                context.pass:bindIndexBuffer(self._indices.handle)
-                -- One draw for the scene, with its instance count decided by the
-                -- cull rather than by anything here.
-                context.pass:drawIndexedIndirect(self._drawArgs.handle, 0, 1)
-            end,
-            forward = function(context: Deferred.PassContext)
-                -- Nothing blended means nothing sorted, and the sorted list
-                -- still holds whatever the last frame that did blend left in
-                -- it. The draw arguments would too, so the gate is here rather
-                -- than left to an instance count that is not this frame's.
-                if self.count == 0 or not self._blending then
-                    return
-                end
-                context.pass:bindPipeline(self.blendPipeline.handle)
-
-                context.pass:pushVertexUniform(0, self._view:matrix(context.width, context.height), 64)
-                context.pass:pushVertexUniform(1, layerUniform(self, context.width, context.height), LAYER_BYTES)
-                context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
-                -- The lights, and the scene block the resolve was given, so a
-                -- blended fragment is lit by the same description of the frame
-                -- as the opaque one behind it.
-                self.deferred:bindLighting(context)
-
-                local buffers <const> = self._forwardBuffers
-                buffers[1] = self.instances.handle
-                buffers[2] = self._blendSorted.handle
-                buffers[3] = self._playbacks.handle
-                context.pass:bindVertexStorageBuffers(0, buffers)
-
-                local textures <const> = self._forwardTextures
-                textures[1] = self.images.handle
-                context.pass:bindTextures(0, textures, self.sampler.handle)
-                context.pass:bindIndexBuffer(self._indices.handle)
-                context.pass:drawIndexedIndirect(self._blendArgs.handle, 0, 1)
-            end,
-        }
-    )
-
     self.pipeline = buildGeometry(self)
     self.blendPipeline = buildForward(self)
 
     if shadows then
         local maskFormat, shadowFormat = self.deferred:castFormats()
-        self._maskPipeline = buildCast(self, maskFormat, "max", "ecs.occluders")
-        self._shadowPipeline = buildCast(self, shadowFormat, "min", "ecs.dropShadows")
-        self._stampPipeline = buildCast(self, shadowFormat, "max", "ecs.dropShadowStamp")
+        self._maskPipeline = buildCast(self, maskFormat, GraphicsPipeline.BLEND_MAX, "ecs.occluders")
+        self._shadowPipeline = buildCast(self, shadowFormat, GraphicsPipeline.BLEND_MIN, "ecs.dropShadows")
+        self._stampPipeline = buildCast(self, shadowFormat, GraphicsPipeline.BLEND_MAX, "ecs.dropShadowStamp")
 
         -- Seeded here rather than above because one of them is the light
         -- buffer, which the deferred pipeline owns and had not been built yet.
@@ -1096,7 +1061,7 @@ end
 --- @return The instance staging as floats, valid until this slot is mapped
 ---     again.
 --- @return The bounds staging as floats, on the same terms.
-function Backend:mapSlot(slot: integer): loader.CArray, loader.CArray
+function SpriteBackend:mapSlot(slot: integer): loader.CArray, loader.CArray
     return self.instances:mapSlotAs(slot, "float *", false), self._bounds:mapSlotAs(slot, "float *", false)
 end
 
@@ -1108,7 +1073,7 @@ end
 ---
 --- @param stage Held until `destroy`, which calls its own. There is no way to
 ---     take one back out.
-function Backend:addComputeStage(stage: ComputeStage)
+function SpriteBackend:addComputeStage(stage: ComputeStage)
     self._stages[#self._stages + 1] = stage
 end
 
@@ -1116,12 +1081,19 @@ end
 ---
 --- For a stage building its own pipelines and buffers, which it has to do
 --- before there is a frame to record onto.
-function Backend:device(): loader.CPtr
+function SpriteBackend:device(): loader.CPtr
     return self._device
 end
 
+--- Returns whether extraction found a caster for the current frame.
+function SpriteBackend:castsThisFrame(): boolean
+    return self._casting
+end
+
 --- Uploads a decoded image into the array and returns the region it occupies.
-function Backend:addImage(pixels: loader.CValue, width: integer, height: integer, pitch: integer): TextureArray.Region
+function SpriteBackend:addImage(
+    pixels: loader.CValue, width: integer, height: integer, pitch: integer
+): TextureArray.Region
     return self.images:add(pixels, width, height, pitch)
 end
 
@@ -1130,7 +1102,7 @@ end
 --- The region is unchanged by this and stays the answer for that image, which
 --- is why nothing outside has to hear about it. Raises on a size that would
 --- need a different rect.
-function Backend:replaceImage(
+function SpriteBackend:replaceImage(
     region: TextureArray.Region, pixels: loader.CValue, width: integer, height: integer, pitch: integer
 )
     self.images:replace(region, pixels, width, height, pitch)
@@ -1150,7 +1122,7 @@ end
 ---
 --- Nothing is released until everything has been built, so a source that no
 --- longer compiles raises and leaves the process drawing exactly what it drew.
-function Backend:rebuildPipelines()
+function SpriteBackend:rebuildPipelines()
     local device <const> = self._device
     C.SDL_WaitForGPUIdle(device)
 
@@ -1176,9 +1148,9 @@ function Backend:rebuildPipelines()
         if self._castCompact ~= nil then
             castCompact = ComputePipeline.load(device, "instance.cast.comp", {})
             local maskFormat, shadowFormat = self.deferred:castFormats()
-            mask = buildCast(self, maskFormat, "max", "ecs.occluders")
-            shadow = buildCast(self, shadowFormat, "min", "ecs.dropShadows")
-            stamp = buildCast(self, shadowFormat, "max", "ecs.dropShadowStamp")
+            mask = buildCast(self, maskFormat, GraphicsPipeline.BLEND_MAX, "ecs.occluders")
+            shadow = buildCast(self, shadowFormat, GraphicsPipeline.BLEND_MIN, "ecs.dropShadows")
+            stamp = buildCast(self, shadowFormat, GraphicsPipeline.BLEND_MAX, "ecs.dropShadowStamp")
         end
     end)
     if not built then
@@ -1286,7 +1258,7 @@ end
 ---     anything outside that raises.
 --- @param region Nil raises rather than clearing; `clearClipRegion` is what
 ---     stops a region clipping.
-function Backend:setClipRegion(index: integer, region: ClipRegion)
+function SpriteBackend:setClipRegion(index: integer, region: ClipRegion)
     checkClipIndex(index, 3)
     if region == nil then
         error("tecs: setClipRegion needs a rectangle; clearClipRegion " .. "is how a region stops clipping", 3)
@@ -1312,7 +1284,7 @@ end
 ---
 --- @param index The same range `setClipRegion` takes. Clearing one nobody set
 ---     is not an error.
-function Backend:clearClipRegion(index: integer)
+function SpriteBackend:clearClipRegion(index: integer)
     checkClipIndex(index, 3)
     local base <const> = index * 4
     local data <const> = self._clipUniform
@@ -1340,7 +1312,7 @@ end
 --- @param groups Workgroups covering every resident instance, as the opaque
 ---     lane's dispatches used.
 --- @param cull The uniform both lanes are pushed from, rewritten here.
-local function sortForward(self: Backend, frame: Frame, groups: integer, cull: loader.CArray)
+local function sortForward(self: SpriteBackend, frame: Frame, groups: integer, cull: loader.CArray)
     local commandBuffer <const> = frame.commandBuffer
     local blendGroups <const> = self._blendGroups
 
@@ -1439,7 +1411,7 @@ end
 --- @param groups Workgroups covering every resident instance, as the opaque
 ---     lane's dispatches used.
 --- @param cull The uniform every lane is pushed from, rewritten here.
-local function compactCasters(self: Backend, frame: Frame, groups: integer, cull: loader.CArray)
+local function compactCasters(self: SpriteBackend, frame: Frame, groups: integer, cull: loader.CArray)
     local commandBuffer <const> = frame.commandBuffer
 
     cull[5] = groups
@@ -1474,7 +1446,7 @@ local function compactCasters(self: Backend, frame: Frame, groups: integer, cull
     compact:finish()
 end
 
---- Uploads what a packet describes, culls, and runs the pipeline.
+--- Uploads what a packet describes and records sprite preparation passes.
 ---
 --- The cull runs on the frame's command buffer, after the upload and before
 --- the passes that consume it, so SDL orders all three without anything here
@@ -1488,7 +1460,7 @@ end
 ---     so the caller is free to refill it as soon as this returns.
 --- @param frame Recorded onto and not submitted. Submitting it is the caller's,
 ---     after every pass it wants in the frame has been recorded.
-function Backend:consume(packet: FramePacket, frame: Frame)
+function SpriteBackend:prepare(packet: SpriteFramePacket, frame: Frame)
     local slot <const> = packet.slot
     self.instances:markSlotRanges(slot, packet.instanceRanges)
     self._bounds:markSlotRanges(slot, packet.boundsRanges)
@@ -1556,6 +1528,7 @@ function Backend:consume(packet: FramePacket, frame: Frame)
     -- passes and a draw are not a cost a world that blends nothing should pay
     -- to find out it has nothing to blend.
     self._blending = packet.blendCount > 0
+    self._casting = packet.castCount > 0
 
     if self.count > 0 then
         local groups = math.ceil(self.count / CULL_GROUP)
@@ -1628,28 +1601,14 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         -- this rewrites it again for a lane of its own. Gated on the pipeline
         -- rather than on the frame: a backend built without shadows has no list
         -- to compact into and no pass that would read one.
-        if self._castCompact ~= nil then
+        if self._castCompact ~= nil and self._casting then
             compactCasters(self, frame, groups, cull)
         end
     end
-
-    self.deferred:render(frame)
-end
-
---- The composited image the last frame produced.
----
---- The scene target rather than the swapchain, because a swapchain texture
---- belongs to the presenter once the frame is submitted while this one
---- persists and can be read at any point between frames. Scene rather than
---- lit, because scene is what present copies: everything drawn between
---- composite and present is in it, so a screenshot stays the frame that was
---- shown as passes are added to that seam.
-function Backend:captureTexture(): Texture
-    return self.deferred.graph:texture("scene")
 end
 
 --- Releases everything the backend owns. Safe to call more than once.
-function Backend:destroy()
+function SpriteBackend:destroy()
     if self._destroyed then
         return
     end
@@ -1662,7 +1621,6 @@ function Backend:destroy()
     end
     self.pipeline:destroy()
     self.blendPipeline:destroy()
-    self.deferred:destroy()
     self.instances:destroy()
     self.sampler:destroy()
     self.images:destroy()
@@ -1696,4 +1654,4 @@ function Backend:destroy()
     end
 end
 
-return Backend
+return SpriteBackend

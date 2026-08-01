@@ -6,11 +6,7 @@ local tecs <const> = require("tecs")
 local type Renderer = require("tecs.Renderer")
 local type inputTypes = require("tecs.input")
 
-local function installManualUi(
-    world: tecs.World,
-    renderer: Renderer,
-    input: inputTypes.Input
-)
+local function installManualUi(world: tecs.World, renderer: Renderer, input: inputTypes.Input)
     world:addPlugin(tecs.ui.plugin({
         renderer = renderer,
         input = input,

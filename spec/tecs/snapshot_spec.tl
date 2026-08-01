@@ -115,7 +115,7 @@ describe(
         it(
             "round-trips FFI + table components through JSON",
             function()
-                -- Mirrors the save-game paint demo: one FFI component (Transform-ish)
+                -- Mirrors the save-game paint demo: one FFI component (Transform2D-ish)
                 -- plus one table component (Cell-ish) on the same entity, through the
                 -- full save -> serialize -> parse -> load pipeline.
                 local data <const> = require("tecs.data")
@@ -311,14 +311,14 @@ describe(
         )
 
         it(
-            "opts.layers filters Transform-bearing entities; non-Transform entities pass through",
+            "opts.layers filters Transform2D-bearing entities; non-Transform2D entities pass through",
             function()
                 -- Lenient semantics: `layers` only filters entities that carry a
-                -- Transform. Entities without a Transform (singletons, config)
+                -- Transform2D. Entities without a Transform2D (singletons, config)
                 -- are never touched by the layer allow-list.
                 local world = tecs.ecs.newWorld()
-                local onLayer2 = world:spawn(tecs.Transform(0, 0, 0, 2))
-                local onLayer5 = world:spawn(tecs.Transform(0, 0, 0, 5))
+                local onLayer2 = world:spawn(tecs.Transform2D(0, 0, 0, 2))
+                local onLayer5 = world:spawn(tecs.Transform2D(0, 0, 0, 5))
                 local noTransform = world:spawn(PositionComp(1, 1))
                 world:commit()
 
@@ -327,7 +327,7 @@ describe(
 
                 luassert.is_true(world:isAlive(onLayer2), "layer-2 entity kept")
                 luassert.is_false(world:isAlive(onLayer5), "layer-5 entity filtered out")
-                luassert.is_true(world:isAlive(noTransform), "non-Transform entity passes through")
+                luassert.is_true(world:isAlive(noTransform), "non-Transform2D entity passes through")
             end
         )
 

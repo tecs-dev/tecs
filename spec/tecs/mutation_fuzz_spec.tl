@@ -64,7 +64,7 @@ local GEN_STRIDE <const> = 4194304
 
 local ChildOf <const> = tecs.ecs.ChildOf
 local Key <const> = tecs.ecs.EntityKey
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 
 -- Fuzz components: one numeric field each so canonical state is cheap.
 local FzA = tecs.ecs.newComponent({
@@ -248,7 +248,7 @@ local function canonicalState(
                 if w:has(id, Key) then
                     piece[#piece + 1] = "Key=" .. tostring(w:get(id, Key))
                 end
-                local tr = w:get(id, Transform) as {string: any}
+                local tr = w:get(id, Transform2D) as {string: any}
                 if tr then
                     piece[#piece + 1] = "T=" .. tostring(tr.x) .. ";" .. tostring(tr.y) .. ";" .. tostring(tr.layer)
                 end
@@ -772,7 +772,7 @@ describe(
                         },
                         {
                             weight = 3,
-                            name = "set Transform with layer",
+                            name = "set Transform2D with layer",
                             run = function()
                                 local si = pickAliveIdx()
                                 if not si then
@@ -789,7 +789,7 @@ describe(
                                         w:set(
                                             id,
                                             (
-                                                Transform as function(
+                                                Transform2D as function(
                                                     number, number, number, integer
                                                 ): tecs.ecs.Component
                                             )(x, y, 0, layer)
@@ -1326,7 +1326,7 @@ describe(
                     validate(freshAgain)
 
                     -- Layer-filtered binary save restores exactly the matching
-                    -- subset; entities without Transform always pass the filter.
+                    -- subset; entities without Transform2D always pass the filter.
                     local outLayers = wa:saveSnapshot({layers = {1, 3}})
                     local freshLayers = tecs.ecs.newWorld()
                     freshLayers:createState("fuzzState")
@@ -1335,7 +1335,7 @@ describe(
                         wa,
                         true,
                         function(w2: tecs.World, id: integer): boolean
-                            local tr = w2:get(id, Transform) as {string: any}
+                            local tr = w2:get(id, Transform2D) as {string: any}
                             if tr == nil then
                                 return true
                             end

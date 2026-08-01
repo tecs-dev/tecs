@@ -17,7 +17,7 @@ local hero <const> = tecs.gfx.animation.newSheetFromAseprite({
     json = asepriteExport,
 })
 
-hero:bind(app.renderer:sprite("sprites/hero.png"))
+hero:bind(app.renderer.sprites:sprite("sprites/hero.png"))
 ```
 
 `sprite(frame)` creates a [`Sprite`](tealdoc:tecs.components.Sprite) for one frame.
@@ -159,7 +159,7 @@ end
 ---
 --- A quad with no Pivot turns about its center, so a character rotates about
 --- its waist and a scale grows it in both directions at once. A quad with one
---- turns about the point the pivot names, and the entity's Transform position
+--- turns about the point the pivot names, and the entity's Transform2D position
 --- is where that point lands: a character pivoted at its feet stands at its
 --- position instead of hovering half a body above it.
 ---
@@ -420,7 +420,7 @@ local record Sheet
 
     --- Resolves the sheet's frames against a registered image.
     ---
-    --- `sprite` is what `Renderer:sprite(name)` returns for a whole image: its
+    --- `sprite` is what `renderer.sprites:sprite(name)` returns for a whole image: its
     --- `u1` and `v1` are the fractions of the texture-array layer that image
     --- occupies. The function scales the frame's image fraction by them
     --- before it names a region of the layer. Pass a sub-rect and the frames
@@ -430,7 +430,7 @@ local record Sheet
     --- result, so re-registering an image does not accumulate scaling error.
     --- Entities already carrying regions from an earlier bind keep them: a
     --- rebind does not update any existing [`Sprite`](tealdoc:tecs.components.Sprite).
-    --- @param sprite A whole image, from `Renderer:sprite`.
+    --- @param sprite A whole image, from `renderer.sprites:sprite`.
     --- @return Returns the sheet so callers can chain `bind`.
     bind: function(self, sprite: Sprite): Sheet
 

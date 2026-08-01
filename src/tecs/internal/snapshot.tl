@@ -26,7 +26,7 @@ Two API layers:
 * Table helpers: `saveSnapshotTable` returns a plain Lua snapshot table
   (JSON-compatible); `loadSnapshotTable` consumes one.
 
-SaveOptions can filter by query and Transform layer. Writers are still
+SaveOptions can filter by query and Transform2D layer. Writers are still
 allowed to drop additional entities or archetypes, but built-in filtering
 happens before writer calls.
 
@@ -331,12 +331,12 @@ local record snapshot
         path: string
         --- QueryDescriptor whose include/includeAny/exclude set selects the
         --- archetypes that should be saved. Built into a temp query internally.
-        --- Composes freely with `layers`; no Transform requirement.
+        --- Composes freely with `layers`; no Transform2D requirement.
         filterQuery: types.Query.Descriptor
-        --- Allow-list of `Transform.layer` values (must fit in 0..31).
-        --- Entities carrying a `Transform` whose `layer` is NOT in this
-        --- set are skipped. Entities without a `Transform` pass through
-        --- unaffected -- `layers` is a filter on Transform-bearing
+        --- Allow-list of `Transform2D.layer` values (must fit in 0..31).
+        --- Entities carrying a `Transform2D` whose `layer` is NOT in this
+        --- set are skipped. Entities without a `Transform2D` pass through
+        --- unaffected -- `layers` is a filter on Transform2D-bearing
         --- entities, not a hard gate.
         layers: {integer}
         --- Ad-hoc keyed metadata to attach to this snapshot. Each `(key,
@@ -642,7 +642,7 @@ local function cloneQueryDescriptor(d: types.Query.Descriptor): types.Query.Desc
     return out
 end
 
--- Build an integer bitmask of allowed `Transform.layer` values from the
+-- Build an integer bitmask of allowed `Transform2D.layer` values from the
 -- user-provided list. Layers >= 32 error out since we use bit.band on a
 -- uint32. In practice games stay well under that.
 local function buildLayerMask(layers: {integer}): integer
@@ -660,7 +660,7 @@ end
 -- Resolve the effective query + per-entity layer filter from SaveOptions.
 -- Returns (query, layerMask) where either can be nil. Layer filtering is
 -- applied per-archetype inside the main loop: archetypes that don't have
--- Transform pass through unconditionally; archetypes that do get their
+-- Transform2D pass through unconditionally; archetypes that do get their
 -- entities filtered by layer.
 local function resolveSaveFilters(
     world: World, opts: SnapshotOptions, filterQuery: types.Query.Descriptor
@@ -679,10 +679,10 @@ local function resolveSaveFilters(
     return query, layerMask
 end
 
--- Does this archetype carry a Transform column? Layer filtering only
+-- Does this archetype carry a Transform2D column? Layer filtering only
 -- applies to archetypes where the answer is yes.
 local function archetypeHasTransform(arch: Archetype): boolean
-    return arch.columns[builtins.Transform as types.components.Component] ~= nil
+    return arch.columns[builtins.Transform2D as types.components.Component] ~= nil
 end
 
 -- Count entities that will actually be emitted per archetype + total, given
@@ -696,7 +696,7 @@ local function countFilteredArchetype(arch: Archetype, layerMask: integer, hasTr
     if layerMask == nil or not hasTransform then
         return full
     end
-    local transforms = arch.columns[builtins.Transform as types.components.Component] as {{string: integer}}
+    local transforms = arch.columns[builtins.Transform2D as types.components.Component] as {{string: integer}}
     local n = 0
     for row = 1, full do
         local layer = transforms[row].layer
@@ -712,7 +712,7 @@ end
 local doubleArrayType <const>: any = ffiTypeof("double[?]")
 local function buildFilteredIds(arch: Archetype, layerMask: integer, count: integer): any
     local ids = ffiNew(doubleArrayType, count) as {integer: integer}
-    local transforms = arch.columns[builtins.Transform as types.components.Component] as {{string: integer}}
+    local transforms = arch.columns[builtins.Transform2D as types.components.Component] as {{string: integer}}
     local entities = arch.entities as {integer}
     local idx = 0
     for row = 1, arch.entities[0] do
@@ -785,8 +785,8 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
         columnIndices: {integer}
         count: integer
         hasSparse: boolean
-        -- True when the archetype carries a Transform AND `layers` was
-        -- set. Archetypes without Transform always pass through in full,
+        -- True when the archetype carries a Transform2D AND `layers` was
+        -- set. Archetypes without Transform2D always pass through in full,
         -- even when `layers` is present.
         applyLayerFilter: boolean
     end
@@ -921,7 +921,7 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
                     -- FFI but layer-filtered: emit per-entity raw via the
                     -- per-component serializeRaw path. Still no allocation.
                     local typedColumn = column as {Component}
-                    local transforms = arch.columns[builtins.Transform as types.components.Component]
+                    local transforms = arch.columns[builtins.Transform2D as types.components.Component]
                         as {{string: integer}}
                     for row = 1, arch.entities[0] do
                         if bit.band(layerMask, bit.lshift(1, transforms[row].layer)) ~= 0 then
@@ -932,7 +932,7 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
                     -- Per-entity encoded value (non-FFI, or table writer).
                     local typedColumn = column as {Component}
                     if applyLayerFilter then
-                        local transforms = arch.columns[builtins.Transform as types.components.Component]
+                        local transforms = arch.columns[builtins.Transform2D as types.components.Component]
                             as {{string: integer}}
                         for row = 1, arch.entities[0] do
                             if bit.band(layerMask, bit.lshift(1, transforms[row].layer)) ~= 0 then
@@ -953,7 +953,7 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
             local entities = arch.entities as {integer}
             local transforms: {{string: integer}}
             if applyLayerFilter then
-                transforms = arch.columns[builtins.Transform as types.components.Component] as {{string: integer}}
+                transforms = arch.columns[builtins.Transform2D as types.components.Component] as {{string: integer}}
             end
 
             for row = 1, arch.entities[0] do

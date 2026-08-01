@@ -80,12 +80,12 @@ See [`tecs.Application`](/modules/Application) for lifecycle and configuration.
 The entry plugin registers systems, observers, resources, and entities:
 
 ```teal
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 
 return tecs.newApplication({
     plugin = function(world: tecs.World, app: tecs.Application)
         local movers <const> = world:newQuery({
-            include = {Transform},
+            include = {Transform2D},
         })
 
         world:addSystem({
@@ -93,7 +93,7 @@ return tecs.newApplication({
             phase = tecs.ecs.phases.Update,
             run = function(dt: number)
                 for archetype, length in movers:iter() do
-                    local transforms <const> = archetype:getMut(Transform)
+                    local transforms <const> = archetype:getMut(Transform2D)
                     for row = 1, length do
                         transforms[row].rotation =
                             transforms[row].rotation + dt
@@ -102,7 +102,7 @@ return tecs.newApplication({
             end,
         })
 
-        world:spawn(Transform(100, 100))
+        world:spawn(Transform2D(100, 100))
     end,
 })
 ```

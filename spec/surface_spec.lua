@@ -144,9 +144,9 @@ local described = surfaceNames(INIT)
 
 --- The three names on `tecs` that no descriptor answers, and why each is
 --- direct. `ecs` reaches nothing below Lua, so it is assigned as the module
---- returns rather than resolved; `Transform` comes off it and so is already
+--- returns rather than resolved; `Transform2D` comes off it and so is already
 --- loaded whenever `tecs` is; `version` is a string.
-local DIRECT = { ecs = true, version = true, Transform = true }
+local DIRECT = { ecs = true, version = true, Transform2D = true }
 
 --- Teal type names that are a Lua type, and the Lua type each of them is. A
 --- field declared one of these carries a value rather than a module, so it is
@@ -211,7 +211,7 @@ describe("the public surface", function()
 
             -- A name declared as something the ECS carries is republished off
             -- it rather than resolved, so what it is held to is being that
-            -- exact value. `tecs.Transform` is the one there is: a component,
+            -- exact value. `tecs.Transform2D` is the one there is: a component,
             -- so neither a module nor a namespace, and the check that matters
             -- is that the root and `tecs.ecs` name one component rather than
             -- two tables that look alike.
@@ -290,11 +290,11 @@ describe("the public surface", function()
             -- A PascalCase `within` name is a class reached through its
             -- namespace rather than a module wanting a page of its own, and it
             -- resolves to the module that declares it rather than a copy.
-            assert.is_true(rawequal(tecs.gfx.Camera, require("tecs.gfx.Camera")))
+            assert.is_true(rawequal(tecs.gfx.Camera2D, require("tecs.gfx.Camera2D")))
             assert.is_true(rawequal(tecs.gfx.Renderer, require("tecs.Renderer")))
             -- The constructor sits on the namespace, not on the class, which
-            -- is what `newCamera` means: the module owns the type.
-            assert.are.equal(require("tecs.gfx.Camera").newCamera, tecs.gfx.newCamera)
+            -- is what `newCamera2D` means: the module owns the type.
+            assert.are.equal(require("tecs.gfx.Camera2D").newCamera2D, tecs.gfx.newCamera2D)
             assert.are.equal(require("tecs.Renderer").newRenderer, tecs.gfx.newRenderer)
         end)
     end)

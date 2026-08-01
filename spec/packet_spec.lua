@@ -17,9 +17,10 @@ local loader = require("tecs.ffi.loader")
 local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
 local Texture = require("tecs.gpu.Texture")
-local Extractor = require("tecs.Extractor")
-local Backend = require("tecs.Backend")
-local FramePacket = require("tecs.FramePacket")
+local Deferred = require("tecs.gpu.Deferred")
+local SpriteExtractor = require("tecs.internal.render.SpriteExtractor")
+local SpriteBackend = require("tecs.internal.render.SpriteBackend")
+local SpriteFramePacket = require("tecs.internal.render.SpriteFramePacket")
 local components = require("tecs.components")
 local ecs = require("tecs.ecs")
 local instancelayout = require("tecs.gpu.instancelayout")
@@ -28,11 +29,13 @@ local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local Tint = components.Tint
 local Clip = components.Clip
-local Renderable = components.Renderable
-local PointLight = components.PointLight
+local Renderable2D = components.Renderable2D
+local PointLight2D = components.PointLight2D
+local Occluder2D = components.Occluder2D
+local DropShadow2D = components.DropShadow2D
 
 local INSTANCE_FLOATS = instancelayout.FLOATS
 local INSTANCE_BYTES = instancelayout.BYTES
@@ -45,14 +48,14 @@ describe("render extraction", function()
     -- plain C array is the whole of what a device supplies it with.
     local function newExtraction()
         local world = tecs.ecs.newWorld()
-        local extractor = Extractor.create({
+        local extractor = SpriteExtractor.create({
             capacity = CAPACITY,
             whiteU0 = 0.0,
             whiteV0 = 0.0,
             whiteU1 = 1 / 512,
             whiteV1 = 1 / 512,
         })
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         local instances = loader.newArray("float[?]", CAPACITY * INSTANCE_FLOATS)
         local bounds = loader.newArray("float[?]", CAPACITY * 4)
         extractor:setStaging(0, instances, bounds)
@@ -63,7 +66,7 @@ describe("render extraction", function()
     it("reports what it laid out from a known world", function()
         local world, _, packet = newExtraction()
         for _ = 1, 3 do
-            world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+            world:spawn(Transform2D(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable2D())
         end
 
         world:update(1 / 60)
@@ -77,7 +80,7 @@ describe("render extraction", function()
     it("marks the bytes it wrote and nothing else", function()
         local world, _, packet = newExtraction()
         for _ = 1, 3 do
-            world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+            world:spawn(Transform2D(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable2D())
         end
 
         world:update(1 / 60)
@@ -94,7 +97,7 @@ describe("render extraction", function()
 
     it("marks nothing on a frame where nothing changed", function()
         local world, _, packet = newExtraction()
-        world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+        world:spawn(Transform2D(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable2D())
 
         world:update(1 / 60)
         world:update(1 / 60)
@@ -112,7 +115,7 @@ describe("render extraction", function()
         -- backend's forward lane on for every later frame including the ones with
         -- nothing in it to blend.
         local world, _, packet = newExtraction()
-        local entity = world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 0.5), Renderable())
+        local entity = world:spawn(Transform2D(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 0.5), Renderable2D())
 
         world:update(1 / 60)
         assert.are.equal(1, packet.blendCount)
@@ -128,10 +131,28 @@ describe("render extraction", function()
         assert.are.equal(0, packet.blendCount, "an opaque scene reports nothing blended")
     end)
 
+    it("counts the shadow casters the scene holds, and stops counting them", function()
+        local world, _, packet = newExtraction()
+        local occluder = world:spawn(Transform2D(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable2D(), Occluder2D())
+        local shadow = world:spawn(Transform2D(16, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable2D(), DropShadow2D())
+
+        world:update(1 / 60)
+        assert.are.equal(2, packet.castCount)
+
+        world:update(1 / 60)
+        assert.are.equal(0, packet.rewritten)
+        assert.are.equal(2, packet.castCount, "resident casters remain counted")
+
+        world:despawn(occluder)
+        world:despawn(shadow)
+        world:update(1 / 60)
+        assert.are.equal(0, packet.castCount, "an ordinary scene skips the shadow lane")
+    end)
+
     it("reports rows it could not fit", function()
         local world, _, packet = newExtraction()
         for _ = 1, CAPACITY + 6 do
-            world:spawn(Transform(0, 0, 0, 1, 0, 1, 1), Tint(1, 1, 1, 1), Renderable())
+            world:spawn(Transform2D(0, 0, 0, 1, 0, 1, 1), Tint(1, 1, 1, 1), Renderable2D())
         end
 
         world:update(1 / 60)
@@ -142,7 +163,7 @@ describe("render extraction", function()
 
     it("writes instances into the staging it was handed", function()
         local world, _, packet, instances = newExtraction()
-        world:spawn(Transform(12, 34, 0, 1, 0, 4, 4), Tint(0.25, 0.5, 0.75, 1), Renderable())
+        world:spawn(Transform2D(12, 34, 0, 1, 0, 4, 4), Tint(0.25, 0.5, 0.75, 1), Renderable2D())
 
         world:update(1 / 60)
 
@@ -170,7 +191,7 @@ describe("render extraction", function()
 
     it("packs light entities into the packet's own storage", function()
         local world, _, packet = newExtraction()
-        world:spawn(Transform(10, 20, 0, 1, 0, 1, 1), PointLight(12.0, 30.0, 1.0, 0.5, 0.25, 4.0))
+        world:spawn(Transform2D(10, 20, 0, 1, 0, 1, 1), PointLight2D(12.0, 30.0, 1.0, 0.5, 0.25, 4.0))
 
         world:update(1 / 60)
 
@@ -188,14 +209,14 @@ describe("render extraction", function()
 
     it("tells whoever owns the packet that it is filled", function()
         local world = tecs.ecs.newWorld()
-        local extractor = Extractor.create({
+        local extractor = SpriteExtractor.create({
             capacity = CAPACITY,
             whiteU0 = 0.0,
             whiteV0 = 0.0,
             whiteU1 = 1.0,
             whiteV1 = 1.0,
         })
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         extractor:setStaging(
             0,
             loader.newArray("float[?]", CAPACITY * INSTANCE_FLOATS),
@@ -223,7 +244,7 @@ describe("reserved instance runs", function()
     local function newExtraction(reserveRuns, capacity)
         capacity = capacity or CAPACITY
         local world = tecs.ecs.newWorld()
-        local extractor = Extractor.create({
+        local extractor = SpriteExtractor.create({
             capacity = capacity,
             reserveRuns = reserveRuns,
             whiteU0 = 0.0,
@@ -231,7 +252,7 @@ describe("reserved instance runs", function()
             whiteU1 = 1 / 512,
             whiteV1 = 1 / 512,
         })
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         local instances = loader.newArray("float[?]", capacity * INSTANCE_FLOATS)
         local bounds = loader.newArray("float[?]", capacity * 4)
         extractor:setStaging(0, instances, bounds)
@@ -250,9 +271,9 @@ describe("reserved instance runs", function()
     local function scatter(world, count, clipped)
         for _ = 1, count do
             if clipped then
-                world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Clip(0), Renderable())
+                world:spawn(Transform2D(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Clip(0), Renderable2D())
             else
-                world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+                world:spawn(Transform2D(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable2D())
             end
         end
     end
@@ -278,7 +299,8 @@ describe("reserved instance runs", function()
     local function scatterTagged(world, tag, count)
         local ids = {}
         for _ = 1, count do
-            ids[#ids + 1] = world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), TAGS[tag](1), Renderable())
+            ids[#ids + 1] =
+                world:spawn(Transform2D(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), TAGS[tag](1), Renderable2D())
         end
         return ids
     end
@@ -356,7 +378,7 @@ describe("reserved instance runs", function()
         local world, _, packet, _, bounds = newExtraction(true)
         local ids = {}
         for _ = 1, 8 do
-            ids[#ids + 1] = world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+            ids[#ids + 1] = world:spawn(Transform2D(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable2D())
         end
         world:update(1 / 60)
         assert.are.equal(24, packet.count)
@@ -374,7 +396,7 @@ describe("reserved instance runs", function()
         local world, _, packet, _, bounds = newExtraction(true)
         local ids = {}
         for _ = 1, 8 do
-            ids[#ids + 1] = world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+            ids[#ids + 1] = world:spawn(Transform2D(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable2D())
         end
         world:update(1 / 60)
 
@@ -406,7 +428,7 @@ describe("reserved instance runs", function()
         local world, _, packet = newExtraction(true)
         local ids = {}
         for _ = 1, 1000 do
-            ids[#ids + 1] = world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+            ids[#ids + 1] = world:spawn(Transform2D(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable2D())
         end
         world:update(1 / 60)
         assert.are.equal(1016, packet.count)
@@ -481,6 +503,9 @@ describe("reserved instance runs", function()
             blended = function()
                 return 0
             end,
+            casting = function()
+                return 0
+            end,
             write = function(_, floats, bounds, base, first, last)
                 writes = writes + 1
                 for slot = base + first - 1, base + last - 1 do
@@ -540,7 +565,7 @@ describe("partial structural rewrites", function()
 
     local function newExtraction(partial, reserveRuns)
         local world = tecs.ecs.newWorld()
-        local extractor = Extractor.create({
+        local extractor = SpriteExtractor.create({
             capacity = CAPACITY,
             reserveRuns = reserveRuns ~= false,
             partialRewrites = partial,
@@ -549,7 +574,7 @@ describe("partial structural rewrites", function()
             whiteU1 = 1 / 512,
             whiteV1 = 1 / 512,
         })
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         local instances = loader.newArray("float[?]", CAPACITY * INSTANCE_FLOATS)
         local bounds = loader.newArray("float[?]", CAPACITY * 4)
         extractor:setStaging(0, instances, bounds)
@@ -569,7 +594,7 @@ describe("partial structural rewrites", function()
     -- pass, which is a second thing a rewrite of it settles besides its bytes:
     -- how many of the run's rows the frame reports as blended.
     local function spawn(side, alpha)
-        local id = side.world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, alpha or 1), Renderable())
+        local id = side.world:spawn(Transform2D(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, alpha or 1), Renderable2D())
         side.live[#side.live + 1] = id
         return id
     end
@@ -637,7 +662,7 @@ describe("partial structural rewrites", function()
         side.world:update(1 / 60)
         side.world:update(1 / 60)
 
-        side.world:set(side.live[5], Transform(9, 9, 0, 1, 0, 4, 4))
+        side.world:set(side.live[5], Transform2D(9, 9, 0, 1, 0, 4, 4))
         side.world:update(1 / 60)
         assert.are.equal(200, side.packet.rewritten)
     end)
@@ -827,7 +852,7 @@ describe("partial structural rewrites", function()
                 live[index] = live[#live]
                 live[#live] = nil
             elseif op[1] == "move" then
-                side.world:set(side.live[op[2]], Transform(op[3], op[4], 0, 1, 0, 4, 4))
+                side.world:set(side.live[op[2]], Transform2D(op[3], op[4], 0, 1, 0, 4, 4))
             elseif op[1] == "tint" then
                 side.world:getMut(side.live[op[2]], Tint).a = op[3]
             else
@@ -907,7 +932,7 @@ describe("structural change after extraction", function()
 
     local function newExtraction(partial)
         local world = tecs.ecs.newWorld()
-        local extractor = Extractor.create({
+        local extractor = SpriteExtractor.create({
             capacity = CAPACITY,
             partialRewrites = partial,
             whiteU0 = 0.0,
@@ -915,7 +940,7 @@ describe("structural change after extraction", function()
             whiteU1 = 1 / 512,
             whiteV1 = 1 / 512,
         })
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         local instances = loader.newArray("float[?]", CAPACITY * INSTANCE_FLOATS)
         local bounds = loader.newArray("float[?]", CAPACITY * 4)
         extractor:setStaging(0, instances, bounds)
@@ -930,7 +955,7 @@ describe("structural change after extraction", function()
     end
 
     local function spawnAt(world, x)
-        return world:spawn(Transform(x, 0, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+        return world:spawn(Transform2D(x, 0, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable2D())
     end
 
     -- Despawns the run's first row and spawns a replacement, once, from a
@@ -999,7 +1024,7 @@ describe("value write after extraction", function()
 
     local function newExtraction(partial)
         local world = tecs.ecs.newWorld()
-        local extractor = Extractor.create({
+        local extractor = SpriteExtractor.create({
             capacity = CAPACITY,
             partialRewrites = partial,
             whiteU0 = 0.0,
@@ -1007,7 +1032,7 @@ describe("value write after extraction", function()
             whiteU1 = 1 / 512,
             whiteV1 = 1 / 512,
         })
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         local instances = loader.newArray("float[?]", CAPACITY * INSTANCE_FLOATS)
         local bounds = loader.newArray("float[?]", CAPACITY * 4)
         extractor:setStaging(0, instances, bounds)
@@ -1022,7 +1047,7 @@ describe("value write after extraction", function()
     end
 
     local function spawnAt(world, x)
-        return world:spawn(Transform(x, 0, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+        return world:spawn(Transform2D(x, 0, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable2D())
     end
 
     local function population(world)
@@ -1047,7 +1072,7 @@ describe("value write after extraction", function()
                     return
                 end
                 wrote = true
-                world:getMut(ids[3], Transform).x = 555
+                world:getMut(ids[3], Transform2D).x = 555
             end,
         })
 
@@ -1101,7 +1126,7 @@ describe("value write after extraction", function()
                 if wrote then
                     return
                 end
-                world:getMut(ids[3], Transform).x = 111
+                world:getMut(ids[3], Transform2D).x = 111
             end,
         })
         world:addSystem({
@@ -1112,7 +1137,7 @@ describe("value write after extraction", function()
                     return
                 end
                 wrote = true
-                world:getMut(ids[3], Transform).x = 555
+                world:getMut(ids[3], Transform2D).x = 555
             end,
         })
 
@@ -1167,6 +1192,7 @@ end)
 
 describe("render backend", function()
     local window, device, screen
+    local deferredOf = {}
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
@@ -1188,11 +1214,29 @@ describe("render backend", function()
         C.SDL_Quit()
     end)
 
-    local function newBackend()
-        return Backend.create(device.handle, FORMAT, {
-            ambient = { 1.0, 1.0, 1.0 },
+    local function newBackend(ambient)
+        local backend
+        local deferred = Deferred.create(device.handle, FORMAT, {
+            ambient = ambient or { 1.0, 1.0, 1.0 },
+            geometry = function(context)
+                backend:recordGeometry(context)
+            end,
+            forward = function(context)
+                backend:recordForward(context)
+            end,
+        })
+        backend = SpriteBackend.create(device.handle, deferred, {
             capacity = 16,
         })
+        deferredOf[backend] = deferred
+        return backend
+    end
+
+    local function destroyBackend(backend)
+        local deferred = deferredOf[backend]
+        backend:destroy()
+        deferred:destroy()
+        deferredOf[backend] = nil
     end
 
     -- One instance covering the whole target, written by hand into the staging
@@ -1226,19 +1270,21 @@ describe("render backend", function()
 
     local function consume(backend, packet)
         local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
-        backend:consume(packet, {
+        local frame = {
             width = SIZE,
             height = SIZE,
             commandBuffer = commandBuffer,
             swapchainTexture = screen.handle,
-        })
+        }
+        backend:prepare(packet, frame)
+        deferredOf[backend]:render(frame)
         assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
         return screen:readback()
     end
 
     it("draws a packet built by hand, with no world anywhere", function()
         local backend = newBackend()
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         writeQuad(backend, packet, SIZE / 2, SIZE / 2, 1.0, 0.0, 0.0)
         packet.cameraX = SIZE / 2
         packet.cameraY = SIZE / 2
@@ -1247,12 +1293,12 @@ describe("render backend", function()
         local center = screen:getPixel(consume(backend, packet), SIZE / 2, SIZE / 2)
         assert.are.equal(255, center.r, "the packet's instance reached the screen")
         assert.are.equal(0, center.g)
-        backend:destroy()
+        destroyBackend(backend)
     end)
 
     it("draws from where the packet says the camera was", function()
         local backend = newBackend()
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         writeQuad(backend, packet, SIZE / 2, SIZE / 2, 0.0, 1.0, 0.0)
         packet.cameraX = SIZE / 2
         packet.cameraY = SIZE / 2
@@ -1268,12 +1314,12 @@ describe("render backend", function()
             screen:getPixel(consume(backend, packet), SIZE / 2, SIZE / 2).g,
             "the camera the packet carried is the one that was drawn from"
         )
-        backend:destroy()
+        destroyBackend(backend)
     end)
 
     it("copies only the ranges the packet named", function()
         local backend = newBackend()
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         writeQuad(backend, packet, SIZE / 2, SIZE / 2, 0.0, 0.0, 1.0)
         packet.cameraX = SIZE / 2
         packet.cameraY = SIZE / 2
@@ -1310,15 +1356,12 @@ describe("render backend", function()
             screen:getPixel(consume(backend, packet), SIZE / 2, SIZE / 2).r,
             "and must be copied once a range names it"
         )
-        backend:destroy()
+        destroyBackend(backend)
     end)
 
     it("lights a packet from the light array it carries", function()
-        local backend = Backend.create(device.handle, FORMAT, {
-            ambient = { 0.0, 0.0, 0.0 },
-            capacity = 16,
-        })
-        local packet = FramePacket.create()
+        local backend = newBackend({ 0.0, 0.0, 0.0 })
+        local packet = SpriteFramePacket.create()
         writeQuad(backend, packet, SIZE / 2, SIZE / 2, 1.0, 1.0, 1.0)
         packet.cameraX = SIZE / 2
         packet.cameraY = SIZE / 2
@@ -1339,7 +1382,7 @@ describe("render backend", function()
         local pixels = consume(backend, packet)
         assert.is_true(screen:getPixel(pixels, SIZE / 2, SIZE / 2).r > 180, "the packet's light lit its own frame")
         assert.is_true(screen:getPixel(pixels, 2, 2).r < 60, "and only as far as its radius")
-        backend:destroy()
+        destroyBackend(backend)
     end)
 
     -- The line is only where it is claimed to be if the backend cannot reach
@@ -1351,11 +1394,12 @@ describe("render backend", function()
         local forbidden = {
             "tecs%.ecs",
             "tecs%.components",
-            "tecs%.internal",
-            "tecs%.Extractor",
+            "tecs%.internal%.render%.SpriteExtractor",
+            "tecs%.internal%.world",
+            "tecs%.internal%.Archetype",
         }
-        for _, module in ipairs({ "Backend", "FramePacket" }) do
-            local file = assert(io.open(root .. "/tecs/" .. module .. ".lua"))
+        for _, module in ipairs({ "SpriteBackend", "SpriteFramePacket" }) do
+            local file = assert(io.open(root .. "/tecs/internal/render/" .. module .. ".lua"))
             local source = file:read("*a")
             file:close()
             for _, name in ipairs(forbidden) do
@@ -1369,7 +1413,7 @@ describe("render backend", function()
 
     it("draws nothing for a packet that counted nothing", function()
         local backend = newBackend()
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         packet:begin(0)
         packet.count = 0
         packet.cameraX = SIZE / 2
@@ -1377,6 +1421,6 @@ describe("render backend", function()
         packet.cameraZoom = 1.0
 
         assert.are.equal(0, screen:getPixel(consume(backend, packet), SIZE / 2, SIZE / 2).r)
-        backend:destroy()
+        destroyBackend(backend)
     end)
 end)

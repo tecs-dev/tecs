@@ -10,13 +10,13 @@ tecs.gfx.layers.configure(1, {sort = "topdown", parallax = 0.4})
 tecs.gfx.layers.configure(8, {sort = "z", screenSpace = true, unlit = true})
 
 world:spawn(
-    tecs.Transform(16, 16, 0, 8, 0, 96, 24),
+    tecs.Transform2D(16, 16, 0, 8, 0, 96, 24),
     tecs.gfx.Tint(1.0, 1.0, 1.0, 1.0),
-    tecs.gfx.Renderable()
+    tecs.gfx.Renderable2D()
 )
 ```
 
-The fourth [`Transform`](/modules/ecs/#tecs.ecs.Transform) argument selects the layer.
+The fourth [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) argument selects the layer.
 
 ## Sort modes
 

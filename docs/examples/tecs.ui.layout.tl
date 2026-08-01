@@ -15,7 +15,7 @@ local panel <const> = world:spawn(
         padding = 20,
         gap = 12,
     }),
-    tecs.ecs.RelativeTransform(),
+    tecs.ecs.RelativeTransform2D(),
     tecs.ecs.ChildOf(root)
 )
 -- #endregion tecs.ui.Style
@@ -29,9 +29,7 @@ local ui <const> = tecs.ui
 local world <const> = tecs.ecs.newWorld()
 
 local root <const> = world:spawn(
-    ui.Style({width = "100%", height = "100%"}),
-    ui.Root("screen"),
-    tecs.Transform(0, 0, 0, 16)
+    ui.Style({width = "100%", height = "100%"}), ui.Root("screen"), tecs.Transform2D(0, 0, 0, 16)
 )
 -- #endregion tecs.ui.Root
 
@@ -62,10 +60,10 @@ local panel <const> = world:spawn(ui.Style({width = 480, height = 320}))
 world:spawn(
     ui.Style({position = "absolute", inset = 0}),
     ui.Paint(true),
-    tecs.ecs.RelativeTransform(0, 0, 1),
+    tecs.ecs.RelativeTransform2D(0, 0, 1),
     tecs.gfx.Tint(0.1, 0.2, 0.3, 1),
     tecs.gfx.Material(tecs.gfx.materials.id("rounded"), 0.1),
-    tecs.gfx.Renderable(),
+    tecs.gfx.Renderable2D(),
     tecs.ecs.ChildOf(panel)
 )
 -- #endregion tecs.ui.Paint
@@ -79,8 +77,5 @@ local ui <const> = tecs.ui
 
 local wrappedText <const> = ui.Intrinsic("text", {wrap = true})
 local imageSize <const> = ui.Intrinsic("image")
-local customSize <const> = ui.Intrinsic(
-    "custom",
-    {width = 96, height = 28, minWidth = 48}
-)
+local customSize <const> = ui.Intrinsic("custom", {width = 96, height = 28, minWidth = 48})
 -- #endregion tecs.ui.Intrinsic

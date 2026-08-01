@@ -66,15 +66,15 @@ describe("tecs headless", function()
                 local tecs = require("tecs")
                 local world = tecs.ecs.newWorld()
                 local Tag = tecs.ecs.newTagComponent({ name = "Headless" })
-                local Transform = tecs.Transform
-                local entity = world:spawn(Transform(10, 20), Tag)
+                local Transform2D = tecs.Transform2D
+                local entity = world:spawn(Transform2D(10, 20), Tag)
                 world:update(1 / 60)
 
                 local matched = 0
-                local query = world:newQuery({ include = { Transform, Tag } })
+                local query = world:newQuery({ include = { Transform2D, Tag } })
                 for _, length in query:iter() do matched = matched + length end
 
-                local transform = world:get(entity, Transform)
+                local transform = world:get(entity, Transform2D)
                 print(("ok %d %d %d %d")
                     :format(entity, transform.x, transform.y, matched))
             ]],
@@ -208,7 +208,7 @@ describe("tecs headless", function()
                 -- Everything else that lives under src/tecs/gfx, plus the two
                 -- modules a graphics stack starts with.
                 local siblings = {
-                    "tecs.gfx.Camera", "tecs.gfx.animation", "tecs.gfx.particles",
+                    "tecs.gfx.Camera2D", "tecs.gfx.animation", "tecs.gfx.particles",
                     "tecs.gfx.text", "tecs.Renderer", "tecs.ffi.sdl3",
                 }
                 local loaded = {}
@@ -368,15 +368,15 @@ describe("tecs headless", function()
                 world:addPlugin(tecs.physics.plugin({
                     gravity = { 0, 980 }, workerCount = 2,
                 }))
-                local Transform = tecs.Transform
-                local entity = world:spawn(Transform(0, 0, 0, 1, 0, 10, 10))
+                local Transform2D = tecs.Transform2D
+                local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 10, 10))
                 tecs.physics.attach(world, entity, {
                     type = "dynamic", halfWidth = 5, halfHeight = 5,
                     density = 1.0,
                 })
                 for _ = 1, 60 do world:update(1 / 60) end
                 -- One second of that gravity, so it is a long way down.
-                print(world:get(entity, Transform).y > 400 and "fell" or "stuck")
+                print(world:get(entity, Transform2D).y > 400 and "fell" or "stuck")
             ]],
                 true
             )

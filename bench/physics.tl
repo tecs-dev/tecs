@@ -26,10 +26,10 @@ local physics <const> = require("tecs.physics")
 local materials <const> = require("tecs.gpu.materials")
 local timing <const> = require("tecs.timing")
 local time <const> = require("tecs.platform.time")
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 local Tint <const> = tecs.gfx.Tint
 local Material <const> = tecs.gfx.Material
-local Renderable <const> = tecs.gfx.Renderable
+local Renderable2D <const> = tecs.gfx.Renderable2D
 
 --- Dynamic bodies. The default is chosen so a frame costs enough that
 --- simulation is the larger stage, which is the regime a frame-structure
@@ -92,7 +92,7 @@ local MIN_Y <const> = WALL * 2
 local function buildContainer(world: tecs.World)
     local function wall(x: number, y: number, halfWidth: number, halfHeight: number)
         local entity = world:spawn(
-            Transform(x, y, 0, 1, 0, halfWidth * 2, halfHeight * 2), Tint(0.18, 0.18, 0.22, 1.0), Renderable()
+            Transform2D(x, y, 0, 1, 0, halfWidth * 2, halfHeight * 2), Tint(0.18, 0.18, 0.22, 1.0), Renderable2D()
         )
         physics.attach(
             world,
@@ -128,12 +128,12 @@ local function dropWave(world: tecs.World, count: integer, rand: function(): num
 
         local round = index % 3 == 0
         local entity = world:spawn(
-            Transform(x, y, 0, 1, 0, SIZE * 2, SIZE * 2),
+            Transform2D(x, y, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(0.3 + rand() * 0.7, 0.3 + rand() * 0.7, 0.5 + rand() * 0.5, 1.0),
             -- A mix, so the fragment shader's material branch is exercised
             -- rather than every instance taking the same path.
             round and Material(circleId, 0) or Material(0, 0),
-            Renderable()
+            Renderable2D()
         )
         physics.attach(
             world,
@@ -236,7 +236,7 @@ return tecs.newApplication({
         local radiusSq <const> = BLOWER_RADIUS * BLOWER_RADIUS
 
         local blown = world:newQuery({
-            include = {Transform, physics.RigidBody},
+            include = {Transform2D, physics.RigidBody},
         })
 
         world:addSystem({
@@ -253,7 +253,7 @@ return tecs.newApplication({
                     -- through Rapier, and the transform is written back by the
                     -- physics sync. Taking it mutable here would mark the
                     -- column dirty every frame and defeat the gate.
-                    local transforms = archetype:get(Transform)
+                    local transforms = archetype:get(Transform2D)
                     local bodies = archetype:get(physics.RigidBody)
                     for row = 1, length do
                         local transform = transforms[row]
@@ -298,7 +298,7 @@ return tecs.newApplication({
             run = function()
                 print(
                     ("frames after %d warmup, %d bodies spawned, " .. "%d instances synced"):format(
-                        WARMUP, spawned, renderer.count
+                        WARMUP, spawned, renderer.sprites.count
                     )
                 )
                 local report = timing.format()

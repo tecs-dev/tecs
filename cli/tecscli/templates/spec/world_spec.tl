@@ -15,11 +15,11 @@ describe(
             "spawns an entity with a transform",
             function()
                 local world <const> = tecs.ecs.newWorld()
-                local Transform <const> = tecs.Transform
-                local entity <const> = world:spawn(Transform(10, 20))
+                local Transform2D <const> = tecs.Transform2D
+                local entity <const> = world:spawn(Transform2D(10, 20))
                 world:update(1 / 60)
 
-                local transform <const> = world:get(entity, Transform)
+                local transform <const> = world:get(entity, Transform2D)
                 check.equal(10, transform.x)
                 check.equal(20, transform.y)
             end
@@ -29,15 +29,15 @@ describe(
             "matches what a query asks for",
             function()
                 local world <const> = tecs.ecs.newWorld()
-                local Transform <const> = tecs.Transform
+                local Transform2D <const> = tecs.Transform2D
                 local Marker <const> = tecs.ecs.newTagComponent({name = "Marker"})
 
-                world:spawn(Transform(0, 0), Marker)
-                world:spawn(Transform(1, 1))
+                world:spawn(Transform2D(0, 0), Marker)
+                world:spawn(Transform2D(1, 1))
                 world:update(1 / 60)
 
                 local matched = 0
-                for _, length in world:newQuery({include = {Transform, Marker}}):iter() do
+                for _, length in world:newQuery({include = {Transform2D, Marker}}):iter() do
                     matched = matched + length
                 end
                 check.equal(1, matched)

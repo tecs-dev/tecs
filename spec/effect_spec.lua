@@ -27,7 +27,7 @@ local components = require("tecs.components")
 local ecs = require("tecs.ecs")
 local particles = require("tecs.gfx.particles")
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local ParticleEmitter = particles.ParticleEmitter
 
 -- Two effects that can be told apart without a GPU. Capacity is the emitter's
@@ -74,7 +74,7 @@ describe("particle effect identity across a snapshot", function()
         assert.are.equal(2, smoke.index)
 
         local world = tecs.ecs.newWorld()
-        local entity = world:spawn(Transform(0, 0), ParticleEmitter({ effect = smoke, seed = 3 }))
+        local entity = world:spawn(Transform2D(0, 0), ParticleEmitter({ effect = smoke, seed = 3 }))
 
         local snapshot = world:saveSnapshot({ format = "table" }).snapshot
         assert.is_true(
@@ -109,7 +109,7 @@ describe("particle effect identity across a snapshot", function()
         local effect = register("specTinted", 8)
         local world = tecs.ecs.newWorld()
         local entity =
-            world:spawn(Transform(0, 0), ParticleEmitter({ effect = effect, tint = { 0.25, 0.5, 0.75, 0.5 } }))
+            world:spawn(Transform2D(0, 0), ParticleEmitter({ effect = effect, tint = { 0.25, 0.5, 0.75, 0.5 } }))
 
         local restored = tecs.ecs.newWorld()
         restored:loadSnapshot(world:saveSnapshot({ format = "table" }).snapshot)
@@ -127,7 +127,7 @@ describe("particle effect identity across a snapshot", function()
         local smoke = register("specSmoke", 64)
 
         local world = tecs.ecs.newWorld()
-        local entity = world:spawn(Transform(0, 0), ParticleEmitter({ effect = smoke, state = "paused" }))
+        local entity = world:spawn(Transform2D(0, 0), ParticleEmitter({ effect = smoke, state = "paused" }))
         local buffer = world:saveSnapshot().buffer
 
         particles.reset()
@@ -147,7 +147,7 @@ describe("particle effect identity across a snapshot", function()
         local smoke = register("specSmoke", 64)
 
         local world = tecs.ecs.newWorld()
-        world:spawn(Transform(0, 0), ParticleEmitter({ effect = smoke }))
+        world:spawn(Transform2D(0, 0), ParticleEmitter({ effect = smoke }))
         local snapshot = world:saveSnapshot({ format = "table" }).snapshot
 
         -- The registration this build lost, with another still in place, so

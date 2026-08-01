@@ -28,7 +28,9 @@ describe(
 
                 luassert.is_equal("test", store[STRING_KEY], "String value should be retrievable with its key")
                 luassert.is_equal(42, store[NUMBER_KEY], "Number value should be retrievable with its key")
-                luassert.is_equal(nil, store[tecs.data.Store.newKey("spec.context.unset")], "Unset key should return nil")
+                luassert.is_equal(
+                    nil, store[tecs.data.Store.newKey("spec.context.unset")], "Unset key should return nil"
+                )
             end
         )
 
@@ -113,7 +115,8 @@ describe(
                 -- The returned table is a copy: mutating it does not affect the registry.
                 listed["spec.context.listed"] = nil
                 luassert.is_not_nil(
-                    tecs.data.Store.findKey("spec.context.listed"), "mutating the listKeys result must not unregister the key"
+                    tecs.data.Store.findKey("spec.context.listed"),
+                    "mutating the listKeys result must not unregister the key"
                 )
             end
         )

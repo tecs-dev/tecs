@@ -1491,7 +1491,7 @@ describe(
         describe(
             "tweens",
             function()
-                local Transform <const> = tecs.Transform
+                local Transform2D <const> = tecs.Transform2D
                 local calls: integer
                 local actor: integer
                 local slide: string
@@ -1499,7 +1499,7 @@ describe(
 
                 before_each(function()
                     calls = 0
-                    actor = world:spawn(Transform(0, 0))
+                    actor = world:spawn(Transform2D(0, 0))
                     world:commit()
                     sequence.registerAction(world, "spec.done", function() calls = calls + 1 end)
                     slide = uniqueName()
@@ -1556,7 +1556,7 @@ describe(
                         stepWorld(world, 60)
                         luassert.equals(1, calls)
                         luassert.equals("completed", sequence.status(world, handle).tweenOutcome)
-                        luassert.is_near(100, world:get(actor, Transform).x, 1e-1)
+                        luassert.is_near(100, world:get(actor, Transform2D).x, 1e-1)
                     end
                 )
 
@@ -2325,14 +2325,14 @@ describe(
         describe(
             "timelines as programs",
             function()
-                local Transform <const> = tecs.Transform
+                local Transform2D <const> = tecs.Transform2D
 
                 local function spawn(): integer
-                    return world:spawn(Transform(0, 0, 0, 1))
+                    return world:spawn(Transform2D(0, 0, 0, 1))
                 end
 
                 local function x(entity: integer): number
-                    return world:get(entity, Transform).x
+                    return world:get(entity, Transform2D).x
                 end
 
                 -- Play a timeline and step it. `play` schedules its eval one
@@ -2374,7 +2374,7 @@ describe(
                         for _ = 1, 30 do
                             world:update(1 / 60)
                         end
-                        local t <const> = world:get(entity, Transform)
+                        local t <const> = world:get(entity, Transform2D)
                         luassert.is_near(60, t.x, 1e-6)
                         luassert.is_near(30, t.y, 1e-6)
                         luassert.is_near(2, t.rotation, 1e-6)
@@ -2563,7 +2563,9 @@ describe(
                                 sequence.tweenEmit("arrived"),
                                 sequence.tweenRun(
                                     {
-                                        sequence.tweenTo(0.1, "linear", sequence.target.field(Transform, "scaleX"), 2),
+                                        sequence.tweenTo(
+                                            0.1, "linear", sequence.target.field(Transform2D, "scaleX"), 2
+                                        ),
                                     },
                                     {mode = "loop", count = 2}
                                 ),
@@ -2576,7 +2578,7 @@ describe(
                         for _ = 1, 40 do
                             world:update(1 / 60)
                         end
-                        local t <const> = world:get(entity, Transform)
+                        local t <const> = world:get(entity, Transform2D)
                         luassert.is_near(40, t.x, 1e-6)
                         luassert.is_near(10, t.y, 1e-6)
                         luassert.is_near(2, t.scaleX, 1e-6)
@@ -2587,7 +2589,7 @@ describe(
                 it(
                     "tracks a source authored through the sequence namespace",
                     function()
-                        local leader <const> = world:spawn(Transform(80, 0, 0, 1), tecs.ecs.EntityKey("spec.leader"))
+                        local leader <const> = world:spawn(Transform2D(80, 0, 0, 1), tecs.ecs.EntityKey("spec.leader"))
                         local follower <const> = spawn()
                         world:commit()
                         sequence.play(
@@ -2599,7 +2601,7 @@ describe(
                                         0.3,
                                         "linear",
                                         sequence.target.translateX,
-                                        sequence.source.key("spec.leader", Transform, "x")
+                                        sequence.source.key("spec.leader", Transform2D, "x")
                                     ),
                                 }
                             ),
@@ -2609,7 +2611,7 @@ describe(
                         for _ = 1, 30 do
                             world:update(1 / 60)
                         end
-                        luassert.is_near(80, world:get(follower, Transform).x, 1e-6)
+                        luassert.is_near(80, world:get(follower, Transform2D).x, 1e-6)
                     end
                 )
 
@@ -2652,7 +2654,7 @@ describe(
                 it(
                     "parks until the provider says the work is done",
                     function()
-                        local actor <const> = world:spawn(tecs.Transform(0, 0))
+                        local actor <const> = world:spawn(tecs.Transform2D(0, 0))
                         world:commit()
                         pending[actor] = true
 
@@ -2683,7 +2685,7 @@ describe(
                 it(
                     "does not wait for work that was never started",
                     function()
-                        local actor <const> = world:spawn(tecs.Transform(0, 0))
+                        local actor <const> = world:spawn(tecs.Transform2D(0, 0))
                         world:commit()
 
                         local calls = 0
@@ -2708,7 +2710,7 @@ describe(
                 it(
                     "releases a waiter whose entity died",
                     function()
-                        local actor <const> = world:spawn(tecs.Transform(0, 0))
+                        local actor <const> = world:spawn(tecs.Transform2D(0, 0))
                         world:commit()
                         pending[actor] = true
 
@@ -2738,7 +2740,7 @@ describe(
                 it(
                     "carries an await through a snapshot",
                     function()
-                        local actor <const> = world:spawn(tecs.Transform(0, 0))
+                        local actor <const> = world:spawn(tecs.Transform2D(0, 0))
                         world:commit()
                         pending[actor] = true
 
@@ -2777,7 +2779,7 @@ describe(
                 it(
                     "faults on an unregistered provider",
                     function()
-                        local actor <const> = world:spawn(tecs.Transform(0, 0))
+                        local actor <const> = world:spawn(tecs.Transform2D(0, 0))
                         world:commit()
                         local handle = sequence.play(
                             world,
@@ -2858,8 +2860,8 @@ describe(
                 it(
                     "stops the branches and the timelines a playback started",
                     function()
-                        local Transform <const> = tecs.Transform
-                        local actor <const> = world:spawn(Transform(0, 0, 0, 1))
+                        local Transform2D <const> = tecs.Transform2D
+                        local actor <const> = world:spawn(Transform2D(0, 0, 0, 1))
                         world:commit()
 
                         local branchCalls = 0
@@ -2897,7 +2899,7 @@ describe(
                             world:update(1 / 60)
                         end
                         luassert.is_true(branchCalls > 0, "the branch is running")
-                        local movedBefore <const> = world:get(actor, Transform).x
+                        local movedBefore <const> = world:get(actor, Transform2D).x
                         luassert.is_true(movedBefore > 0, "the timeline is running")
 
                         sequence.pause(world, handle)
@@ -2909,14 +2911,14 @@ describe(
 
                         luassert.equals(branchAtPause, branchCalls, "the branch stopped too")
                         luassert.is_near(
-                            movedBefore, world:get(actor, Transform).x, 1e-9, "the timeline it started stopped too"
+                            movedBefore, world:get(actor, Transform2D).x, 1e-9, "the timeline it started stopped too"
                         )
 
                         sequence.resume(world, handle)
                         for _ = 1, 10 do
                             world:update(1 / 60)
                         end
-                        luassert.is_true(world:get(actor, Transform).x > movedBefore, "and both carry on")
+                        luassert.is_true(world:get(actor, Transform2D).x > movedBefore, "and both carry on")
                     end
                 )
 

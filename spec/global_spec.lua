@@ -122,9 +122,9 @@ describe("the tecs global", function()
         -- copy of it, and reading it twice answers the same table. What was
         -- resolved is held beside the namespace rather than on it, so the
         -- table a caller holds stays empty and its metamethods keep firing.
-        assert.is_true(rawequal(gfx.Camera, require("tecs.gfx.Camera")))
-        assert.is_true(rawequal(gfx.Camera, gfx.Camera))
-        assert.is_nil(rawget(gfx, "Camera"))
+        assert.is_true(rawequal(gfx.Camera2D, require("tecs.gfx.Camera2D")))
+        assert.is_true(rawequal(gfx.Camera2D, gfx.Camera2D))
+        assert.is_nil(rawget(gfx, "Camera2D"))
     end)
 
     it("answers nil for a member a namespace does not have", function()

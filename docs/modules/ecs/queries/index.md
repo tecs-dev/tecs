@@ -8,16 +8,16 @@ outline: deep
 A query tracks archetypes whose component signatures match one descriptor:
 
 ```teal
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 local movers <const> = world:newQuery({
     name = "game.Movers",
-    include = {Transform, Velocity},
+    include = {Transform2D, Velocity},
     exclude = {Frozen},
     type = "logic",
 })
 
 for archetype, length, entities in movers:iter() do
-    local transforms <const> = archetype:getMut(Transform)
+    local transforms <const> = archetype:getMut(Transform2D)
     local velocities <const> = archetype:get(Velocity)
 
     for row = 1, length do
@@ -32,7 +32,7 @@ with a listed component. `includeAny` adds an OR group:
 
 ```teal
 local drawn <const> = world:newQuery({
-    include = {tecs.Transform, tecs.gfx.Renderable},
+    include = {tecs.Transform2D, tecs.gfx.Renderable2D},
     includeAny = {tecs.gfx.Sprite, tecs.gfx.Material},
     type = "render",
 })
@@ -54,7 +54,7 @@ marks that component dirty:
 
 ```teal
 for archetype, length in movers:iter() do
-    local transforms <const> = archetype:getMut(Transform)
+    local transforms <const> = archetype:getMut(Transform2D)
     local velocities <const> = archetype:get(Velocity)
 
     for row = 1, length do
@@ -139,7 +139,7 @@ registering observers:
 
 ```teal
 for archetype, length in world:newQuery({
-    include = {tecs.gfx.PointLight},
+    include = {tecs.gfx.PointLight2D},
     temp = true,
 }):iter() do
     inspectLights(archetype, length)
@@ -159,8 +159,8 @@ tag. Renderer queries follow the same rule.
 ```teal
 local disabledRenderables <const> = world:newQuery({
     include = {
-        tecs.Transform,
-        tecs.gfx.Renderable,
+        tecs.Transform2D,
+        tecs.gfx.Renderable2D,
         tecs.ecs.Disabled,
     },
 })
@@ -174,12 +174,12 @@ filter.
 
 ```teal
 local movement <const> = world:newQuery({
-    include = {tecs.Transform, Velocity},
+    include = {tecs.Transform2D, Velocity},
     type = "logic",
 })
 
 local sprites <const> = world:newQuery({
-    include = {tecs.Transform, tecs.gfx.Sprite},
+    include = {tecs.Transform2D, tecs.gfx.Sprite},
     type = "render",
 })
 ```
@@ -194,9 +194,9 @@ without constructing a query:
 
 ```teal
 for archetype, length, entities
-    in world:findArchetypes(tecs.gfx.PointLight)
+    in world:findArchetypes(tecs.gfx.PointLight2D)
 do
-    local lights <const> = archetype:get(tecs.gfx.PointLight)
+    local lights <const> = archetype:get(tecs.gfx.PointLight2D)
     for row = 1, length do
         print(entities[row], lights[row].radius)
     end

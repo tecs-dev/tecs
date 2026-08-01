@@ -82,9 +82,9 @@ local sdl = require("tecs.ffi.sdl3")
 local C = sdl.C
 local max = math.max
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local Tint = components.Tint
-local Renderable = components.Renderable
+local Renderable2D = components.Renderable2D
 
 -- Entities the first window draws, and the ones added before the second. The
 -- two counts differ by a factor of eight, which is enough that a per-row
@@ -188,7 +188,7 @@ local Mover = tecs.ecs.newTagComponent({ name = "AllocationSpecMover" })
 --- Fills a freshly spawned archetype with drawable entities.
 local function fill(archetype, firstRow, lastRow)
     -- batchSpawn skips FFI defaults, so every field is written here.
-    local transforms = archetype:getMut(Transform)
+    local transforms = archetype:getMut(Transform2D)
     local tints = archetype:getMut(Tint)
     for row = firstRow, lastRow do
         local transform = transforms[row]
@@ -234,19 +234,19 @@ local function scene()
         capacity = STILL + EXTRA + MOVERS + 64,
         maxEntities = STILL + EXTRA + MOVERS + 1024,
         plugin = function(world)
-            world:batchSpawn(STILL, { Transform, Tint, Renderable }, fill)
-            world:batchSpawn(MOVERS, { Transform, Tint, Renderable, Mover }, fill)
+            world:batchSpawn(STILL, { Transform2D, Tint, Renderable2D }, fill)
+            world:batchSpawn(MOVERS, { Transform2D, Tint, Renderable2D, Mover }, fill)
 
             local movers = world:newQuery({
                 name = "AllocationSpecMovers",
-                include = { Transform, Mover },
+                include = { Transform2D, Mover },
             })
             world:addSystem({
                 name = "AllocationSpecMove",
                 phase = tecs.ecs.phases.Update,
                 run = function()
                     for archetype, length in movers:iter() do
-                        local transforms = archetype:getMut(Transform)
+                        local transforms = archetype:getMut(Transform2D)
                         for row = 1, length do
                             local transform = transforms[row]
                             transform.x = transform.x + 1.0
@@ -307,7 +307,7 @@ describe("allocation", function()
         end
 
         local small = frameBytes()
-        app.world:batchSpawn(EXTRA, { Transform, Tint, Renderable }, fill)
+        app.world:batchSpawn(EXTRA, { Transform2D, Tint, Renderable2D }, fill)
         local large = frameBytes()
 
         if os.getenv("TECS_ALLOCATION_REPORT") ~= nil then
@@ -340,7 +340,7 @@ describe("allocation", function()
         -- Reached through a query rather than through the module, which
         -- exports a constructor and keeps the implementation table private.
         -- Every query shares the one metatable, so this counts them all.
-        local methods = getmetatable(app.world:newQuery({ include = { Transform } })).__index
+        local methods = getmetatable(app.world:newQuery({ include = { Transform2D } })).__index
         local original = methods.newCursor
         assert.is_function(original)
 
