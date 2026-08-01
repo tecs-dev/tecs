@@ -528,6 +528,7 @@ local function writeRows(
     local bandBase = 0.0
     local bandSort = 0
     local bandCulled = true
+    local bandOverlay = false
 
     for row = first, last do
         local transform = transforms[row]
@@ -567,11 +568,19 @@ local function writeRows(
             u0, v0, u1, v1 = sprite.u0, sprite.v0, sprite.u1, sprite.v1
         end
 
-        -- Blending wins over casting, so a translucent row in a caster's
-        -- archetype is drawn forward and casts nothing. The two are exclusive
-        -- in the bound's signs, and a silhouette of something the G-buffer
-        -- never saw is the half of the pair that would be a lie.
-        local blend <const> = tint.a < 1.0
+        local entityLayer <const> = transform.layer as integer
+        if entityLayer ~= bandLayer then
+            bandLayer = entityLayer
+            bandBase, bandSort = layers.bandOf(entityLayer)
+            bandCulled = layers.viewCulled(entityLayer)
+            bandOverlay = layers.isOverlay(entityLayer)
+        end
+
+        -- Forward routing wins over casting, so a translucent row or anything
+        -- on an overlay layer casts nothing. The two are exclusive in the
+        -- bound's signs, and a silhouette of something the G-buffer never saw
+        -- is the half of the pair that would be a lie.
+        local blend <const> = tint.a < 1.0 or bandOverlay
         local casting <const> = casts ~= nil and not blend
 
         -- The clip region rides above the layer in one float, and a caster's
@@ -608,13 +617,6 @@ local function writeRows(
                 param = 0.999
             end
             material = entry.id + param
-        end
-
-        local entityLayer <const> = transform.layer as integer
-        if entityLayer ~= bandLayer then
-            bandLayer = entityLayer
-            bandBase, bandSort = layers.bandOf(entityLayer)
-            bandCulled = layers.viewCulled(entityLayer)
         end
 
         local angle = transform.rotation
@@ -799,14 +801,15 @@ end
 --- only runs while every value column is clean, so a row it did not rewrite is
 --- as opaque as it was and the rows it did rewrite counted themselves.
 ---
---- `writeRows` decides the same thing from the same field, inline, and the two
+--- `writeRows` decides the same thing from the same fields, inline, and the two
 --- only work while they agree: a row is drawn by the forward pass when its tint
---- is not fully opaque.
+--- is not fully opaque or its layer is an overlay.
 local function countBlended(archetype: ecs.Archetype, length: integer): integer
     local tints <const> = archetype:get(components.Tint)
+    local transforms <const> = archetype:get(Transform2D)
     local blended = 0
     for row = 1, length do
-        if tints[row].a < 1.0 then
+        if tints[row].a < 1.0 or layers.isOverlay(transforms[row].layer as integer) then
             blended = blended + 1
         end
     end

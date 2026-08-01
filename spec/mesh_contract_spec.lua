@@ -236,6 +236,36 @@ describe("the 3D scene contract", function()
             end, "tecs: mesh 'bad://skin-pair' joints and weights must be supplied together")
         end)
 
+        it("keeps optional vertex colors outside the rigid vertex stream", function()
+            local source = triangle("procedural://color-source")
+            local vertices = {}
+            for index = 0, source.vertexCount * 12 - 1 do
+                vertices[index + 1] = source.vertices[index]
+            end
+            source:release()
+            local mesh = assets.newMesh({
+                name = "procedural://colored-triangle",
+                vertices = vertices,
+                indices = { 0, 1, 2 },
+                colors = { 1, 0, 0, 1, 0, 1, 0, 0.5, 0, 0, 1, 0.25 },
+            })
+            assert.is_not_nil(mesh.colorVertices)
+            near(mesh.colorVertices[0], 1)
+            near(mesh.colorVertices[7], 0.5)
+            near(mesh.colorVertices[11], 0.25)
+            mesh:release()
+            assert.is_nil(mesh.colorVertices)
+
+            assert.has_error(function()
+                assets.newMesh({
+                    name = "bad://color-count",
+                    vertices = vertices,
+                    indices = { 0, 1, 2 },
+                    colors = { 1, 0, 0, 1 },
+                })
+            end, "tecs: mesh 'bad://color-count' needs four colors per vertex")
+        end)
+
         it("packs optional morph targets outside the rigid vertex stream", function()
             local source = triangle("procedural://morph-source")
             local vertices = {}

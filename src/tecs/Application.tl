@@ -244,6 +244,9 @@ local record Application
         --- Caller-writable. Enables and configures the 3D mesh domain. Nil,
         --- the default, loads no mesh renderer and allocates no mesh buffers.
         meshes: Renderer.MeshOptions
+        --- Caller-writable. Enables optional bloom after opaque lighting and
+        --- before transparent meshes and 2D UI. Nil omits its GPU resources.
+        bloom: Renderer.BloomOptions
         --- Caller-writable. Sets the seconds one fixed step covers. Must be greater than zero. Defaults
         --- to 1/60.
         timestep: number
@@ -750,6 +753,7 @@ function Application:_init(): boolean
             shadows = config.shadows,
             sprites = spriteOptions,
             meshes = config.meshes,
+            bloom = config.bloom,
         }
     )
     self.renderer:install(self.world)

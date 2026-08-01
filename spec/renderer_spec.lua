@@ -94,7 +94,7 @@ describe("ecs.Renderer", function()
         }
     end
 
-    local function triangleMesh(name, skinned, morphed)
+    local function triangleMesh(name, skinned, morphed, colored)
         return assets.newMesh({
             name = name,
             vertices = {
@@ -142,6 +142,7 @@ describe("ecs.Renderer", function()
                 { positions = { 0.8, 0, 0, 0.8, 0, 0, 0.8, 0, 0 } },
             } or nil,
             morphWeights = morphed and { 0 } or nil,
+            colors = colored and { 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1 } or nil,
         })
     end
 
@@ -484,6 +485,101 @@ describe("ecs.Renderer", function()
         assert.has_error(function()
             renderer.meshes:registerMaterial({ name = "spec://missing-texture", baseColorTexture = 99 })
         end, "tecs: mesh material baseColorTexture names unknown texture 99")
+        renderer:destroy()
+    end)
+
+    it("multiplies optional vertex colors through PBR and unlit material dispatch", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 1, 1, 1 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                materialCapacity = 4,
+                vertexColors = true,
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local mesh, bounds = renderer.meshes:registerMesh(triangleMesh("spec://colored-triangle", nil, nil, true))
+        local material = renderer.meshes:registerMaterial({
+            name = "spec://colored-unlit",
+            model = renderer.meshes.MATERIAL_UNLIT,
+            baseR = 0.5,
+        })
+        local entity = world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5 }),
+            mesh,
+            bounds,
+            material,
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+
+        local pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2 - 6, SIZE / 2 + 6)
+        assert.is_true(math.abs(pixel.r - 128) <= 3)
+        assert.are.equal(0, pixel.g)
+        assert.is_true(renderer.meshes.vertexColors)
+        assert.is_not_nil(renderer.meshes._backend._colorVertices)
+
+        local pbr = renderer.meshes:registerMaterial({
+            name = "spec://colored-pbr",
+            model = renderer.meshes.MATERIAL_METALLIC_ROUGHNESS,
+            baseR = 0.25,
+            metallic = 0.7,
+            roughness = 0.2,
+        })
+        local selected = world:getMut(entity, components.MeshMaterial)
+        selected.asset, selected.slot = pbr.asset, pbr.slot
+        pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2 - 6, SIZE / 2 + 6)
+        assert.is_true(math.abs(pixel.r - 64) <= 3)
+        assert.are.equal(0, pixel.g)
+        assert.are.equal(3, renderer.meshes.materialCount)
+        renderer:destroy()
+    end)
+
+    it("applies mesh fog after unlit material dispatch and builds bloom only when requested", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 1, 1, 1 },
+            sprites = false,
+            bloom = { scale = 0.5, threshold = 0.7, knee = 0.1, intensity = 0.5 },
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                materialCapacity = 4,
+                fog = { start = 0, finish = 0.5, r = 0, g = 1, b = 0 },
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local mesh, bounds = renderer.meshes:registerMesh(triangleMesh("spec://fogged-triangle"))
+        local material = renderer.meshes:registerMaterial({
+            name = "spec://fogged-unlit",
+            model = renderer.meshes.MATERIAL_UNLIT,
+            baseR = 1,
+            baseG = 0,
+            baseB = 0,
+        })
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5 }),
+            mesh,
+            bounds,
+            material,
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+
+        local pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2 - 6, SIZE / 2 + 6)
+        assert.are.equal(0, pixel.r)
+        assert.are.equal(255, pixel.g)
+        assert.is_true(renderer.meshes.fogging)
+        assert.is_not_nil(renderer.deferred.graph._targets.bloomA)
+        assert.is_not_nil(renderer.deferred.graph._targets.bloomB)
+        assert.is_not_nil(renderer.deferred._bloomExtractPipeline)
         renderer:destroy()
     end)
 

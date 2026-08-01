@@ -67,6 +67,14 @@ local interface MeshShadowOptions
     softness: number
 end
 
+local interface MeshFogOptions
+    start: number
+    finish: number
+    r: number
+    g: number
+    b: number
+end
+
 local record MeshRegion
     slot: integer
     firstVertex: integer
@@ -103,6 +111,8 @@ local record MeshBackendOptions
     morphing: boolean
     morphVertexCapacity: integer
     morphWeightCapacity: integer
+    vertexColors: boolean
+    fog: MeshFogOptions
 end
 
 local record MeshMaterialData
@@ -135,6 +145,7 @@ local record MeshBackend
     type ShadowOptions = MeshShadowOptions
     type SkinRegion = SkinRegion
     type MorphRegion = MorphRegion
+    type FogOptions = MeshFogOptions
 
     capacity: integer
     vertexCapacity: integer
@@ -174,6 +185,7 @@ local record MeshBackend
     _morphVertices: Buffer
     _instanceMorphs: Buffer
     _morphWeights: Buffer
+    _colorVertices: Buffer
     _morphValues: loader.CArray
     _morphRanges: dirtyranges
     _slots: Buffer
@@ -231,6 +243,7 @@ local record MeshBackend
     _destroyed: boolean
     _count: integer
     _viewProjection: loader.CArray
+    _viewUniform: loader.CArray
     _geometryBuffers: {loader.CValue}
     _fragmentBuffers: {loader.CValue}
     _fragmentTextures: {loader.CValue}
@@ -241,6 +254,10 @@ local record MeshBackend
     _shadows: boolean
     _skinning: boolean
     _morphing: boolean
+    _vertexColors: boolean
+    _fogging: boolean
+    _fog: MeshFogOptions
+    _fogUniform: loader.CArray
     _shadowActive: boolean
     _shadow: MeshShadowOptions
     _shadowUniform: loader.CArray
@@ -248,8 +265,10 @@ end
 
 local MeshBackendMT <const>: metatable<MeshBackend> = {__index = MeshBackend}
 
-local function vertexDefines(skinning: boolean, morphing: boolean): {string: string}
-    if not skinning and not morphing then
+local function vertexDefines(
+    skinning: boolean, morphing: boolean, vertexColors: boolean, fogging: boolean
+): {string: string}
+    if not skinning and not morphing and not vertexColors and not fogging then
         return nil
     end
     local defines: {string: string} = {}
@@ -259,15 +278,43 @@ local function vertexDefines(skinning: boolean, morphing: boolean): {string: str
     if morphing then
         defines.MESH_MORPHING = "1"
     end
+    if vertexColors then
+        defines.MESH_VERTEX_COLORS = "1"
+    end
+    if fogging then
+        defines.MESH_FOG = "1"
+    end
+    return defines
+end
+
+local function fragmentDefines(shadows: boolean, fogging: boolean): {string: string}
+    if not shadows and not fogging then
+        return nil
+    end
+    local defines: {string: string} = {}
+    if shadows then
+        defines.MESH_SHADOWS = "1"
+    end
+    if fogging then
+        defines.MESH_FOG = "1"
+    end
     return defines
 end
 
 local function buildGeometry(
-    device: loader.CPtr, deferred: Deferred, shadows: boolean, skinning: boolean, morphing: boolean
+    device: loader.CPtr,
+    deferred: Deferred,
+    shadows: boolean,
+    skinning: boolean,
+    morphing: boolean,
+    vertexColors: boolean,
+    fogging: boolean
 ): GraphicsPipeline
     local albedoFormat, normalFormat, ormFormat, emissionFormat = deferred:geometryFormats()
-    local vertex = Shader.load(device, "mesh.vert", {defines = vertexDefines(skinning, morphing)})
-    local fragment = Shader.load(device, "mesh.frag", {defines = shadows and {MESH_SHADOWS = "1"} or nil})
+    local vertex = Shader.load(
+        device, "mesh.vert", {defines = vertexDefines(skinning, morphing, vertexColors, fogging)}
+    )
+    local fragment = Shader.load(device, "mesh.frag", {defines = fragmentDefines(shadows, fogging)})
     local pipeline = GraphicsPipeline.create(
         device,
         {
@@ -285,10 +332,18 @@ local function buildGeometry(
 end
 
 local function buildForward(
-    device: loader.CPtr, deferred: Deferred, shadows: boolean, skinning: boolean, morphing: boolean
+    device: loader.CPtr,
+    deferred: Deferred,
+    shadows: boolean,
+    skinning: boolean,
+    morphing: boolean,
+    vertexColors: boolean,
+    fogging: boolean
 ): GraphicsPipeline
-    local vertex = Shader.load(device, "mesh.vert", {defines = vertexDefines(skinning, morphing)})
-    local fragment = Shader.load(device, "mesh.forward.frag", {defines = shadows and {MESH_SHADOWS = "1"} or nil})
+    local vertex = Shader.load(
+        device, "mesh.vert", {defines = vertexDefines(skinning, morphing, vertexColors, fogging)}
+    )
+    local fragment = Shader.load(device, "mesh.forward.frag", {defines = fragmentDefines(shadows, fogging)})
     local pipeline = GraphicsPipeline.create(
         device,
         {
@@ -307,9 +362,11 @@ local function buildForward(
 end
 
 local function buildShadow(
-    device: loader.CPtr, deferred: Deferred, skinning: boolean, morphing: boolean
+    device: loader.CPtr, deferred: Deferred, skinning: boolean, morphing: boolean, vertexColors: boolean
 ): GraphicsPipeline
-    local vertex = Shader.load(device, "mesh.shadow.vert", {defines = vertexDefines(skinning, morphing)})
+    local vertex = Shader.load(
+        device, "mesh.shadow.vert", {defines = vertexDefines(skinning, morphing, vertexColors, false)}
+    )
     local fragment = Shader.load(device, "mesh.shadow.frag", {})
     local pipeline = GraphicsPipeline.create(
         device,
@@ -360,6 +417,13 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._shadows = options.shadows ~= nil
     self._skinning = options.skinning
     self._morphing = options.morphing
+    self._vertexColors = options.vertexColors
+    self._fogging = options.fog ~= nil
+    self._fog = options.fog
+    if self._fogging then
+        self._viewUniform = loader.newArray("float[24]")
+        self._fogUniform = loader.newArray("float[4]")
+    end
     self._shadowActive = false
     self._shadow = options.shadows
     if self._shadows then
@@ -378,6 +442,16 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
             name = "mesh.vertices",
         }
     )
+    if self._vertexColors then
+        self._colorVertices = Buffer.create(
+            device,
+            {
+                usage = {"storage"},
+                size = self.vertexCapacity * meshlayout.COLOR_VERTEX_BYTES,
+                name = "mesh.vertexColors",
+            }
+        )
+    end
     self.indices = Buffer.create(
         device,
         {
@@ -541,7 +615,9 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._bucketScanWrites = {}
     self._placeWrites = {}
     self._placeReads = {}
-    self.pipeline = buildGeometry(device, deferred, self._shadows, self._skinning, self._morphing)
+    self.pipeline = buildGeometry(
+        device, deferred, self._shadows, self._skinning, self._morphing, self._vertexColors, self._fogging
+    )
     if self._shadows then
         self._shadowCommands = Buffer.create(
             device,
@@ -554,7 +630,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
         if self._transparent then
             self._shadowMarkPipeline = ComputePipeline.load(device, "mesh.mark.comp", {defines = {MESH_ALPHA = "1"}})
         end
-        self.shadowPipeline = buildShadow(device, deferred, self._skinning, self._morphing)
+        self.shadowPipeline = buildShadow(device, deferred, self._skinning, self._morphing, self._vertexColors)
     end
     if self._transparent then
         local groups <const> = math.ceil(self.capacity / CULL_GROUP)
@@ -592,7 +668,9 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
         )
         self._rankPipeline = ComputePipeline.load(device, "mesh.rank.comp", {})
         self._placePipeline = ComputePipeline.load(device, "mesh.place.comp", {})
-        self.blendPipeline = buildForward(device, deferred, self._shadows, self._skinning, self._morphing)
+        self.blendPipeline = buildForward(
+            device, deferred, self._shadows, self._skinning, self._morphing, self._vertexColors, self._fogging
+        )
     end
     return self
 end
@@ -698,6 +776,9 @@ function MeshBackend:registerMesh(asset: integer, mesh: assets.Mesh): MeshRegion
     if mesh.vertices == nil or mesh.indices == nil then
         error(("tecs: mesh '%s' has been released"):format(mesh.name), 2)
     end
+    if mesh.colorVertices ~= nil and not self._vertexColors then
+        error("tecs: colored geometry requires meshes.vertexColors = true", 2)
+    end
 
     local nextVertices <const> = self.vertexCount + mesh.vertexCount
     if nextVertices > self.vertexCapacity then
@@ -730,6 +811,19 @@ function MeshBackend:registerMesh(asset: integer, mesh: assets.Mesh): MeshRegion
     self.vertices:upload(
         mesh.vertices, mesh.vertexCount * meshlayout.VERTEX_BYTES, region.firstVertex * meshlayout.VERTEX_BYTES
     )
+    if self._vertexColors then
+        local colors = mesh.colorVertices
+        if colors == nil then
+            colors = loader.newArray("float[?]", mesh.vertexCount * meshlayout.COLOR_VERTEX_FLOATS)
+            for vertex = 0, mesh.vertexCount - 1 do
+                local at <const> = vertex * meshlayout.COLOR_VERTEX_FLOATS
+                colors[at], colors[at + 1], colors[at + 2], colors[at + 3] = 1.0, 1.0, 1.0, 1.0
+            end
+        end
+        self._colorVertices:upload(
+            colors, mesh.vertexCount * meshlayout.COLOR_VERTEX_BYTES, region.firstVertex * meshlayout.COLOR_VERTEX_BYTES
+        )
+    end
     if mesh.skinVertices ~= nil then
         if not self._skinning then
             error("tecs: skinned geometry requires meshes.skinning", 2)
@@ -956,6 +1050,23 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame)
     end
     self._count = packet.count
     self._viewProjection = packet.viewProjection
+    if self._fogging then
+        local fog <const> = self._fog
+        if fog.start < 0.0 or fog.finish <= fog.start then
+            error("tecs: mesh fog finish must be greater than its non-negative start", 2)
+        end
+        if fog.r < 0.0 or fog.r > 1.0 or fog.g < 0.0 or fog.g > 1.0 or fog.b < 0.0 or fog.b > 1.0 then
+            error("tecs: mesh fog colors must be between 0 and 1", 2)
+        end
+        local view <const> = self._viewUniform
+        for lane = 0, 15 do
+            view[lane] = packet.viewProjection[lane]
+        end
+        view[16], view[17], view[18], view[19] = packet.cameraX, packet.cameraY, packet.cameraZ, fog.start
+        view[20], view[21], view[22], view[23] = 1.0 / (fog.finish - fog.start), 0.0, 0.0, 0.0
+        self._fogUniform[0], self._fogUniform[1], self._fogUniform[2], self._fogUniform[3] = fog.r, fog.g, fog.b, 0.0
+        self._deferred:setMeshFog(fog.r, fog.g, fog.b)
+    end
     self._blending = self._transparent and packet.blendCount > 0
     self._shadowActive = self._shadows and packet.count > packet.blendCount
     if self._shadows then
@@ -1151,6 +1262,10 @@ function MeshBackend:recordShadowMap(context: Deferred.PassContext)
     buffers[1] = self.vertices.handle
     buffers[2] = self.instances.handle
     local bufferSlot = 3
+    if self._vertexColors then
+        buffers[bufferSlot] = self._colorVertices.handle
+        bufferSlot = bufferSlot + 1
+    end
     if self._morphing then
         buffers[bufferSlot] = self._morphVertices.handle
         buffers[bufferSlot + 1] = self._instanceMorphs.handle
@@ -1178,11 +1293,17 @@ function MeshBackend:recordGeometry(context: Deferred.PassContext)
         return
     end
     context.pass:bindPipeline(self.pipeline.handle)
-    context.pass:pushVertexUniform(0, self._viewProjection, 64)
+    context.pass:pushVertexUniform(
+        0, self._fogging and self._viewUniform or self._viewProjection, self._fogging and 96 or 64
+    )
     local buffers <const> = self._geometryBuffers
     buffers[1] = self.vertices.handle
     buffers[2] = self.instances.handle
     local bufferSlot = 3
+    if self._vertexColors then
+        buffers[bufferSlot] = self._colorVertices.handle
+        bufferSlot = bufferSlot + 1
+    end
     if self._morphing then
         buffers[bufferSlot] = self._morphVertices.handle
         buffers[bufferSlot + 1] = self._instanceMorphs.handle
@@ -1213,11 +1334,17 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
         return
     end
     context.pass:bindPipeline(self.blendPipeline.handle)
-    context.pass:pushVertexUniform(0, self._viewProjection, 64)
+    context.pass:pushVertexUniform(
+        0, self._fogging and self._viewUniform or self._viewProjection, self._fogging and 96 or 64
+    )
     local buffers <const> = self._forwardBuffers
     buffers[1] = self.vertices.handle
     buffers[2] = self.instances.handle
     local bufferSlot = 3
+    if self._vertexColors then
+        buffers[bufferSlot] = self._colorVertices.handle
+        bufferSlot = bufferSlot + 1
+    end
     if self._morphing then
         buffers[bufferSlot] = self._morphVertices.handle
         buffers[bufferSlot + 1] = self._instanceMorphs.handle
@@ -1240,12 +1367,17 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
     if self._shadows then
         C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, self._shadowUniform, SHADOW_BYTES)
     end
+    if self._fogging then
+        C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 2, self._fogUniform, 16)
+    end
     context.pass:bindIndexBuffer(self.indices.handle, RenderPass.INDEX_UINT32)
     context.pass:drawIndexedIndirect(self._blendSorted.handle, 0, self._count)
 end
 
 function MeshBackend:rebuildPipeline(deferred: Deferred)
-    local geometry <const> = buildGeometry(self._device, deferred, self._shadows, self._skinning, self._morphing)
+    local geometry <const> = buildGeometry(
+        self._device, deferred, self._shadows, self._skinning, self._morphing, self._vertexColors, self._fogging
+    )
     local mark <const> = ComputePipeline.load(
         self._device, self._transparent and "mesh.lanes.mark.comp" or "mesh.mark.comp", {}
     )
@@ -1257,13 +1389,15 @@ function MeshBackend:rebuildPipeline(deferred: Deferred)
     local shadow: GraphicsPipeline = nil
     local shadowMark: ComputePipeline = nil
     if self._shadows then
-        shadow = buildShadow(self._device, deferred, self._skinning, self._morphing)
+        shadow = buildShadow(self._device, deferred, self._skinning, self._morphing, self._vertexColors)
         if self._transparent then
             shadowMark = ComputePipeline.load(self._device, "mesh.mark.comp", {defines = {MESH_ALPHA = "1"}})
         end
     end
     if self._transparent then
-        blend = buildForward(self._device, deferred, self._shadows, self._skinning, self._morphing)
+        blend = buildForward(
+            self._device, deferred, self._shadows, self._skinning, self._morphing, self._vertexColors, self._fogging
+        )
         rank = ComputePipeline.load(self._device, "mesh.rank.comp", {})
         place = ComputePipeline.load(self._device, "mesh.place.comp", {})
     end
@@ -1303,6 +1437,9 @@ function MeshBackend:destroy()
     end
     self._destroyed = true
     self.vertices:destroy()
+    if self._vertexColors then
+        self._colorVertices:destroy()
+    end
     self.indices:destroy()
     self.instances:destroy()
     if self._skinning then

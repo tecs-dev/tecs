@@ -42,17 +42,17 @@ int meshAlphaMode(int material) {
     return int(materials.value[material * MESH_MATERIAL_FLOATS + 7]);
 }
 
-vec4 meshBaseColor(int material, vec2 uv, vec3 tint) {
+vec4 meshBaseColor(int material, vec2 uv, vec4 tint) {
     int base = material * MESH_MATERIAL_FLOATS;
     vec4 baseFactor = vec4(
         materials.value[base + 28], materials.value[base + 29],
         materials.value[base + 30], materials.value[base + 31]);
     return meshSampleMap(base, 1, 8, uv, vec4(1.0))
-        * baseFactor * vec4(tint, 1.0);
+        * baseFactor * tint;
 }
 
 MeshSurface meshMaterial(
-    int material, vec2 uv, vec3 tint, vec3 vertexNormal, vec4 vertexTangent
+    int material, vec2 uv, vec4 tint, vec3 vertexNormal, vec4 vertexTangent
 ) {
     int base = material * MESH_MATERIAL_FLOATS;
     int model = int(materials.value[base]);

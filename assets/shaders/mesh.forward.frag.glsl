@@ -1,15 +1,20 @@
 #version 450
 #pragma tecs variants MESH_SHADOWS=1
+#pragma tecs variants MESH_FOG=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1
 // Shades alpha-blended mesh surfaces after deferred composition. Meshes are
 // sorted back to front before this pass and use premultiplied alpha so one
 // pipeline handles the complete glTF BLEND contract.
 
 layout(location = 0) in vec3 vNormal;
-layout(location = 1) flat in vec3 vColor;
+layout(location = 1) in vec4 vColor;
 layout(location = 2) in vec2 vUV;
 layout(location = 3) in vec4 vTangent;
 layout(location = 4) flat in int vMaterial;
 layout(location = 5) in vec3 vWorld;
+#ifdef MESH_FOG
+layout(location = 6) in float vFog;
+#endif
 layout(location = 0) out vec4 outColor;
 
 struct Light {
@@ -37,6 +42,10 @@ layout(set = 3, binding = 1) uniform Scene {
     vec4 maskXform;
     vec4 maskParams;
 } scene;
+
+#ifdef MESH_FOG
+layout(set = 3, binding = 2) uniform MeshFog { vec4 color; } meshFog;
+#endif
 
 #include "lighting.glsl"
 #ifdef MESH_SHADOWS
@@ -70,6 +79,9 @@ void main() {
         color *= accumulated;
     }
     color += surface.emission;
+#ifdef MESH_FOG
+    color = mix(color, meshFog.color.rgb, vFog);
+#endif
     float alpha = clamp(surface.albedo.a, 0.0, 1.0);
     outColor = vec4(color * alpha, alpha);
 }

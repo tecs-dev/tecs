@@ -24,6 +24,7 @@ local SpriteFramePacket = require("tecs.internal.render.SpriteFramePacket")
 local components = require("tecs.components")
 local ecs = require("tecs.ecs")
 local instancelayout = require("tecs.gpu.instancelayout")
+local layers = require("tecs.gfx.layers")
 
 local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
@@ -129,6 +130,16 @@ describe("render extraction", function()
         world:getMut(entity, Tint).a = 1.0
         world:update(1 / 60)
         assert.are.equal(0, packet.blendCount, "an opaque scene reports nothing blended")
+    end)
+
+    it("routes a fully opaque overlay layer through the forward lane", function()
+        layers.configure(layers.MAX, { sort = "z", screenSpace = true, unlit = true, overlay = true })
+        local world, _, packet = newExtraction()
+        world:spawn(Transform2D(8, 8, 0, layers.MAX, 0, 4, 4), Tint(1, 1, 1, 1), Renderable2D())
+
+        world:update(1 / 60)
+        assert.are.equal(1, packet.blendCount)
+        layers.configure(layers.MAX, { sort = "topdown" })
     end)
 
     it("counts the shadow casters the scene holds, and stops counting them", function()

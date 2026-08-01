@@ -2,13 +2,15 @@
 Fixed storage layouts shared by mesh assets, extraction, and the mesh backend.
 
 Mesh vertices are immutable content. Instances and bounds are frame data. The
-three widths live here so the writer and eventual shaders cannot silently
-choose different strides while the mesh domain is being landed in stages.
+storage widths live here so writers and shaders cannot silently choose
+different strides while the mesh domain grows.
 ]=]
 
 local record meshlayout
     VERTEX_FLOATS: integer
     VERTEX_BYTES: integer
+    COLOR_VERTEX_FLOATS: integer
+    COLOR_VERTEX_BYTES: integer
     SKIN_VERTEX_FLOATS: integer
     SKIN_VERTEX_BYTES: integer
     MORPH_VERTEX_FLOATS: integer
@@ -25,6 +27,11 @@ end
 -- position.xyz, normal.xyz, tangent.xyzw, uv.xy
 meshlayout.VERTEX_FLOATS = 12
 meshlayout.VERTEX_BYTES = meshlayout.VERTEX_FLOATS * 4
+
+-- Linear RGBA. This is a separate optional buffer so meshes that do not use
+-- vertex colors retain the base vertex bandwidth and residency exactly.
+meshlayout.COLOR_VERTEX_FLOATS = 4
+meshlayout.COLOR_VERTEX_BYTES = meshlayout.COLOR_VERTEX_FLOATS * 4
 
 -- joints.xyzw and normalized weights.xyzw. This is a separate optional
 -- buffer so an unskinned domain keeps the existing vertex stride and
