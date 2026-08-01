@@ -219,6 +219,30 @@ describe("Application", function()
     end)
 
     describe("events", function()
+        it("requests a clean quit on Escape only when configured", function()
+            local defaultApp = build({})
+            assert.is_true(defaultApp:_init())
+            defaultApp:_receive({
+                kind = "keyDown",
+                scancode = defaultApp.input:scancode("escape"),
+                down = true,
+            })
+            assert.is_false(defaultApp.quitRequested)
+            defaultApp:_shutdown()
+
+            local app = build({ quitOnEscape = true })
+            assert.is_true(app:_init())
+
+            app:_receive({
+                kind = "keyDown",
+                scancode = app.input:scancode("escape"),
+                down = true,
+            })
+
+            assert.is_true(app.quitRequested)
+            app:_shutdown()
+        end)
+
         it("delivers one to an observer of that kind and to no other", function()
             local keys, drops = 0, 0
             local app = build({

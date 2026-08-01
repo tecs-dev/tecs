@@ -139,6 +139,7 @@ return tecs.newApplication({
     -- The demo is inspectable out of the box. TECS_MCP still selects another
     -- port when several games are running on the same machine.
     mcpPort = math.floor(tonumber(os.getenv("TECS_MCP")) or 19999),
+    quitOnEscape = true,
 
     plugin = function(world: tecs.World, app: tecs.Application)
         local width, height = app.window:getPixelSize()
@@ -924,19 +925,6 @@ return tecs.newApplication({
                         transforms[row].y = height * (0.5 + 0.3 * math.sin(angle))
                         index = index + 1
                     end
-                end
-            end,
-        })
-
-        local input = app.input
-        world:addSystem({
-            name = "demo.Quit",
-            phase = tecs.ecs.phases.Update,
-            run = function()
-                -- Reads the base layer, so this stops responding on its own if
-                -- a menu layer is ever pushed over it.
-                if input:keyPressed("escape") then
-                    app.quitRequested = true
                 end
             end,
         })

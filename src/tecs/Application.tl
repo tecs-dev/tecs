@@ -313,6 +313,10 @@ local record Application
         --- Caller-writable. Stops after this many iterations. This lets an automated run drive a
         --- real window to completion without a human closing it.
         debugMaxFrames: integer
+        --- Caller-writable. Requests a clean exit when the platform delivers
+        --- an Escape key press. Defaults to false. The check is independent of
+        --- gameplay input layers and remains available after a gameplay crash.
+        quitOnEscape: boolean
 
         --- Caller-writable. Sets the game plugin that receives the world and
         --- this application.
@@ -402,6 +406,7 @@ local record Application
     --- the state.
     _checkpointBytes: string
     _checkpointStaged: boolean
+    _quitScancode: integer
     _shutdownDone: boolean
 end
 
@@ -549,6 +554,7 @@ end
 function Application.newApplication(config: Application.Config): Application
     local self = setmetatable({} as Application, ApplicationMT)
     self._config = config or {} as Application.Config
+    self._quitScancode = 0
     self._shutdownDone = false
     self.quitRequested = false
     self.suspended = false
@@ -710,6 +716,7 @@ function Application:_init(): boolean
     -- The window is what text input and the cursor modes act on, so input is
     -- created knowing it rather than being told later.
     self.input = input.newInput({window = self.window.handle})
+    self._quitScancode = config.quitOnEscape and self.input:scancode("escape") or 0
     -- Passed through rather than validated here. `pipeline.new` is where a
     -- timestep of zero or a negative step count is refused, so there is one
     -- description of what is legal and it is the one the world enforces.
@@ -902,7 +909,11 @@ function Application:_receive(event: events.Event)
     self.input:handleEvent(event)
 
     local kind = event.kind
-    if kind == "quit" or kind == "windowCloseRequested" then
+    if
+        kind == "quit"
+        or kind == "windowCloseRequested"
+        or (kind == "keyDown" and self._quitScancode ~= 0 and event.scancode == self._quitScancode)
+    then
         self.quitRequested = true
     elseif kind == "windowResized" then
         -- Touch is normalized to the window, so the conversion to window

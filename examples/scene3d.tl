@@ -88,6 +88,7 @@ local function game(world: tecs.World, app: tecs.Application)
 
     print("scene3d: the cyan wireframe is a 2D projection of one 3D mesh entity")
     print("scene3d: MeshDomain does not draw the mesh yet")
+    print("scene3d: escape or close the window to quit")
 
     local elapsed = 0.0
     world:addSystem({
@@ -165,5 +166,6 @@ return tecs.newApplication({
     maxEntities = 64,
     debug = true,
     debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
+    quitOnEscape = true,
     plugin = game,
 })

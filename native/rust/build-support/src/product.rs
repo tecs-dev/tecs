@@ -196,11 +196,11 @@ pub fn check(root: &Path) -> Result<()> {
 
 pub fn run_example(root: &Path, preset: Preset, name: &str, arguments: &[OsString]) -> Result<()> {
     if name.is_empty()
-        || !name
-            .chars()
-            .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+        || !name.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        })
     {
-        anyhow::bail!("example names contain only lowercase letters and digits");
+        anyhow::bail!("example names contain only lowercase letters, digits, and hyphens");
     }
     let source = root.join("examples").join(format!("{name}.tl"));
     if !source.is_file() {
@@ -326,7 +326,12 @@ pub fn install_package(root: &Path, preset: Preset) -> Result<PathBuf> {
     }
     build(root, preset)?;
     let paths = Paths::new(root, preset);
-    compile_teal_file(root, &paths, &root.join("examples/demo.tl"), "lua/main.lua")?;
+    compile_teal_file(
+        root,
+        &paths,
+        &root.join("examples/ui-demo.tl"),
+        "lua/main.lua",
+    )?;
     let shader_host = crate::presets::host_default()?;
     shaders(root, shader_host)?;
     let host_paths = Paths::new(root, shader_host);

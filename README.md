@@ -356,7 +356,7 @@ never fired, so a phase added later is covered the day it is added.
 
 There is one entry point rather than a list of them, because the world already
 composes plugins. `world:addPlugin` takes an `ecs.Plugin`, which is a plain
-`function(world)`, and it is how `examples/demo.tl` installs the text plugin. Anything
+`function(world)`, and it is how `examples/ui-demo.tl` installs the text plugin. Anything
 the entry plugin delegates to has that same shape and goes through the world, so
 a game with several modules calls it from inside its entry plugin and a list
 here would be a second mechanism for something that already has one.
@@ -3548,7 +3548,7 @@ defers rather than a consequence of this one.
 
 ## GPU-driven by default
 
-`cargo xtask example demo` animates 4000 instances and never tells the GPU how many of them to
+`cargo xtask example ui-demo` animates 4000 instances and never tells the GPU how many of them to
 draw. Per-instance data lives in a storage buffer the host writes the deltas of,
 and what decides the draw is a chain of compute passes: mark, scan and compact
 for the opaque lane, five more for the blended one, light binning beside them.
@@ -3987,7 +3987,7 @@ API and command implementations.
 ```
 cargo xtask presets       list the platform matrix
 cargo xtask build         build the host development preset
-cargo xtask example demo  run the engine showcase
+cargo xtask example ui-demo run the engine showcase
 cargo xtask test          run the spec suite
 cargo xtask check         type-check Teal sources
 cargo xtask abi-check     verify generated cdefs against the C ABI
@@ -4043,10 +4043,10 @@ incomplete fails here rather than for whoever unpacks it. That one fails on
 both kinds of install, since types are not something a development build is
 allowed to borrow from its machine.
 
-`TECS_FRAMES=N cargo xtask example demo` exits after N frames, so an automated
+`TECS_FRAMES=N cargo xtask example ui-demo` exits after N frames, so an automated
 run can drive a real window to completion.
 
-The task compiles `examples/demo.tl` into the selected development output
+The task compiles `examples/ui-demo.tl` into the selected development output
 before it launches the host, matching the packaged entry shape.
 `cargo xtask check` already type-checks that source together with the engine,
 so asking the host's source loader to resolve the same full program again would
