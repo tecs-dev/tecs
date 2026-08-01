@@ -12,10 +12,10 @@ reverse index and cascade delete:
 ```teal
 local ChildOf <const> = tecs.ecs.ChildOf
 
-local parent <const> = world:spawn(tecs.Transform(100, 100))
+local parent <const> = world:spawn(tecs.Transform2D(100, 100))
 local child <const> = world:spawn(
     ChildOf(parent),
-    tecs.ecs.RelativeTransform(16, 0)
+    tecs.ecs.RelativeTransform2D(16, 0)
 )
 
 local link <const> = world:getFirstRelationship(child, ChildOf)
@@ -123,7 +123,7 @@ target set does not fragment the world. `ChildOf` uses this layout.
 
 ```teal
 local children <const> = world:newQuery({
-    include = {ChildOf, tecs.Transform},
+    include = {ChildOf, tecs.Transform2D},
 })
 
 for archetype, length in children:iter() do

@@ -150,7 +150,7 @@ describe("mcp context", function()
         local world = tecs.ecs.newWorld()
         world:addSystem({ name = "spec.context", phase = tecs.ecs.phases.Update, run = function() end })
         for index = 1, 3 do
-            world:spawn(tecs.Transform(index, 0, 0, 1, 0, 1, 1))
+            world:spawn(tecs.Transform2D(index, 0, 0, 1, 0, 1, 1))
         end
         world:commit()
         tools.bind(nil, world)

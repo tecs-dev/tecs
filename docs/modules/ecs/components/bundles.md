@@ -9,17 +9,17 @@ A bundle names one component set and compiles its spawn path once:
 
 ```teal
 local playerBundle <const> = world:newBundle("Player", {
-    required = {tecs.Transform, Health},
+    required = {tecs.Transform2D, Health},
     with = {
         [tecs.gfx.Tint] = function()
             return tecs.gfx.Tint(1, 1, 1, 1)
         end,
-        [tecs.gfx.Renderable] = true,
+        [tecs.gfx.Renderable2D] = true,
     },
 })
 
 local player <const> = playerBundle:spawn(
-    tecs.Transform(100, 200),
+    tecs.Transform2D(100, 200),
     Health(100)
 )
 ```
@@ -33,11 +33,11 @@ Declaration order controls spawn order:
 
 ```teal
 local enemyBundle <const> = world:newBundle("Enemy", {
-    required = {tecs.Transform, Health, Damage},
+    required = {tecs.Transform2D, Health, Damage},
 })
 
 local enemy <const> = enemyBundle:spawn(
-    tecs.Transform(100, 200),
+    tecs.Transform2D(100, 200),
     Health(50),
     Damage(10)
 )
@@ -53,7 +53,7 @@ and returns a fresh instance:
 
 ```teal
 local bulletBundle <const> = world:newBundle("Bullet", {
-    required = {tecs.Transform},
+    required = {tecs.Transform2D},
     with = {
         [Velocity] = function()
             return Velocity(100, 0)
@@ -70,9 +70,9 @@ whose declared defaults already have the right value:
 
 ```teal
 local propBundle <const> = world:newBundle("Prop", {
-    required = {tecs.Transform},
+    required = {tecs.Transform2D},
     with = {
-        [tecs.gfx.Renderable] = true,
+        [tecs.gfx.Renderable2D] = true,
         [Static] = true,
     },
 })
@@ -91,13 +91,13 @@ The bundle object and the world registry call the same compiled spawn path:
 
 ```teal
 local first <const> = playerBundle:spawn(
-    tecs.Transform(0, 0),
+    tecs.Transform2D(0, 0),
     Health(100)
 )
 
 local second <const> = world:spawnBundle(
     "Player",
-    tecs.Transform(20, 0),
+    tecs.Transform2D(20, 0),
     Health(100)
 )
 ```
@@ -111,7 +111,7 @@ operations:
 ```teal
 for _archetype, _length in query:iter() do
     local id <const> = playerBundle:spawn(
-        tecs.Transform(0, 0),
+        tecs.Transform2D(0, 0),
         Health(100)
     )
     world:set(id, Selected)

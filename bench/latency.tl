@@ -48,9 +48,9 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs <const> = require("tecs")
 local events <const> = require("tecs.platform.events")
 local timing <const> = require("tecs.timing")
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 local Tint <const> = tecs.gfx.Tint
-local Renderable <const> = tecs.gfx.Renderable
+local Renderable2D <const> = tecs.gfx.Renderable2D
 
 --- A scene, so the frame being waited on is a real one. Small enough that the
 --- number is about the loop rather than about the field.
@@ -75,10 +75,10 @@ local function spawnField(world: tecs.World)
 
     world:batchSpawn(
         COUNT,
-        {Transform, Tint, Renderable},
+        {Transform2D, Tint, Renderable2D},
         function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
-            local transforms = archetype:getMut(Transform)
+            local transforms = archetype:getMut(Transform2D)
             local tints = archetype:getMut(Tint)
 
             for row = firstRow, lastRow do
@@ -129,7 +129,7 @@ return tecs.newApplication({
         -- The entity the press moves. One entity, so the reaction costs
         -- nothing worth measuring and the latency reported is the loop's.
         local marker = world:spawn(
-            Transform(WIDTH * 0.5, HEIGHT * 0.5, 0, 1, 0, 24, 24), Tint(1.0, 0.3, 0.2, 1.0), Renderable()
+            Transform2D(WIDTH * 0.5, HEIGHT * 0.5, 0, 1, 0, 24, 24), Tint(1.0, 0.3, 0.2, 1.0), Renderable2D()
         )
 
         -- Iterations completed. Incremented in `Last`, so the injector in
@@ -155,7 +155,7 @@ return tecs.newApplication({
                 if frame >= WARMUP then
                     reactions = reactions + 1
                 end
-                local transform = world:getMut(marker, Transform)
+                local transform = world:getMut(marker, Transform2D)
                 transform.y = HEIGHT * (input:keyDown(KEY) and 0.6 or 0.4)
             end,
         })

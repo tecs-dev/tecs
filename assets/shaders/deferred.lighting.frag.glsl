@@ -67,7 +67,7 @@ layout(set = 2, binding = LIGHT_BINDING + 2) readonly buffer TileLights {
 } tileLights;
 
 layout(set = 3, binding = 0) uniform Scene {
-    vec4 ambient;      // rgb ambient color, a unused
+    vec4 ambient;      // rgb ambient color, a says shadow targets are current
     // xy target size, zw unused. What bounds the loop below is the tile's own
     // count rather than the scene's, so the scene's is not here.
     vec4 viewport;
@@ -229,7 +229,7 @@ void main() {
         float lambert = max(dot(normal, normalize(toLight)), 0.0);
 #ifdef SHADOWS
         float reaching = attenuation * lambert;
-        if (reaching > MARCH_FLOOR) {
+        if (scene.ambient.a > 0.5 && reaching > MARCH_FLOOR) {
             attenuation *= 1.0 - marchShadow(world, light.position.xy, light.position.z, attenuation, noise);
         }
 #endif
@@ -242,7 +242,9 @@ void main() {
     // mask reaches a light's own contribution and has no path to the ambient
     // term at all, so in a scene lit mostly by ambient it is not merely fainter
     // than this: it is nothing.
-    accumulated *= texture(dropShadowMask, vUV).r;
+    if (scene.ambient.a > 0.5) {
+        accumulated *= texture(dropShadowMask, vUV).r;
+    }
 #endif
 
     // Added after the multiply, so no light and no shadow scales it. A glowing

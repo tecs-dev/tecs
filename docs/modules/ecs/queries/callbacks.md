@@ -10,7 +10,7 @@ set. Each callback receives one contiguous row range:
 
 ```teal
 local physicsBodies <const> = world:newQuery({
-    include = {tecs.Transform, tecs.physics.RigidBody},
+    include = {tecs.Transform2D, tecs.physics.RigidBody},
 
     onEntitiesAdded = function(
         archetype: tecs.ecs.Archetype,
@@ -18,7 +18,7 @@ local physicsBodies <const> = world:newQuery({
         lastRow: integer,
         count: integer
     )
-        local transforms <const> = archetype:get(tecs.Transform)
+        local transforms <const> = archetype:get(tecs.Transform2D)
         local bodies <const> = archetype:get(tecs.physics.RigidBody)
 
         reservePhysicsBodies(count)
@@ -73,7 +73,7 @@ still read every included column. These changes remove a match:
 
 A one-component query reacts to that component alone. A wider descriptor can
 express a lifecycle boundary such as `{Enemy, Stunned}` or
-`{Transform, RigidBody}` without coordinating separate hooks.
+`{Transform2D, RigidBody}` without coordinating separate hooks.
 
 ## Commit drain {#deferred-scope}
 

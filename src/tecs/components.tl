@@ -1,18 +1,18 @@
 --[=[
 Entity components that describe a rendered scene.
 
-[`Transform`](/modules/ecs/#tecs.ecs.Transform) places an entity, graphics components
-describe its appearance, and [`Renderable`](tealdoc:tecs.components.Renderable)
-admits it to rendering. [`Transform`](/modules/ecs/#tecs.ecs.Transform),
+[`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) places an entity, graphics components
+describe its appearance, and [`Renderable2D`](tealdoc:tecs.components.Renderable2D)
+admits it to rendering. [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D),
 [`Tint`](tealdoc:tecs.components.Tint), and
-[`Renderable`](tealdoc:tecs.components.Renderable) form the minimum drawable set:
+[`Renderable2D`](tealdoc:tecs.components.Renderable2D) form the minimum drawable set:
 
 ```teal
 local player <const> = world:spawn(
-    tecs.Transform(120, 80, 0, 1, 0, 32, 32),
-    app.renderer:sprite("player.png"),
+    tecs.Transform2D(120, 80, 0, 1, 0, 32, 32),
+    app.renderer.sprites:sprite("player.png"),
     tecs.gfx.Tint(1.0, 1.0, 1.0, 1.0),
-    tecs.gfx.Renderable()
+    tecs.gfx.Renderable2D()
 )
 
 local tint <const> = world:getMut(player, tecs.gfx.Tint)
@@ -22,12 +22,12 @@ tint.a = 0.5
 [`Sprite`](tealdoc:tecs.components.Sprite) selects an image region.
 [`Material`](tealdoc:tecs.components.Material) selects fragment coverage and lighting.
 [`Clip`](tealdoc:tecs.components.Clip) selects a target-pixel clip region.
-[`PointLight`](tealdoc:tecs.components.PointLight),
-[`Occluder`](tealdoc:tecs.components.Occluder), and
-[`DropShadow`](tealdoc:tecs.components.DropShadow) describe deferred lighting and
+[`PointLight2D`](tealdoc:tecs.components.PointLight2D),
+[`Occluder2D`](tealdoc:tecs.components.Occluder2D), and
+[`DropShadow2D`](tealdoc:tecs.components.DropShadow2D) describe deferred lighting and
 shadows.
 
-[`Transform`](/modules/ecs/#tecs.ecs.Transform) remains at `tecs.Transform` because
+[`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) remains at `tecs.Transform2D` because
 physics, hierarchy, sequencing, and graphics share it. Other render components
 live under `tecs.gfx`.
 
@@ -36,9 +36,9 @@ Use `world:getMut` for authored changes. A direct cdata write through
 value. `batchSpawn` skips FFI defaults, so its callback must initialize every
 field.
 
-[`PreviousTransform`](tealdoc:tecs.components.PreviousTransform) stores the pose
+[`PreviousTransform2D`](tealdoc:tecs.components.PreviousTransform2D) stores the pose
 before the current fixed step. The renderer interpolates it toward
-[`Transform`](/modules/ecs/#tecs.ecs.Transform) for presentation without changing
+[`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) for presentation without changing
 simulation state.
 ]=]
 -- Implementation details:
@@ -47,8 +47,8 @@ simulation state.
 -- contiguous archetype runs map directly to GPU staging.
 --
 -- Each registered component name is a compatibility surface because snapshots
--- store it as a string. Names such as "Sprite" and "Renderable" remain stable
--- even if their Lua namespace changes.
+-- store it as a string. The dimensional rename deliberately changes those keys
+-- with no migration; later Lua namespace moves must leave the new keys alone.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
@@ -67,7 +67,7 @@ local type Component = ecs.Component
 --- Only the fields that move continuously are here. Scale and layer change by
 --- assignment rather than by integration, and a half-applied assignment is not
 --- a value anything asked for.
-local record PreviousTransform is Component
+local record PreviousTransform2D is Component
     --- Engine-owned. Stores the previous horizontal position for frame
     --- interpolation. Ordinary game code should ignore this field.
     x: number
@@ -80,8 +80,8 @@ local record PreviousTransform is Component
 end
 
 ecs.newFFIComponent({
-    name = "PreviousTransform",
-    container = PreviousTransform,
+    name = "PreviousTransform2D",
+    container = PreviousTransform2D,
     fields = {
         {"x", "float"},
         {"y", "float"},
@@ -135,7 +135,7 @@ ecs.newFFIComponent({
 })
 
 --- Represents a light resolved by the deferred lighting pass.
-local record PointLight is Component
+local record PointLight2D is Component
     --- Caller-writable. Sets the height above the surface plane. At zero, the
     --- Lambert term vanishes and the light contributes nothing.
     height: number
@@ -152,8 +152,8 @@ local record PointLight is Component
 end
 
 ecs.newFFIComponent({
-    name = "PointLight",
-    container = PointLight,
+    name = "PointLight2D",
+    container = PointLight2D,
     fields = {
         {"height", "float"},
         {"radius", "float"},
@@ -402,13 +402,13 @@ ecs.newFFIComponent({
 --- presence is the opt-in and absence is the common case. Archetypes without
 --- this column skip clipping, and their fragments never read the region table.
 ---
---- The index names a rectangle set with `Renderer:setClipRegion`. Zero, which
+--- The index names a rectangle set with `renderer.sprites:setClipRegion`. Zero, which
 --- is the default, means no clipping. Nesting is the caller's: a region is one
 --- rectangle, so a panel inside a panel is set up as the intersection of the
 --- two rather than as two regions an instance sits in at once.
 local record Clip is Component
     --- Caller-writable. Selects a clip region configured with
-    --- `Renderer:setClipRegion`. Zero disables clipping.
+    --- `renderer.sprites:setClipRegion`. Zero disables clipping.
     index: number
 end
 
@@ -426,21 +426,21 @@ ecs.newFFIComponent({
 --- The renderer adds the silhouette to the occluder mask every light samples, so
 --- one entity blocks every light at the cost of one drawing of itself rather
 --- than one per light. It blocks each light's contribution, not ambient light.
---- [`DropShadow`](tealdoc:tecs.components.DropShadow) handles ambient darkening.
+--- [`DropShadow2D`](tealdoc:tecs.components.DropShadow2D) handles ambient darkening.
 ---
 --- Coverage is the silhouette, so a circle, a rounded box or a glyph casts the
 --- shape it draws with no threshold of its own to set. A translucent entity
 --- casts nothing: it is drawn forward over the composited image and never
 --- reaches the G-buffer, so a hard silhouette of it would be a lie.
-local record Occluder is Component
+local record Occluder2D is Component
     --- Caller-writable. Sets the occluder height from zero to one of the
     --- world's configured shadow height.
     height: number
 end
 
 ecs.newFFIComponent({
-    name = "Occluder",
-    container = Occluder,
+    name = "Occluder2D",
+    container = Occluder2D,
     fields = {
         {"height", "float"},
     },
@@ -450,7 +450,7 @@ ecs.newFFIComponent({
 --- Casts a stretched copy of the entity along the ground, away from light.
 ---
 --- This darkens everything a light left, including ambient light, which
---- [`Occluder`](tealdoc:tecs.components.Occluder) cannot do. It blocks no light in
+--- [`Occluder2D`](tealdoc:tecs.components.Occluder2D) cannot do. It blocks no light in
 --- return: a crowd of light-blocking silhouettes merges under the mask into
 --- one flat mat of darkness, so the thing that wants a contact shadow is
 --- exactly the thing that must not be an occluder. An entity carrying both is
@@ -458,15 +458,15 @@ ecs.newFFIComponent({
 ---
 --- The nearest few lights by weight throw the copy. Adding a distant light does
 --- not move an established shadow.
-local record DropShadow is Component
+local record DropShadow2D is Component
     --- Caller-writable. Sets how far lights throw the shadow, from zero to one
     --- of the world's configured shadow height.
     height: number
 end
 
 ecs.newFFIComponent({
-    name = "DropShadow",
-    container = DropShadow,
+    name = "DropShadow2D",
+    container = DropShadow2D,
     fields = {
         {"height", "float"},
     },
@@ -474,17 +474,17 @@ ecs.newFFIComponent({
 })
 
 --- Marks an entity as contributing geometry. Without it, a
---- [`Transform`](/modules/ecs/#tecs.ecs.Transform) represents only a position.
-local record Renderable is Component
+--- [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) represents only a position.
+local record Renderable2D is Component
 end
 
 ecs.newComponent({
-    name = "Renderable",
-    container = Renderable,
+    name = "Renderable2D",
+    container = Renderable2D,
 })
 
 -- Implementation details:
--- All render components except Renderable use FFI columns. Transform remains
+-- All render components except Renderable2D use FFI columns. Transform2D remains
 -- an ECS builtin because every subsystem shares it.
 local record components
     --- Read-only. Exposes the transform component used for frame interpolation.
@@ -493,7 +493,7 @@ local record components
     --- this and its current transform, so physics does not step visibly.
     --- Carries `x`, `y` and `rotation` (radians) only, because scale and
     --- layer change by assignment rather than by integration.
-    PreviousTransform: PreviousTransform
+    PreviousTransform2D: PreviousTransform2D
 
     --- Read-only. Exposes the base-color component. Each channel ranges from
     --- 0 to 1 and defaults to opaque
@@ -528,15 +528,15 @@ local record components
 
     --- Read-only. Exposes the point-light component resolved by deferred
     --- lighting and positioned by the entity's
-    --- [`Transform`](/modules/ecs/#tecs.ecs.Transform). `height` is above the
+    --- [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D). `height` is above the
     --- surface plane and at 0 the light contributes nothing at all;
     --- `radius` is its reach in world units; `r`, `g`, `b` and `intensity`
     --- default to white at 1.
-    PointLight: PointLight
+    PointLight2D: PointLight2D
 
     --- Read-only. Exposes the clip component, which keeps a renderable's
     --- fragments inside one rectangle. `index` names a region set with
-    --- `Renderer:setClipRegion`, and 0, the default, means no clipping. A
+    --- `renderer.sprites:setClipRegion`, and 0, the default, means no clipping. A
     --- region is a single rectangle, so the caller intersects nested regions.
     Clip: Clip
 
@@ -544,19 +544,19 @@ local record components
     --- the entity's shape. `height` is 0 to 1 of the world height
     --- `Deferred.shadowHeight` sets, so 1 is a full wall and 0 blocks nothing.
     --- This component requires renderer `shadows`.
-    Occluder: Occluder
+    Occluder2D: Occluder2D
 
     --- Read-only. Exposes the drop-shadow component, which darkens the ground
     --- away from each nearby light, including ambient light, without blocking
     --- light. `height` is 0 to 1 and controls the copy's travel under the same
-    --- interpretation as `Occluder.height`.
-    DropShadow: DropShadow
+    --- interpretation as `Occluder2D.height`.
+    DropShadow2D: DropShadow2D
 
     --- Read-only. Exposes the renderable tag, which marks an entity as
     --- contributing geometry. The tag costs a column of nothing; without it a
-    --- [`Transform`](/modules/ecs/#tecs.ecs.Transform) is only a position, which
+    --- [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) is only a position, which
     --- is what most entities in a world are.
-    Renderable: Renderable
+    Renderable2D: Renderable2D
 
     --- Returns the index of an image name and assigns one on first use.
     ---
@@ -579,15 +579,15 @@ local record components
     imageName: function(id: integer): string
 end
 
-components.PreviousTransform = PreviousTransform
+components.PreviousTransform2D = PreviousTransform2D
 components.Tint = Tint
 components.Sprite = Sprite
 components.Material = Material
-components.PointLight = PointLight
+components.PointLight2D = PointLight2D
 components.Clip = Clip
-components.Occluder = Occluder
-components.DropShadow = DropShadow
-components.Renderable = Renderable
+components.Occluder2D = Occluder2D
+components.DropShadow2D = DropShadow2D
+components.Renderable2D = Renderable2D
 components.imageId = imageId
 components.imageName = imageName
 

@@ -16,7 +16,7 @@ local Kind <const> = {
 }
 
 local renderables <const> = world:newQuery({
-    include = {tecs.Transform, tecs.gfx.Renderable},
+    include = {tecs.Transform2D, tecs.gfx.Renderable2D},
     groupBy = function(archetype: tecs.ecs.Archetype): integer
         if archetype:get(tecs.gfx.Sprite) then
             return Kind.Textured
@@ -44,7 +44,7 @@ for kind in renderables:groups() do
 
     for archetype, length in renderables:group(kind) do
         local transforms <const> =
-            archetype:get(tecs.Transform)
+            archetype:get(tecs.Transform2D)
 
         for row = 1, length do
             drawRow(transforms[row])

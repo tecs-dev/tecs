@@ -59,7 +59,7 @@ describe("tecs.math.vec2", function()
         nearPair(0, 0, vector.moveTowards(0, 0, 3, 4, -1))
     end)
 
-    it("uses radians and Transform's positive rotation sense", function()
+    it("uses radians and Transform2D's positive rotation sense", function()
         nearPair(0, 1, vector.rotate(1, 0, math.pi / 2))
         near(vector.angle(0, 1), math.pi / 2)
         assert.are.equal(0, vector.angle(0, 0))

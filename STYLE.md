@@ -13,7 +13,7 @@ code; migrate old code opportunistically.
   (`.d.tl`), entrypoints, tests, and generated or macro-support files sit
   outside that split and follow the conventions of their kind.
 - Class files and their import bindings are **PascalCase**: `Camera.tl`,
-  `local Camera <const> = require("tecs.gfx.Camera")`.
+  `local Camera2D <const> = require("tecs.gfx.Camera2D")`.
 - Module files and their bindings are **luacase** (all lowercase, no
   separators): `bucketmanager.tl`, `local bucketmanager <const> = ...`.
   Never snake_case, never camelCase for module names.

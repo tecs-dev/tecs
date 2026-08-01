@@ -13,11 +13,11 @@ it does.
 ## Custom tools
 
 ```teal
-local placed <const> = world:newQuery({include = {tecs.Transform}})
+local placed <const> = world:newQuery({include = {tecs.Transform2D}})
 
 tecs.io.mcp.register({
     name = "placed_count",
-    description = "Count entities that carry a Transform",
+    description = "Count entities that carry a Transform2D",
     inputSchema = {["type"] = "object", properties = {}},
     readOnly = true,
     handler = function(_arguments: {string: any}): {string: any}

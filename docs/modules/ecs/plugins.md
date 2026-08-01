@@ -40,7 +40,7 @@ then close over them from systems:
 local function spinPlugin(speed: number): tecs.Plugin
     return function(world: tecs.World)
         local spinning <const> = world:newQuery({
-            include = {tecs.Transform, tecs.gfx.Renderable},
+            include = {tecs.Transform2D, tecs.gfx.Renderable2D},
             type = "logic",
         })
 
@@ -50,7 +50,7 @@ local function spinPlugin(speed: number): tecs.Plugin
             run = function(dt: number)
                 for archetype, length in spinning:iter() do
                     local transforms <const> =
-                        archetype:getMut(tecs.Transform)
+                        archetype:getMut(tecs.Transform2D)
                     for row = 1, length do
                         transforms[row].rotation =
                             transforms[row].rotation + speed * dt

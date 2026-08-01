@@ -16,8 +16,9 @@ local sdl = require("tecs.ffi.sdl3")
 local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
 local Texture = require("tecs.gpu.Texture")
-local Backend = require("tecs.Backend")
-local FramePacket = require("tecs.FramePacket")
+local Deferred = require("tecs.gpu.Deferred")
+local SpriteBackend = require("tecs.internal.render.SpriteBackend")
+local SpriteFramePacket = require("tecs.internal.render.SpriteFramePacket")
 local instancelayout = require("tecs.gpu.instancelayout")
 
 local C = sdl.C
@@ -30,6 +31,7 @@ local BOUND_BYTES = instancelayout.BOUND_BYTES
 
 describe("forward blending", function()
     local window, device, screen
+    local deferredOf = {}
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
@@ -52,13 +54,31 @@ describe("forward blending", function()
     end)
 
     local function newBackend()
-        return Backend.create(device.handle, FORMAT, {
+        local backend
+        local deferred = Deferred.create(device.handle, FORMAT, {
             -- Fully bright ambient takes lighting out of the question: what
             -- reaches the target is what the material produced, so a difference
             -- between two runs is the blend and nothing else.
             ambient = { 1.0, 1.0, 1.0 },
+            geometry = function(context)
+                backend:recordGeometry(context)
+            end,
+            forward = function(context)
+                backend:recordForward(context)
+            end,
+        })
+        backend = SpriteBackend.create(device.handle, deferred, {
             capacity = 16,
         })
+        deferredOf[backend] = deferred
+        return backend
+    end
+
+    local function destroyBackend(backend)
+        local deferred = deferredOf[backend]
+        backend:destroy()
+        deferred:destroy()
+        deferredOf[backend] = nil
     end
 
     -- One quad covering the whole target, written by hand into the staging the
@@ -109,14 +129,16 @@ describe("forward blending", function()
 
     local function consume(backend, packet)
         local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
-        backend:consume(packet, {
+        local frame = {
             width = SIZE,
             height = SIZE,
             commandBuffer = commandBuffer,
             swapchainTexture = screen.handle,
-        })
+        }
+        backend:prepare(packet, frame)
+        deferredOf[backend]:render(frame)
         assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
-        local scene = backend:captureTexture()
+        local scene = deferredOf[backend].graph:texture("scene")
         return scene, scene:readback()
     end
 
@@ -132,7 +154,7 @@ describe("forward blending", function()
 
     it("blends a tint's alpha over what the G-buffer already drew", function()
         local backend = newBackend()
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
 
         -- Red behind, opaque. Green in front at half alpha, so half of the red
         -- has to survive it.
@@ -146,7 +168,7 @@ describe("forward blending", function()
         near(center.g, 128, "half the green in front must land")
         near(center.b, 0, "nothing wrote blue")
 
-        backend:destroy()
+        destroyBackend(backend)
     end)
 
     it("draws the same quad opaque when its alpha is one", function()
@@ -154,7 +176,7 @@ describe("forward blending", function()
         -- scene is identical except for the alpha and the lane it selects, so a
         -- renderer that ignored both would produce the same image twice.
         local backend = newBackend()
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
 
         writeQuad(backend, 0, 0.6, 1.0, 0.0, 0.0, 1.0, false)
         writeQuad(backend, 1, 0.5, 0.0, 1.0, 0.0, 1.0, false)
@@ -165,7 +187,7 @@ describe("forward blending", function()
         assert.are.equal(255, center.g, "an opaque quad in front must cover what is behind it")
         assert.are.equal(0, center.r, "and none of it may survive")
 
-        backend:destroy()
+        destroyBackend(backend)
     end)
 
     it("draws blended geometry back to front, whatever order it was written in", function()
@@ -175,7 +197,7 @@ describe("forward blending", function()
         -- leaves more of the near quad's color, and the sort is the only thing
         -- that can produce it from this layout.
         local backend = newBackend()
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
 
         writeQuad(backend, 0, 0.7, 1.0, 1.0, 1.0, 1.0, false)
         writeQuad(backend, 1, 0.5, 0.0, 0.0, 1.0, 0.5, true)
@@ -193,7 +215,7 @@ describe("forward blending", function()
         near(center.b, 191, "the nearer quad's blue must be the last thing applied")
         assert.is_true(center.b > center.r, "back to front, not front to back")
 
-        backend:destroy()
+        destroyBackend(backend)
     end)
 
     it("leaves the scene alone when nothing is blended", function()
@@ -201,7 +223,7 @@ describe("forward blending", function()
         -- with no forward list. A stale list from an earlier frame would show
         -- up here as the blend that frame produced.
         local backend = newBackend()
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
 
         writeQuad(backend, 0, 0.6, 1.0, 0.0, 0.0, 1.0, false)
         writeQuad(backend, 1, 0.5, 0.0, 1.0, 0.0, 0.5, true)
@@ -217,7 +239,7 @@ describe("forward blending", function()
         assert.are.equal(255, center.g)
         assert.are.equal(0, center.r, "the previous frame's forward list must not be drawn again")
 
-        backend:destroy()
+        destroyBackend(backend)
     end)
 
     it("adds an additive instance to what is behind it instead of covering it", function()
@@ -226,7 +248,7 @@ describe("forward blending", function()
         -- over keeps half the blue and additive keeps all of it: the blue channel
         -- is what tells the two apart, and neither pass changes the red.
         local backend = newBackend()
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
 
         writeQuad(backend, 0, 0.6, 0.0, 0.0, 1.0, 1.0, false)
         writeQuad(backend, 1, 0.5, 1.0, 0.0, 0.0, 0.5, true, "additive")
@@ -238,14 +260,14 @@ describe("forward blending", function()
         near(center.g, 0, "nothing wrote green")
         assert.are.equal(255, center.b, "an additive fragment must leave what is behind it whole")
 
-        backend:destroy()
+        destroyBackend(backend)
     end)
 
     it("blends the same instance over what is behind it when the mode is alpha", function()
         -- The revert check for the pair above, and the reason either means
         -- anything: one number in one float is the whole difference.
         local backend = newBackend()
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
 
         writeQuad(backend, 0, 0.6, 0.0, 0.0, 1.0, 1.0, false)
         writeQuad(backend, 1, 0.5, 1.0, 0.0, 0.0, 0.5, true, "alpha")
@@ -256,12 +278,12 @@ describe("forward blending", function()
         near(center.r, 128, "half the red must land")
         near(center.b, 128, "and half the blue behind it must give way")
 
-        backend:destroy()
+        destroyBackend(backend)
     end)
 
     it("attaches the geometry pass's depth to the forward pass, unwritten", function()
         local backend = newBackend()
-        local graph = backend.deferred.graph
+        local graph = deferredOf[backend].graph
 
         local depth = graph:depthOf("forward")
         assert.is_not_nil(depth, "a forward pass with no depth cannot sort against the G-buffer")
@@ -271,10 +293,10 @@ describe("forward blending", function()
 
         assert.are.equal(
             graph:formatOf("scene"),
-            backend.deferred:forwardFormat(),
+            deferredOf[backend]:forwardFormat(),
             "the forward pass draws onto the composited image"
         )
 
-        backend:destroy()
+        destroyBackend(backend)
     end)
 end)

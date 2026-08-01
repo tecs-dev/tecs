@@ -19,7 +19,7 @@ local ecs = require("tecs.ecs")
 local physics = require("tecs.physics")
 local TaskPool = require("tecs.physics.TaskPool")
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 
 -- Every world built here, so teardown can shut all of them down. A world
 -- nobody shuts down keeps its Rapier world and its hold on the solver's thread
@@ -63,7 +63,7 @@ describe("ecs.physics world scoping", function()
         assert.is_not.equal(physics.of(first), physics.of(second))
 
         local before = physics.of(second):bodyCount()
-        local entity = first:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = first:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
         first:update(1 / 60)
 
@@ -75,8 +75,8 @@ describe("ecs.physics world scoping", function()
         local slow = newWorld({ gravity = { 0, 100 } })
         local fast = newWorld({ gravity = { 0, 2000 } })
 
-        local a = slow:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        local b = fast:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local a = slow:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
+        local b = fast:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(slow, a, { type = "dynamic", radius = 8, density = 1 })
         physics.attach(fast, b, { type = "dynamic", radius = 8, density = 1 })
 
@@ -89,8 +89,8 @@ describe("ecs.physics world scoping", function()
         -- both are in one simulation. The lower bound on the slow one is the
         -- half that catches `attach` reaching a shared simulation: a body
         -- created in the other world's is stepped by nobody and sits still.
-        local slowY = slow:get(a, Transform).y
-        local fastY = fast:get(b, Transform).y
+        local slowY = slow:get(a, Transform2D).y
+        local fastY = fast:get(b, Transform2D).y
         assert.is_true(slowY > 5, ("the slow body must be simulated too, got %.2f"):format(slowY))
         assert.is_true(
             fastY > slowY * 5,

@@ -216,7 +216,7 @@ local record sequence
 
     --- Read-only. Exposes sources from which `tweenTrack` reads changing
     --- values:
-    --- `sequence.source.own(Transform, "x")`.
+    --- `sequence.source.own(Transform2D, "x")`.
     source: tweeneval.Sources
 
     --- Read-only. Exposes the component that selects a dynamic tracking-source
@@ -451,7 +451,7 @@ local record sequence
         --- which moves at the display's rate. `"fixed"` makes it
         --- deterministic from a snapshot alone, at the cost of stepping at
         --- the simulation's rate: the renderer interpolates only
-        --- [`Transform`](/modules/ecs/#tecs.ecs.Transform) between
+        --- [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) between
         --- fixed steps, so a fixed-clock tween of anything else visibly
         --- steps. If the simulation can observe the value, put it on
         --- `"fixed"`.

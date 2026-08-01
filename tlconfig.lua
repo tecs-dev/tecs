@@ -121,7 +121,7 @@ end
 ---
 --- A `within` key has a page of its own only when it is a module, which is what
 --- luacase says. A PascalCase one is a class reached through its namespace,
---- `tecs.gfx.Camera`, and belongs on the namespace's page.
+--- `tecs.gfx.Camera2D`, and belongs on the namespace's page.
 local function modulePage(name, spec, parent)
     local public = "tecs." .. (parent and parent .. "." .. name or name)
     local route = "modules/" .. (parent and parent .. "/" .. name or name)

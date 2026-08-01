@@ -129,12 +129,12 @@ describe(
                 })
 
                 local world = tecs.ecs.newWorld()
-                local e = world:spawn(tecs.Transform(1, 2), Score(99), Label("boss"))
+                local e = world:spawn(tecs.Transform2D(1, 2), Score(99), Label("boss"))
                 world:commit()
 
                 luassert.equals(99, world:get(e, Score))
                 luassert.equals("boss", world:get(e, Label))
-                local t = world:get(e, tecs.Transform)
+                local t = world:get(e, tecs.Transform2D)
                 luassert.equals(1, t.x)
                 luassert.equals(2, t.y)
             end

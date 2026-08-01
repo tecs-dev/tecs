@@ -16,7 +16,7 @@ local components = require("tecs.components")
 local ecs = require("tecs.ecs")
 local physics = require("tecs.physics")
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 
 -- Every world built here, so teardown can shut all of them down. A world
 -- nobody shuts down keeps its Rapier world and its hold on the solver's thread
@@ -40,7 +40,7 @@ end)
 describe("ecs.physics declaration", function()
     it("records the body a game asked for", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { type = "kinematic", radius = 8, fixedRotation = true })
 
         local body = world:get(entity, physics.Body)
@@ -55,7 +55,7 @@ describe("ecs.physics declaration", function()
 
     it("records the collider a game asked for", function()
         local world = newWorld()
-        local round = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local round = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, round, { type = "dynamic", radius = 8, density = 2, friction = 0.25 })
 
         local circle = world:get(round, physics.Collider)
@@ -64,7 +64,7 @@ describe("ecs.physics declaration", function()
         assert.equal(2, circle.density)
         assert.is_true(math.abs(circle.friction - 0.25) < 1e-6)
 
-        local square = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local square = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, square, { type = "static", halfWidth = 20, halfHeight = 3 })
 
         local box = world:get(square, physics.Collider)
@@ -85,7 +85,7 @@ describe("ecs.physics declaration", function()
     -- it; this asserts that is actually true rather than assumed.
     it("carries the description through a snapshot", function()
         local first = newWorld()
-        local entity = first:spawn(Transform(40, 60, 0, 1, 0, 16, 16))
+        local entity = first:spawn(Transform2D(40, 60, 0, 1, 0, 16, 16))
         physics.attach(first, entity, { type = "static", halfWidth = 12, halfHeight = 7, restitution = 0.5 })
         local snapshot = first:saveSnapshot({ format = "table" }).snapshot
 
@@ -111,20 +111,20 @@ describe("ecs.physics declaration", function()
     -- A body with no pose has nothing to write back to, so it is not a legal
     -- entity. `requires` is what makes it unrepresentable rather than a nil
     -- test in every function that reads the pose.
-    it("gains a Transform and a Motion from Body alone", function()
+    it("gains a Transform2D and a Motion from Body alone", function()
         local world = newWorld()
         local entity = world:spawn()
         world:set(entity, physics.Body())
 
-        assert.is_not_nil(world:get(entity, Transform), "Body requires Transform")
+        assert.is_not_nil(world:get(entity, Transform2D), "Body requires Transform2D")
         assert.is_not_nil(world:get(entity, physics.Motion), "Body requires Motion")
-        assert.equal(0, world:get(entity, Transform).x)
+        assert.equal(0, world:get(entity, Transform2D).x)
     end)
 
-    -- Before this, `attach` guarded for a missing Transform and then read
+    -- Before this, `attach` guarded for a missing Transform2D and then read
     -- `transform.x` anyway, so an entity without one crashed rather than
     -- being told what was wrong.
-    it("attaches to an entity that had no Transform", function()
+    it("attaches to an entity that had no Transform2D", function()
         local world = newWorld()
         local entity = world:spawn()
         physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
@@ -134,12 +134,12 @@ describe("ecs.physics declaration", function()
         for _ = 1, 30 do
             world:update(1 / 60)
         end
-        assert.is_true(world:get(entity, Transform).y > 10, "a body given a default pose still simulates")
+        assert.is_true(world:get(entity, Transform2D).y > 10, "a body given a default pose still simulates")
     end)
 
     it("refuses a body type it cannot name", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         assert.has_error(function()
             physics.attach(world, entity, { type = "floaty" })
         end)
@@ -153,7 +153,7 @@ describe("ecs.physics velocity", function()
     -- half a second under 980 px/s^2 reads 490, not 15.3.
     it("reads a falling body's velocity in pixels", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
 
         for _ = 1, 30 do
@@ -166,7 +166,7 @@ describe("ecs.physics velocity", function()
 
     it("sets a velocity in pixels and the body moves by it", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
 
         world:update(1 / 60)
@@ -179,14 +179,14 @@ describe("ecs.physics velocity", function()
         end
         -- A second at 320 px/s, minus nothing: gravity is vertical.
         assert.is_true(
-            math.abs(world:get(entity, Transform).x - 320) < 8,
-            ("expected about 320 px of travel, got %.1f"):format(world:get(entity, Transform).x)
+            math.abs(world:get(entity, Transform2D).x - 320) < 8,
+            ("expected about 320 px of travel, got %.1f"):format(world:get(entity, Transform2D).x)
         )
     end)
 
     it("leaves an entity with no body alone", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.setVelocity(world, entity, 100, 100)
         local vx, vy = physics.velocity(world, entity)
         assert.equal(0, vx)

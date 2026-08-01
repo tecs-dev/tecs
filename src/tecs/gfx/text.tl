@@ -1,7 +1,7 @@
 --[=[
 Shaped text as entities in the rendered world.
 
-A `Text` names a font and string. `Transform` places its top-left corner,
+A `Text` names a font and string. `Transform2D` places its top-left corner,
 `Tint` colors every glyph, and `Clip` clips it like any other drawable.
 
 ```teal
@@ -10,7 +10,7 @@ world:addPlugin(tecs.gfx.textPlugin({
 }))
 
 world:spawn(
-    tecs.Transform(24, 24),
+    tecs.Transform2D(24, 24),
     tecs.gfx.Tint(0.92, 0.96, 1.0, 1.0),
     tecs.gfx.Text.new({
         text = "tecs\n1200 entities",
@@ -74,11 +74,11 @@ local type TextureArray = require("tecs.gpu.TextureArray")
 local type Component = ecs.Component
 local type World = types.World
 
-local Transform <const> = ecs.Transform
+local Transform2D <const> = ecs.Transform2D
 local Tint <const> = components.Tint
 local Clip <const> = components.Clip
 
-local type TransformInstance = ecs.Transform
+local type TransformInstance = ecs.Transform2D
 local type TintInstance = components.Tint
 
 local abs <const> = math.abs
@@ -147,7 +147,7 @@ end
 
 --- Lays a string out into glyph instances.
 ---
---- The entity's Transform places the top-left corner of the text block and
+--- The entity's Transform2D places the top-left corner of the text block and
 --- orients and scales the whole block, and its Tint, if it has one, colors
 --- every glyph. Both are ordinary components on an ordinary entity, so a text
 --- moves, parents, tweens, and layers like anything else, and a `Clip`
@@ -305,7 +305,7 @@ local record text
     --- @param wrapWidth The caller may override `item.wrapWidth` for this
     ---     measurement without changing the retained authored value.
     --- @return Width at `item.size`, before
-    ---     [`Transform`](/modules/ecs/#tecs.ecs.Transform) scale. Returns zero for a missing
+    ---     [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) scale. Returns zero for a missing
     ---     item, font, or string.
     --- @return Height on the same terms, counting complete line boxes.
     measureText: function(item: Text, wrapWidth?: number): number, number
@@ -741,6 +741,11 @@ function Glyphs:blended(): integer
     return self.high
 end
 
+--- Text never writes caster lane signs into its bounds.
+function Glyphs:casting(): integer
+    return 0
+end
+
 function Glyphs:write(floats: loader.CArray, bounds: loader.CArray, base: integer, first: integer, last: integer)
     local count = last - first + 1
     if count <= 0 then
@@ -1033,7 +1038,7 @@ local function residency(install: Install, renderer: Renderer, copy: loader.CStr
         sdl.fail("SDL_ConvertSurface")
     end
     local pixels <const> = converted as loader.CStruct
-    local region <const> = renderer.images:addPacked(
+    local region <const> = renderer.sprites.images:addPacked(
         pixels.pixels as loader.CValue, pixels.w as integer, pixels.h as integer, pixels.pitch as integer
     )
     C.SDL_DestroySurface(converted)
@@ -1256,7 +1261,7 @@ local function stale(item: Text, transform: TransformInstance, tint: TintInstanc
     return item._builtR ~= tint.r or item._builtG ~= tint.g or item._builtB ~= tint.b or item._builtA ~= tint.a
 end
 
--- Run after RelativeTransform because glyph instances use absolute positions;
+-- Run after RelativeTransform2D because glyph instances use absolute positions;
 -- running before parent composition would consume the previous frame's
 -- transform.
 function text.textPlugin(options: TextOptions): function(World)
@@ -1268,7 +1273,7 @@ function text.textPlugin(options: TextOptions): function(World)
     return function(world: World)
         local texts <const> = world:newQuery({
             name = "tecs.Text",
-            include = {text.Text, Transform},
+            include = {text.Text, Transform2D},
         })
         local install <const>: Install = {
             glyphs = newGlyphs(),
@@ -1278,12 +1283,12 @@ function text.textPlugin(options: TextOptions): function(World)
         glyphs.destroy = function() end
 
         installs[world] = install
-        renderer:addProducer(glyphs as Renderer.InstanceProducer)
+        renderer.sprites:addProducer(glyphs as Renderer.SpriteInstanceProducer)
 
         world:addSystem({
             name = "tecs.TextLayout",
             phase = ecs.phases.PostUpdate,
-            after = {"RelativeTransform"},
+            after = {"RelativeTransform2D"},
             run = function()
                 local built = 0
                 local live = 0
@@ -1293,10 +1298,10 @@ function text.textPlugin(options: TextOptions): function(World)
                         archetype:isComponentDirty(text.Text)
                         or archetype:isComponentDirty(Tint)
                         or archetype:isComponentDirty(Clip)
-                        or archetype:isComponentDirty(Transform)
+                        or archetype:isComponentDirty(Transform2D)
                     then
                         local column = archetype:get(text.Text)
-                        local transforms = archetype:get(Transform)
+                        local transforms = archetype:get(Transform2D)
                         local tints = archetype:get(Tint)
                         -- Absent on a text nobody clips, which is the common
                         -- case and costs one test for the whole archetype.
@@ -1373,7 +1378,7 @@ text.Text = ecs.newComponent({
     -- A text is a position and a string. Requiring the position means one is
     -- never accidentally left off, which would make the text quietly not
     -- appear rather than fail.
-    requires = {Transform},
+    requires = {Transform2D},
     fields = {
         "text",
         "font",

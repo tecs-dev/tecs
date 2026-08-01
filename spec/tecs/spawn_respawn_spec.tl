@@ -12,7 +12,7 @@ end
 describe(
     "Spawn/Respawn consistency",
     function()
-        -- Create FFI components that use recycling (like Transform does)
+        -- Create FFI components that use recycling (like Transform2D does)
         local record TestTransform is tecs.ecs.Component
             x: number
             y: number
@@ -61,7 +61,7 @@ describe(
             function()
                 local w = tecs.ecs.newWorld()
 
-                -- Spawn 10 entities with different Transform values
+                -- Spawn 10 entities with different Transform2D values
                 local entities: {integer} = {}
                 local expectedValues: {integer: ExpectedPos} = {}
 
@@ -76,7 +76,7 @@ describe(
                 -- Verify initial values
                 for _, e in ipairs(entities) do
                     local t = w:get(e, TransformComp)
-                    luassert.is_not_nil(t, "Entity should have Transform")
+                    luassert.is_not_nil(t, "Entity should have Transform2D")
                     local expected = expectedValues[e]
                     luassert.are_equal(expected.x, t.x, "Initial x should match for entity " .. e)
                     luassert.are_equal(expected.y, t.y, "Initial y should match for entity " .. e)
@@ -105,7 +105,7 @@ describe(
                 -- Reused storage must contain only the new values.
                 for _, e in ipairs(newEntities) do
                     local t = w:get(e, TransformComp)
-                    luassert.is_not_nil(t, "New entity should have Transform")
+                    luassert.is_not_nil(t, "New entity should have Transform2D")
                     local expected = newExpectedValues[e]
                     luassert.are_equal(expected.x, t.x, "New x should match for entity " .. e)
                     luassert.are_equal(expected.y, t.y, "New y should match for entity " .. e)
@@ -138,7 +138,7 @@ describe(
                     -- Verify values immediately after spawn
                     for _, e in ipairs(entities) do
                         local t = w:get(e, TransformComp)
-                        luassert.is_not_nil(t, "Entity should have Transform in cycle " .. cycle)
+                        luassert.is_not_nil(t, "Entity should have Transform2D in cycle " .. cycle)
                         local expected = expectedValues[e]
                         luassert.are_equal(expected.x, t.x, "Cycle " .. cycle .. ": x mismatch for entity " .. e)
                         luassert.are_equal(expected.y, t.y, "Cycle " .. cycle .. ": y mismatch for entity " .. e)
@@ -159,10 +159,10 @@ describe(
             function()
                 local w = tecs.ecs.newWorld()
 
-                -- This test mimics the UI example where Text entities (Transform+Text+Color)
-                -- and Circle entities (Transform+Circle+Color) are spawned together
+                -- This test mimics the UI example where Text entities (Transform2D+Text+Color)
+                -- and Circle entities (Transform2D+Circle+Color) are spawned together
 
-                -- Spawn "text-like" entities (Transform + Color + Tag)
+                -- Spawn "text-like" entities (Transform2D + Color + Tag)
                 local textEntities: {integer} = {}
                 local textExpected: {integer: ExpectedPos} = {}
 
@@ -173,7 +173,7 @@ describe(
                     textExpected[e] = {x = x, y = y, z = z}
                 end
 
-                -- Spawn "circle-like" entities (Transform + Color only, different signature)
+                -- Spawn "circle-like" entities (Transform2D + Color only, different signature)
                 local circleEntities: {integer} = {}
                 local circleExpected: {integer: ExpectedPos} = {}
 
@@ -190,7 +190,7 @@ describe(
                 -- Verify text entities have correct values (not circle values!)
                 for _, e in ipairs(textEntities) do
                     local t = w:get(e, TransformComp)
-                    luassert.is_not_nil(t, "Text entity should have Transform")
+                    luassert.is_not_nil(t, "Text entity should have Transform2D")
                     local expected = textExpected[e]
                     luassert.are_equal(expected.x, t.x, "Text entity " .. e .. ": x mismatch")
                     luassert.are_equal(expected.y, t.y, "Text entity " .. e .. ": y mismatch")
@@ -200,7 +200,7 @@ describe(
                 -- Verify circle entities have correct values
                 for _, e in ipairs(circleEntities) do
                     local t = w:get(e, TransformComp)
-                    luassert.is_not_nil(t, "Circle entity should have Transform")
+                    luassert.is_not_nil(t, "Circle entity should have Transform2D")
                     local expected = circleExpected[e]
                     luassert.are_equal(expected.x, t.x, "Circle entity " .. e .. ": x mismatch")
                     luassert.are_equal(expected.y, t.y, "Circle entity " .. e .. ": y mismatch")
@@ -242,7 +242,7 @@ describe(
                 -- New text entities must not inherit despawned values.
                 for _, e in ipairs(newTextEntities) do
                     local t = w:get(e, TransformComp)
-                    luassert.is_not_nil(t, "New text entity should have Transform")
+                    luassert.is_not_nil(t, "New text entity should have Transform2D")
                     local expected = newTextExpected[e]
                     luassert.are_equal(expected.x, t.x, "After respawn: Text entity " .. e .. " x mismatch")
                     luassert.are_equal(expected.y, t.y, "After respawn: Text entity " .. e .. " y mismatch")
@@ -254,7 +254,7 @@ describe(
                 -- Verify new circle entities
                 for _, e in ipairs(newCircleEntities) do
                     local t = w:get(e, TransformComp)
-                    luassert.is_not_nil(t, "New circle entity should have Transform")
+                    luassert.is_not_nil(t, "New circle entity should have Transform2D")
                     local expected = newCircleExpected[e]
                     luassert.are_equal(expected.x, t.x, "After respawn: Circle entity " .. e .. " x mismatch")
                     luassert.are_equal(expected.y, t.y, "After respawn: Circle entity " .. e .. " y mismatch")

@@ -15,7 +15,7 @@ local components = require("tecs.components")
 local ecs = require("tecs.ecs")
 local physics = require("tecs.physics")
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 
 -- Every world built here, so teardown can shut all of them down. The
 -- simulation is per world now, so a world nobody shuts down keeps its Rapier
@@ -39,21 +39,21 @@ end)
 describe("ecs.physics", function()
     it("leaves a static body where it was placed", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(100, 200, 0, 1, 0, 32, 32))
+        local entity = world:spawn(Transform2D(100, 200, 0, 1, 0, 32, 32))
         physics.attach(world, entity, { type = "static", halfWidth = 16, halfHeight = 16 })
 
         for _ = 1, 60 do
             world:update(1 / 60)
         end
 
-        local transform = world:get(entity, Transform)
+        local transform = world:get(entity, Transform2D)
         assert.is_true(math.abs(transform.x - 100) < 0.5)
         assert.is_true(math.abs(transform.y - 200) < 0.5)
     end)
 
     it("accelerates a dynamic body and writes it back to the transform", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
 
         for _ = 1, 60 do
@@ -61,7 +61,7 @@ describe("ecs.physics", function()
         end
 
         -- One second at 980 px/s^2 covers about half that in pixels.
-        local transform = world:get(entity, Transform)
+        local transform = world:get(entity, Transform2D)
         assert.is_true(
             transform.y > 400 and transform.y < 550,
             ("expected roughly 490 px of fall, got %.1f"):format(transform.y)
@@ -70,10 +70,10 @@ describe("ecs.physics", function()
 
     it("rests a falling body on a static one", function()
         local world = newWorld()
-        local ground = world:spawn(Transform(100, 600, 0, 1, 0, 400, 32))
+        local ground = world:spawn(Transform2D(100, 600, 0, 1, 0, 400, 32))
         physics.attach(world, ground, { type = "static", halfWidth = 200, halfHeight = 16 })
 
-        local ball = world:spawn(Transform(100, 50, 0, 1, 0, 16, 16))
+        local ball = world:spawn(Transform2D(100, 50, 0, 1, 0, 16, 16))
         physics.attach(world, ball, {
             type = "dynamic",
             radius = 8,
@@ -86,7 +86,7 @@ describe("ecs.physics", function()
         end
 
         -- Ground surface at 584, ball radius 8, so contact rests near 576.
-        local transform = world:get(ball, Transform)
+        local transform = world:get(ball, Transform2D)
         assert.is_true(math.abs(transform.y - 576) < 4, ("expected rest near 576, got %.1f"):format(transform.y))
     end)
 
@@ -94,8 +94,8 @@ describe("ecs.physics", function()
         -- Two bodies at different heights must stay distinct. A truncated or
         -- reordered handle would make both rows read the same body.
         local world = newWorld()
-        local high = world:spawn(Transform(50, 0, 0, 1, 0, 16, 16))
-        local low = world:spawn(Transform(150, 200, 0, 1, 0, 16, 16))
+        local high = world:spawn(Transform2D(50, 0, 0, 1, 0, 16, 16))
+        local low = world:spawn(Transform2D(150, 200, 0, 1, 0, 16, 16))
         physics.attach(world, high, { type = "dynamic", radius = 8, density = 1 })
         physics.attach(world, low, { type = "dynamic", radius = 8, density = 1 })
 
@@ -103,8 +103,8 @@ describe("ecs.physics", function()
             world:update(1 / 60)
         end
 
-        local a = world:get(high, Transform)
-        local b = world:get(low, Transform)
+        local a = world:get(high, Transform2D)
+        local b = world:get(low, Transform2D)
         assert.is_true(math.abs(a.x - 50) < 0.5, "x must not drift between bodies")
         assert.is_true(math.abs(b.x - 150) < 0.5)
         assert.is_true(b.y > a.y, "the lower body must stay lower")
@@ -112,7 +112,7 @@ describe("ecs.physics", function()
 
     it("holds rotation fixed when asked", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 32, 8))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 32, 8))
         physics.attach(
             world,
             entity,
@@ -123,7 +123,7 @@ describe("ecs.physics", function()
             world:update(1 / 60)
         end
 
-        assert.is_true(math.abs(world:get(entity, Transform).rotation) < 1e-3)
+        assert.is_true(math.abs(world:get(entity, Transform2D).rotation) < 1e-3)
     end)
 end)
 
@@ -134,10 +134,10 @@ describe("ecs.physics write-back", function()
     -- up front would leave every consumer working every frame forever.
     it("stops dirtying transforms once a body has settled", function()
         local world = newWorld()
-        local ground = world:spawn(Transform(0, 400, 0, 1, 0, 2000, 40))
+        local ground = world:spawn(Transform2D(0, 400, 0, 1, 0, 2000, 40))
         physics.attach(world, ground, { type = "static", halfWidth = 1000, halfHeight = 20 })
 
-        local entity = world:spawn(Transform(0, 100, 0, 1, 0, 20, 20))
+        local entity = world:spawn(Transform2D(0, 100, 0, 1, 0, 20, 20))
         physics.attach(world, entity, {
             type = "dynamic",
             halfWidth = 10,
@@ -147,7 +147,7 @@ describe("ecs.physics write-back", function()
             restitution = 0.0,
         })
 
-        local query = world:newQuery({ include = { Transform, physics.RigidBody } })
+        local query = world:newQuery({ include = { Transform2D, physics.RigidBody } })
 
         -- Sampled from inside the frame, because the dirty bits clear at the
         -- end of every update and a check afterwards reads false whatever
@@ -159,7 +159,7 @@ describe("ecs.physics write-back", function()
             run = function()
                 dirty = false
                 for archetype in query:iter() do
-                    if archetype:isComponentDirty(Transform) then
+                    if archetype:isComponentDirty(Transform2D) then
                         dirty = true
                     end
                 end
@@ -186,7 +186,7 @@ describe("ecs.physics write-back", function()
 
     it("writes a moving body every step it moves", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 20, 20))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 20, 20))
         physics.attach(world, entity, {
             type = "dynamic",
             halfWidth = 10,
@@ -195,11 +195,11 @@ describe("ecs.physics write-back", function()
         })
 
         world:update(1 / 60)
-        local first = world:get(entity, Transform).y
+        local first = world:get(entity, Transform2D).y
         for _ = 1, 30 do
             world:update(1 / 60)
         end
-        local later = world:get(entity, Transform).y
+        local later = world:get(entity, Transform2D).y
 
         -- Falling under gravity, so it is strictly lower than it was.
         assert.is_true(later > first)

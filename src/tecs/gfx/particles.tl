@@ -31,7 +31,7 @@ world:addPlugin(tecs.gfx.particles.plugin({
 }))
 
 world:spawn(
-    tecs.Transform(120, 80, 0, 1, 0, 1, 1),
+    tecs.Transform2D(120, 80, 0, 1, 0, 1, 1),
     tecs.gfx.particles.ParticleEmitter({effect = sparks})
 )
 ```
@@ -129,7 +129,7 @@ local type Sheet = sheet.Sheet
 local type Sprite = components.Sprite
 
 local C <const> = sdl.C
-local Transform <const> = ecs.Transform
+local Transform2D <const> = ecs.Transform2D
 
 local floor <const> = math.floor
 local max <const> = math.max
@@ -464,7 +464,7 @@ local record RenderOptions
     --- parameter, so `1.0` would arrive as the next material's id with a
     --- parameter of zero. Defaults to zero.
     materialParam: number
-    --- Caller-writable. Selects a registered image from `Renderer:sprite`. An
+    --- Caller-writable. Selects a registered image from `renderer.sprites:sprite`. An
     --- absent value draws a white quad.
     sprite: Sprite
     --- Caller-writable. Selects a sheet to animate instead of a still region.
@@ -1927,6 +1927,11 @@ function Pool:blended(): integer
     return self._blendedSlots
 end
 
+--- Particles never write caster lane signs into their bounds.
+function Pool:casting(): integer
+    return 0
+end
+
 --- Hides the run and remembers where it landed.
 ---
 --- Only ever called on a frame the layout moved, since nothing else is ever
@@ -2112,10 +2117,10 @@ local function walkEmitters(self: Pool, query: types.Query, advancing: boolean):
 
     for archetype, length in query:iter() do
         local column = archetype:get(ParticleEmitter)
-        local transforms = archetype:get(Transform)
+        local transforms = archetype:get(Transform2D)
         -- Absent on an emitter nothing interpolates, which is one test for
         -- the whole archetype rather than anything per row.
-        local previous = archetype:get(components.PreviousTransform)
+        local previous = archetype:get(components.PreviousTransform2D)
         for row = 1, length do
             local item = column[row]
             seen[item] = true
@@ -2225,24 +2230,24 @@ local function plugin(options: PoolOptions): function(World)
         -- per row.
         local running <const> = world:newQuery({
             name = "tecs.ParticleEmitters",
-            include = {ParticleEmitter, Transform},
+            include = {ParticleEmitter, Transform2D},
             exclude = {ecs.Paused},
         })
         local held <const> = world:newQuery({
             name = "tecs.PausedParticleEmitters",
-            include = {ParticleEmitter, Transform, ecs.Paused},
+            include = {ParticleEmitter, Transform2D, ecs.Paused},
         })
 
-        renderer:addProducer(self as Renderer.InstanceProducer)
-        renderer:addComputeStage(self as Renderer.ComputeStage)
+        renderer.sprites:addProducer(self as Renderer.SpriteInstanceProducer)
+        renderer.sprites:addComputeStage(self as Renderer.SpriteComputeStage)
 
-        -- `PostUpdate`, after `RelativeTransform`, for the reason text is: a
+        -- `PostUpdate`, after `RelativeTransform2D`, for the reason text is: a
         -- parented emitter's world transform is composed in that phase, and
         -- reading it earlier would use the transform the previous frame left.
         world:addSystem({
             name = "tecs.ParticleEmitterSync",
             phase = ecs.phases.PostUpdate,
-            after = {"RelativeTransform"},
+            after = {"RelativeTransform2D"},
             run = function() sync(self, world, running, held) end,
         })
     end
@@ -2390,7 +2395,7 @@ particles.ParticleEmitter = ecs.newComponent({
     -- An emitter is a position and an effect. Requiring the position means one
     -- is never accidentally left off, which would leave the emitter out of the
     -- pool's query and quietly emitting nothing.
-    requires = {Transform},
+    requires = {Transform2D},
     -- One options table rather than seven positional arguments. Six of the
     -- seven are scales a caller almost never sets, and the one that matters is
     -- named: `ParticleEmitter({ effect = sparks })` says what it is, and

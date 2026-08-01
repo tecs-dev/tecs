@@ -116,11 +116,11 @@ local record DepthState
     --- Writes surviving fragments' depth back. Defaults to true, and has no
     --- effect while `test` is false.
     write: boolean
-    --- "never", "less", "equal", "lessOrEqual", "greater", "notEqual",
-    --- "greaterOrEqual", or "always". Defaults to "lessOrEqual", which keeps
+    --- One of `GraphicsPipeline.COMPARE_*`. Defaults to
+    --- `GraphicsPipeline.COMPARE_LESS_OR_EQUAL`, which keeps
     --- draw order deciding ties: equal depths let the later fragment through,
     --- so what a pass draws last is still what is seen.
-    compare: string
+    compare: integer
     --- Value the attachment is cleared to when the pass begins. Omit to load
     --- what is already there. One is the far plane.
     clear: number
@@ -215,9 +215,6 @@ local record PassGraph
     --- Frame height the targets were last allocated for. A change in either
     --- reallocates every target.
     _height: integer
-    --- Written once by `create` and read nowhere: the graph sizes itself on the
-    --- first `execute` rather than in a build step.
-    _built: boolean
     --- Set by the first `destroy`, so a second one releases nothing again.
     _destroyed: boolean
 end
@@ -244,7 +241,7 @@ function PassGraph.create(device: loader.CPtr, swapchainFormat: integer): PassGr
     self._order = {}
     self._passes = {}
     self._prepared = {}
-    self._sampler = Sampler.create(device, {filter = "nearest", address = "clamp"})
+    self._sampler = Sampler.create(device, {})
     self.depthFormat = Texture.depthFormat(device)
     self._needsDepth = false
     -- Reused rather than rebuilt per pass per frame; only its texture and clear
@@ -252,7 +249,6 @@ function PassGraph.create(device: loader.CPtr, swapchainFormat: integer): PassGr
     self._depthAttachment = {texture = nil, clear = nil}
     self._width = 0
     self._height = 0
-    self._built = false
     self._destroyed = false
     return self
 end

@@ -221,7 +221,7 @@ describe("tecs.gfx.sheet", function()
                 frameHeight = 16,
             })
 
-            -- What Renderer:sprite hands back for a whole image that fills
+            -- What renderer.sprites:sprite hands back for a whole image that fills
             -- half its texture-array layer.
             s:bind(Sprite(7, 0, 0, 0.5, 0.25, 3))
 

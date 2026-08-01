@@ -11,7 +11,7 @@ belongs to the world; an entity ID addresses that entity.
 The entry plugin below watches every despawn at the world address:
 
 ```teal
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 
 return tecs.newApplication({
     plugin = function(world: tecs.World)
@@ -19,7 +19,7 @@ return tecs.newApplication({
             event: tecs.ecs.OnDespawn
         )
             -- OnDespawn runs before commit removes the row.
-            local transform <const> = world:get(event.entity, Transform)
+            local transform <const> = world:get(event.entity, Transform2D)
             if transform then
                 spawnDebrisAt(world, transform.x, transform.y)
             end

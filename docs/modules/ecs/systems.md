@@ -9,11 +9,11 @@ A system runs one function in one [phase](/modules/ecs/phases). Build its query 
 inside a plugin, then close over that query:
 
 ```teal
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 
 local function spinPlugin(world: tecs.World)
     local spinning <const> = world:newQuery({
-        include = {Transform, Spin},
+        include = {Transform2D, Spin},
         type = "logic",
     })
 
@@ -22,7 +22,7 @@ local function spinPlugin(world: tecs.World)
         phase = tecs.ecs.phases.Update,
         run = function(dt: number)
             for archetype, length in spinning:iter() do
-                local transforms <const> = archetype:getMut(Transform)
+                local transforms <const> = archetype:getMut(Transform2D)
                 local speeds <const> = archetype:get(Spin)
 
                 for row = 1, length do

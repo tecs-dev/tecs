@@ -21,8 +21,9 @@ local sdl = require("tecs.ffi.sdl3")
 local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
 local Texture = require("tecs.gpu.Texture")
-local Backend = require("tecs.Backend")
-local FramePacket = require("tecs.FramePacket")
+local Deferred = require("tecs.gpu.Deferred")
+local SpriteBackend = require("tecs.internal.render.SpriteBackend")
+local SpriteFramePacket = require("tecs.internal.render.SpriteFramePacket")
 local instancelayout = require("tecs.gpu.instancelayout")
 
 local C = sdl.C
@@ -35,6 +36,7 @@ local BOUND_BYTES = instancelayout.BOUND_BYTES
 
 describe("shadows", function()
     local window, device, screen
+    local deferredOf = {}
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
@@ -58,11 +60,38 @@ describe("shadows", function()
 
     local function newBackend(options)
         options = options or {}
-        return Backend.create(device.handle, FORMAT, {
+        local backend
+        local deferred = Deferred.create(device.handle, FORMAT, {
             ambient = options.ambient or { 0.0, 0.0, 0.0 },
-            capacity = 16,
             shadows = options.shadows ~= false and {} or nil,
+            shadowActive = function()
+                return backend:castsThisFrame()
+            end,
+            occluders = function(context)
+                backend:recordOccluders(context)
+            end,
+            dropShadows = function(context)
+                backend:recordDropShadows(context)
+            end,
+            geometry = function(context)
+                backend:recordGeometry(context)
+            end,
+            forward = function(context)
+                backend:recordForward(context)
+            end,
         })
+        backend = SpriteBackend.create(device.handle, deferred, {
+            capacity = 16,
+        })
+        deferredOf[backend] = deferred
+        return backend
+    end
+
+    local function destroyBackend(backend)
+        local deferred = deferredOf[backend]
+        backend:destroy()
+        deferred:destroy()
+        deferredOf[backend] = nil
     end
 
     -- One quad, written by hand into the staging the backend mapped. This is
@@ -111,14 +140,16 @@ describe("shadows", function()
 
     local function consume(backend, packet)
         local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
-        backend:consume(packet, {
+        local frame = {
             width = SIZE,
             height = SIZE,
             commandBuffer = commandBuffer,
             swapchainTexture = screen.handle,
-        })
+        }
+        backend:prepare(packet, frame)
+        deferredOf[backend]:render(frame)
         assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
-        local scene = backend:captureTexture()
+        local scene = deferredOf[backend].graph:texture("scene")
         return scene, scene:readback()
     end
 
@@ -131,10 +162,11 @@ describe("shadows", function()
 
     -- Renders the floor plus one more quad, and answers the composited pixels.
     local function renderWith(backend, quad, light)
-        local packet = FramePacket.create()
+        local packet = SpriteFramePacket.create()
         writeQuad(backend, 0, FLOOR)
         writeQuad(backend, 1, quad)
         finish(packet, 2, light)
+        packet.castCount = (quad.role == "occluder" or quad.role == "dropShadow") and 1 or 0
         return consume(backend, packet)
     end
 
@@ -160,7 +192,7 @@ describe("shadows", function()
         local behind = scene:getPixel(pixels, 48, SIZE / 2)
         local beside = scene:getPixel(pixels, 48, 8)
         local between = scene:getPixel(pixels, 20, SIZE / 2)
-        backend:destroy()
+        destroyBackend(backend)
 
         -- The revert check, and the reason the numbers above mean anything. The
         -- same scene with the wall casting nothing: identical geometry,
@@ -171,7 +203,7 @@ describe("shadows", function()
         local behindPlain = plainScene:getPixel(plainPixels, 48, SIZE / 2)
         local besidePlain = plainScene:getPixel(plainPixels, 48, 8)
         local betweenPlain = plainScene:getPixel(plainPixels, 20, SIZE / 2)
-        plain:destroy()
+        destroyBackend(plain)
 
         assert.is_true(
             behindPlain.r > 200,
@@ -219,13 +251,13 @@ describe("shadows", function()
         local backend = newBackend()
         local scene, pixels = renderWith(backend, wall, lamp)
         local shaded = scene:getPixel(pixels, 12, SIZE / 2)
-        backend:destroy()
+        destroyBackend(backend)
 
         wall.role = "opaque"
         local plain = newBackend()
         local plainScene, plainPixels = renderWith(plain, wall, lamp)
         local lit = plainScene:getPixel(plainPixels, 12, SIZE / 2)
-        plain:destroy()
+        destroyBackend(plain)
 
         assert.is_true(lit.r > 180, ("an off-screen lamp still lights the floor, got %d"):format(lit.r))
         assert.is_true(
@@ -254,13 +286,13 @@ describe("shadows", function()
         local backend = newBackend()
         local scene, pixels = renderWith(backend, wall, LAMP)
         local face = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
-        backend:destroy()
+        destroyBackend(backend)
 
         wall.role = "opaque"
         local plain = newBackend()
         local plainScene, plainPixels = renderWith(plain, wall, LAMP)
         local facePlain = plainScene:getPixel(plainPixels, SIZE / 2, SIZE / 2)
-        plain:destroy()
+        destroyBackend(plain)
 
         assert.is_true(facePlain.r > 150, ("the wall's own face is lit to begin with, got %d"):format(facePlain.r))
         assert.is_true(
@@ -291,7 +323,7 @@ describe("shadows", function()
         local away = scene:getPixel(pixels, 39, 37)
         local towards = scene:getPixel(pixels, 25, 37)
         local body = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
-        backend:destroy()
+        destroyBackend(backend)
 
         tree.role = "opaque"
         local plain = newBackend()
@@ -299,7 +331,7 @@ describe("shadows", function()
         local awayPlain = plainScene:getPixel(plainPixels, 39, 37)
         local towardsPlain = plainScene:getPixel(plainPixels, 25, 37)
         local bodyPlain = plainScene:getPixel(plainPixels, SIZE / 2, SIZE / 2)
-        plain:destroy()
+        destroyBackend(plain)
 
         assert.is_true(
             away.r < awayPlain.r - 20,
@@ -338,7 +370,7 @@ describe("shadows", function()
         local scene, pixels = renderWith(backend, tree, dark)
         local away = scene:getPixel(pixels, 39, 37)
         local towards = scene:getPixel(pixels, 25, 37)
-        backend:destroy()
+        destroyBackend(backend)
 
         assert.are.equal(255, towards.r, "a black light leaves ambient as the whole of the image")
         assert.is_true(away.r < 220, ("ambient must be darkened where a drop shadow lands, got %d"):format(away.r))
@@ -362,29 +394,67 @@ describe("shadows", function()
         }
 
         local off = newBackend({ shadows = false })
-        assert.is_nil(off.deferred.graph:texture("occluders"), "an unshadowed pipeline owns no mask")
+        assert.is_nil(deferredOf[off].graph:texture("occluders"), "an unshadowed pipeline owns no mask")
         local offScene, offPixels = renderWith(off, wall, LAMP)
         local behindOff = offScene:getPixel(offPixels, 48, SIZE / 2)
 
         local ok = pcall(function()
-            off.deferred.graph:depthOf("occluderBlurH")
+            deferredOf[off].graph:depthOf("occluderBlurH")
         end)
         assert.is_false(ok, "an unshadowed pipeline declares no blur pass")
-        off:destroy()
+        destroyBackend(off)
 
         wall.role = "opaque"
         local plain = newBackend({ shadows = false })
         local plainScene, plainPixels = renderWith(plain, wall, LAMP)
         local behindPlain = plainScene:getPixel(plainPixels, 48, SIZE / 2)
-        plain:destroy()
+        destroyBackend(plain)
 
         assert.is_true(behindPlain.r > 200, "the floor behind the wall is lit")
         assert.are.equal(behindPlain.r, behindOff.r, "with shadows off a caster casts nothing")
     end)
 
+    it("skips every shadow pass without sampling a stale caster", function()
+        local wall = {
+            x = SIZE / 2,
+            y = SIZE / 2,
+            width = 8,
+            height = 8,
+            depth = 0.6,
+            r = 0.5,
+            g = 0.5,
+            b = 0.5,
+            tall = 255,
+            role = "occluder",
+        }
+        local backend = newBackend()
+        local scene, pixels = renderWith(backend, wall, LAMP)
+        assert.is_true(scene:getPixel(pixels, 48, SIZE / 2).r < 180, "the first frame writes the mask")
+
+        wall.role = "opaque"
+        scene, pixels = renderWith(backend, wall, LAMP)
+        assert.is_true(scene:getPixel(pixels, 48, SIZE / 2).r > 200, "lighting ignores the retained mask")
+
+        local graph = deferredOf[backend].graph
+        local gated = 0
+        for _, pass in ipairs(graph._passes) do
+            if
+                pass.name == "occluders"
+                or pass.name == "occluderBlurH"
+                or pass.name == "occluderBlurV"
+                or pass.name == "dropShadowAO"
+            then
+                gated = gated + 1
+                assert.is_false(pass.enabled(), pass.name .. " must skip without casters")
+            end
+        end
+        assert.are.equal(4, gated)
+        destroyBackend(backend)
+    end)
+
     it("declares the shadow passes between geometry and lighting", function()
         local backend = newBackend()
-        local graph = backend.deferred.graph
+        local graph = deferredOf[backend].graph
 
         assert.is_not_nil(graph:texture("occluders") == nil or true)
         for _, name in ipairs({ "occluders", "occludersTemp", "dropShadowAO" }) do
@@ -407,6 +477,6 @@ describe("shadows", function()
         assert.is_nil(graph:depthOf("occluders"))
         assert.is_nil(graph:depthOf("dropShadowAO"))
 
-        backend:destroy()
+        destroyBackend(backend)
     end)
 end)

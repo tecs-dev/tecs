@@ -886,7 +886,7 @@ describe("tecs.Future", function()
         end
 
         it("parks a program until the future settles", function()
-            local loader = world:spawn(tecs.Transform(0, 0))
+            local loader = world:spawn(tecs.Transform2D(0, 0))
             world:commit()
 
             local future = Future.pending()
@@ -914,7 +914,7 @@ describe("tecs.Future", function()
         end)
 
         it("does not wait for a future that already settled", function()
-            local loader = world:spawn(tecs.Transform(0, 0))
+            local loader = world:spawn(tecs.Transform2D(0, 0))
             world:commit()
             Future.track(world, loader, "level1", Future.settled("loaded"))
 
@@ -936,7 +936,7 @@ describe("tecs.Future", function()
         end)
 
         it("does not wait for a key nothing was tracked under", function()
-            local loader = world:spawn(tecs.Transform(0, 0))
+            local loader = world:spawn(tecs.Transform2D(0, 0))
             world:commit()
 
             local calls = 0
@@ -961,7 +961,7 @@ describe("tecs.Future", function()
             -- restored cursor carries the provider name, the entity and the
             -- key, and a game re-issuing the work re-tracks it under the same
             -- key with no further cooperation.
-            local loader = world:spawn(tecs.Transform(0, 0))
+            local loader = world:spawn(tecs.Transform2D(0, 0))
             world:commit()
 
             local first = Future.pending()

@@ -366,21 +366,21 @@ end
 
 --- The built-in animation targets, and the constructors for new ones.
 local record Targets
-    --- Built-in Transform.x target.
+    --- Built-in Transform2D.x target.
     translateX: Target
-    --- Built-in Transform.y target.
+    --- Built-in Transform2D.y target.
     translateY: Target
-    --- Built-in Transform x/y target.
+    --- Built-in Transform2D x/y target.
     translateXY: Target
-    --- Built-in Transform.rotation target.
+    --- Built-in Transform2D.rotation target.
     rotation: Target
-    --- Built-in shortest-path Transform.rotation target.
+    --- Built-in shortest-path Transform2D.rotation target.
     rotationShortest: Target
-    --- Built-in Transform.scaleX target.
+    --- Built-in Transform2D.scaleX target.
     scaleX: Target
-    --- Built-in Transform.scaleY target.
+    --- Built-in Transform2D.scaleY target.
     scaleY: Target
-    --- Built-in Transform scale x/y target.
+    --- Built-in Transform2D scale x/y target.
     scaleXY: Target
     --- Built-in Tint alpha target.
     alpha: Target
@@ -873,15 +873,15 @@ function source.related(relationship: Component, component: Component, field: st
     return newSource("relationship", component, field, nil, relationship)
 end
 
-local Transform <const> = ecs.Transform
-targets.translateX = newTarget(Transform, {"x"}, "field", "transform.x")
-targets.translateY = newTarget(Transform, {"y"}, "field", "transform.y")
-targets.translateXY = newTarget(Transform, {"x", "y"}, "field2", "transform.xy")
-targets.rotation = newTarget(Transform, {"rotation"}, "field", "transform.rotation")
-targets.rotationShortest = newTarget(Transform, {"rotation"}, "angle", "transform.rotationShortest")
-targets.scaleX = newTarget(Transform, {"scaleX"}, "field", "transform.scaleX")
-targets.scaleY = newTarget(Transform, {"scaleY"}, "field", "transform.scaleY")
-targets.scaleXY = newTarget(Transform, {"scaleX", "scaleY"}, "field2", "transform.scaleXY")
+local Transform2D <const> = ecs.Transform2D
+targets.translateX = newTarget(Transform2D, {"x"}, "field", "transform.x")
+targets.translateY = newTarget(Transform2D, {"y"}, "field", "transform.y")
+targets.translateXY = newTarget(Transform2D, {"x", "y"}, "field2", "transform.xy")
+targets.rotation = newTarget(Transform2D, {"rotation"}, "field", "transform.rotation")
+targets.rotationShortest = newTarget(Transform2D, {"rotation"}, "angle", "transform.rotationShortest")
+targets.scaleX = newTarget(Transform2D, {"scaleX"}, "field", "transform.scaleX")
+targets.scaleY = newTarget(Transform2D, {"scaleY"}, "field", "transform.scaleY")
+targets.scaleXY = newTarget(Transform2D, {"scaleX", "scaleY"}, "field2", "transform.scaleXY")
 
 local Tint <const> = components.Tint as Component
 targets.alpha = newTarget(Tint, {"a"}, "field", "color.a")

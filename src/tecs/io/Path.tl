@@ -230,12 +230,8 @@ end
 
 PathMT = {
     __index = Path,
-    __tostring = function(value: Path): string
-        return values[value]
-    end,
-    __eq = function(left: Path, right: Path): boolean
-        return values[left] == values[right]
-    end,
+    __tostring = function(value: Path): string return values[value] end,
+    __eq = function(left: Path, right: Path): boolean return values[left] == values[right] end,
 }
 
 function Path:toString(): string

@@ -100,7 +100,7 @@ an interpolation alpha clamped to `[0, 1]`:
 local timestep, accumulator, alpha = world:getFixedTiming()
 ```
 
-`PreviousTransform` lets the renderer interpolate an entity between its last
+`PreviousTransform2D` lets the renderer interpolate an entity between its last
 two fixed poses. `tecs.SnapshotTransforms` copies the current pose in
 `FixedFirst` before simulation changes it.
 

@@ -8,14 +8,14 @@ entities:
 local moving: tecs.Query
 
 local function game(world: tecs.World)
-    moving = world:newQuery({include = {tecs.Transform}})
+    moving = world:newQuery({include = {tecs.Transform2D}})
 
     world:addSystem({
         name = "game.Drift",
         phase = tecs.ecs.phases.Update,
         run = function(delta: number)
             for archetype, length in moving:iter() do
-                local transform <const> = archetype:getMut(tecs.Transform)
+                local transform <const> = archetype:getMut(tecs.Transform2D)
                 for row = 1, length do
                     transform[row].x = transform[row].x + 60 * delta
                 end
@@ -23,7 +23,7 @@ local function game(world: tecs.World)
         end,
     })
 
-    world:spawn(tecs.Transform(0, 0))
+    world:spawn(tecs.Transform2D(0, 0))
 end
 ```
 
@@ -154,17 +154,17 @@ local record ecs
     -- a save format. Moving one of these fields does not move the string it
     -- is registered under, and neither may be changed casually.
 
-    --- Read-only. [`Transform`](/modules/ecs/#tecs.ecs.Transform) positions everything a
+    --- Read-only. [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) positions everything a
     --- world holds. Hierarchy, physics, sequencing, and rendering all use it.
-    Transform: builtins.Transform
+    Transform2D: builtins.Transform2D
 
     --- Read-only.
-    --- [`RelativeTransform`](/modules/ecs/#tecs.ecs.RelativeTransform) expresses a
+    --- [`RelativeTransform2D`](/modules/ecs/#tecs.ecs.RelativeTransform2D) expresses a
     --- pose relative to a [`ChildOf`](/modules/ecs/#tecs.ecs.ChildOf) parent. The
     --- hierarchy system composes it with the parent's
-    --- [`Transform`](/modules/ecs/#tecs.ecs.Transform), so a game writes this component
+    --- [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D), so a game writes this component
     --- and reads the world-space transform.
-    RelativeTransform: builtins.RelativeTransform
+    RelativeTransform2D: builtins.RelativeTransform2D
 
     --- Read-only. [`ChildOf`](/modules/ecs/#tecs.ecs.ChildOf) links a parent and child.
     --- It stores edges sparsely and cascade-deletes children with their parent.
@@ -376,8 +376,8 @@ ecs.random = random
 -- would name the plugin for the ECS rather than the one that owns the `TTL`
 -- and hierarchy systems. Internal code reaches it through
 -- `tecs.internal.builtins`, which is where it is declared.
-ecs.Transform = builtins.Transform
-ecs.RelativeTransform = builtins.RelativeTransform
+ecs.Transform2D = builtins.Transform2D
+ecs.RelativeTransform2D = builtins.RelativeTransform2D
 ecs.ChildOf = builtins.ChildOf
 ecs.Name = builtins.Name
 ecs.EntityKey = builtins.Key

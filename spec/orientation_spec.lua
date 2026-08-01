@@ -28,9 +28,9 @@ local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local Tint = components.Tint
-local Renderable = components.Renderable
+local Renderable2D = components.Renderable2D
 
 describe("a sampled image", function()
     local window, device, screen
@@ -61,7 +61,7 @@ describe("a sampled image", function()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {
             ambient = { 1.0, 1.0, 1.0 },
-            capacity = 64,
+            sprites = { capacity = 64 },
         })
         renderer:install(world)
         return world, renderer
@@ -112,13 +112,13 @@ describe("a sampled image", function()
     -- A quad the size of the target, so the image maps onto it one to one and
     -- a readback quadrant is an image quadrant.
     local function covering()
-        return Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE)
+        return Transform2D(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE)
     end
 
     it("puts each of the image's quadrants on the matching quarter of the screen", function()
         local world, renderer = newScene()
-        local sprite = renderer:registerImage(quadrants("spec://quadrants"))
-        world:spawn(covering(), Tint(1.0, 1.0, 1.0, 1.0), sprite, Renderable())
+        local sprite = renderer.sprites:registerImage(quadrants("spec://quadrants"))
+        world:spawn(covering(), Tint(1.0, 1.0, 1.0, 1.0), sprite, Renderable2D())
 
         local pixels = frameOnce(world, renderer)
         local topLeft = screen:getPixel(pixels, SIZE / 4, SIZE / 4)
@@ -147,12 +147,12 @@ describe("a sampled image", function()
         -- what a fix applied on the extraction side rather than in the shader
         -- would break.
         local world, renderer = newScene()
-        renderer:registerImage(quadrants("spec://vrange"))
+        renderer.sprites:registerImage(quadrants("spec://vrange"))
         world:spawn(
             covering(),
             Tint(1.0, 1.0, 1.0, 1.0),
-            renderer:sprite("spec://vrange", 0.0, 0.0, 1.0, 0.45),
-            Renderable()
+            renderer.sprites:sprite("spec://vrange", 0.0, 0.0, 1.0, 0.45),
+            Renderable2D()
         )
 
         local upper = screen:getPixel(frameOnce(world, renderer), SIZE / 4, SIZE / 2)
@@ -160,12 +160,12 @@ describe("a sampled image", function()
         assert.are.equal(0, upper.b, "and a range ending short of halfway never reaches the blue below it")
 
         local second, secondRenderer = newScene()
-        secondRenderer:registerImage(quadrants("spec://vrange"))
+        secondRenderer.sprites:registerImage(quadrants("spec://vrange"))
         second:spawn(
             covering(),
             Tint(1.0, 1.0, 1.0, 1.0),
-            secondRenderer:sprite("spec://vrange", 0.0, 0.55, 1.0, 1.0),
-            Renderable()
+            secondRenderer.sprites:sprite("spec://vrange", 0.0, 0.55, 1.0, 1.0),
+            Renderable2D()
         )
 
         local lower = screen:getPixel(frameOnce(second, secondRenderer), SIZE / 4, SIZE / 2)

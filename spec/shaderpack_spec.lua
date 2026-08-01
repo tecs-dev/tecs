@@ -29,9 +29,9 @@ local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local Tint = components.Tint
-local Renderable = components.Renderable
+local Renderable2D = components.Renderable2D
 
 describe("shaders", function()
     -- The fragment shader includes the material dispatch, which is generated
@@ -408,10 +408,14 @@ describe("rendering from a pack", function()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {
             ambient = { 1.0, 1.0, 1.0 },
-            capacity = 64,
+            sprites = { capacity = 64 },
         })
         renderer:install(world)
-        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(1.0, 0.0, 0.0, 1.0), Renderable())
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+            Tint(1.0, 0.0, 0.0, 1.0),
+            Renderable2D()
+        )
 
         world:update(1 / 60)
         local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)

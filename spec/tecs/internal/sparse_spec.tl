@@ -740,7 +740,7 @@ describe(
                             reverseIndex = true,
                         })
 
-                        local Transform = tecs.Transform
+                        local Transform2D = tecs.Transform2D
 
                         -- Create many parents
                         local parents: {integer} = {}
@@ -751,23 +751,23 @@ describe(
 
                         -- Count archetypes before spawning children
                         local archetypesBefore = 0
-                        for _ in world:newQuery({include = {Transform}}):iter() do
+                        for _ in world:newQuery({include = {Transform2D}}):iter() do
                             archetypesBefore = archetypesBefore + 1
                         end
 
                         -- Spawn children with different parents
                         for i = 1, 50 do
-                            world:spawn(Transform(0, 0), ChildOf(parents[i]) as tecs.ecs.Component)
+                            world:spawn(Transform2D(0, 0), ChildOf(parents[i]) as tecs.ecs.Component)
                         end
                         world:update(0)
 
-                        -- Count archetypes after -- should be at most 1 new archetype (Transform + ChildOf wildcard)
+                        -- Count archetypes after -- should be at most 1 new archetype (Transform2D + ChildOf wildcard)
                         local archetypesAfter = 0
-                        for _ in world:newQuery({include = {Transform}}):iter() do
+                        for _ in world:newQuery({include = {Transform2D}}):iter() do
                             archetypesAfter = archetypesAfter + 1
                         end
 
-                        -- At most 1 new archetype for all 50 children (they all share Transform + ChildOf wildcard)
+                        -- At most 1 new archetype for all 50 children (they all share Transform2D + ChildOf wildcard)
                         local newArchetypes = archetypesAfter - archetypesBefore
                         luassert.is_true(
                             newArchetypes <= 1,

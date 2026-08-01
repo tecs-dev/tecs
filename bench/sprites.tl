@@ -84,10 +84,10 @@ local files <const> = require("tecs.io.files")
 local sheet <const> = require("tecs.gfx.sheet")
 local animation <const> = require("tecs.gfx.animation")
 local timing <const> = require("tecs.timing")
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 local Tint <const> = tecs.gfx.Tint
 local Sprite <const> = tecs.gfx.Sprite
-local Renderable <const> = tecs.gfx.Renderable
+local Renderable2D <const> = tecs.gfx.Renderable2D
 local Animation <const> = animation.Animation
 
 --- Sprites in the resident field. The churn pool sits on top of this, so the
@@ -226,8 +226,8 @@ local TOTAL <const> = COUNT + POOL
 ---
 --- A quarter of the population plus the floor is therefore what the widest
 --- reservation asks for in the four regimes that hold every sprite in one
---- archetype: `static` and `churn` carry Transform, Tint, Sprite and
---- Renderable, and `dense` and `sparse` carry those plus Animation, so the sum
+--- archetype: `static` and `churn` carry Transform2D, Tint, Sprite and
+--- Renderable2D, and `dense` and `sparse` carry those plus Animation, so the sum
 --- over archetypes is one term. `spawner` spreads the field over `FIELDS`
 --- archetypes and puts the wave in one more, and every one of them is given
 --- the floor before any of them is given a quarter, so the floor is counted
@@ -290,8 +290,8 @@ local function scatter(world: tecs.World, count: integer, animated: boolean, mar
         return
     end
 
-    local types: {tecs.ecs.Component} = animated and {Transform, Tint, Sprite, Renderable, Animation}
-        or {Transform, Tint, Sprite, Renderable}
+    local types: {tecs.ecs.Component} = animated and {Transform2D, Tint, Sprite, Renderable2D, Animation}
+        or {Transform2D, Tint, Sprite, Renderable2D}
     if marker ~= nil then
         types[#types + 1] = marker
     end
@@ -307,7 +307,7 @@ local function scatter(world: tecs.World, count: integer, animated: boolean, mar
         types,
         function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
-            local transforms = archetype:getMut(Transform)
+            local transforms = archetype:getMut(Transform2D)
             local tints = archetype:getMut(Tint)
             local sprites = archetype:getMut(Sprite)
             local animations = animated and archetype:getMut(Animation) or nil
@@ -364,12 +364,12 @@ local function spawnOne(world: tecs.World, at: integer): integer
     local originX <const> = (WIDTH - AREA_W) * 0.5
     local originY <const> = (HEIGHT - AREA_H) * 0.5
     return world:spawn(
-        Transform(
+        Transform2D(
             originX + (at % 613) / 613.0 * AREA_W, originY + (at % 419) / 419.0 * AREA_H, 0.0, 1, 0.0, 18.0, 18.0
         ),
         Tint(1.0, 0.9, 0.4, 1.0),
         Sprite(resident.image, resident.u0, resident.v0, resident.u1, resident.v1, resident.slot),
-        Renderable()
+        Renderable2D()
     )
 end
 
@@ -408,7 +408,7 @@ return tecs.newApplication({
         local decoded <const> = decoding.value
         local imageWidth <const> = decoded.width
         local imageHeight <const> = decoded.height
-        resident = renderer:registerImage(decoded)
+        resident = renderer.sprites:registerImage(decoded)
 
         playbook = sheet.grid({
             name = "bench.sprites",
@@ -516,7 +516,7 @@ return tecs.newApplication({
                     -- One frame behind, since the counter is published by the
                     -- sync and this runs ahead of it. Over a run of hundreds
                     -- that shifts the window by one frame and nothing else.
-                    local written <const> = renderer.rewritten
+                    local written <const> = renderer.sprites.rewritten
                     rewrittenTotal = rewrittenTotal + written
                     if written > rewrittenPeak then
                         rewrittenPeak = written
@@ -524,7 +524,7 @@ return tecs.newApplication({
                     if written == 0 then
                         quietFrames = quietFrames + 1
                     end
-                    instances = renderer.count
+                    instances = renderer.sprites.count
                 end
                 frame = frame + 1
             end,

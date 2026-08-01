@@ -31,7 +31,7 @@ describe(
                         -- Should have columns for both components
                         luassert.is_not_nil(arch.columns[tecs.ecs.Name], "Expected Name column to exist")
                         luassert.is_not_nil(arch.columns[tecs.ecs.TTL], "Expected TTL column to exist")
-                        luassert.is_nil(arch.columns[tecs.Transform], "Expected Transform column to not exist")
+                        luassert.is_nil(arch.columns[tecs.Transform2D], "Expected Transform2D column to not exist")
                     end
                 )
 

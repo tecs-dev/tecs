@@ -26,7 +26,7 @@ local record builtins
     Key: types.components.ScalarComponent<string>
 
     --- Provides the coordinates and transform of an entity.
-    record Transform is Component
+    record Transform2D is Component
         --- The x coordinate of the entity.
         x: number
 
@@ -48,8 +48,8 @@ local record builtins
         --- The y scale (defaults to 1).
         scaleY: number
 
-        --- Creates a new Transform component from positional args.
-        --- For the table form, use `Transform.new({x=…, y=…})`.
+        --- Creates a new Transform2D component from positional args.
+        --- For the table form, use `Transform2D.new({x=…, y=…})`.
         ---
         --- @param x The x position.
         --- @param y The y position.
@@ -68,10 +68,10 @@ local record builtins
             rotation?: number,
             scaleX?: number,
             scaleY?: number
-        ): Transform
+        ): Transform2D
 
         --- Table-form constructor. `data` is a partial `{x, y, z, layer, rotation, scaleX, scaleY}`.
-        new: function(data: {string: any}): Transform
+        new: function(data: {string: any}): Transform2D
     end
 
     --- Despawns an entity when the TTL reaches zero.
@@ -208,11 +208,11 @@ local record builtins
 
     --- A component that defines an entity's transform relative to its parent (ChildOf).
     ---
-    --- The relative transform system computes the world-space Transform by composing
-    --- the parent's Transform with this RelativeTransform's offset data.
+    --- The relative transform system computes the world-space Transform2D by composing
+    --- the parent's Transform2D with this RelativeTransform2D's offset data.
     ---
     --- Note: Requires ChildOf to be present. The parent is determined by ChildOf.target.
-    record RelativeTransform is Component
+    record RelativeTransform2D is Component
         --- The x offset from the parent.
         x: number
 
@@ -239,8 +239,8 @@ local record builtins
         --- Defaults to 0 (top edge).
         originY: number
 
-        --- Creates a new RelativeTransform component from positional args.
-        --- For the table form, use `RelativeTransform.new({x=…, y=…})`.
+        --- Creates a new RelativeTransform2D component from positional args.
+        --- For the table form, use `RelativeTransform2D.new({x=…, y=…})`.
         ---
         --- @param x The x offset from the parent.
         --- @param y The y offset (defaults to 0).
@@ -250,7 +250,7 @@ local record builtins
         --- @param scaleY The y scale multiplier (defaults to 1).
         --- @param originX The origin X as a percentage (defaults to 0).
         --- @param originY The origin Y as a percentage (defaults to 0).
-        --- @return the created RelativeTransform component.
+        --- @return the created RelativeTransform2D component.
         metamethod __call: function(
             self,
             x?: number,
@@ -261,13 +261,13 @@ local record builtins
             scaleY?: number,
             originX?: number,
             originY?: number
-        ): RelativeTransform
+        ): RelativeTransform2D
 
         --- Table-form constructor.
-        new: function(data: {string: any}): RelativeTransform
+        new: function(data: {string: any}): RelativeTransform2D
     end
 
-    --- The builtin plugin that registers TTL and RelativeTransform systems.
+    --- The builtin plugin that registers TTL and RelativeTransform2D systems.
     plugin: function(w: types.World)
 end
 
@@ -351,8 +351,8 @@ do
 end
 
 components.newFFIComponent({
-    name = "Transform",
-    container = builtins.Transform,
+    name = "Transform2D",
+    container = builtins.Transform2D,
     fields = {
         {"x", "float"},
         {"y", "float"},
@@ -363,9 +363,9 @@ components.newFFIComponent({
         {"scaleY", "float"},
     },
     defaults = {0, 0, 0, 1, 0, 1, 1},
-    init = function(instance: builtins.Transform)
+    init = function(instance: builtins.Transform2D)
         if instance.layer < 1 then
-            error("Transform layer must be greater than 0, got: " .. tostring(instance.layer))
+            error("Transform2D layer must be greater than 0, got: " .. tostring(instance.layer))
         end
     end,
 })
@@ -395,8 +395,8 @@ builtins.Disabled = components.newTagComponent({name = "Disabled"})
 builtins.Paused = components.newTagComponent({name = "Paused"})
 
 components.newFFIComponent({
-    name = "RelativeTransform",
-    container = builtins.RelativeTransform,
+    name = "RelativeTransform2D",
+    container = builtins.RelativeTransform2D,
     fields = {
         {"x", "float"},
         {"y", "float"},
@@ -408,11 +408,11 @@ components.newFFIComponent({
         {"originY", "float"},
     },
     defaults = {0, 0, 0, 0, 1, 1, 0, 0},
-    -- RelativeTransform auto-adds Transform via the declarative
+    -- RelativeTransform2D auto-adds Transform2D via the declarative
     -- `requires` trait. ChildOf is required by convention (the
     -- composition system errors downstream if absent); users should
-    -- add it explicitly alongside RelativeTransform.
-    requires = {builtins.Transform},
+    -- add it explicitly alongside RelativeTransform2D.
+    requires = {builtins.Transform2D},
 })
 
 -------------------------------------------------------------------------------
@@ -422,9 +422,9 @@ components.newFFIComponent({
 --- Composes a parent transform with a relative transform, mutating the output transform in place.
 --- This is the simple version without origin awareness. For origin-aware positioning, use tecs.ui.
 local function composeTransforms(
-    parentTransform: builtins.Transform,
-    relativeTransform: builtins.RelativeTransform,
-    outputTransform: builtins.Transform
+    parentTransform: builtins.Transform2D,
+    relativeTransform: builtins.RelativeTransform2D,
+    outputTransform: builtins.Transform2D
 )
     local pRot, pScaleX, pScaleY = parentTransform.rotation, parentTransform.scaleX, parentTransform.scaleY
 
@@ -448,8 +448,8 @@ end
 
 function builtins.plugin(w: types.World)
     local TTL <const> = builtins.TTL
-    local Transform <const> = builtins.Transform
-    local RelativeTransform <const> = builtins.RelativeTransform
+    local Transform2D <const> = builtins.Transform2D
+    local RelativeTransform2D <const> = builtins.RelativeTransform2D
     local ChildOf <const> = builtins.ChildOf
 
     -- Handle despawning entities with TTLs.
@@ -479,22 +479,22 @@ function builtins.plugin(w: types.World)
         -- the child's column (and its dirty mark) only happens when the
         -- float32-rounded values actually changed. An idle hierarchy
         -- walk therefore marks nothing and the gate below converges.
-        local scratchTransform = Transform(0, 0)
+        local scratchTransform = Transform2D(0, 0)
 
         -- Memoized world transform resolution via __index.
         -- On first access, recursively resolves the parent chain and caches the result.
         -- Subsequent accesses for the same entity are plain table lookups.
-        local worldTransformCache: {integer: builtins.Transform} = {}
+        local worldTransformCache: {integer: builtins.Transform2D} = {}
         setmetatable(
             worldTransformCache as {any: any},
             {
-                __index = function(self: {integer: builtins.Transform}, entityId: integer): builtins.Transform
-                    local transform = w:get(entityId, Transform)
+                __index = function(self: {integer: builtins.Transform2D}, entityId: integer): builtins.Transform2D
+                    local transform = w:get(entityId, Transform2D)
                     if not transform then
                         return nil
                     end
 
-                    local relTransform = w:get(entityId, RelativeTransform)
+                    local relTransform = w:get(entityId, RelativeTransform2D)
                     if not relTransform then
                         -- Root entity: world transform is its own transform
                         self[entityId] = transform
@@ -532,7 +532,7 @@ function builtins.plugin(w: types.World)
                             -- uploads) must see the write; marking here also
                             -- covers ancestors resolved recursively from
                             -- another row's chain.
-                            w:markComponentDirty(entityId, Transform)
+                            w:markComponentDirty(entityId, Transform2D)
                         end
                     end
 
@@ -543,8 +543,8 @@ function builtins.plugin(w: types.World)
         )
 
         local hierarchyQuery = w:newQuery({
-            name = "RelativeTransform",
-            include = {RelativeTransform, ChildOf, Transform},
+            name = "RelativeTransform2D",
+            include = {RelativeTransform2D, ChildOf, Transform2D},
         })
 
         local wImpl <const> = w as internal.WorldImpl
@@ -555,7 +555,7 @@ function builtins.plugin(w: types.World)
             -- world, and `pairs` over the set costs nothing.
             for arch in pairs(wImpl._dirtyArchetypes) do
                 local cols = arch.columns
-                if cols[Transform] or cols[RelativeTransform] or cols[ChildOf] then
+                if cols[Transform2D] or cols[RelativeTransform2D] or cols[ChildOf] then
                     return true
                 end
             end
@@ -580,7 +580,7 @@ function builtins.plugin(w: types.World)
         end
 
         w:addSystem({
-            name = "RelativeTransform",
+            name = "RelativeTransform2D",
             phase = phases.PostUpdate,
             run = function()
                 -- Dirty-skip: recompute only when an archetype carrying
@@ -595,7 +595,7 @@ function builtins.plugin(w: types.World)
                 table_clear(worldTransformCache)
                 for _archetype, len, entities in hierarchyQuery:iter() do
                     -- The resolver writes world transforms in place and
-                    -- marks Transform dirty per changed entity.
+                    -- marks Transform2D dirty per changed entity.
                     for row = 1, len do
                         -- Access triggers __index, which recursively resolves the parent chain
                         local _ = worldTransformCache[entities[row]]

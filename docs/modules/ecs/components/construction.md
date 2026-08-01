@@ -106,7 +106,7 @@ do not match stored fields:
 tecs.ecs.newComponent({
     name = "ParticleEmitter",
     container = ParticleEmitter,
-    requires = {tecs.Transform},
+    requires = {tecs.Transform2D},
     __call = function(
         instance: ParticleEmitter,
         options: EmitterOptions

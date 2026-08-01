@@ -6,7 +6,7 @@ local components = require("tecs.components")
 local ecs = require("tecs.ecs")
 local physics = require("tecs.physics")
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local Paused = tecs.ecs.Paused
 
 local built = {}
@@ -34,7 +34,7 @@ end)
 describe("physics declarations", function()
     it("reconciles declarations and detachments at a fixed step", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { radius = 8 })
 
         assert.is_false(physics.hasBody(world, entity))
@@ -50,7 +50,7 @@ describe("physics declarations", function()
 
     it("restores a saved body and its native motion", function()
         local first = newWorld()
-        local entity = first:spawn(Transform(20, 30, 0, 1, 0, 16, 16))
+        local entity = first:spawn(Transform2D(20, 30, 0, 1, 0, 16, 16))
         physics.attach(first, entity, { radius = 8 })
         step(first)
         physics.setVelocity(first, entity, 120, -40)
@@ -72,24 +72,24 @@ describe("physics declarations", function()
 
     it("holds and restores a paused body's motion", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { radius = 8 })
         step(world)
         physics.setVelocity(world, entity, 120, 0)
         world:set(entity, Paused)
         step(world, 30)
-        assert.is_true(math.abs(world:get(entity, Transform).x) < 0.01)
+        assert.is_true(math.abs(world:get(entity, Transform2D).x) < 0.01)
 
         world:remove(entity, Paused)
         step(world, 30)
-        assert.is_true(world:get(entity, Transform).x > 50)
+        assert.is_true(world:get(entity, Transform2D).x > 50)
     end)
 end)
 
 describe("physics colliders", function()
     it("supports capsule and offset geometry in raycasts", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, {
             type = "static",
             radius = 5,
@@ -106,7 +106,7 @@ describe("physics colliders", function()
 
     it("applies collider edits to the live shape", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { type = "static", halfWidth = 8, halfHeight = 8 })
         step(world)
         assert.is_not_nil(physics.raycast(world, -20, 0, 20, 0))
@@ -120,7 +120,7 @@ describe("physics colliders", function()
 
     it("adds independently addressable secondary colliders", function()
         local world = newWorld()
-        local body = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local body = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, body, { type = "static", halfWidth = 5, halfHeight = 5 })
         local secondary = world:spawn()
         physics.attachCollider(world, secondary, body, {
@@ -141,7 +141,7 @@ describe("physics colliders", function()
         -- head would destroy the wrong entity's shape and leave its
         -- ColliderShape naming nothing, with no error anywhere.
         local world = newWorld()
-        local body = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local body = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, body, { type = "static", halfWidth = 5, halfHeight = 5 })
         local secondary = world:spawn()
         physics.attachCollider(world, secondary, body, {
@@ -173,13 +173,13 @@ describe("physics colliders", function()
         world:observe(0, physics.SensorBegin, function()
             sensors = sensors + 1
         end)
-        local solid = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local solid = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, solid, { type = "static", radius = 10 })
-        local visitor = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local visitor = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, visitor, { radius = 8 })
-        local sensor = world:spawn(Transform(40, 0, 0, 1, 0, 16, 16))
+        local sensor = world:spawn(Transform2D(40, 0, 0, 1, 0, 16, 16))
         physics.attach(world, sensor, { type = "static", radius = 10, isSensor = true })
-        local sensorVisitor = world:spawn(Transform(40, 0, 0, 1, 0, 16, 16))
+        local sensorVisitor = world:spawn(Transform2D(40, 0, 0, 1, 0, 16, 16))
         physics.attach(world, sensorVisitor, { radius = 8 })
         step(world, 2)
 
@@ -191,7 +191,7 @@ end)
 describe("physics body controls", function()
     it("sets angular velocity, applies force and teleports", function()
         local world = newWorld()
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { radius = 8 })
         step(world)
 
@@ -210,7 +210,7 @@ describe("physics body controls", function()
         assert.is_true(physics.isAwake(world, entity))
 
         physics.teleport(world, entity, 200, 300, 0.5)
-        local transform = world:get(entity, Transform)
+        local transform = world:get(entity, Transform2D)
         assert.equal(200, transform.x)
         assert.equal(300, transform.y)
         assert.equal(0.5, transform.rotation)
@@ -218,7 +218,7 @@ describe("physics body controls", function()
 
     it("applies Body edits and Disabled to the live body", function()
         local world = newWorld({ 0, 600 })
-        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local entity = world:spawn(Transform2D(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { radius = 8 })
         step(world, 10)
         assert.is_true(select(2, physics.velocity(world, entity)) > 50)
@@ -229,7 +229,7 @@ describe("physics body controls", function()
         step(world, 10)
         assert.is_true(math.abs(select(2, physics.velocity(world, entity))) < 0.1)
 
-        local y = world:get(entity, Transform).y
+        local y = world:get(entity, Transform2D).y
         world:set(entity, tecs.ecs.Disabled)
         step(world)
         assert.is_nil(physics.raycast(world, -20, y, 20, y))

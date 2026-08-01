@@ -13,14 +13,14 @@ local loader <const> = require("tecs.ffi.loader")
 local C <const> = sdl.C
 
 local record SamplerOptions
-    --- "nearest" or "linear". Defaults to nearest, and applies to both
+    --- One of the module's `FILTER_*` constants. Defaults to `FILTER_NEAREST`, and applies to both
     --- minification and magnification: a sampler that filtered one and not the
     --- other has no use here.
-    filter: string
-    --- "clamp", "repeat", or "mirror". Defaults to clamp, and applies to all
+    filter: integer
+    --- One of the module's `ADDRESS_*` constants. Defaults to `ADDRESS_CLAMP`, and applies to all
     --- three axes. Clamp is what a texture array wants, where an image
     --- occupying part of a cell would otherwise sample its neighbor's padding.
-    address: string
+    address: integer
 end
 
 --- An immutable sampler, and the type `create` returns.
@@ -29,6 +29,17 @@ end
 --- is a second sampler. One may be paired with any number of textures; a bind
 --- call carries one sampler for every texture it lists.
 local record Sampler
+    --- Selects nearest-neighbor filtering.
+    FILTER_NEAREST: integer
+    --- Selects linear filtering.
+    FILTER_LINEAR: integer
+    --- Repeats texture coordinates outside zero through one.
+    ADDRESS_REPEAT: integer
+    --- Mirrors repeated texture coordinates outside zero through one.
+    ADDRESS_MIRROR: integer
+    --- Clamps texture coordinates to the nearest edge.
+    ADDRESS_CLAMP: integer
+
     --- The `SDL_GPUSampler`. Nil once `destroy` has run.
     handle: loader.CPtr
     --- The `SDL_GPUDevice` it was created against, and the one `destroy`
@@ -40,16 +51,11 @@ end
 
 local SamplerMT <const>: metatable<Sampler> = {__index = Sampler}
 
-local FILTERS <const>: {string: integer} = {
-    nearest = 0,
-    linear = 1,
-}
-
-local ADDRESS_MODES <const>: {string: integer} = {
-    ["repeat"] = 0,
-    mirror = 1,
-    clamp = 2,
-}
+Sampler.FILTER_NEAREST = tonumber(C.SDL_GPU_FILTER_NEAREST) as integer
+Sampler.FILTER_LINEAR = tonumber(C.SDL_GPU_FILTER_LINEAR) as integer
+Sampler.ADDRESS_REPEAT = tonumber(C.SDL_GPU_SAMPLERADDRESSMODE_REPEAT) as integer
+Sampler.ADDRESS_MIRROR = tonumber(C.SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT) as integer
+Sampler.ADDRESS_CLAMP = tonumber(C.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE) as integer
 
 --- Creates a sampler.
 ---
@@ -59,17 +65,17 @@ local ADDRESS_MODES <const>: {string: integer} = {
 --- @param device The `SDL_GPUDevice`, which is `Device.handle` and not the
 ---     wrapper around it.
 --- @param options Nil takes every default: nearest filtering, clamped edges.
----     An unknown filter or address mode raises rather than falling back.
+---     An invalid filter or address mode raises rather than falling back.
 function Sampler.create(device: loader.CPtr, options: SamplerOptions): Sampler
     options = options or {}
 
-    local filter = FILTERS[options.filter or "nearest"]
-    if filter == nil then
-        error(("tecs: unknown filter '%s'"):format(tostring(options.filter)), 2)
+    local filter = options.filter or Sampler.FILTER_NEAREST
+    if filter < Sampler.FILTER_NEAREST or filter > Sampler.FILTER_LINEAR then
+        error(("tecs: invalid sampler filter %s"):format(tostring(options.filter)), 2)
     end
-    local address = ADDRESS_MODES[options.address or "clamp"]
-    if address == nil then
-        error(("tecs: unknown address mode '%s'"):format(tostring(options.address)), 2)
+    local address = options.address or Sampler.ADDRESS_CLAMP
+    if address < Sampler.ADDRESS_REPEAT or address > Sampler.ADDRESS_CLAMP then
+        error(("tecs: invalid sampler address mode %s"):format(tostring(options.address)), 2)
     end
 
     local info = loader.newArray("SDL_GPUSamplerCreateInfo[1]")

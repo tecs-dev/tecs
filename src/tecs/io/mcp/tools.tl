@@ -610,7 +610,7 @@ function tools.reloadImage(path: string): integer, integer, integer
         error(("'%s' did not load: %s"):format(path, reason), 0)
     end
 
-    local _, region = target:replaceImage(decoding.value)
+    local _, region = target.sprites:replaceImage(decoding.value)
     return region.layer, region.width, region.height
 end
 

@@ -4,7 +4,7 @@
 --- drives this from its callbacks.
 ---
 --- Entities are the interface. Everything on screen is a spawned entity with a
---- Transform, the lights are entities too, and systems move them. Nothing
+--- Transform2D, the lights are entities too, and systems move them. Nothing
 --- here touches a buffer, a pass, or a command buffer.
 ---
 --- The game is a plugin, which is the only way in. It is handed the world and
@@ -34,12 +34,12 @@ local type UiEvent = uiTypes.Event
 local type Image = assetTypes.Image
 local type Sprite = componentTypes.Sprite
 local type Future = require("tecs.Future")
-local Transform <const> = tecs.Transform
-local RelativeTransform <const> = tecs.ecs.RelativeTransform
+local Transform2D <const> = tecs.Transform2D
+local RelativeTransform2D <const> = tecs.ecs.RelativeTransform2D
 local ChildOf <const> = tecs.ecs.ChildOf
 local Tint <const> = tecs.gfx.Tint
-local PointLight <const> = tecs.gfx.PointLight
-local Renderable <const> = tecs.gfx.Renderable
+local PointLight2D <const> = tecs.gfx.PointLight2D
+local Renderable2D <const> = tecs.gfx.Renderable2D
 
 local COUNT <const> = math.floor(tonumber(os.getenv("TECS_INSTANCES")) or 4000)
 
@@ -67,10 +67,10 @@ local function spawnField(world: tecs.World, width: number, height: number)
 
     world:batchSpawn(
         COUNT,
-        {Transform, Tint, Renderable},
+        {Transform2D, Tint, Renderable2D},
         function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
-            local transforms = archetype:getMut(Transform)
+            local transforms = archetype:getMut(Transform2D)
             local tints = archetype:getMut(Tint)
 
             for row = firstRow, lastRow do
@@ -115,8 +115,8 @@ local function spawnLights(world: tecs.World, width: number, height: number)
             y = y + math.sin(index * golden) * radius
         end
         world:spawn(
-            Transform(x, y, 0, 1, 0, 1, 1),
-            PointLight(120.0, math.min(width, height) * 0.7, color[1], color[2], color[3], 3.0)
+            Transform2D(x, y, 0, 1, 0, 1, 1),
+            PointLight2D(120.0, math.min(width, height) * 0.7, color[1], color[2], color[3], 3.0)
         )
     end
 end
@@ -208,12 +208,12 @@ return tecs.newApplication({
                 padding = 24,
             }),
             ui.Root("screen"),
-            Transform(0, 0, 900, 16)
+            Transform2D(0, 0, 900, 16)
         )
         world:spawn(
             ui.Style({position = "absolute", inset = {left = 24, top = 24}}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 100),
+            RelativeTransform2D(0, 0, 100),
             Tint(0.92, 0.96, 1.0, 1.0),
             tecs.gfx.Text.new({
                 text = ("tecs %s\n%d entities"):format(tecs.version, COUNT),
@@ -230,35 +230,35 @@ return tecs.newApplication({
                 padding = 20,
                 gap = 12,
             }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(uiRoot)
         )
         world:spawn(
             ui.Style({position = "absolute", inset = 0}),
             ui.Paint(true),
-            RelativeTransform(0, 0, 0),
+            RelativeTransform2D(0, 0, 0),
             Tint(0.035, 0.055, 0.09, 0.96),
             tecs.gfx.Material(materials.id("rounded"), 0.04),
-            Renderable(),
+            Renderable2D(),
             ChildOf(panel)
         )
 
         local header <const> = world:spawn(
-            ui.Style({height = 62, width = "100%"}), RelativeTransform(0, 0, 100), ChildOf(panel)
+            ui.Style({height = 62, width = "100%"}), RelativeTransform2D(0, 0, 100), ChildOf(panel)
         )
         world:spawn(
             ui.Style({position = "absolute", width = 42, height = 42, inset = {left = 0, top = 4}}),
             ui.Paint(true),
-            RelativeTransform(0, 0, 2),
+            RelativeTransform2D(0, 0, 2),
             Tint(0.32, 0.82, 1.0, 1.0),
             tecs.gfx.Material(materials.id("circle"), 0),
-            Renderable(),
+            Renderable2D(),
             ChildOf(header)
         )
         world:spawn(
             ui.Style({position = "absolute", inset = {left = 58, top = 0}}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 3),
+            RelativeTransform2D(0, 0, 3),
             Tint(0.94, 0.97, 1.0, 1.0),
             tecs.gfx.Text.new({
                 text = "Tecs UI",
@@ -270,7 +270,7 @@ return tecs.newApplication({
         world:spawn(
             ui.Style({position = "absolute", inset = {left = 58, top = 39}}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 3),
+            RelativeTransform2D(0, 0, 3),
             Tint(0.54, 0.64, 0.76, 1.0),
             tecs.gfx.Text.new({
                 text = "Retained ECS | GPU instanced",
@@ -283,7 +283,7 @@ return tecs.newApplication({
         local status <const> = world:spawn(
             ui.Style({minHeight = 42, width = "100%"}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 100),
+            RelativeTransform2D(0, 0, 100),
             Tint(0.62, 0.75, 0.88, 1.0),
             tecs.gfx.Text.new({
                 text = "Click, Tab, Return, or scroll",
@@ -304,22 +304,22 @@ return tecs.newApplication({
             local control <const> = world:spawn(
                 ui.Style({width = "100%", height = 44}),
                 ui.Interaction({tabIndex = tabIndex}),
-                RelativeTransform(),
+                RelativeTransform2D(),
                 ChildOf(parent)
             )
             local visual <const> = world:spawn(
                 ui.Style({position = "absolute", inset = 0}),
                 ui.Paint(true),
-                RelativeTransform(0, 0, 1),
+                RelativeTransform2D(0, 0, 1),
                 Tint(0.12, 0.20, 0.30, 1.0),
                 tecs.gfx.Material(materials.id("rounded"), 0.18),
-                Renderable(),
+                Renderable2D(),
                 ChildOf(control)
             )
             world:spawn(
                 ui.Style({position = "absolute", inset = {left = 14, top = 11}}),
                 ui.Intrinsic("text"),
-                RelativeTransform(0, 0, 2),
+                RelativeTransform2D(0, 0, 2),
                 Tint(0.9, 0.95, 1.0, 1.0),
                 tecs.gfx.Text.new({text = label, font = font, size = 16}),
                 ChildOf(control)
@@ -359,14 +359,14 @@ return tecs.newApplication({
                 -- visibility because layout participation does not disable a
                 -- renderer producer.
                 for _, entity in world:traverse(scenes[sceneIndex], ChildOf) do
-                    if world:has(entity, Renderable) then
+                    if world:has(entity, Renderable2D) then
                         sceneDrawables[entity] = true
                     end
                     if sceneDrawables[entity] then
-                        if visible and not world:has(entity, Renderable) then
-                            world:set(entity, Renderable)
-                        elseif not visible and world:has(entity, Renderable) then
-                            world:remove(entity, Renderable)
+                        if visible and not world:has(entity, Renderable2D) then
+                            world:set(entity, Renderable2D)
+                        elseif not visible and world:has(entity, Renderable2D) then
+                            world:remove(entity, Renderable2D)
                         end
                     end
                     local tint <const> = world:get(entity, Tint)
@@ -393,29 +393,29 @@ return tecs.newApplication({
                 flexDirection = "row",
                 gap = 8,
             }),
-            RelativeTransform(0, 0, 100),
+            RelativeTransform2D(0, 0, 100),
             ChildOf(panel)
         )
         local function spawnSceneButton(label: string, tabIndex: integer)
             local control <const> = world:spawn(
                 ui.Style({width = 84, height = 44}),
                 ui.Interaction({tabIndex = tabIndex}),
-                RelativeTransform(),
+                RelativeTransform2D(),
                 ChildOf(actions)
             )
             local visual <const> = world:spawn(
                 ui.Style({position = "absolute", inset = 0}),
                 ui.Paint(true),
-                RelativeTransform(0, 0, 1),
+                RelativeTransform2D(0, 0, 1),
                 Tint(0.12, 0.20, 0.30, 1.0),
                 tecs.gfx.Material(materials.id("rounded"), 0.18),
-                Renderable(),
+                Renderable2D(),
                 ChildOf(control)
             )
             world:spawn(
                 ui.Style({position = "absolute", inset = {left = 8, top = 11}}),
                 ui.Intrinsic("text"),
-                RelativeTransform(0, 0, 2),
+                RelativeTransform2D(0, 0, 2),
                 Tint(0.9, 0.95, 1.0, 1.0),
                 tecs.gfx.Text.new({text = label, font = font, size = 16}),
                 ChildOf(control)
@@ -438,7 +438,7 @@ return tecs.newApplication({
         spawnSceneButton("Scroll", 4)
 
         local sceneHost <const> = world:spawn(
-            ui.Style({width = "100%", flexGrow = 1, minHeight = 120}), RelativeTransform(0, 0, 10), ChildOf(panel)
+            ui.Style({width = "100%", flexGrow = 1, minHeight = 120}), RelativeTransform2D(0, 0, 10), ChildOf(panel)
         )
 
         local composeScene <const> = world:spawn(
@@ -450,7 +450,7 @@ return tecs.newApplication({
                 flexDirection = "column",
                 gap = 10,
             }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(sceneHost)
         )
         scenes[1] = composeScene
@@ -462,12 +462,12 @@ return tecs.newApplication({
                 height = "100%",
                 inset = {left = 0, top = 0},
             }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(sceneHost)
         )
         scenes[4] = viewportFrame
         local viewport <const> = world:spawn(
-            ui.Style({position = "absolute", inset = 0}), ui.Scroll(), RelativeTransform(), ChildOf(viewportFrame)
+            ui.Style({position = "absolute", inset = 0}), ui.Scroll(), RelativeTransform2D(), ChildOf(viewportFrame)
         )
         local content <const> = world:spawn(
             ui.Style({
@@ -477,7 +477,7 @@ return tecs.newApplication({
                 padding = {right = 22},
                 gap = 8,
             }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(viewport)
         )
 
@@ -487,65 +487,65 @@ return tecs.newApplication({
         world:spawn(
             ui.Style({position = "absolute", width = 16, inset = {right = 0, top = 0, bottom = 0}}),
             ui.Paint(true),
-            RelativeTransform(0, 0, 7),
+            RelativeTransform2D(0, 0, 7),
             Tint(0.025, 0.045, 0.075, 1.0),
             tecs.gfx.Material(materials.id("rounded"), 0),
-            Renderable(),
+            Renderable2D(),
             ChildOf(viewportFrame)
         )
         world:spawn(
             ui.Style({position = "absolute", width = 4, inset = {right = 6, top = 16, bottom = 16}}),
             ui.Paint(true),
-            RelativeTransform(0, 0, 8),
+            RelativeTransform2D(0, 0, 8),
             Tint(0.08, 0.18, 0.25, 1.0),
             tecs.gfx.Material(materials.id("rounded"), 0),
-            Renderable(),
+            Renderable2D(),
             ChildOf(viewportFrame)
         )
         world:spawn(
             ui.Style({position = "absolute", width = 16, height = 16, inset = {right = 0, top = 0}}),
             ui.Paint(true),
-            RelativeTransform(0, 0, 11),
+            RelativeTransform2D(0, 0, 11),
             Tint(0.22, 0.56, 0.68, 1.0),
             tecs.gfx.Material(materials.id("rounded"), 0),
-            Renderable(),
+            Renderable2D(),
             ChildOf(viewportFrame)
         )
         world:spawn(
             ui.Style({position = "absolute", width = 16, height = 16, inset = {right = 0, bottom = 0}}),
             ui.Paint(true),
-            RelativeTransform(0, 0, 11),
+            RelativeTransform2D(0, 0, 11),
             Tint(0.22, 0.56, 0.68, 1.0),
             tecs.gfx.Material(materials.id("rounded"), 0),
-            Renderable(),
+            Renderable2D(),
             ChildOf(viewportFrame)
         )
         world:spawn(
             ui.Scrollbar("vertical", 12, 2, 28),
             ui.Interaction({focusable = false, draggable = true, order = 100}),
-            RelativeTransform(0, 0, 10),
+            RelativeTransform2D(0, 0, 10),
             Tint(0.32, 0.82, 1.0, 1.0),
             tecs.gfx.Material(materials.id("rounded"), 0),
-            Renderable(),
+            Renderable2D(),
             ChildOf(viewport)
         )
 
         local imageCard <const> = world:spawn(
-            ui.Style({width = "100%", height = 112, order = 1}), RelativeTransform(), ChildOf(composeScene)
+            ui.Style({width = "100%", height = 112, order = 1}), RelativeTransform2D(), ChildOf(composeScene)
         )
         world:spawn(
             ui.Style({position = "absolute", inset = 0}),
             ui.Paint(true),
-            RelativeTransform(0, 0, 1),
+            RelativeTransform2D(0, 0, 1),
             Tint(0.08, 0.15, 0.23, 1.0),
             tecs.gfx.Material(materials.id("rounded"), 0.08),
-            Renderable(),
+            Renderable2D(),
             ChildOf(imageCard)
         )
         world:spawn(
             ui.Style({position = "absolute", inset = {left = 92, top = 20}}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 3),
+            RelativeTransform2D(0, 0, 3),
             Tint(0.9, 0.95, 1.0, 1.0),
             tecs.gfx.Text.new({text = "Image leaf", font = font, size = 16}),
             ChildOf(imageCard)
@@ -553,7 +553,7 @@ return tecs.newApplication({
         world:spawn(
             ui.Style({position = "absolute", inset = {left = 92, top = 49}}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 3),
+            RelativeTransform2D(0, 0, 3),
             Tint(0.48, 0.66, 0.78, 1.0),
             tecs.gfx.Text.new({text = "Sprite + intrinsic ratio", font = font, size = 16}),
             ChildOf(imageCard)
@@ -561,25 +561,25 @@ return tecs.newApplication({
 
         local shapeRow <const> = world:spawn(
             ui.Style({width = "100%", height = 128, flexDirection = "row", gap = 10, order = 2}),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(composeScene)
         )
         local stretchCard <const> = world:spawn(
-            ui.Style({flexGrow = 1, height = "100%"}), RelativeTransform(), ChildOf(shapeRow)
+            ui.Style({flexGrow = 1, height = "100%"}), RelativeTransform2D(), ChildOf(shapeRow)
         )
         world:spawn(
             ui.Style({position = "absolute", inset = 0}),
             ui.Paint(true),
-            RelativeTransform(0, 0, 1),
+            RelativeTransform2D(0, 0, 1),
             Tint(0.10, 0.24, 0.34, 1.0),
             tecs.gfx.Material(materials.id("rounded"), 0.08),
-            Renderable(),
+            Renderable2D(),
             ChildOf(stretchCard)
         )
         world:spawn(
             ui.Style({position = "absolute", inset = {left = 14, top = 20}}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 2),
+            RelativeTransform2D(0, 0, 2),
             Tint(0.9, 0.95, 1.0, 1.0),
             tecs.gfx.Text.new({text = "Paint(true)", font = font, size = 16}),
             ChildOf(stretchCard)
@@ -587,36 +587,36 @@ return tecs.newApplication({
         world:spawn(
             ui.Style({position = "absolute", inset = {left = 14, top = 56}}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 2),
+            RelativeTransform2D(0, 0, 2),
             Tint(0.48, 0.66, 0.78, 1.0),
             tecs.gfx.Text.new({text = "stretches a quad", font = font, size = 16}),
             ChildOf(stretchCard)
         )
         local circleCard <const> = world:spawn(
-            ui.Style({width = 128, height = "100%"}), RelativeTransform(), ChildOf(shapeRow)
+            ui.Style({width = 128, height = "100%"}), RelativeTransform2D(), ChildOf(shapeRow)
         )
         world:spawn(
             ui.Style({position = "absolute", inset = 0}),
             ui.Paint(true),
-            RelativeTransform(0, 0, 1),
+            RelativeTransform2D(0, 0, 1),
             Tint(0.07, 0.12, 0.20, 1.0),
             tecs.gfx.Material(materials.id("rounded"), 0.08),
-            Renderable(),
+            Renderable2D(),
             ChildOf(circleCard)
         )
         world:spawn(
             ui.Style({position = "absolute", width = 48, height = 48, inset = {left = 40, top = 16}}),
             ui.Paint(true),
-            RelativeTransform(0, 0, 2),
+            RelativeTransform2D(0, 0, 2),
             Tint(0.32, 0.82, 1.0, 1.0),
             tecs.gfx.Material(materials.id("circle"), 0),
-            Renderable(),
+            Renderable2D(),
             ChildOf(circleCard)
         )
         world:spawn(
             ui.Style({position = "absolute", inset = {left = 25, top = 82}}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 3),
+            RelativeTransform2D(0, 0, 3),
             Tint(0.72, 0.84, 0.94, 1.0),
             tecs.gfx.Text.new({text = "Circle", font = font, size = 16}),
             ChildOf(circleCard)
@@ -624,7 +624,7 @@ return tecs.newApplication({
         world:spawn(
             ui.Style({maxWidth = "100%", order = 3}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 2),
+            RelativeTransform2D(0, 0, 2),
             Tint(0.62, 0.75, 0.88, 1.0),
             tecs.gfx.Text.new({
                 text = "Existing rectangle, circle, image,\nand text producers.",
@@ -643,21 +643,21 @@ return tecs.newApplication({
                 flexDirection = "column",
                 gap = 12,
             }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(sceneHost)
         )
         scenes[2] = flexScene
         world:spawn(
             ui.Style({maxWidth = "100%", order = 1}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 2),
+            RelativeTransform2D(0, 0, 2),
             Tint(0.72, 0.84, 0.94, 1.0),
             tecs.gfx.Text.new({text = "Fixed width + flexGrow", font = font, size = 16}),
             ChildOf(flexScene)
         )
         local growthRow <const> = world:spawn(
             ui.Style({width = "100%", height = 104, flexDirection = "row", gap = 8, order = 2}),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(flexScene)
         )
         local growthLabels <const> = {"88px", "grow 1", "grow 2"}
@@ -668,20 +668,20 @@ return tecs.newApplication({
             else
                 cellStyle.flexGrow = index - 1
             end
-            local cell <const> = world:spawn(ui.Style(cellStyle), RelativeTransform(), ChildOf(growthRow))
+            local cell <const> = world:spawn(ui.Style(cellStyle), RelativeTransform2D(), ChildOf(growthRow))
             world:spawn(
                 ui.Style({position = "absolute", inset = 0}),
                 ui.Paint(true),
-                RelativeTransform(0, 0, 1),
+                RelativeTransform2D(0, 0, 1),
                 Tint(0.08 + index * 0.04, 0.24 + index * 0.06, 0.38 + index * 0.07, 1.0),
                 tecs.gfx.Material(materials.id("rounded"), 0.08),
-                Renderable(),
+                Renderable2D(),
                 ChildOf(cell)
             )
             world:spawn(
                 ui.Style({position = "absolute", inset = {left = 10, top = 38}}),
                 ui.Intrinsic("text"),
-                RelativeTransform(0, 0, 2),
+                RelativeTransform2D(0, 0, 2),
                 Tint(0.9, 0.95, 1.0, 1.0),
                 tecs.gfx.Text.new({text = growthLabels[index], font = font, size = 16}),
                 ChildOf(cell)
@@ -690,7 +690,7 @@ return tecs.newApplication({
         world:spawn(
             ui.Style({maxWidth = "100%", order = 3}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 2),
+            RelativeTransform2D(0, 0, 2),
             Tint(0.72, 0.84, 0.94, 1.0),
             tecs.gfx.Text.new({text = "flexWrap = wrap", font = font, size = 16}),
             ChildOf(flexScene)
@@ -705,26 +705,26 @@ return tecs.newApplication({
                 gap = 8,
                 order = 4,
             }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(flexScene)
         )
         for index = 1, 8 do
             local chip <const> = world:spawn(
-                ui.Style({width = index % 3 == 0 and 128 or 96, height = 54}), RelativeTransform(), ChildOf(wrapGrid)
+                ui.Style({width = index % 3 == 0 and 128 or 96, height = 54}), RelativeTransform2D(), ChildOf(wrapGrid)
             )
             world:spawn(
                 ui.Style({position = "absolute", inset = 0}),
                 ui.Paint(true),
-                RelativeTransform(0, 0, 1),
+                RelativeTransform2D(0, 0, 1),
                 Tint(0.10, 0.18 + index * 0.018, 0.28 + index * 0.025, 1.0),
                 tecs.gfx.Material(materials.id("rounded"), 0.12),
-                Renderable(),
+                Renderable2D(),
                 ChildOf(chip)
             )
             world:spawn(
                 ui.Style({position = "absolute", inset = {left = 12, top = 16}}),
                 ui.Intrinsic("text"),
-                RelativeTransform(0, 0, 2),
+                RelativeTransform2D(0, 0, 2),
                 Tint(0.86, 0.93, 1.0, 1.0),
                 tecs.gfx.Text.new({text = ("item %d"):format(index), font = font, size = 16}),
                 ChildOf(chip)
@@ -738,17 +738,17 @@ return tecs.newApplication({
                 height = "100%",
                 inset = {left = 0, top = 0},
             }),
-            RelativeTransform(),
+            RelativeTransform2D(),
             ChildOf(sceneHost)
         )
         scenes[3] = overlayScene
         world:spawn(
             ui.Style({position = "absolute", inset = 0}),
             ui.Paint(true),
-            RelativeTransform(0, 0, 0),
+            RelativeTransform2D(0, 0, 0),
             Tint(0.055, 0.10, 0.16, 1.0),
             tecs.gfx.Material(materials.id("rounded"), 0.04),
-            Renderable(),
+            Renderable2D(),
             ChildOf(overlayScene)
         )
         local anchorNames <const> = {"top-left", "top-right", "bottom-left", "bottom-right"}
@@ -766,22 +766,22 @@ return tecs.newApplication({
             end
             local anchor <const> = world:spawn(
                 ui.Style({position = "absolute", width = 142, height = 54, inset = anchorInset}),
-                RelativeTransform(0, 0, index),
+                RelativeTransform2D(0, 0, index),
                 ChildOf(overlayScene)
             )
             world:spawn(
                 ui.Style({position = "absolute", inset = 0}),
                 ui.Paint(true),
-                RelativeTransform(0, 0, 1),
+                RelativeTransform2D(0, 0, 1),
                 Tint(0.10, 0.26 + index * 0.035, 0.38 + index * 0.045, 1.0),
                 tecs.gfx.Material(materials.id("rounded"), 0.1),
-                Renderable(),
+                Renderable2D(),
                 ChildOf(anchor)
             )
             world:spawn(
                 ui.Style({position = "absolute", inset = {left = 10, top = 16}}),
                 ui.Intrinsic("text"),
-                RelativeTransform(0, 0, 2),
+                RelativeTransform2D(0, 0, 2),
                 Tint(0.9, 0.95, 1.0, 1.0),
                 tecs.gfx.Text.new({text = anchorNames[index], font = font, size = 16}),
                 ChildOf(anchor)
@@ -795,16 +795,16 @@ return tecs.newApplication({
                 inset = {left = "34%", top = "34%"},
             }),
             ui.Paint(true),
-            RelativeTransform(0, 0, 8),
+            RelativeTransform2D(0, 0, 8),
             Tint(0.32, 0.82, 1.0, 0.92),
             tecs.gfx.Material(materials.id("circle"), 0),
-            Renderable(),
+            Renderable2D(),
             ChildOf(overlayScene)
         )
         world:spawn(
             ui.Style({position = "absolute", inset = {left = 94, top = "48%"}}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 10),
+            RelativeTransform2D(0, 0, 10),
             Tint(0.95, 0.98, 1.0, 1.0),
             tecs.gfx.Text.new({text = "absolute + z", font = font, size = 16}),
             ChildOf(overlayScene)
@@ -835,7 +835,7 @@ return tecs.newApplication({
         -- card reserves its place, then the natural 64x64 image supplies the
         -- missing width from its intrinsic ratio when it becomes ready.
         tecs.assets.loadImage(tecs.io.files.assetPath("demo/ui-badge.svg")):map(function(image: Image): Sprite
-            local sprite <const> = app.renderer:registerImage(image)
+            local sprite <const> = app.renderer.sprites:registerImage(image)
             return sprite
         end):onSettle(function(sprite: Future<Sprite>)
             if sprite.status == "ready" then
@@ -847,10 +847,10 @@ return tecs.newApplication({
                     }),
                     ui.Intrinsic("image"),
                     ui.Paint(true),
-                    RelativeTransform(0, 0, 3),
+                    RelativeTransform2D(0, 0, 3),
                     sprite.value,
                     Tint(1, 1, 1, 1),
-                    Renderable(),
+                    Renderable2D(),
                     ChildOf(imageCard)
                 )
             end
@@ -893,7 +893,7 @@ return tecs.newApplication({
         -- get: taking getMut to read would mark the component dirty on every
         -- archetype every frame and defeat every dirty-gated consumer.
         local static = os.getenv("TECS_STATIC") ~= nil
-        local spinning = world:newQuery({include = {Transform, Renderable}})
+        local spinning = world:newQuery({include = {Transform2D, Renderable2D}})
         if not static then
             world:addSystem({
                 name = "demo.Spin",
@@ -901,7 +901,7 @@ return tecs.newApplication({
                 run = function(dt: number)
                     elapsed = elapsed + dt
                     for archetype, length in spinning:iter() do
-                        local transforms = archetype:getMut(Transform)
+                        local transforms = archetype:getMut(Transform2D)
                         for row = 1, length do
                             transforms[row].rotation = transforms[row].rotation + dt * 1.5
                         end
@@ -910,14 +910,14 @@ return tecs.newApplication({
             })
         end
 
-        local orbiting = world:newQuery({include = {Transform, PointLight}})
+        local orbiting = world:newQuery({include = {Transform2D, PointLight2D}})
         world:addSystem({
             name = "demo.OrbitLights",
             phase = tecs.ecs.phases.Update,
             run = function()
                 local index = 0
                 for archetype, length in orbiting:iter() do
-                    local transforms = archetype:getMut(Transform)
+                    local transforms = archetype:getMut(Transform2D)
                     for row = 1, length do
                         local angle = elapsed * 0.6 + index * 2.094
                         transforms[row].x = width * (0.5 + 0.3 * math.cos(angle))
@@ -959,8 +959,8 @@ return tecs.newApplication({
                         app.frame,
                         app.elapsed,
                         app.elapsed / math.max(app.frame, 1) * 1000,
-                        app.renderer.count,
-                        app.renderer.rewritten
+                        app.renderer.sprites.count,
+                        app.renderer.sprites.rewritten
                     )
                 )
             end,

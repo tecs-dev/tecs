@@ -18,7 +18,7 @@ Read through `get` and write through `getMut`:
 ```teal
 for archetype, length in movers:iter() do
     local transforms <const> =
-        archetype:getMut(tecs.Transform)
+        archetype:getMut(tecs.Transform2D)
     local velocities <const> = archetype:get(Velocity)
 
     for row = 1, length do
@@ -37,7 +37,7 @@ call it speculatively in a loop that might not write.
 For a conditional write, read first and mark only when the condition succeeds:
 
 ```teal
-local transforms <const> = archetype:get(tecs.Transform)
+local transforms <const> = archetype:get(tecs.Transform2D)
 local changed = false
 
 for row = 1, length do
@@ -48,7 +48,7 @@ for row = 1, length do
 end
 
 if changed then
-    archetype:markComponentDirty(tecs.Transform)
+    archetype:markComponentDirty(tecs.Transform2D)
 end
 ```
 

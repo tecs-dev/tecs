@@ -77,9 +77,9 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local time <const> = require("tecs.platform.time")
-local Transform <const> = tecs.Transform
+local Transform2D <const> = tecs.Transform2D
 local Tint <const> = tecs.gfx.Tint
-local Renderable <const> = tecs.gfx.Renderable
+local Renderable2D <const> = tecs.gfx.Renderable2D
 
 --- Entities in the scene. Allocation per frame is load independent where the
 --- frame path is allocation free and load dependent where it is not, so a
@@ -144,10 +144,10 @@ local function spawnField(world: tecs.World)
 
     world:batchSpawn(
         COUNT,
-        {Transform, Tint, Renderable},
+        {Transform2D, Tint, Renderable2D},
         function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
-            local transforms = archetype:getMut(Transform)
+            local transforms = archetype:getMut(Transform2D)
             local tints = archetype:getMut(Tint)
 
             for row = firstRow, lastRow do
@@ -200,7 +200,7 @@ return tecs.newApplication({
 
         local moving = world:newQuery({
             name = "bench.AllocMoving",
-            include = {Transform, Renderable},
+            include = {Transform2D, Renderable2D},
         })
 
         -- One body per regime, built once, so installing a regime is a lookup
@@ -210,7 +210,7 @@ return tecs.newApplication({
             query = function(_dt: number)
                 local total = 0.0
                 for archetype, length in moving:iter() do
-                    local transforms = archetype:get(Transform)
+                    local transforms = archetype:get(Transform2D)
                     for row = 1, length do
                         total = total + transforms[row].x
                     end
@@ -223,7 +223,7 @@ return tecs.newApplication({
             moving = function(dt: number)
                 local step = dt * 40.0
                 for archetype, length in moving:iter() do
-                    local transforms = archetype:getMut(Transform)
+                    local transforms = archetype:getMut(Transform2D)
                     for row = 1, length do
                         local transform = transforms[row]
                         local x = transform.x + step

@@ -50,11 +50,11 @@ Registration requires only `name` and `container`. A table component may act
 as a presence marker with no instance fields:
 
 ```teal
-local record Renderable is tecs.ecs.Component end
+local record Renderable2D is tecs.ecs.Component end
 
 tecs.ecs.newComponent({
-    name = "Renderable",
-    container = Renderable,
+    name = "Renderable2D",
+    container = Renderable2D,
 })
 ```
 
@@ -136,7 +136,7 @@ Pair it with a custom `new` when the table form needs its own mapping:
 tecs.ecs.newComponent({
     name = "ParticleEmitter",
     container = ParticleEmitter,
-    requires = {tecs.Transform},
+    requires = {tecs.Transform2D},
     __call = function(emitter: ParticleEmitter, options: EmitterOptions)
         initEmitter(emitter, options)
     end,

@@ -9,10 +9,10 @@ response. Resolve its id by name when creating a
 tecs.gfx.materials.addRoot("game/materials/")
 
 world:spawn(
-    tecs.Transform(120, 80, 0, 1, 0, 64, 64),
+    tecs.Transform2D(120, 80, 0, 1, 0, 64, 64),
     tecs.gfx.Material(tecs.gfx.materials.id("rounded"), 0.25),
     tecs.gfx.Tint(0.2, 0.6, 1.0, 1.0),
-    tecs.gfx.Renderable()
+    tecs.gfx.Renderable2D()
 )
 ```
 

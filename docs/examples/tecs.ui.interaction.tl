@@ -10,7 +10,7 @@ local panel <const> = world:spawn(ui.Style({width = 480, height = 360}))
 local button <const> = world:spawn(
     ui.Style({width = 180, height = 44}),
     ui.Interaction({tabIndex = 1, draggable = false}),
-    tecs.ecs.RelativeTransform(),
+    tecs.ecs.RelativeTransform2D(),
     tecs.ecs.ChildOf(panel)
 )
 -- #endregion tecs.ui.Interaction
@@ -41,11 +41,15 @@ local type UiEvent = uiTypes.Event
 local world <const> = tecs.ecs.newWorld()
 local button <const> = world:spawn(ui.Interaction({tabIndex = 1}))
 
-world:observe(button, ui.Event, function(event: UiEvent)
-    if event.kind == "activate" then
-        print("activated via", event.source)
+world:observe(
+    button,
+    ui.Event,
+    function(event: UiEvent)
+        if event.kind == "activate" then
+            print("activated via", event.source)
+        end
     end
-end)
+)
 -- #endregion tecs.ui.Event
 
 -- #region tecs.ui.FocusScope
@@ -58,10 +62,7 @@ local world <const> = tecs.ecs.newWorld()
 local root <const> = world:spawn(ui.Style({width = 1280, height = 720}))
 
 local dialog <const> = world:spawn(
-    ui.Style({width = 440, height = 260}),
-    ui.FocusScope(),
-    tecs.ecs.RelativeTransform(),
-    tecs.ecs.ChildOf(root)
+    ui.Style({width = 440, height = 260}), ui.FocusScope(), tecs.ecs.RelativeTransform2D(), tecs.ecs.ChildOf(root)
 )
 -- #endregion tecs.ui.FocusScope
 
@@ -114,10 +115,7 @@ local tecs <const> = require("tecs")
 local ui <const> = tecs.ui
 local world <const> = tecs.ecs.newWorld()
 local dialog <const> = world:spawn(ui.FocusScope())
-local firstDialogControl <const> = world:spawn(
-    ui.Interaction({tabIndex = 1}),
-    tecs.ecs.ChildOf(dialog)
-)
+local firstDialogControl <const> = world:spawn(ui.Interaction({tabIndex = 1}), tecs.ecs.ChildOf(dialog))
 
 if ui.pushFocusScope(world, dialog) then
     ui.focus(world, firstDialogControl)

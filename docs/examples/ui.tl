@@ -7,9 +7,9 @@ local type UiEvent = uiTypes.Event
 
 local ui <const> = tecs.ui
 local ChildOf <const> = tecs.ecs.ChildOf
-local RelativeTransform <const> = tecs.ecs.RelativeTransform
+local RelativeTransform2D <const> = tecs.ecs.RelativeTransform2D
 local Tint <const> = tecs.gfx.Tint
-local Renderable <const> = tecs.gfx.Renderable
+local Renderable2D <const> = tecs.gfx.Renderable2D
 local Material <const> = tecs.gfx.Material
 local materials <const> = tecs.gfx.materials
 
@@ -51,7 +51,7 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                     padding = "24px",
                 }),
                 ui.Root("screen"),
-                tecs.Transform(0, 0, 0, 16)
+                tecs.Transform2D(0, 0, 0, 16)
             )
 
             local panel <const> = world:spawn(
@@ -62,16 +62,16 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                     padding = 20,
                     gap = 12,
                 }),
-                RelativeTransform(),
+                RelativeTransform2D(),
                 ChildOf(root)
             )
             world:spawn(
                 ui.Style({position = "absolute", inset = 0}),
                 ui.Paint(true),
-                RelativeTransform(0, 0, 0),
+                RelativeTransform2D(0, 0, 0),
                 Tint(0.035, 0.055, 0.09, 0.97),
                 Material(materials.id("rounded"), 0.04),
-                Renderable(),
+                Renderable2D(),
                 ChildOf(panel)
             )
 
@@ -80,7 +80,7 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                     width = "100%",
                     height = 54,
                 }),
-                RelativeTransform(),
+                RelativeTransform2D(),
                 ChildOf(panel)
             )
             world:spawn(
@@ -91,10 +91,10 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                     inset = {left = 0, top = 5},
                 }),
                 ui.Paint(true),
-                RelativeTransform(0, 0, 1),
+                RelativeTransform2D(0, 0, 1),
                 Tint(0.32, 0.82, 1.0, 1.0),
                 Material(materials.id("circle"), 0),
-                Renderable(),
+                Renderable2D(),
                 ChildOf(heading)
             )
             world:spawn(
@@ -103,7 +103,7 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                     inset = {left = 56, top = 0},
                 }),
                 ui.Intrinsic("text"),
-                RelativeTransform(0, 0, 2),
+                RelativeTransform2D(0, 0, 2),
                 Tint(0.94, 0.97, 1.0, 1.0),
                 tecs.gfx.Text.new({
                     text = "Retained, composed UI",
@@ -118,7 +118,7 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                     width = "100%",
                 }),
                 ui.Intrinsic("text"),
-                RelativeTransform(0, 0, 2),
+                RelativeTransform2D(0, 0, 2),
                 Tint(0.58, 0.7, 0.84, 1.0),
                 tecs.gfx.Text.new({
                     text = "Click, Tab, Return, or scroll",
@@ -140,7 +140,7 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                     minHeight = 120,
                 }),
                 ui.Scroll(),
-                RelativeTransform(),
+                RelativeTransform2D(),
                 ChildOf(panel)
             )
             local content <const> = world:spawn(
@@ -150,16 +150,16 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                     flexDirection = "column",
                     gap = 8,
                 }),
-                RelativeTransform(),
+                RelativeTransform2D(),
                 ChildOf(viewport)
             )
             world:spawn(
                 ui.Scrollbar("vertical", 6, 2, 18),
                 ui.Interaction({focusable = false, draggable = true, order = 100}),
-                RelativeTransform(0, 0, 10),
+                RelativeTransform2D(0, 0, 10),
                 Tint(0.32, 0.82, 1.0, 0.85),
                 Material(materials.id("rounded"), 0.5),
-                Renderable(),
+                Renderable2D(),
                 ChildOf(viewport)
             )
 
@@ -170,16 +170,16 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                         height = 48,
                     }),
                     ui.Interaction({tabIndex = tabIndex}),
-                    RelativeTransform(),
+                    RelativeTransform2D(),
                     ChildOf(content)
                 )
                 local visual <const> = world:spawn(
                     ui.Style({position = "absolute", inset = 0}),
                     ui.Paint(true),
-                    RelativeTransform(0, 0, 1),
+                    RelativeTransform2D(0, 0, 1),
                     Tint(0.12, 0.20, 0.30, 1.0),
                     Material(materials.id("rounded"), 0.16),
-                    Renderable(),
+                    Renderable2D(),
                     ChildOf(button)
                 )
                 world:spawn(
@@ -188,7 +188,7 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                         inset = {left = 14, top = 13},
                     }),
                     ui.Intrinsic("text"),
-                    RelativeTransform(0, 0, 2),
+                    RelativeTransform2D(0, 0, 2),
                     Tint(0.9, 0.95, 1.0, 1.0),
                     tecs.gfx.Text.new({
                         text = label,

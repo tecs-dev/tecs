@@ -195,8 +195,8 @@ binary bytes and still returns the tagged result. The world clones
 `filterQuery`, so repeated saves never mutate the caller's descriptor.
 
 `layers` accepts values from 0 through 31. It rejects an entity with
-`Transform` when the component's `layer` falls outside the allowlist. It keeps
-an entity without `Transform`.
+`Transform2D` when the component's `layer` falls outside the allowlist. It keeps
+an entity without `Transform2D`.
 
 Custom-data values must support `string.buffer` encoding. Prefix your keys with
 the game or subsystem name. Tecs reserves keys that begin with `__tecs.` for

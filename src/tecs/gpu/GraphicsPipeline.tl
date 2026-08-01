@@ -47,15 +47,15 @@ local record DepthConfig
     --- Writes surviving fragments' depth back. Defaults to true, and has no
     --- effect while `test` is false.
     write: boolean
-    --- "never", "less", "equal", "lessOrEqual", "greater", "notEqual",
-    --- "greaterOrEqual", or "always". Defaults to "lessOrEqual".
+    --- One of the module's `COMPARE_*` constants. Defaults to
+    --- `COMPARE_LESS_OR_EQUAL`.
     ---
-    --- The incoming fragment is the left side, so "lessOrEqual" keeps a
+    --- The incoming fragment is the left side, so `COMPARE_LESS_OR_EQUAL` keeps a
     --- fragment nearer than or level with what is stored. Level is what makes
     --- draw order the tie-breaker for two instances at one depth: the later
     --- draw passes the test and overwrites, which is the resolution
     --- `layers.depthOf` is written to rely on.
-    compare: string
+    compare: integer
 end
 
 local record PipelineOptions
@@ -70,21 +70,17 @@ local record PipelineOptions
     --- Formats of every color target, in attachment order. A pipeline bakes
     --- these, so they must match the pass it is used in exactly.
     colorFormats: {integer}
-    --- "triangleList", "triangleStrip", "lineList", "lineStrip", "pointList".
-    --- Defaults to "triangleList".
-    primitive: string
-    --- "none", "front", or "back", defaulting to "none". Facing is decided by
+    --- One of the module's `PRIMITIVE_*` constants. Defaults to
+    --- `PRIMITIVE_TRIANGLE_LIST`.
+    primitive: integer
+    --- One of the module's `CULL_*` constants, defaulting to `CULL_NONE`. Facing is decided by
     --- counter-clockwise winding, which this does not expose, so a mesh wound
     --- the other way has its two faces swapped rather than its culling
     --- disabled.
-    cull: string
-    --- Straight alpha blending, applied to every color target rather than to
-    --- one of them. Defaults to false, which writes the fragment's color and
-    --- alpha through unmodified. Ignored when `blendMode` is given.
-    blend: boolean
+    cull: integer
     --- Which blend to bake, for the cases a boolean cannot say.
     ---
-    --- `"alpha"` is what `blend = true` means. `"premultiplied"` is the same
+    --- `BLEND_ALPHA` is straight alpha. `BLEND_PREMULTIPLIED` is the same
     --- blend with the source factor left at one, so the fragment supplies a color
     --- already scaled by its alpha. That is worth a mode of its own because it is
     --- what lets one pipeline serve two looks: a fragment writing its scaled
@@ -93,7 +89,7 @@ local record PipelineOptions
     --- pipeline and one draw rather than two of each, and the two interleave in
     --- whatever order the pass draws in.
     ---
-    --- `"min"` and `"max"` take the
+    --- `BLEND_MIN` and `BLEND_MAX` take the
     --- smaller or the larger of the fragment and what is already there, per
     --- channel, and both ignore the two factors entirely. They are what a
     --- target resolving by coverage rather than by order needs: the value in a
@@ -102,7 +98,7 @@ local record PipelineOptions
     --- occluder mask wants the tallest occluder to win and a shadow target
     --- wants the darkest shadow to, and neither may depend on which of them the
     --- device rasterised first.
-    blendMode: string
+    blendMode: integer
     --- Depth state. Omit for a pipeline with no depth-stencil target, which is
     --- also the only kind that can be bound in a pass begun without one.
     depth: DepthConfig
@@ -121,6 +117,49 @@ local record GraphicsPipeline
     --- Depth state a pipeline bakes, and what `PassGraph:depthOf` answers with.
     DepthConfig: DepthConfig
 
+    --- Selects triangle-list primitives.
+    PRIMITIVE_TRIANGLE_LIST: integer
+    --- Selects triangle-strip primitives.
+    PRIMITIVE_TRIANGLE_STRIP: integer
+    --- Selects line-list primitives.
+    PRIMITIVE_LINE_LIST: integer
+    --- Selects line-strip primitives.
+    PRIMITIVE_LINE_STRIP: integer
+    --- Selects point-list primitives.
+    PRIMITIVE_POINT_LIST: integer
+    --- Disables face culling.
+    CULL_NONE: integer
+    --- Culls front-facing primitives.
+    CULL_FRONT: integer
+    --- Culls back-facing primitives.
+    CULL_BACK: integer
+    --- Disables blending and replaces the target value.
+    BLEND_NONE: integer
+    --- Uses straight-alpha blending.
+    BLEND_ALPHA: integer
+    --- Uses premultiplied-alpha blending.
+    BLEND_PREMULTIPLIED: integer
+    --- Keeps the smaller source or target value per channel.
+    BLEND_MIN: integer
+    --- Keeps the larger source or target value per channel.
+    BLEND_MAX: integer
+    --- Rejects every fragment in the depth test.
+    COMPARE_NEVER: integer
+    --- Keeps fragments with a smaller depth.
+    COMPARE_LESS: integer
+    --- Keeps fragments with an equal depth.
+    COMPARE_EQUAL: integer
+    --- Keeps fragments with a smaller or equal depth.
+    COMPARE_LESS_OR_EQUAL: integer
+    --- Keeps fragments with a greater depth.
+    COMPARE_GREATER: integer
+    --- Keeps fragments with a different depth.
+    COMPARE_NOT_EQUAL: integer
+    --- Keeps fragments with a greater or equal depth.
+    COMPARE_GREATER_OR_EQUAL: integer
+    --- Keeps every fragment in the depth test.
+    COMPARE_ALWAYS: integer
+
     --- The `SDL_GPUGraphicsPipeline`. Nil once `destroy` has run.
     handle: loader.CPtr
     --- The `SDL_GPUDevice` it was created against, and the one `destroy`
@@ -131,7 +170,7 @@ local record GraphicsPipeline
 
     --- Creates a pipeline.
     ---
-    --- Raises on an unknown primitive, cull mode or depth compare op, and on
+    --- Raises on an invalid primitive, cull mode, blend mode or depth compare op, and on
     --- options that name no color format at all. Everything that has to agree
     --- with a pass or a shader is unchecked and surfaces as an SDL failure at
     --- creation or at bind.
@@ -153,31 +192,27 @@ local GraphicsPipelineMT <const>: metatable<GraphicsPipeline> = {
     __index = GraphicsPipeline,
 }
 
-local PRIMITIVES <const>: {string: integer} = {
-    triangleList = 0,
-    triangleStrip = 1,
-    lineList = 2,
-    lineStrip = 3,
-    pointList = 4,
-}
-
-local CULL_MODES <const>: {string: integer} = {
-    none = 0,
-    front = 1,
-    back = 2,
-}
-
--- SDL_GPUCompareOp values, in the order the enum declares them.
-local COMPARE_OPS <const>: {string: integer} = {
-    never = 1,
-    less = 2,
-    equal = 3,
-    lessOrEqual = 4,
-    greater = 5,
-    notEqual = 6,
-    greaterOrEqual = 7,
-    always = 8,
-}
+GraphicsPipeline.PRIMITIVE_TRIANGLE_LIST = tonumber(C.SDL_GPU_PRIMITIVETYPE_TRIANGLELIST) as integer
+GraphicsPipeline.PRIMITIVE_TRIANGLE_STRIP = tonumber(C.SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP) as integer
+GraphicsPipeline.PRIMITIVE_LINE_LIST = tonumber(C.SDL_GPU_PRIMITIVETYPE_LINELIST) as integer
+GraphicsPipeline.PRIMITIVE_LINE_STRIP = tonumber(C.SDL_GPU_PRIMITIVETYPE_LINESTRIP) as integer
+GraphicsPipeline.PRIMITIVE_POINT_LIST = tonumber(C.SDL_GPU_PRIMITIVETYPE_POINTLIST) as integer
+GraphicsPipeline.CULL_NONE = tonumber(C.SDL_GPU_CULLMODE_NONE) as integer
+GraphicsPipeline.CULL_FRONT = tonumber(C.SDL_GPU_CULLMODE_FRONT) as integer
+GraphicsPipeline.CULL_BACK = tonumber(C.SDL_GPU_CULLMODE_BACK) as integer
+GraphicsPipeline.BLEND_NONE = 0
+GraphicsPipeline.BLEND_ALPHA = 1
+GraphicsPipeline.BLEND_PREMULTIPLIED = 2
+GraphicsPipeline.BLEND_MIN = 3
+GraphicsPipeline.BLEND_MAX = 4
+GraphicsPipeline.COMPARE_NEVER = tonumber(C.SDL_GPU_COMPAREOP_NEVER) as integer
+GraphicsPipeline.COMPARE_LESS = tonumber(C.SDL_GPU_COMPAREOP_LESS) as integer
+GraphicsPipeline.COMPARE_EQUAL = tonumber(C.SDL_GPU_COMPAREOP_EQUAL) as integer
+GraphicsPipeline.COMPARE_LESS_OR_EQUAL = tonumber(C.SDL_GPU_COMPAREOP_LESS_OR_EQUAL) as integer
+GraphicsPipeline.COMPARE_GREATER = tonumber(C.SDL_GPU_COMPAREOP_GREATER) as integer
+GraphicsPipeline.COMPARE_NOT_EQUAL = tonumber(C.SDL_GPU_COMPAREOP_NOT_EQUAL) as integer
+GraphicsPipeline.COMPARE_GREATER_OR_EQUAL = tonumber(C.SDL_GPU_COMPAREOP_GREATER_OR_EQUAL) as integer
+GraphicsPipeline.COMPARE_ALWAYS = tonumber(C.SDL_GPU_COMPAREOP_ALWAYS) as integer
 
 -- The blend factors and op straight alpha needs, read from the generated
 -- cdef rather than copied out of the header. An enum constant is a
@@ -197,27 +232,27 @@ local BLEND_OP_MAX <const> = tonumber(C.SDL_GPU_BLENDOP_MAX) as integer
 --- fragment and the target as they are. The two alpha modes are not here: they
 --- need four factors as well as an op, so they stay a branch rather than a table
 --- entry.
-local EXTREME_OPS <const>: {string: integer} = {
-    min = BLEND_OP_MIN,
-    max = BLEND_OP_MAX,
+local EXTREME_OPS <const>: {integer: integer} = {
+    [GraphicsPipeline.BLEND_MIN] = BLEND_OP_MIN,
+    [GraphicsPipeline.BLEND_MAX] = BLEND_OP_MAX,
 }
 
 --- The source color factor each alpha mode takes. The destination factor, both
 --- alpha factors and the op are the same for the two: what differs is only
 --- whether the fragment's color is scaled here or was scaled by whoever wrote it.
-local ALPHA_SOURCES <const>: {string: integer} = {
-    alpha = BLEND_FACTOR_SRC_ALPHA,
-    premultiplied = BLEND_FACTOR_ONE,
+local ALPHA_SOURCES <const>: {integer: integer} = {
+    [GraphicsPipeline.BLEND_ALPHA] = BLEND_FACTOR_SRC_ALPHA,
+    [GraphicsPipeline.BLEND_PREMULTIPLIED] = BLEND_FACTOR_ONE,
 }
 
 function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions): GraphicsPipeline
-    local primitive = PRIMITIVES[options.primitive or "triangleList"]
-    if primitive == nil then
-        error(("tecs: unknown primitive type '%s'"):format(tostring(options.primitive)), 2)
+    local primitive = options.primitive or GraphicsPipeline.PRIMITIVE_TRIANGLE_LIST
+    if primitive < GraphicsPipeline.PRIMITIVE_TRIANGLE_LIST or primitive > GraphicsPipeline.PRIMITIVE_POINT_LIST then
+        error(("tecs: invalid primitive type %s"):format(tostring(options.primitive)), 2)
     end
-    local cull = CULL_MODES[options.cull or "none"]
-    if cull == nil then
-        error(("tecs: unknown cull mode '%s'"):format(tostring(options.cull)), 2)
+    local cull = options.cull or GraphicsPipeline.CULL_NONE
+    if cull < GraphicsPipeline.CULL_NONE or cull > GraphicsPipeline.CULL_BACK then
+        error(("tecs: invalid cull mode %s"):format(tostring(options.cull)), 2)
     end
 
     local formats = options.colorFormats
@@ -228,15 +263,15 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
         formats = {options.colorFormat}
     end
 
-    local mode = options.blendMode or (options.blend and "alpha" or nil)
+    local mode = options.blendMode or GraphicsPipeline.BLEND_NONE
     local extreme: integer = nil
     local source: integer = nil
-    if mode ~= nil then
+    if mode ~= GraphicsPipeline.BLEND_NONE then
         source = ALPHA_SOURCES[mode]
         if source == nil then
             extreme = EXTREME_OPS[mode]
             if extreme == nil then
-                error(("tecs: unknown blend mode '%s'"):format(tostring(mode)), 2)
+                error(("tecs: invalid blend mode %s"):format(tostring(mode)), 2)
             end
         end
     end
@@ -247,7 +282,7 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
         target.format = format
 
         local blend = target.blend_state as loader.CStruct
-        if mode == nil then
+        if mode == GraphicsPipeline.BLEND_NONE then
             blend.enable_blend = false
         elseif extreme ~= nil then
             -- SDL still wants factors on a min or max op and the op ignores
@@ -296,9 +331,9 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
         if depth.format == nil then
             error("tecs: depth state needs the attachment's format", 2)
         end
-        local compare = COMPARE_OPS[depth.compare or "lessOrEqual"]
-        if compare == nil then
-            error(("tecs: unknown depth compare op '%s'"):format(tostring(depth.compare)), 2)
+        local compare = depth.compare or GraphicsPipeline.COMPARE_LESS_OR_EQUAL
+        if compare < GraphicsPipeline.COMPARE_NEVER or compare > GraphicsPipeline.COMPARE_ALWAYS then
+            error(("tecs: invalid depth compare op %s"):format(tostring(depth.compare)), 2)
         end
         targetInfo.has_depth_stencil_target = true
         targetInfo.depth_stencil_format = depth.format

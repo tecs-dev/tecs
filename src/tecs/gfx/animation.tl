@@ -19,14 +19,14 @@ local hero <const> = tecs.gfx.animation.newGridSheet({
     },
 })
 
-hero:bind(app.renderer:sprite("hero.png"))
+hero:bind(app.renderer.sprites:sprite("hero.png"))
 world:addPlugin(tecs.gfx.animation.plugin)
 
 world:spawn(
-    tecs.Transform(64, 64, 0, 1, 0, 32, 32),
+    tecs.Transform2D(64, 64, 0, 1, 0, 32, 32),
     hero:sprite(),
     tecs.gfx.animation.of(hero, "run"),
-    tecs.gfx.Renderable()
+    tecs.gfx.Renderable2D()
 )
 ```
 

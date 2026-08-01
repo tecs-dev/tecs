@@ -10,14 +10,14 @@ return tecs.newApplication({
             tecs.io.files.assetPath("sprites/hero.png")
         )
             :map(function(image: tecs.assets.Image): tecs.gfx.Sprite
-                return app.renderer:registerImage(image)
+                return app.renderer.sprites:registerImage(image)
             end)
             :onSettle(function(sprite: tecs.Future<tecs.gfx.Sprite>)
                 if sprite.status == "ready" then
                     world:spawn(
-                        tecs.Transform(100, 100),
+                        tecs.Transform2D(100, 100),
                         sprite.value,
-                        tecs.gfx.Renderable()
+                        tecs.gfx.Renderable2D()
                     )
                 end
             end)

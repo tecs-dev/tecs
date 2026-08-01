@@ -2,21 +2,21 @@
 Rapier 2D as part of the world.
 
 Install the plugin, spawn an entity with a
-[`Transform`](/modules/ecs/#tecs.ecs.Transform), and attach a body:
+[`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D), and attach a body:
 
 ```teal
 world:addPlugin(tecs.physics.plugin({gravity = {0.0, 980.0}}))
 
-local ground <const> = world:spawn(tecs.Transform(320, 460))
+local ground <const> = world:spawn(tecs.Transform2D(320, 460))
 tecs.physics.attach(world, ground, {["type"] = "static", halfWidth = 320, halfHeight = 20})
 
-local crate <const> = world:spawn(tecs.Transform(320, 100))
+local crate <const> = world:spawn(tecs.Transform2D(320, 100))
 tecs.physics.attach(world, crate, {halfWidth = 16, halfHeight = 16, friction = 0.4})
 
 tecs.physics.applyImpulse(world, crate, 400.0, 0.0)
 ```
 
-The solver writes each body's [`Transform`](/modules/ecs/#tecs.ecs.Transform) back, so
+The solver writes each body's [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D) back, so
 nothing else has to move the entity. `detach` takes a body out of the solve
 without despawning its entity.
 
@@ -59,7 +59,7 @@ local table_clear <const> = require("table.clear")
 
 local atan2 <const> = math.atan2
 
-local Transform <const> = ecs.Transform
+local Transform2D <const> = ecs.Transform2D
 
 local type Component = ecs.Component
 
@@ -84,7 +84,7 @@ local BODY_NAMES <const>: {integer: string} = {
     [2] = "dynamic",
 }
 
--- Implementation details: Body requires Transform so every Rapier body has a
+-- Implementation details: Body requires Transform2D so every Rapier body has a
 -- pose, and requires Motion so snapshots never add storage during serialization.
 
 --- `Body` declares a body's simulation behavior.
@@ -196,7 +196,7 @@ ecs.newFFIComponent({
 ecs.newFFIComponent({
     name = "Body",
     container = Body,
-    requires = {Transform, Motion},
+    requires = {Transform2D, Motion},
     fields = {
         {"kind", "uint8_t"},
         {"fixedRotation", "uint8_t"},
@@ -425,7 +425,7 @@ end
 
 local record PendingCreation
     entity: integer
-    transform: Transform
+    transform: Transform2D
     body: Body
     collider: Collider
     motion: Motion
@@ -608,7 +608,7 @@ end
 --- @param entity The caller supplies the entity that gains
 ---     [`Body`](tealdoc:tecs.physics.Body),
 ---     [`Collider`](tealdoc:tecs.physics.Collider),
----     [`Transform`](/modules/ecs/#tecs.ecs.Transform), and
+---     [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D), and
 ---     [`Motion`](tealdoc:tecs.physics.Motion) as needed.
 --- @param options The caller supplies the initial body and collider settings.
 ---     Unknown body types and invalid capsules raise.
@@ -913,13 +913,13 @@ function physics.setAwake(world: types.World, entity: integer, awake: boolean)
     World.setAwake(handleOf(row), awake)
 end
 
---- Teleports a body and immediately updates its Transform.
+--- Teleports a body and immediately updates its Transform2D.
 ---
 --- A move rather than a push: velocity is left exactly as it was, so a falling
 --- body carries on falling from wherever it lands.
 ---
 --- Teleportation leaves
---- [`PreviousTransform`](tealdoc:tecs.components.PreviousTransform) unchanged.
+--- [`PreviousTransform2D`](tealdoc:tecs.components.PreviousTransform2D) unchanged.
 --- `FixedFirst` snapshots
 --- that column and the renderer interpolates from it, so a teleport in any
 --- phase after that is drawn as one frame of travel between the two positions
@@ -929,20 +929,20 @@ end
 --- @param world The caller supplies the world holding the entity.
 --- @param entity The caller supplies the target entity. A missing live body
 ---     makes the call a no-op, including
----     [`Transform`](/modules/ecs/#tecs.ecs.Transform).
+---     [`Transform2D`](/modules/ecs/#tecs.ecs.Transform2D).
 --- @param x The caller supplies the body's origin in world pixels along x.
 --- @param y The caller supplies the body's origin in world pixels along y,
 ---     positive downward.
 --- @param angle The caller supplies radians or nil to keep the current
----     `Transform.rotation`. Teleportation does not sweep the gap.
+---     `Transform2D.rotation`. Teleportation does not sweep the gap.
 function physics.teleport(world: types.World, entity: integer, x: number, y: number, angle: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
     end
-    local rotation = angle or world:get(entity, Transform).rotation
+    local rotation = angle or world:get(entity, Transform2D).rotation
     World.setTransform(handleOf(row), toMeters(x), toMeters(y), rotation)
-    local transform = world:getMut(entity, Transform)
+    local transform = world:getMut(entity, Transform2D)
     transform.x, transform.y, transform.rotation = x, y, rotation
 end
 
@@ -1029,7 +1029,7 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
             end
         end
 
-        local function createBody(entity: integer, transform: Transform, declared: Body, collider: Collider): Handle
+        local function createBody(entity: integer, transform: Transform2D, declared: Body, collider: Collider): Handle
             local body = simulation:createBody({
                 type = BODY_NAMES[declared.kind as integer] or "dynamic",
                 position = {x = toMeters(transform.x), y = toMeters(transform.y)},
@@ -1048,7 +1048,7 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
 
         local pendingBodies = world:newQuery({
             name = "tecs.PendingBodies",
-            include = {Transform, Body, Collider},
+            include = {Transform2D, Body, Collider},
             exclude = {RigidBody},
         })
         local detachedBodies = world:newQuery({
@@ -1106,7 +1106,7 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
         local bodies = world:newQuery({
             name = "tecs.SimulatedBodies",
             type = "logic",
-            include = {Transform, RigidBody},
+            include = {Transform2D, RigidBody},
         })
         local snapshotBodies = world:newQuery({
             name = "tecs.SnapshotBodies",
@@ -1183,7 +1183,7 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                 table_clear(createQueue)
                 table_clear(createdBodies)
                 for archetype, length, entities in pendingBodies:iter() do
-                    local transforms = archetype:get(Transform)
+                    local transforms = archetype:get(Transform2D)
                     local declarations = archetype:get(Body)
                     local shapes = archetype:get(Collider)
                     local motions = archetype:get(Motion)
@@ -1217,7 +1217,7 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                     )
                     world:set(
                         pending.entity,
-                        components.PreviousTransform(
+                        components.PreviousTransform2D(
                             pending.transform.x, pending.transform.y, pending.transform.rotation
                         )
                     )
@@ -1445,9 +1445,9 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                         local px, py, cosine, sine = simulation:moveOf(rows[row].index1 as integer)
                         if px ~= nil then
                             if transforms == nil then
-                                transforms = archetype:getMut(Transform) as {any}
+                                transforms = archetype:getMut(Transform2D) as {any}
                             end
-                            local transform = transforms[row] as Transform
+                            local transform = transforms[row] as Transform2D
                             transform.x = toPixels(px)
                             transform.y = toPixels(py)
                             transform.rotation = atan2(sine, cosine)

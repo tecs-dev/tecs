@@ -43,7 +43,7 @@ return tecs.newApplication({
         -- model: where it is, what color it is, what it says. There is no
         -- sprite object to make and no draw call to issue.
         local label <const> = world:spawn(
-            tecs.Transform((width - textWidth) * 0.5, restY), tecs.gfx.Tint(0.93, 0.96, 1.0, 1.0), greeting
+            tecs.Transform2D((width - textWidth) * 0.5, restY), tecs.gfx.Tint(0.93, 0.96, 1.0, 1.0), greeting
         )
 
         -- The motion, which this file never computes. A timeline is compiled

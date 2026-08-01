@@ -33,9 +33,9 @@ local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
-local Transform = tecs.Transform
+local Transform2D = tecs.Transform2D
 local Tint = components.Tint
-local Renderable = components.Renderable
+local Renderable2D = components.Renderable2D
 local ParticleEmitter = particles.ParticleEmitter
 
 -- Slots the pool holds in these tests. Small, so a relayout is cheap and the
@@ -94,7 +94,7 @@ describe("tecs.gfx.particles", function()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {
             ambient = { 1.0, 1.0, 1.0 },
-            capacity = 4096,
+            sprites = { capacity = 4096 },
         })
         renderer:install(world)
         if withPool then
@@ -162,7 +162,7 @@ describe("tecs.gfx.particles", function()
     end
 
     local function newEmitter(world, effect, seed)
-        return world:spawn(Transform(SIZE / 2, SIZE / 2), ParticleEmitter({ effect = effect, seed = seed or 7 }))
+        return world:spawn(Transform2D(SIZE / 2, SIZE / 2), ParticleEmitter({ effect = effect, seed = seed or 7 }))
     end
 
     ---------------------------------------------------------------------------
@@ -171,24 +171,32 @@ describe("tecs.gfx.particles", function()
 
     it("reserves nothing in a world that never installs the plugin", function()
         local world, renderer = newScene(false)
-        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(1.0, 0.0, 0.0, 1.0), Renderable())
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+            Tint(1.0, 0.0, 0.0, 1.0),
+            Renderable2D()
+        )
 
         local pixels = frames(world, renderer, 2)
 
         assert.is_nil(particles.poolOf(world))
-        assert.are.equal(1, renderer.count, "a world with no pool reserves no slots")
+        assert.are.equal(1, renderer.sprites.count, "a world with no pool reserves no slots")
         assert.are.equal(255, center(pixels).r)
         renderer:destroy()
     end)
 
     it("reserves the pool as one run and draws nothing from it while it is empty", function()
         local world, renderer = newScene(true)
-        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(0.0, 1.0, 0.0, 1.0), Renderable())
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+            Tint(0.0, 1.0, 0.0, 1.0),
+            Renderable2D()
+        )
 
         local pixels = frames(world, renderer, 2)
 
         assert.is_not_nil(particles.poolOf(world))
-        assert.are.equal(1 + POOL, renderer.count, "the pool is laid out as its own run after the archetypes")
+        assert.are.equal(1 + POOL, renderer.sprites.count, "the pool is laid out as its own run after the archetypes")
         -- Every slot of that run is hidden, so what reaches the target is the
         -- entity and nothing else.
         assert.are.equal(0, center(pixels).r)
@@ -201,13 +209,13 @@ describe("tecs.gfx.particles", function()
         newEmitter(world, stillBurst())
 
         frames(world, renderer, 3)
-        local before = renderer.rewritten
+        local before = renderer.sprites.rewritten
         frame(world, renderer)
 
         -- The producer's takeDirty is empty for ever, so a settled scene with
         -- a live emitter costs the host no instance writes at all: everything
         -- the field does is written by compute.
-        assert.are.equal(0, renderer.rewritten, "a live emitter dirties nothing")
+        assert.are.equal(0, renderer.sprites.rewritten, "a live emitter dirties nothing")
         assert.are.equal(0, before)
         renderer:destroy()
     end)
@@ -230,7 +238,7 @@ describe("tecs.gfx.particles", function()
     it("takes the emitter's tint through to the particle", function()
         local world, renderer = newScene(true)
         local effect = stillBurst({ color = "#ffffff" })
-        world:spawn(Transform(SIZE / 2, SIZE / 2), ParticleEmitter({ effect = effect, seed = 3, tint = "#0000ff" }))
+        world:spawn(Transform2D(SIZE / 2, SIZE / 2), ParticleEmitter({ effect = effect, seed = 3, tint = "#0000ff" }))
 
         local pixels = frames(world, renderer, 4)
 
@@ -248,7 +256,7 @@ describe("tecs.gfx.particles", function()
             initial = { lifetime = 10, speed = 0, size = SIZE * 0.3, color = "#ff0000" },
             render = { layer = 1 },
         })
-        world:spawn(Transform(SIZE * 0.25, SIZE * 0.25), ParticleEmitter({ effect = effect }))
+        world:spawn(Transform2D(SIZE * 0.25, SIZE * 0.25), ParticleEmitter({ effect = effect }))
 
         local pixels = frames(world, renderer, 4)
 
@@ -268,12 +276,12 @@ describe("tecs.gfx.particles", function()
         -- This is the assertion the per-particle bound has to pass, and a
         -- conservative bound around the emitter could not.
         local world, renderer = newScene(true)
-        world:spawn(Transform(5000, 5000), ParticleEmitter({ effect = stillBurst({ size = SIZE * 0.3 }) }))
+        world:spawn(Transform2D(5000, 5000), ParticleEmitter({ effect = stillBurst({ size = SIZE * 0.3 }) }))
         -- One frame first, because the camera centers itself on the viewport
         -- the first time there is anything to draw.
         frame(world, renderer)
-        renderer.camera.x = 5000
-        renderer.camera.y = 5000
+        renderer.sprites.camera.x = 5000
+        renderer.sprites.camera.y = 5000
 
         local visible = frames(world, renderer, 4)
         assert.are.equal(255, center(visible).r, "a particle's bound is centerd on the particle")
@@ -281,7 +289,7 @@ describe("tecs.gfx.particles", function()
         -- And away again. The pool's run is still counted and still dispatched
         -- over; what changed is that no view overlaps the bound each live
         -- particle wrote.
-        renderer.camera.x = 100000
+        renderer.sprites.camera.x = 100000
         local hidden = frames(world, renderer, 2)
         assert.are.equal(0, center(hidden).r)
         renderer:destroy()
@@ -299,7 +307,7 @@ describe("tecs.gfx.particles", function()
         world:despawn(entity)
         local pixels = frames(world, renderer, 12)
 
-        assert.are.equal(POOL, renderer.count, "the slots are still resident")
+        assert.are.equal(POOL, renderer.sprites.count, "the slots are still resident")
         assert.are.equal(0, center(pixels).r, "and none of them reaches the draw")
         renderer:destroy()
     end)
@@ -371,7 +379,7 @@ describe("tecs.gfx.particles", function()
         local gone = frames(world, renderer, 12)
 
         assert.are.equal(0, center(gone).r, "a despawned emitter's particles drain and its slots come back")
-        assert.are.equal(POOL, renderer.count, "the run itself does not move")
+        assert.are.equal(POOL, renderer.sprites.count, "the run itself does not move")
         renderer:destroy()
     end)
 
@@ -390,7 +398,7 @@ describe("tecs.gfx.particles", function()
                 initial = { lifetime = 10, speed = { min = 10, max = 60 }, size = 6, color = "#ff0000" },
                 render = { layer = 1 },
             })
-            world:spawn(Transform(SIZE / 2, SIZE / 2), ParticleEmitter({ effect = effect, seed = seed }))
+            world:spawn(Transform2D(SIZE / 2, SIZE / 2), ParticleEmitter({ effect = effect, seed = seed }))
             local pixels = frames(world, renderer, 6)
             local sample = {}
             for index = 0, SIZE * SIZE - 1 do
@@ -466,7 +474,7 @@ describe("tecs.gfx.particles", function()
             initial = { lifetime = 10, speed = 60, size = SIZE * 0.2, color = "#ff0000" },
             render = { layer = 1 },
         })
-        world:spawn(Transform(SIZE * 0.2, SIZE / 2), ParticleEmitter({ effect = effect }))
+        world:spawn(Transform2D(SIZE * 0.2, SIZE / 2), ParticleEmitter({ effect = effect }))
 
         frames(world, renderer, 3)
         local before = screen:getPixel(screen:readback(), SIZE * 0.2, SIZE / 2).r
@@ -497,7 +505,11 @@ describe("tecs.gfx.particles", function()
     -- pass tests the geometry pass's depth without writing it and a blended
     -- particle behind opaque geometry is correctly hidden by it.
     local function overQuad(world, blend, alpha, lifetime, gradient)
-        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(0.0, 0.0, 1.0, 1.0), Renderable())
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+            Tint(0.0, 0.0, 1.0, 1.0),
+            Renderable2D()
+        )
         newEmitter(
             world,
             particles.newEffect({
@@ -651,7 +663,7 @@ describe("tecs.gfx.particles", function()
 
     it("spawns on the shape rather than at the emitter", function()
         local world, renderer = newScene(true)
-        world:spawn(Transform(SIZE / 2, SIZE / 2), ParticleEmitter({ effect = ringAt(0, false, 0) }))
+        world:spawn(Transform2D(SIZE / 2, SIZE / 2), ParticleEmitter({ effect = ringAt(0, false, 0) }))
 
         local pixels = frames(world, renderer, 4)
 
@@ -662,7 +674,7 @@ describe("tecs.gfx.particles", function()
 
     it("turns the emission area independently of the launch direction", function()
         local world, renderer = newScene(true)
-        world:spawn(Transform(SIZE / 2, SIZE / 2), ParticleEmitter({ effect = ringAt(math.pi * 0.5, false, 0) }))
+        world:spawn(Transform2D(SIZE / 2, SIZE / 2), ParticleEmitter({ effect = ringAt(math.pi * 0.5, false, 0) }))
 
         local pixels = frames(world, renderer, 4)
 
@@ -678,7 +690,7 @@ describe("tecs.gfx.particles", function()
         -- to the right of the emitter, it leaves along the normal the ring
         -- gave it and not along the direction the effect names.
         local effect = ringAt(0, true, 40, math.pi)
-        world:spawn(Transform(SIZE / 2 - 20, SIZE / 2), ParticleEmitter({ effect = effect }))
+        world:spawn(Transform2D(SIZE / 2 - 20, SIZE / 2), ParticleEmitter({ effect = effect }))
 
         local pixels = frames(world, renderer, 20)
         assert.are.equal(255, screen:getPixel(pixels, SIZE / 2 + 12, SIZE / 2).r, "outward is the ring's normal")
@@ -701,12 +713,12 @@ describe("tecs.gfx.particles", function()
             initial = { lifetime = 10, speed = 0, size = 8, color = "#ff0000" },
             render = { layer = 1 },
         })
-        local entity = world:spawn(Transform(SIZE * 0.25, SIZE / 2), ParticleEmitter({ effect = effect }))
+        local entity = world:spawn(Transform2D(SIZE * 0.25, SIZE / 2), ParticleEmitter({ effect = effect }))
 
         frames(world, renderer, 4)
         assert.are.equal(255, screen:getPixel(screen:readback(), SIZE * 0.25, SIZE / 2).r)
 
-        world:getMut(entity, Transform).x = SIZE * 0.75
+        world:getMut(entity, Transform2D).x = SIZE * 0.75
         return frames(world, renderer, 3)
     end
 
@@ -741,7 +753,7 @@ describe("tecs.gfx.particles", function()
         local pixels = loader.newArray("uint8_t[8]")
         pixels[0], pixels[1], pixels[2], pixels[3] = 255, 0, 0, 255
         pixels[4], pixels[5], pixels[6], pixels[7] = 0, 255, 0, 255
-        local sprite = renderer:registerImage({
+        local sprite = renderer.sprites:registerImage({
             status = "ready",
             path = "particles/two.png",
             pixels = pixels,
