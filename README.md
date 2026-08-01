@@ -1813,7 +1813,7 @@ for every body, and states both queue bounds beside the results.
 ## Shelling out
 
 A command-line tool, resource pipeline, asset build, or game may need a
-child whose lifetime is longer than one function call. [`io.tl`](src/tecs/io.tl)
+child whose lifetime is longer than one function call. [`io/init.tl`](src/tecs/io/init.tl)
 therefore exposes a live process with independently closable stdin, stdout,
 and stderr endpoints. It initializes no SDL subsystem and works from a plain
 interpreter as well as from the game host.
@@ -1863,7 +1863,7 @@ no child or pid-reaping obligation escapes the SDL lifetime.
 
 ## Networking is a transport, and the loop drives it
 
-[`io.tl`](src/tecs/io.tl) exposes Rust's TCP and UDP transport shapes without
+[`io/init.tl`](src/tecs/io/init.tl) exposes Rust's TCP and UDP transport shapes without
 inventing a protocol above either. TCP is an ordered byte stream, so a write is
 not a message boundary and reads are allowed to be short. UDP preserves a
 packet boundary and promises neither delivery nor order. Length prefixes,
@@ -3943,15 +3943,14 @@ src/tecs/internal/render/ rendering domains and their extractor/backend seams
 src/tecs/audio.tl         clips, voices, groups, and the Sound component
 src/tecs/physics/         Rapier binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
-src/tecs/io/              files, HTTP, MCP, and loaded-file watching
+src/tecs/io/              binary contracts, files, HTTP, MCP, and file watching
 src/tecs/io/mcp/          the debug server: transport, tools, sandbox
 src/tecs/assets.tl        images and clips, decoded on a worker
 src/tecs/workers.tl       threads with serialized channels
 src/tecs/Future.tl        the value everything asynchronous settles into
-src/tecs/io.tl            binary contracts plus nonblocking TCP and UDP
 src/tecs/io/http/         requests, and the clients the loop turns
 src/tecs/random.tl        seeded streams and Perlin noise
-src/tecs/data.tl          stores, JSON, DEFLATE, UUIDs, hashes and checksums
+src/tecs/data/            stores, JSON, DEFLATE, UUIDs, hashes and checksums
 src/tecs/regex.tl         compiled Rust regular expressions over byte strings
 assets/                   shaders, materials and fonts, globbed at build time
 spec/                     busted suite

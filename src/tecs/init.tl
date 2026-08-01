@@ -65,7 +65,7 @@ local type Closeable = types.Closeable
 -- A public name that one module answers needs none of this, and has none. It
 -- resolves to that module, is typed by the record the module declares, and
 -- carries the names one level down as fields of its own: `tecs.io` is
--- `src/tecs/io.tl`, `Path`, `Process`, `URI`, `files`, `http`, `mcp`, and
+-- `src/tecs/io/init.tl`, `Path`, `Process`, `URI`, `files`, `http`, `mcp`, and
 -- `watcher` included. That is
 -- the shape to reach for, because a record here restates every signature and
 -- every docblock the module already carries and nothing checks the two against

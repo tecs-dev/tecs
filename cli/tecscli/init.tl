@@ -129,7 +129,7 @@ local function unpack(payload: {string: any}, directory: string): boolean, strin
     end
 
     shellSucceeded("rm -rf " .. quote(staging))
-    if not readable(directory .. "/lua/tecscli.lua") then
+    if not readable(directory .. "/lua/tecscli/init.lua") then
         return false, ("cannot place %s"):format(directory)
     end
     return true
@@ -144,7 +144,7 @@ local function contentRoot(): string
     if carried then
         local identity = ((payload as {string: any}).identity as function(): string)()
         local directory = cacheDirectory(identity)
-        if not readable(directory .. "/lua/tecscli.lua") then
+        if not readable(directory .. "/lua/tecscli/init.lua") then
             local ok, reason = unpack(payload as {string: any}, directory)
             if not ok then
                 io.stderr:write(("tecs: %s\n"):format(reason))

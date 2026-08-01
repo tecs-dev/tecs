@@ -1,5 +1,5 @@
 --[[
-world.tl - World implementation and system orchestration.
+world/init.tl - World implementation and system orchestration.
 
 WARNING: This is an internal module and should not be required directly.
 Instead, import the `tecs` module and use the methods provided there.

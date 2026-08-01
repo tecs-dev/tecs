@@ -80,8 +80,7 @@ tecs/
 │   ├── platform/          # window, events, input backends, time, files, the OS
 │   ├── physics/           # Rapier world integration
 │   ├── sequence/          # Sequencer, with the tween runtime inside it
-│   ├── io.tl              # Binary contracts plus TCP and UDP transport
-│   ├── io/                # Files, HTTP, MCP, and loaded-file watching
+│   ├── io/                # Binary contracts, files, HTTP, MCP, and watching
 │   │   └── mcp/           # Debug server: transport, tools, sandbox
 │   ├── Application.tl     # The lifecycle the host drives
 │   ├── Renderer.tl        # World to GPU, owning the two halves below

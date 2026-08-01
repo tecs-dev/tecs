@@ -229,9 +229,9 @@ local REACH = {
         modules = {
             "tecs/physics/TaskPool.lua",
             "tecs/physics/World.lua",
-            "tecs/data.lua",
+            "tecs/data/init.lua",
             "tecs/io/mcp/transport.lua",
-            "tecs/io.lua",
+            "tecs/io/init.lua",
             "tecs/regex.lua",
             "tecs/ui.lua",
         },

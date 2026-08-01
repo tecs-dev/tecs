@@ -1,6 +1,6 @@
 -- lua-cjson, declared so the one module that reaches it by name type-checks.
 --
--- `src/tecs/data.tl` requires it and presents it under `tecs.data`, and Teal
+-- `src/tecs/data/init.tl` requires it and presents it under `tecs.data`, and Teal
 -- has to know what it is. This lived only in an ignored vendor directory until
 -- now, produced by nothing in the tree, so `cargo xtask check` passed on the machine
 -- that happened to have it and failed everywhere else.

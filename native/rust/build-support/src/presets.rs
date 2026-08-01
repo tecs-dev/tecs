@@ -70,7 +70,7 @@ pub const PRESETS: &[Preset] = &[
         shaders: ShaderMode::Runtime,
         sanitize: false,
         deployment_target: Some("11.0"),
-        entry: "lua/tecscli.lua",
+        entry: "lua/tecscli/init.lua",
     },
     Preset {
         name: "macos-x64",

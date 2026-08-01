@@ -65,7 +65,7 @@ local teal = (root:gsub("/$", "")):match("^(.*)/[^/]+$") .. "/teal"
 --- The environment is passed rather than inherited, so the child reads the same
 --- tree this process was pointed at however the suite was launched.
 local function tecs(args, cwd)
-    local argv = { out .. "/bin/tecs", "--entry", root .. "/tecscli.lua" }
+    local argv = { out .. "/bin/tecs", "--entry", root .. "/tecscli/init.lua" }
     for _, argument in ipairs(args) do
         argv[#argv + 1] = argument
     end

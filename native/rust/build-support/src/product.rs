@@ -1616,6 +1616,9 @@ fn stage_content(
         );
     }
 
+    remove_shadowing_teal_outputs(&root.join("src"), &paths.lua, &sources)?;
+    remove_shadowing_teal_outputs(&root.join("cli"), &paths.lua, &cli_sources)?;
+
     if !teal_outputs_are_current(root, &tl, &root.join("src"), &paths.lua, &sources)? {
         let mut engine = Command::new(&tl);
         engine
@@ -1681,6 +1684,37 @@ fn stage_content(
         fs::copy(root.join(notice), paths.notices.join(notice))?;
     }
     compile_specs(root, paths)?;
+    Ok(())
+}
+
+/// Removes a compiled `foo.lua` left behind when `foo.tl` became
+/// `foo/init.tl`. Lua searches the former first, so leaving it in an
+/// incremental build would silently run stale code.
+fn remove_shadowing_teal_outputs(
+    source_root: &Path,
+    output_root: &Path,
+    sources: &[PathBuf],
+) -> Result<()> {
+    for source in sources {
+        if source.file_name().and_then(|name| name.to_str()) != Some("init.tl") {
+            continue;
+        }
+        let relative = source.strip_prefix(source_root)?;
+        let Some(module) = relative.parent() else {
+            continue;
+        };
+        if source_root.join(module).with_extension("tl").is_file() {
+            continue;
+        }
+        let shadow = output_root.join(module).with_extension("lua");
+        match fs::remove_file(&shadow) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).with_context(|| format!("removing stale {}", shadow.display()))
+            }
+        }
+    }
     Ok(())
 }
 
@@ -3025,9 +3059,10 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        copy_dynamic_libraries, fetch_source_at, package_from_flags, package_link_flags, Paths,
-        GLSLANG_REVISION, LUAJIT_REVISION, SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION,
-        SPIRV_CROSS_REVISION, SPIRV_HEADERS_REVISION, SPIRV_TOOLS_REVISION, ZLIB_REVISION,
+        copy_dynamic_libraries, fetch_source_at, package_from_flags, package_link_flags,
+        remove_shadowing_teal_outputs, Paths, GLSLANG_REVISION, LUAJIT_REVISION,
+        SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION, SPIRV_CROSS_REVISION,
+        SPIRV_HEADERS_REVISION, SPIRV_TOOLS_REVISION, ZLIB_REVISION,
     };
 
     #[test]
@@ -3049,6 +3084,27 @@ mod tests {
             std::path::PathBuf::from("libSDL3.0.dylib")
         );
     }
+
+    #[test]
+    fn directory_module_removes_the_compiled_file_that_would_shadow_it() {
+        let root = tempdir().unwrap();
+        let source_root = root.path().join("src");
+        let output_root = root.path().join("lua");
+        let source = source_root.join("tecs/io/init.tl");
+        let shadow = output_root.join("tecs/io.lua");
+        let compiled = output_root.join("tecs/io/init.lua");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::create_dir_all(compiled.parent().unwrap()).unwrap();
+        fs::write(&source, b"return {}").unwrap();
+        fs::write(&shadow, b"stale").unwrap();
+        fs::write(&compiled, b"current").unwrap();
+
+        remove_shadowing_teal_outputs(&source_root, &output_root, &[source]).unwrap();
+
+        assert!(!shadow.exists());
+        assert!(compiled.is_file());
+    }
+
     #[test]
     fn preparing_a_build_preserves_compiled_lua_and_caches() {
         let root = tempdir().unwrap();

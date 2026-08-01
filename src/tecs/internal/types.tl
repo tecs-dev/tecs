@@ -3,7 +3,7 @@ Internal type definitions for breaking circular dependencies.
 
 Declares `WorldImpl` as a concrete record with all fields + every
 method signature (public API + `_`-prefixed internal staging/drain
-methods). Implementations live in `world.tl` and `world/*.tl`; each
+methods). Implementations live in `world/init.tl` and its sibling modules; each
 file aliases `internal.WorldImpl` and attaches methods via
 `function WorldImpl:foo(...)`. This is the only way Teal's type
 checker accepts cross-file method extension -- the concrete record
@@ -342,7 +342,7 @@ local record internal
     end
 
     --- The concrete world record. All fields live here; all methods attach
-    --- via `function WorldImpl:foo` across world.tl + world/*.tl.
+    --- via `function WorldImpl:foo` across `world/init.tl` and its siblings.
     record WorldImpl is types.World
         -- ----- Construction / orchestration -----
         pipeline: types.Pipeline
@@ -421,7 +421,7 @@ local record internal
         autoStateComponent: Component
         emptyArchetype: ArchetypeInternal
 
-        -- Constructor -- implemented in world.tl.
+        -- Constructor -- implemented in world/init.tl.
         new: function(config?: types.World.Config): types.World
 
         -- ----- Public API (mirrors types.World; redeclared for concrete-record resolution) -----

@@ -70,19 +70,32 @@ end
 
 local SURFACE = surface()
 
---- Where the module a require path names lives, as a path under `src`, and the
---- name tealdoc reads it under, which is that path with the separators written
---- as dots. A module that is a directory is its `init.tl` and carries the
---- `init` in its name.
+--- Where the module a require path names lives as a path under `src`.
+---
+--- Tealdoc names a directory module after its physical `init.tl` path. The
+--- site publishes it under the require path instead, matching Teal and Lua.
+local DIRECTORY_MODULES = {}
 local function moduleFile(name)
     local base = "src/" .. name:gsub("%.", "/")
     if isFile(base .. ".tl") then
         return base .. ".tl", name
     end
     if isFile(base .. "/init.tl") then
-        return base .. "/init.tl", name .. ".init"
+        DIRECTORY_MODULES[name] = name .. ".init"
+        return base .. "/init.tl", name
     end
     error("no file under src/ for module " .. name, 0)
+end
+
+--- Makes Tealdoc's physical names for directory modules available under the
+--- require names used by API projections.
+local function prepareDirectoryModules(context)
+    for public, physical in pairs(DIRECTORY_MODULES) do
+        context.env.registry["$" .. public] =
+            assert(context.env.registry["$" .. physical], "Tealdoc did not read directory module " .. physical)
+        context.env.registry[public] =
+            assert(context.env.registry[physical], "Tealdoc did not export directory module " .. physical)
+    end
 end
 
 -- The modules a page's reference is assembled from beyond the one `SURFACE`
@@ -658,6 +671,7 @@ return {
             pages = pages,
             sidebar_open = { "modules" },
             before_build = function(context)
+                prepareDirectoryModules(context)
                 checkWriting(context)
                 checkPages(context)
                 prepareExampleTypes(context)
