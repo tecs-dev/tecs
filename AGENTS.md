@@ -428,6 +428,9 @@ validation that finds state written under it, and neither is in scope for a name
 - Benchmarks are the argument. `cargo xtask bench shapes` is a uniform loop over transforms,
   `cargo xtask bench physics` is lumpy and
   CPU-bound, and a frame-structure change has to be judged against both, p50 and p95 together.
+- `cargo xtask bench bitset` and `cargo xtask bench snapshot` isolate the two
+  core paths those scene benchmarks cannot: archetype-signature operations and
+  binary save/load throughput.
 - `cargo xtask bench latency` measures what neither of those can see: the wait from an event arriving to the frame that
   reacted to it being submitted. Anything that pipelines the frame buys throughput and pays for it there.
 

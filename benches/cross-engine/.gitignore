@@ -1,6 +1,0 @@
-# Build artifacts and run output
-bevy/target/
-defold/build/
-defold/.internal/
-results.csv
-results-*.csv
