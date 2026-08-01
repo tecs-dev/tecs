@@ -285,6 +285,12 @@
  * the headline and the art far enough below the bar to read as a gap rather
  * than as breathing room. Only the home page has a hero, so only it is cut. */
 main:has(.tealdoc-home-hero) {
+    padding-top: 3rem;
+}
+
+/* The cards stand off the hero on their own padding rather than only on the
+ * gap above them, so the space belongs to the block that owns it. */
+.tealdoc-features {
     padding-top: 2rem;
 }
 

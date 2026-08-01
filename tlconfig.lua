@@ -655,7 +655,7 @@ return {
             -- because that is what turns a type name in a code block into a
             -- link. Absent, those blocks render unhighlighted.
             lexers = "vendor/scintillua/lexers",
-            social_image = "/images/desert.png",
+            social_image = "/images/social.png",
             copyright = "Copyright Michael Dowling",
             license = "MIT or Apache-2.0, at your option",
             -- No row for MIT and Apache-2.0: the license line above already
