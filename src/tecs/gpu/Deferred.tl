@@ -1176,15 +1176,18 @@ end
 --- lights are this module's and the geometry is the caller's, so the split is
 --- here rather than in the callback reaching for buffers it does not own.
 ---
---- Fragment storage slots zero to two and fragment uniform slot one, leaving
---- slot zero for whatever the caller pushes; the shader is
---- `assets/shaders/instance.forward.frag.glsl` and the numbering is its.
-function Deferred:bindLighting(context: PassGraph.PassContext)
+--- Fragment uniform slot one remains fixed. Fragment storage starts at
+--- `firstSlot`, which defaults to zero so a domain can reserve its material
+--- table ahead of the shared light buffers.
+--- @param context The deferred graph supplies the open pass and current frame.
+--- @param firstSlot The caller optionally reserves earlier fragment storage
+---     slots for its own data. It defaults to zero.
+function Deferred:bindLighting(context: PassGraph.PassContext, firstSlot?: integer)
     local buffers <const> = self._forwardBuffers
     buffers[1] = self._lightBuffer.handle
     buffers[2] = self._tileCounts.handle
     buffers[3] = self._tileLights.handle
-    context.pass:bindFragmentStorageBuffers(0, buffers)
+    context.pass:bindFragmentStorageBuffers(firstSlot or 0, buffers)
     C.SDL_PushGPUFragmentUniformData(
         context.commandBuffer, 1, sceneUniform(self, context.width, context.height), SCENE_BYTES
     )

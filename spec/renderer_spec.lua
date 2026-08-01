@@ -231,6 +231,8 @@ describe("ecs.Renderer", function()
         renderer:install(world)
         assert.is_nil(renderer.sprites)
         assert.is_not_nil(renderer.meshes)
+        assert.is_nil(renderer.meshes._backend.blendPipeline)
+        assert.is_nil(renderer.meshes._backend._blendSorted)
 
         local source = triangleMesh("spec://triangle")
         local mesh, bounds = renderer.meshes:registerMesh(source)
@@ -327,6 +329,85 @@ describe("ecs.Renderer", function()
         assert.has_error(function()
             renderer.meshes:registerMaterial({ name = "spec://missing-texture", baseColorTexture = 99 })
         end, "tecs: mesh material baseColorTexture names unknown texture 99")
+        renderer:destroy()
+    end)
+
+    it("requires an explicit mesh transparency lane", function()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = { capacity = 4, vertexCapacity = 16, indexCapacity = 24 },
+        })
+        assert.has_error(function()
+            renderer.meshes:registerMaterial({
+                name = "spec://glass-without-lane",
+                alphaMode = renderer.meshes.ALPHA_BLEND,
+            })
+        end, "tecs: alpha-blended mesh materials require meshes.transparency = true")
+        assert.is_false(renderer.meshes.transparency)
+        renderer:destroy()
+    end)
+
+    it("sorts alpha-blended mesh commands back to front on the GPU", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 1, 1, 1 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                materialCapacity = 4,
+                transparency = true,
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local mesh, bounds = renderer.meshes:registerMesh(triangleMesh("spec://transparent-triangle"))
+        local near = renderer.meshes:registerMaterial({
+            name = "spec://near-green-glass",
+            model = renderer.meshes.MATERIAL_UNLIT,
+            alphaMode = renderer.meshes.ALPHA_BLEND,
+            baseR = 0,
+            baseG = 1,
+            baseB = 0,
+            baseA = 0.5,
+        })
+        local far = renderer.meshes:registerMaterial({
+            name = "spec://far-red-glass",
+            model = renderer.meshes.MATERIAL_UNLIT,
+            alphaMode = renderer.meshes.ALPHA_BLEND,
+            baseR = 1,
+            baseG = 0,
+            baseB = 0,
+            baseA = 0.5,
+        })
+
+        -- Extraction sees the near surface first. Correct output therefore
+        -- proves command order came from depth rather than entity order.
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5, z = 0.2 }),
+            mesh,
+            bounds,
+            near,
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5, z = -0.2 }),
+            mesh,
+            bounds,
+            far,
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+
+        local pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2 - 6, SIZE / 2 + 6)
+        assert.is_true(pixel.r >= 62 and pixel.r <= 65, "far red should be attenuated by near green")
+        assert.is_true(pixel.g >= 126 and pixel.g <= 129, "near green should be the last blended surface")
+        assert.are.equal(2, renderer.meshes.count)
+        assert.is_true(renderer.meshes.transparency)
+        assert.is_not_nil(renderer.meshes._backend.blendPipeline)
+        assert.is_not_nil(renderer.meshes._backend._blendSorted)
         renderer:destroy()
     end)
 

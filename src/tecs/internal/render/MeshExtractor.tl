@@ -25,6 +25,7 @@ local max <const> = math.max
 
 local record MeshExtractorOptions
     capacity: integer
+    transparency: boolean
 end
 
 local record MeshDraw
@@ -48,6 +49,8 @@ local record MeshExtractor
     _slot: integer
     _drawByAsset: {integer: MeshDraw}
     _materialSlotByAsset: {integer: integer}
+    _alphaModeBySlot: {integer: integer}
+    _transparency: boolean
     _extractSeconds: number
 end
 
@@ -60,12 +63,15 @@ function MeshExtractor.create(options: MeshExtractorOptions): MeshExtractor
     self._slot = 0
     self._drawByAsset = {}
     self._materialSlotByAsset = {}
+    self._alphaModeBySlot = {[0] = 0}
+    self._transparency = options.transparency
     self._extractSeconds = 0.0
     return self
 end
 
-function MeshExtractor:registerMaterial(asset: integer, slot: integer)
+function MeshExtractor:registerMaterial(asset: integer, slot: integer, alphaMode: integer)
     self._materialSlotByAsset[asset] = slot
+    self._alphaModeBySlot[slot] = alphaMode
 end
 
 function MeshExtractor:setStaging(
@@ -106,6 +112,7 @@ function MeshExtractor:extract(packet: MeshFramePacket)
     local written = 0
     local dropped = 0
     local missing = 0
+    local blended = 0
 
     for archetype, length in self._renderables:iter() do
         local transforms <const> = archetype:get(Transform3D)
@@ -163,7 +170,11 @@ function MeshExtractor:extract(packet: MeshFramePacket)
                     instances[base + 9] = transform.scaleZ
                     instances[base + 10] = meshSlot
                     instances[base + 11] = materialSlot
-                    instances[base + 12] = 0.0
+                    local alphaMode <const> = self._transparency and self._alphaModeBySlot[materialSlot] or 0
+                    instances[base + 12] = alphaMode
+                    if alphaMode == 2 then
+                        blended = blended + 1
+                    end
                     instances[base + 13] = tint.r
                     instances[base + 14] = tint.g
                     instances[base + 15] = tint.b
@@ -210,6 +221,7 @@ function MeshExtractor:extract(packet: MeshFramePacket)
     packet.count = written
     packet.dropped = dropped
     packet.rewritten = written
+    packet.blendCount = blended
     self._extractSeconds = timing.finish(EXTRACT, started)
 
     if missing ~= 0 then

@@ -70,6 +70,7 @@ describe("assets", function()
         assert.are.equal(1, model.images[1].width)
         assert.are.equal(1, #model.materials)
         assert.are.equal(1, model.materials[1].baseColorImage)
+        assert.are.equal(2, model.materials[1].alphaMode)
         assert.are.equal(1, #model.draws)
         assert.are.equal(1, model.draws[1].mesh)
         model:release()
@@ -83,6 +84,14 @@ describe("assets", function()
 
         assert.are.equal("failed", loading.status)
         assert.is_truthy(loading.error:find("unsupported skinning or animation", 1, true))
+    end)
+
+    it("rejects invalid glTF alpha modes instead of treating them as opaque", function()
+        local loading = assets.loadGLTF("spec/fixtures/invalid-alpha.gltf")
+        assets.waitAll(2000)
+
+        assert.are.equal("failed", loading.status)
+        assert.is_truthy(loading.error:find("invalid alpha mode FADE", 1, true))
     end)
 
     it("returns a pending future immediately and settles it later", function()

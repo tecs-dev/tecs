@@ -10,6 +10,11 @@ nor allocated.
 This division is the 3D extension seam. A mesh domain can be prepared beside
 the sprite domain and contribute its own pass bodies without either domain
 branching per entity on what kind of renderer it belongs to.
+
+When both domains contribute transparent work, meshes draw first and sprites
+draw second. Their camera spaces have no universal cross-domain depth order,
+so the fixed order makes sprites deterministic overlays while each domain
+retains its own back-to-front sort.
 ]=]
 
 local type types = require("tecs.types")
@@ -118,7 +123,6 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
         contributions.shadowActive = function(): boolean return sprites:_castsThisFrame() end
         contributions.occluders = function(context: Deferred.PassContext) sprites:_recordOccluders(context) end
         contributions.dropShadows = function(context: Deferred.PassContext) sprites:_recordDropShadows(context) end
-        contributions.forward = function(context: Deferred.PassContext) sprites:_recordForward(context) end
     end
     if sprites ~= nil and meshes ~= nil then
         contributions.geometry = function(context: Deferred.PassContext)
@@ -129,6 +133,18 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
         contributions.geometry = function(context: Deferred.PassContext) sprites:_recordGeometry(context) end
     elseif meshes ~= nil then
         contributions.geometry = function(context: Deferred.PassContext) meshes:_recordGeometry(context) end
+    end
+    if sprites ~= nil and meshes ~= nil then
+        contributions.forward = function(context: Deferred.PassContext)
+            -- Mesh transparency is scene content; sprites land afterwards so
+            -- the peer 2D domain retains deterministic overlay semantics.
+            meshes:_recordForward(context)
+            sprites:_recordForward(context)
+        end
+    elseif sprites ~= nil then
+        contributions.forward = function(context: Deferred.PassContext) sprites:_recordForward(context) end
+    elseif meshes ~= nil then
+        contributions.forward = function(context: Deferred.PassContext) meshes:_recordForward(context) end
     end
     return self
 end

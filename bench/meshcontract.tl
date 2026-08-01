@@ -7,6 +7,8 @@
 ---   BENCH_MESH_COUNT     Entities per sample. Defaults to 100000.
 ---   BENCH_MESH_WARMUP    Untimed extractions. Defaults to 120.
 ---   BENCH_MESH_SAMPLES   Measured extractions. Defaults to 61.
+---   BENCH_MESH_BLEND_EVERY  Classifies every Nth entity as blended. Zero,
+---                           the default, keeps the optional lane disabled.
 
 local getenv <const> = os.getenv
 local floor <const> = math.floor
@@ -48,12 +50,26 @@ local function positiveInteger(name: string, default: integer): integer
     return floor(value)
 end
 
+local function nonNegativeInteger(name: string, default: integer): integer
+    local text <const> = getenv(name)
+    if text == nil then
+        return default
+    end
+    local value <const> = tonumber(text)
+    if value == nil or value < 0 or value ~= floor(value) then
+        error(format("bench: %s must be a non-negative integer", name), 0)
+    end
+    return floor(value)
+end
+
 local COUNT <const> = positiveInteger("BENCH_MESH_COUNT", 100000)
 local WARMUP <const> = positiveInteger("BENCH_MESH_WARMUP", 120)
 local SAMPLES <const> = positiveInteger("BENCH_MESH_SAMPLES", 61)
+local BLEND_EVERY <const> = nonNegativeInteger("BENCH_MESH_BLEND_EVERY", 0)
 
 local world <const> = tecs.ecs.newWorld()
 local asset <const> = components.meshId("bench://unit-mesh")
+local blendAsset <const> = components.meshMaterialId("bench://transparent")
 world:batchSpawn(
     COUNT,
     {Transform3D, Mesh, Bounds3D, MeshMaterial, Tint, Renderable3D},
@@ -87,8 +103,13 @@ world:batchSpawn(
             bound.radius = 1.0
 
             local material = materials[row]
-            material.asset = 0
-            material.slot = 0
+            if BLEND_EVERY > 0 and row % BLEND_EVERY == 0 then
+                material.asset = blendAsset
+                material.slot = 1
+            else
+                material.asset = 0
+                material.slot = 0
+            end
 
             local tint = tints[row]
             tint.r = 1.0
@@ -104,9 +125,12 @@ local instances <const> = loader.newArray("float[?]", COUNT * meshlayout.INSTANC
 local spheres <const> = loader.newArray("float[?]", COUNT * meshlayout.BOUND_FLOATS)
 local commands <const> = loader.newArray("SDL_GPUIndexedIndirectDrawCommand[?]", COUNT)
 local packet <const> = MeshFramePacket.create()
-local extractor <const> = MeshExtractor.create({capacity = COUNT})
+local extractor <const> = MeshExtractor.create({capacity = COUNT, transparency = BLEND_EVERY > 0})
 extractor:setStaging(0, instances, spheres, commands)
 extractor:registerMesh(asset, 0, 0, 0, 3)
+if BLEND_EVERY > 0 then
+    extractor:registerMaterial(blendAsset, 1, 2)
+end
 extractor:install(world, packet, nil)
 
 local function extract(): integer
@@ -130,6 +154,9 @@ for sample = 1, SAMPLES do
     if extract() ~= COUNT then
         error("bench: extraction dropped a mesh", 0)
     end
+    if BLEND_EVERY > 0 and packet.blendCount ~= floor(COUNT / BLEND_EVERY) then
+        error("bench: extraction misclassified transparent meshes", 0)
+    end
     samples[sample] = os.clock() - started
 end
 local heapAfter <const> = (collect("count") as number) * 1024.0
@@ -141,7 +168,8 @@ local p95 <const> = samples[max(1, ceil(SAMPLES * 0.95))]
 local heapPerFrame <const> = max(0.0, heapAfter - heapBefore) / SAMPLES
 print(
     format(
-        "mesh extract: %d entities  p50 %.3f ms  p95 %.3f ms  %.1f ns/entity  heap %.0f B/frame",
+        "mesh extract (%s): %d entities  p50 %.3f ms  p95 %.3f ms  %.1f ns/entity  heap %.0f B/frame",
+        BLEND_EVERY > 0 and ("blend every " .. BLEND_EVERY) or "opaque",
         COUNT,
         p50 * 1000.0,
         p95 * 1000.0,

@@ -281,7 +281,10 @@ local function decodePrimitive(
         if source.components ~= 1 then
             error(("tecs: %s indices are not scalar"):format(name), 0)
         end
-        if source.normalized or (source.componentType ~= 5121 and source.componentType ~= 5123 and source.componentType ~= 5125) then
+        if
+            source.normalized
+            or (source.componentType ~= 5121 and source.componentType ~= 5123 and source.componentType ~= 5125)
+        then
             error(("tecs: %s indices do not use an unsigned integer type"):format(name), 0)
         end
         indexCount = source.count
@@ -366,12 +369,10 @@ local function decodePrimitive(
             local determinant <const> = du1 * dv2 - dv1 * du2
             if math.abs(determinant) > 1e-20 then
                 local inverse <const> = 1.0 / determinant
-                local tx, ty, tz <const> =
-                    (x1 * dv2 - x2 * dv1) * inverse,
+                local tx, ty, tz <const> = (x1 * dv2 - x2 * dv1) * inverse,
                     (y1 * dv2 - y2 * dv1) * inverse,
                     (z1 * dv2 - z2 * dv1) * inverse
-                local bx, by, bz <const> =
-                    (x2 * du1 - x1 * du2) * inverse,
+                local bx, by, bz <const> = (x2 * du1 - x1 * du2) * inverse,
                     (y2 * du1 - y1 * du2) * inverse,
                     (z2 * du1 - z1 * du2) * inverse
                 add3(generatedTangents, a, tx, ty, tz)
@@ -389,7 +390,9 @@ local function decodePrimitive(
             vertices[at + 6], vertices[at + 7] = value(tangents, row, 0), value(tangents, row, 1)
             vertices[at + 8], vertices[at + 9] = value(tangents, row, 2), value(tangents, row, 3)
         else
-            local nx, ny, nz <const> = vertices[at + 3] as number, vertices[at + 4] as number, vertices[at + 5] as number
+            local nx, ny, nz <const> = vertices[at + 3] as number,
+                vertices[at + 4] as number,
+                vertices[at + 5] as number
             local tx, ty, tz = nz, 0.0, -nx
             local handedness = 1.0
             if generatedTangents ~= nil then
@@ -400,14 +403,17 @@ local function decodePrimitive(
                 tx, ty, tz = tx - nx * projection, ty - ny * projection, tz - nz * projection
             end
             if math.abs(tx) + math.abs(ty) + math.abs(tz) < 1e-20 then
-                tx, ty, tz = math.abs(nx) < 0.9 and 0 or 1, math.abs(nx) < 0.9 and nz or 0, math.abs(nx) < 0.9 and -ny or 0
+                tx, ty, tz = math.abs(nx) < 0.9 and 0 or 1,
+                    math.abs(nx) < 0.9 and nz or 0,
+                    math.abs(nx) < 0.9 and -ny or 0
             end
             tx, ty, tz = normalize3(tx, ty, tz)
             if generatedBitangents ~= nil then
                 local bx <const> = generatedBitangents[row * 3] as number
                 local by <const> = generatedBitangents[row * 3 + 1] as number
                 local bz <const> = generatedBitangents[row * 3 + 2] as number
-                handedness = (ny * tz - nz * ty) * bx + (nz * tx - nx * tz) * by + (nx * ty - ny * tx) * bz < 0 and -1 or 1
+                handedness = (ny * tz - nz * ty) * bx + (nz * tx - nx * tz) * by + (nx * ty - ny * tx) * bz < 0 and -1
+                    or 1
             end
             vertices[at + 6], vertices[at + 7], vertices[at + 8], vertices[at + 9] = tx, ty, tz, handedness
         end
@@ -451,10 +457,22 @@ local function localMatrix(node: {string: any}): {number}
     local xy, xz, yz <const> = x * y, x * z, y * z
     local wx, wy, wz <const> = w * x, w * y, w * z
     return {
-        (1 - 2 * (yy + zz)) * s[1], (2 * (xy + wz)) * s[1], (2 * (xz - wy)) * s[1], 0,
-        (2 * (xy - wz)) * s[2], (1 - 2 * (xx + zz)) * s[2], (2 * (yz + wx)) * s[2], 0,
-        (2 * (xz + wy)) * s[3], (2 * (yz - wx)) * s[3], (1 - 2 * (xx + yy)) * s[3], 0,
-        t[1], t[2], t[3], 1,
+        (1 - 2 * (yy + zz)) * s[1],
+        (2 * (xy + wz)) * s[1],
+        (2 * (xz - wy)) * s[1],
+        0,
+        (2 * (xy - wz)) * s[2],
+        (1 - 2 * (xx + zz)) * s[2],
+        (2 * (yz + wx)) * s[2],
+        0,
+        (2 * (xz + wy)) * s[3],
+        (2 * (yz - wx)) * s[3],
+        (1 - 2 * (xx + yy)) * s[3],
+        0,
+        t[1],
+        t[2],
+        t[3],
+        1,
     }
 end
 
@@ -479,17 +497,17 @@ local function decompose(m: {number}): {string: number}
     if sx <= 1e-20 or sy <= 1e-20 or sz <= 1e-20 then
         error("tecs: a glTF node transform has a zero scale axis", 0)
     end
-    local determinant <const> =
-        m[1] * (m[6] * m[11] - m[7] * m[10])
-        - m[5] * (m[2] * m[11] - m[3] * m[10])
-        + m[9] * (m[2] * m[7] - m[3] * m[6])
+    local determinant <const> = m[1] * (m[6] * m[11] - m[7] * m[10]) - m[5] * (m[2] * m[11] - m[3] * m[10]) + m[9] * (
+        m[2] * m[7] - m[3] * m[6]
+    )
     if determinant < 0 then
         sx = -sx
     end
     local r00, r01, r02 <const> = m[1] / sx, m[5] / sy, m[9] / sz
     local r10, r11, r12 <const> = m[2] / sx, m[6] / sy, m[10] / sz
     local r20, r21, r22 <const> = m[3] / sx, m[7] / sy, m[11] / sz
-    if math.abs(r00 * r01 + r10 * r11 + r20 * r21) > 1e-4
+    if
+        math.abs(r00 * r01 + r10 * r11 + r20 * r21) > 1e-4
         or math.abs(r00 * r02 + r10 * r12 + r20 * r22) > 1e-4
         or math.abs(r01 * r02 + r11 * r12 + r21 * r22) > 1e-4
     then
@@ -513,7 +531,18 @@ local function decompose(m: {number}): {string: number}
         local scale <const> = math.sqrt(1.0 + r22 - r00 - r11) * 2
         qw, qx, qy, qz = (r10 - r01) / scale, (r02 + r20) / scale, (r12 + r21) / scale, 0.25 * scale
     end
-    return {x = m[13], y = m[14], z = m[15], rotationX = qx, rotationY = qy, rotationZ = qz, rotationW = qw, scaleX = sx, scaleY = sy, scaleZ = sz}
+    return {
+        x = m[13],
+        y = m[14],
+        z = m[15],
+        rotationX = qx,
+        rotationY = qy,
+        rotationZ = qz,
+        rotationW = qw,
+        scaleX = sx,
+        scaleY = sy,
+        scaleZ = sz,
+    }
 end
 
 function gltf.decodeFile(path: string): {string: any}
@@ -581,7 +610,8 @@ function gltf.decodeFile(path: string): {string: any}
         end
         if texture.sampler ~= nil then
             local sampler <const> = (document.samplers as {{string: any}} or {})[(texture.sampler as integer) + 1]
-            if sampler == nil
+            if
+                sampler == nil
                 or (sampler.wrapS ~= nil and sampler.wrapS ~= 10497)
                 or (sampler.wrapT ~= nil and sampler.wrapT ~= 10497)
                 or (sampler.magFilter ~= nil and sampler.magFilter ~= 9729)
@@ -608,8 +638,16 @@ function gltf.decodeFile(path: string): {string: any}
 
     local materials: {{string: any}} = {}
     for index, source in ipairs(document.materials as {{string: any}} or {}) do
-        if source.alphaMode == "BLEND" then
-            error(("tecs: %s material %d needs the future transparent mesh lane"):format(path, index - 1), 0)
+        if
+            source.alphaMode ~= nil
+            and source.alphaMode ~= "OPAQUE"
+            and source.alphaMode ~= "MASK"
+            and source.alphaMode ~= "BLEND"
+        then
+            error(
+                ("tecs: %s material %d has invalid alpha mode %s"):format(path, index - 1, tostring(source.alphaMode)),
+                0
+            )
         end
         if source.doubleSided == true then
             error(("tecs: %s material %d needs unsupported double-sided rendering"):format(path, index - 1), 0)
@@ -629,19 +667,28 @@ function gltf.decodeFile(path: string): {string: any}
                 .. "#material-"
                 .. (index - 1)
                 .. (source.name ~= nil and (":" .. (source.name as string)) or ""),
-            model = source.extensions ~= nil and (source.extensions as {string: any}).KHR_materials_unlit ~= nil and 1 or 0,
+            model = source.extensions ~= nil and (source.extensions as {string: any}).KHR_materials_unlit ~= nil and 1
+                or 0,
+            alphaMode = source.alphaMode == "BLEND" and 2 or source.alphaMode == "MASK" and 1 or 0,
             baseColorImage = textureImage(pbr.baseColorTexture as {string: any}),
             normalImage = textureImage(source.normalTexture as {string: any}),
             metallicRoughnessImage = textureImage(pbr.metallicRoughnessTexture as {string: any}),
             occlusionImage = textureImage(source.occlusionTexture as {string: any}),
             emissiveImage = textureImage(source.emissiveTexture as {string: any}),
             alphaCutoff = source.alphaMode == "MASK" and (source.alphaCutoff as number or 0.5) or 0.0,
-            baseR = baseFactor[1], baseG = baseFactor[2], baseB = baseFactor[3], baseA = baseFactor[4],
-            emissiveR = emissive[1], emissiveG = emissive[2], emissiveB = emissive[3],
+            baseR = baseFactor[1],
+            baseG = baseFactor[2],
+            baseB = baseFactor[3],
+            baseA = baseFactor[4],
+            emissiveR = emissive[1],
+            emissiveG = emissive[2],
+            emissiveB = emissive[3],
             metallic = pbr.metallicFactor as number or 1.0,
             roughness = pbr.roughnessFactor as number or 1.0,
-            normalScale = source.normalTexture ~= nil and ((source.normalTexture as {string: any}).scale as number or 1.0) or 1.0,
-            occlusionStrength = source.occlusionTexture ~= nil and ((source.occlusionTexture as {string: any}).strength as number or 1.0) or 1.0,
+            normalScale = source.normalTexture ~= nil
+                and ((source.normalTexture as {string: any}).scale as number or 1.0) or 1.0,
+            occlusionStrength = source.occlusionTexture ~= nil
+                and ((source.occlusionTexture as {string: any}).strength as number or 1.0) or 1.0,
         }
     end
 

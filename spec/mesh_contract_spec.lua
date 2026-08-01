@@ -208,10 +208,10 @@ describe("the 3D scene contract", function()
     end)
 
     describe("MeshExtractor", function()
-        local function extractorScene(capacity)
+        local function extractorScene(capacity, transparency)
             local world = tecs.ecs.newWorld()
             local packet = MeshFramePacket.create()
-            local extractor = MeshExtractor.create({ capacity = capacity })
+            local extractor = MeshExtractor.create({ capacity = capacity, transparency = transparency })
             local instances = loader.newArray("float[?]", capacity * 16)
             local bounds = loader.newArray("float[?]", capacity * 4)
             local commands = loader.newArray("SDL_GPUIndexedIndirectDrawCommand[?]", capacity)
@@ -282,6 +282,26 @@ describe("the 3D scene contract", function()
                 found = found + length
             end
             assert.are.equal(1, found)
+        end)
+
+        it("classifies resident blended materials without inspecting textures", function()
+            local world, extractor, packet, instances = extractorScene(2, true)
+            local meshAsset = components.meshId("procedural://glass")
+            local materialAsset = components.meshMaterialId("procedural://glass-material")
+            extractor:registerMesh(meshAsset, 0, 0, 0, 3)
+            extractor:registerMaterial(materialAsset, 1, 2)
+            world:spawn(
+                tecs.Transform3D(),
+                components.Mesh(meshAsset, 0),
+                components.Bounds3D(),
+                components.MeshMaterial(materialAsset, 1),
+                components.Tint(),
+                components.Renderable3D()
+            )
+
+            extractor:extract(packet)
+            assert.are.equal(1, packet.blendCount)
+            assert.are.equal(2, instances[12])
         end)
 
         it("raises for unregistered geometry after exhausting the query", function()

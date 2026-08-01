@@ -26,6 +26,8 @@ local record MeshFramePacket
     dropped: integer
     --- Mesh instances whose staging bytes extraction rewrote this frame.
     rewritten: integer
+    --- Resident instances whose materials require the optional forward lane.
+    blendCount: integer
 
     --- World-space camera x copied during extraction.
     cameraX: number
@@ -70,6 +72,7 @@ function MeshFramePacket.create(): MeshFramePacket
     self.count = 0
     self.dropped = 0
     self.rewritten = 0
+    self.blendCount = 0
     self.cameraX = 0.0
     self.cameraY = 0.0
     self.cameraZ = 0.0

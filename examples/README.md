@@ -17,6 +17,7 @@ domain, so the image proves the mesh lane owns its complete extraction,
 staging, pipeline, and draw path.
 
 `gltf3d.tl` loads a textured glTF 2.0 scene asynchronously, registers its
-geometry, image, and metallic-roughness material with the mesh domain, then
-spawns the flattened scene primitives. It exercises the asset-worker to GPU
-residency path in one small example.
+geometry, image, and alpha-blended metallic-roughness material with a
+transparency-enabled mesh domain, then spawns the flattened scene primitives.
+It exercises the asset-worker through GPU residency and the sorted forward
+lane in one small example.

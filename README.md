@@ -32,13 +32,13 @@ start a graphics stack.
   deterministic random streams.
 - GPU-driven 2D rendering with materials, lights, shadows, layers, text,
   sprite animation, and particles.
-- Optional opaque 3D rendering with indexed mesh residency, ordered GPU
-  frustum culling, texture and PBR material residency, and static glTF/GLB
-  loading on the asset worker.
+- Optional 3D rendering with indexed mesh residency, ordered GPU frustum
+  culling, texture and PBR material residency, static glTF/GLB loading, and an
+  independently allocated transparent forward lane.
 - Input, audio, physics, assets, workers, async I/O, HTTP, file watching, and
   a debug server.
 
-Transparent, skinned, and animated 3D rendering, post-processing, tiled maps,
+Skinned and animated 3D rendering, mesh shadows, post-processing, tiled maps,
 and multi-camera are not yet built.
 
 ## Build
