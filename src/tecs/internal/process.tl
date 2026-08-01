@@ -399,8 +399,9 @@ function ReaderImpl:readInto(destination: IOBuffer, offset?: integer, maxBytes?:
     end
 end
 
-function ReaderImpl:close()
+function ReaderImpl:close(): boolean, string
     closeReader(self, false)
+    return true
 end
 
 function WriterImpl:isClosed(): boolean
@@ -560,8 +561,9 @@ local function closeState(state: State)
     destroyWhenReleased(state)
 end
 
-function ProcessImpl:close()
+function ProcessImpl:close(): boolean, string
     closeState(self._state)
+    return true
 end
 
 local function byteRange(bytes: string | ByteView): loader.BytePointer, integer

@@ -347,8 +347,8 @@ bytes:close()
 -- #endregion tecs.io.Reader.readInto
 
 -- #region tecs.io.transfer
-local source <const> = assert(tecs.io.files.openRead("save.bin"))
-local destination <const> = assert(tecs.io.files.openWrite("save.copy"))
+local source <const> = assert(tecs.io.files.open("save.bin"))
+local destination <const> = assert(tecs.io.files.open("save.copy", "w"))
 local count <const>, reason = tecs.io.transfer(source, destination)
 
 assert(count, reason)
@@ -409,14 +409,14 @@ assert(writer:close())
 destination:close()
 -- #endregion tecs.io.Writer.flush
 
--- #region tecs.io.Writer.close
+-- #region tecs.Closeable.close
 local destination <const> = tecs.io.newFileStream("save.bin")
 local writer <const> = assert(destination:newWriter())
 
 assert(writer:write("complete"))
 assert(writer:close())
 destination:close()
--- #endregion tecs.io.Writer.close
+-- #endregion tecs.Closeable.close
 
 -- #region tecs.io.Stream.contentLength
 local source <const> = tecs.io.newStringStream("four")

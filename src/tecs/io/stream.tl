@@ -573,12 +573,13 @@ function MemoryReader:transferTo(destination: Writer): integer, string
     return pump.transferBuffered(self, destination)
 end
 
-function MemoryReader:close()
+function MemoryReader:close(): boolean, string
     if self._view ~= nil then
         self._view:close()
         self._view = nil
     end
     self._closed = true
+    return true
 end
 
 function HandleReader:read(count: integer): string, string
@@ -609,8 +610,9 @@ function HandleReader:readInto(destination: IOBuffer, offset?: integer, count?: 
     return #piece
 end
 
-function HandleReader:close()
+function HandleReader:close(): boolean, string
     self._closed = true
+    return true
 end
 
 function HandleWriter:write(bytes: string): boolean, string
@@ -918,8 +920,9 @@ end
 function StringStream:isReplayable(): boolean
     return true
 end
-function StringStream:close()
+function StringStream:close(): boolean, string
     close(self)
+    return true
 end
 
 function StringStream:newReader(): Reader, string
@@ -979,13 +982,14 @@ end
 function BufferStream:isReplayable(): boolean
     return true
 end
-function BufferStream:close()
+function BufferStream:close(): boolean, string
     if not self._closed then
         self._closed = true
         if self._ownsBuffer then
             self._buffer:close()
         end
     end
+    return true
 end
 function BufferStream:newReader(): Reader, string
     if unavailable(self) or self._buffer:isReleased() then
@@ -1079,8 +1083,9 @@ end
 function ByteStream:isReplayable(): boolean
     return true
 end
-function ByteStream:close()
+function ByteStream:close(): boolean, string
     close(self)
+    return true
 end
 
 function ByteStream:newReader(): Reader, string
@@ -1140,12 +1145,13 @@ end
 function ViewStream:isReplayable(): boolean
     return true
 end
-function ViewStream:close()
+function ViewStream:close(): boolean, string
     if self._view ~= nil then
         self._view:close()
         self._view = nil
     end
     close(self)
+    return true
 end
 function ViewStream:newReader(): Reader, string
     if unavailable(self) or self._view == nil or self._view:isReleased() then
@@ -1203,22 +1209,23 @@ end
 function FileStream:isReplayable(): boolean
     return true
 end
-function FileStream:close()
+function FileStream:close(): boolean, string
     close(self)
+    return true
 end
 
 function FileStream:newReader(): Reader, string
     if unavailable(self) then
         return nil, "stream is closed"
     end
-    return getFiles().openRead(self._path)
+    return getFiles().open(self._path, "r")
 end
 
 function FileStream:newWriter(): Writer, string
     if unavailable(self) then
         return nil, "stream is closed"
     end
-    return getFiles().openWrite(self._path)
+    return getFiles().open(self._path, "w")
 end
 
 function FileStream:readAll(maxBytes?: integer): string, string
@@ -1263,8 +1270,9 @@ end
 function HandleStream:isReplayable(): boolean
     return false
 end
-function HandleStream:close()
+function HandleStream:close(): boolean, string
     close(self)
+    return true
 end
 
 function HandleStream:newReader(): Reader, string
@@ -1478,8 +1486,8 @@ local function metadataIsReplayable(self: MetadataState): boolean
     return self._source:isReplayable()
 end
 
-local function metadataClose(self: MetadataState)
-    self._source:close()
+local function metadataClose(self: MetadataState): boolean, string
+    return self._source:close()
 end
 
 local function metadataNewReader(self: MetadataState): Reader, string

@@ -12,15 +12,16 @@ local type Store = require("tecs.data.store")
 
 --- An owned value that releases its active lifetime explicitly.
 ---
---- `close` may be called through this structural interface when the caller
---- does not need a more specific result. Implementations may return additional
---- status values, and their own contracts define whether repeated calls are
---- safe.
+--- `close` may report a delayed finalization failure. Every implementation
+--- returns true on success. Its own contract defines whether repeated calls
+--- are safe.
 local interface Closeable
     --- Releases the value's active lifetime.
     ---
     --- @param self The value to close.
-    close: function(self: Closeable)
+    --- @return Returns true when finalization succeeds.
+    --- @return Returns a finalization reason when the first return is false.
+    close: function(self: Closeable): boolean, string
 end
 
 --- Public type definitions for Tecs.
@@ -556,12 +557,6 @@ local record types
             --- @return This cursor.
             --- @return The iterator's initial control value.
             group: function(self, groupId: integer): (GroupIterFn, Cursor, any)
-
-            --- Close this cursor's deferred scope.
-            ---
-            --- Safe to call before iteration, after natural exhaustion, or
-            --- more than once. A closed cursor cannot be reused.
-            close: function(self)
         end
 
         --- The step function `query:iter()` returns. Yields the archetype,

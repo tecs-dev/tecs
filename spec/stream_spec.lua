@@ -222,7 +222,7 @@ describe("tecs.io stream endpoints", function()
                 owned:close()
             end,
         }
-        local reader = assert(tecs.io.files.openRead(path))
+        local reader = assert(tecs.io.files.open(path))
         assert.are.equal(1, reader:readInto(proxy, 4, 10))
         assert.are.equal(5, proxy:length())
         assert.are.equal("ab\0\0x", proxy:getString())
@@ -419,62 +419,62 @@ end)
 describe("tecs.io transfers", function()
     it("persists fallback writer flushes and accepts later writes", function()
         local backend = adapter.storage()
-        local originalOpenWrite = backend.openWrite
+        local originalOpen = backend.open
         local originalWrite = backend.write
         local writes = {}
-        backend.openWrite = nil
+        backend.open = nil
         backend.write = function(_, bytes)
             writes[#writes + 1] = bytes
             return true
         end
 
         local ran, reason = pcall(function()
-            local writer = assert(tecs.io.files.openWrite("/virtual/flush"))
+            local writer = assert(tecs.io.files.open("/virtual/flush", "w"))
             assert.is_true(writer:write("a"))
             assert.is_true(writer:flush())
             assert.is_true(writer:write("b"))
             assert.is_true(writer:flush())
             assert.is_true(writer:close())
         end)
-        backend.openWrite = originalOpenWrite
+        backend.open = originalOpen
         backend.write = originalWrite
         assert.is_true(ran, reason)
-        assert.are.same({ "a", "ab", "ab" }, writes)
+        assert.are.same({ "", "a", "ab", "ab" }, writes)
     end)
 
     it("appends only new fallback writer bytes after each flush", function()
         local backend = adapter.storage()
-        local originalOpenWrite = backend.openWrite
+        local originalOpen = backend.open
         local originalAppend = backend.append
         local appends = {}
-        backend.openWrite = nil
+        backend.open = nil
         backend.append = function(_, bytes)
             appends[#appends + 1] = bytes
             return true
         end
 
         local ran, reason = pcall(function()
-            local writer = assert(tecs.io.files.openWrite("/virtual/append", "append"))
+            local writer = assert(tecs.io.files.open("/virtual/append", "a"))
             assert.is_true(writer:write("a"))
             assert.is_true(writer:flush())
             assert.is_true(writer:write("b"))
             assert.is_true(writer:flush())
             assert.is_true(writer:close())
         end)
-        backend.openWrite = originalOpenWrite
+        backend.open = originalOpen
         backend.append = originalAppend
 
         assert.is_true(ran, reason)
-        assert.are.same({ "a", "b" }, appends)
+        assert.are.same({ "", "a", "b" }, appends)
     end)
 
     it("attempts every endpoint close and fails normal completion", function()
         local files = tecs.io.files
-        local originalOpenRead = files.openRead
+        local originalOpen = files.open
         local readerClosed = false
         local writerClosed = false
         local read = false
-        files.openRead = function()
+        files.open = function()
             return {
                 read = function()
                     return ""
@@ -525,7 +525,7 @@ describe("tecs.io transfers", function()
         }
 
         local copied, reason = ioModule.newFileStream("/virtual/source"):transferTo(destination)
-        files.openRead = originalOpenRead
+        files.open = originalOpen
 
         assert.is_nil(copied)
         assert.matches("reader close exploded", reason, 1, true)
@@ -566,7 +566,7 @@ describe("tecs.io transfers", function()
     it("rejects oversized known sources before opening them", function()
         local files = tecs.io.files
         local originalInfo = files.info
-        local originalOpenRead = files.openRead
+        local originalOpen = files.open
         local opened = false
         files.info = function()
             return {
@@ -577,7 +577,7 @@ describe("tecs.io transfers", function()
                 accessedAt = 0,
             }
         end
-        files.openRead = function()
+        files.open = function()
             opened = true
             return {
                 read = function()
@@ -591,7 +591,7 @@ describe("tecs.io transfers", function()
         end
         local reading, reason = ioModule.newFileStream("/virtual/huge"):transferToBuffer()
         files.info = originalInfo
-        files.openRead = originalOpenRead
+        files.open = originalOpen
 
         assert.is_nil(reading)
         assert.is_string(reason)

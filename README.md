@@ -1453,9 +1453,10 @@ chunks until completion, close both endpoints, and return the buffer. The call
 site therefore owns the honest cost of moving the bytes without allocating
 transfer storage each time. Code that must overlap a large transfer with the
 main loop can run the same operation in a worker instead of turning every
-stream transfer into scheduled main-thread state. `openWrite` accepts explicit
-replacement and append modes. A platform backend without it accumulates
-replacement chunks, while append mode flushes only bytes not already appended.
+stream transfer into scheduled main-thread state. `files.open` uses Lua's six
+standard file modes instead of separate read, write, append, and seekable-open
+functions. A platform backend without direct cursors buffers the file, while
+append modes flush only bytes not already appended.
 Stable buffer sources bypass the scratch copy, strings retain their immutable
 Lua storage, and `transferToBuffer` returns the retained object for a stream
 created by `Buffer:newStream` instead of materializing a new one.
@@ -1535,18 +1536,17 @@ obvious call: `SDL_GetPathInfo` behind `info`, `exists`, `isFile` and
 `isDirectory`, Rust filesystem metadata behind `isSymlink`,
 `SDL_GlobDirectory` behind one-level backend enumeration, `SDL_LoadFile`
 behind `read`, then `createDirectory`, `remove`, `rename`, `copy`, `write`,
-`writeAtomic`, `append`,
+`writeAtomic`, the internal append primitive,
 `currentDirectory` and `userFolder`. `lines` and `load` compose over the one
 watched whole-file read rather than opening a second path around it. No virtual
 filesystem and no invented path scheme, so a failure is the platform's failure
 and the name says which call to read about. Like the process half it initializes
 no subsystem and is more useful with no window than with one.
 
-`openWrite`, `openSeekableWrite`, and `openRead` are the operations that are not
-one call, and they are the exception the streaming body needed: a backend that
-can open a file is asked to, and one that cannot is buffered over, so a
-download that ends in a file and an upload read out of one both work whatever
-a port supplied.
+`open` is the operation that is not necessarily one backend call, and it is the
+exception the streaming body needs: a backend that can open a file is asked to,
+and one that cannot is buffered over, so reads, replacement, patching, and
+append all work whatever a port supplied.
 
 `writeAtomic` is the operation ordinary `write` deliberately is not. The SDL
 filesystem backend creates an exclusive neighboring temporary file, writes and
@@ -1580,25 +1580,15 @@ destination before relinquishing cleanup. Portable permissions stop at a
 read-only bit. POSIX modes and platform ACLs would pretend to have a
 cross-platform meaning they do not share.
 
-`openRead` returns a `SeekableReader`, not merely the basic directional
-`Reader`. Files have an addressable byte space even when a platform's storage
-API can only return their complete contents, so a backend with a real seek
-opens one and a backend without it gets an in-memory cursor over its required
-whole-file `read`. Seeking therefore stays off `Reader`: a transform, socket,
-or pipe cannot implement it honestly, while the common file constructor needs
-no parallel random-access variant. Direct buffer reads stay on `Reader`
-because memory, transforms, sockets, pipes, and files can all implement them
-without an intermediate Lua string. The specialized result adds only `size`,
-`tell`, and `seek`.
-
-`openSeekableWrite` is the symmetric patching operation. Replacement starts
-with an empty file, while update preserves an existing file; both start at byte
-zero and can revisit any position through the current end. The SDL backend
-writes through one `SDL_IOStream`, so patching a length or table offset neither
-copies the file nor reopens it. A backend without a cursor retains the bytes and
-writes the complete result on flush or close. Append remains on `openWrite`,
-because an append handle whose operating system forces every write to the end
-cannot also promise that a seek controls where the next write lands.
+`open` returns one `File`, not separate reader and writer cursor types. Files
+have an addressable byte space even when a platform's storage API can only
+return their complete contents, so every mode provides `size`, `tell`, and
+`seek`. The mode gates directional operations: `r` reads, `w` replaces, `a`
+appends, and `+` adds the other direction. Append writes always land at the end
+even after a seek. The SDL backend uses one `SDL_IOStream`; a backend without a
+cursor retains the bytes and writes or appends them through its whole-file
+primitives. Seeking remains off the general `Reader` and `Writer` contracts
+because transforms, sockets, and pipes cannot implement it honestly.
 
 Nothing here reaches the operating system, because `adapter` names storage as a
 seam and a seam that covered only _where_ content is would leave every read of a

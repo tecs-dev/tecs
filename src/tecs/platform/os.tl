@@ -409,9 +409,9 @@ function SignalListenerImpl:next(): ProcessSignal
     return nil
 end
 
-function SignalListenerImpl:close()
+function SignalListenerImpl:close(): boolean, string
     if self._closed then
-        return
+        return true
     end
     self._closed = true
     listeners[self] = nil
@@ -420,6 +420,7 @@ function SignalListenerImpl:close()
         runtime.unregister("signals")
         R.tecsSignalsUninstall()
     end
+    return true
 end
 
 local function updateSignals(): integer

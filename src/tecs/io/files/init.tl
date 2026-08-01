@@ -40,11 +40,10 @@ operation benefits from component-aware manipulation.
 `tecs.io.watcher` polls paths recorded by `read` and the built-in asset
 loaders. It does not walk the whole asset tree.
 
-`openRead` returns a seekable reader without adding cursor operations to the
-basic `tecs.io.Reader` contract used by transforms, sockets, and pipes. The
-SDL backend seeks the file directly. A storage backend without random access
-falls back to its required whole-file read, retaining those bytes until the
-reader closes.
+`open` uses the standard Lua modes and returns one seekable file cursor. The
+SDL backend operates on the file directly. A storage backend without random
+access falls back to its required whole-file operations and retains the bytes
+until the file closes.
 ]=]
 
 local ffi <const> = require("ffi")
@@ -59,6 +58,15 @@ local runtime <const> = require("tecs.internal.runtime")
 local type types = require("tecs.io.types")
 local type Closeable = require("tecs.types").Closeable
 local type Path = require("tecs.io.Path")
+
+--- A caller-owned, seekable file cursor.
+---
+--- The mode passed to `open` controls which inherited read and write
+--- operations succeed. Files implement [`Closeable`](tealdoc:tecs.Closeable),
+--- [`SeekableReader`](tealdoc:tecs.io.SeekableReader), and
+--- [`SeekableWriter`](tealdoc:tecs.io.SeekableWriter).
+local interface File is types.File
+end
 
 --- One entry yielded by a [`DirectoryStream`](tealdoc:tecs.io.files.DirectoryStream).
 local record DirectoryEntry
@@ -143,12 +151,6 @@ local record TemporaryPath is Closeable
     --- @return Returns whether the resource became permanent.
     --- @return Returns the platform reason when the first return is false.
     persist: function(self: TemporaryPath, destination: string | Path): boolean, string
-    --- Removes the file or the complete directory tree. Repeated calls succeed.
-    ---
-    --- @param self The temporary resource to release.
-    --- @return Returns whether cleanup completed.
-    --- @return Returns the platform reason when the first return is false.
-    close: function(self: TemporaryPath): boolean, string
 end
 
 local floor <const> = math.floor
@@ -174,11 +176,14 @@ local record files
     --- `GlobOptions` controls pattern matching and traversal depth.
     type GlobOptions = FileGlobOptions
 
-    --- `WriteMode` selects replacement or append behavior.
-    type WriteMode = storagebackend.WriteMode
+    --- `PathInput` accepts either a platform path string or an immutable path object.
+    type PathInput = string | Path
 
-    --- `SeekableWriteMode` selects replacement or in-place update behavior.
-    type SeekableWriteMode = storagebackend.SeekableWriteMode
+    --- `FileMode` selects standard read, write, append, or update behavior.
+    type FileMode = storagebackend.FileMode
+
+    --- `File` is the seekable cursor returned by `open`.
+    type File = File
 
     --- `LineIterator` yields each line in a file and returns nil at the end.
     type LineIterator = function(): string
@@ -202,18 +207,15 @@ end
 local type Info = files.Info
 local type UserFolder = files.UserFolder
 local type GlobOptions = files.GlobOptions
-local type WriteMode = files.WriteMode
-local type SeekableWriteMode = files.SeekableWriteMode
+local type PathInput = files.PathInput
+local type FileMode = files.FileMode
 local type ByteInput = storagebackend.ByteInput
 local type LineIterator = files.LineIterator
 local type Writer = types.Writer
-local type SeekableWriter = types.SeekableWriter
 local type Reader = types.Reader
 local type SeekOrigin = types.Seekable.Origin
-local type SeekableReader = types.SeekableReader
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
-local type PathInput = string | Path
 
 local ATOMIC_WRITER <const> = [[
 local tecs = require("tecs")
@@ -730,14 +732,15 @@ function DirectoryStream:toArray(): {DirectoryEntry}, string
     end
 end
 
-function DirectoryStream:close()
+function DirectoryStream:close(): boolean, string
     local state <const> = directoryStates[self]
     if state == nil or state.closed then
-        return
+        return true
     end
     state.closed = true
     state.frames = {}
     state.pendingDirectory = nil
+    return true
 end
 
 --- Opens a pull stream over entries under `path` that match `pattern`.
@@ -967,7 +970,7 @@ end
 --- breaking the loop retains only the immutable bytes and no file descriptor.
 --- It strips LF and CRLF terminators, returns empty lines between adjacent
 --- terminators, and does not invent another empty line after a final
---- terminator. Use `openRead` when the input is too large to hold whole.
+--- terminator. Use `open` when the input is too large to hold whole.
 ---
 --- @param path The caller supplies the source file.
 --- @return Returns a
@@ -1029,193 +1032,181 @@ function files.load(path: PathInput, environment?: {string: any}): function(...:
     return chunk, reason
 end
 
---- A `Writer` for a backend that has no streaming write.
----
---- Replacement mode holds the complete value for `write`. Append mode releases
---- each successfully flushed group after handing it to `append`. It exists so
---- a caller has one interface everywhere: a port that streams gets the memory
---- back without the caller knowing, and a port that does not retains only what
---- its whole-file operations require.
-local function bufferedWriter(backend: storagebackend.Backend, path: string, mode: WriteMode): Writer, string
-    local pieces: {string} = {}
-    local count = 0
-    local appended = false
-
-    local writer <const> = {} as {string: any}
-    local basicWriter <const> = writer as Writer
-    writer.write = function(_self: Writer, bytes: string): boolean, string
-        if pieces == nil then
-            return false, "the writer is closed"
-        end
-        count = count + 1
-        pieces[count] = bytes
-        return true
-    end
-    writer.writeFrom = function(
-        _self: Writer, sourceBuffer: IOBuffer, offset?: integer, length?: integer
-    ): integer, string
-        local bytes <const> = sourceBuffer:getString(offset, length)
-        local ok <const>, reason = basicWriter:write(bytes)
-        if not ok then
-            return nil, reason
-        end
-        return #bytes
-    end
-    writer.writeView = function(
-        _self: Writer, sourceView: ByteView, offset?: integer, length?: integer
-    ): integer, string
-        if sourceView == nil or sourceView:isReleased() then
-            error("tecs: Writer:writeView needs an open io.ByteView", 2)
-        end
-        offset = offset or 0
-        local viewLength <const> = sourceView:length()
-        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 or offset > viewLength then
-            error("tecs: Writer:writeView offset is outside the view", 2)
-        end
-        if length == nil then
-            length = viewLength - offset
-        elseif type(length) ~= "number" or length ~= floor(length) or length < 0 or length > viewLength - offset then
-            error("tecs: Writer:writeView count is outside the view", 2)
-        end
-        local bytes <const> = loader.toBytes((sourceView:getFFIPointer() + offset) as loader.CValue, length)
-        local ok <const>, reason = basicWriter:write(bytes)
-        if not ok then
-            return nil, reason
-        end
-        return length
-    end
-    writer.flush = function(_self: Writer): boolean, string
-        if pieces == nil then
-            return false, "the writer is closed"
-        end
-        if mode == "replace" then
-            return backend.write(path, table.concat(pieces, "", 1, count))
-        end
-        if count == 0 and appended then
-            return true
-        end
-        local ok <const>, reason = backend.append(path, table.concat(pieces, "", 1, count))
-        if ok then
-            pieces = {}
-            count = 0
-            appended = true
-        end
-        return ok, reason
-    end
-    writer.close = function(_self: Writer): boolean, string
-        if pieces == nil then
-            return true
-        end
-        local ok <const>, reason = basicWriter:flush()
-        pieces = nil
-        return ok, reason
-    end
-    return basicWriter
-end
-
---- Builds random-access output over memory for a backend without a cursor.
-local function bufferedSeekableWriter(
-    backend: storagebackend.Backend, path: string, mode: SeekableWriteMode
-): SeekableWriter, string
+--- Builds a shared read/write cursor for a backend without direct file access.
+local function bufferedFile(backend: storagebackend.Backend, path: string, mode: FileMode): File, string
+    local readable <const> = mode == "r" or mode == "r+" or mode == "w+" or mode == "a+"
+    local writable <const> = mode ~= "r"
+    local appending <const> = mode == "a" or mode == "a+"
     local initial = ""
-    if mode == "update" then
+
+    if mode == "r" or mode == "r+" then
         initial = backend.read(path)
         if initial == nil then
-            return nil, ("cannot open %s for update"):format(path)
+            return nil, ("cannot read %s"):format(path)
+        end
+    elseif mode == "w" or mode == "w+" then
+        local ok <const>, reason = backend.write(path, "")
+        if not ok then
+            return nil, reason
+        end
+    else
+        initial = backend.read(path) or ""
+        local ok <const>, reason = backend.append(path, "")
+        if not ok then
+            return nil, reason
         end
     end
-    local bytes = buffer.new(initial)
-    local at = 0
-    local closed = false
 
-    local writer <const> = {} as {string: any}
-    writer.write = function(_self: Writer, piece: string): boolean, string
+    local bytes = buffer.new(initial)
+    local at = mode == "a" and bytes:length() or 0
+    local appendedThrough = bytes:length()
+    local closed = false
+    local file <const> = {} as {string: any}
+
+    file.read = function(_self: Reader, count: integer): string, string
         if closed then
-            return false, "the writer is closed"
+            return nil, "the file is closed"
+        end
+        if not readable then
+            return nil, "the file is not open for reading"
+        end
+        if at >= bytes:length() then
+            return ""
+        end
+        local taking <const> = min(max(1, count), bytes:length() - at)
+        local piece <const> = bytes:getString(at, taking)
+        at = at + taking
+        return piece
+    end
+
+    file.readInto = function(_self: Reader, destination: IOBuffer, offset?: integer, count?: integer): integer, string
+        if closed then
+            return nil, "the file is closed"
+        end
+        if not readable then
+            return nil, "the file is not open for reading"
+        end
+        offset = offset or 0
+        count = count or DEFAULT_READ_BYTES
+        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 then
+            error("tecs: Reader:readInto offset must be a non-negative integer", 2)
+        end
+        if type(count) ~= "number" or count ~= floor(count) or count < 0 then
+            error("tecs: Reader:readInto count must be a non-negative integer", 2)
+        end
+        local taking <const> = min(count, bytes:length() - at)
+        if taking == 0 then
+            return 0
+        end
+        local output <const>, previousLength = buffer.prepareWrite(destination, offset, taking)
+        ffi.copy(output as ffi.CData, (bytes:getFFIPointer() + at) as ffi.CData, taking)
+        buffer.commitWrite(destination, offset, taking, previousLength)
+        at = at + taking
+        return taking
+    end
+
+    file.write = function(_self: Writer, piece: string): boolean, string
+        if closed then
+            return false, "the file is closed"
+        end
+        if not writable then
+            return false, "the file is not open for writing"
+        end
+        if appending then
+            at = bytes:length()
         end
         bytes:setString(piece, at)
         at = at + #piece
         return true
     end
-    writer.writeFrom = function(
-        _self: Writer, sourceBuffer: IOBuffer, offset?: integer, count?: integer
-    ): integer, string
+
+    file.writeFrom = function(_self: Writer, source: IOBuffer, offset?: integer, count?: integer): integer, string
         if closed then
-            return nil, "the writer is closed"
+            return nil, "the file is closed"
+        end
+        if not writable then
+            return nil, "the file is not open for writing"
         end
         offset = offset or 0
-        local length <const> = sourceBuffer:length()
-        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 or offset > length then
+        local sourceLength <const> = source:length()
+        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 or offset > sourceLength then
             error("tecs: Writer:writeFrom offset is outside the buffer", 2)
         end
         if count == nil then
-            count = length - offset
-        elseif type(count) ~= "number" or count ~= floor(count) or count < 0 or count > length - offset then
+            count = sourceLength - offset
+        elseif type(count) ~= "number" or count ~= floor(count) or count < 0 or count > sourceLength - offset then
             error("tecs: Writer:writeFrom count is outside the buffer", 2)
+        end
+        if appending then
+            at = bytes:length()
         end
         if count == 0 then
             return 0
         end
         local output <const>, previousLength = buffer.prepareWrite(bytes, at, count)
-        ffi.copy(output as ffi.CData, (sourceBuffer:getFFIPointer() + offset) as ffi.CData, count)
+        ffi.copy(output as ffi.CData, (source:getFFIPointer() + offset) as ffi.CData, count)
         buffer.commitWrite(bytes, at, count, previousLength)
         at = at + count
         return count
     end
-    writer.writeView = function(_self: Writer, sourceView: ByteView, offset?: integer, count?: integer): integer, string
+
+    file.writeView = function(_self: Writer, source: ByteView, offset?: integer, count?: integer): integer, string
         if closed then
-            return nil, "the writer is closed"
+            return nil, "the file is closed"
         end
-        if sourceView == nil or sourceView:isReleased() then
+        if not writable then
+            return nil, "the file is not open for writing"
+        end
+        if source == nil or source:isReleased() then
             error("tecs: Writer:writeView needs an open io.ByteView", 2)
         end
         offset = offset or 0
-        local length <const> = sourceView:length()
-        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 or offset > length then
+        local sourceLength <const> = source:length()
+        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 or offset > sourceLength then
             error("tecs: Writer:writeView offset is outside the view", 2)
         end
         if count == nil then
-            count = length - offset
-        elseif type(count) ~= "number" or count ~= floor(count) or count < 0 or count > length - offset then
+            count = sourceLength - offset
+        elseif type(count) ~= "number" or count ~= floor(count) or count < 0 or count > sourceLength - offset then
             error("tecs: Writer:writeView count is outside the view", 2)
+        end
+        if appending then
+            at = bytes:length()
         end
         if count == 0 then
             return 0
         end
         local output <const>, previousLength = buffer.prepareWrite(bytes, at, count)
-        ffi.copy(output as ffi.CData, (sourceView:getFFIPointer() + offset) as ffi.CData, count)
+        ffi.copy(output as ffi.CData, (source:getFFIPointer() + offset) as ffi.CData, count)
         buffer.commitWrite(bytes, at, count, previousLength)
         at = at + count
         return count
     end
-    writer.flush = function(_self: Writer): boolean, string
+
+    file.size = function(_self: File): integer, string
         if closed then
-            return false, "the writer is closed"
-        end
-        return backend.write(path, bytes:getString())
-    end
-    writer.size = function(_self: SeekableWriter): integer, string
-        if closed then
-            return nil, "the writer is closed"
+            return nil, "the file is closed"
         end
         return bytes:length()
     end
-    writer.tell = function(_self: SeekableWriter): integer, string
+
+    file.tell = function(_self: File): integer, string
         if closed then
-            return nil, "the writer is closed"
+            return nil, "the file is closed"
         end
         return at
     end
-    writer.seek = function(_self: SeekableWriter, origin: SeekOrigin, offset?: integer): integer, string
+
+    file.seek = function(_self: File, origin: SeekOrigin, offset?: integer): integer, string
         if closed then
-            return nil, "the writer is closed"
+            return nil, "the file is closed"
         end
         if origin ~= "start" and origin ~= "current" and origin ~= "end" then
-            error("tecs: SeekableWriter:seek origin must be 'start', 'current', or 'end'", 2)
+            error("tecs: File:seek origin must be 'start', 'current', or 'end'", 2)
         end
         offset = offset or 0
         if type(offset) ~= "number" or offset ~= floor(offset) then
-            error("tecs: SeekableWriter:seek offset must be an integer", 2)
+            error("tecs: File:seek offset must be an integer", 2)
         end
         local base = 0
         if origin == "current" then
@@ -1225,109 +1216,48 @@ local function bufferedSeekableWriter(
         end
         local target <const> = base + offset
         if target < 0 or target > bytes:length() then
-            return nil, "seek position is outside the destination"
+            return nil, "seek position is outside the file"
         end
         at = target
         return at
     end
-    writer.close = function(_self: Writer): boolean, string
+
+    file.flush = function(_self: Writer): boolean, string
+        if closed then
+            return false, "the file is closed"
+        end
+        if not writable then
+            return true
+        end
+        if appending then
+            if appendedThrough == bytes:length() then
+                return true
+            end
+            local ok <const>, reason = backend.append(
+                path, bytes:getString(appendedThrough, bytes:length() - appendedThrough)
+            )
+            if ok then
+                appendedThrough = bytes:length()
+            end
+            return ok, reason
+        end
+        return backend.write(path, bytes:getString())
+    end
+
+    file.close = function(_self: Writer): boolean, string
         if closed then
             return true
         end
-        local ok <const>, reason = (writer as Writer):flush()
+        local ok = true
+        local reason: string = nil
+        if writable then
+            ok, reason = (file as Writer):flush()
+        end
         closed = true
         bytes:close()
         return ok, reason
     end
-    return writer as SeekableWriter
-end
-
-local record SlicingReaderState
-    bytes: string | nil
-    at: integer
-    closed: boolean
-end
-
---- A `Reader` over bytes already in memory, for the same reason.
-local function slicingReader(bytes: string): SeekableReader
-    local state <const>: SlicingReaderState = {bytes = bytes, at = 1, closed = false}
-    local pointer <const> = ffi.cast("const uint8_t *", bytes) as loader.BytePointer
-
-    local reader <const> = {} as {string: any}
-    reader.read = function(_self: Reader, count: integer): string, string
-        if state.closed then
-            return nil, "the reader is closed"
-        end
-        local source <const> = state.bytes as string
-        if state.at > #source then
-            return ""
-        end
-        local last <const> = min(#source, state.at + max(1, count) - 1)
-        local piece <const> = source:sub(state.at, last)
-        state.at = last + 1
-        return piece
-    end
-    reader.readInto = function(_self: Reader, destination: IOBuffer, offset?: integer, count?: integer): integer, string
-        if state.closed then
-            return nil, "the reader is closed"
-        end
-        offset = offset or 0
-        count = count or DEFAULT_READ_BYTES
-        if type(count) ~= "number" or count ~= floor(count) or count < 0 then
-            error("tecs: Reader:readInto count must be a non-negative integer", 2)
-        end
-        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 then
-            error("tecs: Reader:readInto offset must be a non-negative integer", 2)
-        end
-        local source <const> = state.bytes as string
-        if count == 0 or state.at > #source then
-            return 0
-        end
-        local taking <const> = min(count, #source - state.at + 1)
-        local output <const>, previousLength = buffer.prepareWrite(destination, offset, taking)
-        ffi.copy(output as ffi.CData, (pointer + (state.at - 1)) as ffi.CData, taking)
-        buffer.commitWrite(destination, offset, taking, previousLength)
-        state.at = state.at + taking
-        return taking
-    end
-    reader.size = function(_self: SeekableReader): integer, string
-        if state.closed then
-            return nil, "the reader is closed"
-        end
-        return #(state.bytes as string)
-    end
-    reader.tell = function(_self: SeekableReader): integer, string
-        if state.closed then
-            return nil, "the reader is closed"
-        end
-        return state.at - 1
-    end
-    reader.seek = function(_self: SeekableReader, origin: SeekOrigin, offset?: integer): integer, string
-        if state.closed then
-            return nil, "the reader is closed"
-        end
-        if origin ~= "start" and origin ~= "current" and origin ~= "end" then
-            error("tecs: SeekableReader:seek origin must be 'start', 'current', or 'end'", 2)
-        end
-        offset = offset or 0
-        if type(offset) ~= "number" or offset ~= floor(offset) then
-            error("tecs: SeekableReader:seek offset must be an integer", 2)
-        end
-        local base = 0
-        if origin == "current" then
-            base = state.at - 1
-        elseif origin == "end" then
-            base = #(state.bytes as string)
-        end
-        local position <const> = base + offset
-        if position < 0 or position > #(state.bytes as string) then
-            return nil, "seek position is outside the source"
-        end
-        state.at = position + 1
-        return position
-    end
-    reader.close = function(_self: Reader) state.closed = true; state.bytes = nil end
-    return reader as SeekableReader
+    return file as File
 end
 
 --- Writes `bytes` to `path`, replacing whatever was there.
@@ -1457,109 +1387,38 @@ function files.writeAtomicAsync(path: PathInput, bytes: ByteInput): Future<boole
     return future
 end
 
---- Appends `bytes` to `path`, creating the file when absent.
+--- Opens a file through one seekable cursor.
 ---
---- The string's length controls the binary write, so embedded NUL bytes remain
---- data. The platform opens the destination in append mode instead of reading
---- and replacing it. The parent directory must already exist.
+--- The mode follows Lua's standard file modes. `"r"` opens an existing file
+--- for reading and is the default. `"w"` creates or truncates for writing.
+--- `"a"` creates or preserves for writes that always land at the end. Adding
+--- `+` permits both reading and writing. The cursor starts at byte zero except
+--- for `"a"`; `"a+"` starts at byte zero for reading while every write still
+--- lands at the current end. Seeks may not move past the end.
 ---
---- @param path The caller supplies the destination file.
---- @param bytes The caller supplies the binary contents to append.
---- @return Returns whether the platform appended every byte.
---- @return Returns the platform reason when the first return is false.
-function files.append(path: PathInput, bytes: string): boolean, string
-    local rendered <const> = required(path, "append")
-    if bytes == nil then
-        error("tecs: io.files.append needs bytes to append", 2)
-    end
-    return adapter.storage().append(rendered, bytes)
-end
-
---- Opens `path` for writing in pieces.
+--- Close the file even after its last write succeeds. `close` flushes buffered
+--- bytes and can report a delayed storage failure. A backend without direct
+--- random access retains the complete file until close.
 ---
---- Use it when bytes arrive over time and should not become one large string.
---- The default `"replace"` mode replaces the destination. `"append"` keeps
---- its existing bytes and creates the file when it does not exist.
----
---- Close it. The bytes are not guaranteed to be on disk until `close` answers,
---- and this call reports a full disk.
----
---- @param path The caller supplies the destination file.
---- @param mode The caller selects `"replace"` or `"append"`, or omits it to
----     replace the destination.
---- @return Returns a caller-owned writer, or nil when it cannot open.
+--- @param path The caller supplies the file as a string or immutable
+---     [`Path`](tealdoc:tecs.io.Path).
+--- @param mode The caller selects `"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, or
+---     `"a+"`, or omits it for `"r"`.
+--- @return Returns a caller-owned [`File`](tealdoc:tecs.io.files.File), or nil
+---     when the platform cannot open it.
 --- @return Returns the platform reason when the first return is nil.
-function files.openWrite(path: PathInput, mode?: WriteMode): Writer, string
-    local rendered <const> = required(path, "openWrite")
-    mode = mode or "replace"
-    if mode ~= "replace" and mode ~= "append" then
-        error("tecs: io.files.openWrite mode must be 'replace' or 'append'", 2)
+function files.open(path: PathInput, mode?: FileMode): File, string
+    local rendered <const> = required(path, "open")
+    mode = mode or "r"
+    if mode ~= "r" and mode ~= "w" and mode ~= "a" and mode ~= "r+" and mode ~= "w+" and mode ~= "a+" then
+        error("tecs: io.files.open mode must be 'r', 'w', 'a', 'r+', 'w+', or 'a+'", 2)
     end
     local backend <const> = adapter.storage()
-    if backend.openWrite ~= nil then
-        return backend.openWrite(rendered, mode)
+    if backend.open ~= nil then
+        local opened <const>, reason = backend.open(rendered, mode)
+        return opened as File, reason
     end
-    return bufferedWriter(backend, rendered, mode)
-end
-
---- Opens `path` for writing through a repositionable cursor.
----
---- `"replace"` creates or truncates the file and starts at byte zero.
---- `"update"` requires an existing file, preserves its bytes, and also starts
---- at byte zero. Writes replace bytes at the cursor and extend the file when
---- they reach its end. Seek positions stay within the current file, so this
---- operation does not create sparse holes.
----
---- Close the writer even after the last write succeeds. The close flushes
---- buffered bytes and is where a delayed full-disk failure may be reported.
---- The SDL backend writes and seeks the file directly. A platform backend
---- without random-access output uses an in-memory fallback and writes the
---- complete result on `flush` or `close`.
----
---- @param path The caller supplies the destination file.
---- @param mode The caller selects `"replace"` or `"update"`, or omits it to
----     replace the destination.
---- @return Returns a caller-owned
----     [`SeekableWriter`](tealdoc:tecs.io.SeekableWriter), or nil when it
----     cannot open the file.
---- @return Returns the platform reason when the first return is nil.
-function files.openSeekableWrite(path: string, mode?: SeekableWriteMode): SeekableWriter, string
-    required(path, "openSeekableWrite")
-    mode = mode or "replace"
-    if mode ~= "replace" and mode ~= "update" then
-        error("tecs: io.files.openSeekableWrite mode must be 'replace' or 'update'", 2)
-    end
-    local backend <const> = adapter.storage()
-    if backend.openSeekableWrite ~= nil then
-        return backend.openSeekableWrite(path, mode)
-    end
-    return bufferedSeekableWriter(backend, path, mode)
-end
-
---- Opens `path` for reading in pieces through a repositionable cursor.
----
---- `read` is the right call for a file a program wants whole. This is for one
---- it wants to consume incrementally without first asking the filesystem for
---- one string containing the whole file. The SDL backend reads and seeks the
---- file directly. A platform backend without `openRead` falls back to its
---- whole-file `read` and retains that string until this reader closes.
----
---- @param path The caller supplies the source file.
---- @return Returns a caller-owned
----     [`SeekableReader`](tealdoc:tecs.io.SeekableReader) at byte zero, or nil
----     when the platform cannot open the file.
---- @return Returns the platform reason when the first return is nil.
-function files.openRead(path: PathInput): SeekableReader, string
-    local rendered <const> = required(path, "openRead")
-    local backend <const> = adapter.storage()
-    if backend.openRead ~= nil then
-        return backend.openRead(rendered)
-    end
-    local bytes <const> = backend.read(rendered)
-    if bytes == nil then
-        return nil, ("cannot read %s"):format(rendered)
-    end
-    return slicingReader(bytes)
+    return bufferedFile(backend, rendered, mode)
 end
 
 --- Returns the process working directory.

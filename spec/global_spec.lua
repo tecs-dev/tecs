@@ -64,7 +64,8 @@ local record ScopedReader is tecs.Closeable
     label: string
 end
 
-function ScopedReader:close()
+function ScopedReader:close(): boolean, string
+    return true
 end
 
 local scopedReader = {} as ScopedReader

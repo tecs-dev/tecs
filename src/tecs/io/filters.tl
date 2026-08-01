@@ -780,9 +780,9 @@ function FilterReader:readInto(destination: IOBuffer, offset?: integer, count?: 
     return taking
 end
 
-function FilterReader:close()
+function FilterReader:close(): boolean, string
     if self._closed then
-        return
+        return true
     end
     self._closed = true
     if self._stream ~= nil then
@@ -795,6 +795,7 @@ function FilterReader:close()
     bufferpool.release(self._output)
     local source <const> = self._source as {string: any}
     (source.close as function(any))(self._source)
+    return true
 end
 
 local function writeOutput(self: FilterWriter): boolean, string

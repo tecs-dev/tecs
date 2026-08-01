@@ -284,8 +284,9 @@ end
 ---
 --- Already-queued messages are still delivered: a reader drains what is there and only then
 --- sees nil. A `send` after this still enqueues, and nothing will ever take it.
-function Channel:close()
+function Channel:close(): boolean, string
     C.tecsChannelClose(self.handle)
+    return true
 end
 
 --- Releases the channel. Safe to call more than once.

@@ -129,15 +129,16 @@ local function openCursor(self: QueryCursorImpl): boolean
     return true
 end
 
-function QueryCursorImpl:close()
+function QueryCursorImpl:close(): boolean, string
     if self._closed then
-        return
+        return true
     end
     self._closed = true
     if self._open then
         self._open = false
         self._query._world:_popQueryScope()
     end
+    return true
 end
 
 local function cursorIterStep(self: QueryCursorImpl, var: any): (Archetype, integer, any)

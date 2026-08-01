@@ -319,7 +319,7 @@ end
 --- `write` succeeds. The close can report a delayed flush failure that no
 --- individual write observed. The constructor documents whether closing the
 --- writer also closes or merely releases its destination.
-local interface Writer
+local interface Writer is Closeable
     --- Caller-writable. Supplies the operation that writes the next bytes.
     ---
     --- @param self The writer receiving the bytes.
@@ -363,20 +363,6 @@ local interface Writer
     --- @return Returns the destination's reason when the first return is
     ---     false.
     flush: function(self: Writer): boolean, string
-
-    --- Caller-writable. Supplies the operation that finishes the destination.
-    ---
-    --- Closing more than once must succeed. Unlike `Reader:close`, this
-    --- operation reports delayed flush or finalization failures because a
-    --- successful earlier write does not prove that its bytes reached the
-    --- destination.
-    ---
-    --- @param self The writer to finish and close.
-    --- @return Returns whether buffered bytes reached the destination and its
-    ---     resources were released.
-    --- @return Returns the destination's reason when the first return is
-    ---     false.
-    close: function(self: Writer): boolean, string
 end
 
 --- A writer with a random-access cursor.
@@ -388,6 +374,15 @@ end
 --- `write` replaces bytes at the cursor and advances it, extending the
 --- destination when it starts at or reaches the end.
 local interface SeekableWriter is Writer, Seekable
+end
+
+--- A seekable file cursor that can read, write, flush, and close.
+---
+--- The mode passed to `tecs.io.files.open` decides which directional
+--- operations are available. Read-only and write-only files still carry the
+--- complete interface so one type covers every standard file mode; an
+--- operation forbidden by the mode returns a reason.
+local interface File is SeekableReader, SeekableWriter
 end
 
 --- Describes reopenable or one-shot binary storage.
@@ -609,6 +604,7 @@ local record types
     type SeekableReader = SeekableReader
     type Writer = Writer
     type SeekableWriter = SeekableWriter
+    type File = File
     type Stream = Stream
     type ReadableStream = ReadableStream
     type WritableStream = WritableStream

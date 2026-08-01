@@ -302,7 +302,9 @@ describe("platform contract", function()
 
         local save = files.writablePath("slot1.json")
         assert.is_true(files.write(save, '{"score":41}'))
-        assert.is_true(files.append(save, "\n"))
+        local appended = assert(files.open(save, "a"))
+        assert.is_true(appended:write("\n"))
+        assert.is_true(appended:close())
         assert.are.equal('{"score":41}\n', files.read(save))
 
         local committed, commitReason = files.writeAtomic(save, "replacement")
@@ -330,6 +332,8 @@ describe("platform contract", function()
         assert.are.same({
             "read /dev/content/levels/1.json",
             "write /dev/save/tecs/tecs/slot1.json",
+            "read /dev/save/tecs/tecs/slot1.json",
+            "append /dev/save/tecs/tecs/slot1.json",
             "append /dev/save/tecs/tecs/slot1.json",
             "read /dev/save/tecs/tecs/slot1.json",
             "info /dev/content/levels/1.json",
@@ -393,7 +397,7 @@ describe("platform contract", function()
         adapter.install(platform)
 
         local path = "/dev/content/levels/1.json"
-        local reader = assert(files.openRead(path))
+        local reader = assert(files.open(path))
         assert.are.equal("{", reader:read(0))
         assert.are.equal('"', reader:read(-8))
         assert.are.equal("room", reader:read(4))
@@ -421,7 +425,7 @@ describe("platform contract", function()
         adapter.install(platform)
 
         local path = "/dev/content/levels/1.json"
-        local reader = assert(files.openRead(path))
+        local reader = assert(files.open(path))
 
         assert.are.equal(15, reader:size())
         assert.are.equal(9, reader:seek("end", -6))
@@ -440,7 +444,7 @@ describe("platform contract", function()
         adapter.install(platform)
 
         local path = "/dev/content/levels/1.json"
-        local writer = assert(files.openSeekableWrite(path, "update"))
+        local writer = assert(files.open(path, "r+"))
         local source = tecsIO.newBuffer("xxkeepyy")
         local view = source:view(2, 4)
 

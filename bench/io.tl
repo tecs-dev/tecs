@@ -17,7 +17,7 @@
 ---   buffer-file      BufferStream to FileStream.
 ---   file-writebuf    `FileStream:writeBuffer`.
 ---   concurrent-file  A batch of equal synchronous FileStream transfers.
----   fallback-file    StringStream to a StorageBackend without `openWrite`;
+---   fallback-file    StringStream to a StorageBackend without `open`;
 ---                    close concatenates chunks before the backend's whole
 ---                    write.
 ---
@@ -236,7 +236,7 @@ local function writeWhole(path: string, bytes: string)
 end
 
 local function readStrings(path: string, materialize: boolean): string, integer
-    local reader <const>, failure = files.openRead(path)
+    local reader <const>, failure = files.open(path)
     if reader == nil then
         error(format("bench: cannot open %s: %s", path, failure or "unknown"), 0)
     end
@@ -265,7 +265,7 @@ local function readStrings(path: string, materialize: boolean): string, integer
 end
 
 local function readInto(path: string, materialize: boolean): string, integer, integer
-    local reader <const>, failure = files.openRead(path)
+    local reader <const>, failure = files.open(path)
     if reader == nil then
         error(format("bench: cannot open %s: %s", path, failure or "unknown"), 0)
     end
@@ -300,7 +300,7 @@ local function readInto(path: string, materialize: boolean): string, integer, in
 end
 
 local function writeStrings(path: string, bytes: string)
-    local writer <const>, failure = files.openWrite(path)
+    local writer <const>, failure = files.open(path, "w")
     if writer == nil then
         error(format("bench: cannot open %s: %s", path, failure or "unknown"), 0)
     end
@@ -322,7 +322,7 @@ local function writeStrings(path: string, bytes: string)
 end
 
 local function writeFrom(path: string, bytes: IOBuffer)
-    local writer <const>, failure = files.openWrite(path)
+    local writer <const>, failure = files.open(path, "w")
     if writer == nil then
         error(format("bench: cannot open %s: %s", path, failure or "unknown"), 0)
     end
@@ -743,14 +743,14 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
             streams = 1,
             validate = function(hash: string)
                 local backend <const> = adapter.storage()
-                local openWrite <const> = backend.openWrite
-                backend.openWrite = nil
+                local open <const> = backend.open
+                backend.open = nil
                 local ok, failure = pcall(function()
                     local source <const> = ioModule.newStringStream(fixture)
                     local _ <const> = source:transferToFile(sinkPath)
                     source:close()
                 end) as (boolean, any)
-                backend.openWrite = openWrite
+                backend.open = open
                 if not ok then
                     error(tostring(failure), 0)
                 end
@@ -758,8 +758,8 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
             end,
             operation = function(): Observation
                 local backend <const> = adapter.storage()
-                local openWrite <const> = backend.openWrite
-                backend.openWrite = nil
+                local open <const> = backend.open
+                backend.open = nil
                 local ok, result = pcall(function(): Observation
                     local source <const> = ioModule.newStringStream(fixture)
                     local value <const> = source:transferToFile(sinkPath)
@@ -771,7 +771,7 @@ local function runSize(sourcePath: string, sinkPath: string, size: integer)
                     source:close()
                     return observation
                 end) as (boolean, any)
-                backend.openWrite = openWrite
+                backend.open = open
                 if not ok then
                     error(tostring(result), 0)
                 end

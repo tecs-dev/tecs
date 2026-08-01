@@ -114,8 +114,9 @@ function ChunkReader:readInto(destination: Buffer, offset?: integer, count?: int
     return taking
 end
 
-function ChunkReader:close()
+function ChunkReader:close(): boolean, string
     self.closed = true
+    return true
 end
 
 local record ChunkSource is ReadableStream
@@ -140,8 +141,9 @@ end
 function ChunkSource:isReplayable(): boolean
     return true
 end
-function ChunkSource:close()
+function ChunkSource:close(): boolean, string
     self.closed = true
+    return true
 end
 function ChunkSource:newReader(): Reader, string
     if self.closed then
@@ -223,8 +225,9 @@ end
 function BufferSink:isReplayable(): boolean
     return false
 end
-function BufferSink:close()
+function BufferSink:close(): boolean, string
     self.closed = true
+    return true
 end
 function BufferSink:newWriter(): Writer, string
     self.buffer:clear()

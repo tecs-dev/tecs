@@ -31,49 +31,26 @@ for line in nextLine do
 end
 -- #endregion tecs.io.files.lines
 
--- #region tecs.io.files.openWrite
+-- #region tecs.io.files.open
 local files <const> = require("tecs.io.files")
-local writer <const> = assert(files.openWrite("save.txt", "append"))
-
-assert(writer:write("checkpoint"))
-assert(writer:close())
--- #endregion tecs.io.files.openWrite
-
--- #region tecs.io.files.openSeekableWrite
-local writer, reason = tecs.io.files.openSeekableWrite("world.pack")
-if writer == nil then
+local file, reason = files.open("world.pack", "w+")
+if file == nil then
     error(reason)
 end
 
-local wrote, writeReason = writer:write("HEADpayload bytes")
+local wrote, writeReason = file:write("HEADpayload bytes")
 if not wrote then
-    writer:close()
+    file:close()
     error(writeReason)
 end
-local position, seekReason = writer:seek("start", 0)
+local position, seekReason = file:seek("start")
 if position == nil then
-    writer:close()
+    file:close()
     error(seekReason)
 end
-wrote, writeReason = writer:write("PACK")
-if not wrote then
-    writer:close()
-    error(writeReason)
-end
+local header <const> = assert(file:read(4))
+assert(header == "HEAD")
 
-local closed, closeReason = writer:close()
-if not closed then
-    error(closeReason)
-end
--- #endregion tecs.io.files.openSeekableWrite
-
--- #region tecs.io.files.openRead
-local files <const> = require("tecs.io.files")
-local reader <const> = assert(files.openRead("world.pack"))
-
-assert(reader:seek("start", 4096))
-local header <const> = assert(reader:read(32))
-
-print(#header)
-reader:close()
--- #endregion tecs.io.files.openRead
+local closed, closeReason = file:close()
+assert(closed, closeReason)
+-- #endregion tecs.io.files.open

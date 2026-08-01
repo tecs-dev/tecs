@@ -260,13 +260,14 @@ end
 function OwnedBuffer:isReleased(): boolean
     return self._released
 end
-function OwnedBuffer:close()
+function OwnedBuffer:close(): boolean, string
     if not self._released then
         self._released = true
         self._allocation.references = self._allocation.references - 1
         self._allocation = nil
         self._length = 0
     end
+    return true
 end
 function OwnedView:length(): integer
     if self._released then
@@ -317,12 +318,13 @@ end
 function OwnedView:isReleased(): boolean
     return self._released
 end
-function OwnedView:close()
+function OwnedView:close(): boolean, string
     if not self._released then
         self._released = true
         self._allocation.references = self._allocation.references - 1
         self._allocation = nil
     end
+    return true
 end
 function OwnedWriteRange:getFFIPointer(): loader.BytePointer
     if self._released then
@@ -347,9 +349,10 @@ function OwnedWriteRange:commit(used: integer)
     commitWrite(self._buffer, self._offset, used)
     self:close()
 end
-function OwnedWriteRange:close()
+function OwnedWriteRange:close(): boolean, string
     self._released = true
     self._pointer = nil
+    return true
 end
 function BufferReader:read(count: integer): string, string
     if self._closed then
@@ -442,11 +445,12 @@ function BufferReader:transferTo(destination: Writer | FILE): integer, string
     end
     return total
 end
-function BufferReader:close()
+function BufferReader:close(): boolean, string
     if not self._closed then
         self._closed = true
         self._view:close()
     end
+    return true
 end
 function BufferWriter:write(bytes: string): boolean, string
     if self._closed then

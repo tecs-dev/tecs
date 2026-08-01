@@ -808,14 +808,15 @@ function binaryIO.Address:isClosed(): boolean
     return self._closed
 end
 
-function binaryIO.Address:close()
+function binaryIO.Address:close(): boolean, string
     if self._closed then
-        return
+        return true
     end
     self._closed = true
     destroyHandle(self._handle, C.tecsNetAddressDestroy as function(loader.CPtr))
     self._handle = nil
     closed()
+    return true
 end
 
 local function tcpSocketFrom(handle: loader.CPtr): binaryIO.TCPSocket
@@ -993,14 +994,15 @@ function binaryIO.TCPSocket:wait(timeoutMs?: integer): boolean, string
     return status > 0
 end
 
-function binaryIO.TCPSocket:close()
+function binaryIO.TCPSocket:close(): boolean, string
     if self._closed then
-        return
+        return true
     end
     self._closed = true
     destroyHandle(self._handle, C.tecsNetStreamDestroy as function(loader.CPtr))
     self._handle = nil
     closed()
+    return true
 end
 
 function binaryIO.TCPListener:isClosed(): boolean
@@ -1029,23 +1031,25 @@ function binaryIO.TCPListener:wait(timeoutMs?: integer): boolean, string
     return status > 0
 end
 
-function binaryIO.TCPListener:close()
+function binaryIO.TCPListener:close(): boolean, string
     if self._closed then
-        return
+        return true
     end
     self._closed = true
     destroyHandle(self._handle, C.tecsNetServerDestroy as function(loader.CPtr))
     self._handle = nil
     closed()
+    return true
 end
 
 function binaryIO.UDPSocket:isClosed(): boolean
     return self._closed
 end
 
-function binaryIO.UDPPacket:close()
+function binaryIO.UDPPacket:close(): boolean, string
     self.address:close()
     self.bytes:close()
+    return true
 end
 
 function binaryIO.UDPSocket:send(address: binaryIO.Address, port: integer, bytes: string): boolean, string
@@ -1111,14 +1115,15 @@ function binaryIO.UDPSocket:wait(timeoutMs?: integer): boolean, string
     return status > 0
 end
 
-function binaryIO.UDPSocket:close()
+function binaryIO.UDPSocket:close(): boolean, string
     if self._closed then
-        return
+        return true
     end
     self._closed = true
     destroyHandle(self._handle, C.tecsNetDatagramDestroy as function(loader.CPtr))
     self._handle = nil
     closed()
+    return true
 end
 
 local function removeOperation(operation: Operation)

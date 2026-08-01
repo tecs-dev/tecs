@@ -7,8 +7,8 @@ returns it unchanged, so its concrete type is preserved:
 
 ```teal
 tecs.scoped(function(scope: tecs.Scope)
-    local input <const> = scope:own(tecs.io.files.openRead("save.bin"))
-    local output <const> = scope:own(tecs.io.files.openWrite("save.copy"))
+    local input <const> = scope:own(tecs.io.files.open("save.bin"))
+    local output <const> = scope:own(tecs.io.files.open("save.copy", "w"))
 
     assert(tecs.io.transfer(input, output))
 end)
@@ -31,10 +31,11 @@ cleanup for that exit path.
 
 local type types = require("tecs.types")
 local type Closeable = types.Closeable
+local type CloseFunction = function(any): (boolean, string)
 
 local record Registration
     value: Closeable | FILE
-    close: function(any)
+    close: CloseFunction
 end
 
 local interface Scope
@@ -165,7 +166,7 @@ function ScopeImpl:own<T is Closeable>(value: T, reason?: string): T
     self.count = self.count + 1
     self.registrations[self.count] = {
         value = value as Closeable | FILE,
-        close = close as function(any),
+        close = close as CloseFunction,
     }
     return value
 end
