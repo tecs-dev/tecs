@@ -29,6 +29,7 @@ jobs:
             - run: cargo xtask check
             - run: cargo xtask format-check
             - run: cargo xtask test
+            - run: cargo xtask test-package --preset macos-arm64
 
     docs:
         runs-on: macos-15
@@ -48,7 +49,6 @@ jobs:
               uses: actions/upload-pages-artifact@v3
               with:
                   path: out/docs
-            - run: cargo xtask test-package --preset macos-arm64
 
     deploy-docs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
