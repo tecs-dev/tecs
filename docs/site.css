@@ -381,6 +381,7 @@ main:has(.tealdoc-home-hero) {
 .tealdoc-hero-text {
     font-family: var(--tealdoc-font-heading);
     font-weight: 400;
+    margin-top: 2rem;
 }
 
 /* A linkable type reads as a type first. Tealdoc paints it in the link color,
