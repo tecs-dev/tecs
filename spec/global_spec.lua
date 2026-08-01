@@ -8,10 +8,10 @@
 -- different set of names.
 --
 -- `tecs/global.d.tl` is what types it, and reads that type off the module
--- rather than restating it. Nothing in this repository is checked against that
--- declaration: `src`, `main.tl` and `bench` all require explicitly, which is
--- how they document their dependency. So a broken declaration would fail for
--- every game and never here, and the last two tests check it directly instead.
+-- rather than restating it. The project configuration loads that declaration
+-- for game sources; modules that require `tecs` explicitly shadow it to
+-- document their dependency. The last two tests check both the supported
+-- names and rejection of a name the declaration does not carry.
 
 local tecs = require("tecs")
 
@@ -142,9 +142,7 @@ describe("the tecs global", function()
     end)
 
     it("is the declaration and not a permissive checker", function()
-        -- Without the declaration the same file has no `tecs` at all, which is
-        -- what makes the test above evidence of anything.
-        local output = checkTeal(USAGE, false)
-        assert.is_truthy(output:match("unknown variable: tecs"), output)
+        local output = checkTeal("return tecs.nosuchthing", true)
+        assert.is_truthy(output:match("invalid key 'nosuchthing'"), output)
     end)
 end)
