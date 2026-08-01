@@ -204,7 +204,7 @@ function adapter.install(platform: adapter.Platform)
             "append",
             "info",
             "isSymlink",
-            "glob",
+            "list",
             "createDirectory",
             "remove",
             "rename",

@@ -27,8 +27,8 @@ end
 Filesystem outcomes return a status and a platform reason. Invalid arguments
 raise because they indicate a defect in the calling program. Operations are
 synchronous except `writeAtomicAsync`, whose worker-backed future is advanced
-by `tecs.runtime.poll`. `openDirectory` and `walk` expose caller-owned pull
-streams so enumeration does not retain a complete tree. Temporary files,
+by `tecs.runtime.poll`. `glob` exposes a caller-owned pull stream so recursive
+enumeration does not retain a complete tree. Temporary files,
 temporary directories, and streams are [`Closeable`](tealdoc:tecs.Closeable)
 and fit directly in `tecs.scoped`.
 
@@ -68,20 +68,21 @@ local record DirectoryEntry
     name: string
     --- Read-only. Identifies the resolved object's kind.
     kind: storagebackend.PathType
-    --- Read-only. Reports one for an immediate child and increases during a walk.
+    --- Read-only. Reports one for an immediate child and increases during a recursive glob.
     depth: integer
     --- Read-only. Reports whether the final path itself is a symbolic link.
     symlink: boolean
 end
 
---- Controls a recursive directory walk.
-local record WalkOptions
-    --- Caller-writable. Limits yielded depth when supplied. One means only
-    --- immediate children. Defaults to no depth limit.
-    maxDepth: integer
+--- Controls pattern matching in a streamed glob.
+local record FileGlobOptions
+    --- Caller-writable. Matches ASCII letters without regard to case when
+    --- true. Defaults to false, which compares every UTF-8 codepoint exactly
+    --- on every platform including the ones whose filesystem is not.
+    caseInsensitive: boolean
 end
 
---- Pulls directory entries without retaining the complete tree.
+--- Pulls matching directory entries without retaining the complete tree.
 local record DirectoryStream is Closeable
     --- Returns the next entry.
     ---
@@ -89,11 +90,25 @@ local record DirectoryStream is Closeable
     --- @return Returns the next entry, or nil at the end or after close.
     --- @return Returns a platform reason when traversal fails. Nil means end of stream.
     next: function(self: DirectoryStream): DirectoryEntry, string
-    --- Releases traversal state. Repeated calls succeed.
+    --- Prevents descent into the directory returned by the preceding `next` call.
     ---
-    --- @param self The stream to close.
-    --- @return Returns true.
-    close: function(self: DirectoryStream): boolean, string
+    --- The method returns false when the preceding entry was not a directory,
+    --- was a symbolic link, had no deeper pattern component, or has already
+    --- been skipped. Calling `next` first makes an earlier directory no longer
+    --- eligible for pruning.
+    ---
+    --- @param self The open stream whose pending descent the caller controls.
+    --- @return Returns whether a pending directory descent was removed.
+    skipDirectory: function(self: DirectoryStream): boolean
+    --- Consumes the remaining entries into an array and closes the stream.
+    ---
+    --- Entries returned by earlier `next` calls are not repeated. A traversal
+    --- failure discards the partial array and closes the stream.
+    ---
+    --- @param self The open stream to consume.
+    --- @return Returns every remaining entry, or nil when traversal fails.
+    --- @return Returns the platform reason when the first return is nil.
+    toArray: function(self: DirectoryStream): {DirectoryEntry}, string
 end
 
 --- Controls creation of a temporary file or directory.
@@ -153,7 +168,7 @@ local record files
     type UserFolder = storagebackend.UserFolder
 
     --- `GlobOptions` controls pattern matching.
-    type GlobOptions = storagebackend.GlobOptions
+    type GlobOptions = FileGlobOptions
 
     --- `WriteMode` selects replacement or append behavior.
     type WriteMode = storagebackend.WriteMode
@@ -166,9 +181,6 @@ local record files
 
     --- `DirectoryEntry` describes one streamed child.
     type DirectoryEntry = DirectoryEntry
-
-    --- `WalkOptions` limits recursive traversal.
-    type WalkOptions = WalkOptions
 
     --- `DirectoryStream` is a caller-owned pull cursor over directory entries.
     type DirectoryStream = DirectoryStream
@@ -234,8 +246,9 @@ end
 
 local record DirectoryStreamState
     frames: {DirectoryFrame}
-    recursive: boolean
-    maxDepth: integer
+    pattern: {string}
+    caseInsensitive: boolean
+    pendingDirectory: DirectoryFrame
     closed: boolean
 end
 
@@ -565,38 +578,71 @@ function files.setReadOnly(path: PathInput, readOnly: boolean): boolean, string
     return backend.setReadOnly(rendered, readOnly)
 end
 
---- Returns entries under `path` that match `pattern`.
----
---- **Recursive unless the pattern stops it**: with no pattern this walks the
---- whole tree below `path` and returns every descendant, joined with `/`
---- whatever the platform's separator is. `*` and `?` never match a separator,
---- so `"*"` is one level, `"*/*"` is exactly two, and `"*.png"` matches only
---- immediate children. Results include directories alongside files; call
---- `info` to distinguish them.
----
---- The order is the platform's own and is not sorted.
---- @param path The caller supplies the directory to enumerate.
---- @param pattern The caller supplies `*` and `?` wildcards, or nil to include
----     every descendant recursively.
---- @param options The caller supplies matching options or omits them for a
----     case-sensitive match.
---- @return Returns matching paths relative to `path`, or nil when enumeration
----     fails.
---- @return Returns the platform reason when the first return is nil.
----     An empty list means an empty directory, which nil does not.
-function files.glob(path: PathInput, pattern?: string, options?: GlobOptions): {string}, string
-    return adapter.storage().glob(required(path, "glob"), pattern, options)
+local function listDirectory(path: Path): {string}, string
+    return adapter.storage().list(path:toString())
 end
 
---- Returns names directly inside `path`.
----
---- The function uses a `"*"` glob to confine results to one level. It returns
---- names rather than joined paths.
---- @param path The caller supplies the directory to enumerate.
---- @return Returns immediate child names, or nil when enumeration fails.
---- @return Returns the platform reason when the first return is nil.
-function files.list(path: PathInput): {string}, string
-    return files.glob(required(path, "list"), "*")
+local function nextUTF8Byte(text: string, offset: integer): integer
+    local first <const> = text:byte(offset)
+    if first == nil or first < 0x80 then
+        return offset + 1
+    elseif first >= 0xc2 and first <= 0xdf then
+        return offset + 2
+    elseif first >= 0xe0 and first <= 0xef then
+        return offset + 3
+    elseif first >= 0xf0 and first <= 0xf4 then
+        return offset + 4
+    end
+    return offset + 1
+end
+
+local function matchesGlob(name: string, pattern: string, caseInsensitive: boolean): boolean
+    if caseInsensitive then
+        name = name:lower()
+        pattern = pattern:lower()
+    end
+
+    local nameAt = 1
+    local patternAt = 1
+    local starAt = 0
+    local starNameAt = 0
+    while nameAt <= #name do
+        local token <const> = pattern:sub(patternAt, patternAt)
+        local nextNameAt <const> = nextUTF8Byte(name, nameAt)
+        local nextPatternAt <const> = nextUTF8Byte(pattern, patternAt)
+        if token == "?" or name:sub(nameAt, nextNameAt - 1) == pattern:sub(patternAt, nextPatternAt - 1) then
+            nameAt = nextNameAt
+            patternAt = nextPatternAt
+        elseif token == "*" then
+            starAt = patternAt
+            starNameAt = nameAt
+            patternAt = patternAt + 1
+        elseif starAt ~= 0 then
+            starNameAt = nextUTF8Byte(name, starNameAt)
+            nameAt = starNameAt
+            patternAt = starAt + 1
+        else
+            return false
+        end
+    end
+    while pattern:sub(patternAt, patternAt) == "*" do
+        patternAt = patternAt + 1
+    end
+    return patternAt > #pattern
+end
+
+local function splitGlob(pattern: string): {string}
+    local segments: {string} = {}
+    local start = 1
+    while true do
+        local separator <const> = pattern:find("/", start, true)
+        if separator == nil then
+            segments[#segments + 1] = pattern:sub(start)
+            return segments
+        end
+        segments[#segments + 1] = pattern:sub(start, separator - 1)
+        start = separator + 1
+    end
 end
 
 function DirectoryStream:next(): DirectoryEntry, string
@@ -604,8 +650,17 @@ function DirectoryStream:next(): DirectoryEntry, string
     if state == nil or state.closed then
         return nil
     end
+    state.pendingDirectory = nil
     while #state.frames > 0 do
         local frame <const> = state.frames[#state.frames]
+        if frame.names == nil then
+            local names <const>, reason = listDirectory(frame.path)
+            if names == nil then
+                self:close()
+                return nil, reason
+            end
+            frame.names = names
+        end
         if frame.at > #frame.names then
             state.frames[#state.frames] = nil
         else
@@ -620,81 +675,105 @@ function DirectoryStream:next(): DirectoryEntry, string
             end
             local kind <const>: files.PathType = info ~= nil and info.kind or "other"
             local depth <const> = frame.depth
-            if state.recursive and kind == "directory" and not symlink and depth < state.maxDepth then
-                local names <const>, listReason = files.list(path)
-                if names == nil then
-                    self:close()
-                    return nil, listReason
-                end
-                state.frames[#state.frames + 1] = {path = path, depth = depth + 1, names = names, at = 1}
+            local matches <const> = state.pattern == nil
+                or matchesGlob(name, state.pattern[depth], state.caseInsensitive)
+            local descends <const> = kind == "directory"
+                and not symlink
+                and (state.pattern == nil or (matches and depth < #state.pattern))
+            local child: DirectoryFrame = nil
+            if descends then
+                child = {path = path, depth = depth + 1, at = 1}
+                state.frames[#state.frames + 1] = child
             end
-            return {path = path, name = name, kind = kind, depth = depth, symlink = symlink}
+            if state.pattern == nil or (matches and depth == #state.pattern) then
+                state.pendingDirectory = child
+                return {path = path, name = name, kind = kind, depth = depth, symlink = symlink}
+            end
         end
     end
     state.closed = true
     return nil
 end
 
-function DirectoryStream:close(): boolean, string
+function DirectoryStream:skipDirectory(): boolean
     local state <const> = directoryStates[self]
-    if state == nil or state.closed then
-        return true
+    if state == nil or state.closed or state.pendingDirectory == nil then
+        return false
     end
-    state.closed = true
-    state.frames = {}
+    if state.frames[#state.frames] ~= state.pendingDirectory then
+        state.pendingDirectory = nil
+        return false
+    end
+    state.frames[#state.frames] = nil
+    state.pendingDirectory = nil
     return true
 end
 
-local function directoryStream(
-    path: PathInput, recursive: boolean, maxDepth: integer, operation: string
-): DirectoryStream, string
-    local root <const> = Path.new(required(path, operation))
-    local names <const>, reason = files.list(root)
+function DirectoryStream:toArray(): {DirectoryEntry}, string
+    local entries: {DirectoryEntry} = {}
+    while true do
+        local entry <const>, reason = self:next()
+        if entry == nil then
+            self:close()
+            if reason ~= nil then
+                return nil, reason
+            end
+            return entries
+        end
+        entries[#entries + 1] = entry
+    end
+end
+
+function DirectoryStream:close()
+    local state <const> = directoryStates[self]
+    if state == nil or state.closed then
+        return
+    end
+    state.closed = true
+    state.frames = {}
+    state.pendingDirectory = nil
+end
+
+--- Opens a pull stream over entries under `path` that match `pattern`.
+---
+--- **Recursive unless the pattern stops it**: with no pattern this walks the
+--- whole tree below `path`. `*` and `?` never match a separator, and `?`
+--- consumes one UTF-8 codepoint, so `"*"` is one level, `"*/*"` is exactly
+--- two, and `"*.png"` matches only immediate children. Results include
+--- directories alongside files. Symbolic links are yielded but never followed.
+--- The order is the platform's own and is not sorted.
+---
+--- The stream retains only the unvisited names in each directory on its
+--- current descent. Close it when leaving early. After receiving a directory,
+--- call `skipDirectory` before `next` to prune that complete subtree. Call
+--- `toArray` to consume and close the stream when every remaining entry should
+--- be retained.
+---
+--- @param path The caller supplies the directory to enumerate.
+--- @param pattern The caller supplies `/`-separated `*` and `?` wildcards, or
+---     nil to include every descendant recursively.
+--- @param options The caller supplies matching options or omits them for a
+---     case-sensitive match.
+--- @return Returns a caller-owned stream, or nil when enumeration cannot start.
+--- @return Returns the platform reason when the first return is nil.
+function files.glob(path: PathInput, pattern?: string, options?: GlobOptions): DirectoryStream, string
+    local root <const> = Path.new(required(path, "glob"))
+    local names <const>, reason = listDirectory(root)
     if names == nil then
         return nil, reason
     end
     local stream <const> = setmetatable({} as DirectoryStream, DIRECTORY_STREAM_MT)
+    local segments: {string} = nil
+    if pattern ~= nil then
+        segments = splitGlob(pattern)
+    end
     directoryStates[stream] = {
-        frames = maxDepth == 0 and {} or {{path = root, depth = 1, names = names, at = 1}},
-        recursive = recursive,
-        maxDepth = maxDepth,
+        frames = {{path = root, depth = 1, names = names, at = 1}},
+        pattern = segments,
+        caseInsensitive = options ~= nil and options.caseInsensitive or false,
         closed = false,
     }
     return stream
-end
-
---- Opens a pull stream over the immediate children of a directory.
----
---- The backend may retain the names from this one directory, but the stream
---- never materializes a complete recursive tree. Results use platform order.
----
---- @param path The caller supplies the directory to enumerate.
---- @return Returns a caller-owned stream, or nil when enumeration cannot start.
---- @return Returns the platform reason when the first return is nil.
-function files.openDirectory(path: PathInput): DirectoryStream, string
-    return directoryStream(path, false, 1, "openDirectory")
-end
-
---- Opens a depth-first pull stream over a directory tree.
----
---- Symbolic links are yielded but never followed, which prevents link cycles
---- and keeps traversal inside the spelling of the requested tree. Close the
---- stream when leaving early. The backend retains at most the unvisited names
---- in each directory on the current descent, not every descendant.
----
---- @param path The caller supplies the root directory. The root is not yielded.
---- @param options The caller may limit depth; one yields immediate children only.
---- @return Returns a caller-owned stream, or nil when enumeration cannot start.
---- @return Returns the platform reason when the first return is nil.
-function files.walk(path: PathInput, options?: WalkOptions): DirectoryStream, string
-    local maxDepth = 2147483647
-    if options ~= nil and options.maxDepth ~= nil then
-        maxDepth = options.maxDepth
-        if type(maxDepth) ~= "number" or maxDepth ~= floor(maxDepth) or maxDepth < 0 then
-            error("tecs: io.files.walk maxDepth must be a non-negative integer", 2)
-        end
-    end
-    return directoryStream(path, true, maxDepth, "walk")
 end
 
 --- Creates `path`, and any parents it needs.
@@ -716,10 +795,22 @@ end
 ---
 --- Emptying a tree requires a glob and a deepest-first loop:
 ---
----     local entries = files.glob(root)
----     table.sort(entries, function(a, b) return #a > #b end)
----     for _, entry in ipairs(entries) do
----         files.remove(root .. "/" .. entry)
+---     local stream = assert(files.glob(root))
+---     local paths = {}
+---     while true do
+---         local entry, reason = stream:next()
+---         if entry == nil then
+---             if reason ~= nil then error(reason) end
+---             break
+---         end
+---         paths[#paths + 1] = entry.path
+---     end
+---     stream:close()
+---     table.sort(paths, function(a, b)
+---         return #(a:toString()) > #(b:toString())
+---     end)
+---     for _, path in ipairs(paths) do
+---         files.remove(path)
 ---     end
 ---     files.remove(root)
 ---

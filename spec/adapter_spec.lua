@@ -108,6 +108,15 @@ local function fakeStorage()
     end
     backend.info = function(path)
         note("info", path)
+        if path == "/dev/content/levels" then
+            return {
+                kind = "directory",
+                size = 0,
+                createdAt = 0,
+                modifiedAt = 2e18,
+                accessedAt = 2e18,
+            }
+        end
         if files[path] == nil then
             return nil, "no such title file"
         end
@@ -123,9 +132,14 @@ local function fakeStorage()
         note("isSymlink", path)
         return false
     end
-    backend.glob = function(path, pattern)
-        note("glob " .. tostring(pattern), path)
-        return { "levels", "levels/1.json" }
+    backend.list = function(path)
+        note("list", path)
+        if path == "/dev/content/" then
+            return { "levels" }
+        elseif path == "/dev/content/levels" then
+            return { "1.json" }
+        end
+        return {}
     end
     backend.createDirectory = function(path)
         note("createDirectory", path)
@@ -305,7 +319,6 @@ describe("platform contract", function()
         assert.is_false(files.isSymlink(level))
         assert.is_false(files.exists("/dev/content/absent"))
 
-        assert.are.same({ "levels", "levels/1.json" }, files.list(files.basePath()))
         assert.is_true(files.createDirectory("/dev/save/tecs/tecs/shots"))
         assert.is_true(files.copy(level, "/dev/content/levels/2.json"))
         assert.is_true(files.rename("/dev/content/levels/2.json", "/dev/content/levels/3.json"))
@@ -313,7 +326,7 @@ describe("platform contract", function()
 
         -- Named, in order, so that an operation quietly answered by something
         -- other than this backend is a shorter list rather than a passing
-        -- test. `list` is a glob with the pattern that stops it recursing.
+        -- test. `list` is the one-level enumeration primitive.
         assert.are.same({
             "read /dev/content/levels/1.json",
             "write /dev/save/tecs/tecs/slot1.json",
@@ -325,12 +338,53 @@ describe("platform contract", function()
             "info /dev/content/levels/1.json",
             "isSymlink /dev/content/levels/1.json",
             "info /dev/content/absent",
-            "glob * /dev/content/",
             "createDirectory /dev/save/tecs/tecs/shots",
             "copy /dev/content/levels/1.json /dev/content/levels/2.json",
             "rename /dev/content/levels/2.json /dev/content/levels/3.json",
             "remove /dev/content/levels/3.json",
         }, platform.storage.calls)
+    end)
+
+    it("pulls recursive globs through one-level backend lists", function()
+        local platform = fakePlatform()
+        platform.storage = fakeStorage()
+        adapter.install(platform)
+
+        local base = files.basePath()
+        local stream = assert(files.glob(base))
+        local entries = assert(stream:toArray())
+        local paths = {}
+        for _, entry in ipairs(entries) do
+            paths[#paths + 1] = assert(entry.path:relativeTo(base)):toString()
+        end
+        assert.are.same({ "levels", "levels/1.json" }, paths)
+        assert.are.same({
+            "list /dev/content/",
+            "isSymlink /dev/content/levels",
+            "info /dev/content/levels",
+            "list /dev/content/levels",
+            "isSymlink /dev/content/levels/1.json",
+            "info /dev/content/levels/1.json",
+        }, platform.storage.calls)
+    end)
+
+    it("closes a collected glob when traversal fails", function()
+        local platform = fakePlatform()
+        platform.storage = fakeStorage()
+        local list = platform.storage.list
+        platform.storage.list = function(path)
+            if path == "/dev/content/levels" then
+                return nil, "title directory became unavailable"
+            end
+            return list(path)
+        end
+        adapter.install(platform)
+
+        local stream = assert(files.glob(files.basePath()))
+        local entries, reason = stream:toArray()
+        assert.is_nil(entries)
+        assert.are.equal("title directory became unavailable", reason)
+        assert.is_nil(stream:next())
     end)
 
     it("keeps the Reader count contract through the whole-file fallback", function()

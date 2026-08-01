@@ -1,8 +1,8 @@
 --- Walking, copying and removing trees.
 ---
---- Everything here is `tecs.io.files` plus recursion. SDL answers about one
---- path at a time on purpose, so a tree operation is a walk somebody writes;
---- this is that walk, written once, rather than once per command.
+--- Everything here is `tecs.io.files` plus command-specific policy. The
+--- engine supplies the traversal; this module decides which project trees to
+--- prune and which files each command keeps.
 ---
 --- Paths come back relative to the root they were walked from and always use a
 --- forward slash, so a caller joins them without asking which separator this
@@ -31,29 +31,27 @@ local SKIP <const>: {string: boolean} = {
 --- @param keep Answers whether a relative path is wanted. Omitted keeps all.
 function files.walk(root: string, keep?: function(string): boolean): {string}
     local found: {string} = {}
-
-    local function descend(prefix: string)
-        local entries = tecs.io.files.list(root .. (prefix == "" and "" or "/" .. prefix))
-        if entries == nil then
-            return
+    local stream = tecs.io.files.glob(root)
+    if stream == nil then
+        return found
+    end
+    while true do
+        local entry = stream:next()
+        if entry == nil then
+            break
         end
-        table.sort(entries)
-        for _, entry in ipairs(entries) do
-            if not SKIP[entry] then
-                local relative = prefix == "" and entry or prefix .. "/" .. entry
-                local info = tecs.io.files.info(root .. "/" .. relative)
-                if info ~= nil and info.kind == "directory" then
-                    descend(relative)
-                elseif info ~= nil and info.kind == "file" then
-                    if keep == nil or keep(relative) then
-                        found[#found + 1] = relative
-                    end
-                end
+        if SKIP[entry.name] then
+            if entry.kind == "directory" then
+                stream:skipDirectory()
+            end
+        elseif entry.kind == "file" then
+            local relative = assert(entry.path:relativeTo(root)):toString()
+            if keep == nil or keep(relative) then
+                found[#found + 1] = relative
             end
         end
     end
-
-    descend("")
+    table.sort(found)
     return found
 end
 
@@ -96,10 +94,11 @@ function files.removeTree(path: string): boolean
         return true
     end
     if info.kind == "directory" then
-        local entries = tecs.io.files.list(path)
+        local stream = tecs.io.files.glob(path, "*")
+        local entries = stream ~= nil and stream:toArray() or nil
         if entries ~= nil then
             for _, entry in ipairs(entries) do
-                files.removeTree(path .. "/" .. entry)
+                files.removeTree(entry.path:toString())
             end
         end
     end

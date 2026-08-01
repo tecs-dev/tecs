@@ -61,7 +61,7 @@ all three, and only the memory a large file costs differs.
 Symbolic-link creation and reading, portable read-only mutation, and temporary
 resources are optional platform capabilities. The public module reports an
 unsupported reason when a backend leaves one out. Enumeration streams need no
-extra seam: they pull one level at a time through the required `glob` operation.
+extra seam: they pull one level at a time through the required `list` operation.
 
 `writeAtomic` is optional without a fallback. A title storage may have a
 transaction or commit operation that provides the same guarantee, but
@@ -159,14 +159,6 @@ local enum SeekableWriteMode
     "update"
 end
 
---- How a pattern is matched.
-local record GlobOptions
-    --- Caller-writable. Matches without regard to case when true. Defaults to
-    --- false, which is a case-sensitive match on every platform including the
-    --- ones whose filesystem is not.
-    caseInsensitive: boolean
-end
-
 local record Backend
     --- Name this backend reports as. For diagnostics; it is not matched
     --- against.
@@ -216,11 +208,9 @@ local record Backend
     createSymlink: function(target: string, link: string, directory: boolean): boolean, string
     --- Changes the portable read-only state. Optional.
     setReadOnly: function(path: string, readOnly: boolean): boolean, string
-    --- Entries under `path` matching `pattern`, as paths relative to `path`.
-    --- A nil pattern walks the whole tree. `*` and `?` do not match a
-    --- separator, so `"*"` is one level. Nil and a reason when `path` cannot
-    --- be enumerated, which is not the same answer as an empty list.
-    glob: function(path: string, pattern: string, options: GlobOptions): {string}, string
+    --- Names directly under `path`. Nil and a reason when `path` cannot be
+    --- enumerated, which is not the same answer as an empty list.
+    list: function(path: string): {string}, string
     --- Creates `path` and any parents it needs. Succeeds on one that is
     --- already there.
     createDirectory: function(path: string): boolean, string
@@ -261,8 +251,6 @@ local record storagebackend
     --- reaches a backend. Derived from the one table of them below, so there
     --- is no second list to drift.
     folders: {UserFolder: boolean}
-    --- How `Backend.glob` matches.
-    GlobOptions: GlobOptions
     --- How `Backend.openWrite` opens its destination.
     WriteMode: WriteMode
     --- How `Backend.openSeekableWrite` opens its destination.
@@ -283,8 +271,6 @@ end
 local INFO <const> = loader.newStruct("SDL_PathInfo")
 local FIELDS <const> = INFO as {string: any}
 local countOut <const> = loader.newArray("int[1]")
-
-local CASE_INSENSITIVE <const> = sdl.K.SDL_GLOB_CASEINSENSITIVE
 
 local PATH_TYPES <const>: {integer: PathType} = {
     [tonumber(C.SDL_PATHTYPE_FILE) as integer] = "file",
@@ -793,13 +779,8 @@ local sdlBackend <const>: Backend = {
         return false, loader.toString(R.tecsRustError())
     end,
 
-    glob = function(path: string, pattern: string, options: GlobOptions): {string}, string
-        local flags = 0
-        if options ~= nil and options.caseInsensitive then
-            flags = CASE_INSENSITIVE
-        end
-
-        local list = C.SDL_GlobDirectory(path, pattern, flags, countOut)
+    list = function(path: string): {string}, string
+        local list = C.SDL_GlobDirectory(path, "*", 0, countOut)
         if list == nil then
             return nil, sdl.error()
         end
