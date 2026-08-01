@@ -221,8 +221,8 @@ local PAGE_OVERRIDES = {
         layout = "home",
         hero_title = "Build games with LuaJIT",
         hero_text = "Typed. GPU-driven. One data model.",
-        hero_image = "/images/tecs.png",
-        hero_image_alt = "Tecs",
+        hero_image = "/images/desert.png",
+        hero_image_alt = "A cactus and an armadillo in the desert sun",
         hero_actions = {
             { text = "Get started", path = "getting-started", theme = "brand" },
             { text = "Modules", path = "modules", theme = "alt" },
@@ -616,9 +616,13 @@ return {
             title = "Tecs",
             description = "Typed entity component system and game engine for Lua.",
             site_url = "https://tecs.dev",
-            -- No logo: the wordmark in `docs/site.css` is the mark, and an
-            -- image beside it would say the name twice.
-            favicon = "/images/logo.svg",
+            -- The mark is a 32 by 32 pixel cactus, drawn on a grid to
+            -- match Jersey 15, the pixel face the wordmark beside it is set
+            -- in. One file is both logo and favicon: at 32 and at 16 the grid
+            -- is the artwork, so there is no separately drawn small version
+            -- to keep in step with this one.
+            logo = "/images/cactus.svg",
+            favicon = "/images/cactus.svg",
             github = "https://github.com/tecs-dev/tecs",
             public = "docs/public",
             -- The wordmark is visible in the first paint. Start its tiny local
@@ -651,7 +655,7 @@ return {
             -- because that is what turns a type name in a code block into a
             -- link. Absent, those blocks render unhighlighted.
             lexers = "vendor/scintillua/lexers",
-            social_image = "/images/tecs.png",
+            social_image = "/images/desert.png",
             copyright = "Copyright Michael Dowling",
             license = "MIT or Apache-2.0, at your option",
             -- No row for MIT and Apache-2.0: the license line above already

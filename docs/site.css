@@ -35,13 +35,31 @@
 }
 
 :root {
-    /* The original VitePress palette. The hero uses the whole ramp rather
-     * than tinting one radial glow with the current accent. */
-    --tecs-c-near-black: #110f0d;
-    --tecs-c-purple: #372455;
-    --tecs-c-crimson: #dd2020;
-    --tecs-c-lavender: #867795;
-    --tecs-c-tan: #9b8d75;
+    /* The hero glow, top to bottom: sky down to lit sand. The hero uses a
+     * whole ramp rather than tinting one radial glow with the current accent.
+     *
+     * It has to switch with the theme. The dark ramp starts at night and ends
+     * at gold, which behind a cut-out illustration reads as sky over sand on
+     * a dark page and as a grey smudge on a sand one. The light ramp keeps the
+     * same shape with the floor raised out of the dark end entirely. */
+    --tecs-glow-1: #e4d7bc;
+    --tecs-glow-2: #c9d0ae;
+    --tecs-glow-3: #d8b98a;
+    --tecs-glow-4: #e3c98f;
+    --tecs-glow-5: #f0e2c0;
+
+    /* The header art sits under the nav controls, and in the light theme those
+     * are dark glyphs that would otherwise land on dark mountains. Washing the
+     * art back toward the bar colour buys the contrast back. The dark theme
+     * needs almost none: its controls are already light on a dark scene. */
+    --tecs-header-wash: rgba(240, 231, 210, 0.55);
+
+    /* How far the hero art rides up, and the space that move gives back. It is
+     * 20% of the art's 330px height, written in pixels rather than as a
+     * percentage because the two need to stay equal: `top` takes a percentage
+     * of the row's height, while a percentage margin resolves against its
+     * width, so the pair would drift apart at every width but one. */
+    --tecs-hero-lift: 66px;
 
     /* One root size, at every width. Pico steps this from 100% to 131.25%
      * across five breakpoints, which makes `rem` a function of the viewport,
@@ -51,44 +69,56 @@
      * is a constant and zoom is the only thing that scales it. */
     --pico-font-size: 135%;
 
-    /* Paper and ink. Warm rather than white, because a page of signatures is
-     * read for minutes at a time. */
-    --tealdoc-light-background: #e8e4dc;
-    --tealdoc-light-background-alt: #e0dcd4;
-    --tealdoc-light-background-elv: #e0ddd8;
-    --tealdoc-light-border: #cdc8c0;
-    --tealdoc-light-code-background: #e0ddd8;
-    --tealdoc-light-sidebar-background: #d5d0c8;
-    --tealdoc-light-text: #302d29;
-    --tealdoc-light-text-muted: #565047;
-    --tealdoc-light-text-faint: #756d60;
+    /* Paper and ink. Sand rather than white, because a page of signatures is
+     * read for minutes at a time.
+     *
+     * The dark ground is lifted well off black on purpose. A near-black page
+     * makes every warm color on it read as a light source rather than as a
+     * surface, and this palette is almost entirely warm. */
+    --tealdoc-light-background: #f2e9d4;
+    --tealdoc-light-background-alt: #eae0c8;
+    --tealdoc-light-background-elv: #f8f2e2;
+    --tealdoc-light-border: #d8cbad;
+    --tealdoc-light-code-background: #f8f2e2;
+    --tealdoc-light-sidebar-background: #e6dbc0;
+    --tealdoc-light-text: #4c4235;
+    --tealdoc-light-text-muted: #6e6252;
+    --tealdoc-light-text-faint: #8d8170;
 
-    --tealdoc-dark-background: #110f0d;
-    --tealdoc-dark-background-alt: #110f0d;
-    --tealdoc-dark-background-elv: #2a2724;
-    --tealdoc-dark-border: #3a3730;
-    --tealdoc-dark-code-background: #17141c;
-    --tealdoc-dark-sidebar-background: #1d1d1d;
-    --tealdoc-dark-text: #d9d2c3;
-    --tealdoc-dark-text-muted: #b6ad9e;
-    --tealdoc-dark-text-faint: #8f8677;
+    --tealdoc-dark-background: #292420;
+    --tealdoc-dark-background-alt: #231f1b;
+    --tealdoc-dark-background-elv: #342e28;
+    --tealdoc-dark-border: #453e35;
+    --tealdoc-dark-code-background: #221e1a;
+    --tealdoc-dark-sidebar-background: #221e1a;
+    --tealdoc-dark-text: #d8ccb0;
+    --tealdoc-dark-text-muted: #b0a284;
+    --tealdoc-dark-text-faint: #8a7d69;
 
-    /* Purple on paper, lavender in the dark. */
-    --tealdoc-light-accent: #372455;
-    --tealdoc-light-accent-hover: #4a3570;
-    --tealdoc-light-accent-soft: #37245524;
-    --tealdoc-light-accent-contrast: #ffffff;
-    --tealdoc-dark-accent: #a192b1;
-    --tealdoc-dark-accent-hover: #b5a6c5;
-    --tealdoc-dark-accent-soft: #86779529;
-    --tealdoc-dark-accent-contrast: #110f0d;
+    /* The accent is earth: rust on paper, clay in the dark. Headings carry it,
+     * so it is the color the site is mostly made of, and the desert is the
+     * half of this palette that should be doing that work. */
+    --tealdoc-light-accent: #8e5330;
+    --tealdoc-light-accent-hover: #a96b3e;
+    --tealdoc-light-accent-soft: #8e533024;
+    --tealdoc-light-accent-contrast: #fbf5e6;
+    --tealdoc-dark-accent: #e0a87c;
+    --tealdoc-dark-accent-hover: #cf8659;
+    --tealdoc-dark-accent-soft: #e0a87c29;
+    --tealdoc-dark-accent-contrast: #292420;
 
-    /* A link is not the accent: purple headings and purple links in one column
-     * read as one thing. Tan on paper, the logo red in the dark. */
-    --tealdoc-light-link: #7f6f54;
-    --tealdoc-light-link-hover: #675941;
-    --tealdoc-dark-link: #da6f66;
-    --tealdoc-dark-link-hover: #f08980;
+    /* A link is not the accent: earth headings and earth links in one column
+     * read as one thing. Links are the green, which is the other half of the
+     * desert and the half that has to appear somewhere a reader looks. */
+    --tealdoc-light-link: #4f8064;
+    --tealdoc-light-link-hover: #3f6350;
+    --tealdoc-dark-link: #a7c080;
+    --tealdoc-dark-link-hover: #c6d3a8;
+
+    /* The wordmark rides the header, whose surface follows the theme, so both
+     * of its colors have to as well. */
+    --tecs-wordmark: #a96b3e;
+    --tecs-wordmark-rule: #4f8064;
 
     /* The primary action uses the same active-theme color as a link. Its text
      * keeps Tealdoc's contrast pair: white on the darker light-theme tan and
@@ -107,6 +137,9 @@
      * stays in the reading face, which is what a paragraph is set in. */
     --tealdoc-font-heading: "Jersey 15", sans-serif;
     --tealdoc-heading-font-weight: 400;
+    /* The right-hand outline matches the left-hand navigation rather than
+     * sitting a step under it. They are the same kind of thing, a list of
+     * places on the page, and one being smaller read as an accident. */
     /* Tealdoc applies this on both sides of each h2 separator. */
     --tealdoc-heading-2-spacing: 1.75rem;
     --tealdoc-sidebar-font-family: var(--tealdoc-font-heading);
@@ -123,8 +156,8 @@
     --tealdoc-sidebar-active-font-weight: 400;
     --tealdoc-sidebar-heading-font-weight: 400;
 
-    --tealdoc-outline-font-size: 0.78rem;
-    --tealdoc-outline-nested-font-size: 0.72rem;
+    --tealdoc-outline-font-size: 0.85rem;
+    --tealdoc-outline-nested-font-size: 0.85rem;
     --tealdoc-outline-font-weight: 400;
     --tealdoc-outline-title-font-weight: 400;
 
@@ -151,35 +184,109 @@
     --tealdoc-hero-glow-opacity: 1;
 }
 
-/* The wordmark. Logo red with a purple rule under, which is the one piece of
- * the identity that is a drawing rather than a color, so it is written against
- * tealdoc's classes rather than its tokens. No `logo` is configured, so this
- * is the whole mark. */
+/* The wordmark, which sits beside the cactus rather than replacing it. Clay
+ * with a green rule under, the one piece of the identity that is a drawing
+ * rather than a color, so it is written against tealdoc's classes rather than
+ * its tokens. */
 .tealdoc-brand-name {
     display: inline-flex;
     align-items: center;
     height: 40px;
     margin-left: -12px;
     padding: 0 12px;
-    color: #da6f66;
+    color: var(--tecs-wordmark);
     font-family: var(--tealdoc-font-heading);
     font-size: 1.5rem;
     font-weight: 400;
     text-decoration: underline;
-    text-decoration-color: #a192b1;
+    text-decoration-color: var(--tecs-wordmark-rule);
     text-decoration-thickness: 2px;
     text-underline-offset: 5px;
+}
+
+/* The logo is pixel art, so it is sized to a whole multiple of its 32 unit
+ * grid and told not to resample. Tealdoc's default 28px would land the grid on
+ * fractional pixels and soften every edge the artwork is made of.
+ *
+ * It renders through an `<img>`, which cannot read this page's custom
+ * properties, so the file carries one set of colors picked to clear both the
+ * light and the dark header surface rather than shipping a pair and swapping
+ * them. A mark that needs to know the theme is a mark with two failure modes. */
+.tealdoc-logo {
+    width: 32px;
+    height: 32px;
+    image-rendering: pixelated;
 }
 
 .tealdoc-home-hero .tealdoc-hero-starburst {
     background: linear-gradient(
         180deg,
-        var(--tecs-c-near-black) 0%,
-        var(--tecs-c-purple) 20%,
-        var(--tecs-c-crimson) 45%,
-        var(--tecs-c-lavender) 70%,
-        var(--tecs-c-tan) 100%
+        var(--tecs-glow-1) 0%,
+        var(--tecs-glow-2) 20%,
+        var(--tecs-glow-3) 45%,
+        var(--tecs-glow-4) 70%,
+        var(--tecs-glow-5) 100%
     );
+}
+
+/* The header morphs into a desert at sunset toward its right. The artwork
+ * carries its own left-to-right alpha, so this is a single background layer
+ * over the header colour rather than a masked overlay, and the nav content
+ * paints above it with no stacking context to manage.
+ *
+ * It is anchored right and sized to the bar's height, so the horizon sits at
+ * the same place at every width and the scene simply shows less of itself on
+ * a narrow window. Below the point where the top nav collapses it is dropped
+ * entirely: at that width the icons sit where the mountains are. */
+.tealdoc-header {
+    background-image:
+        linear-gradient(var(--tecs-header-wash), var(--tecs-header-wash)),
+        url("/images/header-desert.svg");
+    background-repeat: no-repeat;
+    background-position: right center;
+    background-size: auto 100%;
+}
+
+@media (max-width: 900px) {
+    .tealdoc-header {
+        background-image: none;
+    }
+}
+
+/* Pull the hero art up. Tealdoc centers the image against the copy column,
+ * which sits the illustration low: its ground and glow hang below the buttons
+ * while the headline has empty page above it. The whole grid moves, image and
+ * starburst together, so the glow stays under the art it belongs to.
+ *
+ * A top offset rather than a transform. It does not reclaim the space it
+ * leaves: a relatively positioned box keeps its original slot in the layout
+ * either way, so the art moves and the row stays as tall as it was. The hole
+ * that opens under it is what the margins below close. */
+.tealdoc-home-hero .tealdoc-hero-image {
+    top: calc(-1 * var(--tecs-hero-lift));
+    margin-bottom: calc(-1 * var(--tecs-hero-lift));
+}
+
+/* Below the width where the hero stacks, the art is over the copy rather than
+ * beside it and there is nothing above it to close up against. */
+@media (max-width: 900px) {
+    .tealdoc-home-hero .tealdoc-hero-image {
+        top: 0;
+        margin-bottom: 0;
+    }
+}
+
+/* Close the gap under the hero. Tealdoc's 4rem plus a 2rem features gap was
+ * tuned for art that filled its row. The art now rides 20% higher and leaves
+ * its slot behind, so that vacated band is added to both of them and the three
+ * together read as one large hole. Nearly all of the explicit spacing comes
+ * out; what is left between the hero and the cards is the vacated band. */
+.tealdoc-home-hero {
+    margin-bottom: 0;
+}
+
+:root {
+    --tealdoc-hero-features-gap: 0.5rem;
 }
 
 .tealdoc-feature-details a,
@@ -267,4 +374,135 @@
     .module-columns ul {
         columns: 1;
     }
+}
+
+/* Syntax.
+ *
+ * Tealdoc ships a Tokyo Night pair: blues and purples, on a page that now has
+ * neither. These are the same twelve roles in this palette's own colors, and
+ * they are where most of the green on the site actually lands, because code is
+ * on every page and prose links are not.
+ *
+ * Strings take the green and functions the aqua, which are the two roles that
+ * recur most inside a block, so a listing reads as green over sand rather than
+ * as earth with green in it. Keywords, numbers and operators take the earth,
+ * which keeps the two families on opposite sides of the syntax rather than
+ * interleaved.
+ *
+ * Written against tealdoc's own three selectors rather than a fourth of our
+ * own: light in `:root`, dark in both the media query and the toggle, matching
+ * its specificity so the cascade decides on file order alone.
+ * -------------------------------------------------------------------------- */
+
+:root {
+    --tealdoc-syntax-foreground: #4c4235;
+    --tealdoc-syntax-comment: #8d8170;
+    --tealdoc-syntax-keyword: #a8503a;
+    --tealdoc-syntax-string: #5f7d33;
+    --tealdoc-syntax-function: #3f7d63;
+    --tealdoc-syntax-type: #a8791f;
+    --tealdoc-syntax-number: #a96b3e;
+    --tealdoc-syntax-boolean: #a96b3e;
+    --tealdoc-syntax-operator: #8e5330;
+    --tealdoc-syntax-property: #3f7d63;
+    --tealdoc-syntax-punctuation: #7a6e5c;
+    --tealdoc-syntax-variable: #4c4235;
+    --tealdoc-syntax-meta: #5f7d33;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --tecs-header-wash: rgba(34, 30, 26, 0.15);
+        --tecs-glow-1: #231f1b;
+        --tecs-glow-2: #3f6350;
+        --tecs-glow-3: #8e5330;
+        --tecs-glow-4: #c08a58;
+        --tecs-glow-5: #dbbc7f;
+        --tealdoc-syntax-foreground: #d8ccb0;
+        --tealdoc-syntax-comment: #8a7d69;
+        --tealdoc-syntax-keyword: #e08a70;
+        --tealdoc-syntax-string: #a7c080;
+        --tealdoc-syntax-function: #83c092;
+        --tealdoc-syntax-type: #dbbc7f;
+        --tealdoc-syntax-number: #cf8659;
+        --tealdoc-syntax-boolean: #cf8659;
+        --tealdoc-syntax-operator: #e0a87c;
+        --tealdoc-syntax-property: #83c092;
+        --tealdoc-syntax-punctuation: #b0a284;
+        --tealdoc-syntax-variable: #d8ccb0;
+        --tealdoc-syntax-meta: #a7c080;
+    }
+}
+
+:root:has(.tealdoc-theme-input:checked),
+:root[data-tealdoc-theme="dark"] {
+    --tecs-header-wash: rgba(34, 30, 26, 0.15);
+    --tecs-glow-1: #231f1b;
+    --tecs-glow-2: #3f6350;
+    --tecs-glow-3: #8e5330;
+    --tecs-glow-4: #c08a58;
+    --tecs-glow-5: #dbbc7f;
+    --tealdoc-syntax-foreground: #d8ccb0;
+    --tealdoc-syntax-comment: #8a7d69;
+    --tealdoc-syntax-keyword: #e08a70;
+    --tealdoc-syntax-string: #a7c080;
+    --tealdoc-syntax-function: #83c092;
+    --tealdoc-syntax-type: #dbbc7f;
+    --tealdoc-syntax-number: #cf8659;
+    --tealdoc-syntax-boolean: #cf8659;
+    --tealdoc-syntax-operator: #e0a87c;
+    --tealdoc-syntax-property: #83c092;
+    --tealdoc-syntax-punctuation: #b0a284;
+    --tealdoc-syntax-variable: #d8ccb0;
+    --tealdoc-syntax-meta: #a7c080;
+}
+
+/* Tealdoc has a fourth theme block, and it is easy to miss: the checkbox is a
+ * toggle relative to the system preference, so on a dark-preferring system
+ * `checked` means "give me light". That case lives inside the dark media query
+ * and restores the light values, which means the light half of this override
+ * needs to be written twice, once here. Without it a reader on a dark system
+ * who asks for light gets this palette everywhere except inside code. */
+
+@media (prefers-color-scheme: dark) {
+    :root:has(.tealdoc-theme-input:checked),
+    :root[data-tealdoc-theme="light"] {
+        --tecs-header-wash: rgba(240, 231, 210, 0.55);
+        --tecs-glow-1: #e4d7bc;
+        --tecs-glow-2: #c9d0ae;
+        --tecs-glow-3: #d8b98a;
+        --tecs-glow-4: #e3c98f;
+        --tecs-glow-5: #f0e2c0;
+        --tealdoc-syntax-foreground: #4c4235;
+        --tealdoc-syntax-comment: #8d8170;
+        --tealdoc-syntax-keyword: #a8503a;
+        --tealdoc-syntax-string: #5f7d33;
+        --tealdoc-syntax-function: #3f7d63;
+        --tealdoc-syntax-type: #a8791f;
+        --tealdoc-syntax-number: #a96b3e;
+        --tealdoc-syntax-boolean: #a96b3e;
+        --tealdoc-syntax-operator: #8e5330;
+        --tealdoc-syntax-property: #3f7d63;
+        --tealdoc-syntax-punctuation: #7a6e5c;
+        --tealdoc-syntax-variable: #4c4235;
+        --tealdoc-syntax-meta: #5f7d33;
+    }
+}
+
+/* Inline code in prose is not a syntax token: it is a bare `<code>`, which
+ * Pico paints in a cool blue-grey that nothing downstream was overriding. It
+ * reads through the accent instead, which tealdoc already switches per theme,
+ * so one declaration covers both.
+ *
+ * The selector is Pico's own rather than a plain `:root`, because Pico sets
+ * this token on `:root:not([data-theme=dark])` and a bare `:root` loses to it
+ * on specificity no matter what order the files load in. This site keys its
+ * theme off `data-tealdoc-theme`, so `data-theme` is never set here and the
+ * negation always matches; matching Pico's shape ties the specificity and
+ * lets file order decide, which is the same bargain the syntax block above
+ * makes with tealdoc. */
+
+:root:not([data-theme="dark"]) {
+    --pico-code-color: var(--tealdoc-accent);
+    --pico-code-background-color: var(--tealdoc-code-background);
 }
