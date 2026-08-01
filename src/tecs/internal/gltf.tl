@@ -19,7 +19,7 @@ local COMPONENT_BYTES <const>: {integer: integer} = {
     [5125] = 4,
     [5126] = 4,
 }
-local TYPE_COUNT <const>: {string: integer} = {SCALAR = 1, VEC2 = 2, VEC3 = 3, VEC4 = 4}
+local TYPE_COUNT <const>: {string: integer} = {SCALAR = 1, VEC2 = 2, VEC3 = 3, VEC4 = 4, MAT4 = 16}
 
 local function uint32(bytes: string, at: integer): integer
     local a, b, c, d = bytes:byte(at, at + 3)
@@ -227,8 +227,11 @@ local function decodePrimitive(
     if attributes == nil or attributes.POSITION == nil then
         error(("tecs: %s has no POSITION attribute"):format(name), 0)
     end
-    if attributes.COLOR_0 ~= nil or attributes.JOINTS_0 ~= nil or attributes.WEIGHTS_0 ~= nil then
+    if attributes.COLOR_0 ~= nil then
         error(("tecs: %s uses unsupported vertex attributes"):format(name), 0)
+    end
+    if (attributes.JOINTS_0 == nil) ~= (attributes.WEIGHTS_0 == nil) then
+        error(("tecs: %s must supply JOINTS_0 and WEIGHTS_0 together"):format(name), 0)
     end
     if primitive.targets ~= nil then
         error(("tecs: %s uses unsupported morph targets"):format(name), 0)
@@ -240,6 +243,8 @@ local function decodePrimitive(
     local normals: Access = nil
     local tangents: Access = nil
     local uvs: Access = nil
+    local joints: Access = nil
+    local weights: Access = nil
     if attributes.NORMAL ~= nil then
         normals = accessor(document, buffers, attributes.NORMAL)
         sameRows(normals, 3, positions.count, name .. " NORMAL")
@@ -251,6 +256,21 @@ local function decodePrimitive(
     if attributes.TEXCOORD_0 ~= nil then
         uvs = accessor(document, buffers, attributes.TEXCOORD_0)
         sameRows(uvs, 2, positions.count, name .. " TEXCOORD_0")
+    end
+    if attributes.JOINTS_0 ~= nil then
+        joints = accessor(document, buffers, attributes.JOINTS_0)
+        weights = accessor(document, buffers, attributes.WEIGHTS_0)
+        sameRows(joints, 4, positions.count, name .. " JOINTS_0")
+        sameRows(weights, 4, positions.count, name .. " WEIGHTS_0")
+        if joints.normalized or (joints.componentType ~= 5121 and joints.componentType ~= 5123) then
+            error(("tecs: %s JOINTS_0 does not use an unsigned integer type"):format(name), 0)
+        end
+        if
+            weights.componentType ~= 5126
+            and not (weights.normalized and (weights.componentType == 5121 or weights.componentType == 5123))
+        then
+            error(("tecs: %s WEIGHTS_0 does not use float or normalized unsigned values"):format(name), 0)
+        end
     end
     if primitive.material ~= nil then
         local material = (document.materials as {{string: any}} or {})[(primitive.material as integer) + 1]
@@ -302,6 +322,32 @@ local function decodePrimitive(
     end
 
     local vertices <const> = ffi.new("float[?]", positions.count * 12) as loader.CArray
+    local skinVertices: loader.CArray = nil
+    local maxJoint = -1
+    if joints ~= nil then
+        skinVertices = ffi.new("float[?]", positions.count * 8) as loader.CArray
+        for row = 0, positions.count - 1 do
+            local at <const> = row * 8
+            local total = 0.0
+            for lane = 0, 3 do
+                local joint <const> = value(joints, row, lane)
+                local weight <const> = value(weights, row, lane)
+                if joint < 0 or joint ~= math.floor(joint) or weight < 0 then
+                    error(("tecs: %s has invalid joint data at vertex %d"):format(name, row), 0)
+                end
+                skinVertices[at + lane] = joint
+                skinVertices[at + 4 + lane] = weight
+                maxJoint = math.floor(math.max(maxJoint, joint))
+                total = total + weight
+            end
+            if total <= 1e-20 then
+                error(("tecs: %s has zero joint weight at vertex %d"):format(name, row), 0)
+            end
+            for lane = 0, 3 do
+                skinVertices[at + 4 + lane] = (skinVertices[at + 4 + lane] as number) / total
+            end
+        end
+    end
     local generatedNormals: loader.CArray = nil
     if normals == nil then
         generatedNormals = ffi.new("float[?]", positions.count * 3) as loader.CArray
@@ -431,6 +477,7 @@ local function decodePrimitive(
         name = name,
         vertices = ffi.string(vertices as string, positions.count * 48),
         indices = ffi.string(indices as string, indexCount * 4),
+        skinVertices = skinVertices ~= nil and ffi.string(skinVertices as string, positions.count * 32) or nil,
         vertexCount = positions.count,
         indexCount = indexCount,
         centerX = centerX,
@@ -438,6 +485,7 @@ local function decodePrimitive(
         centerZ = centerZ,
         radius = math.sqrt(radiusSquared),
         material = primitive.material ~= nil and (primitive.material as integer) + 1 or 0,
+        maxJoint = maxJoint,
     }
 end
 
@@ -488,6 +536,41 @@ local function multiply(a: {number}, b: {number}): {number}
         end
     end
     return result
+end
+
+local function inverseAffine(m: {number}): {number}
+    local a00, a01, a02 <const> = m[1], m[5], m[9]
+    local a10, a11, a12 <const> = m[2], m[6], m[10]
+    local a20, a21, a22 <const> = m[3], m[7], m[11]
+    local determinant <const> = a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) + a02 * (
+        a10 * a21 - a11 * a20
+    )
+    if math.abs(determinant) <= 1e-20 then
+        error("tecs: a glTF skin uses a non-invertible mesh transform", 0)
+    end
+    local d <const> = 1.0 / determinant
+    local i00, i01, i02 <const> = (a11 * a22 - a12 * a21) * d, (a02 * a21 - a01 * a22) * d, (a01 * a12 - a02 * a11) * d
+    local i10, i11, i12 <const> = (a12 * a20 - a10 * a22) * d, (a00 * a22 - a02 * a20) * d, (a02 * a10 - a00 * a12) * d
+    local i20, i21, i22 <const> = (a10 * a21 - a11 * a20) * d, (a01 * a20 - a00 * a21) * d, (a00 * a11 - a01 * a10) * d
+    local tx, ty, tz <const> = m[13], m[14], m[15]
+    return {
+        i00,
+        i10,
+        i20,
+        0,
+        i01,
+        i11,
+        i21,
+        0,
+        i02,
+        i12,
+        i22,
+        0,
+        -(i00 * tx + i01 * ty + i02 * tz),
+        -(i10 * tx + i11 * ty + i12 * tz),
+        -(i20 * tx + i21 * ty + i22 * tz),
+        1,
+    }
 end
 
 local function decompose(m: {number}): {string: number}
@@ -559,8 +642,8 @@ function gltf.decodeFile(path: string): {string: any}
             error(("tecs: %s requires unsupported extension %s"):format(path, extension), 0)
         end
     end
-    if #(document.skins as {{string: any}} or {}) > 0 or #(document.animations as {{string: any}} or {}) > 0 then
-        error(("tecs: %s uses unsupported skinning or animation"):format(path), 0)
+    if #(document.animations as {{string: any}} or {}) > 0 then
+        error(("tecs: %s uses unsupported animation clips"):format(path), 0)
     end
     local base <const> = directory(path)
     local buffers: {string} = {}
@@ -705,9 +788,90 @@ function gltf.decodeFile(path: string): {string: any}
     end
 
     local draws: {{string: any}} = {}
+    local skins: {{string: any}} = {}
     local nodes <const> = document.nodes as {{string: any}} or {}
+    local parents: {integer: integer} = {}
+    for parent, node in ipairs(nodes) do
+        for _, child in ipairs(node.children as {integer} or {}) do
+            if nodes[child + 1] == nil then
+                error(("tecs: %s node names a missing child"):format(path), 0)
+            end
+            if parents[child] ~= nil then
+                error(("tecs: %s node %d has more than one parent"):format(path, child), 0)
+            end
+            parents[child] = parent - 1
+        end
+    end
+
+    local worlds: {integer: {number}} = {}
+    local resolving: {integer: boolean} = {}
+    local function worldOf(index: integer): {number}
+        local existing = worlds[index]
+        if existing ~= nil then
+            return existing
+        end
+        local node = nodes[index + 1]
+        if node == nil then
+            error(("tecs: %s skin names a missing joint node"):format(path), 0)
+        end
+        if resolving[index] then
+            error(("tecs: %s has a cycle in its node hierarchy"):format(path), 0)
+        end
+        resolving[index] = true
+        local parent = parents[index]
+        existing = multiply(parent ~= nil and worldOf(parent) or identity(), localMatrix(node))
+        resolving[index] = nil
+        worlds[index] = existing
+        return existing
+    end
+
+    local skinByNode: {integer: integer} = {}
+    local skinSources <const> = document.skins as {{string: any}} or {}
+    local function skinFor(nodeIndex: integer, skinIndex: integer, meshWorld: {number}): integer
+        local existing = skinByNode[nodeIndex]
+        if existing ~= nil then
+            return existing
+        end
+        local source = skinSources[skinIndex + 1]
+        if source == nil then
+            error(("tecs: %s node names a missing skin"):format(path), 0)
+        end
+        local joints <const> = source.joints as {integer} or {}
+        if #joints == 0 then
+            error(("tecs: %s skin %d has no joints"):format(path, skinIndex), 0)
+        end
+        local inverseBinds: Access = nil
+        if source.inverseBindMatrices ~= nil then
+            inverseBinds = accessor(document, buffers, source.inverseBindMatrices as integer)
+            sameRows(inverseBinds, 16, #joints, ("skin %d inverse bind matrices"):format(skinIndex))
+            if inverseBinds.componentType ~= 5126 or inverseBinds.normalized then
+                error(("tecs: %s skin %d inverse bind matrices are not float MAT4 values"):format(path, skinIndex), 0)
+            end
+        end
+        local inverseMesh <const> = inverseAffine(meshWorld)
+        local matrices: {number} = {}
+        for jointIndex, jointNode in ipairs(joints) do
+            local inverseBind = identity()
+            if inverseBinds ~= nil then
+                for lane = 0, 15 do
+                    inverseBind[lane + 1] = value(inverseBinds, jointIndex - 1, lane)
+                end
+            end
+            local matrix <const> = multiply(multiply(inverseMesh, worldOf(jointNode)), inverseBind)
+            for lane = 1, 16 do
+                matrices[#matrices + 1] = matrix[lane]
+            end
+        end
+        skins[#skins + 1] = {
+            name = path .. "#skin-" .. skinIndex .. "-node-" .. nodeIndex,
+            matrices = matrices,
+        }
+        skinByNode[nodeIndex] = #skins
+        return #skins
+    end
+
     local visiting: {integer: boolean} = {}
-    local function visit(index: integer, parent: {number})
+    local function visit(index: integer)
         local node <const> = nodes[index + 1]
         if node == nil then
             error(("tecs: %s scene names a missing node"):format(path), 0)
@@ -715,25 +879,37 @@ function gltf.decodeFile(path: string): {string: any}
         if visiting[index] then
             error(("tecs: %s has a cycle in its node hierarchy"):format(path), 0)
         end
-        if node.skin ~= nil then
-            error(("tecs: %s node uses unsupported skinning"):format(path), 0)
-        end
         visiting[index] = true
-        local world <const> = multiply(parent, localMatrix(node))
+        local world <const> = worldOf(index)
         if node.mesh ~= nil then
             local nodeMeshes <const> = byMesh[(node.mesh as integer) + 1]
             if nodeMeshes == nil then
                 error(("tecs: %s node names a missing mesh"):format(path), 0)
             end
+            local skin = 0
+            if node.skin ~= nil then
+                skin = skinFor(index, node.skin as integer, world)
+            end
             for _, mesh in ipairs(nodeMeshes) do
+                local geometry <const> = meshes[mesh]
+                if (geometry.skinVertices ~= nil) ~= (skin ~= 0) then
+                    error(("tecs: %s node and mesh disagree about skinning"):format(path), 0)
+                end
+                if skin ~= 0 then
+                    local jointCount <const> = #(skins[skin].matrices as {number}) / 16
+                    if (geometry.maxJoint as integer) >= jointCount then
+                        error(("tecs: %s mesh joint index exceeds skin %d"):format(path, node.skin as integer), 0)
+                    end
+                end
                 local transform <const> = decompose(world)
                 transform.mesh = mesh
-                transform.material = meshes[mesh].material as number
+                transform.material = geometry.material as number
+                transform.skin = skin
                 draws[#draws + 1] = transform
             end
         end
         for _, child in ipairs(node.children as {integer} or {}) do
-            visit(child, world)
+            visit(child)
         end
         visiting[index] = nil
     end
@@ -741,7 +917,7 @@ function gltf.decodeFile(path: string): {string: any}
     local scene <const> = (document.scenes as {{string: any}} or {})[sceneIndex + 1]
     if scene ~= nil then
         for _, node in ipairs(scene.nodes as {integer} or {}) do
-            visit(node, identity())
+            visit(node)
         end
     else
         local children: {integer: boolean} = {}
@@ -752,11 +928,11 @@ function gltf.decodeFile(path: string): {string: any}
         end
         for index = 0, #nodes - 1 do
             if not children[index] then
-                visit(index, identity())
+                visit(index)
             end
         end
     end
-    return {path = path, meshes = meshes, images = images, materials = materials, draws = draws}
+    return {path = path, meshes = meshes, images = images, materials = materials, skins = skins, draws = draws}
 end
 
 return gltf

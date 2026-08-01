@@ -1,5 +1,5 @@
 ---
-description: "Asynchronous byte, image, sound, and static glTF loading through futures"
+description: "Asynchronous byte, image, sound, and initial-pose glTF loading through futures"
 outline: deep
 ---
 

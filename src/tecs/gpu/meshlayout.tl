@@ -9,6 +9,8 @@ choose different strides while the mesh domain is being landed in stages.
 local record meshlayout
     VERTEX_FLOATS: integer
     VERTEX_BYTES: integer
+    SKIN_VERTEX_FLOATS: integer
+    SKIN_VERTEX_BYTES: integer
     INSTANCE_FLOATS: integer
     INSTANCE_BYTES: integer
     BOUND_FLOATS: integer
@@ -19,6 +21,12 @@ end
 -- position.xyz, normal.xyz, tangent.xyzw, uv.xy
 meshlayout.VERTEX_FLOATS = 12
 meshlayout.VERTEX_BYTES = meshlayout.VERTEX_FLOATS * 4
+
+-- joints.xyzw and normalized weights.xyzw. This is a separate optional
+-- buffer so an unskinned domain keeps the existing vertex stride and
+-- residency exactly.
+meshlayout.SKIN_VERTEX_FLOATS = 8
+meshlayout.SKIN_VERTEX_BYTES = meshlayout.SKIN_VERTEX_FLOATS * 4
 
 -- position.xyz, rotation.xyzw, scale.xyz, mesh slot, material id and param,
 -- then opaque base color rgb from Tint.

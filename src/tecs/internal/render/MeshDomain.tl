@@ -16,6 +16,10 @@ sorting buffers, compute pipelines, or forward graphics pipeline.
 A domain created with `shadows` adds one camera-centered directional shadow
 map. Opaque and masked meshes cast; opaque, masked, and blended meshes receive.
 The map, its pipeline, and the lighting shader variant do not exist otherwise.
+A domain created with `skinning` adds separate vertex influence,
+per-instance palette-offset, and joint-matrix buffers plus skinned geometry and
+shadow shader variants. A rigid domain retains the original vertex and
+instance layouts and creates none of those resources.
 ]=]
 
 local type types = require("tecs.types")
@@ -38,6 +42,7 @@ local DEFAULT_INDEX_CAPACITY <const> = 3145728
 local DEFAULT_MATERIAL_CAPACITY <const> = 1024
 local DEFAULT_TEXTURE_SIZE <const> = 1024
 local DEFAULT_TEXTURE_LAYERS <const> = 16
+local DEFAULT_JOINT_CAPACITY <const> = 4096
 
 local record MeshMaterialOptions
     --- Caller-writable. Supplies the stable, non-empty material name used by
@@ -137,6 +142,13 @@ local record MeshShadowOptions is MeshShadowTuning
     scale: number
 end
 
+--- Configures independently allocated GPU skeletal-deformation resources.
+local record MeshSkinningOptions
+    --- Caller-writable. Sets the total resident joint-matrix ceiling and
+    --- defaults to 4,096.
+    jointCapacity: integer
+end
+
 local record MeshDomainOptions
     --- Caller-writable. Sets the maximum resident mesh-instance count and
     --- defaults to 65,536.
@@ -168,6 +180,10 @@ local record MeshDomainOptions
     --- Caller-writable. Enables and configures one independently allocated
     --- directional mesh-shadow lane. Nil disables it.
     shadows: MeshShadowOptions
+    --- Caller-writable. Enables independently allocated skin attributes,
+    --- per-instance palette offsets, joint matrices, and shader variants. Nil
+    --- disables GPU skinning.
+    skinning: MeshSkinningOptions
 end
 
 --- Contains the complete component bundle for one registered model primitive.
@@ -180,6 +196,9 @@ local record RegisteredPrimitive
     bounds: components.Bounds3D
     --- Caller-writable. Selects its resident PBR material.
     material: components.MeshMaterial
+    --- Caller-writable. Selects the primitive's initial joint palette, or nil
+    --- for rigid geometry.
+    skin: components.MeshSkin
 end
 
 local record MeshDomain
@@ -187,6 +206,7 @@ local record MeshDomain
     type MaterialOptions = MeshMaterialOptions
     type ShadowOptions = MeshShadowOptions
     type Shadow = MeshShadowTuning
+    type SkinningOptions = MeshSkinningOptions
     type RegisteredPrimitive = RegisteredPrimitive
 
     --- Read-only. Selects metallic-roughness PBR material dispatch.
@@ -225,11 +245,15 @@ local record MeshDomain
     materialCount: integer
     --- Read-only. Reports unique images uploaded to the mesh texture array.
     textureCount: integer
+    --- Read-only. Reports resident joint matrices in the optional skin lane.
+    jointCount: integer
     --- Read-only. Reports whether this domain owns the optional transparent
     --- command and pipeline resources.
     transparency: boolean
     --- Read-only. Reports whether this domain owns mesh-shadow resources.
     shadows: boolean
+    --- Read-only. Reports whether this domain owns GPU skinning resources.
+    skinning: boolean
     --- Caller-writable. Controls the enabled directional light and shadow map.
     --- Nil while shadows are disabled.
     shadow: MeshShadowTuning
@@ -251,6 +275,17 @@ local record MeshDomain
     --- @return Returns a mesh component ready to spawn.
     --- @return Returns its asset-derived local bounding sphere.
     registerMesh: function(self, mesh: assets.Mesh): components.Mesh, components.Bounds3D
+
+    --- Registers one fixed-size joint palette for GPU deformation.
+    --- @param name The caller supplies a stable non-empty palette name.
+    --- @param matrices The caller supplies sixteen column-major floats per joint.
+    --- @return Returns a palette component ready to spawn.
+    registerSkin: function(self, name: string, matrices: {number}): components.MeshSkin
+
+    --- Replaces every matrix in a registered palette before the next frame.
+    --- @param skin The caller supplies the component returned by `registerSkin`.
+    --- @param matrices The caller supplies the same matrix count used at registration.
+    updateSkin: function(self, skin: components.MeshSkin, matrices: {number})
 
     _extractor: MeshExtractor
     _backend: MeshBackend
@@ -287,6 +322,12 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     local textureWidth <const> = positive("mesh texture width", options.textureWidth or DEFAULT_TEXTURE_SIZE)
     local textureHeight <const> = positive("mesh texture height", options.textureHeight or DEFAULT_TEXTURE_SIZE)
     local textureLayers <const> = positive("mesh texture layers", options.textureLayers or DEFAULT_TEXTURE_LAYERS)
+    local jointCapacity = 0
+    if options.skinning ~= nil then
+        jointCapacity = positive(
+            "mesh joint capacity", (options.skinning as MeshSkinningOptions).jointCapacity or DEFAULT_JOINT_CAPACITY
+        )
+    end
 
     local self = setmetatable({} as MeshDomain, MeshDomainMT)
     self.capacity = capacity
@@ -300,8 +341,10 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self.indexCount = 0
     self.materialCount = 1
     self.textureCount = 0
+    self.jointCount = 0
     self.transparency = options.transparency == true
     self.shadows = options.shadows ~= nil
+    self.skinning = options.skinning ~= nil
     if self.shadows then
         local shadow <const> = options.shadows or {}
         self.shadow = {
@@ -322,7 +365,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self._centerYByAsset = {}
     self._centerZByAsset = {}
     self._radiusByAsset = {}
-    self._packet = MeshFramePacket.create()
+    self._packet = MeshFramePacket.create(self.skinning)
 
     local backend <const> = MeshBackend.create(
         device,
@@ -338,6 +381,8 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
             packTextures = options.packTextures ~= false,
             transparency = self.transparency,
             shadows = self.shadow as MeshBackend.ShadowOptions,
+            skinning = self.skinning,
+            jointCapacity = jointCapacity,
         }
     )
     self._backend = backend
@@ -346,7 +391,11 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self.instances = backend.instances
     self.materials = backend.materials
 
-    local extractor <const> = MeshExtractor.create({capacity = capacity, transparency = self.transparency})
+    local extractor <const> = MeshExtractor.create({
+        capacity = capacity,
+        transparency = self.transparency,
+        skinning = self.skinning,
+    })
     self._extractor = extractor
     self.camera = extractor.camera
     return self
@@ -510,6 +559,10 @@ function MeshDomain:registerModel(model: assets.Model): {RegisteredPrimitive}
         for index, mesh in ipairs(model.meshes) do
             meshes[index], bounds[index] = self:registerMesh(mesh)
         end
+        local skins: {components.MeshSkin} = {}
+        for index, skin in ipairs(model.skins) do
+            skins[index] = self:registerSkin(skin.name, skin.matrices)
+        end
         registered = {}
         for index, draw in ipairs(model.draws) do
             if meshes[draw.mesh] == nil then
@@ -518,6 +571,10 @@ function MeshDomain:registerModel(model: assets.Model): {RegisteredPrimitive}
             local material = materials[draw.material]
             if draw.material ~= 0 and material == nil then
                 error(("tecs: model draw names missing material %d"):format(draw.material), 0)
+            end
+            local skin = skins[draw.skin]
+            if draw.skin ~= 0 and skin == nil then
+                error(("tecs: model draw names missing skin %d"):format(draw.skin), 0)
             end
             registered[index] = {
                 transform = Transform3D.new({
@@ -535,6 +592,7 @@ function MeshDomain:registerModel(model: assets.Model): {RegisteredPrimitive}
                 mesh = meshes[draw.mesh],
                 bounds = bounds[draw.mesh],
                 material = material or components.MeshMaterial(),
+                skin = skin,
             }
         end
     end) as (boolean, any)
@@ -587,6 +645,39 @@ function MeshDomain:_prepare(frame: Frame)
     self._backend:prepare(self._packet, frame)
 end
 
+function MeshDomain:registerSkin(name: string, matrices: {number}): components.MeshSkin
+    if not self.skinning then
+        error("tecs: mesh skinning is not enabled", 2)
+    end
+    local asset <const> = components.meshSkinId(name)
+    local region = self._backend:skinRegion(asset)
+    if region == nil then
+        region = self._backend:registerSkin(asset, matrices)
+    end
+    self._extractor:registerSkin(asset, region.firstJoint)
+    self.jointCount = self._backend.jointCount
+    return components.MeshSkin(asset, region.firstJoint)
+end
+
+function MeshDomain:updateSkin(skin: components.MeshSkin, matrices: {number})
+    if not self.skinning then
+        error("tecs: mesh skinning is not enabled", 2)
+    end
+    if skin == nil then
+        error("tecs: a mesh skin component is required", 2)
+    end
+    local region <const> = self._backend:skinRegion(skin.asset as integer)
+    if region == nil then
+        error(
+            ("tecs: no mesh skin is registered as '%s'"):format(
+                tostring(components.meshSkinName(skin.asset as integer))
+            ),
+            2
+        )
+    end
+    self._backend:updateSkin(region, matrices)
+end
+
 --- Registers immutable CPU geometry in this domain.
 ---
 --- Registration uploads vertices and 32-bit indices once, releases the CPU
@@ -599,6 +690,9 @@ end
 function MeshDomain:registerMesh(mesh: assets.Mesh): components.Mesh, components.Bounds3D
     if mesh == nil then
         error("tecs: mesh data is required", 2)
+    end
+    if mesh.skinVertices ~= nil and not self.skinning then
+        error("tecs: skinned geometry requires meshes.skinning", 2)
     end
     local asset <const> = components.meshId(mesh.name)
     local radius = self._radiusByAsset[asset]

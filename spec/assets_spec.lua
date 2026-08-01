@@ -83,7 +83,24 @@ describe("assets", function()
         assets.waitAll(2000)
 
         assert.are.equal("failed", loading.status)
-        assert.is_truthy(loading.error:find("unsupported skinning or animation", 1, true))
+        assert.is_truthy(loading.error:find("unsupported animation clips", 1, true))
+    end)
+
+    it("decodes glTF joint attributes and its initial skin palette", function()
+        local loading = assets.loadGLTF("spec/fixtures/skinned.gltf")
+        assets.waitAll(2000)
+
+        assert.are.equal("ready", loading.status, loading.error)
+        local model = loading.value
+        assert.are.equal(1, #model.meshes)
+        assert.is_not_nil(model.meshes[1].skinVertices)
+        assert.are.equal(0, model.meshes[1].skinVertices[0])
+        assert.are.equal(1, model.meshes[1].skinVertices[4])
+        assert.are.equal(1, #model.skins)
+        assert.are.equal(16, #model.skins[1].matrices)
+        assert.are.equal(1, model.skins[1].matrices[1])
+        assert.are.equal(1, model.draws[1].skin)
+        model:release()
     end)
 
     it("rejects invalid glTF alpha modes instead of treating them as opaque", function()

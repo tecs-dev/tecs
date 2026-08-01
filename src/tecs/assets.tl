@@ -30,8 +30,9 @@ texture residency. Audio follows the same split between decoded clips and
 voices.
 
 `newMesh` constructs immutable procedural geometry synchronously. `loadGLTF`
-decodes static glTF 2.0 and GLB scenes on the worker, including their images,
-metallic-roughness materials, alpha masks, and `BLEND` modes. Both produce
+decodes glTF 2.0 and GLB scenes in their initial pose on the worker, including
+images, metallic-roughness materials, alpha masks, `BLEND` modes, and skins.
+Both produce
 CPU-owned data that the mesh domain consumes when it becomes resident. A model
 with a `BLEND` material requires a mesh domain created with
 `transparency = true`.
@@ -315,6 +316,9 @@ local record Mesh
     --- Read-only. Contains zero-based unsigned 32-bit indices until `release`
     --- runs.
     indices: loader.CArray
+    --- Read-only. Contains optional joint indices and weights as eight floats
+    --- per vertex until `release` runs. Nil means rigid geometry.
+    skinVertices: loader.CArray
     --- Read-only. Reports the number of vertices, not floats.
     vertexCount: integer
     --- Read-only. Reports the number of indices. It is always a multiple of
@@ -341,6 +345,12 @@ local record MeshOptions
     vertices: {number}
     --- Caller-writable. Supplies zero-based triangle indices.
     indices: {integer}
+    --- Caller-writable. Supplies four zero-based joint indices per vertex.
+    --- Nil requires `weights` to be nil and builds rigid geometry.
+    joints: {integer}
+    --- Caller-writable. Supplies four non-negative joint weights per vertex.
+    --- Each group is normalized by `newMesh` and requires `joints`.
+    weights: {number}
 end
 
 --- Describes one decoded glTF material before GPU registration.
@@ -395,6 +405,9 @@ local record ModelDraw
     --- Read-only. Selects a one-based entry in `Model.materials`, or zero for
     --- the neutral material.
     material: integer
+    --- Read-only. Selects a one-based entry in `Model.skins`, or zero for a
+    --- rigid primitive.
+    skin: integer
     --- Read-only. Reports world translation x from the selected glTF scene.
     x: number
     --- Read-only. Reports world translation y.
@@ -417,12 +430,21 @@ local record ModelDraw
     scaleZ: number
 end
 
---- Represents one decoded static glTF 2.0 scene.
+--- Describes one initial joint palette decoded from a glTF skin instance.
+local record ModelSkin
+    --- Read-only. Contains the stable palette name used during registration.
+    name: string
+    --- Read-only. Contains column-major joint matrices, sixteen floats per
+    --- joint, in the skinned mesh's local coordinate space.
+    matrices: {number}
+end
+
+--- Represents one decoded glTF 2.0 scene in its initial pose.
 ---
 --- Meshes use the same fixed vertex layout as `newMesh`. Images remain
 --- decoded CPU pixels. `renderer.meshes:registerModel` consumes all of them
---- and returns spawnable primitive records. Skinning, morph targets,
---- animation are deliberately outside this static lane.
+--- and returns spawnable primitive records. Skinning includes the initial
+--- joint pose; morph targets and animation clips remain separate lanes.
 local record Model
     --- Read-only. Contains the requested `.gltf` or `.glb` path unchanged.
     path: string
@@ -432,6 +454,8 @@ local record Model
     images: {Image}
     --- Read-only. Contains decoded metallic-roughness material descriptions.
     materials: {ModelMaterial}
+    --- Read-only. Contains initial joint palettes referenced by model draws.
+    skins: {ModelSkin}
     --- Read-only. Contains the selected scene's flattened static draws.
     draws: {ModelDraw}
     --- Releases every CPU mesh and image not already consumed. Calling it
@@ -449,7 +473,7 @@ local record assets
     --- Read-only. Exposes the immutable CPU mesh type.
     Mesh: Mesh
 
-    --- Read-only. Exposes the decoded static glTF scene type.
+    --- Read-only. Exposes the decoded initial-pose glTF scene type.
     Model: Model
 
     --- Read-only. Exposes one glTF material description.
@@ -458,6 +482,9 @@ local record assets
     --- Read-only. Exposes one flattened glTF primitive instance.
     ModelDraw: ModelDraw
 
+    --- Read-only. Exposes one decoded initial joint palette.
+    ModelSkin: ModelSkin
+
     --- Builds procedural mesh data in the renderer's fixed vertex layout.
     --- @param options The caller supplies a name, interleaved vertices, and
     ---     zero-based triangle indices.
@@ -465,14 +492,16 @@ local record assets
     ---     consumes or the caller releases.
     newMesh: function(options: MeshOptions): Mesh
 
-    --- Queues static glTF 2.0 or GLB decoding on the asset worker.
+    --- Queues initial-pose glTF 2.0 or GLB decoding on the asset worker.
     ---
     --- External buffers and images resolve relative to the model path. Data
     --- URIs and embedded GLB resources are supported. Triangle primitives,
     --- static node transforms, metallic-roughness PBR, normal, occlusion,
     --- emissive, alpha-mask, alpha-blended, and unlit materials are decoded.
-    --- A skinned, morphed, animated, sparse-accessor, or non-triangle input
-    --- settles as failed instead of being loaded incompletely. Registering a
+    --- JOINTS_0, WEIGHTS_0, skins, and inverse bind matrices are decoded into
+    --- initial GPU-ready palettes. A morphed, animated, sparse-accessor, or
+    --- non-triangle input settles as failed instead of loading incompletely.
+    --- Registering a
     --- model containing alpha blending requires a mesh domain created with
     --- `transparency = true`.
     --- @param path The caller supplies a `.gltf` or `.glb` asset path.
@@ -498,6 +527,7 @@ local ModelMT <const>: metatable<Model> = {__index = Model}
 function Mesh:release()
     self.vertices = nil
     self.indices = nil
+    self.skinVertices = nil
 end
 
 function Model:release()
@@ -541,17 +571,27 @@ local function modelFromWorker(result: {string: any}): Model
             local indexCount <const> = source.indexCount as integer
             local vertices <const> = loader.newArray("float[?]", vertexCount * meshlayout.VERTEX_FLOATS)
             local indices <const> = loader.newArray("uint32_t[?]", indexCount)
+            local skinVertices: loader.CArray = nil
             loader.copyTo(
                 loader.bytePointer(vertices as loader.CValue),
                 source.vertices as loader.CValue,
                 vertexCount * meshlayout.VERTEX_BYTES
             )
             loader.copyTo(loader.bytePointer(indices as loader.CValue), source.indices as loader.CValue, indexCount * 4)
+            if source.skinVertices ~= nil then
+                skinVertices = loader.newArray("float[?]", vertexCount * meshlayout.SKIN_VERTEX_FLOATS)
+                loader.copyTo(
+                    loader.bytePointer(skinVertices as loader.CValue),
+                    source.skinVertices as loader.CValue,
+                    vertexCount * meshlayout.SKIN_VERTEX_BYTES
+                )
+            end
             meshes[index] = setmetatable(
                 {
                     name = source.name as string,
                     vertices = vertices,
                     indices = indices,
+                    skinVertices = skinVertices,
                     vertexCount = vertexCount,
                     indexCount = indexCount,
                     centerX = source.centerX as number,
@@ -568,6 +608,7 @@ local function modelFromWorker(result: {string: any}): Model
                 meshes = meshes,
                 images = images,
                 materials = result.materials as {ModelMaterial},
+                skins = result.skins as {ModelSkin},
                 draws = result.draws as {ModelDraw},
             } as Model,
             ModelMT
@@ -608,6 +649,14 @@ function assets.newMesh(options: MeshOptions): Mesh
     end
 
     local vertexCount <const>: integer = math.floor(vertexFloats / meshlayout.VERTEX_FLOATS)
+    local sourceJoints <const> = options.joints
+    local sourceWeights <const> = options.weights
+    if (sourceJoints == nil) ~= (sourceWeights == nil) then
+        error(("tecs: mesh '%s' joints and weights must be supplied together"):format(name), 2)
+    end
+    if sourceJoints ~= nil and (#sourceJoints ~= vertexCount * 4 or #sourceWeights ~= vertexCount * 4) then
+        error(("tecs: mesh '%s' needs four joints and weights per vertex"):format(name), 2)
+    end
     local vertices <const> = loader.newArray("float[?]", vertexFloats)
     local minX, minY, minZ = math.huge, math.huge, math.huge
     local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
@@ -639,6 +688,35 @@ function assets.newMesh(options: MeshOptions): Mesh
         indices[index - 1] = value
     end
 
+    local skinVertices: loader.CArray = nil
+    if sourceJoints ~= nil then
+        skinVertices = loader.newArray("float[?]", vertexCount * meshlayout.SKIN_VERTEX_FLOATS)
+        for vertex = 0, vertexCount - 1 do
+            local sourceBase <const> = vertex * 4
+            local destinationBase <const> = vertex * meshlayout.SKIN_VERTEX_FLOATS
+            local total = 0.0
+            for lane = 0, 3 do
+                local joint <const> = sourceJoints[sourceBase + lane + 1]
+                local weight <const> = sourceWeights[sourceBase + lane + 1]
+                if joint == nil or joint < 0 or joint ~= math.floor(joint) then
+                    error(("tecs: mesh '%s' has an invalid joint at vertex %d"):format(name, vertex), 2)
+                end
+                if weight == nil or weight < 0 then
+                    error(("tecs: mesh '%s' has an invalid weight at vertex %d"):format(name, vertex), 2)
+                end
+                skinVertices[destinationBase + lane] = joint
+                skinVertices[destinationBase + 4 + lane] = weight
+                total = total + weight
+            end
+            if total <= 1e-20 then
+                error(("tecs: mesh '%s' has zero joint weight at vertex %d"):format(name, vertex), 2)
+            end
+            for lane = 0, 3 do
+                skinVertices[destinationBase + 4 + lane] = (skinVertices[destinationBase + 4 + lane] as number) / total
+            end
+        end
+    end
+
     local centerX <const> = (minX + maxX) * 0.5
     local centerY <const> = (minY + maxY) * 0.5
     local centerZ <const> = (minZ + maxZ) * 0.5
@@ -659,6 +737,7 @@ function assets.newMesh(options: MeshOptions): Mesh
             name = name,
             vertices = vertices,
             indices = indices,
+            skinVertices = skinVertices,
             vertexCount = vertexCount,
             indexCount = indexCount,
             centerX = centerX,

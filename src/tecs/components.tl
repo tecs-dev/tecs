@@ -31,6 +31,7 @@ The 3D mesh contract is separate from the sprite lane. `tecs.Transform3D`,
 [`Mesh`](tealdoc:tecs.components.Mesh),
 [`Bounds3D`](tealdoc:tecs.components.Bounds3D),
 [`MeshMaterial`](tealdoc:tecs.components.MeshMaterial),
+optional [`MeshSkin`](tealdoc:tecs.components.MeshSkin),
 [`Tint`](tealdoc:tecs.components.Tint), and
 [`Renderable3D`](tealdoc:tecs.components.Renderable3D) describe an opaque mesh
 for the optional mesh domain.
@@ -206,6 +207,12 @@ local meshMaterialIds: {string: integer} = {}
 local meshMaterialNames: {integer: string} = {}
 local meshMaterialCount = 0
 
+--- Interned mesh-skin names. Palette residency is domain-local, while the
+--- normalized name is what a snapshot can retain.
+local meshSkinIds: {string: integer} = {}
+local meshSkinNames: {integer: string} = {}
+local meshSkinCount = 0
+
 --- The scheme a name may lead with, whose `//` is not a path separator: what
 --- follows it is an authority rather than a directory.
 local SCHEME_PREFIX <const> = "^(%a[%w+.-]*://)(.*)$"
@@ -323,6 +330,25 @@ local function meshMaterialName(id: integer): string
     return meshMaterialNames[id]
 end
 
+local function meshSkinId(name: string): integer
+    if name == nil or name == "" then
+        error("tecs: a mesh skin name cannot be empty", 2)
+    end
+    name = normalizePath(name)
+    local id = meshSkinIds[name]
+    if id ~= nil then
+        return id
+    end
+    meshSkinCount = meshSkinCount + 1
+    meshSkinIds[name] = meshSkinCount
+    meshSkinNames[meshSkinCount] = name
+    return meshSkinCount
+end
+
+local function meshSkinName(id: integer): string
+    return meshSkinNames[id]
+end
+
 --- Samples a texture instead of drawing flat color.
 ---
 --- `image` is an index from `imageId`, which names the image; `slot` is the
@@ -435,6 +461,43 @@ ecs.newFFIComponent({
             asset = meshId(name)
         end
         return Mesh(asset, -1)
+    end,
+})
+
+--- Selects one resident joint palette for GPU mesh skinning.
+---
+--- `asset` is the stable name's process-local identity. `slot` is the first
+--- joint matrix in domain residency and starts negative so extraction can
+--- resolve it once. The component is optional; a mesh without it remains
+--- rigid even when its domain enables skinning.
+local record MeshSkin is Component
+    --- Caller-writable. Selects a palette by its `meshSkinId` index. Zero
+    --- selects no palette.
+    asset: number
+    --- Engine-owned. Stores the first resident joint matrix. Set it negative
+    --- when changing `asset`; otherwise ordinary game code should ignore it.
+    slot: number
+end
+
+ecs.newFFIComponent({
+    -- This component name is stored in snapshots and is an external
+    -- compatibility surface.
+    name = "MeshSkin",
+    container = MeshSkin,
+    fields = {
+        {"asset", "int32_t"},
+        {"slot", "int32_t"},
+    },
+    defaults = {0, -1},
+    serialize = function(instance: MeshSkin): {string: any}
+        return {meshSkin = meshSkinNames[instance.asset as integer]}
+    end,
+    deserialize = function(_world: types.World, data: {string: any}): MeshSkin
+        local name = data.meshSkin as string
+        if name == nil or name == "" then
+            return MeshSkin(0, -1)
+        end
+        return MeshSkin(meshSkinId(name), -1)
     end,
 })
 
@@ -707,6 +770,11 @@ local record components
     --- residency state and a negative value means unresolved.
     Mesh: Mesh
 
+    --- Read-only. Exposes the optional joint-palette component. `asset` is a
+    --- process-local `meshSkinId`; `slot` is engine-owned residency, and a
+    --- negative value means unresolved.
+    MeshSkin: MeshSkin
+
     --- Read-only. Exposes the 3D material-reference component. `asset` is a
     --- process-local `meshMaterialId`; `slot` is engine-owned residency, and
     --- zero selects the neutral built-in material.
@@ -789,6 +857,16 @@ local record components
     --- @return The normalized name, or nil when the index names nothing.
     meshName: function(id: integer): string
 
+    --- Returns the process-local identity of a normalized mesh-skin name.
+    --- @param name A non-empty stable palette name.
+    --- @return A positive index stable for the life of the process.
+    meshSkinId: function(name: string): integer
+
+    --- Returns the normalized name represented by a mesh-skin index.
+    --- @param id An index previously returned by `meshSkinId`.
+    --- @return The normalized name, or nil when the index names nothing.
+    meshSkinName: function(id: integer): string
+
     --- Returns the process-local identity of a mesh material name.
     --- @param name A non-empty stable material name.
     --- @return A positive index stable for the life of the process.
@@ -804,6 +882,7 @@ components.PreviousTransform2D = PreviousTransform2D
 components.Tint = Tint
 components.Sprite = Sprite
 components.Mesh = Mesh
+components.MeshSkin = MeshSkin
 components.MeshMaterial = MeshMaterial
 components.Bounds3D = Bounds3D
 components.Material = Material
@@ -817,6 +896,8 @@ components.imageId = imageId
 components.imageName = imageName
 components.meshId = meshId
 components.meshName = meshName
+components.meshSkinId = meshSkinId
+components.meshSkinName = meshSkinName
 components.meshMaterialId = meshMaterialId
 components.meshMaterialName = meshMaterialName
 

@@ -1,4 +1,5 @@
 #version 450
+#pragma tecs variants MESH_SKINNING=1
 
 layout(set = 0, binding = 0) readonly buffer Vertices {
     float value[];
@@ -7,6 +8,12 @@ layout(set = 0, binding = 0) readonly buffer Vertices {
 layout(set = 0, binding = 1) readonly buffer Instances {
     float value[];
 } instances;
+
+#ifdef MESH_SKINNING
+layout(set = 0, binding = 2) readonly buffer SkinVertices { float value[]; } skinVertices;
+layout(set = 0, binding = 3) readonly buffer InstanceSkins { float value[]; } instanceSkins;
+layout(set = 0, binding = 4) readonly buffer JointMatrices { float value[]; } jointMatrices;
+#endif
 
 layout(set = 1, binding = 0) uniform View {
     mat4 viewProjection;
@@ -24,6 +31,42 @@ vec3 rotateBy(vec4 rotation, vec3 value) {
     return value + rotation.w * twice + cross(rotation.xyz, twice);
 }
 
+#ifdef MESH_SKINNING
+mat4 jointMatrix(int joint) {
+    int at = joint * 16;
+    return mat4(
+        jointMatrices.value[at], jointMatrices.value[at + 1],
+        jointMatrices.value[at + 2], jointMatrices.value[at + 3],
+        jointMatrices.value[at + 4], jointMatrices.value[at + 5],
+        jointMatrices.value[at + 6], jointMatrices.value[at + 7],
+        jointMatrices.value[at + 8], jointMatrices.value[at + 9],
+        jointMatrices.value[at + 10], jointMatrices.value[at + 11],
+        jointMatrices.value[at + 12], jointMatrices.value[at + 13],
+        jointMatrices.value[at + 14], jointMatrices.value[at + 15]);
+}
+
+void applySkin(inout vec3 position, inout vec3 normal, inout vec4 tangent) {
+    int skin = int(instanceSkins.value[gl_InstanceIndex]);
+    if (skin < 0) {
+        return;
+    }
+    int at = gl_VertexIndex * 8;
+    ivec4 joints = ivec4(
+        skinVertices.value[at], skinVertices.value[at + 1],
+        skinVertices.value[at + 2], skinVertices.value[at + 3]);
+    vec4 weights = vec4(
+        skinVertices.value[at + 4], skinVertices.value[at + 5],
+        skinVertices.value[at + 6], skinVertices.value[at + 7]);
+    mat4 matrix = jointMatrix(skin + joints.x) * weights.x
+        + jointMatrix(skin + joints.y) * weights.y
+        + jointMatrix(skin + joints.z) * weights.z
+        + jointMatrix(skin + joints.w) * weights.w;
+    position = (matrix * vec4(position, 1.0)).xyz;
+    normal = mat3(matrix) * normal;
+    tangent.xyz = mat3(matrix) * tangent.xyz;
+}
+#endif
+
 void main() {
     int vertexBase = gl_VertexIndex * 12;
     vec3 localPosition = vec3(
@@ -39,6 +82,9 @@ void main() {
         vertices.value[vertexBase + 7],
         vertices.value[vertexBase + 8],
         vertices.value[vertexBase + 9]);
+#ifdef MESH_SKINNING
+    applySkin(localPosition, localNormal, localTangent);
+#endif
 
     int instanceBase = gl_InstanceIndex * 16;
     vec3 position = vec3(

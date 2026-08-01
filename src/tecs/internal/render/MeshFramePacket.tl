@@ -48,10 +48,13 @@ local record MeshFramePacket
     boundsRanges: dirtyranges
     --- Dirty byte ranges in the indexed-command staging buffer.
     commandRanges: dirtyranges
+    --- Dirty byte ranges in optional per-instance skin-palette offsets. Nil
+    --- when the domain did not enable skinning.
+    skinRanges: dirtyranges
 
     --- Creates a reusable empty packet.
     --- @return A packet with allocated matrix and range storage.
-    create: function(): MeshFramePacket
+    create: function(skinning?: boolean): MeshFramePacket
 
     --- Begins writing one frame through a staging slot.
     --- @param slot The zero-based staging slot selected by the renderer.
@@ -66,7 +69,7 @@ end
 
 local MeshFramePacketMT <const>: metatable<MeshFramePacket> = {__index = MeshFramePacket}
 
-function MeshFramePacket.create(): MeshFramePacket
+function MeshFramePacket.create(skinning?: boolean): MeshFramePacket
     local self = setmetatable({} as MeshFramePacket, MeshFramePacketMT)
     self.slot = 0
     self.count = 0
@@ -82,6 +85,9 @@ function MeshFramePacket.create(): MeshFramePacket
     self.instanceRanges = dirtyranges.create()
     self.boundsRanges = dirtyranges.create()
     self.commandRanges = dirtyranges.create()
+    if skinning then
+        self.skinRanges = dirtyranges.create()
+    end
     return self
 end
 
@@ -90,6 +96,9 @@ function MeshFramePacket:begin(slot: integer)
     self.instanceRanges:clear()
     self.boundsRanges:clear()
     self.commandRanges:clear()
+    if self.skinRanges ~= nil then
+        self.skinRanges:clear()
+    end
 end
 
 function MeshFramePacket:setCamera(camera: Camera3D, width: number, height: number)

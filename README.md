@@ -33,13 +33,13 @@ start a graphics stack.
 - GPU-driven 2D rendering with materials, lights, shadows, layers, text,
   sprite animation, and particles.
 - Optional 3D rendering with indexed mesh residency, ordered GPU frustum
-  culling, texture and PBR material residency, static glTF/GLB loading, and an
-  independently allocated transparent forward lane and directional-shadow
-  lane.
+  culling, texture and PBR material residency, initial-pose glTF/GLB skinning,
+  and independently allocated transparent, directional-shadow, and skeletal
+  deformation lanes.
 - Input, audio, physics, assets, workers, async I/O, HTTP, file watching, and
   a debug server.
 
-Skinned and animated 3D rendering, post-processing, tiled maps, and
+glTF animation clips and morph targets, post-processing, tiled maps, and
 multi-camera are not yet built.
 
 Mesh shadows use one camera-centered directional map, not the 2D occluder-mask
@@ -49,6 +49,13 @@ shape: off-camera casters inside the light volume remain, while instances
 outside that volume submit no geometry to the shadow raster pass. A surviving
 mesh still submits its complete resident index range; this is instance culling,
 not per-triangle culling inside one mesh.
+
+Mesh skinning follows the same isolation rule. Rigid meshes retain the fixed
+48-byte vertex and 64-byte instance records. `meshes.skinning` adds separate
+joint/weight, per-instance palette-offset, and joint-matrix buffers and selects
+a skinned vertex-shader variant. That costs no additional vertex bandwidth or
+shader branch in a domain that omits the option, and it adds nothing to a 2D
+renderer.
 
 ## Build
 
@@ -60,7 +67,9 @@ cargo xtask build              # Build the host development preset
 cargo xtask example ui-demo    # Run the 2D showcase
 cargo xtask example scene3d    # Run the shadowed 3D mesh example
 cargo xtask example gltf3d     # Run the textured 3D example
+cargo xtask example skinning3d # Run the GPU skeletal-deformation example
 cargo xtask bench meshshadows  # Measure the optional mesh-shadow lane
+cargo xtask bench meshskinning # Measure the optional mesh-skinning lane
 cargo xtask test               # Run the spec suite
 cargo xtask check              # Type-check Teal sources
 cargo xtask format             # Format sources
