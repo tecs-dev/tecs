@@ -88,19 +88,25 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
     self._destroyed = false
 
     local ambient <const> = options.ambient or {DEFAULT_AMBIENT[1], DEFAULT_AMBIENT[2], DEFAULT_AMBIENT[3]}
+    local meshShadow = options.meshes ~= nil and options.meshes.shadows or nil
+    if meshShadow ~= nil and (meshShadow.scale or 1.0) <= 0.0 then
+        error("tecs: mesh shadow scale must be greater than 0", 2)
+    end
     local sprites: SpriteDomain = nil
     local meshes: MeshDomain = nil
-    -- Deferred retains this options table in its graph closures. The temporary
-    -- no-op functions make the graph constructible before the domains that
-    -- borrow it; the concrete functions replace them once, below. A frame then
-    -- calls exactly the enabled domains without probing a registry or testing
-    -- absent domains on the render path.
+    -- Deferred retains this options table in its graph closures. Predicates
+    -- close over the domain locals before those domains exist; draw callbacks
+    -- are replaced once below. A frame then calls exactly the enabled domains
+    -- without probing a registry on the render path.
     local contributions = {
         ambient = ambient,
         shadows = options.shadows,
-        shadowActive = function(): boolean return false end,
+        shadowActive = function(): boolean return sprites ~= nil and sprites:_castsThisFrame() end,
         occluders = function(_context: Deferred.PassContext) end,
         dropShadows = function(_context: Deferred.PassContext) end,
+        meshShadowScale = meshShadow ~= nil and (meshShadow.scale or 1.0) or nil,
+        meshShadowActive = function(): boolean return meshes ~= nil and meshes:_castsThisFrame() end,
+        meshShadowMap = function(_context: Deferred.PassContext) end,
         geometry = function(_context: Deferred.PassContext) end,
         forward = function(_context: Deferred.PassContext) end,
     }
@@ -120,9 +126,11 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
     end
 
     if sprites ~= nil then
-        contributions.shadowActive = function(): boolean return sprites:_castsThisFrame() end
         contributions.occluders = function(context: Deferred.PassContext) sprites:_recordOccluders(context) end
         contributions.dropShadows = function(context: Deferred.PassContext) sprites:_recordDropShadows(context) end
+    end
+    if meshes ~= nil and meshes.shadows then
+        contributions.meshShadowMap = function(context: Deferred.PassContext) meshes:_recordShadowMap(context) end
     end
     if sprites ~= nil and meshes ~= nil then
         contributions.geometry = function(context: Deferred.PassContext)

@@ -33,6 +33,7 @@ local SIZE = 64
 local Transform2D = tecs.Transform2D
 local Tint = components.Tint
 local PointLight2D = components.PointLight2D
+local Occluder2D = components.Occluder2D
 local Renderable2D = components.Renderable2D
 local Sprite = components.Sprite
 
@@ -138,6 +139,63 @@ describe("ecs.Renderer", function()
         })
     end
 
+    local function planeMesh(name)
+        return assets.newMesh({
+            name = name,
+            vertices = {
+                -1,
+                -1,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                0,
+                1,
+                0,
+                0,
+                1,
+                -1,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                0,
+                1,
+                1,
+                0,
+                1,
+                1,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                0,
+                1,
+                1,
+                1,
+                -1,
+                1,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                0,
+                1,
+                0,
+                1,
+            },
+            indices = { 0, 1, 2, 0, 2, 3 },
+        })
+    end
+
     -- Two texels side by side, the left one opaque and the right one cut away.
     -- Both carry the same color, because that is what a cut-out looks like
     -- when a paint program keeps the pixels it made transparent: a coverage
@@ -233,6 +291,10 @@ describe("ecs.Renderer", function()
         assert.is_not_nil(renderer.meshes)
         assert.is_nil(renderer.meshes._backend.blendPipeline)
         assert.is_nil(renderer.meshes._backend._blendSorted)
+        assert.is_nil(renderer.meshes._backend.shadowPipeline)
+        assert.is_nil(renderer.meshes._backend._shadowCommands)
+        assert.is_nil(renderer.meshes._backend._shadowMarkPipeline)
+        assert.is_nil(renderer.deferred.graph._targets.meshShadowMap)
 
         local source = triangleMesh("spec://triangle")
         local mesh, bounds = renderer.meshes:registerMesh(source)
@@ -408,6 +470,100 @@ describe("ecs.Renderer", function()
         assert.is_true(renderer.meshes.transparency)
         assert.is_not_nil(renderer.meshes._backend.blendPipeline)
         assert.is_not_nil(renderer.meshes._backend._blendSorted)
+        renderer:destroy()
+    end)
+
+    it("casts an opt-in directional mesh shadow without sprite resources", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 0.2, 0.2, 0.2 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                shadows = {
+                    distance = 4,
+                    directionX = -0.5,
+                    directionY = 0,
+                    directionZ = -1,
+                    bias = 0.002,
+                    softness = 0,
+                },
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local plane, planeBounds = renderer.meshes:registerMesh(planeMesh("spec://shadow-plane"))
+        local caster, casterBounds = renderer.meshes:registerMesh(triangleMesh("spec://shadow-caster"))
+        world:spawn(
+            tecs.Transform3D(),
+            plane,
+            planeBounds,
+            components.MeshMaterial(),
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+        world:spawn(
+            tecs.Transform3D.new({ x = 0, y = -0.2, z = 0.5, scaleX = 0.4, scaleY = 0.4, scaleZ = 0.4 }),
+            caster,
+            casterBounds,
+            components.MeshMaterial(),
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        local shadow = screen:getPixel(pixels, 27, 32)
+        local lit = screen:getPixel(pixels, 18, 32)
+        assert.is_true(renderer.meshes.shadows)
+        assert.is_not_nil(renderer.meshes._backend.shadowPipeline)
+        assert.is_not_nil(renderer.meshes._backend._shadowCommands)
+        assert.is_nil(renderer.meshes._backend._shadowMarkPipeline, "opaque shadows reuse the camera mark pipeline")
+        assert.is_not_nil(renderer.deferred.graph._targets.meshShadowMap)
+        assert.is_true(shadow.r < 80, ("the caster should block the directional light, got %d"):format(shadow.r))
+        assert.is_true(lit.r > 180, ("the same receiver should remain lit outside the shadow, got %d"):format(lit.r))
+        renderer:destroy()
+    end)
+
+    it("keeps renderer-owned 2D shadow predicates live after construction", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, { shadows = {} })
+        renderer:install(world)
+        world:spawn(Transform2D(SIZE / 2, SIZE / 2, 0, 1, 0, 8, 8), Tint(1, 1, 1, 1), Renderable2D(), Occluder2D())
+
+        frameOnce(world, renderer)
+        local active = false
+        for _, pass in ipairs(renderer.deferred.graph._passes) do
+            if pass.name == "occluders" then
+                active = pass.enabled()
+            end
+        end
+        assert.is_true(active)
+        renderer:destroy()
+    end)
+
+    it("rejects a non-positive mesh shadow-map scale before allocating", function()
+        assert.has_error(function()
+            Renderer.newRenderer(device.handle, FORMAT, {
+                sprites = false,
+                meshes = { shadows = { scale = 0 } },
+            })
+        end, "tecs: mesh shadow scale must be greater than 0")
+    end)
+
+    it("allocates alpha-aware shadow culling only for the combined lanes", function()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                transparency = true,
+                shadows = {},
+            },
+        })
+        assert.is_not_nil(renderer.meshes._backend._shadowMarkPipeline)
         renderer:destroy()
     end)
 

@@ -1,4 +1,5 @@
 #version 450
+#pragma tecs variants MESH_ALPHA=1
 // Marks visible mesh instances, assigns a stable rank within each workgroup,
 // and clears the indirect destination while no later pass can race it.
 layout(local_size_x = 256) in;
@@ -6,6 +7,9 @@ layout(local_size_x = 256) in;
 layout(set = 0, binding = 0) readonly buffer Bounds {
     vec4 sphere[];
 } bounds;
+#ifdef MESH_ALPHA
+layout(set = 0, binding = 1) readonly buffer Instances { float value[]; } instances;
+#endif
 
 layout(set = 1, binding = 0) writeonly buffer Slots { uint slot[]; } slots;
 layout(set = 1, binding = 1) writeonly buffer Counts { uint count[]; } counts;
@@ -31,6 +35,9 @@ void main() {
                 keep = 0u;
             }
         }
+#ifdef MESH_ALPHA
+        if (int(instances.value[i * 16u + 12u]) == 2) { keep = 0u; }
+#endif
 
         // Every command is defined before compaction. This is a separate GPU
         // pass from compaction, so a later survivor cannot race this clear.

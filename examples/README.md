@@ -11,10 +11,10 @@ cargo xtask example gltf3d
 `ui-demo.tl` is the complete engine showcase. It exercises the sprite renderer,
 lighting, text, UI, input, animation, audio, and debug tools together.
 
-`scene3d.tl` registers an indexed cube, spawns it as a 3D entity, and draws it
-through `MeshDomain` into the shared deferred G-buffer. It disables the sprite
-domain, so the image proves the mesh lane owns its complete extraction,
-staging, pipeline, and draw path.
+`scene3d.tl` registers an indexed cube and floor, then draws their directional
+shadow through the mesh domain's opt-in, GPU-culled shadow lane. It disables
+the sprite domain, so the image isolates 3D extraction, light-volume culling,
+the shadow map, and deferred mesh lighting.
 
 `gltf3d.tl` loads a textured glTF 2.0 scene asynchronously, registers its
 geometry, image, and alpha-blended metallic-roughness material with a

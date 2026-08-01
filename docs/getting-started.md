@@ -34,6 +34,7 @@ cargo xtask deps
 cargo xtask build
 cargo xtask test
 cargo xtask example ui-demo
+cargo xtask example scene3d
 cargo xtask example gltf3d
 ```
 
@@ -157,6 +158,47 @@ return tecs.newApplication({
 The mesh domain frustum-culls and depth-sorts complete indexed commands on the
 GPU. It draws transparent meshes before the sprite forward lane, so sprites
 retain deterministic overlay ordering in a renderer that enables both domains.
+
+## Optional mesh shadows
+
+Enable the mesh domain's directional light and shadow resources at renderer
+creation:
+
+```teal
+return tecs.newApplication({
+    ambientLight = {0.12, 0.13, 0.16},
+    sprites = false,
+    meshes = {
+        shadows = {
+            scale = 1,
+            distance = 40,
+            directionX = -0.45,
+            directionY = -1,
+            directionZ = -0.3,
+            intensity = 1.4,
+            strength = 0.85,
+            softness = 1.5,
+        },
+    },
+    plugin = function(_world: tecs.World, app: tecs.Application)
+        -- Everything except scale remains mutable after creation.
+        app.renderer.meshes.shadow.bias = 0.002
+    end,
+})
+```
+
+`scale` fixes the map size and is creation-only. The other fields are copied
+to `app.renderer.meshes.shadow` and may change between frames. `distance` is
+the half extent of a camera-centered light volume; meshes outside it are
+removed by the same ordered GPU mark, scan, and compact shape used for camera
+culling. Culling rejects complete mesh instances; one surviving mesh still
+draws its full resident index range. Opaque and masked materials cast and
+receive. Blended materials receive but do not cast.
+
+Omitting `meshes.shadows` preserves the shadow-free mesh shaders and allocates
+no map, shadow command buffer, cull pipeline, or graphics pipeline. The 2D
+`shadows` application option remains a separate occluder and drop-shadow
+system.
 
 ## Game modules
 

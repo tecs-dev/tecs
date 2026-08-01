@@ -251,6 +251,9 @@ local record window
             -- Implementation details: this native mode handle lets
             -- `setFullscreenMode` return a selected mode to the platform.
             _mode: loader.CPtr
+            -- Implementation details: this value keeps a copied native mode
+            -- alive when `_mode` points into collector-owned memory.
+            _storage: loader.CValue
         end
 
         --- Callers may set any
@@ -778,7 +781,9 @@ local record window
         ---
         --- @param displayId The caller omits this value to use the primary
         ---     display.
-        --- @return Returns the name, or an empty string without video.
+        --- @return Returns the platform name, a `"Display <id>"` fallback
+        ---     when the platform supplies an empty label, or an empty string
+        ---     without video.
         displayName: function(displayId?: integer): string
 
         --- Reads a display's desktop rectangle.
@@ -1006,7 +1011,7 @@ local function pair(wrote: boolean): integer, integer
 end
 
 --- Converts an `SDL_DisplayMode *` to a mode record, or nil for null.
-local function toMode(pointer: loader.CValue): Window.DisplayMode
+local function toMode(pointer: loader.CValue, storage?: loader.CValue): Window.DisplayMode
     if pointer == nil then
         return nil
     end
@@ -1017,7 +1022,24 @@ local function toMode(pointer: loader.CValue): Window.DisplayMode
         pixelDensity = tonumber(pointer.pixel_density) as number,
         refreshRate = tonumber(pointer.refresh_rate) as number,
         _mode = pointer as loader.CPtr,
+        _storage = storage,
     }
+end
+
+--- Copies a mode out of an SDL-owned list before that list is freed.
+local function copyMode(pointer: loader.CValue): Window.DisplayMode
+    local storage <const> = loader.newStruct("SDL_DisplayMode")
+    local mode <const> = storage as loader.CStruct
+    mode.displayID = pointer.displayID
+    mode.format = pointer.format
+    mode.w = pointer.w
+    mode.h = pointer.h
+    mode.pixel_density = pointer.pixel_density
+    mode.refresh_rate = pointer.refresh_rate
+    mode.refresh_rate_numerator = pointer.refresh_rate_numerator
+    mode.refresh_rate_denominator = pointer.refresh_rate_denominator
+    mode.internal = pointer.internal
+    return toMode(storage, storage)
 end
 
 --- Resolves an optional display argument to the primary display.
@@ -1699,7 +1721,12 @@ function Window.displayName(displayId?: integer): string
     if not Window.isSupported() then
         return ""
     end
-    return loader.toString(C.SDL_GetDisplayName(display(displayId)))
+    local id <const> = display(displayId)
+    local name <const> = loader.toString(C.SDL_GetDisplayName(id))
+    if name == "" then
+        return ("Display %d"):format(id)
+    end
+    return name
 end
 
 function Window.displayBounds(displayId?: integer): integer, integer, integer, integer
@@ -1777,10 +1804,10 @@ function Window.fullscreenModes(displayId?: integer): {Window.DisplayMode}
     end
     local count = countOut[0] as integer
     for index = 0, count - 1 do
-        found[index + 1] = toMode((list as loader.CArray)[index] as loader.CValue)
+        found[index + 1] = copyMode((list as loader.CArray)[index] as loader.CValue)
     end
-    -- One allocation holds the array of pointers; the modes it points at belong
-    -- to SDL and outlive it, which is what lets a mode record keep one.
+    -- SDL describes the list as one allocation, so its mode pointers cannot
+    -- outlive this free. Each returned record owns the copy made above.
     C.SDL_free(list)
     return found
 end
@@ -1800,7 +1827,7 @@ function Window.closestFullscreenMode(
     if not found then
         return nil
     end
-    return toMode(mode)
+    return toMode(mode, mode)
 end
 
 -------------------------------------------------------------------------------

@@ -12,6 +12,11 @@ ordered compute passes mark spheres against the camera frustum, scan survivor
 counts, and compact whole commands into a GPU-only indirect buffer. The CPU
 still submits the fixed extracted command count; cleared trailing commands
 carry zero instances, so no visibility count crosses back from the GPU.
+
+An enabled shadow lane repeats that same mark, scan, and compact sequence
+against the light volume before camera culling reuses the scratch buffers.
+Only its compacted indirect commands reach the shadow raster pass, so meshes
+outside both views cost bounds tests rather than vertex and triangle work.
 ]=]
 
 local type assets = require("tecs.assets")
@@ -37,6 +42,22 @@ local SORT_BUCKETS <const> = 256
 local MATERIAL_FLOATS <const> = 40
 local CULL_FLOATS <const> = 44
 local CULL_BYTES <const> = CULL_FLOATS * 4
+local SHADOW_FLOATS <const> = 28
+local SHADOW_BYTES <const> = SHADOW_FLOATS * 4
+
+local interface MeshShadowOptions
+    distance: number
+    directionX: number
+    directionY: number
+    directionZ: number
+    r: number
+    g: number
+    b: number
+    intensity: number
+    strength: number
+    bias: number
+    softness: number
+end
 
 local record MeshRegion
     slot: integer
@@ -56,6 +77,7 @@ local record MeshBackendOptions
     textureLayers: integer
     packTextures: boolean
     transparency: boolean
+    shadows: MeshShadowOptions
 end
 
 local record MeshMaterialData
@@ -85,6 +107,7 @@ local record MeshBackend
     type Options = MeshBackendOptions
     type Region = MeshRegion
     type MaterialData = MeshMaterialData
+    type ShadowOptions = MeshShadowOptions
 
     capacity: integer
     vertexCapacity: integer
@@ -101,6 +124,7 @@ local record MeshBackend
     sampler: Sampler
     pipeline: GraphicsPipeline
     blendPipeline: GraphicsPipeline
+    shadowPipeline: GraphicsPipeline
     materialCapacity: integer
     materialCount: integer
     textureCount: integer
@@ -109,9 +133,11 @@ local record MeshBackend
     _slots: Buffer
     _blocks: Buffer
     _visibleCommands: Buffer
+    _shadowCommands: Buffer
     _markPipeline: ComputePipeline
     _scanPipeline: ComputePipeline
     _compactPipeline: ComputePipeline
+    _shadowMarkPipeline: ComputePipeline
     _rankPipeline: ComputePipeline
     _placePipeline: ComputePipeline
     _markPass: ComputePass
@@ -128,6 +154,10 @@ local record MeshBackend
     _scanWrites: {loader.CValue}
     _compactWrites: {loader.CValue}
     _compactReads: {loader.CValue}
+    _shadowMarkWrites: {loader.CValue}
+    _shadowMarkReads: {loader.CValue}
+    _shadowCompactWrites: {loader.CValue}
+    _shadowCompactReads: {loader.CValue}
     _blendSlots: Buffer
     _blendBlocks: Buffer
     _blendCommands: Buffer
@@ -160,14 +190,18 @@ local record MeshBackend
     _forwardTextures: {loader.CValue}
     _transparent: boolean
     _blending: boolean
+    _shadows: boolean
+    _shadowActive: boolean
+    _shadow: MeshShadowOptions
+    _shadowUniform: loader.CArray
 end
 
 local MeshBackendMT <const>: metatable<MeshBackend> = {__index = MeshBackend}
 
-local function buildGeometry(device: loader.CPtr, deferred: Deferred): GraphicsPipeline
+local function buildGeometry(device: loader.CPtr, deferred: Deferred, shadows: boolean): GraphicsPipeline
     local albedoFormat, normalFormat, ormFormat, emissionFormat = deferred:geometryFormats()
     local vertex = Shader.load(device, "mesh.vert", {})
-    local fragment = Shader.load(device, "mesh.frag", {})
+    local fragment = Shader.load(device, "mesh.frag", {defines = shadows and {MESH_SHADOWS = "1"} or nil})
     local pipeline = GraphicsPipeline.create(
         device,
         {
@@ -184,9 +218,9 @@ local function buildGeometry(device: loader.CPtr, deferred: Deferred): GraphicsP
     return pipeline
 end
 
-local function buildForward(device: loader.CPtr, deferred: Deferred): GraphicsPipeline
+local function buildForward(device: loader.CPtr, deferred: Deferred, shadows: boolean): GraphicsPipeline
     local vertex = Shader.load(device, "mesh.vert", {})
-    local fragment = Shader.load(device, "mesh.forward.frag", {})
+    local fragment = Shader.load(device, "mesh.forward.frag", {defines = shadows and {MESH_SHADOWS = "1"} or nil})
     local pipeline = GraphicsPipeline.create(
         device,
         {
@@ -197,6 +231,25 @@ local function buildForward(device: loader.CPtr, deferred: Deferred): GraphicsPi
             cull = GraphicsPipeline.CULL_BACK,
             blendMode = GraphicsPipeline.BLEND_PREMULTIPLIED,
             name = "mesh.forward",
+        }
+    )
+    vertex:destroy()
+    fragment:destroy()
+    return pipeline
+end
+
+local function buildShadow(device: loader.CPtr, deferred: Deferred): GraphicsPipeline
+    local vertex = Shader.load(device, "mesh.shadow.vert", {})
+    local fragment = Shader.load(device, "mesh.shadow.frag", {})
+    local pipeline = GraphicsPipeline.create(
+        device,
+        {
+            vertexShader = vertex,
+            fragmentShader = fragment,
+            colorFormat = deferred:meshShadowFormat(),
+            cull = GraphicsPipeline.CULL_NONE,
+            blendMode = GraphicsPipeline.BLEND_MIN,
+            name = "mesh.shadows",
         }
     )
     vertex:destroy()
@@ -226,6 +279,12 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._count = 0
     self._transparent = options.transparency
     self._blending = false
+    self._shadows = options.shadows ~= nil
+    self._shadowActive = false
+    self._shadow = options.shadows
+    if self._shadows then
+        self._shadowUniform = loader.newArray("float[?]", SHADOW_FLOATS)
+    end
     self._geometryBuffers = {}
     self._fragmentBuffers = {}
     self._fragmentTextures = {}
@@ -334,6 +393,10 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._scanWrites = {}
     self._compactWrites = {}
     self._compactReads = {}
+    self._shadowMarkWrites = {}
+    self._shadowMarkReads = {}
+    self._shadowCompactWrites = {}
+    self._shadowCompactReads = {}
     self._blendScanWrites = {}
     self._blendCompactWrites = {}
     self._blendCompactReads = {}
@@ -342,7 +405,21 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._bucketScanWrites = {}
     self._placeWrites = {}
     self._placeReads = {}
-    self.pipeline = buildGeometry(device, deferred)
+    self.pipeline = buildGeometry(device, deferred, self._shadows)
+    if self._shadows then
+        self._shadowCommands = Buffer.create(
+            device,
+            {
+                usage = {"indirect", "computeWrite"},
+                size = self.capacity * meshlayout.COMMAND_BYTES,
+                name = "mesh.shadow.commands",
+            }
+        )
+        if self._transparent then
+            self._shadowMarkPipeline = ComputePipeline.load(device, "mesh.mark.comp", {defines = {MESH_ALPHA = "1"}})
+        end
+        self.shadowPipeline = buildShadow(device, deferred)
+    end
     if self._transparent then
         local groups <const> = math.ceil(self.capacity / CULL_GROUP)
         self._blendSlots = Buffer.create(
@@ -379,7 +456,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
         )
         self._rankPipeline = ComputePipeline.load(device, "mesh.rank.comp", {})
         self._placePipeline = ComputePipeline.load(device, "mesh.place.comp", {})
-        self.blendPipeline = buildForward(device, deferred)
+        self.blendPipeline = buildForward(device, deferred, self._shadows)
     end
     return self
 end
@@ -528,6 +605,60 @@ function MeshBackend:regionOf(asset: integer): MeshRegion
     return self._regionByAsset[asset]
 end
 
+local function writeShadowUniform(self: MeshBackend, packet: MeshFramePacket)
+    local shadow <const> = self._shadow
+    local distance <const> = shadow.distance
+    if distance <= 0.0 then
+        error("tecs: mesh shadow distance must be greater than 0", 3)
+    end
+    if shadow.intensity < 0.0 then
+        error("tecs: mesh shadow intensity must be greater than or equal to 0", 3)
+    end
+    if shadow.strength < 0.0 or shadow.strength > 1.0 then
+        error("tecs: mesh shadow strength must be between 0 and 1", 3)
+    end
+    if shadow.bias < 0.0 or shadow.softness < 0.0 then
+        error("tecs: mesh shadow bias and softness must be greater than or equal to 0", 3)
+    end
+    if shadow.r < 0.0 or shadow.g < 0.0 or shadow.b < 0.0 then
+        error("tecs: mesh shadow light color must be greater than or equal to 0", 3)
+    end
+
+    local dx, dy, dz = shadow.directionX, shadow.directionY, shadow.directionZ
+    local magnitude <const> = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if magnitude == 0.0 then
+        error("tecs: mesh shadow direction must not be zero", 3)
+    end
+    dx, dy, dz = dx / magnitude, dy / magnitude, dz / magnitude
+
+    local ux, uy, uz = 0.0, 1.0, 0.0
+    if math.abs(dy) > 0.99 then
+        ux, uy = 1.0, 0.0
+    end
+    local rx, ry, rz = uy * dz - uz * dy, uz * dx - ux * dz, ux * dy - uy * dx
+    local rightLength <const> = math.sqrt(rx * rx + ry * ry + rz * rz)
+    rx, ry, rz = rx / rightLength, ry / rightLength, rz / rightLength
+    local vx, vy, vz = dy * rz - dz * ry, dz * rx - dx * rz, dx * ry - dy * rx
+
+    local cx, cy, cz <const> = packet.cameraX, packet.cameraY, packet.cameraZ
+    local inverse <const> = 1.0 / distance
+    local depthInverse <const> = 0.5 * inverse
+    local uniform <const> = self._shadowUniform
+    uniform[0], uniform[4], uniform[8] = rx * inverse, ry * inverse, rz * inverse
+    uniform[1], uniform[5], uniform[9] = vx * inverse, vy * inverse, vz * inverse
+    uniform[2], uniform[6], uniform[10] = dx * depthInverse, dy * depthInverse, dz * depthInverse
+    uniform[3], uniform[7], uniform[11] = 0.0, 0.0, 0.0
+    uniform[12] = -(rx * cx + ry * cy + rz * cz) * inverse
+    uniform[13] = -(vx * cx + vy * cy + vz * cz) * inverse
+    uniform[14] = 0.5 - (dx * cx + dy * cy + dz * cz) * depthInverse
+    uniform[15] = 1.0
+    uniform[16], uniform[17], uniform[18], uniform[19] = dx, dy, dz, shadow.intensity
+    uniform[20], uniform[21], uniform[22], uniform[23] = shadow.r, shadow.g, shadow.b, shadow.strength
+    uniform[24], uniform[25] = shadow.bias, shadow.softness
+    uniform[26], uniform[27] = self._shadowActive and 1.0 or 0.0, 0.0
+    self._deferred:setMeshLight(-dx, -dy, -dz, shadow.intensity, shadow.r, shadow.g, shadow.b)
+end
+
 function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame)
     local slot <const> = packet.slot
     self.instances:markSlotRanges(slot, packet.instanceRanges)
@@ -539,12 +670,64 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame)
     self._count = packet.count
     self._viewProjection = packet.viewProjection
     self._blending = self._transparent and packet.blendCount > 0
+    self._shadowActive = self._shadows and packet.count > packet.blendCount
+    if self._shadows then
+        writeShadowUniform(self, packet)
+    end
     if self._count == 0 then
         return
     end
 
     local groups <const> = math.ceil(self._count / CULL_GROUP)
     local uniform <const> = self._cullUniform
+    if self._shadowActive then
+        frustum.write(self._shadowUniform, uniform)
+        uniform[24] = self._count
+        uniform[25] = groups
+        uniform[26] = self.capacity
+        uniform[27] = 0.0
+
+        local markWrites <const> = self._shadowMarkWrites
+        markWrites[1] = self._slots.handle
+        markWrites[2] = self._blocks.handle
+        markWrites[3] = self._shadowCommands.handle
+        local markReads <const> = self._shadowMarkReads
+        markReads[1] = self._bounds.handle
+        if self._transparent then
+            markReads[2] = self.instances.handle
+        end
+        local mark <const> = ComputePass.begin(frame.commandBuffer, markWrites, self._markPass)
+        self._markPass = mark
+        mark:bindPipeline((self._shadowMarkPipeline or self._markPipeline).handle)
+        mark:bindStorageBuffers(0, markReads)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+        mark:dispatch(groups)
+        mark:finish()
+
+        local scanWrites <const> = self._scanWrites
+        scanWrites[1] = self._blocks.handle
+        local scan <const> = ComputePass.begin(frame.commandBuffer, scanWrites, self._scanPass)
+        self._scanPass = scan
+        scan:bindPipeline(self._scanPipeline.handle)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+        scan:dispatch(1)
+        scan:finish()
+
+        local compactWrites <const> = self._shadowCompactWrites
+        compactWrites[1] = self._shadowCommands.handle
+        local compactReads <const> = self._shadowCompactReads
+        compactReads[1] = self._slots.handle
+        compactReads[2] = self._blocks.handle
+        compactReads[3] = self.commands.handle
+        local compact <const> = ComputePass.begin(frame.commandBuffer, compactWrites, self._compactPass)
+        self._compactPass = compact
+        compact:bindPipeline(self._compactPipeline.handle)
+        compact:bindStorageBuffers(0, compactReads)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+        compact:dispatch(groups)
+        compact:finish()
+    end
+
     frustum.write(packet.viewProjection, uniform)
     uniform[24] = self._count
     uniform[25] = groups
@@ -667,6 +850,30 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame)
     end
 end
 
+function MeshBackend:castsThisFrame(): boolean
+    return self._shadowActive
+end
+
+function MeshBackend:recordShadowMap(context: Deferred.PassContext)
+    if not self._shadowActive then
+        return
+    end
+    context.pass:bindPipeline(self.shadowPipeline.handle)
+    context.pass:pushVertexUniform(0, self._shadowUniform, 64)
+    local buffers <const> = self._geometryBuffers
+    buffers[1] = self.vertices.handle
+    buffers[2] = self.instances.handle
+    context.pass:bindVertexStorageBuffers(0, buffers)
+    local fragmentBuffers <const> = self._fragmentBuffers
+    fragmentBuffers[1] = self.materials.handle
+    context.pass:bindFragmentStorageBuffers(0, fragmentBuffers)
+    local textures <const> = self._fragmentTextures
+    textures[1] = self.images.handle
+    context.pass:bindTextures(0, textures, self.sampler.handle)
+    context.pass:bindIndexBuffer(self.indices.handle, RenderPass.INDEX_UINT32)
+    context.pass:drawIndexedIndirect(self._shadowCommands.handle, 0, self._count)
+end
+
 function MeshBackend:recordGeometry(context: Deferred.PassContext)
     if self._count == 0 then
         return
@@ -682,7 +889,10 @@ function MeshBackend:recordGeometry(context: Deferred.PassContext)
     context.pass:bindFragmentStorageBuffers(0, fragmentBuffers)
     local textures <const> = self._fragmentTextures
     textures[1] = self.images.handle
-    context.pass:bindTextures(0, textures, self.sampler.handle)
+    context.pass:bindTextures(self._shadows and 1 or 0, textures, self.sampler.handle)
+    if self._shadows then
+        C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, self._shadowUniform, SHADOW_BYTES)
+    end
     context.pass:bindIndexBuffer(self.indices.handle, RenderPass.INDEX_UINT32)
     context.pass:drawIndexedIndirect(self._visibleCommands.handle, 0, self._count)
 end
@@ -703,13 +913,16 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
     self._deferred:bindLighting(context, 1)
     local textures <const> = self._forwardTextures
     textures[1] = self.images.handle
-    context.pass:bindTextures(0, textures, self.sampler.handle)
+    context.pass:bindTextures(self._shadows and 1 or 0, textures, self.sampler.handle)
+    if self._shadows then
+        C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, self._shadowUniform, SHADOW_BYTES)
+    end
     context.pass:bindIndexBuffer(self.indices.handle, RenderPass.INDEX_UINT32)
     context.pass:drawIndexedIndirect(self._blendSorted.handle, 0, self._count)
 end
 
 function MeshBackend:rebuildPipeline(deferred: Deferred)
-    local geometry <const> = buildGeometry(self._device, deferred)
+    local geometry <const> = buildGeometry(self._device, deferred, self._shadows)
     local mark <const> = ComputePipeline.load(
         self._device, self._transparent and "mesh.lanes.mark.comp" or "mesh.mark.comp", {}
     )
@@ -718,8 +931,16 @@ function MeshBackend:rebuildPipeline(deferred: Deferred)
     local blend: GraphicsPipeline = nil
     local rank: ComputePipeline = nil
     local place: ComputePipeline = nil
+    local shadow: GraphicsPipeline = nil
+    local shadowMark: ComputePipeline = nil
+    if self._shadows then
+        shadow = buildShadow(self._device, deferred)
+        if self._transparent then
+            shadowMark = ComputePipeline.load(self._device, "mesh.mark.comp", {defines = {MESH_ALPHA = "1"}})
+        end
+    end
     if self._transparent then
-        blend = buildForward(self._device, deferred)
+        blend = buildForward(self._device, deferred, self._shadows)
         rank = ComputePipeline.load(self._device, "mesh.rank.comp", {})
         place = ComputePipeline.load(self._device, "mesh.place.comp", {})
     end
@@ -728,6 +949,14 @@ function MeshBackend:rebuildPipeline(deferred: Deferred)
         self._scanPipeline,
         self._compactPipeline
     self.pipeline, self._markPipeline, self._scanPipeline, self._compactPipeline = geometry, mark, scan, compact
+    if self._shadows then
+        local oldShadow, oldShadowMark <const> = self.shadowPipeline, self._shadowMarkPipeline
+        self.shadowPipeline, self._shadowMarkPipeline = shadow, shadowMark
+        oldShadow:destroy()
+        if oldShadowMark ~= nil then
+            oldShadowMark:destroy()
+        end
+    end
     if self._transparent then
         local oldBlend, oldRank, oldPlace <const> = self.blendPipeline, self._rankPipeline, self._placePipeline
         self.blendPipeline, self._rankPipeline, self._placePipeline = blend, rank, place
@@ -765,6 +994,13 @@ function MeshBackend:destroy()
     self._scanPipeline:destroy()
     self._compactPipeline:destroy()
     self.pipeline:destroy()
+    if self._shadows then
+        self._shadowCommands:destroy()
+        if self._shadowMarkPipeline ~= nil then
+            self._shadowMarkPipeline:destroy()
+        end
+        self.shadowPipeline:destroy()
+    end
     if self._transparent then
         self._blendSlots:destroy()
         self._blendBlocks:destroy()

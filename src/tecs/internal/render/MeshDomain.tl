@@ -13,6 +13,9 @@ on the GPU. A domain created with `transparency = true` also classifies glTF
 `BLEND` materials, compacts them separately, and stably sorts their complete
 commands back to front. A domain without that option creates none of the
 sorting buffers, compute pipelines, or forward graphics pipeline.
+A domain created with `shadows` adds one camera-centered directional shadow
+map. Opaque and masked meshes cast; opaque, masked, and blended meshes receive.
+The map, its pipeline, and the lighting shader variant do not exist otherwise.
 ]=]
 
 local type types = require("tecs.types")
@@ -86,6 +89,54 @@ local record MeshMaterialOptions
     occlusionStrength: number
 end
 
+--- Controls one directional light and its mesh shadow map at runtime.
+--- The renderer reads assignments on the next frame. Rendering raises when
+--- `distance` is not positive, a light color or `intensity` is negative,
+--- `strength` is outside zero through one, `bias` or `softness` is negative,
+--- or the three direction fields form a zero vector.
+local interface MeshShadowTuning
+    --- Caller-writable. Sets the half extent of the camera-centered shadow
+    --- volume in world units, must be positive, and defaults to 100.
+    distance: number
+    --- Caller-writable. Sets the x direction light rays travel and defaults
+    --- to negative 0.5.
+    directionX: number
+    --- Caller-writable. Sets the y direction light rays travel and defaults
+    --- to negative one.
+    directionY: number
+    --- Caller-writable. Sets the z direction light rays travel and defaults
+    --- to negative 0.5. The three direction fields must not all be zero.
+    directionZ: number
+    --- Caller-writable. Sets non-negative directional-light red and defaults
+    --- to one.
+    r: number
+    --- Caller-writable. Sets non-negative directional-light green and
+    --- defaults to one.
+    g: number
+    --- Caller-writable. Sets non-negative directional-light blue and defaults
+    --- to one.
+    b: number
+    --- Caller-writable. Scales directional-light contribution, must be
+    --- non-negative, and defaults to one.
+    intensity: number
+    --- Caller-writable. Sets shadow occlusion from zero to one and defaults
+    --- to one.
+    strength: number
+    --- Caller-writable. Sets non-negative receiver clip-depth bias and
+    --- defaults to 0.0015.
+    bias: number
+    --- Caller-writable. Sets the 3x3 PCF radius in texels. Zero selects one
+    --- sample and the default is one.
+    softness: number
+end
+
+--- Configures one directional light and its mesh shadow resources.
+local record MeshShadowOptions is MeshShadowTuning
+    --- Caller-writable. Sets the shadow-map size relative to the frame and
+    --- defaults to one. It must be positive and is fixed at renderer creation.
+    scale: number
+end
+
 local record MeshDomainOptions
     --- Caller-writable. Sets the maximum resident mesh-instance count and
     --- defaults to 65,536.
@@ -114,6 +165,9 @@ local record MeshDomainOptions
     --- Caller-writable. Enables the independently allocated transparent mesh
     --- lane and defaults to false.
     transparency: boolean
+    --- Caller-writable. Enables and configures one independently allocated
+    --- directional mesh-shadow lane. Nil disables it.
+    shadows: MeshShadowOptions
 end
 
 --- Contains the complete component bundle for one registered model primitive.
@@ -131,6 +185,8 @@ end
 local record MeshDomain
     type Options = MeshDomainOptions
     type MaterialOptions = MeshMaterialOptions
+    type ShadowOptions = MeshShadowOptions
+    type Shadow = MeshShadowTuning
     type RegisteredPrimitive = RegisteredPrimitive
 
     --- Read-only. Selects metallic-roughness PBR material dispatch.
@@ -172,6 +228,11 @@ local record MeshDomain
     --- Read-only. Reports whether this domain owns the optional transparent
     --- command and pipeline resources.
     transparency: boolean
+    --- Read-only. Reports whether this domain owns mesh-shadow resources.
+    shadows: boolean
+    --- Caller-writable. Controls the enabled directional light and shadow map.
+    --- Nil while shadows are disabled.
+    shadow: MeshShadowTuning
     --- Engine-owned. Exposes immutable vertex storage to the opaque
     --- mesh pass. Ordinary game code should ignore it.
     vertices: Buffer
@@ -240,6 +301,23 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self.materialCount = 1
     self.textureCount = 0
     self.transparency = options.transparency == true
+    self.shadows = options.shadows ~= nil
+    if self.shadows then
+        local shadow <const> = options.shadows or {}
+        self.shadow = {
+            distance = shadow.distance or 100.0,
+            directionX = shadow.directionX or -0.5,
+            directionY = shadow.directionY or -1.0,
+            directionZ = shadow.directionZ or -0.5,
+            r = shadow.r or 1.0,
+            g = shadow.g or 1.0,
+            b = shadow.b or 1.0,
+            intensity = shadow.intensity or 1.0,
+            strength = shadow.strength or 1.0,
+            bias = shadow.bias or 0.0015,
+            softness = shadow.softness or 1.0,
+        }
+    end
     self._centerXByAsset = {}
     self._centerYByAsset = {}
     self._centerZByAsset = {}
@@ -259,6 +337,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
             textureLayers = textureLayers,
             packTextures = options.packTextures ~= false,
             transparency = self.transparency,
+            shadows = self.shadow as MeshBackend.ShadowOptions,
         }
     )
     self._backend = backend
@@ -489,6 +568,14 @@ end
 
 function MeshDomain:_recordForward(context: Deferred.PassContext)
     self._backend:recordForward(context)
+end
+
+function MeshDomain:_castsThisFrame(): boolean
+    return self._backend:castsThisFrame()
+end
+
+function MeshDomain:_recordShadowMap(context: Deferred.PassContext)
+    self._backend:recordShadowMap(context)
 end
 
 function MeshDomain:_rebuildPipelines(deferred: Deferred)

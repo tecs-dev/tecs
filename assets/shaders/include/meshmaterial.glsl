@@ -3,8 +3,15 @@
 // alpha policy, tangent-space normals, and integer model dispatch stay one
 // contract in both lanes.
 
-layout(set = 2, binding = 0) uniform sampler2DArray images;
-layout(set = 2, binding = 1) readonly buffer Materials { float value[]; } materials;
+#ifndef MESH_IMAGE_BINDING
+#define MESH_IMAGE_BINDING 0
+#endif
+#ifndef MESH_MATERIAL_BINDING
+#define MESH_MATERIAL_BINDING 1
+#endif
+
+layout(set = 2, binding = MESH_IMAGE_BINDING) uniform sampler2DArray images;
+layout(set = 2, binding = MESH_MATERIAL_BINDING) readonly buffer Materials { float value[]; } materials;
 
 const int MESH_MATERIAL_FLOATS = 40;
 const int MESH_MATERIAL_METALLIC_ROUGHNESS = 0;
@@ -31,17 +38,26 @@ vec4 meshSampleMap(int base, int layerLane, int uvLane, vec2 sourceUV, vec4 fall
     return texture(images, vec3(uv, layer));
 }
 
+int meshAlphaMode(int material) {
+    return int(materials.value[material * MESH_MATERIAL_FLOATS + 7]);
+}
+
+vec4 meshBaseColor(int material, vec2 uv, vec3 tint) {
+    int base = material * MESH_MATERIAL_FLOATS;
+    vec4 baseFactor = vec4(
+        materials.value[base + 28], materials.value[base + 29],
+        materials.value[base + 30], materials.value[base + 31]);
+    return meshSampleMap(base, 1, 8, uv, vec4(1.0))
+        * baseFactor * vec4(tint, 1.0);
+}
+
 MeshSurface meshMaterial(
     int material, vec2 uv, vec3 tint, vec3 vertexNormal, vec4 vertexTangent
 ) {
     int base = material * MESH_MATERIAL_FLOATS;
     int model = int(materials.value[base]);
     int alphaMode = int(materials.value[base + 7]);
-    vec4 baseFactor = vec4(
-        materials.value[base + 28], materials.value[base + 29],
-        materials.value[base + 30], materials.value[base + 31]);
-    vec4 baseColor = meshSampleMap(base, 1, 8, uv, vec4(1.0))
-        * baseFactor * vec4(tint, 1.0);
+    vec4 baseColor = meshBaseColor(material, uv, tint);
     if (alphaMode == MESH_ALPHA_MASK && baseColor.a < materials.value[base + 6]) {
         discard;
     }
