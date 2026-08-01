@@ -19,7 +19,8 @@ changed boxes.
 retained tree. Unchanged frames skip layout computation, layout export, clip
 reconstruction, and hit-rectangle reconstruction. A screen root installed
 through `plugin(app)` follows the application's logical window size and pixel
-density automatically.
+density automatically. The plugin observes viewport changes on the world's
+platform event bus, so unchanged frames do not poll the window.
 
 [`Intrinsic`](tealdoc:tecs.ui.Intrinsic) copies cached text, sprite-region, or
 custom leaf metrics into Taffy when the source component dirties. Wrapping text
@@ -131,6 +132,8 @@ return tecs.newApplication({plugin = gamePlugin})
 
 local ecs <const> = require("tecs.ecs")
 local events <const> = require("tecs.events")
+local platformEvents <const> = require("tecs.platform.events")
+local type platformEventTypes = require("tecs.platform.events")
 local type types = require("tecs.types")
 local type internal = require("tecs.internal.types")
 local rust <const> = require("tecs.ffi.rust")
@@ -142,6 +145,7 @@ local ffi <const> = require("ffi")
 
 local type Component = ecs.Component
 local type World = types.World
+local type PlatformEvent = platformEventTypes.Event
 local type Renderer = require("tecs.Renderer")
 
 local C <const> = rust.C
@@ -709,6 +713,7 @@ local record Install
     screenWidth: number
     screenHeight: number
     screenDensity: number
+    viewportDirty: boolean
     nodeMembershipDirty: boolean
     rootMembershipDirty: boolean
 end
@@ -1037,14 +1042,17 @@ local record ui
     --- drawing unclipped content.
     ---
     --- Passing an [`Application`](tealdoc:tecs.Application) supplies its
-    --- renderer, input, and window. The plugin then synchronizes every screen
-    --- root's logical size and pixel density before layout. The optional
-    --- second argument overrides clip allocation, the input layer, and wheel
-    --- distance. Passing `Options` directly preserves manual wiring for tests,
-    --- tools, and worlds not owned by an application. When input is present,
-    --- the plugin reads its configured layer in `PreUpdate`. It uses the hit
-    --- geometry derived after the previous frame's layout and clipping, which
-    --- is the geometry the player was shown when the input arrived.
+    --- renderer, input, and window. The plugin samples the viewport initially,
+    --- then observes platform resize, pixel-size, display, and display-scale
+    --- events at world address zero. It coalesces them and refreshes automatic
+    --- roots before layout without polling the window on unchanged frames. The
+    --- optional second argument overrides clip allocation, the input layer,
+    --- and wheel distance. Passing `Options` directly preserves manual wiring
+    --- for tests, tools, and worlds not owned by an application. When input is
+    --- present, the plugin reads its configured layer in `PreUpdate`. It uses
+    --- the hit geometry derived after the previous frame's layout and
+    --- clipping, which is the geometry the player was shown when the input
+    --- arrived.
     ---
     --- @param source The caller supplies an application or manually wired
     ---     options containing a renderer.
@@ -1182,11 +1190,21 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             screenWidth = math.huge,
             screenHeight = math.huge,
             screenDensity = math.huge,
+            viewportDirty = true,
             nodeMembershipDirty = true,
             rootMembershipDirty = true,
         }
         installs[world] = install
         local worldImpl <const> = world as internal.WorldImpl
+        if window ~= nil then
+            local function invalidateViewport(_event: PlatformEvent)
+                install.viewportDirty = true
+            end
+            world:observe(0, platformEvents.on.windowResized, invalidateViewport)
+            world:observe(0, platformEvents.on.windowPixelSizeChanged, invalidateViewport)
+            world:observe(0, platformEvents.on.windowDisplayChanged, invalidateViewport)
+            world:observe(0, platformEvents.on.windowDisplayScaleChanged, invalidateViewport)
+        end
         -- These names are compatibility surfaces exposed by the debugger.
         local function invalidateNodes()
             install.nodeMembershipDirty = true
@@ -1372,19 +1390,20 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 local screenHeight: number = 0
                 local screenDensity: number = 1
                 local activeWindow = install.window
-                if activeWindow ~= nil then
-                    screenWidth, screenHeight = activeWindow:getSize()
-                    screenDensity = activeWindow:pixelDensity()
+                local windowDirty = false
+                if activeWindow ~= nil and install.viewportDirty then
+                    local width, height = activeWindow:getSize()
+                    local density = activeWindow:pixelDensity()
+                    install.viewportDirty = false
+                    windowDirty = install.screenWidth ~= width
+                        or install.screenHeight ~= height
+                        or install.screenDensity ~= density
+                    install.screenWidth, install.screenHeight = width, height
+                    install.screenDensity = density
                 end
-                local windowDirty = activeWindow ~= nil
-                    and (
-                        install.screenWidth ~= screenWidth
-                        or install.screenHeight ~= screenHeight
-                        or install.screenDensity ~= screenDensity
-                    )
                 if activeWindow ~= nil then
-                    install.screenWidth, install.screenHeight = screenWidth, screenHeight
-                    install.screenDensity = screenDensity
+                    screenWidth, screenHeight = install.screenWidth, install.screenHeight
+                    screenDensity = install.screenDensity
                 end
                 local camera = renderer.camera
                 local cameraSizingDirty = install.hasCameraRoots

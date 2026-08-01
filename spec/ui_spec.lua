@@ -6,6 +6,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs = require("tecs")
 local ui = require("tecs.ui")
 local components = require("tecs.components")
+local platformEvents = require("tecs.platform.events")
 
 local ChildOf = tecs.ecs.ChildOf
 local RelativeTransform = tecs.ecs.RelativeTransform
@@ -57,11 +58,15 @@ local function fakeWindow(width, height, density)
         width = width,
         height = height,
         density = density,
+        sizeReads = 0,
+        densityReads = 0,
     }
     function window:getSize()
+        self.sizeReads = self.sizeReads + 1
         return self.width, self.height
     end
     function window:pixelDensity()
+        self.densityReads = self.densityReads + 1
         return self.density
     end
     return window
@@ -131,8 +136,27 @@ describe("tecs.ui", function()
         assert.are.equal(2, root.pixelDensity)
         assert.are.equal(90, world:get(child, ui.Layout).width)
         assert.are.equal(20, world:get(child, ui.Layout).height)
+        assert.are.equal(1, window.sizeReads)
+        assert.are.equal(1, window.densityReads)
+
+        world:update(1 / 60)
+        assert.are.equal(1, window.sizeReads)
+        assert.are.equal(1, window.densityReads)
 
         window.width, window.height, window.density = 300, 180, 1.5
+        world:update(1 / 60)
+
+        root = world:get(rootEntity, ui.Root)
+        assert.are.equal(200, root.width)
+        assert.are.equal(120, root.height)
+        assert.are.equal(2, root.pixelDensity)
+        assert.are.equal(1, window.sizeReads)
+        assert.are.equal(1, window.densityReads)
+
+        world:emit(0, platformEvents.on.windowResized)
+        world:emit(0, platformEvents.on.windowPixelSizeChanged)
+        world:emit(0, platformEvents.on.windowDisplayChanged)
+        world:emit(0, platformEvents.on.windowDisplayScaleChanged)
         world:update(1 / 60)
 
         root = world:get(rootEntity, ui.Root)
@@ -140,6 +164,8 @@ describe("tecs.ui", function()
         assert.are.equal(180, root.height)
         assert.are.equal(1.5, root.pixelDensity)
         assert.are.equal(140, world:get(child, ui.Layout).width)
+        assert.are.equal(2, window.sizeReads)
+        assert.are.equal(2, window.densityReads)
     end)
 
     it("measures custom and image leaves without authored dimensions", function()
@@ -196,6 +222,7 @@ describe("tecs.ui", function()
 
         window.width = 300
         renderer.camera.x = 30
+        world:emit(0, platformEvents.on.windowResized)
         world:update(1 / 60)
         assert.are.equal(300, world:get(cameraRoot, ui.Root).width)
         assert.are.equal(70, world:get(manualRoot, ui.Root).width)
