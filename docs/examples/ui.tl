@@ -211,7 +211,7 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
 
             spawnButton("Rectangle instance", 1)
             spawnButton("Circle material", 2)
-            spawnButton("Distance-field text", 3)
+            spawnButton("Alpha UI text", 3)
             spawnButton("Nested clipping", 4)
             spawnButton("Dirty transforms", 5)
             spawnButton("Bubbling events", 6)
@@ -256,6 +256,7 @@ return tecs.newApplication({
     capacity = 512,
     maxEntities = 1024,
     debug = true,
+    mcpPort = math.floor(tonumber(os.getenv("TECS_MCP")) or 19998),
     debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
     plugin = uiExamplePlugin,
 })

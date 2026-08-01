@@ -1740,6 +1740,7 @@ local record types
             eventId: integer
 
             --- Positional initializer used by `newEvent` / `newFFIEvent`.
+            --- @local
             init: function(instance: self, ...: any)
         end
 

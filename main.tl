@@ -132,8 +132,8 @@ return tecs.newApplication({
     ambientLight = {0.05, 0.05, 0.08},
     -- Headroom over the field for lights, composed UI shapes, and one entity
     -- per glyph. Hitting the renderer capacity drops later instances.
-    capacity = COUNT + 512,
-    maxEntities = COUNT + 1024,
+    capacity = COUNT + 8192,
+    maxEntities = COUNT + 8192,
     debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
     presentMode = os.getenv("TECS_PRESENT"),
     -- The demo is inspectable out of the box. TECS_MCP still selects another
@@ -213,7 +213,7 @@ return tecs.newApplication({
         world:spawn(
             ui.Style({position = "absolute", inset = {left = 24, top = 24}}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 3),
+            RelativeTransform(0, 0, 100),
             Tint(0.92, 0.96, 1.0, 1.0),
             tecs.gfx.Text.new({
                 text = ("tecs %s\n%d entities"):format(tecs.version, COUNT),
@@ -243,7 +243,9 @@ return tecs.newApplication({
             ChildOf(panel)
         )
 
-        local header <const> = world:spawn(ui.Style({height = 56, width = "100%"}), RelativeTransform(), ChildOf(panel))
+        local header <const> = world:spawn(
+            ui.Style({height = 62, width = "100%"}), RelativeTransform(0, 0, 100), ChildOf(panel)
+        )
         world:spawn(
             ui.Style({position = "absolute", width = 42, height = 42, inset = {left = 0, top = 4}}),
             ui.Paint(true),
@@ -266,7 +268,7 @@ return tecs.newApplication({
             ChildOf(header)
         )
         world:spawn(
-            ui.Style({position = "absolute", inset = {left = 58, top = 32}}),
+            ui.Style({position = "absolute", inset = {left = 58, top = 39}}),
             ui.Intrinsic("text"),
             RelativeTransform(0, 0, 3),
             Tint(0.54, 0.64, 0.76, 1.0),
@@ -281,10 +283,10 @@ return tecs.newApplication({
         local status <const> = world:spawn(
             ui.Style({minHeight = 42, width = "100%"}),
             ui.Intrinsic("text"),
-            RelativeTransform(0, 0, 3),
+            RelativeTransform(0, 0, 100),
             Tint(0.62, 0.75, 0.88, 1.0),
             tecs.gfx.Text.new({
-                text = "Click, Tab, Shift-Tab, Return, or scroll",
+                text = "Click, Tab, Return, or scroll",
                 font = font,
                 size = 16,
             }),
@@ -335,19 +337,68 @@ return tecs.newApplication({
             return control
         end
 
+        local activeScene = 1
+        local scenes: {integer} = {}
+        local sceneTintAlpha: {integer: number} = {}
+        local sceneDrawables: {integer: boolean} = {}
+        local sceneIndexByControl: {integer: integer} = {}
+        local sceneStatus <const> = {
+            "Scene: composition + intrinsic",
+            "Scene: flex growth + wrapping",
+            "Scene: absolute anchors + depth",
+            "Scene: clipping + scrollbars",
+        }
+        local function selectScene(index: integer)
+            activeScene = index
+            for sceneIndex = 1, #scenes do
+                local visible <const> = sceneIndex == activeScene
+                local style <const> = world:getMut(scenes[sceneIndex], ui.Style)
+                style.style.display = visible and "flex" or "none"
+                -- Layout roots stay retained so switching scenes exercises
+                -- dirty layout updates. Their drawables also need explicit
+                -- visibility because layout participation does not disable a
+                -- renderer producer.
+                for _, entity in world:traverse(scenes[sceneIndex], ChildOf) do
+                    if world:has(entity, Renderable) then
+                        sceneDrawables[entity] = true
+                    end
+                    if sceneDrawables[entity] then
+                        if visible and not world:has(entity, Renderable) then
+                            world:set(entity, Renderable)
+                        elseif not visible and world:has(entity, Renderable) then
+                            world:remove(entity, Renderable)
+                        end
+                    end
+                    local tint <const> = world:get(entity, Tint)
+                    if tint ~= nil then
+                        local alpha = sceneTintAlpha[entity]
+                        if alpha == nil then
+                            alpha = tint.a
+                            sceneTintAlpha[entity] = alpha
+                        end
+                        local nextAlpha <const> = visible and alpha or 0
+                        if tint.a ~= nextAlpha then
+                            world:getMut(entity, Tint).a = nextAlpha
+                        end
+                    end
+                end
+            end
+            setStatus(sceneStatus[index])
+        end
+
         local actions <const> = world:spawn(
             ui.Style({
                 width = "100%",
                 height = 44,
                 flexDirection = "row",
-                gap = 10,
+                gap = 8,
             }),
-            RelativeTransform(),
+            RelativeTransform(0, 0, 100),
             ChildOf(panel)
         )
-        local function spawnCompactButton(label: string, tabIndex: integer)
+        local function spawnSceneButton(label: string, tabIndex: integer)
             local control <const> = world:spawn(
-                ui.Style({width = 112, height = 44}),
+                ui.Style({width = 84, height = 44}),
                 ui.Interaction({tabIndex = tabIndex}),
                 RelativeTransform(),
                 ChildOf(actions)
@@ -362,7 +413,7 @@ return tecs.newApplication({
                 ChildOf(control)
             )
             world:spawn(
-                ui.Style({position = "absolute", inset = {left = 12, top = 11}}),
+                ui.Style({position = "absolute", inset = {left = 8, top = 11}}),
                 ui.Intrinsic("text"),
                 RelativeTransform(0, 0, 2),
                 Tint(0.9, 0.95, 1.0, 1.0),
@@ -370,29 +421,51 @@ return tecs.newApplication({
                 ChildOf(control)
             )
             controls[#controls + 1] = {control, visual}
+            sceneIndexByControl[control] = tabIndex
             world:observe(
                 control,
                 ui.Event,
                 function(event: UiEvent)
                     if event.kind == "activate" then
-                        setStatus(("%s via %s"):format(label, event.source))
+                        selectScene(tabIndex)
                     end
                 end
             )
         end
-        spawnCompactButton("Compose", 1)
-        spawnCompactButton("Inspect", 2)
-        spawnCompactButton("Ship", 3)
+        spawnSceneButton("Compose", 1)
+        spawnSceneButton("Flex", 2)
+        spawnSceneButton("Overlay", 3)
+        spawnSceneButton("Scroll", 4)
+
+        local sceneHost <const> = world:spawn(
+            ui.Style({width = "100%", flexGrow = 1, minHeight = 120}), RelativeTransform(0, 0, 10), ChildOf(panel)
+        )
+
+        local composeScene <const> = world:spawn(
+            ui.Style({
+                position = "absolute",
+                width = "100%",
+                height = "100%",
+                inset = {left = 0, top = 0},
+                flexDirection = "column",
+                gap = 10,
+            }),
+            RelativeTransform(),
+            ChildOf(sceneHost)
+        )
+        scenes[1] = composeScene
 
         local viewportFrame <const> = world:spawn(
             ui.Style({
+                position = "absolute",
                 width = "100%",
-                flexGrow = 1,
-                minHeight = 120,
+                height = "100%",
+                inset = {left = 0, top = 0},
             }),
             RelativeTransform(),
-            ChildOf(panel)
+            ChildOf(sceneHost)
         )
+        scenes[4] = viewportFrame
         local viewport <const> = world:spawn(
             ui.Style({position = "absolute", inset = 0}), ui.Scroll(), RelativeTransform(), ChildOf(viewportFrame)
         )
@@ -458,7 +531,7 @@ return tecs.newApplication({
         )
 
         local imageCard <const> = world:spawn(
-            ui.Style({width = "100%", height = 96}), RelativeTransform(), ChildOf(content)
+            ui.Style({width = "100%", height = 112, order = 1}), RelativeTransform(), ChildOf(composeScene)
         )
         world:spawn(
             ui.Style({position = "absolute", inset = 0}),
@@ -485,26 +558,277 @@ return tecs.newApplication({
             tecs.gfx.Text.new({text = "Sprite + intrinsic ratio", font = font, size = 16}),
             ChildOf(imageCard)
         )
+
+        local shapeRow <const> = world:spawn(
+            ui.Style({width = "100%", height = 128, flexDirection = "row", gap = 10, order = 2}),
+            RelativeTransform(),
+            ChildOf(composeScene)
+        )
+        local stretchCard <const> = world:spawn(
+            ui.Style({flexGrow = 1, height = "100%"}), RelativeTransform(), ChildOf(shapeRow)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", inset = 0}),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 1),
+            Tint(0.10, 0.24, 0.34, 1.0),
+            tecs.gfx.Material(materials.id("rounded"), 0.08),
+            Renderable(),
+            ChildOf(stretchCard)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", inset = {left = 14, top = 20}}),
+            ui.Intrinsic("text"),
+            RelativeTransform(0, 0, 2),
+            Tint(0.9, 0.95, 1.0, 1.0),
+            tecs.gfx.Text.new({text = "Paint(true)", font = font, size = 16}),
+            ChildOf(stretchCard)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", inset = {left = 14, top = 56}}),
+            ui.Intrinsic("text"),
+            RelativeTransform(0, 0, 2),
+            Tint(0.48, 0.66, 0.78, 1.0),
+            tecs.gfx.Text.new({text = "stretches a quad", font = font, size = 16}),
+            ChildOf(stretchCard)
+        )
+        local circleCard <const> = world:spawn(
+            ui.Style({width = 128, height = "100%"}), RelativeTransform(), ChildOf(shapeRow)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", inset = 0}),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 1),
+            Tint(0.07, 0.12, 0.20, 1.0),
+            tecs.gfx.Material(materials.id("rounded"), 0.08),
+            Renderable(),
+            ChildOf(circleCard)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", width = 48, height = 48, inset = {left = 40, top = 16}}),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 2),
+            Tint(0.32, 0.82, 1.0, 1.0),
+            tecs.gfx.Material(materials.id("circle"), 0),
+            Renderable(),
+            ChildOf(circleCard)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", inset = {left = 25, top = 82}}),
+            ui.Intrinsic("text"),
+            RelativeTransform(0, 0, 3),
+            Tint(0.72, 0.84, 0.94, 1.0),
+            tecs.gfx.Text.new({text = "Circle", font = font, size = 16}),
+            ChildOf(circleCard)
+        )
+        world:spawn(
+            ui.Style({maxWidth = "100%", order = 3}),
+            ui.Intrinsic("text"),
+            RelativeTransform(0, 0, 2),
+            Tint(0.62, 0.75, 0.88, 1.0),
+            tecs.gfx.Text.new({
+                text = "Existing rectangle, circle, image,\nand text producers.",
+                font = font,
+                size = 16,
+            }),
+            ChildOf(composeScene)
+        )
+
+        local flexScene <const> = world:spawn(
+            ui.Style({
+                position = "absolute",
+                width = "100%",
+                height = "100%",
+                inset = {left = 0, top = 0},
+                flexDirection = "column",
+                gap = 12,
+            }),
+            RelativeTransform(),
+            ChildOf(sceneHost)
+        )
+        scenes[2] = flexScene
+        world:spawn(
+            ui.Style({maxWidth = "100%", order = 1}),
+            ui.Intrinsic("text"),
+            RelativeTransform(0, 0, 2),
+            Tint(0.72, 0.84, 0.94, 1.0),
+            tecs.gfx.Text.new({text = "Fixed width + flexGrow", font = font, size = 16}),
+            ChildOf(flexScene)
+        )
+        local growthRow <const> = world:spawn(
+            ui.Style({width = "100%", height = 104, flexDirection = "row", gap = 8, order = 2}),
+            RelativeTransform(),
+            ChildOf(flexScene)
+        )
+        local growthLabels <const> = {"88px", "grow 1", "grow 2"}
+        for index = 1, 3 do
+            local cellStyle: {string: any} = {height = "100%"}
+            if index == 1 then
+                cellStyle.width = 88
+            else
+                cellStyle.flexGrow = index - 1
+            end
+            local cell <const> = world:spawn(ui.Style(cellStyle), RelativeTransform(), ChildOf(growthRow))
+            world:spawn(
+                ui.Style({position = "absolute", inset = 0}),
+                ui.Paint(true),
+                RelativeTransform(0, 0, 1),
+                Tint(0.08 + index * 0.04, 0.24 + index * 0.06, 0.38 + index * 0.07, 1.0),
+                tecs.gfx.Material(materials.id("rounded"), 0.08),
+                Renderable(),
+                ChildOf(cell)
+            )
+            world:spawn(
+                ui.Style({position = "absolute", inset = {left = 10, top = 38}}),
+                ui.Intrinsic("text"),
+                RelativeTransform(0, 0, 2),
+                Tint(0.9, 0.95, 1.0, 1.0),
+                tecs.gfx.Text.new({text = growthLabels[index], font = font, size = 16}),
+                ChildOf(cell)
+            )
+        end
+        world:spawn(
+            ui.Style({maxWidth = "100%", order = 3}),
+            ui.Intrinsic("text"),
+            RelativeTransform(0, 0, 2),
+            Tint(0.72, 0.84, 0.94, 1.0),
+            tecs.gfx.Text.new({text = "flexWrap = wrap", font = font, size = 16}),
+            ChildOf(flexScene)
+        )
+        local wrapGrid <const> = world:spawn(
+            ui.Style({
+                width = "100%",
+                flexGrow = 1,
+                flexDirection = "row",
+                flexWrap = "wrap",
+                alignContent = "start",
+                gap = 8,
+                order = 4,
+            }),
+            RelativeTransform(),
+            ChildOf(flexScene)
+        )
+        for index = 1, 8 do
+            local chip <const> = world:spawn(
+                ui.Style({width = index % 3 == 0 and 128 or 96, height = 54}), RelativeTransform(), ChildOf(wrapGrid)
+            )
+            world:spawn(
+                ui.Style({position = "absolute", inset = 0}),
+                ui.Paint(true),
+                RelativeTransform(0, 0, 1),
+                Tint(0.10, 0.18 + index * 0.018, 0.28 + index * 0.025, 1.0),
+                tecs.gfx.Material(materials.id("rounded"), 0.12),
+                Renderable(),
+                ChildOf(chip)
+            )
+            world:spawn(
+                ui.Style({position = "absolute", inset = {left = 12, top = 16}}),
+                ui.Intrinsic("text"),
+                RelativeTransform(0, 0, 2),
+                Tint(0.86, 0.93, 1.0, 1.0),
+                tecs.gfx.Text.new({text = ("item %d"):format(index), font = font, size = 16}),
+                ChildOf(chip)
+            )
+        end
+
+        local overlayScene <const> = world:spawn(
+            ui.Style({
+                position = "absolute",
+                width = "100%",
+                height = "100%",
+                inset = {left = 0, top = 0},
+            }),
+            RelativeTransform(),
+            ChildOf(sceneHost)
+        )
+        scenes[3] = overlayScene
+        world:spawn(
+            ui.Style({position = "absolute", inset = 0}),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 0),
+            Tint(0.055, 0.10, 0.16, 1.0),
+            tecs.gfx.Material(materials.id("rounded"), 0.04),
+            Renderable(),
+            ChildOf(overlayScene)
+        )
+        local anchorNames <const> = {"top-left", "top-right", "bottom-left", "bottom-right"}
+        for index = 1, 4 do
+            local anchorInset: {string: any} = {}
+            if index % 2 == 1 then
+                anchorInset.left = 14
+            else
+                anchorInset.right = 14
+            end
+            if index <= 2 then
+                anchorInset.top = 14
+            else
+                anchorInset.bottom = 14
+            end
+            local anchor <const> = world:spawn(
+                ui.Style({position = "absolute", width = 142, height = 54, inset = anchorInset}),
+                RelativeTransform(0, 0, index),
+                ChildOf(overlayScene)
+            )
+            world:spawn(
+                ui.Style({position = "absolute", inset = 0}),
+                ui.Paint(true),
+                RelativeTransform(0, 0, 1),
+                Tint(0.10, 0.26 + index * 0.035, 0.38 + index * 0.045, 1.0),
+                tecs.gfx.Material(materials.id("rounded"), 0.1),
+                Renderable(),
+                ChildOf(anchor)
+            )
+            world:spawn(
+                ui.Style({position = "absolute", inset = {left = 10, top = 16}}),
+                ui.Intrinsic("text"),
+                RelativeTransform(0, 0, 2),
+                Tint(0.9, 0.95, 1.0, 1.0),
+                tecs.gfx.Text.new({text = anchorNames[index], font = font, size = 16}),
+                ChildOf(anchor)
+            )
+        end
+        world:spawn(
+            ui.Style({
+                position = "absolute",
+                width = 116,
+                height = 116,
+                inset = {left = "34%", top = "34%"},
+            }),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 8),
+            Tint(0.32, 0.82, 1.0, 0.92),
+            tecs.gfx.Material(materials.id("circle"), 0),
+            Renderable(),
+            ChildOf(overlayScene)
+        )
+        world:spawn(
+            ui.Style({position = "absolute", inset = {left = 94, top = "48%"}}),
+            ui.Intrinsic("text"),
+            RelativeTransform(0, 0, 10),
+            Tint(0.95, 0.98, 1.0, 1.0),
+            tecs.gfx.Text.new({text = "absolute + z", font = font, size = 16}),
+            ChildOf(overlayScene)
+        )
         local labels <const> = {
-            "Rectangle instance",
-            "Circle material",
-            "Text producer",
-            "Intrinsic text sizing",
-            "Image aspect ratio",
-            "Camera-sized roots",
+            "Viewport stays fixed",
+            "Content is 920px tall",
+            "Descendants are clipped",
+            "Wheel moves content",
+            "Unused wheel reaches parent",
+            "Focus reveals descendants",
+            "Scrollbar thumb is composed",
             "Nested clipping",
             "Nested wheel handoff",
-            "Dirty transforms",
-            "Focus navigation",
-            "Focus scopes",
-            "Bubbling events",
-            "Stable ordering",
+            "Dirty offsets only",
             "Pointer capture",
-            "Multi-touch pointers",
-            "Drag lifecycle",
+            "Drag moves the thumb",
+            "Negative extents clamp",
+            "Absolute children count",
+            "Snapshot keeps offset",
+            "Clip indices stay GPU-side",
         }
         for index = 1, #labels do
-            spawnButton(content, ("%02d  %s"):format(index, labels[index]), index + 3)
+            spawnButton(content, ("%02d  %s"):format(index, labels[index]), index + 4)
         end
 
         -- Images remain sprites. Loading and residency are asynchronous. The
@@ -532,6 +856,8 @@ return tecs.newApplication({
             end
         end)
 
+        selectScene(1)
+
         world:addSystem({
             name = "demo.UiState",
             phase = tecs.ecs.phases.Update,
@@ -542,6 +868,9 @@ return tecs.newApplication({
                     local tint = world:get(pair[2], Tint)
                     if state ~= nil and tint ~= nil then
                         local r, g, b = 0.12, 0.20, 0.30
+                        if sceneIndexByControl[pair[1]] == activeScene then
+                            r, g, b = 0.12, 0.34, 0.48
+                        end
                         if state.pressed then
                             r, g, b = 0.14, 0.47, 0.62
                         elseif state.hovered then

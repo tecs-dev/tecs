@@ -222,8 +222,40 @@ pub fn check(root: &Path) -> Result<()> {
     let site = scratch.path().join("site");
     build(root, &site)?;
     check_rendered_hierarchy(&site)?;
+    check_rendered_html(&site)?;
     check_rendered_writing(&site)?;
     println!("OK: the site builds, and every link and anchor in it resolves");
+    Ok(())
+}
+
+/// Rejects malformed image elements in generated HTML.
+///
+/// Lunamark has emitted an image as an unterminated `<img` element when its
+/// optional width and height were absent. Browsers then discard the screenshot
+/// while the source asset and Tealdoc's link checks both look healthy.
+fn check_rendered_html(site: &Path) -> Result<()> {
+    for entry in WalkDir::new(site) {
+        let entry = entry?;
+        let path = entry.path();
+        if !entry.file_type().is_file()
+            || path.extension().and_then(|extension| extension.to_str()) != Some("html")
+        {
+            continue;
+        }
+        let text = fs::read_to_string(path)?;
+        let mut remaining = text.as_str();
+        while let Some(start) = remaining.find("<img") {
+            let image = &remaining[start + 4..];
+            let Some(close) = image.find('>') else {
+                anyhow::bail!("{} contains an unterminated <img> element", path.display());
+            };
+            let next_element = image.find('<');
+            if next_element.is_some_and(|next| next < close) {
+                anyhow::bail!("{} contains an unterminated <img> element", path.display());
+            }
+            remaining = &image[close + 1..];
+        }
+    }
     Ok(())
 }
 

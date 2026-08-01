@@ -12,7 +12,10 @@ defines both its layout hierarchy and its transform hierarchy, while the
 existing rectangle, circle, image, sprite, and text producers keep drawing the
 result through the normal instanced GPU pipeline.
 
-![The Tecs UI demo with a composed panel, controls, and a clipped scrolling list](/images/ui-overview.png)
+<img src="/images/ui-compose.png" alt="The Compose demo scene combining an intrinsic image, a stretched rectangle, a fixed circle, and text" />
+
+The Compose scene shows the central rule: Taffy sizes retained ECS nodes, while
+the existing image, rectangle, circle, and text producers draw their leaves.
 
 The boundary is intentionally narrow:
 
@@ -33,27 +36,75 @@ Layout changes only dirty transforms whose computed results changed. Drawing
 components retain their normal batching, materials, dirty tracking, and GPU
 instancing.
 
-## Define the retained layout
+## Start with a complete screen UI
 
-Keep entity creation in a function dedicated to building the interface. This
-function runs once from a `Startup` system; it does not install plugins or
-register systems.
+These first two blocks form one complete `main.tl`. The first block contains
+only imports and retained entity composition. It creates a full-window root, a
+panel, an ordinary rounded rectangle behind it, and one intrinsic text leaf.
+It does not install plugins or register systems.
 
 ```teal
-local function spawnInterface(world: tecs.World)
-    local ui <const> = tecs.ui
+local tecs <const> = require("tecs")
+local ui <const> = tecs.ui
+local ChildOf <const> = tecs.ecs.ChildOf
+local RelativeTransform <const> = tecs.ecs.RelativeTransform
+local Tint <const> = tecs.gfx.Tint
+local Material <const> = tecs.gfx.Material
+local Renderable <const> = tecs.gfx.Renderable
+
+local function spawnInterface(
+    world: tecs.World,
+    app: tecs.Application,
+    font: tecs.gfx.Font
+)
+    local materials <const> = tecs.gfx.materials
 
     local root <const> = world:spawn(
         ui.Style({
             width = "100%",
             height = "100%",
+            justifyContent = "center",
+            alignItems = "center",
             padding = "24px",
         }),
         ui.Root("screen"),
         tecs.Transform(0, 0, 0, 16)
     )
 
-    -- Spawn the panels, drawing leaves, and controls under root here.
+    local panel <const> = world:spawn(
+        ui.Style({
+            width = 420,
+            height = 240,
+            flexDirection = "column",
+            padding = 20,
+            gap = 12,
+        }),
+        RelativeTransform(),
+        ChildOf(root)
+    )
+
+    world:spawn(
+        ui.Style({position = "absolute", inset = 0}),
+        ui.Paint(true),
+        RelativeTransform(0, 0, 0),
+        Tint(0.035, 0.055, 0.09, 0.96),
+        Material(materials.id("rounded"), 0.05),
+        Renderable(),
+        ChildOf(panel)
+    )
+
+    world:spawn(
+        ui.Style({maxWidth = "100%"}),
+        ui.Intrinsic("text", {wrap = true}),
+        RelativeTransform(0, 0, 1),
+        Tint(0.94, 0.97, 1.0, 1.0),
+        tecs.gfx.Text.new({
+            text = "This text and its panel are ordinary ECS entities.",
+            font = font,
+            size = 16,
+        }),
+        ChildOf(panel)
+    )
 end
 ```
 
@@ -88,7 +139,9 @@ world, and registers the system that calls `spawnInterface`. Passing the
 application supplies the renderer and folded input. A second table can
 override clip allocation, the input layer, or wheel distance.
 
-Paste this block after the `spawnInterface` function above:
+Paste this setup block after `spawnInterface`. It installs text and UI
+separately, loads an exact-size alpha font for crisp fixed-size UI text, and
+spawns the retained tree from `Startup`.
 
 ```teal
 local function gamePlugin(world: tecs.World, app: tecs.Application)
@@ -98,12 +151,19 @@ local function gamePlugin(world: tecs.World, app: tecs.Application)
         unlit = true,
     })
 
+    world:addPlugin(tecs.gfx.textPlugin({renderer = app.renderer}))
     world:addPlugin(tecs.ui.plugin(app, {wheelStep = 36}))
     world:addSystem({
         name = "game.SpawnInterface",
         phase = tecs.ecs.phases.Startup,
         run = function()
-            spawnInterface(world)
+            local font <const> = tecs.gfx.newTTF({
+                source = "fonts/JetBrainsMono-ExtraBold.ttf",
+                name = "game-ui-16",
+                size = 16,
+                raster = "alpha",
+            }):wait().value
+            spawnInterface(world, app, font)
         end,
     })
 end
@@ -135,6 +195,176 @@ world:addPlugin(ui.plugin({
 That manual form has no window to synchronize. Give its screen roots explicit
 logical dimensions and pixel density with
 `ui.Root("screen", width, height, pixelDensity)`.
+
+## Layout recipes
+
+Every recipe below belongs inside `spawnInterface` and attaches to the `root`
+created there. A layout container needs `Style`, `RelativeTransform`, and
+`ChildOf`. It needs no drawing component unless the container itself should be
+visible.
+
+### Anchor a panel to a corner
+
+The root is a row by default. `justifyContent` chooses the main-axis position
+and `alignItems` chooses the cross-axis position. This puts a fixed-width panel
+at the top right while its height follows its children:
+
+```teal
+local sidebar <const> = world:spawn(
+    ui.Style({
+        width = 360,
+        flexDirection = "column",
+        gap = 12,
+        padding = 16,
+        margin = {left = "auto"},
+    }),
+    RelativeTransform(),
+    ChildOf(root)
+)
+```
+
+For a true overlay that takes no space from siblings, use absolute positioning:
+
+```teal
+local overlay <const> = world:spawn(
+    ui.Style({
+        position = "absolute",
+        width = 360,
+        inset = {right = 24, top = 24, bottom = 24},
+        flexDirection = "column",
+        gap = 12,
+    }),
+    RelativeTransform(),
+    ChildOf(root)
+)
+```
+
+### Build a horizontal toolbar
+
+```teal
+local toolbar <const> = world:spawn(
+    ui.Style({
+        width = "100%",
+        height = 48,
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 8,
+        padding = {left = 12, right = 12},
+    }),
+    RelativeTransform(),
+    ChildOf(root)
+)
+
+for index = 1, 4 do
+    world:spawn(
+        ui.Style({width = 96, height = 32}),
+        RelativeTransform(),
+        ChildOf(toolbar)
+    )
+end
+```
+
+### Divide remaining space between children
+
+`flexGrow` consumes space left on the container's main axis. This creates a
+fixed navigation column and a content area that fills the rest:
+
+```teal
+local body <const> = world:spawn(
+    ui.Style({width = "100%", flexGrow = 1, flexDirection = "row", gap = 16}),
+    RelativeTransform(),
+    ChildOf(root)
+)
+
+local navigation <const> = world:spawn(
+    ui.Style({width = 220, height = "100%"}),
+    RelativeTransform(),
+    ChildOf(body)
+)
+
+local contentArea <const> = world:spawn(
+    ui.Style({flexGrow = 1, height = "100%"}),
+    RelativeTransform(),
+    ChildOf(body)
+)
+```
+
+### Wrap cards into rows
+
+```teal
+local cards <const> = world:spawn(
+    ui.Style({
+        width = "100%",
+        flexDirection = "row",
+        flexWrap = "wrap",
+        gap = 12,
+    }),
+    RelativeTransform(),
+    ChildOf(root)
+)
+
+for index = 1, 12 do
+    world:spawn(
+        ui.Style({width = 180, height = 96}),
+        RelativeTransform(),
+        ChildOf(cards)
+    )
+end
+```
+
+<img src="/images/ui-flex.png" alt="The Flex demo scene comparing a fixed-width child with flex-grow children and a wrapped grid" />
+
+The Flex scene makes both behaviors measurable: the first row compares `88px`,
+`flexGrow = 1`, and `flexGrow = 2`, while the cards below wrap at the panel
+edge.
+
+### Overlay a badge without affecting layout
+
+An absolute child is positioned relative to its retained parent and does not
+consume flex space:
+
+```teal
+world:spawn(
+    ui.Style({
+        position = "absolute",
+        width = 20,
+        height = 20,
+        inset = {right = -6, top = -6},
+    }),
+    ui.Paint(true),
+    RelativeTransform(0, 0, 5),
+    Tint(1.0, 0.25, 0.2, 1.0),
+    Material(tecs.gfx.materials.id("circle"), 0),
+    Renderable(),
+    ChildOf(contentArea)
+)
+```
+
+<img src="/images/ui-overlay.png" alt="The Overlay demo scene with four absolutely positioned corner cards and a centered higher-depth circle" />
+
+The Overlay scene shows that absolute children anchor to their retained parent
+without consuming flex space. The center circle and label also demonstrate
+that renderer depth remains independent from layout order.
+
+### Remove a subtree from layout
+
+Change `display` through `getMut` so the UI plugin sees the write:
+
+```teal
+local style <const> = world:getMut(sidebar, ui.Style)
+style.style.display = "none"
+
+-- Later:
+local visible <const> = world:getMut(sidebar, ui.Style)
+visible.style.display = "flex"
+```
+
+`display = "none"` removes the entity and its descendants from Taffy layout.
+It does not remove ordinary rectangle, image, or text instances from their GPU
+producers. A component that owns a whole-screen scene should therefore pair the
+layout state with its normal rendering visibility state. The repository demo's
+scene selector removes `Renderable` from inactive drawing leaves and restores
+it when their scene becomes active.
 
 ## Compose visuals from ordinary entities
 
@@ -170,7 +400,7 @@ world:spawn(
 ```
 
 The same pattern works with every drawing producer. A circle keeps the circle
-material, text keeps the distance-field text producer, and an image keeps its
+material, text keeps the glyph instance producer, and an image keeps its
 sprite. Add `Intrinsic` when a leaf should size itself instead of stretching:
 
 ```teal
@@ -195,6 +425,147 @@ world:spawn(
         size = 22,
     }),
     tecs.ecs.ChildOf(panel)
+)
+```
+
+### Draw a stretched rectangle
+
+There is no UI rectangle type. This is the normal renderer quad, stretched to
+the box computed for its parent:
+
+```teal
+local card <const> = world:spawn(
+    ui.Style({width = 280, height = 120}),
+    RelativeTransform(),
+    ChildOf(root)
+)
+
+world:spawn(
+    ui.Style({position = "absolute", inset = 0}),
+    ui.Paint(true),
+    RelativeTransform(0, 0, 0),
+    Tint(0.10, 0.17, 0.27, 1.0),
+    Material(tecs.gfx.materials.id("rounded"), 0.08),
+    Renderable(),
+    ChildOf(card)
+)
+```
+
+### Draw a circle at a fixed size
+
+```teal
+world:spawn(
+    ui.Style({width = 40, height = 40}),
+    ui.Paint(true),
+    RelativeTransform(0, 0, 1),
+    Tint(0.32, 0.82, 1.0, 1.0),
+    Material(tecs.gfx.materials.id("circle"), 0),
+    Renderable(),
+    ChildOf(card)
+)
+```
+
+### Render crisp fixed-size UI text
+
+Load an alpha font at the exact size used by `Text`. The same text component,
+atlas, producer, clipping, and instancing are used as SDF text. Exact-size
+alpha text on a screen-space layer also snaps its origin to a pixel:
+
+```teal
+local uiFont <const> = tecs.gfx.newTTF({
+    source = "fonts/JetBrainsMono-ExtraBold.ttf",
+    name = "settings-ui-16",
+    size = 16,
+    raster = "alpha",
+}):wait().value
+
+world:spawn(
+    ui.Style({maxWidth = "100%"}),
+    ui.Intrinsic("text"),
+    RelativeTransform(0, 0, 2),
+    Tint(0.94, 0.97, 1.0, 1.0),
+    tecs.gfx.Text.new({
+        text = "Video settings",
+        font = uiFont,
+        size = 16,
+    }),
+    ChildOf(card)
+)
+```
+
+Use the default `raster = "sdf"` when the same font must animate through many
+scales or live in the world. Use separate `name` values when loading the same
+source in multiple sizes or raster modes because snapshots resolve fonts by
+name.
+
+### Wrap text to the available width
+
+```teal
+world:spawn(
+    ui.Style({width = "100%", maxWidth = 320}),
+    ui.Intrinsic("text", {wrap = true}),
+    RelativeTransform(0, 0, 2),
+    Tint(0.72, 0.80, 0.90, 1.0),
+    tecs.gfx.Text.new({
+        text = "This paragraph wraps when its parent becomes narrower.",
+        font = uiFont,
+        size = 16,
+    }),
+    ChildOf(card)
+)
+```
+
+### Load an image and preserve its aspect ratio
+
+Images remain asynchronously loaded sprites. This example fixes the height at
+64 logical pixels and lets `Intrinsic("image")` derive the width from the
+registered sprite region:
+
+```teal
+tecs.assets.loadImage(
+    tecs.io.files.assetPath("images/portrait.png")
+):map(function(image: tecs.assets.Image): tecs.gfx.Sprite
+    return app.renderer:registerImage(image)
+end):onSettle(function(loaded: tecs.Future<tecs.gfx.Sprite>)
+    if loaded.status == "ready" then
+        world:spawn(
+            ui.Style({height = 64}),
+            ui.Intrinsic("image"),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 2),
+            loaded.value,
+            Tint(1, 1, 1, 1),
+            Renderable(),
+            ChildOf(card)
+        )
+    end
+end)
+```
+
+The callback captures `world`, `app`, and `card` from the application plugin
+and startup function shown earlier. It spawns only after the image has entered
+the renderer, so no placeholder sprite or per-frame polling is required.
+
+### Give another leaf a natural size
+
+Use custom intrinsic metrics when a dedicated producer already knows its
+preferred size. `Paint(true)` below makes the ordinary rectangle consume those
+metrics:
+
+```teal
+world:spawn(
+    ui.Style({maxWidth = "100%"}),
+    ui.Intrinsic("custom", {
+        width = 96,
+        height = 28,
+        minWidth = 48,
+    }),
+    ui.Paint(true),
+    RelativeTransform(0, 0, 2),
+    Tint(0.22, 0.56, 0.68, 1.0),
+    Material(tecs.gfx.materials.id("rounded"), 0.12),
+    Renderable(),
+    ChildOf(card)
 )
 ```
 
@@ -254,12 +625,72 @@ local style <const> = world:getMut(panel, ui.Style)
 style.style.width = 440
 ```
 
+### Switch a responsive layout at a breakpoint
+
+Screen roots resize automatically, but a game may still want a deliberate
+layout change at a logical-width breakpoint. Cache the selected direction so
+`getMut` is called only when the breakpoint changes:
+
+System recipes belong in `gamePlugin`, beside the `Startup` system, rather
+than inside `spawnInterface`. Keep the entity ids in plugin-local variables,
+assign them from `Startup`, and guard the first update until spawning has
+finished. This abbreviated recipe assumes `root` and `body` are those retained
+ids:
+
+```teal
+local narrow = false
+
+world:addSystem({
+    name = "game.ResponsiveUi",
+    phase = tecs.ecs.phases.Update,
+    run = function()
+        if root == 0 or body == 0 then
+            return
+        end
+        local rootValue <const> = world:get(root, ui.Root)
+        local nextNarrow <const> = rootValue.width < 720
+        if nextNarrow ~= narrow then
+            narrow = nextNarrow
+            local style <const> = world:getMut(body, ui.Style)
+            style.style.flexDirection = narrow and "column" or "row"
+        end
+    end,
+})
+```
+
+### Read a computed box
+
+`Layout` is engine-owned output. Read it after UI layout when another system
+needs the final logical dimensions:
+
+```teal
+world:addSystem({
+    name = "game.ReadPanelLayout",
+    phase = tecs.ecs.phases.Last,
+    run = function()
+        local box <const> = world:get(panel, ui.Layout)
+        if box ~= nil then
+            print(("panel is %.0f by %.0f"):format(box.width, box.height))
+        end
+    end,
+})
+```
+
+Do not write `Layout`, `Transform`, or `RelativeTransform` to resize a retained
+node. Change its `Style`; the plugin owns the computed outputs.
+
 ## Scroll and clip descendants
 
 Add `Scroll` to the viewport and make the larger content entity its child.
 Wheel input targets the deepest viewport under the pointer. The plugin clamps
 the offset, moves descendants after layout, intersects nested viewports, and
 writes ordinary `tecs.gfx.Clip` indices to drawing entities.
+
+<img src="/images/ui-scroll.png" alt="The Scroll demo scene with a fixed clipped viewport, overflowing rows, and a composed block scrollbar" />
+
+The Scroll scene labels the edge cases directly: fixed viewport size, clipped
+descendants, nested wheel handoff, focus reveal, and a scrollbar assembled
+from ordinary rectangle entities.
 
 ```teal
 local viewport <const> = world:spawn(
@@ -284,11 +715,57 @@ local content <const> = world:spawn(
 )
 ```
 
+Populate the content with ordinary retained rows. The larger authored content
+height is what creates overflow:
+
+```teal
+local function spawnRow(label: string, tabIndex: integer)
+    local row <const> = world:spawn(
+        ui.Style({width = "100%", height = 44}),
+        ui.Interaction({tabIndex = tabIndex}),
+        RelativeTransform(),
+        ChildOf(content)
+    )
+    world:spawn(
+        ui.Style({position = "absolute", inset = 0}),
+        ui.Paint(true),
+        RelativeTransform(0, 0, 1),
+        Tint(0.12, 0.20, 0.30, 1.0),
+        Material(tecs.gfx.materials.id("rounded"), 0.08),
+        Renderable(),
+        ChildOf(row)
+    )
+    world:spawn(
+        ui.Style({position = "absolute", inset = {left = 12, top = 14}}),
+        ui.Intrinsic("text"),
+        RelativeTransform(0, 0, 2),
+        Tint(0.9, 0.95, 1.0, 1.0),
+        tecs.gfx.Text.new({text = label, font = font, size = 16}),
+        ChildOf(row)
+    )
+    return row
+end
+
+local lastRow = 0
+for index = 1, 20 do
+    lastRow = spawnRow(("Item %02d"):format(index), index)
+end
+```
+
 Programmatic scrolling writes `Scroll.x` or `Scroll.y` through `getMut`.
 Offsets clamp to the complete retained extent, including negative and
 absolute descendants. `contentX`, `contentY`, `contentWidth`, and
 `contentHeight` are engine-owned measurements. Snapshots retain `x` and `y`;
 the derived content fields are rebuilt after load.
+
+```teal
+-- Scroll by a logical amount. The plugin clamps it during layout.
+local scroll <const> = world:getMut(viewport, ui.Scroll)
+scroll.y = scroll.y + 80
+
+-- Or expose a particular descendant through every nested viewport.
+ui.reveal(world, lastRow, "center")
+```
 
 Wheel movement starts at the deepest viewport and hands any unused distance
 to its ancestors. It follows the platform's configured scroll direction while
@@ -321,6 +798,52 @@ blocks, arrow controls, or grip marks are optional composed entities. The
 repository demo uses squared rectangles for a chunky retro skin; none of that
 appearance lives in Taffy or in the scrollbar component.
 
+Here is a complete squared, blocky scrollbar skin. Only the middle entity
+carries `Scrollbar`; the track and end blocks are ordinary decoration:
+
+```teal
+world:spawn(
+    ui.Style({
+        position = "absolute",
+        width = 14,
+        inset = {right = 0, top = 0, bottom = 0},
+    }),
+    ui.Paint(true),
+    RelativeTransform(0, 0, 8),
+    Tint(0.05, 0.09, 0.14, 1.0),
+    Material(tecs.gfx.materials.id("rounded"), 0),
+    Renderable(),
+    ChildOf(viewport)
+)
+
+world:spawn(
+    ui.Scrollbar("vertical", 12, 16, 28),
+    ui.Interaction({focusable = false, draggable = true, order = 100}),
+    RelativeTransform(0, 0, 10),
+    Tint(0.32, 0.82, 1.0, 1.0),
+    Material(tecs.gfx.materials.id("rounded"), 0),
+    Renderable(),
+    ChildOf(viewport)
+)
+
+for _, top in ipairs({true, false}) do
+    world:spawn(
+        ui.Style({
+            position = "absolute",
+            width = 14,
+            height = 14,
+            inset = top and {right = 0, top = 0} or {right = 0, bottom = 0},
+        }),
+        ui.Paint(true),
+        RelativeTransform(0, 0, 11),
+        Tint(0.22, 0.56, 0.68, 1.0),
+        Material(tecs.gfx.materials.id("rounded"), 0),
+        Renderable(),
+        ChildOf(viewport)
+    )
+end
+```
+
 ## Observe clicks and keyboard activation
 
 `Interaction` adds clip-aware hit testing and transient
@@ -348,13 +871,108 @@ world:observe(button, ui.Event, function(event: UiEvent)
 end)
 ```
 
+`Interaction` makes the container selectable; it does not draw a button. Add
+ordinary visual and text children to complete it:
+
+```teal
+local buttonVisual <const> = world:spawn(
+    ui.Style({position = "absolute", inset = 0}),
+    ui.Paint(true),
+    RelativeTransform(0, 0, 1),
+    Tint(0.12, 0.20, 0.30, 1.0),
+    Material(tecs.gfx.materials.id("rounded"), 0.16),
+    Renderable(),
+    ChildOf(button)
+)
+
+world:spawn(
+    ui.Style({position = "absolute", inset = {left = 14, top = 13}}),
+    ui.Intrinsic("text"),
+    RelativeTransform(0, 0, 2),
+    Tint(0.9, 0.95, 1.0, 1.0),
+    tecs.gfx.Text.new({text = "Apply", font = font, size = 16}),
+    ChildOf(button)
+)
+```
+
 Events bubble through `ChildOf`. An observer can set `event.consumed = true`
 to stop ancestor delivery. Consuming a wheel event also suppresses default
 scrolling.
 
+```teal
+world:observe(panel, ui.Event, function(event: UiEvent)
+    if event.kind == "activate" then
+        print("panel saw activation from", event.target)
+        event.consumed = true
+    elseif event.kind == "wheel" and menuIsLocked then
+        event.consumed = true
+    end
+end)
+```
+
 `event.pointerId` distinguishes simultaneous touches and
 `event.pointerType` reports `"mouse"` or `"touch"`. Pointer movement and drag
 events put their movement in `deltaX` and `deltaY`.
+
+### Update hover, press, focus, and drag colors
+
+Keep the control and its drawing child as separate entities. The update system
+reads transient state from the control and dirties the GPU tint only when the
+selected color changes:
+
+```teal
+world:addSystem({
+    name = "game.ButtonVisualState",
+    phase = tecs.ecs.phases.Update,
+    run = function()
+        local state <const> = world:get(button, ui.InteractionState)
+        local tint <const> = world:get(buttonVisual, Tint)
+        local r, g, b = 0.12, 0.20, 0.30
+        if state.dragging or state.pressed then
+            r, g, b = 0.14, 0.47, 0.62
+        elseif state.hovered then
+            r, g, b = 0.17, 0.34, 0.48
+        elseif state.focused then
+            r, g, b = 0.18, 0.29, 0.46
+        end
+        if tint.r ~= r or tint.g ~= g or tint.b ~= b then
+            local changed <const> = world:getMut(buttonVisual, Tint)
+            changed.r, changed.g, changed.b = r, g, b
+        end
+    end,
+})
+```
+
+Register update systems from `gamePlugin`, beside the `Startup` system. Keep
+the spawned entity ids in plugin-local variables so those systems can read
+them after startup.
+
+### Handle dragging and simultaneous pointers
+
+```teal
+local slider <const> = world:spawn(
+    ui.Style({width = 240, height = 32}),
+    ui.Interaction({tabIndex = 2, draggable = true}),
+    RelativeTransform(),
+    ChildOf(panel)
+)
+
+local dragByPointer: {string: number} = {}
+world:observe(slider, ui.Event, function(event: UiEvent)
+    if event.kind == "dragStart" then
+        dragByPointer[event.pointerId] = 0
+    elseif event.kind == "dragMove" then
+        dragByPointer[event.pointerId] =
+            (dragByPointer[event.pointerId] or 0) + event.deltaX
+    elseif event.kind == "dragEnd" or event.kind == "dragCancel" then
+        dragByPointer[event.pointerId] = nil
+    end
+end)
+```
+
+Each touch and the mouse has its own `pointerId`, capture, and drag lifecycle.
+Do not use one global dragging boolean when a control needs to distinguish
+simultaneous touches.
 
 Call `ui.focus`, `ui.blur`, and `ui.focused` for programmatic focus. A modal
 panel can carry `ui.FocusScope()` and constrain navigation until popped:
@@ -366,14 +984,71 @@ ui.pushFocusScope(world, dialog)
 ui.popFocusScope(world, dialog) -- Restores the prior focus when possible.
 ```
 
+This is a complete focus-scope container. Controls spawned below `dialog`
+become the only Tab and pointer targets while the scope is active:
+
+```teal
+local dialog <const> = world:spawn(
+    ui.Style({
+        position = "absolute",
+        width = 440,
+        height = 260,
+        inset = {left = "25%", top = "20%"},
+        flexDirection = "column",
+        padding = 20,
+        gap = 12,
+    }),
+    ui.FocusScope(),
+    RelativeTransform(0, 0, 20),
+    ChildOf(root)
+)
+
+local cancelButton <const> = world:spawn(
+    ui.Style({width = 120, height = 44}),
+    ui.Interaction({tabIndex = 1}),
+    RelativeTransform(),
+    ChildOf(dialog)
+)
+
+ui.pushFocusScope(world, dialog)
+ui.focus(world, cancelButton)
+
+world:observe(cancelButton, ui.Event, function(event: UiEvent)
+    if event.kind == "activate" then
+        ui.popFocusScope(world, dialog)
+        world:despawn(dialog)
+    end
+end)
+```
+
+### Choose deterministic overlap and navigation order
+
+```teal
+local back <const> = world:spawn(
+    ui.Style({position = "absolute", width = 160, height = 48, order = 1}),
+    ui.Interaction({tabIndex = 1, order = 1}),
+    RelativeTransform(0, 0, 4),
+    ChildOf(panel)
+)
+
+local front <const> = world:spawn(
+    ui.Style({position = "absolute", width = 160, height = 48, order = 2}),
+    ui.Interaction({tabIndex = 2, order = 2}),
+    RelativeTransform(0, 0, 5),
+    ChildOf(panel)
+)
+```
+
+`Style.style.order` places siblings in layout. `Interaction.order` breaks hit
+and focus ties. Transform Z determines renderer depth. Set all three when two
+controls intentionally overlap rather than relying on entity creation order.
+
 `Interaction.tabIndex` defines the primary navigation order.
 `Interaction.order` is the explicit authorial tie-breaker for focus and hit
 testing, while `Style.style.order` controls retained sibling layout order.
 Equal values fall back to the order in which entities first entered the
 retained tree, not to entity identity. Give overlapping controls explicit
 orders when their stacking is meaningful.
-
-![The same demo after keyboard focus and activation change its retained state](/images/ui-interaction.png)
 
 Read `InteractionState` from an update system to select hover, pressed, and
 focused colors. Only call `getMut` on the visual component when the selected
@@ -402,6 +1077,8 @@ capture, bubbling events, and keyboard navigation:
 ```bash
 cargo xtask run
 ```
+
+<img src="/images/ui-example.png" alt="The standalone retained UI example with a centered panel and scrollable controls" />
 
 The smaller [standalone UI example](https://github.com/tecs-dev/tecs/blob/main/docs/examples/ui.tl)
 is suitable as a project's `main.tl`.

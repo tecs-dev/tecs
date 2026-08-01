@@ -1,11 +1,32 @@
 --[=[
-Retained UI layout for ordinary Tecs entities.
+Build retained interfaces from ordinary Tecs entities.
 
-[`Style`](tealdoc:tecs.ui.Style) describes layout only. It does not replace a
-rectangle, circle, sprite, image, or text component. Put an existing drawing
-component on the same entity, or on a child, and add `Paint(true)` when its
-transform should stretch to the computed box. Drawing remains in the existing
-instanced producers and shaders.
+`tecs.ui` supplies responsive layout, intrinsic sizing, clipping, scrolling,
+hit testing, keyboard focus, and semantic interaction events for HUDs, menus,
+inspectors, inventories, and in-world panels. A UI tree is an ECS hierarchy:
+spawn entities, relate them with `ChildOf`, describe their boxes with
+[`Style`](tealdoc:tecs.ui.Style), and let the plugin update only the layout and
+GPU instance data that changed. Screen roots follow window resizing and pixel
+density automatically.
+
+<img src="/images/ui-compose.png" alt="The Compose demo scene combining an intrinsic image, a stretched rectangle, a fixed circle, and text" />
+
+Use the module when several visual entities must size and position one another,
+when content must scroll or clip, or when pointer and keyboard input should
+target the same retained boxes that were drawn. It is not a DOM or a separate
+widget renderer. Existing rectangles, circles, sprites, images, and text remain
+the visible pieces, with their current materials, shaders, batching, and dirty
+tracking. `tecs.ui` composes those pieces and gives them layout and interaction.
+
+[`Style`](tealdoc:tecs.ui.Style) describes layout rather than appearance. Put a
+drawing component on the same entity or on a child, and add `Paint(true)` when
+its transform should stretch to the computed box. Drawing remains in the
+existing instanced producers and shaders.
+
+The [complete interface guide](/ui/) contains 37 copyable recipes for layout,
+visual composition, intrinsic sizing, images, scrolling, interaction, focus,
+and dirty-aware updates. The examples below provide a complete starting point
+without leaving this API reference.
 
 The plugin retains one native layout tree keyed by ECS entity ID. `ChildOf` is the
 layout hierarchy as well as the transform hierarchy. The layout system writes
@@ -32,6 +53,22 @@ containers at unit scale and put their rectangle, circle, or image on an
 absolute child with `Paint`: transform scale composes through `ChildOf`, so a
 stretched container would also scale its descendants.
 
+## Flex sizing and wrapping
+
+<img src="/images/ui-flex.png" alt="The Flex demo scene comparing a fixed-width child with flex-grow children and a wrapped grid" />
+
+The first row compares a fixed `88px` child with `flexGrow` weights one and
+two. The cards below use `flexWrap = "wrap"`, so the screenshot shows both
+remaining-space distribution and line wrapping against one retained parent.
+
+## Absolute positioning and depth
+
+<img src="/images/ui-overlay.png" alt="The Overlay demo scene with four absolutely positioned corner cards and a centered higher-depth circle" />
+
+Absolute children anchor to their retained parent without consuming flex
+space. Renderer depth remains a separate concern, which is why the center
+circle and its label can sit above the four anchored cards.
+
 ## Scrolling and clipping
 
 [`Scroll`](tealdoc:tecs.ui.Scroll) turns its entity's layout box into a
@@ -46,6 +83,8 @@ distance that a deepest viewport cannot consume passes to its ancestors.
 `reveal` exposes a descendant programmatically, and `Scrollbar` derives a
 composed thumb transform without adding a renderer primitive. Snapshots retain
 scroll offsets and derive content extent again after load.
+
+<img src="/images/ui-scroll.png" alt="The Scroll demo scene with a fixed clipped viewport, overflowing rows, and a composed block scrollbar" />
 
 Screen roots use logical UI coordinates and multiply clips by `pixelDensity`.
 World roots project viewport corners through the renderer camera. Clip
@@ -77,57 +116,248 @@ insertion order. `Style.style.order` independently orders layout siblings.
 Give overlapping controls explicit orders and distinct renderer depth when
 both their input and drawing order are meaningful.
 
+## Complete application
+
+Keep entity composition separate from plugin setup. This first block creates
+a full-window root, a centered panel, an ordinary GPU-rendered background, and
+intrinsically sized text:
+
 ```teal
+local tecs <const> = require("tecs")
 local ui <const> = tecs.ui
 local ChildOf <const> = tecs.ecs.ChildOf
 local RelativeTransform <const> = tecs.ecs.RelativeTransform
-local type uiTypes = require("tecs.ui")
-local type UiEvent = uiTypes.Event
+local Tint <const> = tecs.gfx.Tint
+local Material <const> = tecs.gfx.Material
+local Renderable <const> = tecs.gfx.Renderable
 
-local function spawnInterface(world: tecs.World)
+local function spawnInterface(
+    world: tecs.World,
+    app: tecs.Application,
+    font: tecs.gfx.Font
+)
     local root <const> = world:spawn(
-        ui.Style({width = "100%", height = "100%"}),
-        ui.Root("screen")
+        ui.Style({
+            width = "100%",
+            height = "100%",
+            justifyContent = "center",
+            alignItems = "center",
+        }),
+        ui.Root("screen"),
+        tecs.Transform(0, 0, 0, 16)
     )
-    local viewport <const> = world:spawn(
-        ui.Style({width = "320px", height = "240px", padding = 8}),
-        ui.Scroll(),
+
+    local panel <const> = world:spawn(
+        ui.Style({
+            width = 420,
+            height = 240,
+            flexDirection = "column",
+            padding = 20,
+            gap = 12,
+        }),
         RelativeTransform(),
         ChildOf(root)
     )
 
     world:spawn(
-        ui.Style({width = 300, height = 600}),
-        ui.Interaction(),
-        RelativeTransform(),
-        ChildOf(viewport)
+        ui.Style({position = "absolute", inset = 0}),
+        ui.Paint(true),
+        RelativeTransform(0, 0, 0),
+        Tint(0.035, 0.055, 0.09, 0.96),
+        Material(tecs.gfx.materials.id("rounded"), 0.05),
+        Renderable(),
+        ChildOf(panel)
     )
 
-    world:observe(viewport, ui.Event, function(event: UiEvent)
-        if event.kind == "activate" then
-            print("activated", event.target)
-        end
-    end)
+    world:spawn(
+        ui.Style({maxWidth = "100%"}),
+        ui.Intrinsic("text", {wrap = true}),
+        RelativeTransform(0, 0, 1),
+        Tint(0.94, 0.97, 1.0, 1.0),
+        tecs.gfx.Text.new({
+            text = "This text and panel are ordinary ECS entities.",
+            font = font,
+            size = 16,
+        }),
+        ChildOf(panel)
+    )
 end
 ```
 
-Install the UI from the application plugin, and let a `Startup` system invoke
-the layout function:
+The application plugin installs text and UI before a `Startup` system spawns
+the retained entities. Passing `app` to `ui.plugin` supplies the renderer,
+input, window size, and pixel density:
 
 ```teal
 local function gamePlugin(world: tecs.World, app: tecs.Application)
+    tecs.gfx.layers.configure(16, {
+        sort = "z",
+        screenSpace = true,
+        unlit = true,
+    })
+    world:addPlugin(tecs.gfx.textPlugin({renderer = app.renderer}))
     world:addPlugin(ui.plugin(app))
     world:addSystem({
         name = "game.SpawnInterface",
         phase = tecs.ecs.phases.Startup,
         run = function()
-            spawnInterface(world)
+            local font <const> = tecs.gfx.newTTF({
+                source = "fonts/JetBrainsMono-ExtraBold.ttf",
+                name = "game-ui-16",
+                size = 16,
+                raster = "alpha",
+            }):wait().value
+            spawnInterface(world, app, font)
         end,
     })
 end
 
 return tecs.newApplication({plugin = gamePlugin})
 ```
+
+The standalone [`docs/examples/ui.tl`](https://github.com/tecs-dev/tecs/blob/main/docs/examples/ui.tl)
+application expands that setup into a scrollable, keyboard-navigable panel:
+
+<img src="/images/ui-example.png" alt="The standalone retained UI example with a centered panel and scrollable controls" />
+
+## Common recipes
+
+### Stretch an ordinary rectangle over a layout box
+
+Put the drawing component on an absolute child. `Paint(true)` copies the
+computed width and height into its relative transform without scaling the
+container's descendants:
+
+```teal
+local card <const> = world:spawn(
+    ui.Style({width = 280, height = 120}),
+    RelativeTransform(),
+    ChildOf(panel)
+)
+
+world:spawn(
+    ui.Style({position = "absolute", inset = 0}),
+    ui.Paint(true),
+    RelativeTransform(0, 0, 0),
+    Tint(0.10, 0.17, 0.27, 1.0),
+    Material(tecs.gfx.materials.id("rounded"), 0.08),
+    Renderable(),
+    ChildOf(card)
+)
+```
+
+### Load an image and preserve its aspect ratio
+
+The asset loader decodes pixels asynchronously. The renderer registers them
+and returns the ordinary sprite consumed by `Intrinsic("image")`:
+
+```teal
+tecs.assets.loadImage(
+    tecs.io.files.assetPath("images/portrait.png")
+):map(function(image: tecs.assets.Image): tecs.gfx.Sprite
+    return app.renderer:registerImage(image)
+end):onSettle(function(loaded: tecs.Future<tecs.gfx.Sprite>)
+    if loaded.status == "ready" then
+        world:spawn(
+            ui.Style({height = 64}),
+            ui.Intrinsic("image"),
+            ui.Paint(true),
+            RelativeTransform(0, 0, 2),
+            loaded.value,
+            Tint(1, 1, 1, 1),
+            Renderable(),
+            ChildOf(panel)
+        )
+    end
+end)
+```
+
+### Create a clipped scrolling list
+
+`Scroll` belongs on the fixed viewport. Its larger child creates overflow,
+and the scrollbar is an ordinary composed drawing entity rather than a Taffy
+or renderer primitive:
+
+```teal
+local viewport <const> = world:spawn(
+    ui.Style({width = "100%", height = 240}),
+    ui.Scroll(),
+    RelativeTransform(),
+    ChildOf(panel)
+)
+
+local content <const> = world:spawn(
+    ui.Style({
+        width = "100%",
+        height = 600,
+        flexDirection = "column",
+        gap = 8,
+    }),
+    RelativeTransform(),
+    ChildOf(viewport)
+)
+
+world:spawn(
+    ui.Scrollbar("vertical", 12, 4, 28),
+    ui.Interaction({focusable = false, draggable = true, order = 100}),
+    RelativeTransform(0, 0, 10),
+    Tint(0.32, 0.82, 1.0, 1.0),
+    Material(tecs.gfx.materials.id("rounded"), 0),
+    Renderable(),
+    ChildOf(viewport)
+)
+```
+
+### Observe pointer and keyboard activation
+
+`Interaction` makes the computed box selectable but draws nothing. Events
+bubble through `ChildOf`, and Return or Space produces the same `activate`
+event as a click:
+
+```teal
+local type uiTypes = require("tecs.ui")
+local type UiEvent = uiTypes.Event
+
+local button <const> = world:spawn(
+    ui.Style({width = 180, height = 44}),
+    ui.Interaction({tabIndex = 1}),
+    RelativeTransform(),
+    ChildOf(content)
+)
+
+world:observe(button, ui.Event, function(event: UiEvent)
+    if event.kind == "activate" then
+        print("activated via", event.source)
+    end
+end)
+```
+
+### Change a retained style
+
+Use `getMut` only when a property actually changes. This dirties the retained
+style once; unchanged frames do not parse the string or recompute the tree:
+
+```teal
+local style <const> = world:getMut(panel, ui.Style)
+style.style.width = "100%"
+style.style.maxWidth = "480px"
+```
+
+### Focus and reveal a control
+
+Programmatic focus uses the same state and navigation order as Tab. Focusing a
+clipped descendant reveals it through every ancestor viewport:
+
+```teal
+ui.focus(world, button)
+ui.reveal(world, button, "center")
+
+local focused <const> = ui.focused(world)
+if focused == button then
+    ui.blur(world)
+end
+```
+
 ]=]
 
 local ecs <const> = require("tecs.ecs")
@@ -154,6 +384,110 @@ local RelativeTransform <const> = ecs.RelativeTransform
 local ChildOf <const> = ecs.ChildOf
 local Clip <const> = components.Clip
 
+--- `RootSpace` selects whether a retained tree uses screen or world coordinates.
+local enum RootSpace
+    --- Read-only. Uses logical screen coordinates and a screen-space layer.
+    "screen"
+    --- Read-only. Uses coordinates projected through the active camera.
+    "world"
+end
+
+--- `RootSizing` selects where a root receives its available dimensions.
+local enum RootSizing
+    --- Read-only. Follows the window for screen roots and preserves world-root dimensions.
+    "auto"
+    --- Read-only. Preserves the caller-authored dimensions and pixel density.
+    "manual"
+    --- Read-only. Derives a world root from the active camera and viewport.
+    "camera"
+end
+
+--- `IntrinsicSource` selects which leaf component owns natural dimensions.
+local enum IntrinsicSource
+    --- Read-only. Uses the dimensions stored directly on `Intrinsic`.
+    "custom"
+    --- Read-only. Measures the entity's `tecs.gfx.Text` component.
+    "text"
+    --- Read-only. Measures the entity's registered `tecs.gfx.Sprite` region.
+    "image"
+end
+
+--- `ScrollAxis` selects the dimension controlled by a scrollbar thumb.
+local enum ScrollAxis
+    --- Read-only. Controls the ancestor viewport's horizontal offset.
+    "horizontal"
+    --- Read-only. Controls the ancestor viewport's vertical offset.
+    "vertical"
+end
+
+--- `EventKind` identifies one semantic UI interaction.
+local enum EventKind
+    --- Read-only. Reports that a pointer entered an interaction.
+    "pointerEnter"
+    --- Read-only. Reports that a pointer left an interaction.
+    "pointerLeave"
+    --- Read-only. Reports that a pointer button went down over an interaction.
+    "pointerDown"
+    --- Read-only. Reports pointer movement over or captured by an interaction.
+    "pointerMove"
+    --- Read-only. Reports that a captured pointer button went up.
+    "pointerUp"
+    --- Read-only. Reports a press and release over the same interaction.
+    "click"
+    --- Read-only. Reports wheel input over a retained viewport.
+    "wheel"
+    --- Read-only. Reports that an interaction received keyboard focus.
+    "focus"
+    --- Read-only. Reports that an interaction lost keyboard focus.
+    "blur"
+    --- Read-only. Reports semantic activation from pointer, keyboard, or controller input.
+    "activate"
+    --- Read-only. Reports that captured pointer movement crossed the drag threshold.
+    "dragStart"
+    --- Read-only. Reports movement during an active drag.
+    "dragMove"
+    --- Read-only. Reports normal completion of an active drag.
+    "dragEnd"
+    --- Read-only. Reports cancellation of an active drag.
+    "dragCancel"
+end
+
+--- `PointerType` identifies the device associated with a UI event.
+local enum PointerType
+    --- Read-only. Identifies the application mouse.
+    "mouse"
+    --- Read-only. Identifies one touch contact.
+    "touch"
+    --- Read-only. Identifies one pen contact.
+    "pen"
+    --- Read-only. Reports that an event has no pointer device.
+    "none"
+end
+
+--- `InteractionSource` identifies what initiated a semantic UI event.
+local enum InteractionSource
+    --- Read-only. Reports mouse, touch, pen, or wheel input.
+    "pointer"
+    --- Read-only. Reports keyboard navigation or activation.
+    "keyboard"
+    --- Read-only. Reports controller navigation or activation.
+    "controller"
+    --- Read-only. Reports a call made directly by game code.
+    "programmatic"
+end
+
+--- `RevealAlign` selects where a revealed descendant lands in each viewport.
+local enum RevealAlign
+    --- Read-only. Moves only enough to expose the descendant.
+    "nearest"
+    --- Read-only. Places the descendant at the viewport's leading edge.
+    "start"
+    --- Read-only. Centers the descendant in the viewport.
+    "center"
+    --- Read-only. Places the descendant at the viewport's trailing edge.
+    "end"
+end
+
 --- `Style` stores the layout properties that place one UI entity.
 local record Style is Component
     --- Caller-writable. The caller supplies a table and marks `Style` dirty
@@ -176,7 +510,7 @@ end
 local record Root is Component
     --- Caller-writable. The caller chooses `"screen"` for logical screen
     --- coordinates or `"world"` for coordinates projected by the camera.
-    space: string
+    space: RootSpace
     --- Caller-writable. The caller supplies the layout root width. An
     --- application-backed screen root with automatic sizing follows the
     --- logical window width; a camera-sized world root derives world units
@@ -196,7 +530,7 @@ local record Root is Component
     --- root to derive its extent and transform from the active camera.
     --- `"auto"` follows the window for screen roots and is manual for world
     --- roots.
-    sizing: string
+    sizing: RootSizing
 end
 --- `Layout` reports the last box computed by retained layout.
 local record Layout is Component
@@ -215,12 +549,12 @@ local record Paint is Component
     --- and height into `RelativeTransform.scaleX` and `scaleY`.
     stretch: boolean
 end
---- `Intrinsic` supplies cached leaf metrics to Taffy without a Lua callback.
+--- `Intrinsic` supplies cached leaf metrics to layout without a Lua callback.
 local record Intrinsic is Component
     --- Caller-writable. The caller selects `"custom"`, `"text"`, or
     --- `"image"`. Text reads `tecs.gfx.text.Text`; image reads
     --- `tecs.components.Sprite`; custom reads the dimensions below.
-    source: string
+    source: IntrinsicSource
     --- Caller-writable. The caller supplies the preferred custom width in
     --- logical units. Text and image sources ignore this field.
     width: number
@@ -267,7 +601,7 @@ end
 --- `Scrollbar` derives one composed thumb transform from an ancestor viewport.
 local record Scrollbar is Component
     --- Caller-writable. The caller selects `"horizontal"` or `"vertical"`.
-    axis: string
+    axis: ScrollAxis
     --- Caller-writable. The caller sets the thumb thickness in logical units.
     thickness: number
     --- Caller-writable. The caller leaves this much room inside each end of
@@ -325,7 +659,7 @@ local record Event is events.Event
     --- `"pointerDown"`, `"pointerMove"`, `"pointerUp"`, `"click"`, `"wheel"`,
     --- `"focus"`, `"blur"`, `"activate"`, `"dragStart"`, `"dragMove"`,
     --- `"dragEnd"`, or `"dragCancel"`.
-    kind: string
+    kind: EventKind
     --- Read-only. Identifies the entity where dispatch began.
     target: integer
     --- Read-only. Identifies the entity whose observers are currently
@@ -342,7 +676,7 @@ local record Event is events.Event
     --- controller, and programmatic events use the empty string.
     pointerId: string
     --- Read-only. Reports `"mouse"`, `"touch"`, `"pen"`, or `"none"`.
-    pointerType: string
+    pointerType: PointerType
     --- Read-only. Reports horizontal movement for pointer-move, drag, and
     --- wheel events, or zero for other events.
     deltaX: number
@@ -351,7 +685,7 @@ local record Event is events.Event
     deltaY: number
     --- Read-only. Reports `"pointer"`, `"keyboard"`, `"controller"`, or
     --- `"programmatic"` as the activation source.
-    source: string
+    source: InteractionSource
     --- Caller-writable. An observer may set this field to stop bubbling and
     --- suppress the default wheel scroll.
     consumed: boolean
@@ -373,18 +707,19 @@ local record Event is events.Event
     --- @param deltaY Vertical pointer, drag, or wheel movement or zero.
     --- @param source The activation source.
     --- @return Returns an independent event value.
+    --- @local
     metamethod __call: function(
         self,
-        kind: string,
+        kind: EventKind,
         target: integer,
         x: number,
         y: number,
         button: integer,
         pointerId: string,
-        pointerType: string,
+        pointerType: PointerType,
         deltaX: number,
         deltaY: number,
-        source: string
+        source: InteractionSource
     ): Event
 end
 local interface TouchReader
@@ -503,13 +838,13 @@ ecs.newComponent({
     fields = {"source", "width", "height", "minWidth", "scale", "wrap"},
     defaults = {"custom", 0, 0, 0, 1, false},
     requires = {Style},
-    __call = function(instance: Intrinsic, source?: string | {string: any}, options?: {string: any})
+    __call = function(instance: Intrinsic, source?: IntrinsicSource | {string: any}, options?: {string: any})
         local values = options or {}
         if type(source) == "table" then
             values = source as {string: any}
-            source = values.source as string
+            source = values.source as IntrinsicSource
         end
-        instance.source = source as string or "custom"
+        instance.source = source as IntrinsicSource or "custom"
         instance.width = values.width as number or 0
         instance.height = values.height as number or 0
         instance.minWidth = values.minWidth as number or 0
@@ -600,16 +935,16 @@ ecs.newComponent({
 
 Event.init = function(
     event: Event,
-    kind: string,
+    kind: EventKind,
     target: integer,
     x: number,
     y: number,
     button: integer,
     pointerId: string,
-    pointerType: string,
+    pointerType: PointerType,
     deltaX: number,
     deltaY: number,
-    source: string
+    source: InteractionSource
 )
     event.kind = kind
     event.target = target
@@ -642,7 +977,7 @@ end
 
 local record PointerState
     id: string
-    kind: string
+    kind: PointerType
     x: number
     y: number
     previousX: number
@@ -686,8 +1021,8 @@ local record Install
     focusRestore: {integer: integer}
     ordinals: {integer: integer}
     nextOrdinal: integer
-    focusEntity: function(entity?: integer, source?: string, x?: number, y?: number): boolean
-    revealEntity: function(entity: integer, align?: string): boolean
+    focusEntity: function(entity?: integer, source?: InteractionSource, x?: number, y?: number): boolean
+    revealEntity: function(entity: integer, align?: RevealAlign): boolean
     pushScope: function(entity: integer): boolean
     popScope: function(entity?: integer): boolean
     cancelPointers: function()
@@ -960,6 +1295,22 @@ local function applyCurrentLayout(entity: integer, world: World)
 end
 
 local record ui
+    --- Selects whether a root uses screen or world coordinates.
+    type RootSpace = RootSpace
+    --- Selects where a root receives its available dimensions.
+    type RootSizing = RootSizing
+    --- Selects which leaf component owns natural dimensions.
+    type IntrinsicSource = IntrinsicSource
+    --- Selects the dimension controlled by a scrollbar thumb.
+    type ScrollAxis = ScrollAxis
+    --- Identifies one semantic UI interaction.
+    type EventKind = EventKind
+    --- Identifies the pointer device associated with an event.
+    type PointerType = PointerType
+    --- Identifies what initiated a semantic UI event.
+    type InteractionSource = InteractionSource
+    --- Selects where `reveal` places a descendant in each viewport.
+    type RevealAlign = RevealAlign
     --- Read-only. Exposes the tag that marks an entity as participating in UI
     --- layout. `Style`, `Root`, and `Scroll` add it automatically.
     Node: Component
@@ -1020,7 +1371,7 @@ local record ui
     --- @param align The caller selects `"nearest"`, `"start"`, `"center"`, or
     ---     `"end"`; omission selects `"nearest"`.
     --- @return Returns false when the plugin or layout is missing.
-    reveal: function(world: World, entity: integer, align?: string): boolean
+    reveal: function(world: World, entity: integer, align?: RevealAlign): boolean
     --- Pushes one modal navigation boundary and remembers the current focus.
     --- @param world The caller supplies a world with the UI plugin.
     --- @param scope The caller supplies an entity carrying `FocusScope`.
@@ -1084,7 +1435,7 @@ function ui.focused(world: World): integer
     return install ~= nil and install.focused or nil
 end
 
-function ui.reveal(world: World, entity: integer, align?: string): boolean
+function ui.reveal(world: World, entity: integer, align?: RevealAlign): boolean
     local install = installs[world]
     return install ~= nil and install.revealEntity(entity, align) or false
 end
@@ -1161,10 +1512,10 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             focusRestore = {},
             ordinals = {},
             nextOrdinal = 1,
-            focusEntity = function(_entity?: integer, _source?: string, _x?: number, _y?: number): boolean
+            focusEntity = function(_entity?: integer, _source?: InteractionSource, _x?: number, _y?: number): boolean
                 return false
             end,
-            revealEntity = function(_entity: integer, _align?: string): boolean return false end,
+            revealEntity = function(_entity: integer, _align?: RevealAlign): boolean return false end,
             pushScope = function(_entity: integer): boolean return false end,
             popScope = function(_entity?: integer): boolean return false end,
             cancelPointers = function() end,
@@ -1772,7 +2123,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 return 0
             end
             local density: number = 1
-            local rootSpace = "screen"
+            local rootSpace: RootSpace = "screen"
             local rootWidth: number = 0
             local rootHeight: number = 0
             if root ~= nil then
@@ -2175,16 +2526,16 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
 
         local function dispatch(
             target: integer,
-            kind: string,
+            kind: EventKind,
             x: number,
             y: number,
             button: integer,
             deltaX: number,
             deltaY: number,
-            source: string,
+            source: InteractionSource,
             bubbles: boolean,
             pointerId?: string,
-            pointerType?: string
+            pointerType?: PointerType
         ): Event
             local event = Event(
                 kind, target, x, y, button, pointerId or "", pointerType or "none", deltaX, deltaY, source
@@ -2222,7 +2573,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             end
         end
 
-        local function reveal(entity: integer, align?: string): boolean
+        local function reveal(entity: integer, align?: RevealAlign): boolean
             local layout = world:get(entity, Layout)
             if layout == nil then
                 return false
@@ -2279,7 +2630,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
             return true
         end
 
-        local function focus(entity?: integer, source?: string, x?: number, y?: number): boolean
+        local function focus(entity?: integer, source?: InteractionSource, x?: number, y?: number): boolean
             local previous = install.focused
             if previous == entity then
                 return true
@@ -2630,7 +2981,7 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                     if pointer.dragging then
                         dispatch(
                             captured,
-                            canceled and "dragCancel" or "dragEnd",
+                            (canceled and "dragCancel" or "dragEnd") as EventKind,
                             pointer.x,
                             pointer.y,
                             1,
