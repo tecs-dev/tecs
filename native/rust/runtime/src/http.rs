@@ -1085,6 +1085,10 @@ mod tests {
 
     #[test]
     fn upload_queue_refuses_the_seventeenth_chunk_without_copying() {
+        // The production constructor installs this before it builds either
+        // client. This test constructs the client directly to isolate queue
+        // backpressure, so it must establish the same process invariant.
+        install_tls_provider();
         let (event_sender, event_receiver) = mpsc::channel(EVENT_QUEUE_CAPACITY);
         let shared = Arc::new(Shared {
             sender: event_sender,

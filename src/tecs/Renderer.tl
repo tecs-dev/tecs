@@ -15,6 +15,12 @@ When both domains contribute transparent work, meshes draw first and sprites
 draw second. Their camera spaces have no universal cross-domain depth order,
 so the fixed order makes sprites deterministic overlays while each domain
 retains its own back-to-front sort.
+
+Setting `maxViews` enables ordered [`View`](/modules/gfx/#tecs.gfx.View)
+entities. The renderer extracts and uploads each enabled domain once, then
+reculls, shades, and immediately composites each view through shared GPU work
+buffers. Omitting `maxViews` keeps the original full-frame path and allocates no
+multi-camera intermediate.
 ]=]
 
 local type types = require("tecs.types")
@@ -27,6 +33,8 @@ local screenshot <const> = require("tecs.gfx.screenshot")
 
 local type SpriteDomain = require("tecs.internal.render.SpriteDomain")
 local type MeshDomain = require("tecs.internal.render.MeshDomain")
+local View <const> = require("tecs.gfx.View")
+local type Query = types.Query
 local type InstanceProducer = SpriteDomain.InstanceProducer
 local type ClipRegion = SpriteDomain.ClipRegion
 local type ComputeStage = SpriteDomain.ComputeStage
@@ -47,6 +55,11 @@ local record RendererOptions
     --- Caller-writable. Enables and configures optional bloom. Nil omits its
     --- targets, pipelines, and passes.
     bloom: Deferred.BloomOptions
+    --- Caller-writable. Enables [`View`](/modules/gfx/#tecs.gfx.View) entities
+    --- and sets their fixed ceiling. Omit to retain the original single
+    --- full-frame camera path. Setting it allocates one forward intermediate
+    --- shared by every view.
+    maxViews: integer
 end
 
 local record Renderer
@@ -75,6 +88,13 @@ local record Renderer
     _device: loader.CPtr
     --- Engine-owned. Prevents resources from being released twice.
     _destroyed: boolean
+    _maxViews: integer
+    _multiCamera: boolean
+    _viewQuery: Query
+    _views: {View}
+    _viewEntities: {integer}
+    _drawSprites: boolean
+    _drawMeshes: boolean
 end
 
 local RendererMT <const>: metatable<Renderer> = {__index = Renderer}
@@ -90,6 +110,14 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
     self._slot = 0
     self._device = device
     self._destroyed = false
+    self._multiCamera = options.maxViews ~= nil
+    self._maxViews = options.maxViews or 1
+    if self._maxViews < 1 then
+        error("tecs: Renderer maxViews must be at least 1", 2)
+    end
+    self._views = {}
+    self._viewEntities = {}
+    self._drawSprites, self._drawMeshes = true, true
 
     local ambient <const> = options.ambient or {DEFAULT_AMBIENT[1], DEFAULT_AMBIENT[2], DEFAULT_AMBIENT[3]}
     local meshShadow = options.meshes ~= nil and options.meshes.shadows or nil
@@ -99,6 +127,17 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
     end
     local sprites: SpriteDomain = nil
     local meshes: MeshDomain = nil
+    local shadowActive: function(): boolean
+    local meshShadowActive: function(): boolean
+    if self._multiCamera then
+        shadowActive = function(): boolean return self._drawSprites and sprites ~= nil and sprites:_castsThisFrame() end
+        meshShadowActive = function(): boolean
+            return self._drawMeshes and meshes ~= nil and meshes:_castsThisFrame()
+        end
+    else
+        shadowActive = function(): boolean return sprites ~= nil and sprites:_castsThisFrame() end
+        meshShadowActive = function(): boolean return meshes ~= nil and meshes:_castsThisFrame() end
+    end
     -- Deferred retains this options table in its graph closures. Predicates
     -- close over the domain locals before those domains exist; draw callbacks
     -- are replaced once below. A frame then calls exactly the enabled domains
@@ -106,14 +145,16 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
     local contributions = {
         ambient = ambient,
         shadows = options.shadows,
-        shadowActive = function(): boolean return sprites ~= nil and sprites:_castsThisFrame() end,
+        shadowActive = shadowActive,
         occluders = function(_context: Deferred.PassContext) end,
         dropShadows = function(_context: Deferred.PassContext) end,
         meshShadowScale = meshShadow ~= nil and (meshShadow.scale or 1.0) or nil,
-        meshShadowActive = function(): boolean return meshes ~= nil and meshes:_castsThisFrame() end,
+        meshShadowActive = meshShadowActive,
         meshShadowMap = function(_context: Deferred.PassContext) end,
         meshFog = meshFog ~= nil,
+        meshPBR = options.meshes ~= nil,
         bloom = options.bloom,
+        multiCamera = self._multiCamera,
         geometry = function(_context: Deferred.PassContext) end,
         forward = function(_context: Deferred.PassContext) end,
     }
@@ -139,27 +180,72 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
     if meshes ~= nil and meshes.shadows then
         contributions.meshShadowMap = function(context: Deferred.PassContext) meshes:_recordShadowMap(context) end
     end
-    if sprites ~= nil and meshes ~= nil then
-        contributions.geometry = function(context: Deferred.PassContext)
-            sprites:_recordGeometry(context)
-            meshes:_recordGeometry(context)
+    if self._multiCamera then
+        if sprites ~= nil and meshes ~= nil then
+            contributions.geometry = function(context: Deferred.PassContext)
+                if self._drawSprites then
+                    sprites:_recordGeometry(context)
+                end
+                if self._drawMeshes then
+                    meshes:_recordGeometry(context)
+                end
+            end
+        elseif sprites ~= nil then
+            contributions.geometry = function(context: Deferred.PassContext)
+                if self._drawSprites then
+                    sprites:_recordGeometry(context)
+                end
+            end
+        elseif meshes ~= nil then
+            contributions.geometry = function(context: Deferred.PassContext)
+                if self._drawMeshes then
+                    meshes:_recordGeometry(context)
+                end
+            end
         end
-    elseif sprites ~= nil then
-        contributions.geometry = function(context: Deferred.PassContext) sprites:_recordGeometry(context) end
-    elseif meshes ~= nil then
-        contributions.geometry = function(context: Deferred.PassContext) meshes:_recordGeometry(context) end
-    end
-    if sprites ~= nil and meshes ~= nil then
-        contributions.forward = function(context: Deferred.PassContext)
-            -- Mesh transparency is scene content; sprites land afterwards so
-            -- the peer 2D domain retains deterministic overlay semantics.
-            meshes:_recordForward(context)
-            sprites:_recordForward(context)
+        if sprites ~= nil and meshes ~= nil then
+            contributions.forward = function(context: Deferred.PassContext)
+                -- Mesh transparency is scene content; sprites land afterwards
+                -- so the peer 2D domain retains deterministic overlay semantics.
+                if self._drawMeshes then
+                    meshes:_recordForward(context)
+                end
+                if self._drawSprites then
+                    sprites:_recordForward(context)
+                end
+            end
+        elseif sprites ~= nil then
+            contributions.forward = function(context: Deferred.PassContext)
+                if self._drawSprites then
+                    sprites:_recordForward(context)
+                end
+            end
+        elseif meshes ~= nil then
+            contributions.forward = function(context: Deferred.PassContext)
+                if self._drawMeshes then
+                    meshes:_recordForward(context)
+                end
+            end
         end
-    elseif sprites ~= nil then
-        contributions.forward = function(context: Deferred.PassContext) sprites:_recordForward(context) end
-    elseif meshes ~= nil then
-        contributions.forward = function(context: Deferred.PassContext) meshes:_recordForward(context) end
+    else
+        if sprites ~= nil and meshes ~= nil then
+            contributions.geometry = function(context: Deferred.PassContext)
+                sprites:_recordGeometry(context)
+                meshes:_recordGeometry(context)
+            end
+            contributions.forward = function(context: Deferred.PassContext)
+                -- Mesh transparency is scene content; sprites land afterwards
+                -- so the peer 2D domain retains deterministic overlay semantics.
+                meshes:_recordForward(context)
+                sprites:_recordForward(context)
+            end
+        elseif sprites ~= nil then
+            contributions.geometry = function(context: Deferred.PassContext) sprites:_recordGeometry(context) end
+            contributions.forward = function(context: Deferred.PassContext) sprites:_recordForward(context) end
+        elseif meshes ~= nil then
+            contributions.geometry = function(context: Deferred.PassContext) meshes:_recordGeometry(context) end
+            contributions.forward = function(context: Deferred.PassContext) meshes:_recordForward(context) end
+        end
     end
     return self
 end
@@ -167,12 +253,53 @@ end
 --- Registers every rendering domain on a world.
 --- @param world The caller supplies the world this renderer reads.
 function Renderer:install(world: types.World)
+    if self._multiCamera then
+        self._viewQuery = world:newQuery({include = {View}})
+    end
     if self.sprites ~= nil then
         self.sprites:_install(world)
     end
     if self.meshes ~= nil then
         self.meshes:_install(world)
     end
+end
+
+local function orderedBefore(view: View, entity: integer, other: View, otherEntity: integer): boolean
+    return view.order < other.order or view.order == other.order and entity < otherEntity
+end
+
+--- Copies and orders the enabled view entities without retaining archetype columns.
+local function collectViews(self: Renderer): integer, boolean
+    if self._viewQuery == nil then
+        return 0, false
+    end
+    local count = 0
+    local found = false
+    for archetype, length, entities in self._viewQuery:iter() do
+        local column <const> = archetype:get(View)
+        for row = 1, length do
+            found = true
+            local view <const> = column[row]
+            if view.enabled then
+                count = count + 1
+                if count > self._maxViews then
+                    error(
+                        ("tecs: renderer maxViews is %d but the world has more enabled views"):format(self._maxViews), 2
+                    )
+                end
+                local entity <const> = entities[row]
+                local at = count
+                while at > 1 and orderedBefore(view, entity, self._views[at - 1], self._viewEntities[at - 1]) do
+                    self._views[at] = self._views[at - 1]
+                    self._viewEntities[at] = self._viewEntities[at - 1]
+                    at = at - 1
+                end
+                self._views[at] = view
+                self._viewEntities[at] = entity
+            end
+        end
+    end
+    return count, found
 end
 
 --- Rebuilds every domain pipeline from current shader sources.
@@ -228,13 +355,65 @@ function Renderer:render(frame: Frame)
         meshes:_setStaging(slot)
     end
 
-    if sprites ~= nil then
-        sprites:_prepare(frame)
+    if not self._multiCamera then
+        self._drawSprites, self._drawMeshes = sprites ~= nil, meshes ~= nil
+        if sprites ~= nil then
+            sprites:_prepare(frame)
+        end
+        if meshes ~= nil then
+            meshes:_prepare(frame)
+        end
+        self.deferred:render(frame)
+        return
     end
-    if meshes ~= nil then
-        meshes:_prepare(frame)
+
+    local viewCount, foundViews = collectViews(self)
+    if not foundViews then
+        self._drawSprites, self._drawMeshes = sprites ~= nil, meshes ~= nil
+        if sprites ~= nil then
+            sprites:_prepare(frame)
+        end
+        if meshes ~= nil then
+            meshes:_prepare(frame)
+        end
+        self.deferred:render(frame)
+        return
     end
-    self.deferred:render(frame)
+
+    -- All-disabled views still produce a defined cleared frame and keep each
+    -- domain's resident buffers current. The synthesized cameras are used only
+    -- to run preparation; both contribution gates stay closed.
+    if viewCount == 0 then
+        self._drawSprites, self._drawMeshes = false, false
+        if sprites ~= nil then
+            sprites:_prepare(frame, sprites.camera, frame.width, frame.height, true)
+        end
+        if meshes ~= nil then
+            meshes:_prepare(frame, meshes.camera, frame.width, frame.height, true)
+        end
+        self.deferred:render(frame, 0, 0, frame.width, frame.height, true, true)
+        return
+    end
+
+    for index = 1, viewCount do
+        local view <const> = self._views[index]
+        local x <const> = math.floor(view.x * frame.width)
+        local y <const> = math.floor(view.y * frame.height)
+        local right <const> = math.floor((view.x + view.width) * frame.width)
+        local bottom <const> = math.floor((view.y + view.height) * frame.height)
+        local width <const> = math.max(1, right - x)
+        local height <const> = math.max(1, bottom - y)
+        self._drawSprites = sprites ~= nil and view.camera2D ~= nil
+        self._drawMeshes = meshes ~= nil and view.camera3D ~= nil
+
+        if sprites ~= nil and (index == 1 or self._drawSprites) then
+            sprites:_prepare(frame, view.camera2D or sprites.camera, width, height, index == 1)
+        end
+        if meshes ~= nil and (index == 1 or self._drawMeshes) then
+            meshes:_prepare(frame, view.camera3D or meshes.camera, width, height, index == 1)
+        end
+        self.deferred:render(frame, x, y, width, height, index == 1, index == viewCount)
+    end
 end
 
 --- Returns the composited image from the last frame.

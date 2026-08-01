@@ -43,6 +43,10 @@ layout(set = 3, binding = 1) uniform Scene {
     vec4 maskParams;
 } scene;
 
+layout(set = 3, binding = 3) uniform Camera {
+    vec4 position;
+} camera;
+
 #ifdef MESH_FOG
 layout(set = 3, binding = 2) uniform MeshFog { vec4 color; } meshFog;
 #endif
@@ -57,11 +61,14 @@ void main() {
     MeshSurface surface = meshMaterial(vMaterial, vUV, vColor, vNormal, vTangent);
     vec3 color = surface.albedo.rgb;
     if (surface.lit >= 0.5) {
-        vec3 accumulated = scene.ambient.rgb * surface.orm.r;
+        vec3 viewDirection = normalize(camera.position.xyz - vWorld);
+        color = surface.albedo.rgb * scene.ambient.rgb * surface.orm.r * (1.0 - surface.orm.b);
 #ifdef MESH_SHADOWS
-        float sunLambert = max(dot(surface.normal, -meshShadow.direction.xyz), 0.0);
-        accumulated += meshShadow.colorStrength.rgb * meshShadow.direction.w
-            * sunLambert * meshShadowVisibility(vWorld, surface.normal);
+        vec3 sunDirection = normalize(-meshShadow.direction.xyz);
+        color += cookTorrance(surface.albedo.rgb, surface.normal, viewDirection, sunDirection,
+            meshShadow.colorStrength.rgb * meshShadow.direction.w
+                * meshShadowVisibility(vWorld, surface.normal),
+            surface.orm.g, surface.orm.b);
 #endif
         int tile = lightTileOf(vWorld.xy, scene.bounds);
         int count = int(tiles.count[tile]);
@@ -73,10 +80,9 @@ void main() {
             float radius = max(light.position.w, 1.0);
             float attenuation = clamp(1.0 - distance / radius, 0.0, 1.0);
             attenuation *= attenuation;
-            float lambert = max(dot(surface.normal, normalize(toLight)), 0.0);
-            accumulated += light.color.rgb * light.color.a * attenuation * lambert;
+            color += cookTorrance(surface.albedo.rgb, surface.normal, viewDirection, normalize(toLight),
+                light.color.rgb * light.color.a * attenuation, surface.orm.g, surface.orm.b);
         }
-        color *= accumulated;
     }
     color += surface.emission;
 #ifdef MESH_FOG

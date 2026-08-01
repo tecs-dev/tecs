@@ -258,6 +258,7 @@ local record MeshBackend
     _fogging: boolean
     _fog: MeshFogOptions
     _fogUniform: loader.CArray
+    _cameraUniform: loader.CArray
     _shadowActive: boolean
     _shadow: MeshShadowOptions
     _shadowUniform: loader.CArray
@@ -420,6 +421,9 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._vertexColors = options.vertexColors
     self._fogging = options.fog ~= nil
     self._fog = options.fog
+    if self._transparent then
+        self._cameraUniform = loader.newArray("float[4]")
+    end
     if self._fogging then
         self._viewUniform = loader.newArray("float[24]")
         self._fogUniform = loader.newArray("float[4]")
@@ -1012,44 +1016,53 @@ local function writeShadowUniform(self: MeshBackend, packet: MeshFramePacket)
     self._deferred:setMeshLight(-dx, -dy, -dz, shadow.intensity, shadow.r, shadow.g, shadow.b)
 end
 
-function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame)
-    local slot <const> = packet.slot
-    self.instances:markSlotRanges(slot, packet.instanceRanges)
-    self._bounds:markSlotRanges(slot, packet.boundsRanges)
-    self.commands:markSlotRanges(slot, packet.commandRanges)
-    if self._skinning then
-        self._instanceSkins:markSlotRanges(slot, packet.skinRanges)
-        local ranges <const> = self._jointRanges
-        local source <const> = loader.bytePointer(self._jointValues as loader.CValue)
-        for entry = 0, ranges.count - 1 do
-            local offset, size = ranges:at(entry)
-            self._jointMatrices:writeSlot(slot, offset, source + offset, size)
+function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boolean)
+    if upload ~= false then
+        local slot <const> = packet.slot
+        self.instances:markSlotRanges(slot, packet.instanceRanges)
+        self._bounds:markSlotRanges(slot, packet.boundsRanges)
+        self.commands:markSlotRanges(slot, packet.commandRanges)
+        if self._skinning then
+            self._instanceSkins:markSlotRanges(slot, packet.skinRanges)
+            local ranges <const> = self._jointRanges
+            local source <const> = loader.bytePointer(self._jointValues as loader.CValue)
+            for entry = 0, ranges.count - 1 do
+                local offset, size = ranges:at(entry)
+                self._jointMatrices:writeSlot(slot, offset, source + offset, size)
+            end
+            ranges:clear()
         end
-        ranges:clear()
-    end
-    if self._morphing then
-        self._instanceMorphs:markSlotRanges(slot, packet.morphRanges)
-        local ranges <const> = self._morphRanges
-        local source <const> = loader.bytePointer(self._morphValues as loader.CValue)
-        for entry = 0, ranges.count - 1 do
-            local offset, size = ranges:at(entry)
-            self._morphWeights:writeSlot(slot, offset, source + offset, size)
+        if self._morphing then
+            self._instanceMorphs:markSlotRanges(slot, packet.morphRanges)
+            local ranges <const> = self._morphRanges
+            local source <const> = loader.bytePointer(self._morphValues as loader.CValue)
+            for entry = 0, ranges.count - 1 do
+                local offset, size = ranges:at(entry)
+                self._morphWeights:writeSlot(slot, offset, source + offset, size)
+            end
+            ranges:clear()
         end
-        ranges:clear()
-    end
-    self.instances:flushSlot(slot, frame.commandBuffer)
-    self._bounds:flushSlot(slot, frame.commandBuffer)
-    self.commands:flushSlot(slot, frame.commandBuffer)
-    if self._skinning then
-        self._instanceSkins:flushSlot(slot, frame.commandBuffer)
-        self._jointMatrices:flushSlot(slot, frame.commandBuffer)
-    end
-    if self._morphing then
-        self._instanceMorphs:flushSlot(slot, frame.commandBuffer)
-        self._morphWeights:flushSlot(slot, frame.commandBuffer)
+        self.instances:flushSlot(slot, frame.commandBuffer)
+        self._bounds:flushSlot(slot, frame.commandBuffer)
+        self.commands:flushSlot(slot, frame.commandBuffer)
+        if self._skinning then
+            self._instanceSkins:flushSlot(slot, frame.commandBuffer)
+            self._jointMatrices:flushSlot(slot, frame.commandBuffer)
+        end
+        if self._morphing then
+            self._instanceMorphs:flushSlot(slot, frame.commandBuffer)
+            self._morphWeights:flushSlot(slot, frame.commandBuffer)
+        end
     end
     self._count = packet.count
     self._viewProjection = packet.viewProjection
+    self._deferred:setMeshView(packet.cameraX, packet.cameraY, packet.cameraZ, packet.inverseViewProjection)
+    if self._transparent then
+        self._cameraUniform[0], self._cameraUniform[1], self._cameraUniform[2], self._cameraUniform[3] = packet.cameraX,
+            packet.cameraY,
+            packet.cameraZ,
+            0.0
+    end
     if self._fogging then
         local fog <const> = self._fog
         if fog.start < 0.0 or fog.finish <= fog.start then
@@ -1370,6 +1383,7 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
     if self._fogging then
         C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 2, self._fogUniform, 16)
     end
+    C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 3, self._cameraUniform, 16)
     context.pass:bindIndexBuffer(self.indices.handle, RenderPass.INDEX_UINT32)
     context.pass:drawIndexedIndirect(self._blendSorted.handle, 0, self._count)
 end

@@ -97,6 +97,21 @@ layout(location = 0) out vec4 color;
 void main() { color = vec4(1.0, 0.0, 0.0, 1.0); }
 ]]
 
+local SOLID_GEOMETRY = [[
+#version 450
+layout(location = 0) out vec4 albedo;
+layout(location = 1) out vec4 normal;
+layout(location = 2) out vec4 orm;
+layout(location = 3) out vec4 emission;
+layout(set = 3, binding = 0) uniform Color { vec4 value; } solid;
+void main() {
+    albedo = solid.value;
+    normal = vec4(0.5, 0.5, 1.0, 0.0);
+    orm = vec4(1.0, 0.5, 0.0, 1.0);
+    emission = vec4(0.0);
+}
+]]
+
 describe("pass graph", function()
     local window, device
 
@@ -370,6 +385,52 @@ describe("deferred pipeline", function()
             ("green must grow downward: %d then %d"):format(topLeft.g, bottomLeft.g)
         )
         assert.is_true(math.abs(topLeft.b - 64) <= 2, ("blue must survive transport, got %d"):format(topLeft.b))
+
+        geometryPipeline:destroy()
+        pipeline:destroy()
+    end)
+
+    it("composes ordered views into independent frame rectangles", function()
+        local color = require("tecs.ffi.loader").newArray("float[4]")
+        local geometryPipeline
+        local pipeline = Deferred.create(device.handle, FORMAT, {
+            multiCamera = true,
+            geometry = function(context)
+                context.pass:bindPipeline(geometryPipeline.handle)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, color, 16)
+                context.pass:draw(3)
+            end,
+        })
+        local albedoFormat, normalFormat, ormFormat, emissionFormat = pipeline:geometryFormats()
+        local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", {})
+        local fragment = Shader.fromGLSL(device.handle, SOLID_GEOMETRY, "fragment", {})
+        geometryPipeline = GraphicsPipeline.create(device.handle, {
+            vertexShader = vertex,
+            fragmentShader = fragment,
+            colorFormats = { albedoFormat, normalFormat, ormFormat, emissionFormat },
+            depth = pipeline:geometryDepth(),
+        })
+        vertex:destroy()
+        fragment:destroy()
+
+        local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
+        local frame = {
+            width = SIZE,
+            height = SIZE,
+            commandBuffer = commandBuffer,
+            swapchainTexture = screen.handle,
+        }
+        color[0], color[1], color[2], color[3] = 1, 0, 0, 1
+        pipeline:render(frame, 0, 0, SIZE / 2, SIZE, true, false)
+        color[0], color[1], color[2], color[3] = 0, 1, 0, 1
+        pipeline:render(frame, SIZE / 2, 0, SIZE / 2, SIZE, false, true)
+        assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
+
+        local pixels = screen:readback()
+        local left = screen:getPixel(pixels, SIZE / 4, SIZE / 2)
+        local right = screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2)
+        assert.is_true(left.r > 240 and left.g < 10, ("left view was %d,%d"):format(left.r, left.g))
+        assert.is_true(right.g > 240 and right.r < 10, ("right view was %d,%d"):format(right.r, right.g))
 
         geometryPipeline:destroy()
         pipeline:destroy()

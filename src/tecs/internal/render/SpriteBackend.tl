@@ -345,6 +345,8 @@ local record SpriteBackend
     --- A second one rather than the scene's, because both are live within one
     --- frame and one of them would have to be put back.
     _maskView: Camera2D
+    _viewWidth: number
+    _viewHeight: number
     --- Blocks the forward list's own dispatches cover, which is its capacity
     --- rather than the frame's count: every block of the counts table has to be
     --- written every frame or the scan folds a stale one.
@@ -659,8 +661,7 @@ function SpriteBackend:recordOccluders(context: Deferred.PassContext)
     end
     local view <const> = self._maskView
     view.x, view.y, view.zoom, view.rotation = self.deferred:maskView()
-    local frame <const> = context.frame
-    recordCast(self, context, self._maskPipeline, view:matrix(frame.width, frame.height), Deferred.MASK)
+    recordCast(self, context, self._maskPipeline, view:matrix(self._viewWidth, self._viewHeight), Deferred.MASK)
 end
 
 --- Records sprite drop shadows and their caster stamps.
@@ -669,8 +670,7 @@ function SpriteBackend:recordDropShadows(context: Deferred.PassContext)
     if self.count == 0 or not self._casting then
         return
     end
-    local frame <const> = context.frame
-    local matrix <const> = self._view:matrix(frame.width, frame.height)
+    local matrix <const> = self._view:matrix(self._viewWidth, self._viewHeight)
     recordCast(self, context, self._shadowPipeline, matrix, Deferred.SHADOW)
     recordCast(self, context, self._stampPipeline, matrix, Deferred.STAMP)
 end
@@ -682,8 +682,8 @@ function SpriteBackend:recordGeometry(context: Deferred.PassContext)
         return
     end
     context.pass:bindPipeline(self.pipeline.handle)
-    context.pass:pushVertexUniform(0, self._view:matrix(context.width, context.height), 64)
-    context.pass:pushVertexUniform(1, layerUniform(self, context.width, context.height), LAYER_BYTES)
+    context.pass:pushVertexUniform(0, self._view:matrix(self._viewWidth, self._viewHeight), 64)
+    context.pass:pushVertexUniform(1, layerUniform(self, self._viewWidth, self._viewHeight), LAYER_BYTES)
     context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
 
     local buffers <const> = self._geometryBuffers
@@ -706,8 +706,8 @@ function SpriteBackend:recordForward(context: Deferred.PassContext)
         return
     end
     context.pass:bindPipeline(self.blendPipeline.handle)
-    context.pass:pushVertexUniform(0, self._view:matrix(context.width, context.height), 64)
-    context.pass:pushVertexUniform(1, layerUniform(self, context.width, context.height), LAYER_BYTES)
+    context.pass:pushVertexUniform(0, self._view:matrix(self._viewWidth, self._viewHeight), 64)
+    context.pass:pushVertexUniform(1, layerUniform(self, self._viewWidth, self._viewHeight), LAYER_BYTES)
     context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
     self.deferred:bindLighting(context)
 
@@ -963,6 +963,7 @@ function SpriteBackend.create(device: loader.CPtr, deferred: Deferred, options: 
 
     self._view = Camera2D.newCamera2D()
     self._maskView = Camera2D.newCamera2D()
+    self._viewWidth, self._viewHeight = 1.0, 1.0
     -- Three vec4s: the world rectangle the camera sees, the counts, and what
     -- the shadow lane needs that the other two do not.
     self._cullUniform = loader.newArray("float[12]")
@@ -1460,59 +1461,70 @@ end
 ---     so the caller is free to refill it as soon as this returns.
 --- @param frame Recorded onto and not submitted. Submitting it is the caller's,
 ---     after every pass it wants in the frame has been recorded.
-function SpriteBackend:prepare(packet: SpriteFramePacket, frame: Frame)
-    local slot <const> = packet.slot
-    self.instances:markSlotRanges(slot, packet.instanceRanges)
-    self._bounds:markSlotRanges(slot, packet.boundsRanges)
-    self.instances:flushSlot(slot, frame.commandBuffer)
-    self._bounds:flushSlot(slot, frame.commandBuffer)
+function SpriteBackend:prepare(
+    packet: SpriteFramePacket, frame: Frame, camera?: Camera2D, width?: number, height?: number, upload?: boolean
+)
+    if upload ~= false then
+        local slot <const> = packet.slot
+        self.instances:markSlotRanges(slot, packet.instanceRanges)
+        self._bounds:markSlotRanges(slot, packet.boundsRanges)
+        self.instances:flushSlot(slot, frame.commandBuffer)
+        self._bounds:flushSlot(slot, frame.commandBuffer)
 
-    -- Content rather than per-frame data, so it is written when it moves and
-    -- not when it is read. The revision also moves when a sheet is rebound,
-    -- since that changes every region the table copied, which is what makes a
-    -- rebind cost one upload here instead of a write to every entity playing it.
-    local revision <const> = frametable.revision()
-    if revision ~= self._playbackRevision then
-        self._playbackRevision = revision
-        local data, count = frametable.floats()
-        if count > PLAYBACK_FLOATS then
-            error(
-                ("tecs: the animation frame table needs %d floats and the " .. "buffer holds %d"):format(
-                    count, PLAYBACK_FLOATS
-                ),
-                2
-            )
+        -- Content rather than per-frame data, so it is written when it moves and
+        -- not when it is read. The revision also moves when a sheet is rebound,
+        -- since that changes every region the table copied, which is what makes a
+        -- rebind cost one upload here instead of a write to every entity playing it.
+        local revision <const> = frametable.revision()
+        if revision ~= self._playbackRevision then
+            self._playbackRevision = revision
+            local data, count = frametable.floats()
+            if count > PLAYBACK_FLOATS then
+                error(
+                    ("tecs: the animation frame table needs %d floats and the " .. "buffer holds %d"):format(
+                        count, PLAYBACK_FLOATS
+                    ),
+                    2
+                )
+            end
+            self._playbacks:write(0, data as loader.CValue, count * 4)
+            self._playbacks:flush(frame.commandBuffer)
         end
-        self._playbacks:write(0, data as loader.CValue, count * 4)
-        self._playbacks:flush(frame.commandBuffer)
-    end
 
-    -- After the flush and before the cull. A stage owns a region of the same
-    -- two buffers the flush just wrote, so what it writes has to land on top
-    -- of whatever staging left there, and it has to land before the mark pass
-    -- reads the bounds beside it. Both fall out of the recording order.
-    local stages <const> = self._stages
-    for index = 1, #stages do
-        local stage = stages[index]
-        if stage:active() then
-            stage:record(frame, self.instances, self._bounds)
+        -- After the flush and before the cull. A stage owns a region of the same
+        -- two buffers the flush just wrote, so what it writes has to land on top
+        -- of whatever staging left there, and it has to land before the mark pass
+        -- reads the bounds beside it. Both fall out of the recording order.
+        local stages <const> = self._stages
+        for index = 1, #stages do
+            local stage = stages[index]
+            if stage:active() then
+                stage:record(frame, self.instances, self._bounds)
+            end
         end
     end
 
     self._stepClock = packet.stepClock
     self.count = packet.count
     local view <const> = self._view
-    view.x = packet.cameraX
-    view.y = packet.cameraY
-    view.zoom = packet.cameraZoom
-    view.rotation = packet.cameraRotation
+    if camera ~= nil then
+        view.x, view.y, view.zoom, view.rotation = camera.x, camera.y, camera.zoom, camera.rotation
+    else
+        view.x, view.y, view.zoom, view.rotation = packet.cameraX,
+            packet.cameraY,
+            packet.cameraZoom,
+            packet.cameraRotation
+    end
+    self._viewWidth, self._viewHeight = width or frame.width, height or frame.height
     -- The same view the geometry pass draws with, handed to the pass that has
     -- to invert it. Lights arrive in world units, so a lighting pass working
     -- in target pixels needs this to put a fragment back where its geometry
     -- came from, and taking it from the one camera is what stops the two
     -- spaces drifting apart.
     self.deferred:setView(view.x, view.y, view.zoom, view.rotation)
-    self.deferred:setLightData(packet.lights, packet.lightCount)
+    if upload ~= false then
+        self.deferred:setLightData(packet.lights, packet.lightCount)
+    end
     -- The clock the shadow passes resolve a caster's playback against, so an
     -- animated caster's silhouette is the frame the geometry pass drew.
     self.deferred:setStepClock(packet.stepClock)
@@ -1521,7 +1533,9 @@ function SpriteBackend:prepare(packet: SpriteFramePacket, frame: Frame)
     -- ones a caster throws a copy by. A pass reading a buffer whose upload has
     -- not been recorded reads the frame before, and a shadow one frame behind
     -- its light is a shadow that lags every time a light moves.
-    self.deferred:flushLights(frame)
+    if upload ~= false then
+        self.deferred:flushLights(frame)
+    end
 
     -- Nothing routes into the forward lane unless extraction said something is
     -- blended, and the whole lane is skipped when nothing is: five compute
@@ -1532,7 +1546,7 @@ function SpriteBackend:prepare(packet: SpriteFramePacket, frame: Frame)
 
     if self.count > 0 then
         local groups = math.ceil(self.count / CULL_GROUP)
-        local bounds = view:viewBounds(frame.width, frame.height)
+        local bounds = view:viewBounds(self._viewWidth, self._viewHeight)
         local cull <const> = self._cullUniform
         cull[0] = bounds[1]
         cull[1] = bounds[2]

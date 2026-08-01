@@ -35,7 +35,9 @@ void main() {
     float fogMarker = surface.lit < 0.5 ? 0.25 + vFog * 0.24 : 0.50 + vFog * 0.24;
     normal = vec4(surface.normal * 0.5 + 0.5, fogMarker);
 #else
-    normal = vec4(surface.normal * 0.5 + 0.5, surface.lit);
+    // Middle markers distinguish meshes even when fog is disabled, so the
+    // shared resolve knows when sampled depth describes a perspective surface.
+    normal = vec4(surface.normal * 0.5 + 0.5, surface.lit < 0.5 ? 0.25 : 0.50);
 #endif
 #ifdef MESH_SHADOWS
     // The bottom quarter of reserved ORM alpha marks a shadow-enabled mesh

@@ -222,6 +222,42 @@ targets, and adds it before transparent meshes and sprites. Omitting `bloom`
 declares no bloom targets or passes. Run `cargo xtask example scene3d` for the
 complete mixed-domain setup.
 
+## Multiple cameras
+
+Set `maxViews` when creating the application, then spawn ordered `View`
+components. A view may draw either domain or both. Coordinates are fractions
+of the frame, so this is a two-player split with a 2D HUD composed last:
+
+```teal
+local View <const> = tecs.gfx.View
+local left <const> = tecs.gfx.newCamera3D({z = 8})
+local right <const> = tecs.gfx.newCamera3D({x = 4, z = 8})
+
+world:spawn(View.new({camera3D = left, width = 0.5, order = 0}))
+world:spawn(View.new({camera3D = right, x = 0.5, width = 0.5, order = 1}))
+world:spawn(View.new({camera2D = app.renderer.sprites.camera, order = 2}))
+```
+
+```teal
+return tecs.newApplication({
+    maxViews = 3,
+    meshes = {},
+    plugin = game,
+})
+```
+
+The renderer extracts scene instances once. Each view then reuses the same
+G-buffer, visible lists, light tiles, and transparent intermediate in strict
+sequence: cull, shade, composite, then overwrite for the next view. The
+original path remains in use when `maxViews` is omitted, so a one-camera game
+allocates no multi-camera target and records no extra composition pass.
+
+Opaque and transparent metallic-roughness meshes use the same Cook-Torrance
+direct-light function. Opaque meshes reconstruct world position from the
+geometry depth target; transparent meshes already carry it from the vertex
+stage. Roughness uses GGX, visibility uses Smith-Schlick, and Fresnel uses the
+Schlick approximation.
+
 ## Optional mesh shadows
 
 Enable the mesh domain's directional light and shadow resources at renderer

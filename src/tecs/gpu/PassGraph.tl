@@ -13,16 +13,18 @@ validated against what earlier passes produce, so a missing dependency is
 an error at build time instead of a black screen.
 
 One depth attachment is shared by whichever passes ask for it, sized and
-resized with the frame like every other target. Depth is per pass rather
-than per graph because a pass that must not have one is as ordinary as a
-pass that must, and a pipeline bound in either has to agree with it.
+resized with the frame like every other target. A later pass may name the
+reserved `depth` input to sample what an earlier depth-writing pass produced.
+Depth is per pass rather than per graph because a pass that must not have one
+is as ordinary as a pass that must, and a pipeline bound in either has to agree
+with it.
 
 A color clear comes from the target, which is right while one pass writes
 a target and wrong as soon as two do: the second would clear the first
 one's result away. A pass may therefore override it, with `PassGraph.LOAD`
 as the way to say "load, whatever the target asks for". That is what any
 pass accumulating into a target an earlier pass filled needs, and what a
-second view's lighting pass needs to leave the first view's pixels alone.
+second view's composite needs to leave the first view's pixels alone.
 
 The graph knows nothing about entities, archetypes, or dirtiness. A pass
 that should be skipped says so through `enabled`, which is where an
@@ -261,6 +263,9 @@ end
 ---     reused for a second target.
 --- @return The graph, so declarations chain.
 function PassGraph:target(spec: TargetSpec): PassGraph
+    if spec.name == "depth" then
+        error("tecs: target name 'depth' is reserved for the shared depth attachment", 2)
+    end
     if self._targets[spec.name] ~= nil then
         error(("tecs: target '%s' is already declared"):format(spec.name), 2)
     end
@@ -284,17 +289,24 @@ function PassGraph:pass(spec: PassSpec): PassGraph
     -- Validate against what earlier passes have produced, so an ordering
     -- mistake surfaces here rather than as an empty or stale attachment.
     local produced: {string: boolean} = {}
+    local producedDepth = false
     for _, earlier in ipairs(self._passes) do
         for _, output in ipairs(earlier.outputs or {}) do
             produced[output] = true
         end
+        if earlier.depth ~= nil and earlier.depth.write ~= false then
+            producedDepth = true
+        end
     end
 
     for _, input in ipairs(spec.inputs or {}) do
-        if self._targets[input] == nil then
+        if input == "depth" then
+            if not producedDepth then
+                error(("tecs: pass '%s' reads depth before any pass writes it"):format(spec.name), 2)
+            end
+        elseif self._targets[input] == nil then
             error(("tecs: pass '%s' reads undeclared target '%s'"):format(spec.name, input), 2)
-        end
-        if not produced[input] then
+        elseif not produced[input] then
             error(("tecs: pass '%s' reads '%s' before any pass writes it"):format(spec.name, input), 2)
         end
     end
@@ -362,6 +374,9 @@ end
 --- @return The graph's texture, replaced whenever the frame size changes, so
 ---     nothing may hold it across frames. Nil before the graph has been sized.
 function PassGraph:texture(name: string): Texture
+    if name == "depth" then
+        return self._depth
+    end
     return self._textures[name]
 end
 
@@ -462,7 +477,7 @@ local function resize(self: PassGraph, width: integer, height: integer)
                 width = width,
                 height = height,
                 format = self.depthFormat,
-                usage = {"depthTarget"},
+                usage = {"depthTarget", "sampled"},
                 name = "depth",
             }
         )
@@ -539,7 +554,8 @@ function PassGraph:execute(frame: Frame)
             if textures ~= nil then
                 local inputs <const> = spec.inputs
                 for slot = 1, #inputs do
-                    textures[slot] = self._textures[inputs[slot]].handle
+                    local input <const> = inputs[slot]
+                    textures[slot] = input == "depth" and self._depth.handle or self._textures[input].handle
                 end
                 pass:bindTextures(0, textures, self._sampler.handle)
             end

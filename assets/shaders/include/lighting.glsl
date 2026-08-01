@@ -43,3 +43,60 @@ int lightTileOf(vec2 world, vec4 bounds) {
                        ivec2(0), ivec2(LIGHT_TILES - 1));
     return cell.y * LIGHT_TILES + cell.x;
 }
+
+// Shared metallic-roughness direct-light term. The distribution is
+// Trowbridge-Reitz GGX, visibility is Smith with Schlick-GGX, and Fresnel is
+// Schlick's approximation. Keeping this here makes deferred opaque surfaces
+// and forward blended meshes consume the same material contract.
+const float PBR_PI = 3.14159265358979323846;
+
+float pbrDistributionGGX(vec3 normal, vec3 halfway, float roughness) {
+    float alpha = roughness * roughness;
+    float alpha2 = alpha * alpha;
+    float nDotH = max(dot(normal, halfway), 0.0);
+    float nDotH2 = nDotH * nDotH;
+    float denominator = nDotH2 * (alpha2 - 1.0) + 1.0;
+    return alpha2 / max(PBR_PI * denominator * denominator, 1e-6);
+}
+
+float pbrGeometrySchlickGGX(float nDotDirection, float roughness) {
+    float r = roughness + 1.0;
+    float k = r * r * 0.125;
+    return nDotDirection / max(nDotDirection * (1.0 - k) + k, 1e-6);
+}
+
+float pbrGeometrySmith(vec3 normal, vec3 viewDirection, vec3 lightDirection, float roughness) {
+    return pbrGeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), roughness)
+         * pbrGeometrySchlickGGX(max(dot(normal, lightDirection), 0.0), roughness);
+}
+
+vec3 pbrFresnelSchlick(float cosine, vec3 f0) {
+    return f0 + (1.0 - f0) * pow(clamp(1.0 - cosine, 0.0, 1.0), 5.0);
+}
+
+vec3 cookTorrance(
+    vec3 albedo,
+    vec3 normal,
+    vec3 viewDirection,
+    vec3 lightDirection,
+    vec3 radiance,
+    float roughness,
+    float metallic
+) {
+    roughness = clamp(roughness, 0.045, 1.0);
+    metallic = clamp(metallic, 0.0, 1.0);
+    float nDotL = max(dot(normal, lightDirection), 0.0);
+    float nDotV = max(dot(normal, viewDirection), 0.0);
+    if (nDotL <= 0.0 || nDotV <= 0.0) {
+        return vec3(0.0);
+    }
+
+    vec3 halfway = normalize(viewDirection + lightDirection);
+    vec3 f0 = mix(vec3(0.04), albedo, metallic);
+    vec3 fresnel = pbrFresnelSchlick(max(dot(halfway, viewDirection), 0.0), f0);
+    float distribution = pbrDistributionGGX(normal, halfway, roughness);
+    float geometry = pbrGeometrySmith(normal, viewDirection, lightDirection, roughness);
+    vec3 specular = distribution * geometry * fresnel / max(4.0 * nDotV * nDotL, 1e-5);
+    vec3 diffuseWeight = (vec3(1.0) - fresnel) * (1.0 - metallic);
+    return (diffuseWeight * albedo / PBR_PI + specular) * radiance * nDotL;
+}

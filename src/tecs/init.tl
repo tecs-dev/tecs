@@ -29,6 +29,7 @@ local type audio = require("tecs.audio")
 local type Renderer = require("tecs.Renderer")
 local type Camera2D = require("tecs.gfx.Camera2D")
 local type Camera3D = require("tecs.gfx.Camera3D")
+local type View = require("tecs.gfx.View")
 local type Model3D = require("tecs.gfx.Model3D")
 local type animation = require("tecs.gfx.animation")
 local type events = require("tecs.events")
@@ -101,6 +102,9 @@ local record gfx
     Camera3D: Camera3D
     type Camera3DOptions = Camera3D.Options
 
+    --- The entity component that draws one ordered viewport.
+    View: View
+
     --- The resident shared resources for one registered glTF model.
     type Model3D = Model3D
     --- One independently posed copy of a registered glTF model.
@@ -127,15 +131,16 @@ local record gfx
     ---     which a renderer recenters on its first drawn frame if the game
     ---     never moves it. No field is validated.
     --- @return A camera whose fields are plain and meant to be assigned to
-    ---     frame by frame. It is not attached to anything: a renderer draws
-    ---     from the one on `renderer.sprites.camera`, so a second is for a calculation
-    ---     rather than a second view.
+    ---     frame by frame. It is not attached to anything. The renderer's
+    ---     default lives on `renderer.sprites.camera`; assign another to a
+    ---     [`View`](tealdoc:tecs.gfx.View) entity to draw it.
     newCamera2D: function(options?: Camera2D.Options): Camera2D
 
     --- Builds a perspective view into a right-handed 3D world.
     --- @param options Omit for a camera at the origin looking down negative z.
     --- @return A camera whose position, orientation, and projection fields the
-    ---     caller assigns directly.
+    ---     caller assigns directly. Assign it to a
+    ---     [`View`](tealdoc:tecs.gfx.View) entity to draw it.
     newCamera3D: function(options?: Camera3D.Options): Camera3D
 
     --- Builds a renderer against an open GPU device.
@@ -547,10 +552,18 @@ local SURFACE <const>: {string: Namespace} = {
     events = {module = "tecs.events"},
     input = {module = "tecs.input"},
     gfx = {
-        beside = {"tecs.components", "tecs.gfx.Camera2D", "tecs.gfx.Camera3D", "tecs.Renderer", "tecs.gfx.text"},
+        beside = {
+            "tecs.components",
+            "tecs.gfx.Camera2D",
+            "tecs.gfx.Camera3D",
+            "tecs.gfx.View",
+            "tecs.Renderer",
+            "tecs.gfx.text",
+        },
         within = {
             Camera2D = {module = "tecs.gfx.Camera2D"},
             Camera3D = {module = "tecs.gfx.Camera3D"},
+            View = {module = "tecs.gfx.View"},
             Renderer = {module = "tecs.Renderer"},
             animation = {module = "tecs.gfx.animation"},
             layers = {module = "tecs.gfx.layers"},

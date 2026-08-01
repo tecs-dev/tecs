@@ -149,8 +149,8 @@ function SpriteDomain:_center(frame: Frame)
 end
 
 --- Uploads and culls the last extracted sprite packet.
-function SpriteDomain:_prepare(frame: Frame)
-    self._backend:prepare(self._packet, frame)
+function SpriteDomain:_prepare(frame: Frame, camera?: Camera2D, width?: number, height?: number, upload?: boolean)
+    self._backend:prepare(self._packet, frame, camera, width, height, upload)
 end
 
 function SpriteDomain:_recordOccluders(context: Deferred.PassContext)

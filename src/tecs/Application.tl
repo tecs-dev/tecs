@@ -247,6 +247,10 @@ local record Application
         --- Caller-writable. Enables optional bloom after opaque lighting and
         --- before transparent meshes and 2D UI. Nil omits its GPU resources.
         bloom: Renderer.BloomOptions
+        --- Caller-writable. Enables [`View`](/modules/gfx/#tecs.gfx.View)
+        --- entities and sets the maximum enabled views composed in one frame.
+        --- Omit for the zero-overhead synthesized full-frame view.
+        maxViews: integer
         --- Caller-writable. Sets the seconds one fixed step covers. Must be greater than zero. Defaults
         --- to 1/60.
         timestep: number
@@ -754,6 +758,7 @@ function Application:_init(): boolean
             sprites = spriteOptions,
             meshes = config.meshes,
             bloom = config.bloom,
+            maxViews = config.maxViews,
         }
     )
     self.renderer:install(self.world)

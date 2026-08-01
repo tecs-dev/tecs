@@ -28,6 +28,14 @@
 #pragma tecs variants SHADOWS=1 MESH_FOG=1
 #pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1
 #pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_FOG=1
+#pragma tecs variants MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_PBR=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_PBR=1
+#pragma tecs variants MESH_FOG=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_FOG=1 MESH_PBR=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_FOG=1 MESH_PBR=1
 
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 outColor;
@@ -43,16 +51,23 @@ layout(set = 2, binding = 2) uniform sampler2D gORM;
 // same and the term below costs them a multiply.
 layout(set = 2, binding = 3) uniform sampler2D gEmission;
 
+#ifdef MESH_PBR
+layout(set = 2, binding = 4) uniform sampler2D gDepth;
+#define SHADOW_BINDING 5
+#else
+#define SHADOW_BINDING 4
+#endif
+
 #ifdef SHADOWS
 // Height in red, and green marking a pixel an occluder really covers rather
 // than one the blur spread a halo over.
-layout(set = 2, binding = 4) uniform sampler2D occluderMask;
+layout(set = 2, binding = SHADOW_BINDING) uniform sampler2D occluderMask;
 // One channel, half resolution: how much of all lighting reaches the ground
 // here, after every drop shadow thrown across it.
-layout(set = 2, binding = 5) uniform sampler2D dropShadowMask;
-#define LIGHT_BINDING 6
+layout(set = 2, binding = SHADOW_BINDING + 1) uniform sampler2D dropShadowMask;
+#define LIGHT_BINDING SHADOW_BINDING + 2
 #else
-#define LIGHT_BINDING 4
+#define LIGHT_BINDING SHADOW_BINDING
 #endif
 
 struct Light {
@@ -99,6 +114,10 @@ layout(set = 3, binding = 0) uniform Scene {
     vec4 meshLightDirection;
     vec4 meshLightColor;
 #endif
+#ifdef MESH_PBR
+    vec4 meshCamera;
+    mat4 inverseViewProjection;
+#endif
 #ifdef MESH_FOG
     vec4 meshFog;
 #endif
@@ -129,6 +148,14 @@ vec2 worldOf(vec2 fragment) {
         offset.x * scene.view.z - offset.y * scene.view.w,
         offset.x * scene.view.w + offset.y * scene.view.z);
 }
+
+#ifdef MESH_PBR
+vec3 meshWorldOf(vec2 uv, float depth) {
+    vec4 clip = vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
+    vec4 world = scene.inverseViewProjection * clip;
+    return world.xyz / max(abs(world.w), 1e-6) * sign(world.w);
+}
+#endif
 
 #ifdef SHADOWS
 vec2 maskUV(vec2 world) {
@@ -198,6 +225,10 @@ void main() {
 
     float fog = 0.0;
     bool lit = encoded.a >= 0.5;
+    bool mesh = false;
+#ifdef MESH_PBR
+    mesh = encoded.a > 0.1 && encoded.a < 0.9;
+#endif
 #ifdef MESH_FOG
     // Sprites use the exact endpoints. Fog-enabled meshes use two reserved
     // middle ranges so both lit and unlit material dispatch survive the trip
@@ -232,19 +263,36 @@ void main() {
     // from and the one a readback names a pixel in.
     vec2 fragment = vUV * scene.viewport.xy;
     vec2 world = worldOf(fragment);
+    vec3 surfaceWorld = vec3(world, 0.0);
+    vec3 viewDirection = vec3(0.0, 0.0, 1.0);
+#ifdef MESH_PBR
+    if (mesh) {
+        surfaceWorld = meshWorldOf(vUV, texture(gDepth, vUV).r);
+        viewDirection = normalize(scene.meshCamera.xyz - surfaceWorld);
+    }
+#endif
     // Authored occlusion reaches indirect light only. A point light is a
     // directionally known contribution and is not hidden by a baked ambient
     // term; its own shadowing is handled separately below.
-    vec3 accumulated = scene.ambient.rgb * orm.r;
+    vec3 accumulated = albedo.rgb * scene.ambient.rgb * orm.r;
+#ifdef MESH_PBR
+    if (mesh) {
+        // Without an environment map the ambient term is a diffuse-only
+        // approximation. Metals have no diffuse lobe, so only mesh pixels
+        // lose it; the established 2D material contract remains Lambertian.
+        accumulated *= 1.0 - orm.b;
+    }
+#endif
 #ifdef MESH_SHADOWS
     // ORM alpha is otherwise reserved. A shadow-enabled mesh writes its
     // directional visibility into the bottom quarter; sprites and ordinary
     // meshes leave the channel at one and therefore receive no 3D sun term.
     if (orm.a < 0.5) {
         float visibility = clamp(orm.a * 4.0, 0.0, 1.0);
-        float sunLambert = max(dot(normal, scene.meshLightDirection.xyz), 0.0);
-        accumulated += scene.meshLightColor.rgb
-            * scene.meshLightDirection.w * sunLambert * visibility;
+        accumulated += cookTorrance(albedo.rgb, normal, viewDirection,
+            normalize(scene.meshLightDirection.xyz),
+            scene.meshLightColor.rgb * scene.meshLightDirection.w * visibility,
+            orm.g, orm.b);
     }
 #endif
 #ifdef SHADOWS
@@ -260,7 +308,7 @@ void main() {
     int base = tile * LIGHT_TILE_SLOTS;
     for (int slot = 0; slot < count; slot++) {
         Light light = lights.item[tileLights.index[base + slot]];
-        vec3 toLight = vec3(light.position.xy - world, light.position.z);
+        vec3 toLight = light.position.xyz - surfaceWorld;
         float distance = length(toLight);
         float radius = max(light.position.w, 1.0);
 
@@ -276,7 +324,15 @@ void main() {
             attenuation *= 1.0 - marchShadow(world, light.position.xy, light.position.z, attenuation, noise);
         }
 #endif
-        accumulated += light.color.rgb * light.color.a * attenuation * lambert;
+#ifdef MESH_PBR
+        if (mesh) {
+            accumulated += cookTorrance(albedo.rgb, normal, viewDirection, normalize(toLight),
+                light.color.rgb * light.color.a * attenuation, orm.g, orm.b);
+        } else
+#endif
+        {
+            accumulated += albedo.rgb * light.color.rgb * light.color.a * attenuation * lambert;
+        }
     }
 
 #ifdef SHADOWS
@@ -294,7 +350,7 @@ void main() {
     // sign is as bright in the dark as under a lamp, which is the whole of what
     // makes it a sign, and the drop shadow above darkens the ground the sign
     // stands on without dimming the sign.
-    vec3 color = albedo.rgb * accumulated + emission;
+    vec3 color = accumulated + emission;
 #ifdef MESH_FOG
     color = mix(color, scene.meshFog.rgb, fog);
 #endif

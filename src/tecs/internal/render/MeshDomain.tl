@@ -713,9 +713,9 @@ function MeshDomain:_rebuildPipelines(deferred: Deferred)
     self._backend:rebuildPipeline(deferred)
 end
 
-function MeshDomain:_prepare(frame: Frame)
-    self._packet:setCamera(self.camera, frame.width, frame.height)
-    self._backend:prepare(self._packet, frame)
+function MeshDomain:_prepare(frame: Frame, camera?: Camera3D, width?: number, height?: number, upload?: boolean)
+    self._packet:setCamera(camera or self.camera, width or frame.width, height or frame.height)
+    self._backend:prepare(self._packet, frame, upload)
 end
 
 function MeshDomain:registerSkin(name: string, matrices: {number}): components.MeshSkin

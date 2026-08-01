@@ -59,9 +59,9 @@ local function triangle(name)
     })
 end
 
-local function near(actual, expected, message)
+local function near(actual, expected, message, tolerance)
     assert.is_true(
-        math.abs(actual - expected) < 0.00001,
+        math.abs(actual - expected) < (tolerance or 0.00001),
         (message or "values differ") .. (": expected %.8f, got %.8f"):format(expected, actual)
     )
 end
@@ -526,6 +526,33 @@ describe("the 3D scene contract", function()
             near(x / w, 0, "rotated view x")
             near(y / w, 0, "rotated view y")
             near(w, 1, "rotated near distance")
+        end)
+
+        it("round-trips world points through its clip-to-world inverse", function()
+            local camera = Camera3D.newCamera3D({
+                x = 3,
+                y = -2,
+                z = 7,
+                rotationX = 0.12,
+                rotationY = -0.24,
+                rotationW = 0.96,
+                verticalFov = math.rad(57),
+                near = 0.2,
+                far = 300,
+            })
+            local matrix = camera:matrix(853, 480)
+            local inverse = camera:inverseMatrix(853, 480)
+            local clipX, clipY, clipZ, clipW = clipPoint(matrix, -1.5, 0.75, -6)
+            local worldX, worldY, worldZ, worldW = clipPoint(inverse, clipX, clipY, clipZ)
+            -- clipPoint assumes an input w of one, so include the actual clip
+            -- w contribution explicitly for this homogeneous inverse.
+            worldX = worldX + inverse[12] * (clipW - 1)
+            worldY = worldY + inverse[13] * (clipW - 1)
+            worldZ = worldZ + inverse[14] * (clipW - 1)
+            worldW = worldW + inverse[15] * (clipW - 1)
+            near(worldX / worldW, -1.5, "world x")
+            near(worldY / worldW, 0.75, "world y")
+            near(worldZ / worldW, -6, "world z", 0.00002)
         end)
 
         it("rejects invalid projection and zero orientation values", function()

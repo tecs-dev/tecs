@@ -41,6 +41,8 @@ local record MeshFramePacket
     far: number
     --- Column-major world-to-clip matrix with depth in `[0, 1]`.
     viewProjection: loader.CArray
+    --- Column-major clip-to-world inverse of `viewProjection`.
+    inverseViewProjection: loader.CArray
 
     --- Dirty byte ranges in the mesh instance staging buffer.
     instanceRanges: dirtyranges
@@ -85,6 +87,7 @@ function MeshFramePacket.create(skinning?: boolean, morphing?: boolean): MeshFra
     self.near = 0.1
     self.far = 1000.0
     self.viewProjection = loader.newArray("float[16]")
+    self.inverseViewProjection = loader.newArray("float[16]")
     self.instanceRanges = dirtyranges.create()
     self.boundsRanges = dirtyranges.create()
     self.commandRanges = dirtyranges.create()
@@ -119,8 +122,11 @@ function MeshFramePacket:setCamera(camera: Camera3D, width: number, height: numb
 
     local source <const> = camera:matrix(width, height)
     local destination <const> = self.viewProjection
+    local inverseSource <const> = camera:inverseMatrix(width, height)
+    local inverseDestination <const> = self.inverseViewProjection
     for index = 0, 15 do
         destination[index] = source[index]
+        inverseDestination[index] = inverseSource[index]
     end
 end
 

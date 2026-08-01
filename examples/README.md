@@ -14,9 +14,9 @@ cargo xtask example morph3d
 `ui-demo.tl` is the complete engine showcase. It exercises the sprite renderer,
 lighting, text, UI, input, animation, audio, and debug tools together.
 
-`scene3d.tl` combines a vertex-colored PBR mesh, an emissive unlit mesh,
-directional shadows, fog, and bloom, then draws a translucent, screen-space,
-unlit 2D HUD above them. It is the compact mixed-renderer example.
+`scene3d.tl` draws the same Cook-Torrance scene through two ordered 3D views,
+then composes one full-frame 2D HUD view above them. It also combines vertex
+colors, an emissive unlit mesh, directional shadows, fog, and bloom.
 
 `gltf3d.tl` loads a textured glTF 2.0 scene asynchronously, registers its
 geometry, vertex colors, image, and alpha-blended metallic-roughness material with a

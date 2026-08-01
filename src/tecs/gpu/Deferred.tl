@@ -59,8 +59,8 @@ once per pixel regardless of how many objects overlap it.
 The G-buffer uses all four color attachments a render pass allows: albedo, a
 normal with the lit flag in its alpha, ORM surface properties, and emission.
 ORM carries ambient occlusion, roughness and metallic in RGB. Occlusion
-multiplies ambient light; roughness and metallic are carried for the
-physically based light term rather than changing the Lambert term.
+multiplies ambient light. Mesh surfaces consume roughness and metallic through
+Cook-Torrance; sprite surfaces retain their established Lambert term.
 
 Emission is the one attachment lighting does not treat as a surface input. It is added to the
 resolved result rather than multiplied into it, so it survives ambient of
@@ -121,7 +121,7 @@ local BIN_GROUP <const> = 64
 local SCENE_FLOATS <const> = 24
 local SCENE_BYTES <const> = SCENE_FLOATS * 4
 local MESH_SHADOW_SCENE_FLOATS <const> = 32
-local MESH_SHADOW_SCENE_BYTES <const> = MESH_SHADOW_SCENE_FLOATS * 4
+local MESH_PBR_FLOATS <const> = 20
 local MESH_FOG_FLOATS <const> = 4
 
 --- Floats the block a shadow draw is placed from holds: a matrix and four
@@ -301,6 +301,12 @@ local record DeferredOptions
     meshShadowMap: function(context: PassGraph.PassContext)
     --- Engine-owned. Enables mesh fog decoding in the lighting resolve.
     meshFog: boolean
+    --- Engine-owned. Enables depth reconstruction and Cook-Torrance shading
+    --- for opaque mesh surfaces.
+    meshPBR: boolean
+    --- Engine-owned. Enables repeated view composition through shared
+    --- intermediate targets.
+    multiCamera: boolean
     --- Enables an optional half-resolution bloom branch. Nil omits both
     --- targets and all three passes.
     bloom: BloomOptions
@@ -388,11 +394,19 @@ local record Deferred
     --- Copies the scene target to the swapchain, and so the only pipeline here
     --- built against the swapchain's format.
     _presentPipeline: GraphicsPipeline
+    _viewCompositePipeline: GraphicsPipeline
     _bloomExtractPipeline: GraphicsPipeline
     _bloomBlurPipeline: GraphicsPipeline
     _bloomUniform: loader.CArray
     _bloomStep: loader.CArray
     _bloom: boolean
+    _multiCamera: boolean
+    _firstView: boolean
+    _lastView: boolean
+    _viewportX: integer
+    _viewportY: integer
+    _viewportWidth: integer
+    _viewportHeight: integer
     --- Blurs the occluder mask along one axis, bound by both blur passes and
     --- told which axis by the four floats it is pushed. Nil while shadows are
     --- off.
@@ -417,6 +431,12 @@ local record Deferred
     _meshShadows: boolean
     --- Whether the lighting resolve decodes mesh fog markers.
     _meshFog: boolean
+    _meshPBR: boolean
+    _meshCameraX: number
+    _meshCameraY: number
+    _meshCameraZ: number
+    _inverseViewProjection: loader.CArray
+    _sceneBytes: integer
     _meshFogR: number
     _meshFogG: number
     _meshFogB: number
@@ -518,7 +538,12 @@ Deferred.SHADOW = SHADOW
 Deferred.STAMP = STAMP
 
 local function buildPipeline(
-    device: loader.CPtr, fragmentName: string, format: integer, name: string, defines: {string: string}
+    device: loader.CPtr,
+    fragmentName: string,
+    format: integer,
+    name: string,
+    defines: {string: string},
+    blendMode?: integer
 ): GraphicsPipeline
     local vertex = Shader.load(device, "deferred.fullscreen.vert", {})
     local fragment = Shader.load(device, fragmentName, {defines = defines})
@@ -528,6 +553,7 @@ local function buildPipeline(
             vertexShader = vertex,
             fragmentShader = fragment,
             colorFormat = format,
+            blendMode = blendMode,
             name = name,
         }
     )
@@ -599,8 +625,18 @@ local function sceneUniform(self: Deferred, width: number, height: number): load
         scene[30] = self._meshLightB
         scene[31] = 0.0
     end
+    local at = self._meshShadows and MESH_SHADOW_SCENE_FLOATS or SCENE_FLOATS
+    if self._meshPBR then
+        scene[at], scene[at + 1], scene[at + 2], scene[at + 3] = self._meshCameraX,
+            self._meshCameraY,
+            self._meshCameraZ,
+            0.0
+        for lane = 0, 15 do
+            scene[at + 4 + lane] = self._inverseViewProjection[lane]
+        end
+        at = at + MESH_PBR_FLOATS
+    end
     if self._meshFog then
-        local at <const> = self._meshShadows and MESH_SHADOW_SCENE_FLOATS or SCENE_FLOATS
         scene[at] = self._meshFogR
         scene[at + 1] = self._meshFogG
         scene[at + 2] = self._meshFogB
@@ -637,6 +673,8 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     local shadows <const> = options.shadows ~= nil
     local meshShadows <const> = options.meshShadowScale ~= nil
     local meshFog <const> = options.meshFog == true
+    local meshPBR <const> = options.meshPBR == true
+    local multiCamera <const> = options.multiCamera == true
     local bloom <const> = options.bloom ~= nil
     local bloomOptions <const> = options.bloom or {}
     local bloomScale <const> = bloomOptions.scale or 0.5
@@ -655,7 +693,13 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self._shadows = shadows
     self._meshShadows = meshShadows
     self._meshFog = meshFog
+    self._meshPBR = meshPBR
+    self._meshCameraX, self._meshCameraY, self._meshCameraZ = 0.0, 0.0, 0.0
+    self._inverseViewProjection = loader.newArray("float[16]")
     self._bloom = bloom
+    self._multiCamera = multiCamera
+    self._firstView, self._lastView = true, true
+    self._viewportX, self._viewportY, self._viewportWidth, self._viewportHeight = 0, 0, 0, 0
     self._meshFogR, self._meshFogG, self._meshFogB = 0.5, 0.6, 0.7
     self._shadowActive = options.shadowActive or alwaysEnabled
     self._meshShadowActive = options.meshShadowActive or alwaysEnabled
@@ -692,8 +736,9 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     )
     self._lightScratch = loader.newArray("float[?]", MAX_LIGHTS * LIGHT_FLOATS)
     local sceneFloats <const> = (meshShadows and MESH_SHADOW_SCENE_FLOATS or SCENE_FLOATS) + (
-        meshFog and MESH_FOG_FLOATS or 0
-    )
+        meshPBR and MESH_PBR_FLOATS or 0
+    ) + (meshFog and MESH_FOG_FLOATS or 0)
+    self._sceneBytes = sceneFloats * 4
     self._sceneUniform = loader.newArray("float[?]", sceneFloats)
     self._binUniform = loader.newArray("float[8]")
     self._viewX = 0.0
@@ -795,6 +840,13 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         name = "scene",
         format = RGBA8,
     })
+    if multiCamera then
+        graph:target({
+            name = "forwardView",
+            format = RGBA8,
+            clear = {r = 0, g = 0, b = 0, a = 0},
+        })
+    end
 
     if bloom then
         graph:target({
@@ -859,7 +911,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     end
 
     local lightingDefines: {string: string} = nil
-    if shadows or meshShadows or meshFog then
+    if shadows or meshShadows or meshFog or meshPBR then
         lightingDefines = {}
         if shadows then
             lightingDefines.SHADOWS = "1"
@@ -869,6 +921,9 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         end
         if meshFog then
             lightingDefines.MESH_FOG = "1"
+        end
+        if meshPBR then
+            lightingDefines.MESH_PBR = "1"
         end
     end
     self._lightingPipeline = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting", lightingDefines)
@@ -880,9 +935,26 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         self._bloomBlurPipeline = buildPipeline(device, "bloom.blur.frag", RGBA8, "bloomBlur", nil)
     end
     self._compositePipeline = buildPipeline(
-        device, "deferred.composite.frag", RGBA8, "composite", bloom and {BLOOM = "1"} or nil
+        device,
+        "deferred.composite.frag",
+        RGBA8,
+        "composite",
+        bloom and {BLOOM = "1"} or nil,
+        multiCamera and GraphicsPipeline.BLEND_PREMULTIPLIED or nil
     )
     self._presentPipeline = buildPipeline(device, "deferred.present.frag", swapchainFormat, "present", nil)
+    if multiCamera then
+        self._viewCompositePipeline = buildPipeline(
+            device, "deferred.present.frag", RGBA8, "forwardComposite", nil, GraphicsPipeline.BLEND_PREMULTIPLIED
+        )
+        graph:pass({
+            name = "sceneClear",
+            outputs = {"scene"},
+            clear = {r = 0, g = 0, b = 0, a = 1},
+            enabled = function(): boolean return self._firstView end,
+            execute = function(_context: PassGraph.PassContext) end,
+        })
+    end
 
     if meshShadows then
         graph:pass({
@@ -991,11 +1063,17 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         -- Declaration order is binding order, and the shader numbers its
         -- samplers to match: the G-buffer's four first, then the two a
         -- pipeline built with shadows on adds.
-        inputs = shadows and {"albedo", "normal", "orm", "emission", "occluders", "dropShadowAO"}
+        inputs = shadows and meshPBR and {"albedo", "normal", "orm", "emission", "depth", "occluders", "dropShadowAO"}
+            or shadows and {"albedo", "normal", "orm", "emission", "occluders", "dropShadowAO"}
+            or meshPBR and {"albedo", "normal", "orm", "emission", "depth"}
             or {"albedo", "normal", "orm", "emission"},
         outputs = {"lit"},
         execute = function(context: PassGraph.PassContext)
-            local scene <const> = sceneUniform(self, context.width, context.height)
+            local scene <const> = sceneUniform(
+                self,
+                self._multiCamera and self._viewportWidth or context.width,
+                self._multiCamera and self._viewportHeight or context.height
+            )
 
             local buffers <const> = self._lightingBuffers
             buffers[1] = self._lightBuffer.handle
@@ -1004,14 +1082,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
 
             context.pass:bindPipeline(self._lightingPipeline.handle)
             context.pass:bindFragmentStorageBuffers(0, buffers)
-            C.SDL_PushGPUFragmentUniformData(
-                context.commandBuffer,
-                0,
-                scene,
-                (self._meshShadows and MESH_SHADOW_SCENE_BYTES or SCENE_BYTES) + (
-                    self._meshFog and MESH_FOG_FLOATS * 4 or 0
-                )
-            )
+            C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, scene, self._sceneBytes)
             context.pass:draw(3)
         end,
     })
@@ -1063,7 +1134,12 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         name = "composite",
         inputs = bloom and {"lit", "bloomA"} or {"lit"},
         outputs = {"scene"},
+        clear = multiCamera and PassGraph.LOAD or nil,
         execute = function(context: PassGraph.PassContext)
+            if self._multiCamera then
+                context.pass:setViewport(self._viewportX, self._viewportY, self._viewportWidth, self._viewportHeight)
+                context.pass:setScissor(self._viewportX, self._viewportY, self._viewportWidth, self._viewportHeight)
+            end
             context.pass:bindPipeline(self._compositePipeline.handle)
             context.pass:draw(3)
         end,
@@ -1080,7 +1156,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         -- it against the G-buffer and cannot decide it against itself.
         name = "forward",
         inputs = meshShadows and {"meshShadowMap"} or nil,
-        outputs = {"scene"},
+        outputs = multiCamera and {"forwardView"} or {"scene"},
         depth = {test = true, write = false},
         execute = function(context: PassGraph.PassContext)
             if options.forward ~= nil then
@@ -1089,6 +1165,21 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         end,
     })
 
+    if multiCamera then
+        graph:pass({
+            name = "forwardComposite",
+            inputs = {"forwardView"},
+            outputs = {"scene"},
+            clear = PassGraph.LOAD,
+            execute = function(context: PassGraph.PassContext)
+                context.pass:setViewport(self._viewportX, self._viewportY, self._viewportWidth, self._viewportHeight)
+                context.pass:setScissor(self._viewportX, self._viewportY, self._viewportWidth, self._viewportHeight)
+                context.pass:bindPipeline(self._viewCompositePipeline.handle)
+                context.pass:draw(3)
+            end,
+        })
+    end
+
     graph:pass({
         -- Declared last and executed last, since the graph runs passes in
         -- declaration order and this is the one that writes the swapchain.
@@ -1096,6 +1187,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         name = "present",
         inputs = {"scene"},
         outputs = {},
+        enabled = multiCamera and function(): boolean return self._lastView end or nil,
         execute = function(context: PassGraph.PassContext)
             context.pass:bindPipeline(self._presentPipeline.handle)
             context.pass:draw(3)
@@ -1259,9 +1351,23 @@ end
 --- @param frame The frame to record into. Present writes to its swapchain
 ---     texture and the graph sizes its targets to its width and height, so a
 ---     resized window is picked up here rather than announced.
-function Deferred:render(frame: Frame)
+function Deferred:render(
+    frame: Frame,
+    viewportX?: integer,
+    viewportY?: integer,
+    viewportWidth?: integer,
+    viewportHeight?: integer,
+    firstView?: boolean,
+    lastView?: boolean
+)
     self._lightBuffer:flush(frame.commandBuffer)
-    resolveView(self, frame.width, frame.height)
+    local width <const> = viewportWidth or frame.width
+    local height <const> = viewportHeight or frame.height
+    self._viewportX, self._viewportY = viewportX or 0, viewportY or 0
+    self._viewportWidth, self._viewportHeight = width, height
+    self._firstView = firstView ~= false
+    self._lastView = lastView ~= false
+    resolveView(self, width, height)
 
     local bin <const> = self._binUniform
     bin[0] = self._boundsMinX
@@ -1306,13 +1412,14 @@ function Deferred:rebuildPipelines()
     local lighting: GraphicsPipeline = nil
     local composite: GraphicsPipeline = nil
     local present: GraphicsPipeline = nil
+    local viewComposite: GraphicsPipeline = nil
     local blur: GraphicsPipeline = nil
     local bloomExtract: GraphicsPipeline = nil
     local bloomBlur: GraphicsPipeline = nil
     local bin: ComputePipeline = nil
     local built, reason = pcall(function(): string
         local defines: {string: string} = nil
-        if self._shadows or self._meshShadows or self._meshFog then
+        if self._shadows or self._meshShadows or self._meshFog or self._meshPBR then
             defines = {}
             if self._shadows then
                 defines.SHADOWS = "1"
@@ -1323,6 +1430,9 @@ function Deferred:rebuildPipelines()
             if self._meshFog then
                 defines.MESH_FOG = "1"
             end
+            if self._meshPBR then
+                defines.MESH_PBR = "1"
+            end
         end
         lighting = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting", defines)
         if self._bloom then
@@ -1330,9 +1440,19 @@ function Deferred:rebuildPipelines()
             bloomBlur = buildPipeline(device, "bloom.blur.frag", RGBA8, "bloomBlur", nil)
         end
         composite = buildPipeline(
-            device, "deferred.composite.frag", RGBA8, "composite", self._bloom and {BLOOM = "1"} or nil
+            device,
+            "deferred.composite.frag",
+            RGBA8,
+            "composite",
+            self._bloom and {BLOOM = "1"} or nil,
+            self._multiCamera and GraphicsPipeline.BLEND_PREMULTIPLIED or nil
         )
         present = buildPipeline(device, "deferred.present.frag", self.graph.swapchainFormat, "present", nil)
+        if self._multiCamera then
+            viewComposite = buildPipeline(
+                device, "deferred.present.frag", RGBA8, "forwardComposite", nil, GraphicsPipeline.BLEND_PREMULTIPLIED
+            )
+        end
         if self._shadows then
             blur = buildPipeline(device, "occluder.blur.frag", RGBA8, "occluderBlur", nil)
         end
@@ -1347,6 +1467,9 @@ function Deferred:rebuildPipelines()
         end
         if present ~= nil then
             present:destroy()
+        end
+        if viewComposite ~= nil then
+            viewComposite:destroy()
         end
         if blur ~= nil then
             blur:destroy()
@@ -1366,6 +1489,7 @@ function Deferred:rebuildPipelines()
     local oldLighting <const> = self._lightingPipeline
     local oldComposite <const> = self._compositePipeline
     local oldPresent <const> = self._presentPipeline
+    local oldViewComposite <const> = self._viewCompositePipeline
     local oldBlur <const> = self._blurPipeline
     local oldBloomExtract <const> = self._bloomExtractPipeline
     local oldBloomBlur <const> = self._bloomBlurPipeline
@@ -1373,6 +1497,7 @@ function Deferred:rebuildPipelines()
     self._lightingPipeline = lighting
     self._compositePipeline = composite
     self._presentPipeline = present
+    self._viewCompositePipeline = viewComposite
     self._blurPipeline = blur
     self._bloomExtractPipeline = bloomExtract
     self._bloomBlurPipeline = bloomBlur
@@ -1380,6 +1505,9 @@ function Deferred:rebuildPipelines()
     oldLighting:destroy()
     oldComposite:destroy()
     oldPresent:destroy()
+    if oldViewComposite ~= nil then
+        oldViewComposite:destroy()
+    end
     if oldBlur ~= nil then
         oldBlur:destroy()
     end
@@ -1452,7 +1580,14 @@ function Deferred:bindLighting(context: PassGraph.PassContext, firstSlot?: integ
     buffers[3] = self._tileLights.handle
     context.pass:bindFragmentStorageBuffers(firstSlot or 0, buffers)
     C.SDL_PushGPUFragmentUniformData(
-        context.commandBuffer, 1, sceneUniform(self, context.width, context.height), SCENE_BYTES
+        context.commandBuffer,
+        1,
+        sceneUniform(
+            self,
+            self._multiCamera and self._viewportWidth or context.width,
+            self._multiCamera and self._viewportHeight or context.height
+        ),
+        SCENE_BYTES
     )
 end
 
@@ -1529,6 +1664,18 @@ end
 --- @param b The mesh domain supplies normalized blue.
 function Deferred:setMeshFog(r: number, g: number, b: number)
     self._meshFogR, self._meshFogG, self._meshFogB = r, g, b
+end
+
+--- Updates the perspective view used to reconstruct opaque mesh positions.
+--- @param x World-space camera x.
+--- @param y World-space camera y.
+--- @param z World-space camera z.
+--- @param inverseViewProjection Sixteen column-major clip-to-world floats.
+function Deferred:setMeshView(x: number, y: number, z: number, inverseViewProjection: loader.CArray)
+    self._meshCameraX, self._meshCameraY, self._meshCameraZ = x, y, z
+    for lane = 0, 15 do
+        self._inverseViewProjection[lane] = inverseViewProjection[lane]
+    end
 end
 
 --- The color format a pipeline drawing into the occluder mask must be created
@@ -1619,6 +1766,9 @@ function Deferred:destroy()
         self._bloomBlurPipeline:destroy()
     end
     self._presentPipeline:destroy()
+    if self._viewCompositePipeline ~= nil then
+        self._viewCompositePipeline:destroy()
+    end
     if self._blurPipeline ~= nil then
         self._blurPipeline:destroy()
     end

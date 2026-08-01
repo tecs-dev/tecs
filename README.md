@@ -93,7 +93,7 @@ Run `cargo xtask deps` once to install and stage development dependencies, then:
 ```bash
 cargo xtask build              # Build the host development preset
 cargo xtask example ui-demo    # Run the 2D showcase
-cargo xtask example scene3d    # Run the shadowed 3D mesh example
+cargo xtask example scene3d    # Run the split-screen Cook-Torrance example
 cargo xtask example gltf3d     # Run the textured 3D example
 cargo xtask example skinning3d # Run the GPU skeletal-deformation example
 cargo xtask example animated3d # Run decoded glTF node animation

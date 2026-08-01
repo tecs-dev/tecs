@@ -47,6 +47,11 @@ local MAX_COLOR_TARGETS <const> = 8
 local MAX_TEXTURE_BINDINGS <const> = 16
 local MAX_BUFFER_BINDINGS <const> = 8
 
+-- Rewritten immediately before SDL copies them. Render recording is already
+-- single-threaded for the same reason every binding array in this module is.
+local viewportInfo <const> = loader.newArray("SDL_GPUViewport[1]")
+local scissorInfo <const> = loader.newArray("SDL_Rect[1]")
+
 --- A begun render pass, and everything that records into one.
 ---
 --- `begin` opens one on a command buffer and `finish` closes it; between those
@@ -166,6 +171,20 @@ local record RenderPass
     ---     depth-stencil target match what this pass was begun with. A pipeline
     ---     must be bound before the pass's first draw.
     bindPipeline: function(self, pipeline: loader.CValue)
+
+    --- Restricts clip-space rasterization to one attachment rectangle.
+    --- @param x Left edge in attachment pixels.
+    --- @param y Top edge in attachment pixels.
+    --- @param width Positive width in attachment pixels.
+    --- @param height Positive height in attachment pixels.
+    setViewport: function(self, x: number, y: number, width: number, height: number)
+
+    --- Rejects fragments outside one attachment rectangle.
+    --- @param x Left edge in attachment pixels.
+    --- @param y Top edge in attachment pixels.
+    --- @param width Positive width in attachment pixels.
+    --- @param height Positive height in attachment pixels.
+    setScissor: function(self, x: integer, y: integer, width: integer, height: integer)
 
     --- Binds textures with their samplers to the fragment stage.
     ---
@@ -374,6 +393,25 @@ end
 
 function RenderPass:bindPipeline(pipeline: loader.CValue)
     C.SDL_BindGPUGraphicsPipeline(self.handle, pipeline)
+end
+
+function RenderPass:setViewport(x: number, y: number, width: number, height: number)
+    if width <= 0.0 or height <= 0.0 then
+        error("tecs: GPU viewport width and height must be greater than 0", 2)
+    end
+    local viewport <const> = viewportInfo[0] as loader.CStruct
+    viewport.x, viewport.y, viewport.w, viewport.h = x, y, width, height
+    viewport.min_depth, viewport.max_depth = 0.0, 1.0
+    C.SDL_SetGPUViewport(self.handle, viewportInfo)
+end
+
+function RenderPass:setScissor(x: integer, y: integer, width: integer, height: integer)
+    if width <= 0 or height <= 0 then
+        error("tecs: GPU scissor width and height must be greater than 0", 2)
+    end
+    local scissor <const> = scissorInfo[0] as loader.CStruct
+    scissor.x, scissor.y, scissor.w, scissor.h = x, y, width, height
+    C.SDL_SetGPUScissor(self.handle, scissorInfo)
 end
 
 --- Fills the shared handle array, and answers how many it holds.

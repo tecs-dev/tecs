@@ -25,6 +25,7 @@ local ecs = require("tecs.ecs")
 local materials = require("tecs.gpu.materials")
 local shaders = require("tecs.gpu.shaders")
 local Camera2D = require("tecs.gfx.Camera2D")
+local View = require("tecs.gfx.View")
 
 local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
@@ -534,7 +535,9 @@ describe("ecs.Renderer", function()
         local selected = world:getMut(entity, components.MeshMaterial)
         selected.asset, selected.slot = pbr.asset, pbr.slot
         pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2 - 6, SIZE / 2 + 6)
-        assert.is_true(math.abs(pixel.r - 64) <= 3)
+        -- There is no image-based light yet, so ambient represents only the
+        -- diffuse lobe. A 0.7 metal has 30 percent of that lobe left.
+        assert.is_true(math.abs(pixel.r - 19) <= 3)
         assert.are.equal(0, pixel.g)
         assert.are.equal(3, renderer.meshes.materialCount)
         renderer:destroy()
@@ -711,7 +714,8 @@ describe("ecs.Renderer", function()
         assert.is_nil(renderer.meshes._backend._shadowMarkPipeline, "opaque shadows reuse the camera mark pipeline")
         assert.is_not_nil(renderer.deferred.graph._targets.meshShadowMap)
         assert.is_true(shadow.r < 80, ("the caster should block the directional light, got %d"):format(shadow.r))
-        assert.is_true(lit.r > 180, ("the same receiver should remain lit outside the shadow, got %d"):format(lit.r))
+        assert.is_true(lit.r > 110, ("the same receiver should remain lit outside the shadow, got %d"):format(lit.r))
+        assert.is_true(lit.r - shadow.r > 40, "the Cook-Torrance light must retain visible shadow contrast")
         renderer:destroy()
     end)
 
@@ -2627,6 +2631,35 @@ describe("ecs.Renderer", function()
         )
         local pixels = frameOnce(world, renderer)
         assert.are.equal(255, screen:getPixel(pixels, SIZE * 0.25, SIZE * 0.25).r)
+        renderer:destroy()
+    end)
+
+    it("reculls one uploaded sprite field through ordered entity views", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = { capacity = 8 },
+            maxViews = 2,
+        })
+        renderer:install(world)
+        world:spawn(View.new({
+            camera2D = Camera2D.newCamera2D({ x = SIZE / 4, y = SIZE / 2 }),
+            width = 0.5,
+            order = 0,
+        }))
+        world:spawn(View.new({
+            camera2D = Camera2D.newCamera2D({ x = 1000, y = SIZE / 2 }),
+            x = 0.5,
+            width = 0.5,
+            order = 1,
+        }))
+        world:spawn(Transform2D(SIZE / 4, SIZE / 2, 0, 1, 0, 16, 16), Tint(0.0, 1.0, 0.0, 1.0), Renderable2D())
+
+        local pixels = frameOnce(world, renderer)
+        local left = screen:getPixel(pixels, SIZE / 4, SIZE / 2)
+        local right = screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2)
+        assert.is_true(left.g > 240, ("the first view should retain the sprite, got %d"):format(left.g))
+        assert.are.equal(0, right.g, "the second view should recull the same resident field")
+        assert.is_not_nil(renderer.deferred.graph._targets.forwardView)
         renderer:destroy()
     end)
 

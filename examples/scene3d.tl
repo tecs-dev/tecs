@@ -13,6 +13,7 @@ local Tint <const> = tecs.gfx.Tint
 local Renderable3D <const> = tecs.gfx.Renderable3D
 local Transform2D <const> = tecs.Transform2D
 local Renderable2D <const> = tecs.gfx.Renderable2D
+local View <const> = tecs.gfx.View
 
 local VERTICES <const>: {{number}} = {
     {-1, -1, -1},
@@ -128,6 +129,20 @@ local function game(world: tecs.World, app: tecs.Application)
     camera.near = 0.1
     camera.far = 100
 
+    local sideCamera <const> = tecs.gfx.newCamera3D({
+        x = 5.5,
+        y = 2.5,
+        z = 5.5,
+        rotationY = math.sin(math.rad(-42) * 0.5),
+        rotationW = math.cos(math.rad(-42) * 0.5),
+        verticalFov = math.rad(55),
+        near = 0.1,
+        far = 100,
+    })
+    world:spawn(View.new({camera3D = camera, x = 0, y = 0, width = 0.5, height = 1, order = 0}))
+    world:spawn(View.new({camera3D = sideCamera, x = 0.5, y = 0, width = 0.5, height = 1, order = 1}))
+    world:spawn(View.new({camera2D = app.renderer.sprites.camera, order = 2}))
+
     local meshVertices: {number} = {}
     local meshColors: {number} = {}
     for index = 1, #VERTICES do
@@ -205,7 +220,7 @@ local function game(world: tecs.World, app: tecs.Application)
     world:spawn(Transform2D(70, 44, 1, 16, 0, 88, 10), Tint(0.2, 0.9, 1.0, 1.0), Renderable2D())
     world:spawn(Transform2D(170, 44, 1, 16, 0, 88, 10), Tint(1.0, 0.45, 0.2, 1.0), Renderable2D())
 
-    print("scene3d: vertex colors, PBR/unlit materials, fog, bloom, shadow, and 2D HUD")
+    print("scene3d: two 3D cameras, Cook-Torrance materials, fog, bloom, shadow, and 2D HUD")
     print("scene3d: escape or close the window to quit")
 
     local elapsed = 0.0
@@ -231,6 +246,7 @@ return tecs.newApplication({
     ambientLight = {0.12, 0.13, 0.16},
     capacity = 128,
     bloom = {scale = 0.5, threshold = 0.72, knee = 0.12, intensity = 0.65},
+    maxViews = 3,
     meshes = {
         capacity = 64,
         vertexCapacity = 1024,
@@ -248,7 +264,7 @@ return tecs.newApplication({
             softness = 1.5,
         },
     },
-    maxEntities = 8,
+    maxEntities = 16,
     debug = true,
     debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
     quitOnEscape = true,
