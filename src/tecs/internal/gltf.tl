@@ -396,9 +396,6 @@ local function decodePrimitive(
     if attributes == nil or attributes.POSITION == nil then
         error(("tecs: %s has no POSITION attribute"):format(name), 0)
     end
-    if attributes.COLOR_0 ~= nil then
-        error(("tecs: %s uses unsupported vertex attributes"):format(name), 0)
-    end
     if (attributes.JOINTS_0 == nil) ~= (attributes.WEIGHTS_0 == nil) then
         error(("tecs: %s must supply JOINTS_0 and WEIGHTS_0 together"):format(name), 0)
     end
@@ -411,6 +408,7 @@ local function decodePrimitive(
     local uvs: Access = nil
     local joints: Access = nil
     local weights: Access = nil
+    local colors: Access = nil
     local morphTargets: {{string: Access}} = {}
     if attributes.NORMAL ~= nil then
         normals = accessor(document, buffers, attributes.NORMAL)
@@ -423,6 +421,19 @@ local function decodePrimitive(
     if attributes.TEXCOORD_0 ~= nil then
         uvs = accessor(document, buffers, attributes.TEXCOORD_0)
         sameRows(uvs, 2, positions.count, name .. " TEXCOORD_0")
+    end
+    if attributes.COLOR_0 ~= nil then
+        colors = accessor(document, buffers, attributes.COLOR_0)
+        if colors.components ~= 3 and colors.components ~= 4 then
+            error(("tecs: %s COLOR_0 is not VEC3 or VEC4"):format(name), 0)
+        end
+        if
+            colors.componentType ~= 5126
+            and not (colors.normalized and (colors.componentType == 5121 or colors.componentType == 5123))
+        then
+            error(("tecs: %s COLOR_0 does not use float or normalized unsigned values"):format(name), 0)
+        end
+        sameRows(colors, colors.components, positions.count, name .. " COLOR_0")
     end
     if attributes.JOINTS_0 ~= nil then
         joints = accessor(document, buffers, attributes.JOINTS_0)
@@ -518,6 +529,7 @@ local function decodePrimitive(
 
     local vertices <const> = ffi.new("float[?]", positions.count * 12) as loader.CArray
     local skinVertices: loader.CArray = nil
+    local colorVertices: loader.CArray = nil
     local morphVertices: loader.CArray = nil
     local maxJoint = -1
     if joints ~= nil then
@@ -542,6 +554,16 @@ local function decodePrimitive(
             for lane = 0, 3 do
                 skinVertices[at + 4 + lane] = (skinVertices[at + 4 + lane] as number) / total
             end
+        end
+    end
+    if colors ~= nil then
+        colorVertices = ffi.new("float[?]", positions.count * 4) as loader.CArray
+        for row = 0, positions.count - 1 do
+            local at <const> = row * 4
+            colorVertices[at] = value(colors, row, 0)
+            colorVertices[at + 1] = value(colors, row, 1)
+            colorVertices[at + 2] = value(colors, row, 2)
+            colorVertices[at + 3] = colors.components == 4 and value(colors, row, 3) or 1.0
         end
     end
     local morphRadius = 0.0
@@ -695,6 +717,7 @@ local function decodePrimitive(
     return {
         name = name,
         vertices = ffi.string(vertices as string, positions.count * 48),
+        colorVertices = colorVertices ~= nil and ffi.string(colorVertices as string, positions.count * 16) or nil,
         indices = ffi.string(indices as string, indexCount * 4),
         skinVertices = skinVertices ~= nil and ffi.string(skinVertices as string, positions.count * 32) or nil,
         morphVertices = morphVertices ~= nil

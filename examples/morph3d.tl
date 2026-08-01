@@ -39,9 +39,7 @@ local function game(world: tecs.World, app: tecs.Application)
         world:addSystem({
             name = "example.AnimateMorph",
             phase = tecs.ecs.phases.Update,
-            run = function(dt: number)
-                instance:update(dt)
-            end,
+            run = function(dt: number) instance:update(dt) end,
         })
         print("morph3d: sampling glTF weights into an instance-owned GPU morph vector")
         print("morph3d: escape or close the window to quit")

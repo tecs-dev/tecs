@@ -122,6 +122,7 @@ local SCENE_FLOATS <const> = 24
 local SCENE_BYTES <const> = SCENE_FLOATS * 4
 local MESH_SHADOW_SCENE_FLOATS <const> = 32
 local MESH_SHADOW_SCENE_BYTES <const> = MESH_SHADOW_SCENE_FLOATS * 4
+local MESH_FOG_FLOATS <const> = 4
 
 --- Floats the block a shadow draw is placed from holds: a matrix and four
 --- parameters.
@@ -216,6 +217,21 @@ local record ShadowOptions
     dropLength: number
 end
 
+--- Configures the optional bloom branch.
+local record BloomOptions
+    --- Caller-writable. Sets both bloom targets relative to the frame and
+    --- defaults to 0.5. It must be positive.
+    scale: number
+    --- Caller-writable. Sets the resolved brightness threshold from zero
+    --- through one and defaults to 0.8.
+    threshold: number
+    --- Caller-writable. Softens the threshold from zero through one and
+    --- defaults to 0.1.
+    knee: number
+    --- Caller-writable. Scales the blurred contribution and defaults to 0.7.
+    intensity: number
+end
+
 local record DeferredOptions
     --- Draws into the G-buffer. Writes location 0 for albedo, location 1 for a
     --- normal biased into unsigned range, location 2 for ORM, and location 3
@@ -283,6 +299,11 @@ local record DeferredOptions
     meshShadowActive: function(): boolean
     --- Engine-owned. Draws mesh depth into the directional shadow map.
     meshShadowMap: function(context: PassGraph.PassContext)
+    --- Engine-owned. Enables mesh fog decoding in the lighting resolve.
+    meshFog: boolean
+    --- Enables an optional half-resolution bloom branch. Nil omits both
+    --- targets and all three passes.
+    bloom: BloomOptions
 end
 
 --- The deferred pipeline: its pass graph, the pipelines it binds, and the
@@ -297,6 +318,7 @@ local record Deferred
     Light: Light
     --- What turns shadows on, and the only place their numbers are described.
     ShadowOptions: ShadowOptions
+    BloomOptions: BloomOptions
     --- The occluder mask draw, which puts a caster's own silhouette into the
     --- mask every light marches against.
     MASK: integer
@@ -366,6 +388,11 @@ local record Deferred
     --- Copies the scene target to the swapchain, and so the only pipeline here
     --- built against the swapchain's format.
     _presentPipeline: GraphicsPipeline
+    _bloomExtractPipeline: GraphicsPipeline
+    _bloomBlurPipeline: GraphicsPipeline
+    _bloomUniform: loader.CArray
+    _bloomStep: loader.CArray
+    _bloom: boolean
     --- Blurs the occluder mask along one axis, bound by both blur passes and
     --- told which axis by the four floats it is pushed. Nil while shadows are
     --- off.
@@ -388,6 +415,11 @@ local record Deferred
     _shadows: boolean
     --- Whether the graph owns the optional mesh shadow-map lane.
     _meshShadows: boolean
+    --- Whether the lighting resolve decodes mesh fog markers.
+    _meshFog: boolean
+    _meshFogR: number
+    _meshFogG: number
+    _meshFogB: number
     --- Reports whether the current frame has an opaque mesh caster.
     _meshShadowActive: function(): boolean
     --- Direction from a surface toward the mesh domain's directional light.
@@ -567,6 +599,13 @@ local function sceneUniform(self: Deferred, width: number, height: number): load
         scene[30] = self._meshLightB
         scene[31] = 0.0
     end
+    if self._meshFog then
+        local at <const> = self._meshShadows and MESH_SHADOW_SCENE_FLOATS or SCENE_FLOATS
+        scene[at] = self._meshFogR
+        scene[at + 1] = self._meshFogG
+        scene[at + 2] = self._meshFogB
+        scene[at + 3] = 0.0
+    end
     return scene
 end
 
@@ -597,8 +636,27 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     local tuning <const> = options.shadows or {}
     local shadows <const> = options.shadows ~= nil
     local meshShadows <const> = options.meshShadowScale ~= nil
+    local meshFog <const> = options.meshFog == true
+    local bloom <const> = options.bloom ~= nil
+    local bloomOptions <const> = options.bloom or {}
+    local bloomScale <const> = bloomOptions.scale or 0.5
+    local bloomThreshold <const> = bloomOptions.threshold or 0.8
+    local bloomKnee <const> = bloomOptions.knee or 0.1
+    local bloomIntensity <const> = bloomOptions.intensity or 0.7
+    if bloomScale <= 0.0 then
+        error("tecs: bloom scale must be greater than 0", 2)
+    end
+    if bloomThreshold < 0.0 or bloomThreshold > 1.0 or bloomKnee < 0.0 or bloomKnee > 1.0 then
+        error("tecs: bloom threshold and knee must be between 0 and 1", 2)
+    end
+    if bloomIntensity < 0.0 then
+        error("tecs: bloom intensity must be greater than or equal to 0", 2)
+    end
     self._shadows = shadows
     self._meshShadows = meshShadows
+    self._meshFog = meshFog
+    self._bloom = bloom
+    self._meshFogR, self._meshFogG, self._meshFogB = 0.5, 0.6, 0.7
     self._shadowActive = options.shadowActive or alwaysEnabled
     self._meshShadowActive = options.meshShadowActive or alwaysEnabled
     self._meshLightX, self._meshLightY, self._meshLightZ = 0.0, 1.0, 0.0
@@ -614,6 +672,14 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self._stepClock = 0.0
     self._blurUniform = loader.newArray("float[4]")
     self._castUniform = loader.newArray("float[?]", CAST_FLOATS)
+    if bloom then
+        self._bloomUniform = loader.newArray("float[4]")
+        self._bloomUniform[0], self._bloomUniform[1], self._bloomUniform[2], self._bloomUniform[3] = bloomThreshold,
+            bloomKnee,
+            bloomIntensity,
+            0.0
+        self._bloomStep = loader.newArray("float[4]")
+    end
 
     self._lightBuffer = Buffer.create(
         device,
@@ -625,7 +691,10 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         }
     )
     self._lightScratch = loader.newArray("float[?]", MAX_LIGHTS * LIGHT_FLOATS)
-    self._sceneUniform = loader.newArray("float[?]", meshShadows and MESH_SHADOW_SCENE_FLOATS or SCENE_FLOATS)
+    local sceneFloats <const> = (meshShadows and MESH_SHADOW_SCENE_FLOATS or SCENE_FLOATS) + (
+        meshFog and MESH_FOG_FLOATS or 0
+    )
+    self._sceneUniform = loader.newArray("float[?]", sceneFloats)
     self._binUniform = loader.newArray("float[8]")
     self._viewX = 0.0
     self._viewY = 0.0
@@ -727,6 +796,25 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         format = RGBA8,
     })
 
+    if bloom then
+        graph:target({
+            -- Compatibility surface: games may add passes around this target
+            -- by name, so the string stays stable if bloom moves internally.
+            name = "bloomA",
+            format = RGBA8,
+            scale = bloomScale,
+            clear = {r = 0, g = 0, b = 0, a = 1},
+        })
+        graph:target({
+            -- Compatibility surface: games may add passes around this target
+            -- by name, so the string stays stable if bloom moves internally.
+            name = "bloomB",
+            format = RGBA8,
+            scale = bloomScale,
+            clear = {r = 0, g = 0, b = 0, a = 1},
+        })
+    end
+
     if meshShadows then
         graph:target({
             -- Compatibility surface: games may add passes around this target
@@ -771,7 +859,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     end
 
     local lightingDefines: {string: string} = nil
-    if shadows or meshShadows then
+    if shadows or meshShadows or meshFog then
         lightingDefines = {}
         if shadows then
             lightingDefines.SHADOWS = "1"
@@ -779,12 +867,21 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         if meshShadows then
             lightingDefines.MESH_SHADOWS = "1"
         end
+        if meshFog then
+            lightingDefines.MESH_FOG = "1"
+        end
     end
     self._lightingPipeline = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting", lightingDefines)
     if shadows then
         self._blurPipeline = buildPipeline(device, "occluder.blur.frag", RGBA8, "occluderBlur", nil)
     end
-    self._compositePipeline = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite", nil)
+    if bloom then
+        self._bloomExtractPipeline = buildPipeline(device, "bloom.extract.frag", RGBA8, "bloomExtract", nil)
+        self._bloomBlurPipeline = buildPipeline(device, "bloom.blur.frag", RGBA8, "bloomBlur", nil)
+    end
+    self._compositePipeline = buildPipeline(
+        device, "deferred.composite.frag", RGBA8, "composite", bloom and {BLOOM = "1"} or nil
+    )
     self._presentPipeline = buildPipeline(device, "deferred.present.frag", swapchainFormat, "present", nil)
 
     if meshShadows then
@@ -908,15 +1005,63 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
             context.pass:bindPipeline(self._lightingPipeline.handle)
             context.pass:bindFragmentStorageBuffers(0, buffers)
             C.SDL_PushGPUFragmentUniformData(
-                context.commandBuffer, 0, scene, self._meshShadows and MESH_SHADOW_SCENE_BYTES or SCENE_BYTES
+                context.commandBuffer,
+                0,
+                scene,
+                (self._meshShadows and MESH_SHADOW_SCENE_BYTES or SCENE_BYTES) + (
+                    self._meshFog and MESH_FOG_FLOATS * 4 or 0
+                )
             )
             context.pass:draw(3)
         end,
     })
 
+    if bloom then
+        graph:pass({
+            -- Compatibility surface: games may place their own pass around
+            -- this one by name, so the string remains stable.
+            name = "bloomExtract",
+            inputs = {"lit"},
+            outputs = {"bloomA"},
+            execute = function(context: PassGraph.PassContext)
+                context.pass:bindPipeline(self._bloomExtractPipeline.handle)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, self._bloomUniform, 16)
+                context.pass:draw(3)
+            end,
+        })
+        graph:pass({
+            -- Compatibility surface: games may place their own pass around
+            -- this one by name, so the string remains stable.
+            name = "bloomBlurX",
+            inputs = {"bloomA"},
+            outputs = {"bloomB"},
+            execute = function(context: PassGraph.PassContext)
+                local step <const> = self._bloomStep
+                step[0], step[1], step[2], step[3] = 1.0 / context.width, 0.0, 0.0, 0.0
+                context.pass:bindPipeline(self._bloomBlurPipeline.handle)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, step, 16)
+                context.pass:draw(3)
+            end,
+        })
+        graph:pass({
+            -- Compatibility surface: games may place their own pass around
+            -- this one by name, so the string remains stable.
+            name = "bloomBlurY",
+            inputs = {"bloomB"},
+            outputs = {"bloomA"},
+            execute = function(context: PassGraph.PassContext)
+                local step <const> = self._bloomStep
+                step[0], step[1], step[2], step[3] = 0.0, 1.0 / context.height, 0.0, 0.0
+                context.pass:bindPipeline(self._bloomBlurPipeline.handle)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, step, 16)
+                context.pass:draw(3)
+            end,
+        })
+    end
+
     graph:pass({
         name = "composite",
-        inputs = {"lit"},
+        inputs = bloom and {"lit", "bloomA"} or {"lit"},
         outputs = {"scene"},
         execute = function(context: PassGraph.PassContext)
             context.pass:bindPipeline(self._compositePipeline.handle)
@@ -1162,10 +1307,12 @@ function Deferred:rebuildPipelines()
     local composite: GraphicsPipeline = nil
     local present: GraphicsPipeline = nil
     local blur: GraphicsPipeline = nil
+    local bloomExtract: GraphicsPipeline = nil
+    local bloomBlur: GraphicsPipeline = nil
     local bin: ComputePipeline = nil
     local built, reason = pcall(function(): string
         local defines: {string: string} = nil
-        if self._shadows or self._meshShadows then
+        if self._shadows or self._meshShadows or self._meshFog then
             defines = {}
             if self._shadows then
                 defines.SHADOWS = "1"
@@ -1173,9 +1320,18 @@ function Deferred:rebuildPipelines()
             if self._meshShadows then
                 defines.MESH_SHADOWS = "1"
             end
+            if self._meshFog then
+                defines.MESH_FOG = "1"
+            end
         end
         lighting = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting", defines)
-        composite = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite", nil)
+        if self._bloom then
+            bloomExtract = buildPipeline(device, "bloom.extract.frag", RGBA8, "bloomExtract", nil)
+            bloomBlur = buildPipeline(device, "bloom.blur.frag", RGBA8, "bloomBlur", nil)
+        end
+        composite = buildPipeline(
+            device, "deferred.composite.frag", RGBA8, "composite", self._bloom and {BLOOM = "1"} or nil
+        )
         present = buildPipeline(device, "deferred.present.frag", self.graph.swapchainFormat, "present", nil)
         if self._shadows then
             blur = buildPipeline(device, "occluder.blur.frag", RGBA8, "occluderBlur", nil)
@@ -1195,6 +1351,12 @@ function Deferred:rebuildPipelines()
         if blur ~= nil then
             blur:destroy()
         end
+        if bloomExtract ~= nil then
+            bloomExtract:destroy()
+        end
+        if bloomBlur ~= nil then
+            bloomBlur:destroy()
+        end
         if bin ~= nil then
             bin:destroy()
         end
@@ -1205,17 +1367,25 @@ function Deferred:rebuildPipelines()
     local oldComposite <const> = self._compositePipeline
     local oldPresent <const> = self._presentPipeline
     local oldBlur <const> = self._blurPipeline
+    local oldBloomExtract <const> = self._bloomExtractPipeline
+    local oldBloomBlur <const> = self._bloomBlurPipeline
     local oldBin <const> = self._binPipeline
     self._lightingPipeline = lighting
     self._compositePipeline = composite
     self._presentPipeline = present
     self._blurPipeline = blur
+    self._bloomExtractPipeline = bloomExtract
+    self._bloomBlurPipeline = bloomBlur
     self._binPipeline = bin
     oldLighting:destroy()
     oldComposite:destroy()
     oldPresent:destroy()
     if oldBlur ~= nil then
         oldBlur:destroy()
+    end
+    if oldBloomExtract ~= nil then
+        oldBloomExtract:destroy()
+        oldBloomBlur:destroy()
     end
     oldBin:destroy()
 end
@@ -1353,6 +1523,14 @@ function Deferred:setMeshLight(x: number, y: number, z: number, intensity: numbe
     self._meshLightR, self._meshLightG, self._meshLightB = r, g, b
 end
 
+--- Updates the color used for mesh fog in the next lighting resolve.
+--- @param r The mesh domain supplies normalized red.
+--- @param g The mesh domain supplies normalized green.
+--- @param b The mesh domain supplies normalized blue.
+function Deferred:setMeshFog(r: number, g: number, b: number)
+    self._meshFogR, self._meshFogG, self._meshFogB = r, g, b
+end
+
 --- The color format a pipeline drawing into the occluder mask must be created
 --- against, and the one drawing into the drop-shadow target.
 ---
@@ -1436,6 +1614,10 @@ function Deferred:destroy()
     self.graph:destroy()
     self._lightingPipeline:destroy()
     self._compositePipeline:destroy()
+    if self._bloom then
+        self._bloomExtractPipeline:destroy()
+        self._bloomBlurPipeline:destroy()
+    end
     self._presentPipeline:destroy()
     if self._blurPipeline ~= nil then
         self._blurPipeline:destroy()

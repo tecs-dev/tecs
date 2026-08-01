@@ -24,6 +24,10 @@
 #pragma tecs variants SHADOWS=1
 #pragma tecs variants MESH_SHADOWS=1
 #pragma tecs variants SHADOWS=1 MESH_SHADOWS=1
+#pragma tecs variants MESH_FOG=1
+#pragma tecs variants SHADOWS=1 MESH_FOG=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_FOG=1
 
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 outColor;
@@ -94,6 +98,9 @@ layout(set = 3, binding = 0) uniform Scene {
     // in w, then its color. Only mesh geometry marks itself as participating.
     vec4 meshLightDirection;
     vec4 meshLightColor;
+#endif
+#ifdef MESH_FOG
+    vec4 meshFog;
 #endif
 } scene;
 
@@ -189,13 +196,30 @@ void main() {
     vec4 emitted = texture(gEmission, vUV);
     vec3 emission = emitted.rgb * emitted.a;
 
+    float fog = 0.0;
+    bool lit = encoded.a >= 0.5;
+#ifdef MESH_FOG
+    // Sprites use the exact endpoints. Fog-enabled meshes use two reserved
+    // middle ranges so both lit and unlit material dispatch survive the trip
+    // through the normalized G-buffer.
+    if (encoded.a > 0.1 && encoded.a < 0.9) {
+        lit = encoded.a >= 0.5;
+        fog = lit ? clamp((encoded.a - 0.50) / 0.24, 0.0, 1.0)
+                  : clamp((encoded.a - 0.25) / 0.24, 0.0, 1.0);
+    }
+#endif
+
     // A material that asked not to be lit passes through at its own color,
     // plus whatever it emits: the flag says the lighting does not reach the
     // surface, and emission is the surface's own and is not lighting reaching
     // it. The G-buffer clears both attachments to zero, so anything nothing drew
     // over also takes this path and stays the clear color.
-    if (encoded.a < 0.5) {
-        outColor = vec4(albedo.rgb + emission, albedo.a);
+    if (!lit) {
+        vec3 color = albedo.rgb + emission;
+#ifdef MESH_FOG
+        color = mix(color, scene.meshFog.rgb, fog);
+#endif
+        outColor = vec4(color, albedo.a);
         return;
     }
 
@@ -270,5 +294,9 @@ void main() {
     // sign is as bright in the dark as under a lamp, which is the whole of what
     // makes it a sign, and the drop shadow above darkens the ground the sign
     // stands on without dimming the sign.
-    outColor = vec4(albedo.rgb * accumulated + emission, albedo.a);
+    vec3 color = albedo.rgb * accumulated + emission;
+#ifdef MESH_FOG
+    color = mix(color, scene.meshFog.rgb, fog);
+#endif
+    outColor = vec4(color, albedo.a);
 }

@@ -44,6 +44,9 @@ local record RendererOptions
     --- Caller-writable. Configures and enables the 3D mesh rendering domain.
     --- Nil leaves every mesh module and allocation out of this renderer.
     meshes: MeshDomain.Options
+    --- Caller-writable. Enables and configures optional bloom. Nil omits its
+    --- targets, pipelines, and passes.
+    bloom: Deferred.BloomOptions
 end
 
 local record Renderer
@@ -55,6 +58,7 @@ local record Renderer
     type SpriteComputeStage = ComputeStage
     type MeshDomain = MeshDomain
     type MeshOptions = MeshDomain.Options
+    type BloomOptions = Deferred.BloomOptions
 
     --- Read-only. Provides the concrete 2D rendering lane, or nil when
     --- creation disabled it.
@@ -89,6 +93,7 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
 
     local ambient <const> = options.ambient or {DEFAULT_AMBIENT[1], DEFAULT_AMBIENT[2], DEFAULT_AMBIENT[3]}
     local meshShadow = options.meshes ~= nil and options.meshes.shadows or nil
+    local meshFog = options.meshes ~= nil and options.meshes.fog or nil
     if meshShadow ~= nil and (meshShadow.scale or 1.0) <= 0.0 then
         error("tecs: mesh shadow scale must be greater than 0", 2)
     end
@@ -107,6 +112,8 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
         meshShadowScale = meshShadow ~= nil and (meshShadow.scale or 1.0) or nil,
         meshShadowActive = function(): boolean return meshes ~= nil and meshes:_castsThisFrame() end,
         meshShadowMap = function(_context: Deferred.PassContext) end,
+        meshFog = meshFog ~= nil,
+        bloom = options.bloom,
         geometry = function(_context: Deferred.PassContext) end,
         forward = function(_context: Deferred.PassContext) end,
     }

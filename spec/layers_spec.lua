@@ -32,6 +32,14 @@ describe("a layer's depth", function()
         assert.is_false(layers.isScreenSpace(layers.MAX + 1))
     end)
 
+    it("reports whether a layer always uses the forward overlay lane", function()
+        layers.configure(6, { sort = "z", screenSpace = true, overlay = true })
+        assert.is_true(layers.isOverlay(6))
+        restore(6)
+        assert.is_false(layers.isOverlay(6))
+        assert.is_false(layers.isOverlay(layers.MAX + 1))
+    end)
+
     it("stays inside its own band for a scene taller than maxY", function()
         -- Ten times the extent the module was told to expect, which is what a
         -- large world hands it without anyone having said anything wrong.

@@ -62,6 +62,7 @@ return tecs.newApplication({
         textureLayers = 4,
         packTextures = true,
         transparency = true,
+        vertexColors = true,
     },
     maxEntities = 16,
     debug = true,

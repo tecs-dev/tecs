@@ -24,6 +24,9 @@ A domain created with `morphing` adds immutable position, normal, and tangent
 deltas, per-instance locators, retained weight vectors, and morph shader
 variants. A domain without it creates none of those resources. When both
 deformation lanes exist, morphing runs before skinning.
+A domain created with `vertexColors = true` adds a separate immutable RGBA
+vertex stream and matching shader variants. The base vertex stride is unchanged
+when the lane is disabled.
 ]=]
 
 local type types = require("tecs.types")
@@ -165,6 +168,25 @@ local record MeshMorphingOptions
     weightCapacity: integer
 end
 
+--- Controls linear camera-distance fog at runtime.
+local interface MeshFogTuning
+    --- Caller-writable. Sets the distance where fog begins and defaults to 20.
+    start: number
+    --- Caller-writable. Sets the distance where fog is complete, must exceed
+    --- `start`, and defaults to 100.
+    finish: number
+    --- Caller-writable. Sets fog red from zero through one.
+    r: number
+    --- Caller-writable. Sets fog green from zero through one.
+    g: number
+    --- Caller-writable. Sets fog blue from zero through one.
+    b: number
+end
+
+--- Enables the mesh-only fog shader and G-buffer variants.
+local record MeshFogOptions is MeshFogTuning
+end
+
 local record MeshDomainOptions
     --- Caller-writable. Sets the maximum resident mesh-instance count and
     --- defaults to 65,536.
@@ -204,6 +226,13 @@ local record MeshDomainOptions
     --- per-instance metadata and weights, and shader variants. Nil disables
     --- GPU morphing.
     morphing: MeshMorphingOptions
+    --- Caller-writable. Enables a separate immutable linear RGBA vertex-color
+    --- stream and shader variants. Defaults to false. A colored procedural or
+    --- glTF mesh requires this option.
+    vertexColors: boolean
+    --- Caller-writable. Enables linear camera-distance fog for meshes. Nil
+    --- omits its shader variants and runtime work.
+    fog: MeshFogOptions
 end
 
 local type RegisteredPrimitive = Model3D.Primitive
@@ -215,6 +244,8 @@ local record MeshDomain
     type Shadow = MeshShadowTuning
     type SkinningOptions = MeshSkinningOptions
     type MorphingOptions = MeshMorphingOptions
+    type FogOptions = MeshFogOptions
+    type Fog = MeshFogTuning
     type RegisteredPrimitive = RegisteredPrimitive
     type Model3D = Model3D
 
@@ -269,9 +300,15 @@ local record MeshDomain
     skinning: boolean
     --- Read-only. Reports whether this domain owns GPU morph resources.
     morphing: boolean
+    --- Read-only. Reports whether this domain owns vertex-color resources.
+    vertexColors: boolean
+    --- Read-only. Reports whether mesh fog shader variants are enabled.
+    fogging: boolean
     --- Caller-writable. Controls the enabled directional light and shadow map.
     --- Nil while shadows are disabled.
     shadow: MeshShadowTuning
+    --- Caller-writable. Controls enabled mesh fog. Nil while fog is disabled.
+    fog: MeshFogTuning
     --- Engine-owned. Exposes immutable vertex storage to the opaque
     --- mesh pass. Ordinary game code should ignore it.
     vertices: Buffer
@@ -392,6 +429,8 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self.shadows = options.shadows ~= nil
     self.skinning = options.skinning ~= nil
     self.morphing = options.morphing ~= nil
+    self.vertexColors = options.vertexColors == true
+    self.fogging = options.fog ~= nil
     if self.shadows then
         local shadow <const> = options.shadows or {}
         self.shadow = {
@@ -406,6 +445,16 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
             strength = shadow.strength or 1.0,
             bias = shadow.bias or 0.0015,
             softness = shadow.softness or 1.0,
+        }
+    end
+    if self.fogging then
+        local fog <const> = options.fog or {}
+        self.fog = {
+            start = fog.start or 20.0,
+            finish = fog.finish or 100.0,
+            r = fog.r or 0.5,
+            g = fog.g or 0.6,
+            b = fog.b or 0.7,
         }
     end
     self._centerXByAsset = {}
@@ -433,6 +482,8 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
             morphing = self.morphing,
             morphVertexCapacity = morphVertexCapacity,
             morphWeightCapacity = morphWeightCapacity,
+            vertexColors = self.vertexColors,
+            fog = self.fog as MeshBackend.FogOptions,
         }
     )
     self._backend = backend

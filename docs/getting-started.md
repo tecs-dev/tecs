@@ -161,6 +161,67 @@ The mesh domain frustum-culls and depth-sorts complete indexed commands on the
 GPU. It draws transparent meshes before the sprite forward lane, so sprites
 retain deterministic overlay ordering in a renderer that enables both domains.
 
+## Vertex colors, fog, bloom, and a 2D HUD
+
+Enable each expensive lane explicitly and keep the base 2D and rigid-mesh
+paths unchanged:
+
+```teal
+return tecs.newApplication({
+    bloom = {
+        scale = 0.5,
+        threshold = 0.75,
+        knee = 0.1,
+        intensity = 0.65,
+    },
+    meshes = {
+        vertexColors = true,
+        fog = {
+            start = 20,
+            finish = 100,
+            r = 0.12,
+            g = 0.16,
+            b = 0.24,
+        },
+    },
+    plugin = function(world: tecs.World, app: tecs.Application)
+        tecs.gfx.layers.configure(16, {
+            sort = "z",
+            screenSpace = true,
+            unlit = true,
+            overlay = true,
+        })
+
+        -- The overlay flag selects the sprite forward lane. It runs after
+        -- opaque and transparent meshes and after bloom composition, even
+        -- when this tint is fully opaque.
+        world:spawn(
+            tecs.Transform2D(160, 40, 0, 16, 0, 280, 56),
+            tecs.gfx.Tint(0.02, 0.04, 0.08, 1.0),
+            tecs.gfx.Renderable2D()
+        )
+    end,
+})
+```
+
+`assets.newMesh` accepts linear RGBA through `colors`; `assets.loadGLTF`
+decodes normalized integer or float `COLOR_0` values in VEC3 or VEC4 form.
+The color multiplies `Tint`, the material base-color factor, and the sampled
+base-color texture. Its alpha therefore participates in `ALPHA_MASK` and
+`ALPHA_BLEND` material policy. A colored mesh requires
+`meshes.vertexColors = true`; omitting the option preserves the 48-byte base
+vertex stream and creates no color buffer or shader variant.
+
+Fog is linear camera-distance fog and applies after both metallic-roughness
+and unlit material dispatch, in deferred and transparent mesh passes. Its
+runtime fields are available on `app.renderer.meshes.fog`. Omitting
+`meshes.fog` keeps the fog-free shaders and uniform path.
+
+Bloom extracts resolved opaque brightness, blurs it through two scaled
+targets, and adds it before transparent meshes and sprites. Omitting `bloom`
+declares no bloom targets or passes. Run `cargo xtask example scene3d` for the
+complete mixed-domain setup.
+
 ## Optional mesh shadows
 
 Enable the mesh domain's directional light and shadow resources at renderer

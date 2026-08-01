@@ -2,23 +2,33 @@
 #pragma tecs variants MESH_SKINNING=1
 #pragma tecs variants MESH_MORPHING=1
 #pragma tecs variants MESH_SKINNING=1 MESH_MORPHING=1
+#pragma tecs variants MESH_VERTEX_COLORS=1
+#pragma tecs variants MESH_VERTEX_COLORS=1 MESH_SKINNING=1
+#pragma tecs variants MESH_VERTEX_COLORS=1 MESH_MORPHING=1
+#pragma tecs variants MESH_VERTEX_COLORS=1 MESH_SKINNING=1 MESH_MORPHING=1
 
 layout(set = 0, binding = 0) readonly buffer Vertices { float value[]; } vertices;
 layout(set = 0, binding = 1) readonly buffer Instances { float value[]; } instances;
+#ifdef MESH_VERTEX_COLORS
+layout(set = 0, binding = 2) readonly buffer VertexColors { float value[]; } vertexColors;
+#define MESH_VERTEX_COLOR_BINDINGS 1
+#else
+#define MESH_VERTEX_COLOR_BINDINGS 0
+#endif
 #ifdef MESH_MORPHING
-layout(set = 0, binding = 2) readonly buffer MorphVertices { float value[]; } morphVertices;
-layout(set = 0, binding = 3) readonly buffer InstanceMorphs { float value[]; } instanceMorphs;
-layout(set = 0, binding = 4) readonly buffer MorphWeights { float value[]; } morphWeights;
+layout(set = 0, binding = 2 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer MorphVertices { float value[]; } morphVertices;
+layout(set = 0, binding = 3 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer InstanceMorphs { float value[]; } instanceMorphs;
+layout(set = 0, binding = 4 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer MorphWeights { float value[]; } morphWeights;
 #endif
 #ifdef MESH_SKINNING
 #ifdef MESH_MORPHING
-layout(set = 0, binding = 5) readonly buffer SkinVertices { float value[]; } skinVertices;
-layout(set = 0, binding = 6) readonly buffer InstanceSkins { float value[]; } instanceSkins;
-layout(set = 0, binding = 7) readonly buffer JointMatrices { float value[]; } jointMatrices;
+layout(set = 0, binding = 5 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer SkinVertices { float value[]; } skinVertices;
+layout(set = 0, binding = 6 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer InstanceSkins { float value[]; } instanceSkins;
+layout(set = 0, binding = 7 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer JointMatrices { float value[]; } jointMatrices;
 #else
-layout(set = 0, binding = 2) readonly buffer SkinVertices { float value[]; } skinVertices;
-layout(set = 0, binding = 3) readonly buffer InstanceSkins { float value[]; } instanceSkins;
-layout(set = 0, binding = 4) readonly buffer JointMatrices { float value[]; } jointMatrices;
+layout(set = 0, binding = 2 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer SkinVertices { float value[]; } skinVertices;
+layout(set = 0, binding = 3 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer InstanceSkins { float value[]; } instanceSkins;
+layout(set = 0, binding = 4 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer JointMatrices { float value[]; } jointMatrices;
 #endif
 #endif
 
@@ -28,6 +38,7 @@ layout(set = 1, binding = 0) uniform ShadowView {
 
 layout(location = 0) out vec2 vUV;
 layout(location = 1) flat out int vMaterial;
+layout(location = 2) out float vColorAlpha;
 
 vec3 rotateBy(vec4 rotation, vec3 value) {
     vec3 twice = 2.0 * cross(rotation.xyz, value);
@@ -121,4 +132,8 @@ void main() {
     gl_Position = shadowView.viewProjection * vec4(world, 1.0);
     vUV = vec2(vertices.value[vertexBase + 10], vertices.value[vertexBase + 11]);
     vMaterial = int(instances.value[instanceBase + 11]);
+    vColorAlpha = 1.0;
+#ifdef MESH_VERTEX_COLORS
+    vColorAlpha = vertexColors.value[gl_VertexIndex * 4 + 3];
+#endif
 }

@@ -178,6 +178,12 @@ return tecs.newApplication({
 })
 ```
 
+For UI over a 3D scene, configure the layer above with `overlay = true`. That
+selects the sprite forward lane even for fully opaque UI, and the lane runs
+after opaque and transparent meshes. The layer orders UI elements against one
+another; Tecs does not compare a `Camera3D` distance with a 2D layer band.
+Bloom is also composed before this lane, so HUD text and panels remain crisp.
+
 Plugin setup is for composition and registration. `Startup` is for spawning
 the retained entities, after all application plugins have been installed and
 before the first frame.

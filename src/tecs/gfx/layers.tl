@@ -7,7 +7,12 @@ layer 8 covers a world on layer 1.
 
 ```teal
 tecs.gfx.layers.configure(1, {sort = "topdown", parallax = 0.4})
-tecs.gfx.layers.configure(8, {sort = "z", screenSpace = true, unlit = true})
+tecs.gfx.layers.configure(8, {
+    sort = "z",
+    screenSpace = true,
+    unlit = true,
+    overlay = true,
+})
 
 world:spawn(
     tecs.Transform2D(16, 16, 0, 8, 0, 96, 24),
@@ -44,6 +49,12 @@ square pixels.
 
 `unlit` bypasses scene lighting for UI, debug overlays, and other content that
 must retain its own color.
+
+In a renderer that also enables meshes, put a HUD on the highest screen-space,
+unlit overlay layer. `overlay` selects the sprite forward lane even for opaque
+content. That lane runs after opaque and transparent meshes and after bloom.
+The 2D layer still orders the HUD internally; 2D and 3D do not pretend to share
+one camera-space depth scale.
 
 `configure` replaces the complete layer configuration. Any omitted option
 returns to its default.
@@ -129,6 +140,11 @@ local record layers
         --- Defaults to false. A material can ask for the same thing, and a
         --- fragment is lit only where the material and the layer agree.
         unlit: boolean
+        --- Caller-writable. Routes the layer through the sorted sprite forward
+        --- lane after meshes and bloom, including when its tint is fully
+        --- opaque. Defaults to false. A topmost HUD uses this with
+        --- `screenSpace` and `unlit`.
+        overlay: boolean
         --- Caller-writable. Sets how much the camera's position carries the contents. One moves them
         --- with the world; a half drifts them at half speed, which is what a
         --- background wants. Defaults to one.
@@ -187,6 +203,12 @@ local record layers
     ---     what an unconfigured layer answers too.
     --- @return Whether `configure` selected `screenSpace` for the layer.
     isScreenSpace: function(layer: integer): boolean
+
+    --- Returns whether a layer always uses the sprite forward lane.
+    --- @param layer One to `MAX`. Outside that this answers false, which is
+    ---     what an unconfigured layer answers too.
+    --- @return Whether `configure` selected `overlay` for the layer.
+    isOverlay: function(layer: integer): boolean
 
     --- Returns the two terms `depthIn` takes, resolved once for a layer.
     ---
@@ -303,6 +325,8 @@ local modes: {number} = {}
 local parallaxOffsets: {number} = {}
 local zoomFlags: {number} = {}
 local litFlags: {number} = {}
+--- Whether opaque content is deliberately routed through the forward lane.
+local overlayFlags: {boolean} = {}
 --- Whether the world rectangle the camera sees is what decides if a layer's
 --- contents are drawn.
 local culledByView: {boolean} = {}
@@ -313,6 +337,7 @@ for index = 1, layers.MAX do
     parallaxOffsets[index] = 0.0
     zoomFlags[index] = 0.0
     litFlags[index] = 1.0
+    overlayFlags[index] = false
     culledByView[index] = true
 end
 
@@ -368,6 +393,7 @@ function layers.configure(layer: integer, config: layers.Config)
     parallaxOffsets[layer] = 1.0 - parallax
     zoomFlags[layer] = config.ignoreZoom and 1.0 or 0.0
     litFlags[layer] = config.unlit and 0.0 or 1.0
+    overlayFlags[layer] = config.overlay == true
     -- The cull tests a world rectangle against a world bound, which only means
     -- something where the camera places the contents where the bound says.
     culledByView[layer] = mode == MODE_CAMERA and parallax == 1.0 and not config.ignoreZoom
@@ -396,6 +422,10 @@ end
 
 function layers.isScreenSpace(layer: integer): boolean
     return modes[layer] == MODE_SCREEN
+end
+
+function layers.isOverlay(layer: integer): boolean
+    return overlayFlags[layer] == true
 end
 
 function layers.bandOf(layer: integer): number, integer

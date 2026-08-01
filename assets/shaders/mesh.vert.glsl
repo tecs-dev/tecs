@@ -2,6 +2,18 @@
 #pragma tecs variants MESH_SKINNING=1
 #pragma tecs variants MESH_MORPHING=1
 #pragma tecs variants MESH_SKINNING=1 MESH_MORPHING=1
+#pragma tecs variants MESH_VERTEX_COLORS=1
+#pragma tecs variants MESH_VERTEX_COLORS=1 MESH_SKINNING=1
+#pragma tecs variants MESH_VERTEX_COLORS=1 MESH_MORPHING=1
+#pragma tecs variants MESH_VERTEX_COLORS=1 MESH_SKINNING=1 MESH_MORPHING=1
+#pragma tecs variants MESH_FOG=1
+#pragma tecs variants MESH_FOG=1 MESH_SKINNING=1
+#pragma tecs variants MESH_FOG=1 MESH_MORPHING=1
+#pragma tecs variants MESH_FOG=1 MESH_SKINNING=1 MESH_MORPHING=1
+#pragma tecs variants MESH_FOG=1 MESH_VERTEX_COLORS=1
+#pragma tecs variants MESH_FOG=1 MESH_VERTEX_COLORS=1 MESH_SKINNING=1
+#pragma tecs variants MESH_FOG=1 MESH_VERTEX_COLORS=1 MESH_MORPHING=1
+#pragma tecs variants MESH_FOG=1 MESH_VERTEX_COLORS=1 MESH_SKINNING=1 MESH_MORPHING=1
 
 layout(set = 0, binding = 0) readonly buffer Vertices {
     float value[];
@@ -11,34 +23,48 @@ layout(set = 0, binding = 1) readonly buffer Instances {
     float value[];
 } instances;
 
+#ifdef MESH_VERTEX_COLORS
+layout(set = 0, binding = 2) readonly buffer VertexColors { float value[]; } vertexColors;
+#define MESH_VERTEX_COLOR_BINDINGS 1
+#else
+#define MESH_VERTEX_COLOR_BINDINGS 0
+#endif
+
 #ifdef MESH_MORPHING
-layout(set = 0, binding = 2) readonly buffer MorphVertices { float value[]; } morphVertices;
-layout(set = 0, binding = 3) readonly buffer InstanceMorphs { float value[]; } instanceMorphs;
-layout(set = 0, binding = 4) readonly buffer MorphWeights { float value[]; } morphWeights;
+layout(set = 0, binding = 2 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer MorphVertices { float value[]; } morphVertices;
+layout(set = 0, binding = 3 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer InstanceMorphs { float value[]; } instanceMorphs;
+layout(set = 0, binding = 4 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer MorphWeights { float value[]; } morphWeights;
 #endif
 
 #ifdef MESH_SKINNING
 #ifdef MESH_MORPHING
-layout(set = 0, binding = 5) readonly buffer SkinVertices { float value[]; } skinVertices;
-layout(set = 0, binding = 6) readonly buffer InstanceSkins { float value[]; } instanceSkins;
-layout(set = 0, binding = 7) readonly buffer JointMatrices { float value[]; } jointMatrices;
+layout(set = 0, binding = 5 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer SkinVertices { float value[]; } skinVertices;
+layout(set = 0, binding = 6 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer InstanceSkins { float value[]; } instanceSkins;
+layout(set = 0, binding = 7 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer JointMatrices { float value[]; } jointMatrices;
 #else
-layout(set = 0, binding = 2) readonly buffer SkinVertices { float value[]; } skinVertices;
-layout(set = 0, binding = 3) readonly buffer InstanceSkins { float value[]; } instanceSkins;
-layout(set = 0, binding = 4) readonly buffer JointMatrices { float value[]; } jointMatrices;
+layout(set = 0, binding = 2 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer SkinVertices { float value[]; } skinVertices;
+layout(set = 0, binding = 3 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer InstanceSkins { float value[]; } instanceSkins;
+layout(set = 0, binding = 4 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer JointMatrices { float value[]; } jointMatrices;
 #endif
 #endif
 
 layout(set = 1, binding = 0) uniform View {
     mat4 viewProjection;
+#ifdef MESH_FOG
+    vec4 cameraStart;
+    vec4 fogRange;
+#endif
 } view;
 
 layout(location = 0) out vec3 vNormal;
-layout(location = 1) flat out vec3 vColor;
+layout(location = 1) out vec4 vColor;
 layout(location = 2) out vec2 vUV;
 layout(location = 3) out vec4 vTangent;
 layout(location = 4) flat out int vMaterial;
 layout(location = 5) out vec3 vWorld;
+#ifdef MESH_FOG
+layout(location = 6) out float vFog;
+#endif
 
 vec3 rotateBy(vec4 rotation, vec3 value) {
     vec3 twice = 2.0 * cross(rotation.xyz, value);
@@ -152,6 +178,9 @@ void main() {
     vec3 world = position + rotateBy(rotation, localPosition * scale);
     vWorld = world;
     gl_Position = view.viewProjection * vec4(world, 1.0);
+#ifdef MESH_FOG
+    vFog = clamp((distance(world, view.cameraStart.xyz) - view.cameraStart.w) * view.fogRange.x, 0.0, 1.0);
+#endif
 
     vec3 inverseScale = vec3(
         scale.x == 0.0 ? 0.0 : 1.0 / scale.x,
@@ -164,8 +193,15 @@ void main() {
     vTangent = vec4(tangent, localTangent.w * reflection);
     vUV = vec2(vertices.value[vertexBase + 10], vertices.value[vertexBase + 11]);
     vMaterial = int(instances.value[instanceBase + 11]);
-    vColor = vec3(
+    vec4 vertexColor = vec4(1.0);
+#ifdef MESH_VERTEX_COLORS
+    int colorBase = gl_VertexIndex * 4;
+    vertexColor = vec4(
+        vertexColors.value[colorBase], vertexColors.value[colorBase + 1],
+        vertexColors.value[colorBase + 2], vertexColors.value[colorBase + 3]);
+#endif
+    vColor = vertexColor * vec4(
         instances.value[instanceBase + 13],
         instances.value[instanceBase + 14],
-        instances.value[instanceBase + 15]);
+        instances.value[instanceBase + 15], 1.0);
 }

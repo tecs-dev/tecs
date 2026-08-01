@@ -159,9 +159,9 @@ Working: windowing, input in three tiers behind a layer stack, events, the GPU p
 layers, physics, workers and asset loading, logging, the debug server, sprite sheets with animation,
 sequencing with tweening merged into it, distance-field text drawn through an instance producer, audio
 on SDL3_mixer (a voice per track, groups by tag, keyed limits, fades, pitch, loop points, and streaming),
-and shadows: an occluder mask every light marches against, and a drop shadow that reaches ambient.
+and shadows: an occluder mask every light marches against, a drop shadow that reaches ambient, and optional bloom.
 
-Not ported: post-processing, UI, tiled maps and multi-camera.
+Not ported: general post-processing, tiled maps and multi-camera.
 
 ## Development Guidelines
 

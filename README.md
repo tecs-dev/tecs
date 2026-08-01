@@ -35,11 +35,13 @@ start a graphics stack.
 - Optional 3D rendering with indexed mesh residency, ordered GPU frustum
   culling, texture and PBR material residency, glTF/GLB skinning and animation,
   and independently allocated transparent, directional-shadow, skeletal, and
-  morph-target deformation lanes.
+  morph-target deformation, vertex-color, and fog lanes.
+- Optional half-resolution bloom composed before transparent meshes and the
+  2D forward lane, so a mixed renderer can keep its HUD crisp.
 - Input, audio, physics, assets, workers, async I/O, HTTP, file watching, and
   a debug server.
 
-Post-processing, tiled maps, and multi-camera are not yet built.
+General post-processing, tiled maps, and multi-camera are not yet built.
 
 Mesh shadows use one camera-centered directional map, not the 2D occluder-mask
 pipeline. Their mark, scan, compact, map, and shader resources exist only when
@@ -61,6 +63,18 @@ immutable position/normal/tangent delta buffer, a five-float per-instance
 locator, retained weight vectors, and morph shader variants. The rigid and
 skin-only layouts do not change when it is omitted. Morphing runs before
 skinning when both lanes are enabled, matching glTF deformation order.
+
+Vertex colors follow the same rule. `meshes.vertexColors = true` adds one
+separate RGBA stream and matching geometry and shadow shader variants; rigid
+geometry keeps its 48-byte base stride. `meshes.fog` adds linear,
+camera-distance fog to mesh variants only. Top-level `bloom` adds two scaled
+targets and three fullscreen passes only when configured. None of the three
+changes the resources or shaders of a 2D-only renderer.
+
+A mixed renderer keeps HUD work in the sprite domain. A highest,
+screen-space, unlit layer with `overlay = true` routes even fully opaque 2D
+content through the existing sorted forward lane after meshes and bloom. It
+adds no second sprite renderer and no overlay resources to an ordinary layer.
 
 Animated glTF models keep shared geometry, material, texture, hierarchy, and
 clip data in one `Model3D`. Each `newInstance` allocates only its own reusable

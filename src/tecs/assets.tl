@@ -31,8 +31,8 @@ voices.
 
 `newMesh` constructs immutable procedural geometry synchronously. `loadGLTF`
 decodes glTF 2.0 and GLB scenes on the worker, including images,
-metallic-roughness materials, alpha masks, `BLEND` modes, skins, and node
-animation clips including morph weights. Both produce
+metallic-roughness materials, vertex colors, alpha masks, `BLEND` modes, skins,
+and node animation clips including morph weights. Both produce
 CPU-owned data that the mesh domain consumes when it becomes resident. A model
 with a `BLEND` material requires a mesh domain created with
 `transparency = true`.
@@ -313,6 +313,9 @@ local record Mesh
     name: string
     --- Read-only. Contains interleaved vertex floats until `release` runs.
     vertices: loader.CArray
+    --- Read-only. Contains optional linear RGBA vertex colors until `release`
+    --- runs. Nil means every vertex is white.
+    colorVertices: loader.CArray
     --- Read-only. Contains zero-based unsigned 32-bit indices until `release`
     --- runs.
     indices: loader.CArray
@@ -363,6 +366,9 @@ local record MeshOptions
     --- Caller-writable. Supplies interleaved position xyz, normal xyz,
     --- tangent xyzw, and texture uv floats.
     vertices: {number}
+    --- Caller-writable. Supplies optional linear RGBA colors, four per vertex.
+    --- Nil makes every vertex white without allocating a color array.
+    colors: {number}
     --- Caller-writable. Supplies zero-based triangle indices.
     indices: {integer}
     --- Caller-writable. Supplies four zero-based joint indices per vertex.
@@ -667,6 +673,7 @@ local ModelMT <const>: metatable<Model> = {__index = Model}
 
 function Mesh:release()
     self.vertices = nil
+    self.colorVertices = nil
     self.indices = nil
     self.skinVertices = nil
     self.morphVertices = nil
@@ -714,6 +721,7 @@ local function modelFromWorker(result: {string: any}): Model
             local vertices <const> = loader.newArray("float[?]", vertexCount * meshlayout.VERTEX_FLOATS)
             local indices <const> = loader.newArray("uint32_t[?]", indexCount)
             local skinVertices: loader.CArray = nil
+            local colorVertices: loader.CArray = nil
             local morphVertices: loader.CArray = nil
             loader.copyTo(
                 loader.bytePointer(vertices as loader.CValue),
@@ -721,6 +729,14 @@ local function modelFromWorker(result: {string: any}): Model
                 vertexCount * meshlayout.VERTEX_BYTES
             )
             loader.copyTo(loader.bytePointer(indices as loader.CValue), source.indices as loader.CValue, indexCount * 4)
+            if source.colorVertices ~= nil then
+                colorVertices = loader.newArray("float[?]", vertexCount * meshlayout.COLOR_VERTEX_FLOATS)
+                loader.copyTo(
+                    loader.bytePointer(colorVertices as loader.CValue),
+                    source.colorVertices as loader.CValue,
+                    vertexCount * meshlayout.COLOR_VERTEX_BYTES
+                )
+            end
             if source.skinVertices ~= nil then
                 skinVertices = loader.newArray("float[?]", vertexCount * meshlayout.SKIN_VERTEX_FLOATS)
                 loader.copyTo(
@@ -744,6 +760,7 @@ local function modelFromWorker(result: {string: any}): Model
                 {
                     name = source.name as string,
                     vertices = vertices,
+                    colorVertices = colorVertices,
                     indices = indices,
                     skinVertices = skinVertices,
                     morphVertices = morphVertices,
@@ -815,6 +832,21 @@ function assets.newMesh(options: MeshOptions): Mesh
     end
     if sourceJoints ~= nil and (#sourceJoints ~= vertexCount * 4 or #sourceWeights ~= vertexCount * 4) then
         error(("tecs: mesh '%s' needs four joints and weights per vertex"):format(name), 2)
+    end
+    local sourceColors <const> = options.colors
+    if sourceColors ~= nil and #sourceColors ~= vertexCount * meshlayout.COLOR_VERTEX_FLOATS then
+        error(("tecs: mesh '%s' needs four colors per vertex"):format(name), 2)
+    end
+    local colorVertices: loader.CArray = nil
+    if sourceColors ~= nil then
+        colorVertices = loader.newArray("float[?]", vertexCount * meshlayout.COLOR_VERTEX_FLOATS)
+        for index = 1, #sourceColors do
+            local value <const> = sourceColors[index]
+            if value == nil or value < 0.0 or value > 1.0 then
+                error(("tecs: mesh '%s' color %d is outside 0..1"):format(name, index), 2)
+            end
+            colorVertices[index - 1] = value
+        end
     end
     local vertices <const> = loader.newArray("float[?]", vertexFloats)
     local minX, minY, minZ = math.huge, math.huge, math.huge
@@ -981,6 +1013,7 @@ function assets.newMesh(options: MeshOptions): Mesh
         {
             name = name,
             vertices = vertices,
+            colorVertices = colorVertices,
             indices = indices,
             skinVertices = skinVertices,
             morphVertices = morphVertices,
