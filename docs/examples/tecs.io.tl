@@ -338,6 +338,20 @@ reader:close()
 source:close()
 -- #endregion tecs.io.Reader.read
 
+-- #region tecs.io.Reader.readInto
+local source <const> = tecs.io.newStringStream("abcdefgh")
+local reader <const> = assert(source:newReader())
+local bytes <const> = tecs.io.newBuffer("prefix:")
+local count <const>, reason = reader:readInto(bytes, bytes:length(), 4)
+
+assert(count, reason)
+print(bytes:getString())
+
+reader:close()
+source:close()
+bytes:close()
+-- #endregion tecs.io.Reader.readInto
+
 -- #region tecs.io.transfer
 local source <const> = assert(tecs.io.files.openRead("save.bin"))
 local destination <const> = assert(tecs.io.files.openWrite("save.copy"))
@@ -368,6 +382,36 @@ print(bytes:getString())
 
 bytes:close()
 -- #endregion tecs.io.Writer.write
+
+-- #region tecs.io.Writer.writeFrom
+local source <const> = tecs.io.newBuffer("header:data")
+local destination <const> = tecs.io.newBuffer()
+local writer <const> = destination:newWriter()
+local count <const>, reason = writer:writeFrom(source, 7, 4)
+
+assert(count, reason)
+assert(writer:close())
+print(destination:getString())
+
+source:close()
+destination:close()
+-- #endregion tecs.io.Writer.writeFrom
+
+-- #region tecs.io.Writer.writeView
+local source <const> = tecs.io.newBuffer("header:data")
+local view <const> = source:view(7, 4)
+local destination <const> = tecs.io.newBuffer()
+local writer <const> = destination:newWriter()
+local count <const>, reason = writer:writeView(view)
+
+assert(count, reason)
+assert(writer:close())
+print(destination:getString())
+
+view:close()
+source:close()
+destination:close()
+-- #endregion tecs.io.Writer.writeView
 
 -- #region tecs.io.Writer.flush
 local destination <const> = tecs.io.newFileStream("save.bin")

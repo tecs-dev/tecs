@@ -1437,16 +1437,14 @@ a writer. Cursor state belongs to each endpoint, so two readers over replayable
 memory or a path do not move one another. A borrowed handle reports that it is
 not replayable and lets only its first endpoint claim the handle's cursor.
 
-`Reader` and `Writer` deliberately stop at the string operations Lua files
-already implement, so a `FILE` and a small table can participate without an
-adapter object. `Buffer` is the reusable native-memory boundary beneath those
-interfaces. It separates logical length from capacity, grows geometrically
-through `ensureCapacity`, and exposes a borrowed FFI pointer whose lifetime
-ends at growth or closure. `resize` changes the logical length instead,
-zero-filling bytes it exposes. Engine endpoints can additionally expose
-direct-buffer operations. `tecs.io.transfer` discovers those accelerators and
-otherwise falls back to the basic string protocol, keeping optimization out of
-the compatibility contract.
+`Reader` and `Writer` include direct-buffer operations so every engine endpoint
+can transfer reusable storage without first allocating a Lua string. `Buffer`
+is that native-memory boundary. It separates logical length from capacity,
+grows geometrically through `ensureCapacity`, and exposes a borrowed FFI
+pointer whose lifetime ends at growth or closure. `resize` changes the logical
+length instead, zero-filling bytes it exposes. Operations that explicitly
+accept a Lua `FILE` use its string protocol as a fallback, so raw files remain
+usable without pretending to implement the engine endpoint interfaces.
 
 Whole-source operations are synchronous. Generic copies and discards open the
 required endpoints, borrow a 64 KiB buffer from a bounded scratch pool, move
@@ -1571,9 +1569,10 @@ API can only return their complete contents, so a backend with a real seek
 opens one and a backend without it gets an in-memory cursor over its required
 whole-file `read`. Seeking therefore stays off `Reader`: a transform, socket,
 or pipe cannot implement it honestly, while the common file constructor needs
-no parallel random-access variant. The specialized result also types
-`readInto`; direct buffer reads are a file capability rather than a dynamic
-transfer optimization once the caller has asked for this kind of reader.
+no parallel random-access variant. Direct buffer reads stay on `Reader`
+because memory, transforms, sockets, pipes, and files can all implement them
+without an intermediate Lua string. The specialized result adds only `size`,
+`tell`, and `seek`.
 
 `openSeekableWrite` is the symmetric patching operation. Replacement starts
 with an empty file, while update preserves an existing file; both start at byte

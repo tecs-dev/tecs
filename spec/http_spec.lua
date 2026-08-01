@@ -305,11 +305,11 @@ describe("http.newClient", function()
                 at = at + taking
                 return bytes
             end
-            function reader:readInto(buffer, count, offset)
+            function reader:readInto(buffer, offset, count)
                 if closed then
                     return nil, "reader is closed"
                 end
-                local taking = min(limit, count, #text - at)
+                local taking = min(limit, count or 16 * 1024, #text - at)
                 if taking > 0 then
                     buffer:setString(text:sub(at + 1, at + taking), offset or 0)
                     at = at + taking
@@ -616,9 +616,9 @@ describe("http.newClient", function()
             function source:newReader()
                 local reader = original(self)
                 local readInto = reader.readInto
-                function reader:readInto(destination, count, offset)
+                function reader:readInto(destination, offset, count)
                     readCounts[index] = readCounts[index] + 1
-                    return readInto(self, destination, count, offset)
+                    return readInto(self, destination, offset, count)
                 end
                 return reader
             end

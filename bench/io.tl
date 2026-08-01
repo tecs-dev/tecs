@@ -279,7 +279,7 @@ local function readInto(path: string, materialize: boolean): string, integer, in
     local count = 0
     while true do
         scratch:clear()
-        local read <const>, readFailure = pump.readInto(reader, scratch, CHUNK)
+        local read <const>, readFailure = pump.readInto(reader, scratch, 0, CHUNK)
         if read == nil then
             reader:close()
             scratch:close()

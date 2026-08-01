@@ -8,7 +8,7 @@ local CHUNK <const> = 64 * 1024
 
 local record pump
     readInto: function(
-        source: Reader | FILE, destination: types.Buffer, count: integer, offset?: integer
+        source: Reader | FILE, destination: types.Buffer, offset?: integer, count?: integer
     ): integer, string
     writeFrom: function(
         destination: Writer | FILE, source: types.Buffer, offset?: integer, count?: integer
@@ -18,22 +18,24 @@ local record pump
 end
 
 function pump.readInto(
-    source: Reader | FILE, destination: types.Buffer, count: integer, offset?: integer
+    source: Reader | FILE, destination: types.Buffer, offset?: integer, count?: integer
 ): integer, string
+    offset = offset or 0
+    count = count or CHUNK
     if count == 0 then
         return 0
     end
     local dynamic <const> = source as {string: any}
     if type(dynamic.readInto) == "function" then
         return (dynamic.readInto as function(any, types.Buffer, integer, integer): integer, string)(
-            source, destination, count, offset
+            source, destination, offset, count
         )
     end
     local piece <const>, reason = (dynamic.read as function(any, integer): string, string)(source, count)
     if piece == nil then
         return reason == nil and 0 or nil, reason
     end
-    destination:setString(piece, offset or 0)
+    destination:setString(piece, offset)
     return #piece
 end
 
@@ -74,7 +76,7 @@ function pump.transferBuffered(source: Reader | FILE, destination: Writer | FILE
     local failure: string
     while failure == nil do
         scratch:clear()
-        local got <const>, readReason = pump.readInto(source, scratch, CHUNK)
+        local got <const>, readReason = pump.readInto(source, scratch, 0, CHUNK)
         if got == nil then
             failure = readReason
             break

@@ -239,14 +239,12 @@ local interface Buffer is Closeable
     close: function(self: Buffer)
 end
 
---- A caller-owned source of binary strings.
+--- A caller-owned binary source.
 ---
 --- The constructor documents whether the reader owns retained state or
 --- borrows externally owned storage. A consumer reads forward until `read`
---- returns an empty string, then closes the reader. A failure returns nil and
---- a reason instead of raising. Implementations may provide direct-buffer
---- accelerators which `tecs.io.transfer` selects without making them part of
---- this basic protocol.
+--- returns an empty string or `readInto` returns zero, then closes the reader.
+--- A failure returns nil and a reason instead of raising.
 local interface Reader is Closeable
     --- Caller-writable. Supplies the operation that reads the next bytes.
     ---
@@ -258,6 +256,22 @@ local interface Reader is Closeable
     ---     empty string after the source is exhausted.
     --- @return Returns the source's reason when the first return is nil.
     read: function(self: Reader, count: integer): string, string
+
+    --- Reads bytes directly into a buffer and advances the cursor.
+    ---
+    --- The operation grows the destination as needed and preserves bytes
+    --- outside the written range. It returns zero after the source is
+    --- exhausted.
+    --- @param self The open reader whose cursor advances.
+    --- @param destination The caller supplies an open destination buffer and
+    ---     keeps ownership of it.
+    --- @param offset The caller supplies a non-negative zero-based destination
+    ---     offset or omits it for zero.
+    --- @param count The caller supplies the maximum non-negative byte count or
+    ---     omits it for 16,384.
+    --- @return Returns the number of bytes written into the destination.
+    --- @return Returns the source's reason when the first return is nil.
+    readInto: function(self: Reader, destination: Buffer, offset?: integer, count?: integer): integer, string
 
     --- Caller-writable. Supplies the operation that releases the source.
     ---
@@ -281,20 +295,6 @@ end
 --- positions are zero-based byte counts. A seek must land from byte zero
 --- through the current end position, inclusive.
 local interface SeekableReader is Reader
-    --- Reads bytes directly into a buffer and advances the cursor.
-    ---
-    --- The operation grows the destination as needed and preserves bytes
-    --- outside the written range. It returns zero at the end of the file.
-    --- @param self The open reader whose cursor advances.
-    --- @param destination The caller supplies an open destination buffer and
-    ---     keeps ownership of it.
-    --- @param count The caller supplies the maximum non-negative byte count.
-    --- @param offset The caller supplies a non-negative zero-based destination
-    ---     offset or omits it for zero.
-    --- @return Returns the number of bytes written into the destination.
-    --- @return Returns the source's reason when the first return is nil.
-    readInto: function(self: SeekableReader, destination: Buffer, count: integer, offset?: integer): integer, string
-
     --- Returns the source's current byte length.
     ---
     --- @param self The open reader to inspect.
@@ -325,14 +325,12 @@ local interface SeekableReader is Reader
     seek: function(self: SeekableReader, origin: SeekOrigin, offset?: integer): integer, string
 end
 
---- A caller-owned destination for binary strings.
+--- A caller-owned binary destination.
 ---
 --- A consumer writes pieces in order and closes the writer even after the last
 --- `write` succeeds. The close can report a delayed flush failure that no
 --- individual write observed. The constructor documents whether closing the
---- writer also closes or merely releases its destination. Implementations may
---- provide direct-buffer accelerators which `tecs.io.transfer` selects without
---- making them part of this basic protocol.
+--- writer also closes or merely releases its destination.
 local interface Writer is Closeable
     --- Caller-writable. Supplies the operation that writes the next bytes.
     ---
@@ -343,6 +341,32 @@ local interface Writer is Closeable
     --- @return Returns the destination's reason when the first return is
     ---     false.
     write: function(self: Writer, bytes: string): boolean, string
+
+    --- Writes a complete buffer range and advances the cursor.
+    ---
+    --- @param self The open writer whose cursor advances.
+    --- @param source The caller supplies an open source buffer and retains
+    ---     ownership.
+    --- @param offset The caller supplies a zero-based source offset or omits
+    ---     it for zero.
+    --- @param count The caller supplies a byte count or omits it for the
+    ---     remainder.
+    --- @return Returns the complete byte count.
+    --- @return Returns the destination's reason when the first return is nil.
+    writeFrom: function(self: Writer, source: Buffer, offset?: integer, count?: integer): integer, string
+
+    --- Writes a complete immutable-view range and advances the cursor.
+    ---
+    --- @param self The open writer whose cursor advances.
+    --- @param source The caller supplies an open source view and retains
+    ---     ownership.
+    --- @param offset The caller supplies a zero-based source offset or omits
+    ---     it for zero.
+    --- @param count The caller supplies a byte count or omits it for the
+    ---     remainder.
+    --- @return Returns the complete byte count.
+    --- @return Returns the destination's reason when the first return is nil.
+    writeView: function(self: Writer, source: ByteView, offset?: integer, count?: integer): integer, string
 
     --- Flushes buffered bytes without closing the destination.
     ---
@@ -704,29 +728,16 @@ local interface ProcessReader is Reader
     --- @param self The process reader whose pipe advances.
     --- @param destination The caller supplies an open destination buffer and
     ---     retains ownership.
-    --- @param maxBytes The caller supplies 1 through 65,536 bytes or omits it
-    ---     for 16,384.
     --- @param offset The caller supplies a non-negative destination offset or
     ---     omits it for zero.
+    --- @param maxBytes The caller supplies 1 through 65,536 bytes or omits it
+    ---     for 16,384.
     --- @return Returns bytes read, nil when none are ready, or zero at end of
     ---     file.
     --- @return Returns a reason only when reading fails.
     readAvailableInto: function(
-        self: ProcessReader, destination: Buffer, maxBytes?: integer, offset?: integer
+        self: ProcessReader, destination: Buffer, offset?: integer, maxBytes?: integer
     ): integer, string
-
-    --- Reads bytes into reusable storage, waiting until bytes or EOF arrive.
-    ---
-    --- @param self The process reader whose pipe advances.
-    --- @param destination The caller supplies an open destination buffer and
-    ---     retains ownership.
-    --- @param maxBytes The caller supplies 1 through 65,536 bytes or omits it
-    ---     for 16,384.
-    --- @param offset The caller supplies a non-negative destination offset or
-    ---     omits it for zero.
-    --- @return Returns bytes read, or zero at end of file.
-    --- @return Returns the read reason when the first return is nil.
-    readInto: function(self: ProcessReader, destination: Buffer, maxBytes?: integer, offset?: integer): integer, string
 end
 
 --- A caller-owned writer over one live child-process input pipe.
@@ -783,32 +794,6 @@ local interface ProcessWriter is Writer
     writeAvailableView: function(
         self: ProcessWriter, source: ByteView, offset?: integer, count?: integer
     ): integer, string
-
-    --- Writes a complete buffer range, waiting for pipe capacity.
-    ---
-    --- @param self The process writer whose pipe advances.
-    --- @param source The caller supplies an open source buffer and retains
-    ---     ownership.
-    --- @param offset The caller supplies a zero-based source offset or omits
-    ---     it for zero.
-    --- @param count The caller supplies a byte count or omits it for the
-    ---     remainder.
-    --- @return Returns the complete byte count.
-    --- @return Returns the write reason when the first return is nil.
-    writeFrom: function(self: ProcessWriter, source: Buffer, offset?: integer, count?: integer): integer, string
-
-    --- Writes a complete immutable-view range, waiting for pipe capacity.
-    ---
-    --- @param self The process writer whose pipe advances.
-    --- @param source The caller supplies an open source view and retains
-    ---     ownership.
-    --- @param offset The caller supplies a zero-based source offset or omits
-    ---     it for zero.
-    --- @param count The caller supplies a byte count or omits it for the
-    ---     remainder.
-    --- @return Returns the complete byte count.
-    --- @return Returns the write reason when the first return is nil.
-    writeView: function(self: ProcessWriter, source: ByteView, offset?: integer, count?: integer): integer, string
 end
 
 --- A caller-owned child process and its independently closable pipes.

@@ -19,6 +19,7 @@ local type ReadWriteStream = types.ReadWriteStream
 
 local floor <const> = math.floor
 local max <const> = math.max
+local DEFAULT_READ_BYTES <const> = 16 * 1024
 local MIN_CAPACITY <const> = 64
 local MAX_INTEGER <const> = 9007199254740991
 
@@ -374,12 +375,12 @@ function BufferReader:_readPointer(count: integer): loader.BytePointer, integer,
     self._at = self._at + taking
     return pointer, taking
 end
-function BufferReader:readInto(destination: IOBuffer, count: integer, offset?: integer): integer, string
+function BufferReader:readInto(destination: IOBuffer, offset?: integer, count?: integer): integer, string
     if self._closed then
         return nil, "the reader is closed"
     end
-    count = integer(count, "Reader:readInto count", 2)
     offset = integer(offset or 0, "Reader:readInto offset", 2)
+    count = integer(count or DEFAULT_READ_BYTES, "Reader:readInto count", 2)
     if count == 0 or self._at >= self._view:length() then
         return 0
     end

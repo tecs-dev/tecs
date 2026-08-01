@@ -45,6 +45,7 @@ local newStreamWithMetadata: function<T is Stream>(
     source: T, contentType?: string, contentLength?: integer, isReplayable?: boolean
 ): T
 local CHUNK <const> = 64 * 1024
+local DEFAULT_READ_BYTES <const> = 16 * 1024
 local MAX_INTEGER <const> = 9007199254740991
 
 local function acquireScratch(): IOBuffer
@@ -524,12 +525,12 @@ function MemoryReader:_readPointer(count: integer): loader.BytePointer, integer,
     return pointer, taking
 end
 
-function MemoryReader:readInto(destination: IOBuffer, count: integer, offset?: integer): integer, string
+function MemoryReader:readInto(destination: IOBuffer, offset?: integer, count?: integer): integer, string
     if self._closed then
         return nil, "the reader is closed"
     end
-    count = nonNegative(count, "Reader:readInto count", 2)
     offset = nonNegative(offset or 0, "Reader:readInto offset", 2)
+    count = nonNegative(count or DEFAULT_READ_BYTES, "Reader:readInto count", 2)
     if count == 0 or self._at >= self._length then
         return 0
     end
@@ -592,9 +593,9 @@ function HandleReader:read(count: integer): string, string
     return ""
 end
 
-function HandleReader:readInto(destination: IOBuffer, count: integer, offset?: integer): integer, string
-    count = nonNegative(count, "Reader:readInto count", 2)
+function HandleReader:readInto(destination: IOBuffer, offset?: integer, count?: integer): integer, string
     offset = nonNegative(offset or 0, "Reader:readInto offset", 2)
+    count = nonNegative(count or DEFAULT_READ_BYTES, "Reader:readInto count", 2)
     if count == 0 then
         return 0
     end
@@ -714,7 +715,7 @@ local function readIntoBuffer(source: ReadableStream, maxBytes: integer): IOBuff
             count = min(count, maxBytes - total + 1)
         end
         output:resize(total)
-        local got <const>, reason = pump.readInto(reader, output, count, total)
+        local got <const>, reason = pump.readInto(reader, output, total, count)
         if got == nil then
             closeReader(reader)
             output:close()
@@ -794,7 +795,7 @@ local function discard(source: ReadableStream): integer, string
     local failure: string
     while failure == nil do
         scratch:clear()
-        local got <const>, reason = pump.readInto(reader, scratch, CHUNK)
+        local got <const>, reason = pump.readInto(reader, scratch, 0, CHUNK)
         if got == nil then
             failure = reason
         elseif got == 0 then

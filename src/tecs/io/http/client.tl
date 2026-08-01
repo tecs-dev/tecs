@@ -529,7 +529,7 @@ local function serviceUpload(self: Client, transfer: Transfer): boolean, boolean
     if transfer.sourcePending == 0 then
         transfer.sourceScratch:clear()
         local ok <const>, count, reason = pcall(
-            pump.readInto, reader, transfer.sourceScratch, CHUNK, 0
+            pump.readInto, reader, transfer.sourceScratch, 0, CHUNK
         ) as (boolean, integer, string)
         if not ok then
             failTransfer(self, transfer, ("tecs: %s: %s"):format(transfer.url, tostring(count)))

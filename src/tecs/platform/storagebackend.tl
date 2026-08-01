@@ -76,6 +76,8 @@ local loader <const> = require("tecs.ffi.loader")
 local buffer <const> = require("tecs.io.buffer")
 local type types = require("tecs.io.types")
 
+local DEFAULT_READ_BYTES <const> = 16 * 1024
+
 local C <const> = sdl.C
 local R <const> = rust.C
 local floor <const> = math.floor
@@ -509,11 +511,12 @@ local function sdlSeekableReader(path: string): SeekableReader, string
         end
         return loader.toBytes(scratch as loader.CValue, got)
     end
-    reader.readInto = function(_self: Reader, destination: IOBuffer, count: integer, offset?: integer): integer, string
+    reader.readInto = function(_self: Reader, destination: IOBuffer, offset?: integer, count?: integer): integer, string
         if stream == nil then
             return nil, "the reader is closed"
         end
         offset = offset or 0
+        count = count or DEFAULT_READ_BYTES
         if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 then
             error("tecs: Reader:readInto offset must be a non-negative integer", 2)
         end

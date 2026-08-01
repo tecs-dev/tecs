@@ -621,7 +621,7 @@ describe("io.files", function()
             local destination = tecsIO.newBuffer("prefix")
 
             assert.are.equal(3, reader:seek("start", 3))
-            assert.are.equal(4, reader:readInto(destination, 4, 6))
+            assert.are.equal(4, reader:readInto(destination, 6, 4))
             assert.are.equal("prefixdefg", destination:getString())
             assert.are.equal(7, reader:tell())
 

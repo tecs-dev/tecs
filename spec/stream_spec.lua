@@ -152,9 +152,9 @@ describe("tecs.io stream endpoints", function()
 
         assert.are.equal("ab", first:read(2))
         assert.are.equal("abcd", second:read(10))
-        assert.are.equal(2, first:readInto(buffer, 10))
+        assert.are.equal(2, first:readInto(buffer, 0, 10))
         assert.are.equal("cd", buffer:getString())
-        assert.are.equal(0, first:readInto(buffer, 10))
+        assert.are.equal(0, first:readInto(buffer, 0, 10))
 
         first:close()
         second:close()
@@ -165,7 +165,7 @@ describe("tecs.io stream endpoints", function()
         local buffer = ioModule.newBuffer("same")
         local reader = buffer:newReader()
 
-        assert.are.equal(4, reader:readInto(buffer, 4))
+        assert.are.equal(4, reader:readInto(buffer, 0, 4))
         assert.are.equal("same", buffer:getString())
 
         reader:close()
@@ -222,10 +222,10 @@ describe("tecs.io stream endpoints", function()
             end,
         }
         local reader = assert(tecs.io.files.openRead(path))
-        assert.are.equal(1, reader:readInto(proxy, 10, 4))
+        assert.are.equal(1, reader:readInto(proxy, 4, 10))
         assert.are.equal(5, proxy:length())
         assert.are.equal("ab\0\0x", proxy:getString())
-        assert.are.equal(0, reader:readInto(proxy, 10, 9))
+        assert.are.equal(0, reader:readInto(proxy, 9, 10))
         assert.are.equal(5, proxy:length())
         assert.are.equal("ab\0\0x", proxy:getString())
         reader:close()
@@ -475,7 +475,7 @@ describe("tecs.io transfers", function()
                 end,
                 transferTo = function(self, destination)
                     local scratch = ioModule.newBuffer()
-                    local got, readReason = self:readInto(scratch, 1)
+                    local got, readReason = self:readInto(scratch, 0, 1)
                     if got == nil then
                         scratch:close()
                         return nil, readReason

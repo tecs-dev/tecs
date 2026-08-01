@@ -372,7 +372,7 @@ function ReaderImpl:read(maxBytes: integer): string, string
     end
 end
 
-function ReaderImpl:readAvailableInto(destination: IOBuffer, maxBytes?: integer, offset?: integer): integer, string
+function ReaderImpl:readAvailableInto(destination: IOBuffer, offset?: integer, maxBytes?: integer): integer, string
     local wanted <const> = integerIn(maxBytes or DEFAULT_READ_BYTES, 1, MAX_READ_BYTES, "process read size", 2)
     local at <const> = offset or 0
     if type(at) ~= "number" or at ~= floor(at) or at < 0 then
@@ -388,9 +388,9 @@ function ReaderImpl:readAvailableInto(destination: IOBuffer, maxBytes?: integer,
     return got
 end
 
-function ReaderImpl:readInto(destination: IOBuffer, maxBytes?: integer, offset?: integer): integer, string
+function ReaderImpl:readInto(destination: IOBuffer, offset?: integer, maxBytes?: integer): integer, string
     while true do
-        local got <const>, reason = self:readAvailableInto(destination, maxBytes, offset)
+        local got <const>, reason = self:readAvailableInto(destination, offset, maxBytes)
         if got ~= nil or reason ~= nil then
             return got, reason
         end
@@ -635,7 +635,7 @@ function ProcessImpl:communicate(options?: CommunicateOptions): ProcessResult, s
         if not stdoutEOF then
             while true do
                 local got <const>, readReason = (self.stdout as ProcessReader):readAvailableInto(
-                    output, MAX_READ_BYTES, output:length()
+                    output, output:length(), MAX_READ_BYTES
                 )
                 if got == nil then
                     if readReason ~= nil then
@@ -654,7 +654,7 @@ function ProcessImpl:communicate(options?: CommunicateOptions): ProcessResult, s
         if not stderrEOF then
             while true do
                 local got <const>, readReason = (self.stderr as ProcessReader):readAvailableInto(
-                    errors, MAX_READ_BYTES, errors:length()
+                    errors, errors:length(), MAX_READ_BYTES
                 )
                 if got == nil then
                     if readReason ~= nil then

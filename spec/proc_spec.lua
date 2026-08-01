@@ -196,7 +196,7 @@ describe("streaming processes", function()
     it("reads directly into a reusable buffer", function()
         local child = newProcess({ args = { "/bin/echo", "direct" } })
         local destination = tecsIO.newBuffer("prefix:")
-        local got, reason = child.stdout:readInto(destination, 64, destination:length())
+        local got, reason = child.stdout:readInto(destination, destination:length(), 64)
 
         assert.are.equal(7, got, reason)
         assert.are.equal("prefix:direct\n", destination:getString())
@@ -224,7 +224,7 @@ describe("streaming processes", function()
         child.stdin:close()
 
         while now() < deadline do
-            local got, readReason = child.stdout:readAvailableInto(destination, 64, destination:length())
+            local got, readReason = child.stdout:readAvailableInto(destination, destination:length(), 64)
             assert.is_nil(readReason)
             if got == 0 then
                 break

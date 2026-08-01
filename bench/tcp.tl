@@ -251,7 +251,7 @@ local function consumeBuffer(connection: TCPSocket, destination: IOBuffer, count
     local consumed = 0
     while consumed < count do
         waitReadable(connection)
-        local read <const>, reason = connection:readInto(destination, count - consumed, consumed)
+        local read <const>, reason = connection:readInto(destination, consumed, count - consumed)
         if read == nil then
             if reason ~= nil then
                 error("bench: loopback buffer read failed: " .. reason, 0)

@@ -484,16 +484,16 @@ local record binaryIO
         --- returns zero without consuming input.
         --- @param destination The caller supplies an open
         ---     [`Buffer`](tealdoc:tecs.io.Buffer).
-        --- @param maxBytes The caller supplies a ceiling from 0 to 65536 bytes
-        ---     or omits it for 16384. Invalid values raise.
         --- @param offset The caller supplies a zero-based destination offset
         ---     or omits it for zero.
+        --- @param maxBytes The caller supplies a ceiling from 0 to 65536 bytes
+        ---     or omits it for 16384. Invalid values raise.
         --- @return Returns the bytes read, zero for a zero-byte request, or nil
         ---     when no bytes arrived or the read failed.
         --- @return Returns the reason only when reading fails or the peer
         ---     disconnects.
         readInto: function(
-            self: TCPSocket, destination: IOBuffer, maxBytes?: integer, offset?: integer
+            self: TCPSocket, destination: IOBuffer, offset?: integer, maxBytes?: integer
         ): integer, string
         --- Queues one chunk for reliable ordered delivery.
         ---
@@ -523,9 +523,13 @@ local record binaryIO
         ---
         --- The native send queue copies the range before this call returns.
         --- @param source The caller supplies an open [`ByteView`](tealdoc:tecs.io.ByteView).
+        --- @param offset The caller supplies a zero-based source offset or
+        ---     omits it for zero.
+        --- @param count The caller supplies at most 16777216 bytes or omits it
+        ---     for the remainder. Invalid ranges raise.
         --- @return Returns the number of bytes accepted.
         --- @return Returns the reason when the first return is nil.
-        writeView: function(self: TCPSocket, source: types.ByteView): integer, string
+        writeView: function(self: TCPSocket, source: types.ByteView, offset?: integer, count?: integer): integer, string
         --- Returns bytes accepted but not yet sent.
         ---
         --- @return Returns the queued byte count, zero after sending, or nil on
@@ -910,7 +914,7 @@ function binaryIO.TCPSocket:read(maxBytes?: integer): string, string
     return loader.toBytes(self._buffer as loader.CValue, read)
 end
 
-function binaryIO.TCPSocket:readInto(destination: IOBuffer, maxBytes?: integer, offset?: integer): integer, string
+function binaryIO.TCPSocket:readInto(destination: IOBuffer, offset?: integer, maxBytes?: integer): integer, string
     if self._closed then
         return nil, "connection is closed"
     end
@@ -978,21 +982,29 @@ function binaryIO.TCPSocket:writeFrom(source: IOBuffer, offset?: integer, count?
     return size
 end
 
-function binaryIO.TCPSocket:writeView(source: types.ByteView): integer, string
+function binaryIO.TCPSocket:writeView(source: types.ByteView, offset?: integer, count?: integer): integer, string
     if self._closed then
         return nil, "connection is closed"
     end
     if source == nil or source:isReleased() then
         error("tecs: TCPSocket:writeView needs an open io.ByteView", 2)
     end
-    local size <const> = source:length()
+    local length <const> = source:length()
+    local at <const> = offset or 0
+    if type(at) ~= "number" or at ~= floor(at) or at < 0 or at > length then
+        error("tecs: TCPSocket:writeView offset is outside the view", 2)
+    end
+    local size <const> = count == nil and length - at or count
+    if type(size) ~= "number" or size ~= floor(size) or size < 0 or size > length - at then
+        error("tecs: TCPSocket:writeView count is outside the view", 2)
+    end
     if size > MAX_WRITE_BYTES then
         error(("tecs: TCPSocket:writeView accepts at most %d bytes, not %d"):format(MAX_WRITE_BYTES, size), 2)
     end
     if size == 0 then
         return 0
     end
-    if tonumber(C.tecsNetStreamWrite(self._handle, source:getFFIPointer(), size)) == 0 then
+    if tonumber(C.tecsNetStreamWrite(self._handle, source:getFFIPointer() + at, size)) == 0 then
         return nil, loader.toString(C.tecsRustError())
     end
     return size

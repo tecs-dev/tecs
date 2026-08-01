@@ -29,6 +29,7 @@ local max <const> = math.max
 local min <const> = math.min
 
 local CHUNK <const> = 64 * 1024
+local DEFAULT_READ_BYTES <const> = 16 * 1024
 local MAX_ZLIB_CHUNK <const> = 0x40000000
 local MAX_INTEGER <const> = 9007199254740991
 local DEFAULT_MAX_INFLATE_BYTES <const> = 256 * 1024 * 1024
@@ -505,7 +506,7 @@ local function readSourcePointer(self: FilterReader): loader.BytePointer, intege
             self._source, CHUNK
         )
     end
-    local read <const>, reason = pump.readInto(self._source, self._input, CHUNK, 0)
+    local read <const>, reason = pump.readInto(self._source, self._input, 0, CHUNK)
     return read ~= nil and read > 0 and self._input:getFFIPointer() or nil, read, reason
 end
 
@@ -743,12 +744,12 @@ function FilterReader:read(count: integer): string, string
     return result
 end
 
-function FilterReader:readInto(destination: IOBuffer, count: integer, offset?: integer): integer, string
+function FilterReader:readInto(destination: IOBuffer, offset?: integer, count?: integer): integer, string
     if self._closed then
         return nil, "the reader is closed"
     end
-    count = nonNegative(count, "Reader:readInto count", 2)
     offset = nonNegative(offset or 0, "Reader:readInto offset", 2)
+    count = nonNegative(count or DEFAULT_READ_BYTES, "Reader:readInto count", 2)
     if count == 0 then
         return 0
     end

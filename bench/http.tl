@@ -99,14 +99,14 @@ function ChunkReader:read(count: integer): string, string
     return result
 end
 
-function ChunkReader:readInto(destination: Buffer, count: integer, offset?: integer): integer, string
+function ChunkReader:readInto(destination: Buffer, offset?: integer, count?: integer): integer, string
     if self.closed then
         return nil, "reader is closed"
     end
     if self.at >= self.source:length() or count == 0 then
         return 0
     end
-    local taking <const> = min(count, self.source:length() - self.at)
+    local taking <const> = min(count or 16 * 1024, self.source:length() - self.at)
     local output <const>, previousLength <const> = buffer.prepareWrite(destination, offset or 0, taking)
     copy(output as ffi.CData, (self.source:getFFIPointer() + self.at) as ffi.CData, taking)
     buffer.commitWrite(destination, offset or 0, taking, previousLength)
@@ -272,7 +272,7 @@ local function pollServer(server: Server, response: string): boolean
             return false
         end
     end
-    local read <const>, reason = server.connection:readInto(server.pending, READ_CHUNK, server.pending:length())
+    local read <const>, reason = server.connection:readInto(server.pending, server.pending:length(), READ_CHUNK)
     if reason ~= nil then
         error(reason, 0)
     end

@@ -56,6 +56,7 @@ local type pathModule = require("tecs.io.path")
 local floor <const> = math.floor
 local max <const> = math.max
 local min <const> = math.min
+local DEFAULT_READ_BYTES <const> = 16 * 1024
 local G <const> = _G as {string: any}
 local loadstring <const> = G["loadstring"] as function(string, string): function(...: any): any..., string
 local setfenv <const> = G["setfenv"] as function(any, {string: any})
@@ -659,14 +660,15 @@ local function slicingReader(bytes: string): SeekableReader
         state.at = last + 1
         return piece
     end
-    reader.readInto = function(_self: Reader, destination: IOBuffer, count: integer, offset?: integer): integer, string
+    reader.readInto = function(_self: Reader, destination: IOBuffer, offset?: integer, count?: integer): integer, string
         if state.closed then
             return nil, "the reader is closed"
         end
+        offset = offset or 0
+        count = count or DEFAULT_READ_BYTES
         if type(count) ~= "number" or count ~= floor(count) or count < 0 then
             error("tecs: Reader:readInto count must be a non-negative integer", 2)
         end
-        offset = offset or 0
         if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 then
             error("tecs: Reader:readInto offset must be a non-negative integer", 2)
         end
