@@ -177,14 +177,16 @@ local prepared <const> = saveWorld:saveSnapshot({buffer = reusable})
 local preparedBuffer <const> = requireBuffer(prepared)
 local bytes <const> = #preparedBuffer:tostring()
 
-measure("save", bytes, function()
-    saveWorld:saveSnapshot({buffer = reusable})
-end)
+measure("save", bytes, function() saveWorld:saveSnapshot({buffer = reusable}) end)
 
 local loadWorld <const> = tecs.ecs.newWorld({maxEntities = COUNT + 64})
-measure("load", bytes, function()
-    loadWorld:loadSnapshot(reusable)
-    if loadWorld:getStats().entities ~= COUNT then
-        error("bench: snapshot load restored the wrong entity count", 0)
+measure(
+    "load",
+    bytes,
+    function()
+        loadWorld:loadSnapshot(reusable)
+        if loadWorld:getStats().entities ~= COUNT then
+            error("bench: snapshot load restored the wrong entity count", 0)
+        end
     end
-end)
+)

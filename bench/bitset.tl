@@ -123,52 +123,68 @@ local function measure(name: string, operations: integer, run: function(): integ
     )
 end
 
-measure("set", SET_COUNT, function(): integer
-    local set <const> = BitsetModule.new(BITS)
-    for _, index in ipairs(PRIMARY) do
-        set:set(index)
+measure(
+    "set",
+    SET_COUNT,
+    function(): integer
+        local set <const> = BitsetModule.new(BITS)
+        for _, index in ipairs(PRIMARY) do
+            set:set(index)
+        end
+        if set.count ~= SET_COUNT then
+            error("bench: set lost bits", 0)
+        end
+        return set.count
     end
-    if set.count ~= SET_COUNT then
-        error("bench: set lost bits", 0)
-    end
-    return set.count
-end)
+)
 
-measure("setRange", SET_COUNT, function(): integer
-    local set <const> = BitsetModule.new(BITS)
-    for _, range in ipairs(RANGES) do
-        set:setRange(range.lo, range.hi)
+measure(
+    "setRange",
+    SET_COUNT,
+    function(): integer
+        local set <const> = BitsetModule.new(BITS)
+        for _, range in ipairs(RANGES) do
+            set:setRange(range.lo, range.hi)
+        end
+        if set.count ~= SET_COUNT then
+            error("bench: setRange lost bits", 0)
+        end
+        return set.count
     end
-    if set.count ~= SET_COUNT then
-        error("bench: setRange lost bits", 0)
-    end
-    return set.count
-end)
+)
 
-measure("clear", SET_COUNT, function(): integer
-    local set <const> = populated(PRIMARY)
-    for _, index in ipairs(PRIMARY) do
-        set:clear(index)
+measure(
+    "clear",
+    SET_COUNT,
+    function(): integer
+        local set <const> = populated(PRIMARY)
+        for _, index in ipairs(PRIMARY) do
+            set:clear(index)
+        end
+        if set.count ~= 0 then
+            error("bench: clear left bits", 0)
+        end
+        return set.count
     end
-    if set.count ~= 0 then
-        error("bench: clear left bits", 0)
-    end
-    return set.count
-end)
+)
 
 local scanSet <const> = populated(PRIMARY)
-measure("scan", SET_COUNT, function(): integer
-    local count = 0
-    local index = scanSet:beginScan(0)
-    while index do
-        count = count + 1
-        index = scanSet:nextScan()
+measure(
+    "scan",
+    SET_COUNT,
+    function(): integer
+        local count = 0
+        local index = scanSet:beginScan(0)
+        while index do
+            count = count + 1
+            index = scanSet:nextScan()
+        end
+        if count ~= SET_COUNT then
+            error("bench: scan skipped bits", 0)
+        end
+        return count
     end
-    if count ~= SET_COUNT then
-        error("bench: scan skipped bits", 0)
-    end
-    return count
-end)
+)
 
 local subset: {integer} = {}
 for index = 1, #PRIMARY, 2 do
@@ -176,21 +192,29 @@ for index = 1, #PRIMARY, 2 do
 end
 local containsLeft <const> = populated(PRIMARY)
 local containsRight <const> = populated(subset)
-measure("containsAll", #subset, function(): integer
-    if not containsLeft:containsAll(containsRight) then
-        error("bench: containsAll rejected a subset", 0)
+measure(
+    "containsAll",
+    #subset,
+    function(): integer
+        if not containsLeft:containsAll(containsRight) then
+            error("bench: containsAll rejected a subset", 0)
+        end
+        return 1
     end
-    return 1
-end)
+)
 
 local overlapLeft <const> = populated(PRIMARY)
 local overlapRight <const> = populated(DISJOINT)
 for index = 1, #PRIMARY, 4 do
     overlapRight:set(PRIMARY[index])
 end
-measure("overlaps", SET_COUNT, function(): integer
-    if not overlapLeft:overlaps(overlapRight) then
-        error("bench: overlaps missed shared bits", 0)
+measure(
+    "overlaps",
+    SET_COUNT,
+    function(): integer
+        if not overlapLeft:overlaps(overlapRight) then
+            error("bench: overlaps missed shared bits", 0)
+        end
+        return 1
     end
-    return 1
-end)
+)
