@@ -575,6 +575,62 @@ local function prepareExampleTypes(context)
     end
 end
 
+--- Makes a public builtin name resolve to the record that owns its declaration.
+---
+--- Builtins return their constructors from `tecs.internal.builtins`, while
+--- `tecs.ecs` binds the same values as its public names. Tealdoc otherwise
+--- sees only that binding and drops the nested record beneath it. Copy the
+--- original declaration subtree under the public name rather than declaring a
+--- second record merely for documentation.
+local function publishBuiltinTypes(context)
+    local registry = context.env.registry
+    local function copy(sourcePath, publicPath, parent, ownership)
+        local source = assert(registry[sourcePath], "Tealdoc did not read " .. sourcePath)
+        local item = {}
+        for key, value in pairs(source) do
+            item[key] = value
+        end
+        setmetatable(item, getmetatable(source))
+        item.path = publicPath
+        item.parent = parent
+        item.children = {}
+        if item.kind == "variable" or item.kind == "field" then
+            item.text = ownership .. " " .. (item.text or "Reports this public value.")
+        end
+        registry[publicPath] = item
+        for _, childPath in ipairs(source.children or {}) do
+            local child = assert(registry[childPath], "Tealdoc lost " .. childPath)
+            local childPublic = publicPath .. "." .. child.name
+            copy(childPath, childPublic, publicPath, ownership)
+            table.insert(item.children, childPublic)
+        end
+    end
+
+    for _, name in ipairs({
+        "Transform2D",
+        "Transform3D",
+        "RelativeTransform2D",
+        "TTL",
+        "OnSpawn",
+        "OnDespawn",
+        "ArchetypeCreated",
+        "StateEnter",
+        "StateExit",
+        "StateBlur",
+        "StateFocus",
+        "OnSnapshotSave",
+        "StartSnapshotLoad",
+        "FinishSnapshotLoad",
+    }) do
+        local ownership = (name == "TTL" or name:match("^On")
+            or name:match("^State") or name == "ArchetypeCreated"
+            or name:match("SnapshotLoad$"))
+            and "Engine-owned."
+            or "Caller-writable."
+        copy("tecs.internal.builtins." .. name, "tecs.ecs." .. name, "tecs.ecs", ownership)
+    end
+end
+
 local pages = { "docs" }
 for _, entry in ipairs(PAGE_OVERRIDES) do
     table.insert(pages, {
@@ -704,6 +760,7 @@ return {
             sidebar_open = { "modules" },
             before_build = function(context)
                 prepareDirectoryModules(context)
+                publishBuiltinTypes(context)
                 checkWriting(context)
                 checkPages(context)
                 prepareExampleTypes(context)
