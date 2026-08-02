@@ -857,7 +857,13 @@ return tecs.newApplication({
             end
         end)
 
-        selectScene(1)
+        -- Plugin spawns remain staged until Startup begins, so select the
+        -- initial scene here rather than reading its Style before it exists.
+        world:addSystem({
+            name = "demo.SelectInitialScene",
+            phase = tecs.ecs.phases.Startup,
+            run = function() selectScene(1) end,
+        })
 
         world:addSystem({
             name = "demo.UiState",
