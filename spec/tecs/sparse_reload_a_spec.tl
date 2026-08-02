@@ -12,7 +12,7 @@ describe(
             function()
                 local w = tecs.ecs.newWorld()
                 w:spawn(tecs.ecs.Name("first"))
-                w:commit()
+                w:enqueueCommit()
                 luassert.is_true(true)
             end
         )

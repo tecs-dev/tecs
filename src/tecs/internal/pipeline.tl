@@ -1,4 +1,5 @@
 local types <const> = require("tecs.types")
+local internal <const> = require("tecs.internal.types")
 local phases <const> = require("tecs.internal.phases")
 local fixedtracking <const> = require("tecs.internal.fixedtracking")
 local EMPTY <const> = require("tecs.utils.pool").EMPTY
@@ -30,6 +31,8 @@ local record FlatGroup
     runIfs: {function(number, World, string): boolean}
     ids: {string}
     names: {string}
+    commitBefores: {boolean}
+    commitAfters: {boolean}
     count: integer
 end
 
@@ -112,6 +115,8 @@ local EMPTY_GROUP <const>: FlatGroup = {
     runIfs = {},
     ids = {},
     names = {},
+    commitBefores = {},
+    commitAfters = {},
     count = 0,
 }
 
@@ -290,6 +295,8 @@ local function buildFlatGroup(configs: {RegisteredSystem}): FlatGroup
     ): boolean}
     local ids: {string} = table_new(n, 0) as {string}
     local names: {string} = table_new(n, 0) as {string}
+    local commitBefores: {boolean} = table_new(n, 0) as {boolean}
+    local commitAfters: {boolean} = table_new(n, 0) as {boolean}
 
     for i = 1, n do
         local config = configs[i]
@@ -297,6 +304,8 @@ local function buildFlatGroup(configs: {RegisteredSystem}): FlatGroup
         runIfs[i] = config.runIf
         ids[i] = config.id
         names[i] = config.name
+        commitBefores[i] = config.commitBefore or false
+        commitAfters[i] = config.commitAfter or false
     end
 
     return {
@@ -304,6 +313,8 @@ local function buildFlatGroup(configs: {RegisteredSystem}): FlatGroup
         runIfs = runIfs,
         ids = ids,
         names = names,
+        commitBefores = commitBefores,
+        commitAfters = commitAfters,
         count = n,
     }
 end
@@ -362,25 +373,83 @@ local function recreatePipeline(self: PipelineImpl)
     self.dirty = false
 end
 
--- Execute a flat group of systems. Each system runs inside its own jit.zone
--- so profiling can attribute samples. This does not commit the world.
-local function runGroup(group: FlatGroup, dt: number, world: World)
+-- Execute one phase's systems. Each system runs inside its own jit.zone so
+-- profiling can attribute samples. The caller owns the phase barrier.
+local function runGroupBody(group: FlatGroup, dt: number, world: World)
     local n = group.count
-    if n == 0 then
-        return
-    end
-
     local runs = group.runs
     local runIfArr = group.runIfs
     local idArr = group.ids
     local nameArr = group.names
+    local commitBefores = group.commitBefores
+    local commitAfters = group.commitAfters
+    local worldImpl = world as internal.WorldImpl
 
     for i = 1, n do
+        if commitBefores[i] then
+            worldImpl:_commit()
+        end
+        worldImpl._runningSystem = true
         local runIf = runIfArr[i]
         if not runIf or runIf(dt, world, nameArr[i]) then
             zone(idArr[i])
             runs[i](dt, world)
             zone()
+        end
+        worldImpl._runningSystem = false
+        if commitAfters[i] or worldImpl._commitRequested then
+            worldImpl._commitRequested = false
+            worldImpl:_commit()
+        end
+    end
+end
+
+-- One protected boundary per phase, not per system. The error handler runs
+-- before the system stack unwinds, so it can restore request state and retain
+-- the original traceback. A stack rather than one slot preserves nested world
+-- updates invoked by a system.
+local activeWorlds: {internal.WorldImpl} = {}
+local activeWorldDepth = 0
+local traceback <const> = debug.traceback
+
+local function phaseFailure(failure: any): string
+    local world = activeWorlds[activeWorldDepth]
+    if world then
+        world._runningSystem = false
+        world._commitRequested = false
+    end
+    zone()
+    return traceback(tostring(failure), 2)
+end
+
+local function runGroup(group: FlatGroup, dt: number, world: World)
+    if group.count == 0 then
+        return
+    end
+
+    activeWorldDepth = activeWorldDepth + 1
+    activeWorlds[activeWorldDepth] = world as internal.WorldImpl
+    local ok, failure = xpcall(runGroupBody, phaseFailure, group, dt, world) as (boolean, string)
+    activeWorlds[activeWorldDepth] = nil
+    activeWorldDepth = activeWorldDepth - 1
+    if not ok then
+        error(failure, 0)
+    end
+end
+
+-- Execute enabled leaf phases in order, publishing once after each phase.
+-- Systems within one phase therefore batch together and intentionally do not
+-- observe one another's structural changes unless its configuration declares
+-- an additional barrier.
+local function runPhaseList(self: PipelineImpl, phaseList: {Phase}, dt: number, world: World)
+    for i = 1, #phaseList do
+        local phase = phaseList[i]
+        if self.phaseStates[phase.position] then
+            local group = self.phaseGroups[phase.position]
+            if group and group.count > 0 then
+                runGroup(group, dt, world)
+                (world as internal.WorldImpl):_commit()
+            end
         end
     end
 end
@@ -431,8 +500,8 @@ local function dropCatchUp(self: PipelineImpl, fixedTimestep: number)
     )
 end
 
--- Execute fixed timestep systems with death-spiral protection. This does
--- not commit between iterations.
+-- Execute fixed timestep systems with death-spiral protection. System
+-- barriers inside each group also separate fixed iterations.
 local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
     local fixedTimestep = self.fixedTimestep
     self.fixedAccumulator = self.fixedAccumulator + dt
@@ -442,8 +511,7 @@ local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
         return
     end
 
-    local fixedGroup = self.fixedGroup
-    local hasWork = fixedGroup.count > 0
+    local hasWork = self.fixedGroup.count > 0
     local maxSteps = self.fixedMaxSteps
     local steps = 0
 
@@ -455,7 +523,7 @@ local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
         self.fixedStepCount = self.fixedStepCount + 1
         fixedtracking.beginStep(world)
         if hasWork then
-            runGroup(fixedGroup, fixedTimestep, world)
+            runPhaseList(self, FIXED_PHASES, fixedTimestep, world)
         end
         fixedtracking.finishStep(world)
         self.fixedAccumulator = self.fixedAccumulator - fixedTimestep
@@ -478,9 +546,7 @@ function PipelineImpl:update(dt: number, world: World)
     end
 
     zone("beforeFixed")
-    if self.beforeFixedGroup.count > 0 then
-        runGroup(self.beforeFixedGroup, dt, world)
-    end
+    runPhaseList(self, BEFORE_FIXED_PHASES, dt, world)
     zone()
 
     zone("fixedLoop")
@@ -488,9 +554,7 @@ function PipelineImpl:update(dt: number, world: World)
     zone()
 
     zone("afterFixed")
-    if self.afterFixedGroup.count > 0 then
-        runGroup(self.afterFixedGroup, dt, world)
-    end
+    runPhaseList(self, AFTER_FIXED_PHASES, dt, world)
     zone()
 end
 
@@ -582,8 +646,8 @@ function PipelineImpl:addSystem(config: SystemConfig)
     self.dirty = true
 end
 
--- Recursive phase dispatch. Never commits.
-local function runPhaseNoCommit(self: PipelineImpl, phase: Phase, dt: number, world: World)
+-- Recursive phase dispatch. Each leaf phase is one transaction.
+local function runPhaseCommitted(self: PipelineImpl, phase: Phase, dt: number, world: World)
     if not phase.children then
         -- Leaf phase: use cached flat group, honoring the phase state like
         -- group dispatch does.
@@ -591,6 +655,7 @@ local function runPhaseNoCommit(self: PipelineImpl, phase: Phase, dt: number, wo
             local group = self.phaseGroups[phase.position]
             if group then
                 runGroup(group, dt, world)
+                (world as internal.WorldImpl):_commit()
             end
         end
     else
@@ -599,11 +664,12 @@ local function runPhaseNoCommit(self: PipelineImpl, phase: Phase, dt: number, wo
             local child = phase.children[i]
             if child.position and child.position > 0 and self.phaseStates[child.position] then
                 if child.children then
-                    runPhaseNoCommit(self, child, dt, world)
+                    runPhaseCommitted(self, child, dt, world)
                 else
                     local group = self.phaseGroups[child.position]
                     if group then
                         runGroup(group, dt, world)
+                        (world as internal.WorldImpl):_commit()
                     end
                 end
             end
@@ -616,7 +682,7 @@ function PipelineImpl:run(phase: Phase, dt: number, world: World)
         recreatePipeline(self)
     end
 
-    runPhaseNoCommit(self, phase, dt, world)
+    runPhaseCommitted(self, phase, dt, world)
 end
 
 function PipelineImpl:registerPhase(phase: Phase)

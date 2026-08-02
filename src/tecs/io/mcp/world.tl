@@ -30,8 +30,10 @@ local mcp <const> = require("tecs.io.mcp")
 --- protocol has nowhere to carry it.
 ---
 --- Every handler here runs on the game thread inside the frame, before the
---- world is stepped, so a write lands before the update that reads it. While
---- the application is suspended nothing is polled, so no tool answers at all.
+--- world is stepped. Structural tools request publication before they answer,
+--- so their result describes the settled mutation and the following update
+--- reads it. While the application is suspended nothing is polled, so no tool
+--- answers at all.
 local record world
     --- Makes `w` the world these tools act on.
     ---
@@ -388,6 +390,7 @@ mcp.register({
         -- LuaJIT is 5.1, where unpack is a global rather than table.unpack.
         local unpackAll = (_G as {string: any})["unpack"] as function({any}): any...
         local entity = (w.spawn as function(types.World, ...: any): integer)(w, unpackAll(instances))
+        w:enqueueCommit()
         return describeOne(w, entity)
     end,
 })
@@ -417,6 +420,7 @@ mcp.register({
         local kind = component(args.component as string)
         local added = not w:has(entity, kind)
         w:set(entity, kind, construct(kind, args.values as {string: any}))
+        w:enqueueCommit()
 
         local described = describeOne(w, entity)
         described.added = added
@@ -486,6 +490,7 @@ mcp.register({
             return {entity = entity, skipped = true}
         end
         w:remove(entity, kind)
+        w:enqueueCommit()
         local described = describeOne(w, entity)
         described.skipped = false
         return described
@@ -508,6 +513,7 @@ mcp.register({
             return {entity = entity, skipped = true}
         end
         w:despawn(entity)
+        w:enqueueCommit()
         return {entity = entity, skipped = false}
     end,
 })

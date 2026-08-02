@@ -1,31 +1,83 @@
 ---
-description: "Mutation paths, entity lifecycle states, commit drain ordering, and visibility guarantees"
+description: "Structural transactions, publication barriers, value writes, and visibility guarantees"
 outline: deep
 ---
 
 # Mutation model
 
-This page defines mutation timing, visibility, and ordering. When another page
-disagrees with this specification, this page wins.
+Tecs has one structural mutation model. Spawns, despawns, component additions,
+component removals, bundle spawns, and every batch operation stage work into the
+world's current transaction. They never change archetype rows before returning.
 
-## Execution paths
+The pipeline owns normal publication. It settles the transaction before
+lifecycle dispatch and after each non-empty phase. A system may declare an
+unconditional additional barrier with `commitBefore` or `commitAfter`, and
+`world:enqueueCommit()` requests a conditional safe-point barrier.
 
-| Path        | APIs                                                                        | Applied                  |
-| ----------- | --------------------------------------------------------------------------- | ------------------------ |
-| Instant     | `spawn`, `set`, `remove`, and `despawn` at depth 0                          | Before return            |
-| Staged      | The same APIs in a [deferred scope](/modules/ecs/world#deferred-operations) | At commit                |
-| Batch       | The `batch*` APIs                                                           | At the outer boundary    |
-| Bundle      | Bundle spawn APIs                                                           | Immediately or at commit |
-| Explicit ID | `spawnAt`, `batchSpawnAt`, and snapshot load                                | At placement             |
-| Sparse      | Sparse relationship `set` and `remove`                                      | Last in the drain        |
+## Mutation classes
 
-Every path must produce the same post-commit state for the same logical
-operations. The instant path optimizes staged semantics.
+| Class          | APIs                                                                  | Visibility                           |
+| -------------- | --------------------------------------------------------------------- | ------------------------------------ |
+| Structural     | `spawn`, `despawn`, structural `set`, `remove`, bundles, and `batch*` | Next pipeline barrier                |
+| Value          | `set` for a component already present                                 | Before return                        |
+| Mutable access | `world:getMut` and `archetype:getMut`                                 | The returned live value is immediate |
+| Explicit ID    | `spawnAt`, `batchSpawnAt`, and snapshot restore                       | Next owning internal barrier         |
+| Sparse         | Sparse relationship `set` and `remove`                                | Last step of transaction settle      |
 
-An instant call may route through staging when a transaction already includes
-the entity, when spawn observers exist, when despawn needs cleanup or cascade
-work, or when sparse storage requires a store flush. Callers cannot rely on
-which implementation path runs.
+`getMut` is immediate because it cannot change an entity's archetype. It marks
+the component column dirty before returning the live value. Any other side
+effect performed through that value also happens immediately; Tecs does not
+attempt to roll value writes back when later structural work fails.
+
+`set` has the same fast path when the committed entity already owns the
+component. Once that entity has a pending structural change, later values join
+its staged destination so the transaction still has one final result.
+
+## Publication ownership
+
+The standard lifecycle publishes at these points:
+
+1. `startup`, `update`, `runPhase`, and `shutdown` publish work queued before
+   dispatch begins.
+2. Systems in one phase normally run against the same committed structure.
+3. The pipeline publishes after each non-empty phase.
+4. A system with `commitBefore = true` adds a barrier before its `runIf` and
+   `run`. A system with `commitAfter = true` adds one after its dispatch.
+5. `enqueueCommit()` called by a system coalesces into one barrier after that
+   system returns and before the next system runs.
+
+The declarations are scheduler metadata for unconditional dependencies.
+`enqueueCommit()` is the conditional form: it sets one request bit during
+system dispatch, so calling it more than once still creates only one barrier.
+The requesting system retains its stable view and cannot observe the structural
+work it just staged. If it is the last system, the request is honored before
+the ordinary phase-end barrier, which then has nothing left to publish.
+
+Use `commitBefore` when a system consumes archetype membership produced by an
+earlier system in the same phase. Use `commitAfter` when a later system in that
+phase must consume this system's structural output. Prefer a later phase when
+the dependency is part of the frame's normal architecture. Call
+`enqueueCommit()` inside `run` only when whether the next system needs the
+output is known at runtime.
+
+```teal
+world:addSystem({
+    name = "game.ResolveSpawns",
+    phase = tecs.ecs.phases.Update,
+    commitBefore = true,
+    run = resolveSpawns,
+})
+```
+
+`runIf` should remain a predicate. A declared pre-barrier runs before it, and a
+declared post-barrier runs after the dispatch slot even when the predicate
+skips the system, so the publication schedule does not depend on dynamic code.
+
+Outside system dispatch, `enqueueCommit()` publishes synchronously before it
+returns. Tests use that behavior to inspect a settled world, and the built-in
+MCP mutation tools use it so their responses describe the mutation they just
+performed. This is still the one deferred structural model: each operation
+stages first, and the explicit request only selects its publication boundary.
 
 ## Entity transaction states
 
@@ -45,88 +97,70 @@ One transaction places each entity ID in exactly one state:
 | Staged mutate  | `true`    | See committed structure.  | Match the committed archetype. |
 | Staged despawn | `true`    | See committed values.     | Match until row removal.       |
 
-Commit clears every staged state.
+Publication clears every staged state. A spawn returns its reserved ID
+immediately, so later calls in the same transaction may modify or cancel it.
+Pass final values to `spawn` when code needs them before the next barrier;
+`getMut` cannot return a value for a staged spawn.
 
 ## Operations across states
 
-**`set`**
+`set` behaves as follows:
 
-- Committed: Writes a value immediately or stages an archetype move.
-- Staged spawn: Updates the staged shape and value.
-- Staged mutate: Restages the destination and value.
-- Staged despawn: Does nothing.
+- A committed value replacement writes immediately and marks its column dirty.
+- A committed component addition stages an archetype move.
+- A staged spawn or mutate updates its final staged shape and value.
+- A staged despawn ignores the call.
 
-**`remove`**
+`remove` stages a move for a committed entity, edits the final shape of a
+staged spawn or mutate, and ignores a staged despawn.
 
-- Committed: Stages a move when the component exists.
-- Staged spawn: Removes the component from the staged shape.
-- Staged mutate: Restages the destination.
-- Staged despawn: Does nothing.
+`despawn` stages removal for a committed entity, cancels placement of a staged
+spawn, replaces a staged move with removal, and ignores a repeated despawn.
 
-**`despawn`**
+`spawnAt` requires a non-live ID. It revives a free slot and reconciles
+allocator state. Passing a live ID violates the caller contract.
 
-- Committed: Runs cleanup and events, then records row removal.
-- Staged spawn: Cancels placement but still emits `OnDespawn`.
-- Staged mutate: Cancels the move and records removal.
-- Staged despawn: Does nothing.
+## Settle order
 
-`spawnAt` requires a non-live ID. The function revives a free slot and
-reconciles allocator state. A live ID violates the caller contract.
-
-## Commit drain {#commit-drain}
-
-The outermost scope closes by draining dirty archetypes in waves:
+One publication drains dirty archetypes in fixed-point waves:
 
 1. Despawns remove rows and free capacity.
-2. Spawns place bundle queues, batch queues, explicit-ID batches, then
-   per-entity staged spawns.
-3. Moves relocate rows and write final component values.
-4. Batch `set` and `remove` calls run in call order.
+2. Bundle queues, batch queues, explicit-ID batches, and ordinary spawns place
+   rows.
+3. Structural moves relocate rows and write final component values.
+4. Batch `set` and `remove` operations run in call order.
 5. Sparse relationship writes flush to their stores.
 
-Observers and query callbacks may stage more work during any phase. That work
+Observers and query callbacks may stage more work during settle. That work
 starts another wave. The drain stops at a fixed point or raises after 64 waves
 with a likely observer-cascade error.
 
-The drain guarantees:
+The settle guarantees that despawns precede spawns within a wave, the last
+staged write wins, net-zero remove/add changes keep their row, despawn cancels
+other staged work for that entity, and recycled slots cannot inherit sparse
+writes from their previous entity.
 
-- Despawns precede spawns within one wave, so spawns may reuse freed rows.
-- The last staged write wins for one entity and component.
-- A remove followed by an add of the same component keeps the row in place and
-  fires no match-set callback when the net signature stays unchanged.
-- Despawn cancels staged spawn, move, and sparse writes for that entity.
-- Slot recycling cannot revive a sparse write from the previous entity.
+Sparse structural moves use a compact list of touched slots when the changed
+set is small relative to its source archetype. Dense changes retain a linear
+descending scan. Spawn staging transfers packed value arrays directly and
+stores no payload for tags. These are settle implementation details; neither
+changes transaction ordering or visibility.
 
-## Scope ownership
+## Query iteration
 
-These operations raise scope depth:
+Query iteration does not own transaction lifetime. `query:iter()`, grouped
+iteration, and cursors read committed archetypes while structural calls stage
+for a later pipeline barrier. Breaking or returning early cannot leave the
+world in a special mutation mode.
 
-- An archetype-level query iterator, from its first step through exhaustion.
-- The commit drain while it invokes query callbacks.
-- Every batch call for the duration of that call.
-- `world:defer()` until the matching `world:commit()`.
+Use `query:newCursor()` only when code needs an explicitly closable traversal
+object. `cursor:close()` stops that traversal and does not publish mutations.
 
-Leaving `query:iter()` early skips the iterator step that closes its scope.
-Every later structural mutation then stages silently. Use a cursor for loops
-that may `break` or return, and call `cursor:close()`.
-
-`world:unwind()` closes all scopes and drains pending work after an exception.
-`world:update()` calls it before pipeline dispatch. Closing a cursor after an
-unwind remains safe because scope pops clamp at zero.
-
-## Visibility inside a scope
-
-- Every spawn path returns an ID immediately. Later staged calls may use it.
-- Structural changes remain invisible to `get`, `has`, `isAlive`, and queries
-  until the drain applies them.
-- `set` writes through immediately when the committed entity already has the
-  component and no staged structural change exists for that entity.
-- After an entity acquires staged structure, later values wait for commit.
-- Query callbacks may read the supplied archetype and row range until the
-  callback returns.
-
-Only mid-scope reads distinguish immediate value writes from staged values.
-Post-commit state always follows last-write-wins.
+Columns and entity arrays are live archetype storage. They remain valid until a
+later publication changes that archetype. Outside a system,
+`enqueueCommit()` may publish immediately, so finish manual traversal and
+release retained archetype storage before calling it. Inside a system the
+request waits until the system returns and is safe in a query loop.
 
 ## Dead and stale entity IDs
 
@@ -139,23 +173,19 @@ Entity generations reject a handle after slot reuse:
 | `markComponentDirty`, `remove`, `despawn` | Do nothing.                        |
 | `set`                                     | Raise `Entity ID not found: <id>`. |
 
-## Lifecycle event timing
+## Lifecycle events
 
-- `spawn`, `spawnAt`, and bundle spawn emit `OnSpawn` once per entity.
-- `despawn` and `batchDespawn` emit `OnDespawn` once at the entity address and
-  once at address `0`.
-- `batchSpawn` and `batchSpawnAt` emit neither event. Use the fill callback or
-  `onEntitiesAdded`.
+`spawn`, `spawnAt`, and bundle spawn emit `OnSpawn` once per entity during the
+call, after its final initial shape has been staged. The entity is not alive or
+queryable yet, but observers may stage more mutations against its ID.
 
-`OnSpawn` runs during the spawn call while the entity remains staged.
-Observers may stage mutations against the pending ID.
+`despawn` and `batchDespawn` emit `OnDespawn` once at the entity address and
+once at address `0` before physical removal. The entity remains alive and
+readable during dispatch. Tecs clears entity-address observers after fan-out.
 
-`OnDespawn` runs before physical removal. The entity remains alive, readable,
-and queryable during dispatch. Tecs clears observers at the entity address
-after fan-out.
-
-Query callbacks run when rows enter or leave matching archetypes. The instant
-path invokes them inline; the staged path invokes them during drain.
+`batchSpawn` and `batchSpawnAt` emit neither lifecycle event. Use their fill
+callback or archetype `onEntitiesAdded` notification. Query callbacks run when
+settle actually adds or removes matching rows.
 
 ## Dirty tracking
 
@@ -165,21 +195,16 @@ callers still owe these access rules:
 - Read through `get`; take `getMut` only when code will write.
 - A direct cdata write through `get` needs
   `markComponentDirty(entity, Component)`.
-- `world:update` clears dirty bits after the pipeline, once extraction has
-  consumed them.
-- `batchSpawn` runs no component constructors and applies only
-  `requires` defaults before its callback. The callback must write every field
-  it depends on.
+- `world:update` clears dirty bits after the pipeline, once every consumer has
+  had a chance to observe them.
+- `batchSpawn` runs no component constructors and applies only `requires`
+  defaults before its callback. The callback must write every field it uses.
 
-Tecs owns dirty state. Callers declare write intent; they must not mutate the
-dirty metadata itself. [Dirty tracking](/modules/ecs/components/dirty-tracking)
-covers consumer-side iteration.
+## Structural invariants
 
-## Mutation-path requirements
+Every membership path honors the same rules:
 
-Every spawn or membership path must honor these invariants:
-
-- Adding a component includes its transitive `requires` closure in one
+- Adding a component includes its transitive `requires` closure in one final
   archetype transition. Caller values override required defaults.
 - A dense relationship instance adds its wildcard container.
 - Spawn paths add the active state tag; `set` and `remove` do not.
@@ -188,8 +213,7 @@ Every spawn or membership path must honor these invariants:
 - Scalar columns store raw values, and tags store no per-row value.
 - Table defaults and bundle factories create a fresh table per row.
 - Sparse relationships route through the world store. Exclusive edges evict
-  the prior target. Reverse indexes unlink old values before linking new ones.
-  Cascade delete recursively despawns sources.
+  the prior target, reverse indexes unlink before linking, and cascade delete
+  recursively stages source despawns.
 - Value writes dirty component columns; placements and moves dirty archetypes.
 - Entity-address observers never survive slot reuse.
-- Staged moves reserve destination capacity before the drain starts.

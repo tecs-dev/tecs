@@ -80,9 +80,9 @@ An FFI reference obtained through `world:get` remains writable because LuaJIT
 cannot make cdata const. If code writes through that reference, it must call
 `world:markComponentDirty(entity, Component)` explicitly.
 
-A spawn inside a deferred scope reserves an ID but does not place the entity
-until commit. `world:get` and `world:getMut` return `nil` for that staged
-entity. Pass its initial values to `world:spawn` instead.
+A spawn reserves an ID but does not place the entity until the next pipeline
+barrier. `world:get` and `world:getMut` return `nil` for that staged entity.
+Pass its initial values to `world:spawn` instead.
 
 ## Adding and removing components
 
@@ -102,10 +102,9 @@ world:remove(entity, tecs.ecs.Name)
 instances add any-target and specific-target checks; see
 [Relationships](/modules/ecs/relationships/).
 
-Adding or removing a component changes the entity's archetype. Query
-iteration, query callbacks, explicit `world:defer()` scopes, and batch
-callbacks stage that structural change until the outermost scope closes.
-[Deferred operations](/modules/ecs/world#deferred-operations) covers the visibility
+Adding or removing a component changes the entity's archetype, so those calls
+always stage until a pipeline barrier. [Structural
+transactions](/modules/ecs/world#structural-transactions) covers the visibility
 rules.
 
 ## Component dependencies {#auto-dependencies-with-requires}

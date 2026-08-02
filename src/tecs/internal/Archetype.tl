@@ -126,6 +126,8 @@ local record Archetype is ArchetypeInternal
     hasPendingDespawns: boolean
     hasPendingSpawns: boolean
     hasPendingMoveOut: boolean
+    pendingMoveSlots: {integer}
+    pendingMoveCount: integer
     dirtyQueuedEpoch: integer
     pendingBundleDrains: {any}
     pendingBundleDrainCount: integer
@@ -153,6 +155,7 @@ local record Archetype is ArchetypeInternal
     compact: function(self)
     resetPending: function(self)
     appendPendingValue: function(self, slot: integer, value: any, vals?: {any})
+    adoptPendingValues: function(self, slot: integer, vals: {any})
     getPendingValues: function(self, slot: integer): {any}
     findPendingValue: function(self, slot: integer, componentType: Component): any
     movePendingValuesTo: function(self, dst: Archetype, slot: integer)
@@ -690,6 +693,10 @@ function Archetype:resetPending()
     self.hasPendingSpawns = false
     self.pendingSpawnCount = 0
     self.hasPendingMoveOut = false
+    if self.pendingMoveCount > 0 then
+        table_clear(self.pendingMoveSlots)
+        self.pendingMoveCount = 0
+    end
     if self.pendingValueCount > 0 then
         local slots = self.pendingValueSlots
         local values = self.pendingValues
@@ -735,6 +742,14 @@ function Archetype:appendPendingValue(slot: integer, value: any, newVals?: {any}
 
     vals = newVals or {}
     vals[1] = value
+    self.pendingValues[slot] = vals
+    local count = self.pendingValueCount + 1
+    self.pendingValueCount = count
+    self.pendingValueSlots[count] = slot
+end
+
+-- Transfer an already-packed spawn value list into staging without copying.
+function Archetype:adoptPendingValues(slot: integer, vals: {any})
     self.pendingValues[slot] = vals
     local count = self.pendingValueCount + 1
     self.pendingValueCount = count
@@ -1069,6 +1084,8 @@ function Archetype.new(
         hasPendingDespawns = false,
         hasPendingSpawns = false,
         hasPendingMoveOut = false,
+        pendingMoveSlots = {},
+        pendingMoveCount = 0,
         pendingBundleDrains = {},
         pendingBundleDrainCount = 0,
         batchSpawnQueue = {},
@@ -1104,7 +1121,7 @@ function Archetype.new(
 
         -- Sparse relationships store their per-row data in the world's
         -- relationship store; column writes through `columns[comp]`
-        -- (instant/deferred set, applyPendingVals, etc.) silently land
+        -- (set, applyPendingVals, etc.) silently land
         -- in the empty `store` and the sparse-set fast path routes the
         -- value into the relationship store instead. Reads through
         -- `:get` / `:getMut` should return a proxy that resolves

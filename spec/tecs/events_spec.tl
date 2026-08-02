@@ -557,7 +557,7 @@ describe(
                         world:observe(0, tecs.ecs.OnDespawn, function(_e: tecs.ecs.OnDespawn) end)
 
                         local e = world:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         local secondRan = false
                         world:observe(e, Greet, function(_g: Greet) world:despawn(e) end)
@@ -566,6 +566,7 @@ describe(
                         world:emit(e, Greet, "hi")
 
                         luassert.is_true(secondRan, "dispatch must finish over the array being cleared")
+                        world:enqueueCommit()
                         luassert.is_false(world:isAlive(e))
 
                         -- The address is cleared; a later emit finds no observers.
@@ -583,7 +584,7 @@ describe(
                         world:observe(0, tecs.ecs.OnDespawn, function(_e: tecs.ecs.OnDespawn) end)
 
                         local e = world:spawn()
-                        world:commit()
+                        world:enqueueCommit()
                         world:observe(e, Greet, function(_g: Greet) world:despawn(e) end)
                         world:emit(e, Greet, "hi")
 
@@ -606,7 +607,7 @@ describe(
                 -- entity inherits the old entity's observers.
                 local function assertNoLeak(world: tecs.World, despawn: function(integer))
                     local e1 = world:spawn(LeakTag())
-                    world:commit()
+                    world:enqueueCommit()
 
                     local heard = 0
                     world:observe(e1, Greet, function(_g: Greet) heard = heard + 1 end)
@@ -614,10 +615,10 @@ describe(
                     luassert.equals(1, heard, "observer fires while the entity lives")
 
                     despawn(e1)
-                    world:commit()
+                    world:enqueueCommit()
 
                     local e2 = world:spawn()
-                    world:commit()
+                    world:enqueueCommit()
                     world:emit(e2, Greet, "recycled")
                     luassert.equals(1, heard, "stale observer must not fire for the recycled slot")
                 end
@@ -634,7 +635,7 @@ describe(
                     "clears per-entity observers on deferred despawn",
                     function()
                         local world = tecs.ecs.newWorld()
-                        assertNoLeak(world, function(id: integer) world:defer(); world:despawn(id) end)
+                        assertNoLeak(world, function(id: integer) world:despawn(id) end)
                     end
                 )
 

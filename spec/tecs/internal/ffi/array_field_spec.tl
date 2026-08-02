@@ -40,7 +40,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 local id = world:spawn(Holder({vals = {7, 8, 9}}))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = world:saveSnapshot({format = "table"})
                 world:loadSnapshot(snap)

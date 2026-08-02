@@ -73,20 +73,18 @@ local QUERY_CURSOR_MT <const>: metatable<QueryCursorImpl> = {__index = QueryCurs
 -- Iterator steps derive their resume position from the loop control
 -- variable (the current archetype or group id) through the active reverse
 -- indices, so nested or interleaved iteration of one query stays correct.
--- The lookups are stable mid-loop: iteration holds a query scope, so
--- structural changes stay deferred until the scope pops.
+-- The lookups are stable mid-loop because every structural change remains
+-- staged until the pipeline or caller commits it.
 
 local function simpleIterStep(self: QueryImpl, var: any): (Archetype, integer, any)
     local idx: integer
     if var == nil then
         idx = 1
-        self._world:_pushQueryScope()
     else
         idx = self._activeIndices[var as Archetype] + 1
     end
     local archetype = self._activeItems[idx]
     if not archetype then
-        self._world:_popQueryScope()
         return
     end
     return archetype, archetype.entities[0] as integer, archetype.entities
@@ -98,7 +96,6 @@ local function groupedIterStep(self: QueryImpl, var: any): (Archetype, integer, 
     local gi, ai: integer, integer
     if var == nil then
         gi, ai = 1, 1
-        self._world:_pushQueryScope()
     else
         local arch = var as Archetype
         local groupId = self._archetypeGroups[arch]
@@ -115,7 +112,6 @@ local function groupedIterStep(self: QueryImpl, var: any): (Archetype, integer, 
         gi = gi + 1
         ai = 1
     end
-    self._world:_popQueryScope()
 end
 
 local function openCursor(self: QueryCursorImpl): boolean
@@ -123,7 +119,6 @@ local function openCursor(self: QueryCursorImpl): boolean
         return false
     end
     if not self._open then
-        self._query._world:_pushQueryScope()
         self._open = true
     end
     return true
@@ -136,7 +131,6 @@ function QueryCursorImpl:close(): boolean, string
     self._closed = true
     if self._open then
         self._open = false
-        self._query._world:_popQueryScope()
     end
     return true
 end
@@ -367,7 +361,6 @@ local function groupsNext(self: QueryImpl, prev: any): integer
     local i: integer
     if prev == nil then
         i = 1
-        self._world:_pushQueryScope()
     else
         i = self._activeGroupListIndices[prev as integer] + 1
     end
@@ -375,7 +368,6 @@ local function groupsNext(self: QueryImpl, prev: any): integer
     if i <= #list then
         return list[i]
     end
-    self._world:_popQueryScope()
     return nil
 end
 
@@ -385,14 +377,8 @@ local function groupNext(self: QueryImpl, prev: any): (Archetype, integer, {inte
     if prev == nil then
         items = self._iterGroupSelected
         if not items then
-            -- First-call with no matching group: still needs a
-            -- balanced push/pop pair so we don't leave dangling
-            -- scope state.
-            self._world:_pushQueryScope()
-            self._world:_popQueryScope()
             return
         end
-        self._world:_pushQueryScope()
         i = 1
     else
         local arch = prev as Archetype
@@ -404,7 +390,6 @@ local function groupNext(self: QueryImpl, prev: any): (Archetype, integer, {inte
         local archetype = items[i]
         return archetype, archetype.entities[0] as integer, archetype.entities
     end
-    self._world:_popQueryScope()
 end
 
 function QueryImpl:groups(): (Query.GroupsIterFn, Query, any)

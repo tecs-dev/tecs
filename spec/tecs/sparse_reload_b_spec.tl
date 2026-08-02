@@ -12,7 +12,7 @@ describe(
                 local w = tecs.ecs.newWorld()
                 local parent = w:spawn(Name("parent"))
                 local child = w:spawn(Name("child"), ChildOf(parent))
-                w:commit()
+                w:enqueueCommit()
 
                 luassert.is_not_nil(w:get(child, ChildOf))
                 luassert.is_true(w:has(child, ChildOf))

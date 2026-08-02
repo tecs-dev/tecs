@@ -33,11 +33,11 @@ describe(
                         local a = world:spawn(Position(1, 1), Tag)
                         local b = world:spawn(Position(2, 2), Tag)
                         local c = world:spawn(Position(3, 3), Tag)
-                        world:commit()
+                        world:enqueueCommit()
 
                         local q = world:newQuery({include = {Tag}})
                         world:batchSet(q, Position(99, 99))
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(99, world:get(a, Position).x)
                         luassert.equals(99, world:get(b, Position).x)
@@ -52,14 +52,14 @@ describe(
                         local world = tecs.ecs.newWorld()
                         local a = world:spawn(Tag)
                         local b = world:spawn(Tag)
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.is_nil(world:get(a, Position))
                         luassert.is_nil(world:get(b, Position))
 
                         local q = world:newQuery({include = {Tag}})
                         world:batchSet(q, Position(5, 7))
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(5, world:get(a, Position).x)
                         luassert.equals(7, world:get(a, Position).y)
@@ -73,11 +73,11 @@ describe(
                         local world = tecs.ecs.newWorld()
                         local tagged = world:spawn(Tag, Position(1, 1))
                         local untagged = world:spawn(Position(2, 2))
-                        world:commit()
+                        world:enqueueCommit()
 
                         local q = world:newQuery({include = {Tag}})
                         world:batchSet(q, Position(99, 99))
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(99, world:get(tagged, Position).x)
                         luassert.equals(2, world:get(untagged, Position).x)
@@ -92,11 +92,11 @@ describe(
                         local a = world:spawn(Tag)
                         -- Archetype B: {Tag, Position}
                         local b = world:spawn(Tag, Position(1, 1))
-                        world:commit()
+                        world:enqueueCommit()
 
                         local q = world:newQuery({include = {Tag}})
                         world:batchSet(q, Position(42, 42))
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(42, world:get(a, Position).x)
                         luassert.equals(42, world:get(b, Position).x)
@@ -109,12 +109,12 @@ describe(
                         local world = tecs.ecs.newWorld()
                         local e1 = world:spawn(Position(1, 1))
                         local e2 = world:spawn(Position(2, 2))
-                        world:commit()
+                        world:enqueueCommit()
 
                         -- Apply Tag to every Position-carrying entity.
                         local q = world:newQuery({include = {Position}})
                         world:batchSet(q, Tag)
-                        world:commit()
+                        world:enqueueCommit()
 
                         -- Matched entities should now be in a Position+Tag archetype.
                         local tagged = world:newQuery({include = {Position, Tag}})
@@ -132,11 +132,11 @@ describe(
                         local world = tecs.ecs.newWorld()
                         local a = world:spawn(Position(1, 1), Tag)
                         local b = world:spawn(Position(2, 2), Tag, OtherTag)
-                        world:commit()
+                        world:enqueueCommit()
 
                         local q = world:newQuery({include = {Tag}, exclude = {OtherTag}})
                         world:batchSet(q, Position(50, 50))
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(50, world:get(a, Position).x)
                         luassert.equals(2, world:get(b, Position).x)
@@ -148,11 +148,11 @@ describe(
                     function()
                         local world = tecs.ecs.newWorld()
                         world:spawn(Position(1, 1))
-                        world:commit()
+                        world:enqueueCommit()
 
                         local q = world:newQuery({include = {OtherTag}})
                         world:batchSet(q, Position(99, 99))
-                        world:commit()
+                        world:enqueueCommit()
                     end
                 )
             end
@@ -168,7 +168,7 @@ describe(
                         for i = 1, 5 do
                             world:spawn(Tag, Position(i, i))
                         end
-                        world:commit()
+                        world:enqueueCommit()
 
                         local calls = 0
                         local seenFirst, seenLast, seenCount = 0, 0, 0
@@ -189,7 +189,7 @@ describe(
                                 end
                             end
                         )
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(1, calls, "single archetype, single call")
                         luassert.equals(1, seenFirst)
@@ -214,7 +214,7 @@ describe(
                         local world = tecs.ecs.newWorld()
                         local a = world:spawn(Tag)
                         local b = world:spawn(Tag)
-                        world:commit()
+                        world:enqueueCommit()
 
                         -- Tag archetype lacks Position; the callback runs against the
                         -- destination archetype. For table-storage components, new
@@ -232,7 +232,7 @@ describe(
                                 end
                             end
                         )
-                        world:commit()
+                        world:enqueueCommit()
 
                         -- Row ordering is stable: first-spawned at row 1, etc.
                         luassert.equals(10, world:get(a, Position).x)
@@ -248,31 +248,18 @@ describe(
             "interaction with commit lifecycle",
             function()
                 it(
-                    "defers until commit when wrapped in world:defer()",
+                    "defers until the transaction commits",
                     function()
                         local world = tecs.ecs.newWorld()
                         local a = world:spawn(Position(1, 1), Tag)
+                        world:enqueueCommit()
 
                         local q = world:newQuery({include = {Tag}})
-                        world:defer()
                         world:batchSet(q, Position(99, 99))
-                        -- Inside defer scope, the write hasn't happened.
+                        -- The batch write has not published yet.
                         luassert.equals(1, world:get(a, Position).x)
 
-                        world:commit()
-                        luassert.equals(99, world:get(a, Position).x)
-                    end
-                )
-
-                it(
-                    "applies immediately in eager mode (outside any defer scope)",
-                    function()
-                        local world = tecs.ecs.newWorld()
-                        local a = world:spawn(Position(1, 1), Tag)
-
-                        local q = world:newQuery({include = {Tag}})
-                        world:batchSet(q, Position(99, 99))
-                        -- Eager default: the write applied synchronously.
+                        world:enqueueCommit()
                         luassert.equals(99, world:get(a, Position).x)
                     end
                 )
@@ -290,12 +277,12 @@ describe(
                 local world = tecs.ecs.newWorld()
                 local a = world:spawn(Position(1, 1), Velocity(10, 20))
                 local b = world:spawn(Position(2, 2), Velocity(30, 40))
-                world:commit()
+                world:enqueueCommit()
 
                 luassert.is_not_nil(world:get(a, Velocity))
                 local q = world:newQuery({include = {Position}})
                 world:batchRemove(q, Velocity)
-                world:commit()
+                world:enqueueCommit()
 
                 luassert.is_nil(world:get(a, Velocity))
                 luassert.is_nil(world:get(b, Velocity))
@@ -313,12 +300,12 @@ describe(
                 local a = world:spawn(Position(1, 1))
                 -- {Position, Velocity} archetype
                 local b = world:spawn(Position(2, 2), Velocity(5, 5))
-                world:commit()
+                world:enqueueCommit()
 
                 -- Query matches BOTH archetypes via Position.
                 local q = world:newQuery({include = {Position}})
                 world:batchRemove(q, Velocity)
-                world:commit()
+                world:enqueueCommit()
 
                 luassert.is_nil(world:get(a, Velocity)) -- was never there
                 luassert.is_nil(world:get(b, Velocity)) -- was removed
@@ -332,39 +319,26 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(Position(1, 1))
-                world:commit()
+                world:enqueueCommit()
                 local q = world:newQuery({include = {OtherTag}})
                 world:batchRemove(q, Velocity)
-                world:commit()
+                world:enqueueCommit()
             end
         )
 
         it(
-            "defers until commit when wrapped in world:defer()",
+            "defers until the transaction commits",
             function()
                 local world = tecs.ecs.newWorld()
                 local a = world:spawn(Position(1, 1), Velocity(1, 1))
+                world:enqueueCommit()
 
                 local q = world:newQuery({include = {Velocity}})
-                world:defer()
                 world:batchRemove(q, Velocity)
-                -- Inside defer, Velocity still present.
+                -- The structural removal has not published yet.
                 luassert.is_not_nil(world:get(a, Velocity))
 
-                world:commit()
-                luassert.is_nil(world:get(a, Velocity))
-            end
-        )
-
-        it(
-            "applies immediately in eager mode",
-            function()
-                local world = tecs.ecs.newWorld()
-                local a = world:spawn(Position(1, 1), Velocity(1, 1))
-
-                local q = world:newQuery({include = {Velocity}})
-                world:batchRemove(q, Velocity)
-                -- Eager default: applied synchronously.
+                world:enqueueCommit()
                 luassert.is_nil(world:get(a, Velocity))
             end
         )
@@ -379,7 +353,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(Position(1, 1))
-                world:commit()
+                world:enqueueCommit()
                 luassert.has_error(function() (world as any):batchDespawn({Position}) end)
             end
         )
@@ -389,7 +363,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(Tag, Position(1, 1))
-                world:commit()
+                world:enqueueCommit()
                 luassert.has_error(function() (world as any):batchSet({Tag}, Position(99, 99)) end)
             end
         )
@@ -399,7 +373,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(Position(1, 1), Velocity(1, 1))
-                world:commit()
+                world:enqueueCommit()
                 luassert.has_error(function() (world as any):batchRemove({include = {Position}}, Velocity) end)
             end
         )
@@ -414,7 +388,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(Tag, Position(1, 1))
-                world:commit()
+                world:enqueueCommit()
                 local q = world:newQuery({include = {Tag}})
                 luassert.has_error(function()
                     -- Mistake: instance as arg2 when also passing a callback.
@@ -439,7 +413,7 @@ describe(
                 })
                 local parent = world:spawn()
                 world:spawn(ParentOf(parent) as tecs.ecs.Component, Tag)
-                world:commit()
+                world:enqueueCommit()
 
                 local q = world:newQuery({include = {Tag}})
                 luassert.has_error(function()
@@ -481,7 +455,7 @@ describe(
                 for i = 1, 100 do
                     ids[i] = world:spawn(Pos(i))
                 end
-                world:commit()
+                world:enqueueCommit()
 
                 -- Inflate the source archetype far beyond its occupancy so the
                 -- swap hands the destination oversized shared columns.
@@ -490,7 +464,7 @@ describe(
 
                 local q = world:newQuery({include = {Pos}})
                 world:batchSet(q, Extra(0.5))
-                world:commit()
+                world:enqueueCommit()
 
                 -- The destination's Extra column was sized for ~100 rows; its
                 -- capacity must not claim the source's inflated 4096.
@@ -503,7 +477,7 @@ describe(
                 for i = 101, 400 do
                     ids[i] = world:spawn(Pos(i), Extra(i + 0.5))
                 end
-                world:commit()
+                world:enqueueCommit()
 
                 for i = 1, 400 do
                     local p = world:get(ids[i], Pos) as SwapPos
@@ -535,13 +509,13 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:batchSpawn(10, {Position}, fill)
-                world:commit()
+                world:enqueueCommit()
                 world:clearEntities()
 
                 -- The fresh range restarts inside the recycled prefix; handles
                 -- must carry the bumped generation.
                 local firstId = world:batchSpawn(10, {Position}, fill)
-                world:commit()
+                world:enqueueCommit()
                 luassert.is_not_nil(firstId, "uniform recycled range keeps contiguous handles")
 
                 for i = 0, 9 do
@@ -550,7 +524,7 @@ describe(
                     luassert.is_not_nil(world:get(id, Position))
                     world:set(id, Velocity(1, 2))
                 end
-                world:commit()
+                world:enqueueCommit()
                 for i = 0, 9 do
                     luassert.equals(1, world:get((firstId as integer) + i, Velocity).vx)
                 end
@@ -564,13 +538,13 @@ describe(
                 for i = 1, 5 do
                     world:spawn(Position(i, i))
                 end
-                world:commit()
+                world:enqueueCommit()
                 world:clearEntities()
 
                 -- Slots 1..5 carry a bumped generation, 6..10 are virgin; a
                 -- contiguous base id cannot represent both.
                 local firstId, ids = world:batchSpawn(10, {Position}, fill)
-                world:commit()
+                world:enqueueCommit()
 
                 luassert.is_nil(firstId, "straddling range must fall back to the id list")
                 local list = ids as {integer}

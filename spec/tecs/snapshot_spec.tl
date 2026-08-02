@@ -65,7 +65,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 local a = world:spawn(PositionComp(10, 20), HealthComp(100))
                 local b = world:spawn(PositionComp(30, 40))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world)
                 luassert.equals(1, snap.version)
@@ -90,13 +90,13 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 local a = world:spawn(PositionComp(1, 2))
-                world:commit()
+                world:enqueueCommit()
                 local snap = saveTableSnapshot(world)
 
                 -- Simulate gameplay drift.
                 world:get(a, PositionComp).x = 999
                 world:spawn(PositionComp(7, 8))
-                world:commit()
+                world:enqueueCommit()
 
                 -- Restore twice: catches state not being cleaned between loads.
                 world:loadSnapshot(snap)
@@ -107,7 +107,7 @@ describe(
 
                 -- After restore, new spawns should not collide with restored IDs.
                 local fresh = world:spawn(PositionComp(0, 0))
-                world:commit()
+                world:enqueueCommit()
                 luassert.is_true(fresh > a)
             end
         )
@@ -157,7 +157,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 local a = world:spawn(FFIComp(100, 200, 3), CellComp(4, 5, 7))
                 local b = world:spawn(FFIComp(-10, -20, 1), CellComp(0, 0, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world)
                 local jsonStr = data.encodeJSON(snap as {string: any})
@@ -218,7 +218,7 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local id = world:spawn(Vec3Comp(3, 4, 12))
-                world:commit()
+                world:enqueueCommit()
 
                 -- Method works before save (sanity check the metatable wiring itself).
                 luassert.equals(13, world:get(id, Vec3Comp):length())
@@ -251,7 +251,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 local a = world:spawn(PositionComp(10, 20), HealthComp(100))
                 local b = world:spawn(PositionComp(30, 40))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world)
                 local jsonStr = data.encodeJSON(snap as {string: any})
@@ -273,7 +273,7 @@ describe(
                 local a = world:spawn(PositionComp(1, 1), HealthComp(10))
                 world:spawn(PositionComp(2, 2), HealthComp(20))
                 world:spawn(PositionComp(3, 3), HealthComp(30))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world)
                 -- All 3 entities share the same archetype, so one group of 3 entities.
@@ -304,7 +304,7 @@ describe(
                     for i = 1, #ids do
                         world:despawn(ids[i])
                     end
-                    world:commit()
+                    world:enqueueCommit()
                     luassert.equals(0, count(), "iter " .. iter .. ": cell count after clear")
                 end
             end
@@ -320,7 +320,7 @@ describe(
                 local onLayer2 = world:spawn(tecs.Transform2D(0, 0, 0, 2))
                 local onLayer5 = world:spawn(tecs.Transform2D(0, 0, 0, 5))
                 local noTransform = world:spawn(PositionComp(1, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world, {layers = {2}})
                 world:loadSnapshot(snap)
@@ -339,7 +339,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 local keeper = world:spawn(PositionComp(1, 1), HealthComp(10))
                 local skipper = world:spawn(PositionComp(2, 2))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(
                     world,
@@ -359,7 +359,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1), HealthComp(10))
-                world:commit()
+                world:enqueueCommit()
 
                 world:observe(
                     0, tecs.ecs.OnSnapshotSave, function(ev: tecs.ecs.OnSnapshotSave) ev:exclude(HealthComp) end
@@ -386,7 +386,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1), HealthComp(10))
-                world:commit()
+                world:enqueueCommit()
 
                 world:observe(
                     0, tecs.ecs.OnSnapshotSave, function(ev: tecs.ecs.OnSnapshotSave) ev:exclude(HealthComp) end
@@ -437,7 +437,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 local e1 = world:spawn(SkippyComp(111, 1), HealthComp(10))
                 local e2 = world:spawn(SkippyComp(222, 0), HealthComp(20))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world)
                 world:loadSnapshot(snap)
@@ -485,7 +485,7 @@ describe(
                 for i = 1, 8 do
                     ids[i] = world:spawn(HalfCustomComp(i), PlainFFIComp(i * 100))
                 end
-                world:commit()
+                world:enqueueCommit()
 
                 local buffer = saveBinarySnapshot(world)
                 world:loadSnapshot(buffer)
@@ -505,7 +505,7 @@ describe(
                 for i = 1, 20 do
                     ids[i] = world:spawn(PositionComp(i, i))
                 end
-                world:commit()
+                world:enqueueCommit()
                 local maxSlot = 0
                 for i = 1, 20 do
                     local slot = ids[i] % 2 ^ 22
@@ -516,7 +516,7 @@ describe(
                 for i = 1, 10 do
                     world:despawn(ids[i])
                 end
-                world:commit()
+                world:enqueueCommit()
 
                 local buffer = saveBinarySnapshot(world)
                 world:loadSnapshot(buffer)
@@ -524,7 +524,7 @@ describe(
                 -- The ten dead slots must be reusable; a fresh spawn draws from
                 -- the recycled range instead of pushing the watermark.
                 local fresh = world:spawn(PositionComp(99, 99))
-                world:commit()
+                world:enqueueCommit()
                 luassert.is_true(
                     fresh % 2 ^ 22 <= maxSlot, "post-load spawns must reuse slots that were dead at save time"
                 )
@@ -541,7 +541,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 local a = world:spawn(PositionComp(11, 22), HealthComp(77))
                 local b = world:spawn(PositionComp(33, 44))
-                world:commit()
+                world:enqueueCommit()
 
                 local buf = saveBinarySnapshot(world)
 
@@ -561,7 +561,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 local a = world:spawn(PositionComp(7, 8))
-                world:commit()
+                world:enqueueCommit()
 
                 local buf = saveBinarySnapshot(world)
                 local bytes = tostring(buf) -- what files.read hands back
@@ -603,7 +603,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 local target = world:spawn()
                 local owner = world:spawn(NeedsWorldComp(7), SparseTagRel(target) as tecs.ecs.Component)
-                world:commit()
+                world:enqueueCommit()
 
                 local buf = saveBinarySnapshot(world)
                 local fresh = tecs.ecs.newWorld()
@@ -631,7 +631,7 @@ describe(
                 local target = world:spawn()
                 local wildcardOnly = world:spawn(PositionComp(1, 2), SparseMaybeRel as tecs.ecs.Component)
                 local withValue = world:spawn(PositionComp(3, 4), SparseMaybeRel(target) as tecs.ecs.Component)
-                world:commit()
+                world:enqueueCommit()
 
                 local buf = saveBinarySnapshot(world)
                 local fresh = tecs.ecs.newWorld()
@@ -651,7 +651,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 local buf = saveBinarySnapshot(
                     world,
@@ -687,7 +687,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 world:observe(
                     0,
@@ -722,7 +722,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 local sourceValue = 7
                 local loadedValue = 0
@@ -763,7 +763,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 local loaded = false
                 world:addSnapshotHandler({
@@ -826,7 +826,7 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local id = world:spawn(DurableComp(42), RuntimeComp(99))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world)
                 local componentNames: {string: boolean} = {}
@@ -876,7 +876,7 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local id = world:spawn(PositionComp(1, 1), TransientTag, TransientScalar(12), TransientFFIComp(34))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world)
                 local componentNames: {string: boolean} = {}
@@ -916,7 +916,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 local target = world:spawn(PositionComp(1, 1))
                 local source = world:spawn(PositionComp(2, 2), LinkRel(target, 7))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world)
                 local componentNames: {string: boolean} = {}
@@ -996,7 +996,7 @@ describe(
                 world:pushState("base")
                 world:pushState("game")
                 world:spawn(PositionComp(1, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world)
 
@@ -1017,7 +1017,7 @@ describe(
                 world:createState("game")
                 world:pushState("game")
                 world:spawn(PositionComp(1, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world)
                 local fresh = tecs.ecs.newWorld()
@@ -1052,7 +1052,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 local player = world:spawn(tecs.ecs.EntityKey("player"), PositionComp(1, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world)
 
@@ -1083,7 +1083,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 local player = world:spawn(tecs.ecs.EntityKey("player"), PositionComp(1, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 local bytes = tostring(saveBinarySnapshot(world))
 
@@ -1101,7 +1101,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 local buf = saveBinarySnapshot(world)
 
@@ -1125,7 +1125,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 local buf = saveBinarySnapshot(world)
 
@@ -1150,7 +1150,7 @@ describe(
                 local buffer = require("string.buffer")
                 local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
-                world:commit()
+                world:enqueueCommit()
 
                 local sharedBuf = buffer.new()
                 local returned = world:saveSnapshot({buffer = sharedBuf})
@@ -1159,7 +1159,7 @@ describe(
 
                 -- A second save reuses the same buffer (it gets reset automatically).
                 world:spawn(PositionComp(2, 2))
-                world:commit()
+                world:enqueueCommit()
                 local returned2 = world:saveSnapshot({buffer = sharedBuf})
                 luassert.equals(sharedBuf, returned2.buffer)
             end
@@ -1359,7 +1359,7 @@ describe(
                 local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(10, 20), HealthComp(50))
                 world:spawn(PositionComp(-1, -2))
-                world:commit()
+                world:enqueueCommit()
 
                 local snap = saveTableSnapshot(world)
                 luassert.is_not_nil(snap.componentTable)

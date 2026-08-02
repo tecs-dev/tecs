@@ -488,10 +488,12 @@ local function applyBatchSet(self: WorldImpl, mut: BatchMutation, srcArch: Arche
     local isTag = mut.isTag
 
     if not fast then
-        -- Slow path: per-entity `_instantSet` for non-bulk behavior.
+        -- Slow path: stage per-entity mutations for component behavior that
+        -- cannot use the whole-archetype bulk mover. The drain reaches these
+        -- in its next fixed-point wave.
         local value = mut.value
         for i = count, 1, -1 do
-            self:_instantSet(entities[i], componentType, value)
+            self:_deferSet(entities[i], componentType, value)
         end
         return
     end
@@ -561,9 +563,9 @@ local function applyBatchRemove(self: WorldImpl, mut: BatchMutation, srcArch: Ar
     end
 
     if not mut.canBulk then
-        -- Slow path: per-entity `_instantRemove`.
+        -- Slow path: stage per-entity mutations for the next drain wave.
         for i = count, 1, -1 do
-            self:_instantRemove(entities[i], componentType)
+            self:_deferRemove(entities[i], componentType)
         end
         return
     end

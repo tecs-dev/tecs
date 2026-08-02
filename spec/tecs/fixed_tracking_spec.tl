@@ -29,6 +29,7 @@ describe(
                 local world = tecs.ecs.newWorld({timestep = 0.01})
                 fixedtracking.track(world, Position)
                 world:spawn(Position(0))
+                world:enqueueCommit()
                 local arch = findArchetype(world)
 
                 local samples: {{number}} = {}
@@ -63,6 +64,7 @@ describe(
                 local world = tecs.ecs.newWorld({timestep = 0.01})
                 fixedtracking.track(world, Position)
                 world:spawn(Position(0))
+                world:enqueueCommit()
                 local arch = findArchetype(world)
                 local shouldWrite = true
                 local wrote: {boolean} = {}
@@ -94,6 +96,7 @@ describe(
                 local world = tecs.ecs.newWorld({timestep = 0.01})
                 fixedtracking.track(world, Position)
                 world:spawn(Position(0))
+                world:enqueueCommit()
                 local arch = findArchetype(world)
 
                 world:addSystem({

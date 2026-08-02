@@ -170,22 +170,7 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
         return base
     end
 
-    -- Immediate path column/sparse writes. The entity is already placed,
-    -- so sparse values apply to the store now instead of staging.
-    local columnWritesImmediate: string
-    do
-        local parts: {string} = {}
-        for i = 1, n do
-            if isSparse[i] then
-                parts[#parts + 1] = "    world:applySparseRaw(id, " .. valueExpr(i) .. ")"
-            else
-                parts[#parts + 1] = "    col" .. i .. "[row] = " .. valueExpr(i)
-            end
-        end
-        columnWritesImmediate = table.concat(parts, "\n")
-    end
-
-    -- Deferred path: record = {target arch id, slot, non-sparse values};
+    -- Each record is {target arch id, slot, non-sparse values};
     -- sparse goes to the world's staging buffer under the packed handle.
     local enqueuePushes: string
     do
@@ -217,14 +202,9 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
 
     local requiredChecks = requiredChecksSrc(requiredCount)
 
-    -- Two hot paths in the emitted spawn:
-    --   1. `_scopeDepth == 0`: immediate placement -- the entity is
-    --      placed directly into the cached target archetype and
-    --      observer-notified inline.
-    --   2. `_scopeDepth > 0`: enqueue into the bundle-local spawnQueue
-    --      and register `drain` with the arch so `_drain` invokes it
-    --      at commit. Amortizes the archetype walk vs naive
-    --      `world:_deferSpawn(...)` which re-walks per entity.
+    -- Bundle spawns always enqueue into their bundle-local queue and register
+    -- `drain` with the archetype. This keeps the public mutation model uniform
+    -- while amortizing archetype resolution and generic staging overhead.
     local src: string = [[
 local __UPVALUES__ = ...
 
@@ -286,75 +266,32 @@ __REQUIRED_CHECKS__
     local es = world.allocator.slots[slot]
     local id = slot + es.generation * __GEN_STRIDE__
 
-    -- OnSpawn observers force the staged route so the event contract
-    -- (entity staged, observer mutations stage) matches world:spawn.
-    local staged = world._scopeDepth > 0
-    local synthetic = false
-    if not staged and world.messages._totalObservers > 0
-            and world:hasObservers(0, OnSpawn) then
-        staged = true
-        synthetic = true
-        world._scopeDepth = 1
+    -- Entity isn't visible to queries until commit invokes `drain`. The slot
+    -- is fresh from allocSlot so its stamp normally cannot match this epoch;
+    -- claim it and zero the state companion when necessary.
+    local epoch = world._transactionEpoch
+    if world._slotStamp[slot] ~= epoch then
+        world._slotStamp[slot] = epoch
+        world._stateArr[slot] = 0
     end
-
-    if staged then
-        -- Deferred: enqueue + register drain. Entity isn't visible to
-        -- queries until `_drain` fires the registered drain callback.
-        -- Slot is fresh from allocSlot so its stamp doesn't match the
-        -- current epoch; claim + zero state companion.
-        local epoch = world._transactionEpoch
-        if world._slotStamp[slot] ~= epoch then
-            world._slotStamp[slot] = epoch
-            world._stateArr[slot] = 0
-        end
-        world._pendingArchArr[slot] = a.id
-        local c = spawnQueueCount
+    world._pendingArchArr[slot] = a.id
+    local c = spawnQueueCount
 __ENQUEUE_PUSHES__
-        spawnQueueCount = c + __STRIDE__
-        if not pendingDrain then
-            local bc = a.pendingBundleDrainCount + 1
-            a.pendingBundleDrains[bc] = drain
-            a.pendingBundleDrainCount = bc
-            if a.dirtyQueuedEpoch ~= world._dirtyEpoch then
-                a.dirtyQueuedEpoch = world._dirtyEpoch
-                local dc = world.dirtyArchetypeCount + 1
-                world.dirtyArchetypeList[dc] = a
-                world.dirtyArchetypeCount = dc
-            end
-            pendingDrain = true
-            world.isDirty = true
+    spawnQueueCount = c + __STRIDE__
+    if not pendingDrain then
+        local bc = a.pendingBundleDrainCount + 1
+        a.pendingBundleDrains[bc] = drain
+        a.pendingBundleDrainCount = bc
+        if a.dirtyQueuedEpoch ~= world._dirtyEpoch then
+            a.dirtyQueuedEpoch = world._dirtyEpoch
+            local dc = world.dirtyArchetypeCount + 1
+            world.dirtyArchetypeList[dc] = a
+            world.dirtyArchetypeCount = dc
         end
-        world:emit(0, OnSpawn, id)
-        if synthetic then
-            world:_drain()
-            world._scopeDepth = 0
-        end
-        return id
+        pendingDrain = true
+        world.isDirty = true
     end
-
-    -- Immediate placement.
-    local entities = a.entities
-    local row = entities[0] + 1
-    if row > a.capacity then
-        a:reserveCapacity(row)
-        entities = a.entities
-        cachedGen = a.generation
-__FETCH_COLS_GROW_IMMEDIATE__
-    elseif a.generation ~= cachedGen then
-        -- Another spawn path grew the archetype and swapped its columns.
-        cachedGen = a.generation
-__FETCH_COLS_GROW_IMMEDIATE__
-    end
-    entities[row] = id
-    entities[0] = row
-    es.archetypeId = a.id
-    es.row = row - 1
-
-    if requiredList then writeRequired(a, row) end
-__COLUMN_WRITES_IMMEDIATE__
-
-    a:onRowsAdded(row - 1, 1, nil)
-
+    world:emit(0, OnSpawn, id)
     return id
 end
 
@@ -374,7 +311,7 @@ drain = function()
         -- A despawn staged before commit wins; skip placement.
         if not (slotStamp[slot] == epoch and stateArr[slot] == __STATE_DESPAWN__) then
             if entryArchId ~= currentArchId then
-                -- Entries carry their enqueue-time target so a mid-scope
+                -- Entries carry their enqueue-time target so a mid-transaction
                 -- state change places each burst correctly.
                 a = archIndex[entryArchId]
                 currentArchId = entryArchId
@@ -412,18 +349,6 @@ end
 return spawn, drain
 ]]
 
-    -- Grow path for immediate: indentation differs (outer level).
-    local fetchColsGrowImmediate: string
-    do
-        local parts: {string} = {}
-        for i = 1, n do
-            if not isSparse[i] then
-                parts[#parts + 1] = "        col" .. i .. " = a.columns[T" .. i .. "]"
-            end
-        end
-        fetchColsGrowImmediate = table.concat(parts, "\n")
-    end
-
     src = src:gsub("__UPVALUES__", upvalueList)
     src = src:gsub("__PARAM_LIST__", paramList)
     src = src:gsub("__REQUIRED_CHECKS__", requiredChecks)
@@ -431,9 +356,7 @@ return spawn, drain
     src = src:gsub("__STATE_DESPAWN__", tostring(shared.STATE_DESPAWN))
     src = src:gsub("__CACHED_COL_DECLS__", cachedColDecls)
     src = src:gsub("__FETCH_COLS_RESOLVE__", fetchColsResolve)
-    src = src:gsub("__FETCH_COLS_GROW_IMMEDIATE__", fetchColsGrowImmediate)
     src = src:gsub("__FETCH_COLS_GROW__", fetchColsGrow)
-    src = src:gsub("__COLUMN_WRITES_IMMEDIATE__", columnWritesImmediate)
     src = src:gsub("__ENQUEUE_PUSHES__", enqueuePushes)
     src = src:gsub("__DRAIN_COLUMN_WRITES__", drainColumnWrites)
     src = src:gsub("__STRIDE__", tostring(stride))

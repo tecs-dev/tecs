@@ -95,6 +95,7 @@ describe("mcp world tools", function()
         assert.is_true(found.Renderable2D.tag)
 
         local entity = world:spawn(components.Renderable2D())
+        world:enqueueCommit()
         assert.are.equal(true, ok("info", { entity = entity }).components.Renderable2D)
     end)
 
@@ -102,6 +103,7 @@ describe("mcp world tools", function()
         for index = 1, 5 do
             world:spawn(tecs.Transform2D(index, 0, 0, 1, 0, 1, 1), components.Renderable2D())
         end
+        world:enqueueCommit()
         local result = ok("query", { include = { "Transform2D", "Renderable2D" }, limit = 2 })
 
         assert.are.equal(5, result.matched, "the total is not the page")
@@ -121,7 +123,7 @@ describe("mcp world tools", function()
         -- second list. Nothing here registered SpecAmmo with the debug server,
         -- and every tool still resolves it.
         local entity = world:spawn(components.Renderable2D(), Ammo(3))
-        world:commit()
+        world:enqueueCommit()
 
         local listed = {}
         for _, entry in ipairs(ok("components_info", {}).components) do
@@ -134,7 +136,8 @@ describe("mcp world tools", function()
         assert.are.equal(1, ok("query", { include = { "SpecAmmo" } }).matched)
         local reloaded = ok("modify", { entity = entity, component = "SpecAmmo", values = { rounds = 9 } })
         assert.are.equal(9, reloaded.components.SpecAmmo.rounds)
-        assert.is_true(world:isAlive(ok("spawn", { components = { SpecAmmo = { rounds = 1 } } }).entity))
+        local spawned = ok("spawn", { components = { SpecAmmo = { rounds = 1 } } })
+        assert.is_true(world:isAlive(spawned.entity))
     end)
 
     it("separates a component nothing here carries from one nobody declared", function()
@@ -148,7 +151,7 @@ describe("mcp world tools", function()
         assert.is_false(listed.SpecAmmo.present, "no entity in this world carries one")
 
         world:spawn(Ammo(1))
-        world:commit()
+        world:enqueueCommit()
         for _, entry in ipairs(ok("components_info", {}).components) do
             listed[entry.name] = entry
         end
@@ -163,7 +166,7 @@ describe("mcp world tools", function()
         -- the ECS provides for saying so.
         local named = world:spawn(components.Renderable2D(), ecs.Name("player"))
         local anonymous = world:spawn(components.Renderable2D())
-        world:commit()
+        world:enqueueCommit()
 
         assert.are.equal("player", ok("info", { entity = named }).name)
         assert.are.equal(cjson.null, ok("info", { entity = anonymous }).name)
@@ -184,7 +187,7 @@ describe("mcp world tools", function()
                 Renderable2D = {},
             },
         })
-        local transform = spawned.components.Transform2D
+        local transform = ok("info", { entity = spawned.entity }).components.Transform2D
         assert.are.equal(10, transform.x)
         -- Not sent, so the component's own default rather than zero.
         assert.are.equal(1, transform.scaleX)
@@ -196,6 +199,7 @@ describe("mcp world tools", function()
         -- opaque white, so a set naming only green comes back white with green
         -- rather than black with green.
         local entity = world:spawn(components.Tint(0.5, 0.5, 0.5, 0.5))
+        world:enqueueCommit()
 
         local merged = ok("modify", { entity = entity, component = "Tint", values = { r = 0.25 } })
         assert.are.equal(0.25, merged.components.Tint.r)
@@ -208,6 +212,7 @@ describe("mcp world tools", function()
 
     it("adds a component on set and says that it did", function()
         local entity = world:spawn(components.Renderable2D())
+        world:enqueueCommit()
         local result = ok("set", { entity = entity, component = "Tint", values = { r = 0.5 } })
         assert.is_true(result.added)
         assert.is_true(world:has(entity, components.Tint))
@@ -218,6 +223,7 @@ describe("mcp world tools", function()
         -- half, where the name is right but the entity does not carry it.
         -- Adding one would be a surprise an agent cannot undo.
         local entity = world:spawn(components.Renderable2D())
+        world:enqueueCommit()
         local result = ok("modify", { entity = entity, component = "Tint", values = { r = 0.5 } })
 
         assert.is_true(result.skipped)
@@ -226,6 +232,7 @@ describe("mcp world tools", function()
 
     it("removes and despawns, and says when there was nothing to do", function()
         local entity = world:spawn(components.Renderable2D(), components.Tint())
+        world:enqueueCommit()
         assert.is_false(ok("remove", { entity = entity, component = "Tint" }).skipped)
         assert.is_false(world:has(entity, components.Tint))
 
@@ -250,7 +257,7 @@ describe("mcp world tools", function()
         -- value. Asserted here on the flag rather than on pixels, which the
         -- renderer spec covers.
         local entity = world:spawn(components.Tint(1, 0, 0, 1))
-        world:commit()
+        world:enqueueCommit()
 
         local query = world:newQuery({ include = { components.Tint } })
         local function dirty()

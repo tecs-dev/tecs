@@ -681,6 +681,7 @@ describe(
                     local id: integer
                     for i = 1, 600 do
                         id = world:spawn()
+                        world:enqueueCommit()
                         if i < 600 then
                             world:despawn(id)
                             world:update(0)
@@ -750,7 +751,7 @@ describe(
                     function()
                         local t1 = world:spawn()
                         local t2 = world:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         local containerId = (Owes as {any: any}).componentId as integer
                         local a = Owes:targeting(t1) as {any: any}
@@ -772,16 +773,16 @@ describe(
                     function()
                         local t1 = world:spawn()
                         local t2 = world:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         local q = world:newQuery({include = {Owes:targeting(t1) as tecs.ecs.Component}})
 
                         local e1 = world:spawn(Owes(t1) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
                         -- Creates a new archetype after the query exists; it must not
                         -- match through a signature bit shared with the container.
                         local e2 = world:spawn(Owes(t2) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
 
                         local count = 0
                         local seen: {integer: boolean} = {}

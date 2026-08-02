@@ -56,7 +56,7 @@ the slot can belong to another entity. World-address observers remain.
 ## Observer timing
 
 `world:emit` invokes matching observers before it returns. The observer runs in
-the emitter's phase and deferred scope.
+the emitter's phase and joins that phase's structural transaction.
 
 Platform events arrive before `world:update`, so their observers run outside
 the phase tree. They do not receive fixed-step timing, phase order, or state

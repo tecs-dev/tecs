@@ -409,7 +409,7 @@ describe("Application", function()
             )
         end
 
-        it("unwinds the scope a system threw out of", function()
+        it("settles structural work after a system throws", function()
             local explode = true
             local query
             local app = build({
@@ -435,13 +435,13 @@ describe("Application", function()
             app:_simulate(1 / 60)
 
             assert.is_truthy(app:crashed():match("iter boom"))
-            assert.are.equal(0, app.world._scopeDepth, "the world was left deferred")
             assert.are.equal(open, passscope.openCount())
 
             -- Applied rather than staged, which is the difference a deferred
             -- world hides. Nothing has been unwound by hand here: the guard
             -- did it.
             local spawned = app.world:spawn(components.Tint(0, 1, 0, 1))
+            app.world:enqueueCommit()
             assert.is_true(app.world:isAlive(spawned))
 
             explode = false
@@ -560,7 +560,6 @@ describe("Application", function()
             -- and no frame was ever acquired. What has to survive is the
             -- world, which was inside a query loop when the producer ran.
             assert.is_truthy(app:crashed():match("producer boom"))
-            assert.are.equal(0, app.world._scopeDepth)
             assert.are.equal(open, passscope.openCount())
 
             explode = false

@@ -129,6 +129,8 @@ local record internal
         hasPendingDespawns: boolean
         hasPendingSpawns: boolean
         hasPendingMoveOut: boolean
+        pendingMoveSlots: {integer}
+        pendingMoveCount: integer
         dirtyQueuedEpoch: integer
         pendingBundleDrains: {any}
         pendingBundleDrainCount: integer
@@ -163,6 +165,7 @@ local record internal
         compact: function(self)
         resetPending: function(self)
         appendPendingValue: function(self, slot: integer, value: any, vals?: {any})
+        adoptPendingValues: function(self, slot: integer, vals: {any})
         getPendingValues: function(self, slot: integer): {any}
         findPendingValue: function(self, slot: integer, componentType: types.components.Component): any
         movePendingValuesTo: function(self, dst: ArchetypeInternal, slot: integer)
@@ -376,12 +379,6 @@ local record internal
 
         _archetypeSnapshotPool: pool.TablePool
 
-        -- Merged scope counter. Incremented by `defer()` and query
-        -- iteration entry; decremented by matching `commit()` and
-        -- query exhaustion. Mutations stage rather than apply instantly
-        -- while this is > 0; a drain fires when it returns to 0.
-        _scopeDepth: integer
-
         -- ----- Staging / drain state -----
         -- Dirty-archetype dedupe uses an epoch + per-archetype marker
         -- (`arch.dirtyQueuedEpoch`) instead of a hashset. Bumping
@@ -407,6 +404,7 @@ local record internal
         sparseSets: {integer: {Component}}
         sparseSetCount: integer
         _swapRemoveQueue: {integer}
+        _moveCandidateRows: {integer}
         batchMutations: {any}
         batchMutationCount: integer
         _valsPool: {{any}}
@@ -415,6 +413,10 @@ local record internal
         _sparseArraysPool: pool.TablePool
         _exclusivePool: pool.TablePool
         isDirty: boolean
+        _commitRequested: boolean
+        _runningSystem: boolean
+        _committing: boolean
+        _rebuildKeyIndexAfterCommit: boolean
         lastCompType: Component
         lastArch: ArchetypeInternal
         lastColumn: {any}
@@ -498,11 +500,8 @@ local record internal
         hasObservers: function<E is Event>(self: WorldImpl, address: integer, eventType: E): boolean
         emit: function<E is Event>(self: WorldImpl, address: integer, eventOrType: E, ...: any)
         clearObservers: function(self: WorldImpl, address: integer)
-        _pushQueryScope: function(self: WorldImpl)
-        _popQueryScope: function(self: WorldImpl)
-        defer: function(self: WorldImpl)
-        commit: function(self: WorldImpl)
-        unwind: function(self: WorldImpl)
+        enqueueCommit: function(self: WorldImpl)
+        _commit: function(self: WorldImpl)
         update: function(self: WorldImpl, dt: number)
         enablePhase: function(self: WorldImpl, phase: Phase)
         disablePhase: function(self: WorldImpl, phase: Phase)
@@ -530,16 +529,12 @@ local record internal
         -- behavior when present, otherwise delegate to the raw entry below.
         _deferSet: function(self: WorldImpl, id: integer, componentType: Component, value: any)
         _deferRemove: function(self: WorldImpl, id: integer, component: Component)
-        _instantSet: function(self: WorldImpl, id: integer, componentType: Component, value: any)
-        _instantRemove: function(self: WorldImpl, id: integer, component: Component)
 
         -- Raw entries (no underscore): component-specific callbacks call
         -- these to invoke default behavior without re-dispatching into
         -- themselves.
         deferSetRaw: function(self: WorldImpl, id: integer, componentType: Component, value: any)
         deferRemoveRaw: function(self: WorldImpl, id: integer, component: Component)
-        instantSetRaw: function(self: WorldImpl, id: integer, componentType: Component, value: any)
-        instantRemoveRaw: function(self: WorldImpl, id: integer, component: Component)
         setRaw: function(self: WorldImpl, id: integer, componentType: Component, value: any)
         removeRaw: function(self: WorldImpl, id: integer, component: Component)
         oldValueOf: function(self: WorldImpl, id: integer, component: Component): any
@@ -558,8 +553,6 @@ local record internal
         -- Pure-mechanism workers; component-specific callbacks do not call
         -- these directly.
         _deferSetSlow: function(self: WorldImpl, id: integer, componentType: Component, value: any)
-        _instantSpawn: function(self: WorldImpl, ...: Component): boolean, integer
-        _instantDespawn: function(self: WorldImpl, id: integer): boolean
         _deferBatchSpawn: function(
             self: WorldImpl,
             count: integer,

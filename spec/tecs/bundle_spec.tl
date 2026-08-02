@@ -129,7 +129,7 @@ describe(
                         ) as Bundle
 
                         local entityId = bundle:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.is_equal(factoryCalled, 1, "Factory should be called once")
                         local comp = world:get(entityId, TC) as BundleTestComponent1
@@ -168,7 +168,7 @@ describe(
 
                         local id1 = bundle:spawn()
                         local id2 = bundle:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.is_equal(callCount, 2, "Factory should be called twice")
                         local c1 = world:get(id1, TC3) as TestComponent3
@@ -184,7 +184,7 @@ describe(
                     function()
                         local bundle = world:newBundle("EmptyBundle") as Bundle
                         local entityId = bundle:spawn()
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.is_true(world:isAlive(entityId), "Empty bundle should still spawn a bare entity")
                     end
                 )
@@ -223,7 +223,7 @@ describe(
                         ) as Bundle
 
                         local entityId = bundle:spawn()
-                        world:commit()
+                        world:enqueueCommit()
                         local comp = world:get(entityId, TC) as TypedComponent
                         luassert.is_equal(comp.x, 10, "Should have correct x")
                         luassert.is_equal(comp.y, 20, "Should have correct y")
@@ -321,7 +321,7 @@ describe(
                         ) as Bundle
 
                         local entityId = bundle:spawn(TC(42), Tag3())
-                        world:commit()
+                        world:enqueueCommit()
 
                         local comp = world:get(entityId, TC) as RequiredBundleTestComponent
                         luassert.is_not_nil(comp, "Should have required TC")
@@ -401,7 +401,7 @@ describe(
 
                         -- Required value is positional; optional slots always use factory.
                         local entityId = bundle:spawn(RC(100))
-                        world:commit()
+                        world:enqueueCommit()
 
                         local rc = world:get(entityId, RC) as RequiredComp
                         luassert.is_not_nil(rc)
@@ -434,7 +434,7 @@ describe(
 
                         -- Required args are positional in declaration order: Tag7, Tag9.
                         local entityId = bundle:spawn(Tag7(), Tag9())
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.is_true((world:get(entityId, Tag7) ~= nil))
                         luassert.is_true((world:get(entityId, Tag8) ~= nil))
                         luassert.is_true((world:get(entityId, Tag9) ~= nil))
@@ -459,7 +459,7 @@ describe(
                         ) as Bundle
 
                         local entityId = bundle:spawn(Tag10())
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.is_true((world:get(entityId, Tag10) ~= nil))
 
                         luassert.has_error(function() bundle:spawn() end, "Required component missing: EmptyBundleTag")
@@ -497,7 +497,7 @@ describe(
                         luassert.is_true(entityId > 0, "Entity ID should be positive")
 
                         -- Commit and verify entity exists
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.is_true(world:isAlive(entityId), "Entity should be alive")
 
                         local comp = world:get(entityId, TC)
@@ -530,7 +530,7 @@ describe(
                         local entityId = world:spawnBundle("WorldSpawnBundle", TC("test"))
                         luassert.is_number(entityId, "Should return entity ID")
 
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.is_true(world:isAlive(entityId), "Entity should be alive")
 
                         local comp = world:get(entityId, TC)
@@ -553,9 +553,6 @@ describe(
         describe(
             "deferred spawn semantics",
             function()
-                -- Note: bundle:spawn is immediate outside of a defer scope (matches
-                -- world:spawn). These tests verify deferred semantics by wrapping
-                -- bundle spawns in world:defer() / world:commit().
                 it(
                     "defers placement until commit",
                     function()
@@ -574,12 +571,11 @@ describe(
                             }
                         ) as Bundle
 
-                        world:defer()
                         local id = bundle:spawn(Comp(42))
                         -- Before commit: entity not yet placed in entityIndex.
                         luassert.is_false(world:isAlive(id), "Entity should not be alive before commit")
 
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.is_true(world:isAlive(id), "Entity should be alive after commit")
                         local comp = world:get(id, Comp) as DC1
                         luassert.is_equal(comp.x, 42)
@@ -604,12 +600,11 @@ describe(
                             }
                         ) as Bundle
 
-                        world:defer()
                         local ids: {integer} = {}
                         for i = 1, 100 do
                             ids[i] = bundle:spawn(Comp(i))
                         end
-                        world:commit()
+                        world:enqueueCommit()
 
                         for i = 1, 100 do
                             luassert.is_true(world:isAlive(ids[i]))
@@ -650,10 +645,9 @@ describe(
                         -- Inside a defer scope: bundle spawn queues, world:set stages.
                         -- The ledger walker transitions the bundle-placed entity from
                         -- its target arch (just Pos) to (Pos + Health) at commit.
-                        world:defer()
                         local id = bundle:spawn(Pos(10, 20))
                         world:set(id, Health(100))
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.is_true(world:isAlive(id))
                         local p = world:get(id, Pos) as DC3Pos
@@ -687,12 +681,11 @@ describe(
                         local bundleA = world:newBundle("DeferBundle4A", {required = {CompA}}) as Bundle
                         local bundleB = world:newBundle("DeferBundle4B", {required = {CompB}}) as Bundle
 
-                        world:defer()
                         local idA1 = bundleA:spawn(CompA(1))
                         local idB1 = bundleB:spawn(CompB(10))
                         local idA2 = bundleA:spawn(CompA(2))
                         local idB2 = bundleB:spawn(CompB(20))
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.is_equal((world:get(idA1, CompA) as DC4A).v, 1)
                         luassert.is_equal((world:get(idA2, CompA) as DC4A).v, 2)
@@ -718,7 +711,7 @@ describe(
                         })
 
                         local target = world:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         local bundle = world:newBundle(
                             "DenseRelBundle",
@@ -728,7 +721,7 @@ describe(
                         ) as Bundle
 
                         local src = bundle:spawn(DenseRel(target, 7))
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.is_true(world:isAlive(src))
                         -- Dense rel container is a wildcard tag; presence is observable via get on container.
@@ -756,7 +749,7 @@ describe(
                         })
 
                         local parent = world:spawn(PosComp(0, 0))
-                        world:commit()
+                        world:enqueueCommit()
 
                         local bundle = world:newBundle(
                             "SparseChildBundle",
@@ -766,7 +759,7 @@ describe(
                         ) as Bundle
 
                         local child = bundle:spawn(SparseRel(parent), PosComp(5, 10))
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.is_true(world:isAlive(child))
                         local pos = world:get(child, PosComp) as DCPos
@@ -808,7 +801,7 @@ describe(
 
                         -- First commit: spawn and commit.
                         local id1 = bundle:spawn(Comp(1))
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.is_true(world:isAlive(id1))
 
                         -- clearEntities drops entities + queues but preserves the bundle
@@ -818,7 +811,7 @@ describe(
 
                         -- The same bundle handle keeps working -- no re-registration needed.
                         local id2 = bundle:spawn(Comp(42))
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.is_true(world:isAlive(id2))
                         luassert.is_equal((world:get(id2, Comp) as DC5).v, 42)
                     end
@@ -868,10 +861,10 @@ describe(
                         for i = 1, 300 do
                             others[i] = world:spawn(GC(1000 + i))
                         end
-                        world:commit()
+                        world:enqueueCommit()
 
                         local second = bundle:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(1, getX(first))
                         luassert.equals(2, getX(second))
@@ -891,11 +884,10 @@ describe(
                         for i = 1, 300 do
                             others[i] = world:spawn(GC(1000 + i))
                         end
-                        world:commit()
+                        world:enqueueCommit()
 
-                        world:defer()
                         local second = bundle:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(1, getX(first))
                         luassert.equals(2, getX(second))
@@ -944,15 +936,14 @@ describe(
 
                         -- Immediate path.
                         local e1 = bundle:spawn()
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.equals(7, (world:get(e1, Top) as ReqTop).t)
                         luassert.is_not_nil(world:get(e1, Base), "requires must add the base component")
                         luassert.equals(41, (world:get(e1, Base) as ReqBase).v, "requires default must be written")
 
                         -- Deferred path.
-                        world:defer()
                         local e2 = bundle:spawn()
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.equals(7, (world:get(e2, Top) as ReqTop).t)
                         luassert.equals(41, (world:get(e2, Base) as ReqBase).v)
                     end
@@ -965,7 +956,7 @@ describe(
                             name = "BundleWildcardOwes",
                         })
                         local target = world:spawn()
-                        world:commit()
+                        world:enqueueCommit()
                         local instance = Owes(target) as tecs.ecs.Component
 
                         local bundle = world:newBundle(
@@ -978,7 +969,7 @@ describe(
                         ) as Bundle
 
                         local e = bundle:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         -- Wildcard queries match through the container marker.
                         local q = world:newQuery({include = {Owes as tecs.ecs.Component}, temp = true})
@@ -1005,17 +996,16 @@ describe(
                             }
                         ) as Bundle
 
-                        world:defer()
                         local id = bundle:spawn()
                         world:despawn(id)
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.is_false(world:isAlive(id), "the bundle drain must not resurrect a despawned entity")
                     end
                 )
 
                 it(
-                    "applies sparse relationship values immediately at scope depth 0",
+                    "publishes sparse relationship values with the bundle spawn",
                     function()
                         local Follows = tecs.ecs.newRelationship({
                             name = "BundleSparseFollows",
@@ -1023,7 +1013,7 @@ describe(
                             exclusive = true,
                         })
                         local target = world:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         local bundle = world:newBundle(
                             "SparseBundle",
@@ -1037,8 +1027,10 @@ describe(
                         ) as Bundle
 
                         local e = bundle:spawn()
+                        luassert.is_nil(world:getFirstRelationship(e, Follows))
+                        world:enqueueCommit()
                         local rel = world:getFirstRelationship(e, Follows)
-                        luassert.is_not_nil(rel, "immediate bundle spawn must commit sparse values")
+                        luassert.is_not_nil(rel, "bundle settle must publish sparse values")
                         luassert.equals(target, rel.target)
                     end
                 )
@@ -1057,11 +1049,10 @@ describe(
                         ) as Bundle
 
                         world:pushState("BundleStateA")
-                        world:defer()
                         local e1 = bundle:spawn()
                         world:pushState("BundleStateB")
                         local e2 = bundle:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.is_not_nil(world:get(e1, stateA), "first burst keeps state A")
                         luassert.is_nil(world:get(e1, stateB))
