@@ -651,7 +651,7 @@ describe("io.files", function()
     describe("temporary resources", function()
         it("removes a temporary file when its scope ends", function()
             local path
-            require("tecs").scoped(function(scope)
+            require("tecs").scoped("temporary file", function(scope)
                 local temporary = scope:own(files.createTemporaryFile({
                     directory = temp,
                     prefix = "save-",

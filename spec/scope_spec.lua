@@ -1,5 +1,7 @@
 local tecs = require("tecs")
 local scopeModule = require("tecs.scope")
+local zones = require("tecs.internal.zones")
+local zone = require("jit.zone")
 
 local function resource(name, closed, failure)
     local value = { name = name }
@@ -17,12 +19,65 @@ describe("resource scopes", function()
         assert.are.equal(scopeModule.scoped, tecs.scoped)
     end)
 
+    it("requires and exposes a diagnostic name", function()
+        local seen
+        tecs.scoped("named scope", function(scope)
+            seen = scope.name
+        end)
+        assert.are.equal("named scope", seen)
+
+        assert.has_error(function()
+            tecs.scoped(nil, function() end)
+        end, "tecs: scoped needs a non-empty name")
+        assert.has_error(function()
+            tecs.scoped("", function() end)
+        end, "tecs: scoped needs a non-empty name")
+    end)
+
+    it("does not touch the JIT zone stack while profiling is inactive", function()
+        assert.is_false(zones.active)
+        local version = zones.version
+        local depth = #zone
+
+        tecs.scoped("inactive zone", function() end)
+
+        assert.are.equal(version, zones.version)
+        assert.are.equal(depth, #zone)
+    end)
+
+    it("uses its name as a nested JIT zone through cleanup", function()
+        local seenBody
+        local seenCleanup
+        local restoredOuter
+        zones.acquire()
+        local ok, reason = pcall(function()
+            zone("outer zone")
+            tecs.scoped("profiled scope", function(scope)
+                seenBody = zone[#zone]
+                scope:own({
+                    close = function()
+                        seenCleanup = zone[#zone]
+                    end,
+                })
+            end)
+            restoredOuter = zone[#zone]
+            zone()
+        end)
+        zones.release()
+
+        assert.is_true(ok, reason)
+        assert.are.equal("profiled scope", seenBody)
+        assert.are.equal("profiled scope", seenCleanup)
+        assert.are.equal("outer zone", restoredOuter)
+        assert.is_nil(zone[#zone])
+    end)
+
     it("returns each registration and closes in reverse order", function()
         local closed = {}
         local first = resource("first", closed)
         local second = resource("second", closed)
 
-        tecs.scoped(function(scope)
+        tecs.scoped("reverse cleanup", function(scope)
             assert.is_true(rawequal(first, scope:own(first)))
             assert.is_true(rawequal(second, scope:own(second)))
             assert.same({}, closed)
@@ -34,9 +89,9 @@ describe("resource scopes", function()
     it("closes a nested scope before its containing scope", function()
         local closed = {}
 
-        tecs.scoped(function(outer)
+        tecs.scoped("outer", function(outer)
             outer:own(resource("outer", closed))
-            tecs.scoped(function(inner)
+            tecs.scoped("inner", function(inner)
                 inner:own(resource("inner", closed))
             end)
             assert.same({ "inner" }, closed)
@@ -48,7 +103,7 @@ describe("resource scopes", function()
     it("closes every registration after the body raises", function()
         local closed = {}
         local ok, reason = pcall(function()
-            tecs.scoped(function(scope)
+            tecs.scoped("body failure", function(scope)
                 scope:own(resource("first", closed))
                 scope:own(resource("second", closed))
                 error("body failed", 0)
@@ -63,7 +118,7 @@ describe("resource scopes", function()
     it("attempts every close and reports cleanup failures", function()
         local closed = {}
         local ok, reason = pcall(function()
-            tecs.scoped(function(scope)
+            tecs.scoped("cleanup failures", function(scope)
                 scope:own(resource("first", closed))
                 scope:own(resource("second", closed, "second close failed"))
                 scope:own(resource("third", closed, "third close failed"))
@@ -73,7 +128,7 @@ describe("resource scopes", function()
 
         assert.is_false(ok)
         assert.same({ "third", "second", "first" }, closed)
-        assert.is_truthy(reason:find("Scoped cleanup failed", 1, true))
+        assert.is_truthy(reason:find('Scope "cleanup failures" cleanup failed', 1, true))
         assert.is_truthy(reason:find("Resource 3 failed to close", 1, true))
         assert.is_truthy(reason:find("third close failed", 1, true))
         assert.is_truthy(reason:find("Resource 2 failed to close", 1, true))
@@ -89,7 +144,7 @@ describe("resource scopes", function()
         end
 
         local ok, reason = pcall(function()
-            tecs.scoped(function(scope)
+            tecs.scoped("false close", function(scope)
                 scope:own(resource("first", closed))
                 scope:own(failed)
                 scope:own(resource("last", closed))
@@ -105,7 +160,7 @@ describe("resource scopes", function()
     it("keeps the body failure primary when cleanup also fails", function()
         local closed = {}
         local ok, reason = pcall(function()
-            tecs.scoped(function(scope)
+            tecs.scoped("primary failure", function(scope)
                 scope:own(resource("resource", closed, "close failed"))
                 error("body failed", 0)
             end)
@@ -115,14 +170,14 @@ describe("resource scopes", function()
         assert.is_false(ok)
         assert.same({ "resource" }, closed)
         local body = assert(reason:find("body failed", 1, true))
-        local cleanup = assert(reason:find("Scoped cleanup also failed", 1, true))
+        local cleanup = assert(reason:find('Scope "primary failure" cleanup also failed', 1, true))
         assert.is_true(body < cleanup)
         assert.is_truthy(reason:find("close failed", 1, true))
     end)
 
     it("refuses a captured scope after its body ends", function()
         local captured
-        tecs.scoped(function(scope)
+        tecs.scoped("captured scope", function(scope)
             captured = scope
             scope:own(resource("captured", {}))
         end)
@@ -133,7 +188,7 @@ describe("resource scopes", function()
             captured:own(resource("late", {}))
         end)
         assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("Scope is no longer active", 1, true))
+        assert.is_truthy(tostring(reason):find('Scope "captured scope" is no longer active', 1, true))
     end)
 
     it("makes the scope inactive before closing resources", function()
@@ -146,7 +201,7 @@ describe("resource scopes", function()
         end
 
         local ok, reason = pcall(function()
-            tecs.scoped(function(scope)
+            tecs.scoped("active cleanup", function(scope)
                 captured = scope
                 scope:own(value)
             end)
@@ -154,14 +209,14 @@ describe("resource scopes", function()
 
         assert.is_false(ok)
         assert.same({ "registered" }, closed)
-        assert.is_truthy(tostring(reason):find("Scope is no longer active", 1, true))
+        assert.is_truthy(tostring(reason):find('Scope "active cleanup" is no longer active', 1, true))
     end)
 
     it("treats repeated registration as repeated ownership", function()
         local closed = {}
         local value = resource("same", closed)
 
-        tecs.scoped(function(scope)
+        tecs.scoped("duplicate registration", function(scope)
             scope:own(value)
             scope:own(value)
         end)
@@ -172,7 +227,7 @@ describe("resource scopes", function()
     it("owns Lua files", function()
         local file
 
-        tecs.scoped(function(scope)
+        tecs.scoped("Lua file", function(scope)
             file = assert(io.tmpfile())
             scope:own(file)
 
@@ -184,7 +239,7 @@ describe("resource scopes", function()
 
     it("validates untyped callers at registration", function()
         local ok, reason = pcall(function()
-            tecs.scoped(function(scope)
+            tecs.scoped("nil registration", function(scope)
                 scope:own(nil)
             end)
         end)
@@ -192,7 +247,7 @@ describe("resource scopes", function()
         assert.is_truthy(tostring(reason):find("Scope:own needs a non-nil value", 1, true))
 
         ok, reason = pcall(function()
-            tecs.scoped(function(scope)
+            tecs.scoped("invalid registration", function(scope)
                 scope:own({})
             end)
         end)
@@ -200,7 +255,7 @@ describe("resource scopes", function()
         assert.is_truthy(tostring(reason):find("Scope needs a value with a close method", 1, true))
 
         ok, reason = pcall(function()
-            tecs.scoped(nil)
+            tecs.scoped("invalid body", nil)
         end)
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("scoped needs a function", 1, true))
@@ -208,7 +263,7 @@ describe("resource scopes", function()
 
     it("raises a constructor failure supplied beside a nil value", function()
         local ok, reason = pcall(function()
-            tecs.scoped(function(scope)
+            tecs.scoped("constructor failure", function(scope)
                 scope:own(nil, "resource could not be opened")
             end)
         end)

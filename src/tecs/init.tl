@@ -408,7 +408,7 @@ local record tecs
     --- `Scope` owns explicitly registered resources for one lexical lifetime.
     type Scope = scopeModule.Scope
 
-    --- Runs a callback inside a fresh resource scope.
+    --- Runs a callback inside a fresh named resource scope and JIT zone.
     ---
     --- Every [`Closeable`](tealdoc:tecs.Closeable) registered through the
     --- callback's [`Scope`](tealdoc:tecs.Scope) closes in reverse order after
@@ -417,9 +417,10 @@ local record tecs
     --- owned resources remain live until it resumes and cleanup begins. A
     --- captured scope refuses registration after cleanup starts.
     ---
+    --- @param name The non-empty diagnostic and profiler-zone name.
     --- @param body The lexical callback that owns the scope and every resource
     ---     registered through it. Returned values are ignored.
-    scoped: function(body: function(scopeModule.Scope))
+    scoped: function(name: string, body: function(scopeModule.Scope))
 
     --- Builds the application an entry file returns.
     ---

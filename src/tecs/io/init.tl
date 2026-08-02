@@ -19,7 +19,7 @@ call blocks its caller outside a world update. They return nil and a reason
 when an endpoint cannot be opened, read, written, flushed, or closed:
 
 ```teal
-tecs.scoped(function(scope: tecs.Scope)
+tecs.scoped("read save", function(scope: tecs.Scope)
     local save <const> = scope:own(tecs.io.newFileStream("save.bin"))
     local bytes <const> = assert(save:transferToBuffer())
     scope:own(bytes)
@@ -70,7 +70,7 @@ world:addSystem({
     name = "game.ReceiveCommand",
     phase = tecs.ecs.phases.Update,
     run = function()
-        tecs.scoped(function(scope)
+        tecs.scoped("serve client", function(scope)
             local client <const> = scope:own(assert(listener:accept()))
             local command <const> = assert(client:read())
             applyCommand(command)

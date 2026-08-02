@@ -42,7 +42,7 @@ dielectric Cook-Torrance materials. The same environment is visible as the sky
 and in reflections, so face orientation and camera-relative reflection remain
 easy to verify while moving.
 
-`gltf3d.tl` loads a textured glTF 2.0 scene asynchronously, registers its
+`gltf3d.tl` loads a textured glTF 2.0 scene through the direct asset pipeline, registers its
 geometry, vertex colors, image, and alpha-blended metallic-roughness material with a
 transparency-enabled mesh domain, then spawns the flattened scene primitives.
 It exercises the asset-worker through GPU residency and the sorted forward

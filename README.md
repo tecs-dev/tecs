@@ -183,6 +183,13 @@ outside `world:update` use the same direct-value API and block while pumping
 the producer. Private completion state may bridge a native worker queue, but
 it is not a second user-facing execution model.
 
+Resource ownership remains lexical across those waits. Every `tecs.scoped`
+callback has a required name, keeps its registered values live while its
+system is parked, and closes them in reverse order when it unwinds. The same
+name is its profiler zone when profiling is active and costs no zone-stack
+mutation when profiling is off, so cleanup failures and suspended work share
+one diagnostic identity without taxing the ordinary path.
+
 The producer still matches the work. TCP, UDP, and process pipes try their
 syscall first and use a process-wide `mio` readiness reactor only after
 `WouldBlock`; no worker thread sits waiting on a handle. One bounded Tokio

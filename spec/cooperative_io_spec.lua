@@ -91,7 +91,7 @@ describe("cooperative socket systems", function()
             run = function()
                 entered = entered + 1
                 order[#order + 1] = "read"
-                tecs.scoped(function(scope)
+                tecs.scoped("cooperative socket read", function(scope)
                     scope:own({
                         close = function()
                             closed = closed + 1
@@ -203,7 +203,7 @@ describe("cooperative socket systems", function()
             name = "ScopedCanceledSocketRead",
             phase = tecs.ecs.phases.Update,
             run = function()
-                tecs.scoped(function(scope)
+                tecs.scoped("canceled socket read", function(scope)
                     scope:own({
                         close = function()
                             closed = closed + 1

@@ -373,7 +373,7 @@ pipeline in a 2D or ordinary 3D application. Prebuilt releases currently
 carry those optional variants in the shared shader pack.
 
 Enable a sampled specular environment independently, then register its six
-decoded RGBA8 faces after asynchronous loading:
+decoded RGBA8 faces. Each direct load waits appropriately for its context:
 
 ```teal
 return tecs.newApplication({
@@ -392,23 +392,17 @@ return tecs.newApplication({
             "positive-y.png", "negative-y.png",
             "positive-z.png", "negative-z.png",
         }
-        local loading: {tecs.Future<tecs.assets.Image>} = {}
+        local face: {tecs.assets.Image} = {}
         for index, name in ipairs(names) do
-            loading[index] = tecs.assets.loadImage(
+            face[index] = tecs.assets.loadImage(
                 tecs.io.files.assetPath("environment/studio/" .. name)
             )
         end
-        tecs.Future.all(loading):onSettle(function(done: tecs.Future<{tecs.assets.Image}>)
-            if done.status ~= "ready" then
-                error(done.error, 0)
-            end
-            local face <const> = done.value
-            app.renderer.meshes:registerEnvironment({
-                positiveX = face[1], negativeX = face[2],
-                positiveY = face[3], negativeY = face[4],
-                positiveZ = face[5], negativeZ = face[6],
-            })
-        end)
+        app.renderer.meshes:registerEnvironment({
+            positiveX = face[1], negativeX = face[2],
+            positiveY = face[3], negativeY = face[4],
+            positiveZ = face[5], negativeZ = face[6],
+        })
     end,
 })
 ```
@@ -636,7 +630,8 @@ using core glTF linear, step, and cubic-spline interpolation. A resident
 reusable pose, joint palettes, and morph vectors:
 
 ```teal
-local model <const> = app.renderer.meshes:registerModel(loaded.value)
+local loaded <const> = tecs.assets.loadGLTF("models/hero.gltf")
+local model <const> = app.renderer.meshes:registerModel(loaded)
 local instance <const> = model:newInstance()
 for index, primitive in ipairs(instance.primitives) do
     local entity <const> = world:spawn(

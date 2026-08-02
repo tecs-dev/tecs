@@ -217,99 +217,123 @@ handle:close()
 -- #endregion tecs.io.newHandleStream
 
 -- #region tecs.io.newInflateReader
-tecs.scoped(function(scope: tecs.Scope)
-    local compressed <const> = scope:own(tecs.io.newBuffer())
-    local restored <const> = scope:own(tecs.io.newBuffer())
-    local compressor <const> = scope:own(tecs.io.newDeflateWriter(compressed:newWriter()))
+tecs.scoped(
+    "inflate save",
+    function(scope: tecs.Scope)
+        local compressed <const> = scope:own(tecs.io.newBuffer())
+        local restored <const> = scope:own(tecs.io.newBuffer())
+        local compressor <const> = scope:own(tecs.io.newDeflateWriter(compressed:newWriter()))
 
-    assert(compressor:write("snapshot bytes"))
-    assert(compressor:close())
+        assert(compressor:write("snapshot bytes"))
+        assert(compressor:close())
 
-    local reader <const> = scope:own(tecs.io.newInflateReader(compressed:newReader()))
-    local sink <const> = scope:own(restored:newWriter())
-    local count <const>, reason = tecs.io.transfer(reader, sink)
+        local reader <const> = scope:own(tecs.io.newInflateReader(compressed:newReader()))
+        local sink <const> = scope:own(restored:newWriter())
+        local count <const>, reason = tecs.io.transfer(reader, sink)
 
-    assert(count, reason)
-    assert(restored:getString() == "snapshot bytes")
-end)
+        assert(count, reason)
+        assert(restored:getString() == "snapshot bytes")
+    end
+)
 -- #endregion tecs.io.newInflateReader
 
 -- #region tecs.io.newDeflateWriter
-tecs.scoped(function(scope: tecs.Scope)
-    local compressed <const> = scope:own(tecs.io.newBuffer())
-    local writer <const> = scope:own(tecs.io.newDeflateWriter(compressed:newWriter()))
+tecs.scoped(
+    "deflate save",
+    function(scope: tecs.Scope)
+        local compressed <const> = scope:own(tecs.io.newBuffer())
+        local writer <const> = scope:own(tecs.io.newDeflateWriter(compressed:newWriter()))
 
-    assert(writer:write("snapshot "))
-    assert(writer:write("bytes"))
-    assert(writer:close())
-    assert(compressed:length() > 0)
-end)
+        assert(writer:write("snapshot "))
+        assert(writer:write("bytes"))
+        assert(writer:close())
+        assert(compressed:length() > 0)
+    end
+)
 -- #endregion tecs.io.newDeflateWriter
 
 -- #region tecs.io.newBase64DecodeReader
-tecs.scoped(function(scope: tecs.Scope)
-    local reader <const> = scope:own(tecs.io.newBase64DecodeReader(tecs.io.newStringReader("c25hcHNob3QgYnl0ZXM=")))
-    local decoded <const>, reason = reader:read(1024)
+tecs.scoped(
+    "decode base64",
+    function(scope: tecs.Scope)
+        local reader <const> = scope:own(tecs.io.newBase64DecodeReader(tecs.io.newStringReader("c25hcHNob3QgYnl0ZXM=")))
+        local decoded <const>, reason = reader:read(1024)
 
-    assert(decoded, reason)
-    assert(decoded == "snapshot bytes")
-end)
+        assert(decoded, reason)
+        assert(decoded == "snapshot bytes")
+    end
+)
 -- #endregion tecs.io.newBase64DecodeReader
 
 -- #region tecs.io.newBase64EncodeWriter
-tecs.scoped(function(scope: tecs.Scope)
-    local encoded <const> = scope:own(tecs.io.newBuffer())
-    local writer <const> = scope:own(tecs.io.newBase64EncodeWriter(encoded:newWriter()))
+tecs.scoped(
+    "encode base64",
+    function(scope: tecs.Scope)
+        local encoded <const> = scope:own(tecs.io.newBuffer())
+        local writer <const> = scope:own(tecs.io.newBase64EncodeWriter(encoded:newWriter()))
 
-    assert(writer:write("snapshot bytes"))
-    assert(writer:close())
-    assert(encoded:getString() == "c25hcHNob3QgYnl0ZXM=")
-end)
+        assert(writer:write("snapshot bytes"))
+        assert(writer:close())
+        assert(encoded:getString() == "c25hcHNob3QgYnl0ZXM=")
+    end
+)
 -- #endregion tecs.io.newBase64EncodeWriter
 
 -- #region tecs.io.newHexDecodeReader
-tecs.scoped(function(scope: tecs.Scope)
-    local reader <const> = scope:own(tecs.io.newHexDecodeReader(tecs.io.newStringReader("73617665")))
-    local decoded <const>, reason = reader:read(1024)
+tecs.scoped(
+    "decode hexadecimal",
+    function(scope: tecs.Scope)
+        local reader <const> = scope:own(tecs.io.newHexDecodeReader(tecs.io.newStringReader("73617665")))
+        local decoded <const>, reason = reader:read(1024)
 
-    assert(decoded, reason)
-    assert(decoded == "save")
-end)
+        assert(decoded, reason)
+        assert(decoded == "save")
+    end
+)
 -- #endregion tecs.io.newHexDecodeReader
 
 -- #region tecs.io.newHexEncodeWriter
-tecs.scoped(function(scope: tecs.Scope)
-    local encoded <const> = scope:own(tecs.io.newBuffer())
-    local writer <const> = scope:own(tecs.io.newHexEncodeWriter(encoded:newWriter()))
+tecs.scoped(
+    "encode hexadecimal",
+    function(scope: tecs.Scope)
+        local encoded <const> = scope:own(tecs.io.newBuffer())
+        local writer <const> = scope:own(tecs.io.newHexEncodeWriter(encoded:newWriter()))
 
-    assert(writer:write("save"))
-    assert(writer:close())
-    assert(encoded:getString() == "73617665")
-end)
+        assert(writer:write("save"))
+        assert(writer:close())
+        assert(encoded:getString() == "73617665")
+    end
+)
 -- #endregion tecs.io.newHexEncodeWriter
 
 -- #region tecs.io.newTranscodeReader
-tecs.scoped(function(scope: tecs.Scope)
-    local reader <const> = scope:own(
-        tecs.io.newTranscodeReader(tecs.io.newStringReader("A\0\233\0"), "UTF-16LE", "UTF-8")
-    )
-    local utf8 <const>, reason = reader:read(1024)
+tecs.scoped(
+    "transcode input",
+    function(scope: tecs.Scope)
+        local reader <const> = scope:own(
+            tecs.io.newTranscodeReader(tecs.io.newStringReader("A\0\233\0"), "UTF-16LE", "UTF-8")
+        )
+        local utf8 <const>, reason = reader:read(1024)
 
-    assert(utf8, reason)
-    assert(utf8 == "A\195\169")
-end)
+        assert(utf8, reason)
+        assert(utf8 == "A\195\169")
+    end
+)
 -- #endregion tecs.io.newTranscodeReader
 
 -- #region tecs.io.newTranscodeWriter
-tecs.scoped(function(scope: tecs.Scope)
-    local utf16 <const> = scope:own(tecs.io.newBuffer())
-    local writer <const> = scope:own(tecs.io.newTranscodeWriter(utf16:newWriter(), "UTF-8", "UTF-16LE"))
+tecs.scoped(
+    "transcode output",
+    function(scope: tecs.Scope)
+        local utf16 <const> = scope:own(tecs.io.newBuffer())
+        local writer <const> = scope:own(tecs.io.newTranscodeWriter(utf16:newWriter(), "UTF-8", "UTF-16LE"))
 
-    assert(writer:write("A\195"))
-    assert(writer:write("\169"))
-    assert(writer:close())
-    assert(utf16:getString() == "A\0\233\0")
-end)
+        assert(writer:write("A\195"))
+        assert(writer:write("\169"))
+        assert(writer:close())
+        assert(utf16:getString() == "A\0\233\0")
+    end
+)
 -- #endregion tecs.io.newTranscodeWriter
 
 -- #region tecs.io.Stream.withMetadata

@@ -116,25 +116,19 @@ local function game(world: tecs.World, app: tecs.Application)
         "positive-z.svg",
         "negative-z.svg",
     }
-    local loading: {tecs.Future<tecs.assets.Image>} = {}
+    local images: {tecs.assets.Image} = {}
     for index, face in ipairs(faceNames) do
-        loading[index] = assets.loadImage(files.assetPath("environment/ibl-demo/" .. face))
+        images[index] = assets.loadImage(files.assetPath("environment/ibl-demo/" .. face))
     end
-    tecs.Future.all(loading):onSettle(function(loaded: tecs.Future<{tecs.assets.Image}>)
-        if loaded.status ~= "ready" then
-            error(loaded.error, 0)
-        end
-        local images <const> = loaded.value
-        meshes:registerEnvironment({
-            positiveX = images[1],
-            negativeX = images[2],
-            positiveY = images[3],
-            negativeY = images[4],
-            positiveZ = images[5],
-            negativeZ = images[6],
-        })
-        print("ibl3d: loaded six CC0 environment faces and generated the roughness mip chain")
-    end)
+    meshes:registerEnvironment({
+        positiveX = images[1],
+        negativeX = images[2],
+        positiveY = images[3],
+        negativeY = images[4],
+        positiveZ = images[5],
+        negativeZ = images[6],
+    })
+    print("ibl3d: loaded six CC0 environment faces and generated the roughness mip chain")
 
     print("ibl3d: upper row is gold metal, lower row is blue dielectric")
     print("ibl3d: roughness runs 0.05, 0.18, 0.32, 0.48, 0.65 from left to right")

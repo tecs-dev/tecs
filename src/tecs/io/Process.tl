@@ -14,7 +14,7 @@ It feeds stdin while draining stdout and stderr concurrently, so neither
 output pipe can fill and deadlock the child:
 
 ```teal
-tecs.scoped(function(scope: tecs.Scope)
+tecs.scoped("read child output", function(scope: tecs.Scope)
     local child <const> = scope:own(
         tecs.io.Process.new({
             args = {"git", "status", "--porcelain"},
@@ -39,7 +39,7 @@ Interactive children use the same reader and writer vocabulary as files,
 buffers, and transforms. Closing stdin sends EOF:
 
 ```teal
-tecs.scoped(function(scope: tecs.Scope)
+tecs.scoped("communicate with child", function(scope: tecs.Scope)
     local child <const> = scope:own(tecs.io.Process.new({args = {"/bin/cat"}}))
 
     local written, writeReason = child.stdin:write("one request\n")

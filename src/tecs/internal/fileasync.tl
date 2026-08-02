@@ -40,12 +40,7 @@ local record fileasync
     type NativeRead = NativeRead
     read: function(path: string): Completion<NativeRead>
     write: function(
-        path: string,
-        pointer: loader.BytePointer,
-        length: integer,
-        owner: any,
-        closeOwner?: boolean,
-        flush?: boolean
+        path: string, pointer: loader.BytePointer, length: integer, owner: any, closeOwner?: boolean, flush?: boolean
     ): Completion<NativeRead>
     release: function(read: NativeRead)
     takeBytes: function(read: NativeRead): loader.CPtr
@@ -173,12 +168,7 @@ function fileasync.read(path: string): Completion<NativeRead>
 end
 
 function fileasync.write(
-    path: string,
-    pointer: loader.BytePointer,
-    length: integer,
-    owner: any,
-    closeOwner?: boolean,
-    flush?: boolean
+    path: string, pointer: loader.BytePointer, length: integer, owner: any, closeOwner?: boolean, flush?: boolean
 ): Completion<NativeRead>
     return track(R.tecsAsyncFileWrite(path, #path, pointer, length, flush and 1 or 0), owner, closeOwner)
 end

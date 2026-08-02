@@ -7,7 +7,8 @@ primitive templates, so copies of one model can play different poses without
 duplicating geometry, materials, textures, morph deltas, or clips.
 
 ```teal
-local model <const> = app.renderer.meshes:registerModel(loaded.value)
+local loaded <const> = tecs.assets.loadGLTF("models/hero.gltf")
+local model <const> = app.renderer.meshes:registerModel(loaded)
 local instance <const> = model:newInstance()
 for index, primitive in ipairs(instance.primitives) do
     local entity <const> = world:spawn(

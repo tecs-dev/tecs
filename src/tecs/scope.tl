@@ -1,12 +1,12 @@
 --[=[
 A lexical lifetime for explicitly owned resources.
 
-`scoped` creates one lexical scope for a callback. Calling `scope:own`
+`scoped` creates one named lexical scope for a callback. Calling `scope:own`
 with an open [`Closeable`](tealdoc:tecs.Closeable) registers that value and
 returns it unchanged, so its concrete type is preserved:
 
 ```teal
-tecs.scoped(function(scope: tecs.Scope)
+tecs.scoped("copy save", function(scope: tecs.Scope)
     local input <const> = scope:own(tecs.io.files.open("save.bin"))
     local output <const> = scope:own(tecs.io.files.open("save.copy", "w"))
 
@@ -35,12 +35,16 @@ local type types = require("tecs.types")
 local type Closeable = types.Closeable
 local type CloseFunction = function(any): (boolean, string)
 
+local zones <const> = require("tecs.internal.zones")
+
 local record Registration
     value: Closeable | FILE
     close: CloseFunction
 end
 
 local interface Scope
+    --- Read-only. Reports the diagnostic name supplied to `scoped`.
+    name: string
     --- Registers one owned value for cleanup and returns it unchanged.
     ---
     --- The scope is active only inside the callback passed to `scoped`.
@@ -63,6 +67,7 @@ local interface Scope
 end
 
 local record ScopeImpl is Scope
+    name: string
     active: boolean
     registrations: {Registration}
     count: integer
@@ -74,7 +79,7 @@ local record scope
     --- `Scope` owns resources while preserving each concrete type.
     type Scope = Scope
 
-    --- Runs a callback inside a fresh resource scope.
+    --- Runs a callback inside a fresh named resource scope and JIT zone.
     ---
     --- The callback may suspend through a cooperative engine call inside a
     --- system. Every value it registers closes in reverse order before this
@@ -82,36 +87,46 @@ local record scope
     --- and unwinds a suspended system. Cleanup begins by making the scope
     --- inactive, and one failing close does not prevent the remaining closes.
     ---
+    --- @param name The non-empty diagnostic and profiler-zone name.
     --- @param body The callback that receives the only active [`Scope`](tealdoc:tecs.Scope)
     ---     for this invocation. Returned values are ignored, and registered
     ---     resources must not be used after the callback ends.
-    scoped: function(body: function(Scope))
+    scoped: function(name: string, body: function(Scope))
 end
 
 local function traceback(reason: any): string
     return debug.traceback(tostring(reason), 2)
 end
 
-local function appendCleanupFailures(primary: string, failures: {string}): string
+local function appendCleanupFailures(name: string, primary: string, failures: {string}): string
     if #failures == 0 then
         return primary
     end
-    return primary .. "\n\nScoped cleanup also failed:\n" .. table.concat(failures, "\n\n")
+    return primary .. ('\n\nScope "%s" cleanup also failed:\n'):format(name) .. table.concat(failures, "\n\n")
 end
 
-function scope.scoped(body: function(Scope))
+function scope.scoped(name: string, body: function(Scope))
+    if type(name) ~= "string" or name == "" then
+        error("tecs: scoped needs a non-empty name", 2)
+    end
     if type(body) ~= "function" then
         error("tecs: scoped needs a function", 2)
     end
 
     local owned <const> = setmetatable(
         {
+            name = name,
             active = true,
             registrations = {},
             count = 0,
         } as ScopeImpl,
         SCOPE_MT
     )
+
+    local profiling <const> = zones.active
+    if profiling then
+        zones.push(name)
+    end
 
     local ok <const>, bodyFailure = xpcall(function() body(owned) end, traceback) as (boolean, string)
 
@@ -136,17 +151,21 @@ function scope.scoped(body: function(Scope))
         end
     end
 
+    if profiling then
+        zones.push()
+    end
+
     if not ok then
-        error(appendCleanupFailures(bodyFailure, cleanupFailures), 0)
+        error(appendCleanupFailures(name, bodyFailure, cleanupFailures), 0)
     end
     if #cleanupFailures > 0 then
-        error("Scoped cleanup failed:\n" .. table.concat(cleanupFailures, "\n\n"), 0)
+        error(('Scope "%s" cleanup failed:\n'):format(name) .. table.concat(cleanupFailures, "\n\n"), 0)
     end
 end
 
 function ScopeImpl:own<T is Closeable>(value: T, reason?: string): T
     if not self.active then
-        error("tecs: Scope is no longer active", 2)
+        error(('tecs: Scope "%s" is no longer active'):format(self.name), 2)
     end
     if value == nil then
         if reason ~= nil then

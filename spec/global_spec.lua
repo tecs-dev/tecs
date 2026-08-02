@@ -69,7 +69,7 @@ function ScopedReader:close(): boolean, string
 end
 
 local scopedReader = {} as ScopedReader
-tecs.scoped(function(scope: tecs.Scope)
+tecs.scoped("type scope", function(scope: tecs.Scope)
     local kept: ScopedReader = scope:own(scopedReader)
     print(kept.label)
 end)

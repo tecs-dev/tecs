@@ -71,13 +71,13 @@ at phase boundaries.
 Coroutines do not make a blocking decoder or disk syscall asynchronous. Tecs
 routes work according to what it needs:
 
-| Work | Execution place |
-| --- | --- |
-| Cache hits, memory Readers, URI parsing, ECS and GPU publication | Main thread |
-| TCP, UDP, timers, and pollable handles | Native `mio` readiness reactor |
-| Bulk regular-file reads and writes | One bounded SDL AsyncIO queue |
-| Opens, metadata, directories, and uncovered platform calls | Bounded blocking-I/O lane |
-| Image decode and other expensive transformations | Separate bounded CPU lane |
+| Work                                                             | Execution place                |
+| ---------------------------------------------------------------- | ------------------------------ |
+| Cache hits, memory Readers, URI parsing, ECS and GPU publication | Main thread                    |
+| TCP, UDP, timers, and pollable handles                           | Native `mio` readiness reactor |
+| Bulk regular-file reads and writes                               | One bounded SDL AsyncIO queue  |
+| Opens, metadata, directories, and uncovered platform calls       | Bounded blocking-I/O lane      |
+| Image decode and other expensive transformations                 | Separate bounded CPU lane      |
 
 An asset miss therefore reads through SDL AsyncIO, decodes in the CPU lane,
 publishes the result on the main thread, and resumes the system. A cache hit
@@ -147,12 +147,12 @@ actual wait: register, yield, drain one native completion, and resume.
 
 The current host measurements make the scale concrete:
 
-| Scheduler case | Median |
-| --- | ---: |
-| Empty world update | 124.9 ns |
-| One synchronous system | 148.4 ns |
+| Scheduler case                |   Median |
+| ----------------------------- | -------: |
+| Empty world update            | 124.9 ns |
+| One synchronous system        | 148.4 ns |
 | Already-ready contextual call | 177.4 ns |
-| One suspend and resume | 506.8 ns |
+| One suspend and resume        | 506.8 ns |
 
 The synchronous empty-world path remains within measurement noise of the 126
 ns main baseline. A 1 MiB loopback TCP transfer measured 1.17 GiB/s, and a

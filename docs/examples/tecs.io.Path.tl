@@ -67,14 +67,17 @@ end
 -- #endregion tecs.io.files.writeAtomic
 
 -- #region tecs.io.Process.new
-tecs.scoped(function(scope: tecs.Scope)
-    local child <const> = scope:own(tecs.io.Process.new({
-        args = {"git", "status", "--porcelain"},
-        cwd = tecs.io.Path.new("workspace"),
-    }))
+tecs.scoped(
+    "inspect repository",
+    function(scope: tecs.Scope)
+        local child <const> = scope:own(tecs.io.Process.new({
+            args = {"git", "status", "--porcelain"},
+            cwd = tecs.io.Path.new("workspace"),
+        }))
 
-    local result, communicateReason = child:communicate()
+        local result, communicateReason = child:communicate()
 
-    assert(result, communicateReason)
-end)
+        assert(result, communicateReason)
+    end
+)
 -- #endregion tecs.io.Process.new

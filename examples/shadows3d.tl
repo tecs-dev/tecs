@@ -232,24 +232,18 @@ local function game(world: tecs.World, app: tecs.Application)
         "positive-z.svg",
         "negative-z.svg",
     }
-    local loading: {tecs.Future<tecs.assets.Image>} = {}
+    local images: {tecs.assets.Image} = {}
     for index, face in ipairs(faceNames) do
-        loading[index] = assets.loadImage(files.assetPath("environment/ibl-demo/" .. face))
+        images[index] = assets.loadImage(files.assetPath("environment/ibl-demo/" .. face))
     end
-    tecs.Future.all(loading):onSettle(function(loaded: tecs.Future<{tecs.assets.Image}>)
-        if loaded.status ~= "ready" then
-            error(loaded.error, 0)
-        end
-        local images <const> = loaded.value
-        meshes:registerEnvironment({
-            positiveX = images[1],
-            negativeX = images[2],
-            positiveY = images[3],
-            negativeY = images[4],
-            positiveZ = images[5],
-            negativeZ = images[6],
-        })
-    end)
+    meshes:registerEnvironment({
+        positiveX = images[1],
+        negativeX = images[2],
+        positiveY = images[3],
+        negativeY = images[4],
+        positiveZ = images[5],
+        negativeZ = images[6],
+    })
 
     print("shadows3d: warm point and cool spot shadows join three directional cascades")
     print("shadows3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")

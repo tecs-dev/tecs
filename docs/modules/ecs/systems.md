@@ -125,7 +125,7 @@ world:addSystem({
     name = "game.ReceivePacket",
     phase = tecs.ecs.phases.PreUpdate,
     run = function()
-        tecs.scoped(function(scope)
+        tecs.scoped("decode packet", function(scope)
             local packet <const> = scope:own(assert(inbox:receive()))
             decodePacket(packet.bytes)
         end)

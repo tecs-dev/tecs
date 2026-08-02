@@ -28,7 +28,7 @@ lifecycle. A headless loop can retain a [`SignalListener`](tealdoc:tecs.platform
 instead. `next` transfers native signal flags and drains one without waiting:
 
 ```teal
-tecs.scoped(function(scope: tecs.Scope)
+tecs.scoped("listen for signals", function(scope: tecs.Scope)
     local signals <const> = scope:own(tecs.platform.os.newSignalListener())
 
     local running = true

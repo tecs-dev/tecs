@@ -40,7 +40,7 @@ end
 local function transformedByWriter(constructor, pieces, ...)
     local result
     local arguments = { ... }
-    tecs.scoped(function(scope)
+    tecs.scoped("filter round trip", function(scope)
         local destination = scope:own(ioModule.newBuffer())
         local writer = scope:own(constructor(destination:newWriter(), unpack(arguments)))
 
