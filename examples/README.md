@@ -48,7 +48,9 @@ BC3 mip chains and writes a derived glTF. The demo keeps those textures
 compressed in GPU memory and exercises double-sided materials, independently
 GPU-culled primitive chunks, Cook-Torrance point and spot lights, directional
 shadows, fog, and bloom. Running the example without that cache fails before
-opening a window and reports the fetch command.
+opening a window and reports the fetch command. Click the scene to capture the
+mouse, use WASD to move, Q and E to change height, hold Shift to sprint, and
+press Tab to release the mouse. Escape quits.
 
 `bistro3d.tl` is the large-scene stress test. Its pinned CC BY 4.0 Amazon
 Lumberyard exterior is fetched through a reference-Draco preprocessing step,
@@ -58,3 +60,7 @@ mip chains. Large-primitive splitting turns 1,591 authored primitives into
 probe, Cook-Torrance local lights, directional shadows, fog, and bloom. The
 source GLB is removed after a successful import, and running without the cache
 reports the fetch command before a window opens.
+
+The Bistro demo uses the same free-fly controls as Sponza. It moves faster to
+cover the exterior's larger authored scale. The controller is noclip by
+design, so neither scene adds render geometry to Rapier merely for navigation.

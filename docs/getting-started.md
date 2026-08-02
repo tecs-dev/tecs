@@ -362,6 +362,13 @@ mipmaps, point and spot lights, shadows, fog, and bloom together. The example
 command reports the required fetch command before opening a window when its
 ignored scene cache is absent.
 
+Sponza and Bistro install `tecs.gfx.FlyCamera3D` as an ordinary Update-phase
+system. Click to enter relative mouse mode, move with WASD, change height with
+Q and E, hold Shift to sprint, press Tab to release the pointer, and press
+Escape to quit. This is noclip movement with no collision or gravity, which
+keeps scene navigation independent from Rapier and preserves the rendering
+stress test.
+
 `cargo xtask fetch bistro` downloads and verifies the pinned CC BY 4.0 Amazon
 Lumberyard exterior, decodes its older Draco stream with the reference codec,
 reconstructs two-channel normal maps, downsamples textures into 512px BC3 mip

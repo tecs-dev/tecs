@@ -292,6 +292,7 @@ describe("the public surface", function()
             -- resolves to the module that declares it rather than a copy.
             assert.is_true(rawequal(tecs.gfx.Camera2D, require("tecs.gfx.Camera2D")))
             assert.is_true(rawequal(tecs.gfx.Camera3D, require("tecs.gfx.Camera3D")))
+            assert.is_true(rawequal(tecs.gfx.FlyCamera3D, require("tecs.gfx.FlyCamera3D")))
             assert.is_true(rawequal(tecs.gfx.Renderer, require("tecs.Renderer")))
             -- The constructor sits on the namespace, not on the class, which
             -- is what `newCamera2D` means: the module owns the type.

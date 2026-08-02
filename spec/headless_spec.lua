@@ -208,8 +208,8 @@ describe("tecs headless", function()
                 -- Everything else that lives under src/tecs/gfx, plus the
                 -- modules a graphics stack starts with.
                 local siblings = {
-                    "tecs.gfx.Camera2D", "tecs.gfx.Camera3D", "tecs.gfx.animation", "tecs.gfx.particles",
-                    "tecs.gfx.text", "tecs.Renderer", "tecs.ffi.sdl3",
+                    "tecs.gfx.Camera2D", "tecs.gfx.Camera3D", "tecs.gfx.FlyCamera3D", "tecs.gfx.animation",
+                    "tecs.gfx.particles", "tecs.gfx.text", "tecs.Renderer", "tecs.ffi.sdl3",
                 }
                 local loaded = {}
                 for _, name in ipairs(siblings) do

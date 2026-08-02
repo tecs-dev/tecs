@@ -29,6 +29,7 @@ local type audio = require("tecs.audio")
 local type Renderer = require("tecs.Renderer")
 local type Camera2D = require("tecs.gfx.Camera2D")
 local type Camera3D = require("tecs.gfx.Camera3D")
+local type FlyCamera3D = require("tecs.gfx.FlyCamera3D")
 local type View = require("tecs.gfx.View")
 local type Model3D = require("tecs.gfx.Model3D")
 local type animation = require("tecs.gfx.animation")
@@ -101,6 +102,10 @@ local record gfx
     --- The perspective view used by the 3D mesh domain.
     Camera3D: Camera3D
     type Camera3DOptions = Camera3D.Options
+
+    --- The noclip mouse-and-keyboard controller for a perspective camera.
+    FlyCamera3D: FlyCamera3D
+    type FlyCamera3DOptions = FlyCamera3D.Options
 
     --- The entity component that draws one ordered viewport.
     View: View
@@ -569,6 +574,7 @@ local SURFACE <const>: {string: Namespace} = {
         within = {
             Camera2D = {module = "tecs.gfx.Camera2D"},
             Camera3D = {module = "tecs.gfx.Camera3D"},
+            FlyCamera3D = {module = "tecs.gfx.FlyCamera3D"},
             View = {module = "tecs.gfx.View"},
             Renderer = {module = "tecs.Renderer"},
             animation = {module = "tecs.gfx.animation"},

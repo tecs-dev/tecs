@@ -10,6 +10,7 @@ local tecs <const> = require("tecs")
 local Transform3D <const> = tecs.Transform3D
 local PointLight3D <const> = tecs.gfx.PointLight3D
 local SpotLight3D <const> = tecs.gfx.SpotLight3D
+local FlyCamera3D <const> = tecs.gfx.FlyCamera3D
 local Tint <const> = tecs.gfx.Tint
 local Renderable3D <const> = tecs.gfx.Renderable3D
 
@@ -26,6 +27,13 @@ local function game(world: tecs.World, app: tecs.Application)
     camera.verticalFov = math.rad(58)
     camera.near = 0.1
     camera.far = 120
+
+    local controller <const> = FlyCamera3D.new(app.input, camera, {moveSpeed = 5, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.SponzaFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number) controller:update(dt) end,
+    })
 
     local pointColors <const>: {{number}} = {
         {-8, 4.0, 1.5, 1.0, 0.48, 0.20},
@@ -67,6 +75,7 @@ local function game(world: tecs.World, app: tecs.Application)
             )
         end
         print(("sponza3d: loaded %d cullable primitives under point and spot lights"):format(#instance.primitives))
+        print("sponza3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
     end)
 end
 
@@ -104,6 +113,7 @@ return tecs.newApplication({
         },
     },
     maxEntities = 512,
+    fixedMaxSteps = 240,
     debug = true,
     debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
     quitOnEscape = true,

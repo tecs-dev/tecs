@@ -9,6 +9,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs <const> = require("tecs")
 local Transform3D <const> = tecs.Transform3D
 local PointLight3D <const> = tecs.gfx.PointLight3D
+local FlyCamera3D <const> = tecs.gfx.FlyCamera3D
 local Tint <const> = tecs.gfx.Tint
 local Renderable3D <const> = tecs.gfx.Renderable3D
 
@@ -29,6 +30,13 @@ local function game(world: tecs.World, app: tecs.Application)
     camera.near = 0.1
     camera.far = 250
 
+    local controller <const> = FlyCamera3D.new(app.input, camera, {moveSpeed = 7, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.BistroFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number) controller:update(dt) end,
+    })
+
     local lamps <const>: {{number}} = {
         {3.5, 4.0, -5.0, 1.0, 0.45, 0.16},
         {9.0, 3.5, 4.5, 1.0, 0.34, 0.12},
@@ -37,8 +45,7 @@ local function game(world: tecs.World, app: tecs.Application)
     }
     for _, lamp in ipairs(lamps) do
         world:spawn(
-            Transform3D.new({x = lamp[1], y = lamp[2], z = lamp[3]}),
-            PointLight3D(12, lamp[4], lamp[5], lamp[6], 4)
+            Transform3D.new({x = lamp[1], y = lamp[2], z = lamp[3]}), PointLight3D(12, lamp[4], lamp[5], lamp[6], 4)
         )
     end
 
@@ -61,13 +68,10 @@ local function game(world: tecs.World, app: tecs.Application)
         end
         print(
             ("bistro3d: loaded %d GPU-cullable chunks, %d vertices, %d indices, %d materials, and %d textures"):format(
-                #instance.primitives,
-                meshes.vertexCount,
-                meshes.indexCount,
-                meshes.materialCount,
-                meshes.textureCount
+                #instance.primitives, meshes.vertexCount, meshes.indexCount, meshes.materialCount, meshes.textureCount
             )
         )
+        print("bistro3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
     end)
 end
 
