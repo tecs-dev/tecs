@@ -622,10 +622,14 @@ local function publishBuiltinTypes(context)
         "StartSnapshotLoad",
         "FinishSnapshotLoad",
     }) do
-        local ownership = (name == "TTL" or name:match("^On")
-            or name:match("^State") or name == "ArchetypeCreated"
-            or name:match("SnapshotLoad$"))
-            and "Engine-owned."
+        local ownership = (
+            name == "TTL"
+            or name:match("^On")
+            or name:match("^State")
+            or name == "ArchetypeCreated"
+            or name:match("SnapshotLoad$")
+        )
+                and "Engine-owned."
             or "Caller-writable."
         copy("tecs.internal.builtins." .. name, "tecs.ecs." .. name, "tecs.ecs", ownership)
     end
