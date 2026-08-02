@@ -17,35 +17,12 @@ layout(set = 2, binding = 0) uniform Cull {
     vec4 extra;
 } cull;
 
-shared uint partial[256];
+#include "orderedscan.glsl"
 
 void main() {
     uint t = gl_LocalInvocationID.x;
     uint blocks = uint(cull.params.y);
-    uint span = (blocks + 255u) / 256u;
-    uint begin = t * span;
-    uint end = min(begin + span, blocks);
-
-    uint sum = 0u;
-    for (uint i = begin; i < end; i++) { sum += counts.count[i]; }
-
-    partial[t] = sum;
-    barrier();
-    for (uint stride = 1u; stride < 256u; stride <<= 1) {
-        uint carried = 0u;
-        if (t >= stride) { carried = partial[t - stride]; }
-        barrier();
-        partial[t] += carried;
-        barrier();
-    }
-
-    // Exclusive: where this thread's span starts in the compacted list.
-    uint base = partial[t] - sum;
-    for (uint i = begin; i < end; i++) {
-        uint block = counts.count[i];
-        counts.count[i] = base;
-        base += block;
-    }
+    uint total = scanOrderedBlockCounts(blocks);
 
     if (t == 255u) {
         // The draw's instance count, which the CPU never reads back. Held to
@@ -54,6 +31,6 @@ void main() {
         // end of it. The opaque list is as long as the instance buffer, so the
         // ceiling only ever binds on the forward and shadow lanes, both of
         // which are deliberately shorter than the world.
-        args.value[1] = min(partial[255], uint(cull.params.z));
+        args.value[1] = min(total, uint(cull.params.z));
     }
 }
