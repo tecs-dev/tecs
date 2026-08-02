@@ -406,12 +406,13 @@ local record tecs
     ---
     --- Every [`Closeable`](tealdoc:tecs.Closeable) registered through the
     --- callback's [`Scope`](tealdoc:tecs.Scope) closes in reverse order after
-    --- the callback returns or raises. Cleanup attempts every close. The
-    --- callback must not yield, and a captured scope refuses registration
-    --- after cleanup starts.
+    --- the callback returns or raises. Cleanup attempts every close. Inside a
+    --- system, the callback may suspend through a cooperative engine call;
+    --- owned resources remain live until it resumes and cleanup begins. A
+    --- captured scope refuses registration after cleanup starts.
     ---
-    --- @param body The synchronous callback that owns the scope and every
-    ---     resource registered through it. Returned values are ignored.
+    --- @param body The lexical callback that owns the scope and every resource
+    ---     registered through it. Returned values are ignored.
     scoped: function(body: function(scopeModule.Scope))
 
     --- Builds the application an entry file returns.
