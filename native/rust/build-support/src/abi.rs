@@ -36,18 +36,6 @@ const LIBRARIES: &[Library] = &[
         requires: &["sdl3"],
     },
     Library {
-        name: "shaderc",
-        headers: &["shaderc/shaderc.h"],
-        include_key: Some("shaderc"),
-        requires: &[],
-    },
-    Library {
-        name: "spvc",
-        headers: &["spirv_cross_c.h"],
-        include_key: Some("spvc"),
-        requires: &[],
-    },
-    Library {
         name: "zlib",
         headers: &["zlib.h"],
         include_key: Some("zlib"),
@@ -113,8 +101,6 @@ pub fn check(root: &Path, generated: &Path) -> Result<usize> {
         ("sdl3", "sdl3"),
         ("sdl3mixer", "sdl3-mixer"),
         ("sdl3ttf", "sdl3-ttf"),
-        ("shaderc", "shaderc"),
-        ("spvc", "spirv-cross-c"),
         ("zlib", "zlib"),
     ] {
         include_directories.insert(name, package_include_directories(package)?);

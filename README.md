@@ -63,6 +63,15 @@ existing component value through `set` takes the same immediate path. This
 keeps the common simulation loop cheap without maintaining a second structural
 mutation implementation.
 
+Development shader compilation is one optional Rust service rather than two
+LuaJIT FFI bindings. Cargo owns shaderc and SPIRV-Cross, and the Teal side sees
+only compiled code plus reflected SDL_GPU resource counts. Naga cannot replace
+that stack while Tecs authors combined `sampler2D` resources: its GLSL frontend
+requires separate textures and samplers, and its SPIR-V frontend rejects the
+combined sampled-image modules shaderc produces for SDL_GPU's Vulkan binding
+contract. Packaged builds compile none of this toolchain and load the generated
+shader pack instead.
+
 Mesh shadows use three camera-frustum directional cascades, not the 2D
 occluder-mask pipeline. Their mark, scan, compact, map, and shader resources
 exist only when the mesh domain opts in. Each cascade reuses the ordered GPU
@@ -262,7 +271,9 @@ repository.
 
 ## Requirements
 
-Rust/Cargo, LuaJIT, SDL3, SDL3_mixer, shaderc, SPIRV-Cross, zlib, and Teal.
+Rust/Cargo, LuaJIT, SDL3, SDL3_mixer, zlib, and Teal. Cargo owns the
+development-only shaderc and SPIRV-Cross crates; packaged builds contain only
+their prebuilt shader pack.
 `rust-toolchain.toml` selects the Rust version; `cargo xtask deps` installs the
 development dependencies managed by the project.
 

@@ -38,6 +38,7 @@ mod physics;
 mod regex;
 mod registry;
 mod sha256;
+mod shader;
 mod signals;
 mod ui;
 mod uri;

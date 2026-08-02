@@ -25,10 +25,10 @@ something does, that is the defect rather than the workaround.
 
 `deps` finishes by holding the machine to the versions the build-support crate
 pins. It does that because it can break the gate itself: SDL3, SDL3_mixer,
-shaderc and LuaJIT are pinned here, Homebrew carries only the current version of
-each, and installing the current one is how a machine ends up outside the pin
-with every later `cargo xtask` command failing on it. Reporting that where it
-happens is the most `deps` can do, since there is no older bottle to ask for.
+SDL3_ttf and LuaJIT are pinned here, Homebrew carries only the current version
+of each, and installing the current one is how a machine ends up outside the
+pin with every later `cargo xtask` command failing on it. Reporting that where
+it happens is the most `deps` can do, since there is no older bottle to ask for.
 When it does happen, either raise the pin deliberately, revision and version
 together, or set `TECS_ALLOW_VERSION_DRIFT=1` while working on that update.
 

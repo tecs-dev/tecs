@@ -10,6 +10,7 @@ crate-type = ["rlib", "staticlib"]
 
 [features]
 payload = ["dep:flate2"]
+shader-compiler = ["dep:shaderc", "dep:spirv-cross2"]
 
 [dependencies]
 bincode.workspace = true
@@ -22,6 +23,8 @@ flate2 = { workspace = true, optional = true }
 image.workspace = true
 libc.workspace = true
 mio.workspace = true
+shaderc = { workspace = true, optional = true }
+spirv-cross2 = { workspace = true, optional = true }
 path-clean.workspace = true
 pathdiff.workspace = true
 rapier2d.workspace = true
