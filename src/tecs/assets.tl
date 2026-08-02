@@ -38,12 +38,14 @@ voices.
 Image cache misses read through SDL AsyncIO, decode in the bounded native CPU
 lane, and publish on the main thread. `newMesh` constructs immutable
 procedural geometry synchronously. `loadGLTF` decodes glTF 2.0 and GLB scenes
-in a warmed isolated Lua worker, including images,
-metallic-roughness materials, vertex colors, alpha masks, `BLEND` modes, skins,
-and node animation clips including morph weights. Both produce
-CPU-owned data that the mesh domain consumes when it becomes resident. A model
-with a `BLEND` material requires a mesh domain created with
-`transparency = true`.
+through the maintained Rust glTF importer on a warmed isolated worker,
+including images, metallic-roughness materials, vertex colors, alpha masks,
+`BLEND` modes, skins, and node animation clips including morph weights. One
+opaque native allocation retains the import; the main thread borrows its
+geometry through flat views instead of serializing large strings through the
+worker channel. Both produce CPU-owned data that the mesh domain consumes when
+it becomes resident. A model with a `BLEND` material requires a mesh domain
+created with `transparency = true`.
 
 One imported primitive becomes one independently bounded GPU-culling command.
 The decoder splits a primitive above 65,536 triangles into bounded commands,
@@ -116,19 +118,19 @@ local DECODER <const> = [==[
 local ffi = require("ffi")
 local mixer = require("tecs.ffi.sdl3mixer")
 local loader = require("tecs.ffi.loader")
+local rust = require("tecs.ffi.rust")
 local workers = require("tecs.workers")
-local gltf = require("tecs.internal.gltf")
 
 local MIX = mixer.C
+local RUST = rust.C
 local self = workers.current()
 
 local function decodeModel(task)
-    local ok, result = pcall(gltf.decodeFile, task.path)
-    if not ok then
-        return {id = task.id, error = tostring(result)}
+    local model = RUST.tecsModelLoad(task.path, #task.path)
+    if model == nil then
+        return {id = task.id, error = loader.toString(RUST.tecsRustError())}
     end
-    result.id = task.id
-    return result
+    return {id = task.id, model = tonumber(ffi.cast("uintptr_t", model))}
 end
 
 -- Length in milliseconds, or -1 when the container cannot say. A format that
@@ -653,13 +655,13 @@ local record assets
     --- URIs and embedded GLB resources are supported. Triangle primitives,
     --- static node transforms, metallic-roughness PBR, normal, occlusion,
     --- emissive, alpha-mask, alpha-blended, and unlit materials are decoded.
-    --- JOINTS_0, WEIGHTS_0, skins, inverse bind matrices, morph targets, mesh
-    --- and node weights, and node animation clips are decoded. A
-    --- sparse-accessor or non-triangle input raises at the direct load call
-    --- instead of loading incompletely. A primitive above 65,536 triangles is split into
-    --- independently bounded and culled mesh records.
-    --- Registering a
-    --- model containing alpha blending requires a mesh domain created with
+    --- JOINTS_0, WEIGHTS_0, skins, inverse bind matrices, sparse accessors,
+    --- morph targets, mesh and node weights, and node animation clips are
+    --- decoded. Non-triangle input and texture-coordinate transforms raise at
+    --- the direct load call instead of loading incompletely. A primitive above
+    --- 65,536 triangles is split into independently bounded and culled mesh
+    --- records. Registering a model containing alpha blending requires a mesh
+    --- domain created with
     --- `transparency = true`.
     --- @param path The caller supplies a `.gltf` or `.glb` asset path.
     --- @return Returns the decoded model. The call suspends its system while
@@ -691,6 +693,9 @@ local ImageMT <const>: metatable<Image> = {__index = Image}
 local SoundMT <const>: metatable<Sound> = {__index = Sound}
 local MeshMT <const>: metatable<Mesh> = {__index = Mesh}
 local ModelMT <const>: metatable<Model> = {__index = Model}
+local modelOwners <const>: {Model: loader.CValue} = setmetatable(
+    {}, {__mode = "k"} as metatable<{Model: loader.CValue}>
+)
 
 function Mesh:release()
     self.vertices = nil
@@ -706,6 +711,12 @@ function Model:release()
     end
     for _, image in ipairs(self.images) do
         image:release()
+    end
+    local owner <const> = modelOwners[self]
+    if owner ~= nil then
+        modelOwners[self] = nil
+        ffi.gc(owner as ffi.CData, nil)
+        RUST.tecsModelDestroy(owner)
     end
 end
 
@@ -786,82 +797,197 @@ end
 local function modelFromWorker(result: {string: any}): Model
     local images: {Image} = {}
     local meshes: {Mesh} = {}
-    local built, modelOrReason = pcall(function(): Model
-        for index, source in ipairs(result.images as {{string: any}}) do
-            images[index] = imageFromBytes(source.bytes as string, source.name as string)
+    local owner <const> = ffi.gc(
+        ffi.cast("TecsModel *", ffi.cast("uintptr_t", result.model)) as ffi.CData,
+        RUST.tecsModelDestroy as function(ffi.CData)
+    ) as loader.CValue
+    local infoOwner <const> = loader.newArray("TecsModelInfo[1]")
+    if not RUST.tecsModelGetInfo(owner, infoOwner) then
+        ffi.gc(owner as ffi.CData, nil)
+        RUST.tecsModelDestroy(owner)
+        error("cannot read imported model: " .. loader.toString(RUST.tecsRustError()), 0)
+    end
+    local info <const> = infoOwner[0] as {string: any}
+
+    local function textAt(pointer: loader.CValue, length: any): string
+        return loader.toBytes(pointer, tonumber(length) as integer)
+    end
+
+    local function numbersAt(pointer: loader.CValue, count: any, declaration?: string): {number}
+        local length <const> = tonumber(count) as integer
+        local source <const> = ffi.cast(declaration or "const float *", pointer) as loader.CArray
+        local values: {number} = {}
+        for index = 0, length - 1 do
+            values[index + 1] = tonumber(source[index]) as number
         end
-        for index, source in ipairs(result.meshes as {{string: any}}) do
-            local vertexCount <const> = source.vertexCount as integer
-            local indexCount <const> = source.indexCount as integer
-            local vertices <const> = loader.newArray("float[?]", vertexCount * meshlayout.VERTEX_FLOATS)
-            local indices <const> = loader.newArray("uint32_t[?]", indexCount)
-            local skinVertices: loader.CArray = nil
-            local colorVertices: loader.CArray = nil
-            local morphVertices: loader.CArray = nil
-            loader.copyTo(
-                loader.bytePointer(vertices as loader.CValue),
-                source.vertices as loader.CValue,
-                vertexCount * meshlayout.VERTEX_BYTES
+        return values
+    end
+
+    local built, modelOrReason = pcall(function(): Model
+        local nativeImages <const> = info.images as loader.CArray
+        for index = 0, (tonumber(info.image_count) as integer) - 1 do
+            local source <const> = nativeImages[index] as {string: any}
+            images[index + 1] = imageFromBytes(
+                textAt(source.bytes as loader.CValue, source.byte_count),
+                textAt(source.name as loader.CValue, source.name_length)
             )
-            loader.copyTo(loader.bytePointer(indices as loader.CValue), source.indices as loader.CValue, indexCount * 4)
-            if source.colorVertices ~= nil then
-                colorVertices = loader.newArray("float[?]", vertexCount * meshlayout.COLOR_VERTEX_FLOATS)
-                loader.copyTo(
-                    loader.bytePointer(colorVertices as loader.CValue),
-                    source.colorVertices as loader.CValue,
-                    vertexCount * meshlayout.COLOR_VERTEX_BYTES
-                )
-            end
-            if source.skinVertices ~= nil then
-                skinVertices = loader.newArray("float[?]", vertexCount * meshlayout.SKIN_VERTEX_FLOATS)
-                loader.copyTo(
-                    loader.bytePointer(skinVertices as loader.CValue),
-                    source.skinVertices as loader.CValue,
-                    vertexCount * meshlayout.SKIN_VERTEX_BYTES
-                )
-            end
-            local morphTargetCount <const> = source.morphTargetCount as integer or 0
-            if source.morphVertices ~= nil then
-                morphVertices = loader.newArray(
-                    "float[?]", vertexCount * morphTargetCount * meshlayout.MORPH_VERTEX_FLOATS
-                )
-                loader.copyTo(
-                    loader.bytePointer(morphVertices as loader.CValue),
-                    source.morphVertices as loader.CValue,
-                    vertexCount * morphTargetCount * meshlayout.MORPH_VERTEX_BYTES
-                )
-            end
-            meshes[index] = setmetatable(
+        end
+        local nativeMeshes <const> = info.meshes as loader.CArray
+        for index = 0, (tonumber(info.mesh_count) as integer) - 1 do
+            local source <const> = nativeMeshes[index] as {string: any}
+            local vertexCount <const> = tonumber(source.vertex_count) as integer
+            local morphTargetCount <const> = tonumber(source.morph_target_count) as integer
+            meshes[index + 1] = setmetatable(
                 {
-                    name = source.name as string,
-                    vertices = vertices,
-                    colorVertices = colorVertices,
-                    indices = indices,
-                    skinVertices = skinVertices,
-                    morphVertices = morphVertices,
+                    name = textAt(source.name as loader.CValue, source.name_length),
+                    vertices = ffi.cast("float *", source.vertices) as loader.CArray,
+                    colorVertices = source.color_vertices ~= nil
+                        and ffi.cast("float *", source.color_vertices) as loader.CArray or nil,
+                    indices = ffi.cast("uint32_t *", source.indices) as loader.CArray,
+                    skinVertices = source.skin_vertices ~= nil
+                        and ffi.cast("float *", source.skin_vertices) as loader.CArray or nil,
+                    morphVertices = source.morph_vertices ~= nil
+                        and ffi.cast("float *", source.morph_vertices) as loader.CArray or nil,
                     morphTargetCount = morphTargetCount,
-                    morphWeights = source.morphWeights as {number} or {},
+                    morphWeights = numbersAt(source.morph_weights as loader.CValue, source.morph_weight_count),
                     vertexCount = vertexCount,
-                    indexCount = indexCount,
-                    centerX = source.centerX as number,
-                    centerY = source.centerY as number,
-                    centerZ = source.centerZ as number,
+                    indexCount = tonumber(source.index_count) as integer,
+                    centerX = tonumber(source.center_x) as number,
+                    centerY = tonumber(source.center_y) as number,
+                    centerZ = tonumber(source.center_z) as number,
                     radius = source.radius as number,
                 } as Mesh,
                 MeshMT
             )
         end
+
+        local materials: {ModelMaterial} = {}
+        local nativeMaterials <const> = info.materials as loader.CArray
+        for index = 0, (tonumber(info.material_count) as integer) - 1 do
+            local source <const> = nativeMaterials[index] as {string: any}
+            materials[index + 1] = {
+                name = textAt(source.name as loader.CValue, source.name_length),
+                model = tonumber(source.model) as integer,
+                alphaMode = tonumber(source.alpha_mode) as integer,
+                baseColorImage = tonumber(source.base_color_image) as integer,
+                normalImage = tonumber(source.normal_image) as integer,
+                metallicRoughnessImage = tonumber(source.metallic_roughness_image) as integer,
+                occlusionImage = tonumber(source.occlusion_image) as integer,
+                emissiveImage = tonumber(source.emissive_image) as integer,
+                alphaCutoff = tonumber(source.alpha_cutoff),
+                baseR = tonumber(source.base_r),
+                baseG = tonumber(source.base_g),
+                baseB = tonumber(source.base_b),
+                baseA = tonumber(source.base_a),
+                emissiveR = tonumber(source.emissive_r),
+                emissiveG = tonumber(source.emissive_g),
+                emissiveB = tonumber(source.emissive_b),
+                metallic = tonumber(source.metallic),
+                roughness = tonumber(source.roughness),
+                normalScale = tonumber(source.normal_scale),
+                occlusionStrength = tonumber(source.occlusion_strength),
+                doubleSided = tonumber(source.double_sided) ~= 0,
+            }
+        end
+
+        local nodes: {ModelNode} = {}
+        local nativeNodes <const> = info.nodes as loader.CArray
+        for index = 0, (tonumber(info.node_count) as integer) - 1 do
+            local source <const> = nativeNodes[index] as {string: any}
+            nodes[index + 1] = {
+                parent = tonumber(source.parent) as integer,
+                x = tonumber(source.x),
+                y = tonumber(source.y),
+                z = tonumber(source.z),
+                rotationX = tonumber(source.rotation_x),
+                rotationY = tonumber(source.rotation_y),
+                rotationZ = tonumber(source.rotation_z),
+                rotationW = tonumber(source.rotation_w),
+                scaleX = tonumber(source.scale_x),
+                scaleY = tonumber(source.scale_y),
+                scaleZ = tonumber(source.scale_z),
+                matrix = tonumber(source.has_matrix) ~= 0 and numbersAt(source.matrix as loader.CValue, 16) or nil,
+            }
+        end
+
+        local skins: {ModelSkin} = {}
+        local nativeSkins <const> = info.skins as loader.CArray
+        for index = 0, (tonumber(info.skin_count) as integer) - 1 do
+            local source <const> = nativeSkins[index] as {string: any}
+            local joints <const> = numbersAt(source.joints as loader.CValue, source.joint_count, "const uint32_t *")
+            local integerJoints: {integer} = {}
+            for joint, value in ipairs(joints) do
+                integerJoints[joint] = value as integer
+            end
+            skins[index + 1] = {
+                name = textAt(source.name as loader.CValue, source.name_length),
+                matrices = numbersAt(source.matrices as loader.CValue, source.matrix_count),
+                node = tonumber(source.node) as integer,
+                joints = integerJoints,
+                inverseBindMatrices = numbersAt(
+                    source.inverse_bind_matrices as loader.CValue, source.inverse_bind_matrix_count
+                ),
+            }
+        end
+
+        local nativeChannels <const> = info.channels as loader.CArray
+        local animations: {ModelAnimation} = {}
+        local nativeAnimations <const> = info.animations as loader.CArray
+        for index = 0, (tonumber(info.animation_count) as integer) - 1 do
+            local source <const> = nativeAnimations[index] as {string: any}
+            local channels: {ModelAnimationChannel} = {}
+            local first <const> = tonumber(source.first_channel) as integer
+            for channelIndex = 0, (tonumber(source.channel_count) as integer) - 1 do
+                local channel <const> = nativeChannels[first + channelIndex] as {string: any}
+                channels[channelIndex + 1] = {
+                    node = tonumber(channel.node) as integer,
+                    path = tonumber(channel.path) as integer,
+                    interpolation = tonumber(channel.interpolation) as integer,
+                    width = tonumber(channel.width) as integer,
+                    times = numbersAt(channel.times as loader.CValue, channel.time_count),
+                    values = numbersAt(channel.values as loader.CValue, channel.value_count),
+                }
+            end
+            animations[index + 1] = {
+                name = textAt(source.name as loader.CValue, source.name_length),
+                duration = tonumber(source.duration),
+                channels = channels,
+            }
+        end
+
+        local draws: {ModelDraw} = {}
+        local nativeDraws <const> = info.draws as loader.CArray
+        for index = 0, (tonumber(info.draw_count) as integer) - 1 do
+            local source <const> = nativeDraws[index] as {string: any}
+            draws[index + 1] = {
+                mesh = tonumber(source.mesh) as integer,
+                material = tonumber(source.material) as integer,
+                skin = tonumber(source.skin) as integer,
+                node = tonumber(source.node) as integer,
+                weights = numbersAt(source.weights as loader.CValue, source.weight_count),
+                x = tonumber(source.x),
+                y = tonumber(source.y),
+                z = tonumber(source.z),
+                rotationX = tonumber(source.rotation_x),
+                rotationY = tonumber(source.rotation_y),
+                rotationZ = tonumber(source.rotation_z),
+                rotationW = tonumber(source.rotation_w),
+                scaleX = tonumber(source.scale_x),
+                scaleY = tonumber(source.scale_y),
+                scaleZ = tonumber(source.scale_z),
+            }
+        end
         return setmetatable(
             {
-                path = result.path as string,
-                mipmaps = result.mipmaps == true,
+                path = textAt(info.path as loader.CValue, info.path_length),
+                mipmaps = tonumber(info.mipmaps) ~= 0,
                 meshes = meshes,
                 images = images,
-                materials = result.materials as {ModelMaterial},
-                skins = result.skins as {ModelSkin},
-                nodes = result.nodes as {ModelNode},
-                animations = result.animations as {ModelAnimation},
-                draws = result.draws as {ModelDraw},
+                materials = materials,
+                skins = skins,
+                nodes = nodes,
+                animations = animations,
+                draws = draws,
             } as Model,
             ModelMT
         )
@@ -873,9 +999,13 @@ local function modelFromWorker(result: {string: any}): Model
         for _, image in ipairs(images) do
             image:release()
         end
+        ffi.gc(owner as ffi.CData, nil)
+        RUST.tecsModelDestroy(owner)
         error(tostring(modelOrReason), 0)
     end
-    return modelOrReason as Model
+    local model <const> = modelOrReason as Model
+    modelOwners[model] = owner
+    return model
 end
 
 function assets.newMesh(options: MeshOptions): Mesh
@@ -1194,6 +1324,9 @@ end
 local function discard(result: {string: any})
     if result.audio ~= nil then
         MIX.MIX_DestroyAudio(ffi.cast("MIX_Audio *", ffi.cast("uintptr_t", result.audio)) as loader.CValue)
+    end
+    if result.model ~= nil then
+        RUST.tecsModelDestroy(ffi.cast("TecsModel *", ffi.cast("uintptr_t", result.model)) as loader.CValue)
     end
 end
 

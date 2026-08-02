@@ -124,9 +124,13 @@ complete mip chains on the GPU. An explicitly selected BC3 array instead
 uploads importer-built chains without expanding them in GPU memory. The
 Sponza fetch command is both a pinned cache and a deterministic import step;
 it leaves source and derived files ignored while retaining the upstream
-notice. The glTF worker also remaps primitives above 65,536 triangles into
-independently bounded culling commands, so one oversized source range does not
-turn instance culling into an all-or-nothing million-triangle draw.
+notice. The glTF crate parses and validates models in Rust on the asset worker,
+and glam supplies transform math. The worker returns one opaque native owner,
+not serialized geometry strings; the main thread borrows flat vertex and index
+views until registration finishes. The importer also remaps primitives above
+65,536 triangles into independently bounded culling commands, so one oversized
+source range does not turn instance culling into an all-or-nothing
+million-triangle draw.
 
 Mesh residency is intentionally owned below the public domain. Games register
 geometry, textures, and materials through `MeshDomain` and observe compact

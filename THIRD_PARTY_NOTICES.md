@@ -158,7 +158,8 @@ Vulkan headers (Apache-2.0).
 ### Rust native build foundation
 
 The static native archive includes `clap` for CLI parsing and `clap_complete`
-for shell completion generation, FastNoise Lite for procedural fields, `image`
+for shell completion generation, FastNoise Lite for procedural fields, `gltf`
+for glTF parsing and validation, `glam` for importer transform math, `image`
 for PNG and JPEG decoding and PNG encoding, `resvg` for static SVG
 rasterization, `reqwest` with Rustls for HTTP, `rmcp` for the official MCP
 protocol and Streamable HTTP server, `rapier2d` for physics, `regex` for
@@ -194,13 +195,14 @@ release for that target compiles them:
 `foldhash`, `fontdb`, `form_urlencoded`,
 `futures-channel`, `futures-core`, `futures-io`, `futures-macro`,
 `futures-sink`, `futures-task`, `futures-util`, `generic-array`, `getrandom`,
-`glam`, `glamx`, `grid`,
+`glam`, `glamx`, `gltf`, `gltf-derive`, `gltf-json`, `grid`,
 `hashbrown`, `heck`, `http`, `http-body`, `http-body-util`, `httparse`,
 `hyper`, `hyper-rustls`, `hyper-util`, `icu_collections`, `icu_locale_core`,
 `icu_normalizer`, `icu_normalizer_data`, `icu_properties`,
 `icu_properties_data`, `icu_provider`, `idna`, `idna_adapter`, `image`,
-`imagesize`, `indexmap`, `ipnet`, `itoa`, `jni`, `jni-macros`, `jni-sys`,
-`jni-sys-macros`, `jobserver`, `js-sys`, `kurbo`, `libc`, `libm`, `litemap`, `log`,
+`imagesize`, `indexmap`, `inflections`, `ipnet`, `itoa`, `jni`, `jni-macros`,
+`jni-sys`, `jni-sys-macros`, `jobserver`, `js-sys`, `kurbo`, `lazy_static`,
+`libc`, `libm`, `litemap`, `log`,
 `matrixmultiply`, `memchr`, `miniz_oxide`, `mio`, `moxcms`, `nalgebra`,
 `nalgebra-macros`, `num-bigint`, `num-complex`, `num-derive`, `num-integer`,
 `num-rational`, `num-traits`, `once_cell`, `openssl-probe`, `ordered-float`,
@@ -227,7 +229,7 @@ release for that target compiles them:
 `tokio`, `tokio-rustls`, `tokio-util`, `tower`, `tower-http`, `tower-layer`,
 `tower-service`, `tracing`, `tracing-core`, `try-lock`, `ttf-parser`, `typenum`,
 `unicode-bidi`, `unicode-bidi-mirroring`, `unicode-ccc`, `unicode-ident`,
-`unicode-properties`, `unicode-script`, `unicode-vo`, `untrusted`, `url`,
+`unicode-properties`, `unicode-script`, `unicode-vo`, `untrusted`, `url`, `urlencoding`,
 `usvg`, `utf8_iter`, `version_check`, `walkdir`, `want`, `wasi`,
 `wasm-bindgen`, `wasm-bindgen-futures`, `wasm-bindgen-macro`,
 `wasm-bindgen-macro-support`, `wasm-bindgen-shared`, `wasm-streams`, `web-sys`,

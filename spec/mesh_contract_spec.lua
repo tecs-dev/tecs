@@ -15,7 +15,6 @@ local MeshExtractor = require("tecs.internal.render.MeshExtractor")
 local MeshFramePacket = require("tecs.internal.render.MeshFramePacket")
 local meshlayout = require("tecs.gpu.meshlayout")
 local frustum = require("tecs.internal.render.frustum")
-local gltf = require("tecs.internal.gltf")
 
 local function triangle(name)
     return assets.newMesh({
@@ -305,38 +304,6 @@ describe("the 3D scene contract", function()
                     morphTargets = { { positions = { 0, 0, 0 } } },
                 })
             end, "tecs: mesh 'bad://morph-position-count' morph target 1 needs three position deltas per vertex")
-        end)
-
-        it("splits oversized imported primitives into independent culling chunks", function()
-            local vertices = ffi.new("float[?]", 6 * 12)
-            vertices[12] = 1
-            vertices[24 + 1] = 1
-            vertices[36] = 10
-            vertices[48] = 11
-            vertices[60], vertices[60 + 1] = 10, 1
-            local indices = ffi.new("uint32_t[6]", { 0, 1, 2, 3, 4, 5 })
-            local chunks = gltf._splitPrimitive({
-                name = "fixture://two-triangles",
-                vertices = ffi.string(vertices, 6 * 48),
-                indices = ffi.string(indices, 6 * 4),
-                vertexCount = 6,
-                indexCount = 6,
-                morphTargetCount = 0,
-                morphWeights = {},
-                material = 2,
-                maxJoint = -1,
-            }, 3)
-
-            assert.are.equal(2, #chunks)
-            assert.are.equal(3, chunks[1].vertexCount)
-            assert.are.equal(3, chunks[2].vertexCount)
-            assert.are.equal(3, chunks[1].indexCount)
-            assert.are.equal(3, chunks[2].indexCount)
-            assert.are.equal("fixture://two-triangles#chunk-0", chunks[1].name)
-            assert.are.equal("fixture://two-triangles#chunk-1", chunks[2].name)
-            near(chunks[1].centerX, 0.5)
-            near(chunks[2].centerX, 10.5)
-            assert.are.equal(2, chunks[2].material)
         end)
     end)
 

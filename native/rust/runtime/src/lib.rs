@@ -29,6 +29,7 @@ mod logsink;
 mod luamods;
 mod mcodearena;
 mod mcp;
+mod model;
 mod net;
 mod noise;
 mod path;
