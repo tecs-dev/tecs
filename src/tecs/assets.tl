@@ -37,6 +37,17 @@ CPU-owned data that the mesh domain consumes when it becomes resident. A model
 with a `BLEND` material requires a mesh domain created with
 `transparency = true`.
 
+One imported primitive becomes one independently bounded GPU-culling command.
+The decoder splits a primitive above 65,536 triangles into bounded commands,
+remapping the vertices and optional color, skin, and morph streams in each
+chunk. Smaller primitives keep their authored order and representation.
+
+The repository's large-scene fetch command can replace source images with
+complete BC3 mip chains. Those images remain compressed through upload and
+require a mesh domain created with `textureFormat = tecs.assets.IMAGE_BC3`,
+`mipmaps = true`, and `packTextures = false`. Normal `loadImage` and ordinary
+glTF images remain decoded RGBA8.
+
 ## Lifetime
 
 [`Application`](tealdoc:tecs.Application) installs and shuts down the process-wide worker, and
@@ -83,6 +94,10 @@ end
 
 local MIX <const> = sdl3mixer.C
 local RUST <const> = rust.C
+local IMAGE_RGBA8 <const> = 0
+local IMAGE_BC3 <const> = 1
+local COMPRESSED_HEADER_BYTES <const> = 36
+local COMPRESSED_MAGIC <const> = "TECSBC3\0"
 
 --- Runs on the worker. Decodes to a normalized layout and returns an address.
 local DECODER <const> = [==[
@@ -213,7 +228,8 @@ while true do
 end
 ]==]
 
---- Represents decoded pixels and the caller's hold on them.
+--- Represents decoded pixels or an imported compressed mip chain and the
+--- caller's hold on them.
 ---
 --- What a `loadImage` future settles to. Reference counts govern the pixels rather than
 --- owned outright, because two loads of one path that overlap share a decode:
@@ -225,8 +241,8 @@ local record Image
     --- whatever the caller passed.
     path: string
 
-    --- Read-only. Contains decoded RGBA pixels until the last `release`, then
-    --- becomes nil.
+    --- Read-only. Contains decoded RGBA pixels or BC3 blocks until the last
+    --- `release`, then becomes nil.
     pixels: loader.CValue
 
     --- Read-only. Reports the width in pixels.
@@ -239,9 +255,32 @@ local record Image
     --- beyond `width * 4`.
     pitch: integer
 
+    --- Read-only. Selects decoded RGBA8 pixels or an imported BC3 mip chain
+    --- with an `assets.IMAGE_*` integer constant.
+    format: integer
+
+    --- Read-only. Reports the texture width represented by the uploaded mip
+    --- chain. It equals `width` for decoded RGBA8 images.
+    storageWidth: integer
+
+    --- Read-only. Reports the texture height represented by the uploaded mip
+    --- chain. It equals `height` for decoded RGBA8 images.
+    storageHeight: integer
+
+    --- Read-only. Reports the number of consecutive mip levels in `pixels`.
+    levels: integer
+
+    --- Read-only. Reports bytes available from `pixels`. Decoded RGBA8 images
+    --- report `pitch * height`.
+    byteCount: integer
+
     --- Engine-owned. Stores the decoded image allocation until the last
     --- `release`. Ordinary game code should ignore this field.
     _image: loader.CValue
+
+    --- Engine-owned. Retains imported compressed bytes while `pixels` points
+    --- into them. Ordinary game code should ignore this field.
+    _bytes: string
 
     --- Engine-owned. Counts callers holding these pixels. Ordinary game code
     --- should ignore this field. The count includes one per load of the path whose
@@ -429,6 +468,8 @@ local record ModelMaterial
     normalScale: number
     --- Read-only. Reports sampled occlusion strength.
     occlusionStrength: number
+    --- Read-only. Reports whether both triangle faces must render.
+    doubleSided: boolean
 end
 
 --- Describes one static primitive instance in a decoded glTF scene.
@@ -555,6 +596,9 @@ end
 local record Model
     --- Read-only. Contains the requested `.gltf` or `.glb` path unchanged.
     path: string
+    --- Read-only. Reports whether the source sampler requires a complete
+    --- linearly filtered mip chain.
+    mipmaps: boolean
     --- Read-only. Contains unique decoded primitive geometry.
     meshes: {Mesh}
     --- Read-only. Contains unique decoded source images.
@@ -575,6 +619,10 @@ local record Model
 end
 
 local record assets
+    --- Read-only. Selects decoded, uncompressed RGBA8 image storage.
+    IMAGE_RGBA8: integer
+    --- Read-only. Selects a complete imported BC3 image mip chain.
+    IMAGE_BC3: integer
     --- Read-only. Selects a translation animation channel.
     ANIMATION_TRANSLATION: integer
     --- Read-only. Selects a rotation animation channel.
@@ -639,7 +687,8 @@ local record assets
     --- JOINTS_0, WEIGHTS_0, skins, inverse bind matrices, morph targets, mesh
     --- and node weights, and node animation clips are decoded. A
     --- sparse-accessor or non-triangle input settles as failed instead of
-    --- loading incompletely.
+    --- loading incompletely. A primitive above 65,536 triangles is split into
+    --- independently bounded and culled mesh records.
     --- Registering a
     --- model containing alpha blending requires a mesh domain created with
     --- `transparency = true`.
@@ -665,6 +714,8 @@ assets.ANIMATION_WEIGHTS = 3
 assets.ANIMATION_LINEAR = 0
 assets.ANIMATION_STEP = 1
 assets.ANIMATION_CUBIC = 2
+assets.IMAGE_RGBA8 = IMAGE_RGBA8
+assets.IMAGE_BC3 = IMAGE_BC3
 
 local ImageMT <const>: metatable<Image> = {__index = Image}
 local SoundMT <const>: metatable<Sound> = {__index = Sound}
@@ -688,7 +739,56 @@ function Model:release()
     end
 end
 
+local function uint32(bytes: string, offset: integer, path: string): integer
+    local a, b, c, d <const> = string.byte(bytes, offset, offset + 3)
+    if d == nil then
+        error(("cannot decode %s: truncated compressed texture header"):format(path), 0)
+    end
+    return a + b * 256 + c * 65536 + d * 16777216
+end
+
 local function imageFromBytes(bytes: string, path: string): Image
+    if #bytes >= COMPRESSED_HEADER_BYTES and bytes:sub(1, 8) == COMPRESSED_MAGIC then
+        local version <const> = uint32(bytes, 9, path)
+        local width <const> = uint32(bytes, 13, path)
+        local height <const> = uint32(bytes, 17, path)
+        local storageWidth <const> = uint32(bytes, 21, path)
+        local storageHeight <const> = uint32(bytes, 25, path)
+        local levels <const> = uint32(bytes, 29, path)
+        local byteCount <const> = uint32(bytes, 33, path)
+        if version ~= 1 then
+            error(("cannot decode %s: unsupported compressed texture version %d"):format(path, version), 0)
+        end
+        if
+            width < 1
+            or height < 1
+            or width > storageWidth
+            or height > storageHeight
+            or levels < 1
+            or byteCount ~= #bytes - COMPRESSED_HEADER_BYTES
+        then
+            error(("cannot decode %s: invalid compressed texture dimensions or length"):format(path), 0)
+        end
+        return setmetatable(
+            {
+                path = path,
+                _bytes = bytes,
+                pixels = (
+                    loader.bytePointer(ffi.cast("const uint8_t *", bytes) as loader.CValue) + COMPRESSED_HEADER_BYTES
+                ) as loader.CValue,
+                width = width,
+                height = height,
+                storageWidth = storageWidth,
+                storageHeight = storageHeight,
+                levels = levels,
+                byteCount = byteCount,
+                pitch = 0,
+                format = IMAGE_BC3,
+                _refs = 1,
+            } as Image,
+            ImageMT
+        )
+    end
     local decoded = RUST.tecsImageDecode(ffi.cast("const uint8_t *", bytes), #bytes)
     if decoded == nil then
         error(("cannot decode %s: %s"):format(path, loader.toString(RUST.tecsRustError())), 0)
@@ -702,6 +802,11 @@ local function imageFromBytes(bytes: string, path: string): Image
             width = width,
             height = tonumber(RUST.tecsImageHeight(decoded)) as integer,
             pitch = width * 4,
+            format = IMAGE_RGBA8,
+            storageWidth = width,
+            storageHeight = tonumber(RUST.tecsImageHeight(decoded)) as integer,
+            levels = 1,
+            byteCount = width * (tonumber(RUST.tecsImageHeight(decoded)) as integer) * 4,
             _refs = 1,
         } as Image,
         ImageMT
@@ -779,6 +884,7 @@ local function modelFromWorker(result: {string: any}): Model
         return setmetatable(
             {
                 path = result.path as string,
+                mipmaps = result.mipmaps == true,
                 meshes = meshes,
                 images = images,
                 materials = result.materials as {ModelMaterial},
@@ -1195,6 +1301,11 @@ local function settleResult(result: {string: any}): boolean
             width = result.width as integer,
             height = result.height as integer,
             pitch = result.pitch as integer,
+            format = IMAGE_RGBA8,
+            storageWidth = result.width as integer,
+            storageHeight = result.height as integer,
+            levels = 1,
+            byteCount = (result.pitch as integer) * (result.height as integer),
             -- Zero, and counted up by each surviving caller's own link below. A
             -- caller that canceled first never runs one, which is what makes this
             -- exact rather than optimistic.
@@ -1237,6 +1348,8 @@ function Image:release()
         return
     end
     if self._image == nil then
+        self._bytes = nil
+        self.pixels = nil
         return
     end
     RUST.tecsImageDestroy(self._image)

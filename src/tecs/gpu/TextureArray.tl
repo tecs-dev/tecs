@@ -24,6 +24,7 @@ the array's area rather than its layer count.
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
+local bit <const> = require("bit")
 
 local C <const> = sdl.C
 local K <const> = sdl.K
@@ -33,6 +34,12 @@ local TYPE_2D_ARRAY <const> = 1
 
 --- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local RGBA8 <const> = 4
+
+--- SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM
+local BC3 <const> = 15
+
+local FORMAT_RGBA8 <const> = 0
+local FORMAT_BC3 <const> = 1
 
 --- Texels of gutter around every packed image, on all four sides.
 ---
@@ -71,6 +78,12 @@ local record TextureArrayOptions
     --- Fit many images into each layer rather than one. Defaults to false,
     --- which is one image per layer at the layer's origin.
     pack: boolean
+    --- Allocates a complete mip chain. This requires unpacked, cell-sized
+    --- images so downsampling never crosses an atlas boundary.
+    mipmaps: boolean
+    --- Selects RGBA8 or BC3 storage. BC3 requires an unpacked complete mip
+    --- chain supplied by `addCompressed`.
+    format: integer
 end
 
 --- Many images behind one texture binding, addressed by layer and UV rect.
@@ -124,6 +137,12 @@ local record TextureArray
     used: integer
     --- Whether a layer holds many images.
     packed: boolean
+    --- Reports whether this array owns a complete mip chain.
+    mipmaps: boolean
+    --- Reports the allocated mip-level count.
+    levels: integer
+    --- Reports `FORMAT_RGBA8` or `FORMAT_BC3` storage.
+    format: integer
     --- The `SDL_GPUDevice` the texture and its staging were created against.
     _device: loader.CPtr
     --- Upload staging, kept between calls and grown when an image needs more
@@ -146,6 +165,8 @@ local record TextureArray
     _shelfLayer: integer
     --- Texels handed out, gutters included, for `usage`.
     _occupied: integer
+    --- Set by an upload and cleared after one ordered mip generation.
+    _mipsDirty: boolean
 
     --- How much of the array's texels are occupied, counting gutters.
     ---
@@ -155,6 +176,21 @@ local record TextureArray
     --- @return Texels the whole array holds, which is the cell area times the
     ---     layer count whether a layer is in use or not.
     usage: function(self): integer, integer
+
+    --- Generates every dirty mip level once after preceding uploads.
+    generateMipmaps: function(self)
+
+    --- Uploads one complete imported BC3 mip chain into an unpacked layer.
+    addCompressed: function(
+        self,
+        pixels: loader.CValue,
+        width: integer,
+        height: integer,
+        storageWidth: integer,
+        storageHeight: integer,
+        levels: integer,
+        byteCount: integer
+    ): Region
 end
 
 local TextureArrayMT <const>: metatable<TextureArray> = {__index = TextureArray}
@@ -168,17 +204,43 @@ local TextureArrayMT <const>: metatable<TextureArray> = {__index = TextureArray}
 --- @return An empty array whose layers are all allocated. Staging is not: the
 ---     first `add` sizes it to the image it is given.
 function TextureArray.create(device: loader.CPtr, options: TextureArrayOptions): TextureArray
+    local format <const> = options.format or FORMAT_RGBA8
+    if format ~= FORMAT_RGBA8 and format ~= FORMAT_BC3 then
+        error("tecs: unknown texture-array format " .. tostring(format), 2)
+    end
+    if format == FORMAT_BC3 and (not options.mipmaps or options.pack) then
+        error("tecs: BC3 texture arrays require unpacked mipmaps", 2)
+    end
+    if options.mipmaps and options.pack then
+        error("tecs: mipmapped texture arrays cannot pack images", 2)
+    end
+    local levels = 1
+    if options.mipmaps then
+        levels = math.floor(math.log(math.max(options.width, options.height)) / math.log(2)) + 1
+    end
     local info = loader.newArray("SDL_GPUTextureCreateInfo[1]")
     local settings = info[0] as loader.CStruct
     settings.type = TYPE_2D_ARRAY
-    settings.format = RGBA8
-    settings.usage = K.SDL_GPU_TEXTUREUSAGE_SAMPLER
+    settings.format = format == FORMAT_BC3 and BC3 or RGBA8
+    settings.usage = options.mipmaps
+        and format == FORMAT_RGBA8
+        and bit.bor(
+            K.SDL_GPU_TEXTUREUSAGE_SAMPLER, K.SDL_GPU_TEXTUREUSAGE_COLOR_TARGET
+        ) or K.SDL_GPU_TEXTUREUSAGE_SAMPLER
     settings.width = options.width
     settings.height = options.height
     settings.layer_count_or_depth = options.layers
-    settings.num_levels = 1
+    settings.num_levels = levels
     settings.sample_count = 0
     settings.props = 0
+
+    if not C.SDL_GPUTextureSupportsFormat(device, settings.format, TYPE_2D_ARRAY, settings.usage) then
+        error(
+            format == FORMAT_BC3 and "tecs: this GPU does not support sampled BC3 texture arrays"
+                or "tecs: this GPU does not support the requested texture array",
+            2
+        )
+    end
 
     local handle = C.SDL_CreateGPUTexture(device, info)
     if handle == nil then
@@ -192,6 +254,9 @@ function TextureArray.create(device: loader.CPtr, options: TextureArrayOptions):
     self.layers = options.layers
     self.used = 0
     self.packed = options.pack == true
+    self.mipmaps = options.mipmaps == true
+    self.levels = levels
+    self.format = format
     self._device = device
     self._transferSize = 0
     self._destroyed = false
@@ -199,6 +264,7 @@ function TextureArray.create(device: loader.CPtr, options: TextureArrayOptions):
     self._shelfTop = 0
     self._shelfLayer = -1
     self._occupied = 0
+    self._mipsDirty = false
     return self
 end
 
@@ -305,11 +371,19 @@ end
 --- edge is what makes what it finds harmless; leaving the gutter undefined
 --- would only move the seam.
 local function stage(
-    self: TextureArray, pixels: loader.CValue, width: integer, height: integer, pitch: integer, pad: integer
+    self: TextureArray,
+    pixels: loader.CValue,
+    width: integer,
+    height: integer,
+    pitch: integer,
+    pad: integer,
+    stagedWidth?: integer,
+    stagedHeight?: integer
 ): integer
-    local rowTexels <const> = width + pad * 2
+    local rowTexels <const> = stagedWidth or width + pad * 2
+    local rowCount <const> = stagedHeight or height + pad * 2
     local rowBytes <const> = rowTexels * 4
-    ensureTransfer(self, rowBytes * (height + pad * 2))
+    ensureTransfer(self, rowBytes * rowCount)
 
     local mapped = C.SDL_MapGPUTransferBuffer(self._device, self._transfer, true)
     if mapped == nil then
@@ -320,24 +394,18 @@ local function stage(
     -- of what stride the source used.
     local source <const> = loader.bytePointer(pixels)
     local destination <const> = loader.bytePointer(mapped as loader.CValue)
-    for row = 0, height - 1 do
-        local start <const> = destination + (row + pad) * rowBytes
+    for row = 0, rowCount - 1 do
+        local sourceRow <const> = math.max(0, math.min(height - 1, row - pad))
+        local start <const> = destination + row * rowBytes
         local target <const> = start + pad * 4
-        loader.copyTo(target, (source + row * pitch) as loader.CValue, width * 4)
+        loader.copyTo(target, (source + sourceRow * pitch) as loader.CValue, width * 4)
         for column = 1, pad do
             loader.copyTo(start + (pad - column) * 4, target as loader.CValue, 4)
-            loader.copyTo(target + (width + column - 1) * 4, (target + (width - 1) * 4) as loader.CValue, 4)
         end
-    end
-    -- Top and bottom gutters are whole rows of what they abut, so they pick up
-    -- the side gutters written above with no further work.
-    for row = 1, pad do
-        loader.copyTo(destination + (pad - row) * rowBytes, (destination + pad * rowBytes) as loader.CValue, rowBytes)
-        loader.copyTo(
-            destination + (pad + height + row - 1) * rowBytes,
-            (destination + (pad + height - 1) * rowBytes) as loader.CValue,
-            rowBytes
-        )
+        local edge <const> = target + (width - 1) * 4
+        for column = pad + width, rowTexels - 1 do
+            loader.copyTo(start + column * 4, edge as loader.CValue, 4)
+        end
     end
 
     C.SDL_UnmapGPUTransferBuffer(self._device, self._transfer)
@@ -408,8 +476,11 @@ local function add(
         layer, x, y = placeUnpacked(self, width, height, 3)
     end
 
-    local rowTexels <const> = stage(self, pixels, width, height, pitch, pad)
-    upload(self, layer, x, y, rowTexels, width + pad * 2, height + pad * 2)
+    local stagedWidth <const> = self.mipmaps and self.width or width + pad * 2
+    local stagedHeight <const> = self.mipmaps and self.height or height + pad * 2
+    local rowTexels <const> = stage(self, pixels, width, height, pitch, pad, stagedWidth, stagedHeight)
+    upload(self, layer, x, y, rowTexels, stagedWidth, stagedHeight)
+    self._mipsDirty = self.mipmaps
 
     -- The rect the caller samples is the image's own texels and never the
     -- gutter around them, so a neighbor packed one texel away is unreachable
@@ -429,8 +500,106 @@ local function add(
     }
 end
 
+function TextureArray:generateMipmaps()
+    if not self._mipsDirty then
+        return
+    end
+    local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
+    if commandBuffer == nil then
+        sdl.fail("SDL_AcquireGPUCommandBuffer")
+    end
+    C.SDL_GenerateMipmapsForGPUTexture(commandBuffer, self.handle)
+    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean, "SDL_SubmitGPUCommandBuffer")
+    self._mipsDirty = false
+end
+
 function TextureArray:add(pixels: loader.CValue, width: integer, height: integer, pitch: integer): TextureArray.Region
+    if self.format ~= FORMAT_RGBA8 then
+        error("tecs: decoded RGBA pixels cannot be added to a BC3 texture array", 2)
+    end
     return add(self, pixels, width, height, pitch, self.packed)
+end
+
+function TextureArray:addCompressed(
+    pixels: loader.CValue,
+    width: integer,
+    height: integer,
+    storageWidth: integer,
+    storageHeight: integer,
+    levels: integer,
+    byteCount: integer
+): TextureArray.Region
+    if self.format ~= FORMAT_BC3 then
+        error("tecs: a BC3 mip chain cannot be added to an RGBA texture array", 2)
+    end
+    if storageWidth ~= self.width or storageHeight ~= self.height or levels ~= self.levels then
+        error(
+            ("tecs: BC3 texture is %dx%d with %d levels, expected %dx%d with %d"):format(
+                storageWidth, storageHeight, levels, self.width, self.height, self.levels
+            ),
+            2
+        )
+    end
+    local expected = 0
+    local levelWidth, levelHeight = storageWidth, storageHeight
+    for _ = 1, levels do
+        expected = expected + math.max(1, math.floor((levelWidth + 3) / 4)) * math.max(
+            1, math.floor((levelHeight + 3) / 4)
+        ) * 16
+        levelWidth, levelHeight = math.max(1, math.floor(levelWidth / 2)), math.max(1, math.floor(levelHeight / 2))
+    end
+    if byteCount ~= expected then
+        error(("tecs: BC3 mip chain has %d bytes, expected %d"):format(byteCount, expected), 2)
+    end
+    local layer <const> = placeUnpacked(self, width, height, 2)
+    ensureTransfer(self, byteCount)
+    local mapped = C.SDL_MapGPUTransferBuffer(self._device, self._transfer, true)
+    if mapped == nil then
+        sdl.fail("SDL_MapGPUTransferBuffer")
+    end
+    loader.copyTo(loader.bytePointer(mapped as loader.CValue), pixels, byteCount)
+    C.SDL_UnmapGPUTransferBuffer(self._device, self._transfer)
+
+    local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
+    if commandBuffer == nil then
+        sdl.fail("SDL_AcquireGPUCommandBuffer")
+    end
+    local copyPass = C.SDL_BeginGPUCopyPass(commandBuffer)
+    local offset = 0
+    levelWidth, levelHeight = storageWidth, storageHeight
+    for level = 0, levels - 1 do
+        local from = loader.newArray("SDL_GPUTextureTransferInfo[1]")
+        local sourceInfo = from[0] as loader.CStruct
+        sourceInfo.transfer_buffer = self._transfer
+        sourceInfo.offset = offset
+        sourceInfo.pixels_per_row = 0
+        sourceInfo.rows_per_layer = 0
+        local to = loader.newArray("SDL_GPUTextureRegion[1]")
+        local region = to[0] as loader.CStruct
+        region.texture = self.handle
+        region.mip_level = level
+        region.layer = layer
+        region.x, region.y, region.z = 0, 0, 0
+        region.w, region.h, region.d = levelWidth, levelHeight, 1
+        C.SDL_UploadToGPUTexture(copyPass, from, to, false)
+        offset = offset + math.max(1, math.floor((levelWidth + 3) / 4)) * math.max(
+            1, math.floor((levelHeight + 3) / 4)
+        ) * 16
+        levelWidth, levelHeight = math.max(1, math.floor(levelWidth / 2)), math.max(1, math.floor(levelHeight / 2))
+    end
+    C.SDL_EndGPUCopyPass(copyPass)
+    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean, "SDL_SubmitGPUCommandBuffer")
+    return {
+        layer = layer,
+        u0 = 0,
+        v0 = 0,
+        u1 = width / self.width,
+        v1 = height / self.height,
+        x = 0,
+        y = 0,
+        width = width,
+        height = height,
+    }
 end
 
 --- Uploads RGBA pixels into a packed region even when ordinary images use one
@@ -482,6 +651,7 @@ function TextureArray:replace(
     local pad <const> = self.packed and PADDING or 0
     local rowTexels <const> = stage(self, pixels, width, height, pitch, pad)
     upload(self, region.layer, region.x - pad, region.y - pad, rowTexels, width + pad * 2, height + pad * 2)
+    self._mipsDirty = self.mipmaps
 end
 
 function TextureArray:usage(): integer, integer

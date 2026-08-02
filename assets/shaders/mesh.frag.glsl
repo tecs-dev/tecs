@@ -2,6 +2,10 @@
 #pragma tecs variants MESH_SHADOWS=1
 #pragma tecs variants MESH_FOG=1
 #pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1
+#pragma tecs variants MESH_DOUBLE_SIDED=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_DOUBLE_SIDED=1
+#pragma tecs variants MESH_FOG=1 MESH_DOUBLE_SIDED=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_DOUBLE_SIDED=1
 
 layout(location = 0) in vec3 vNormal;
 layout(location = 1) in vec4 vColor;
@@ -27,6 +31,9 @@ layout(location = 3) out vec4 emission;
 
 void main() {
     MeshSurface surface = meshMaterial(vMaterial, vUV, vColor, vNormal, vTangent);
+#ifdef MESH_DOUBLE_SIDED
+    if (!gl_FrontFacing) { surface.normal = -surface.normal; }
+#endif
     albedo = vec4(surface.albedo.rgb, 1.0);
 #ifdef MESH_FOG
     // Exact zero and one remain the sprite-domain unlit and lit markers. Mesh

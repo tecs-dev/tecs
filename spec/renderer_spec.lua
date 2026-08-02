@@ -91,6 +91,11 @@ describe("ecs.Renderer", function()
             width = 1,
             height = 1,
             pitch = 4,
+            format = assets.IMAGE_RGBA8,
+            storageWidth = 1,
+            storageHeight = 1,
+            levels = 1,
+            byteCount = 4,
             release = function() end,
         }
     end
@@ -598,6 +603,134 @@ describe("ecs.Renderer", function()
             })
         end, "tecs: alpha-blended mesh materials require meshes.transparency = true")
         assert.is_false(renderer.meshes.transparency)
+        renderer:destroy()
+    end)
+
+    it("allocates double-sided mesh work only for an opted-in domain", function()
+        local without = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = { capacity = 4, vertexCapacity = 16, indexCapacity = 24 },
+        })
+        assert.has_error(function()
+            without.meshes:registerMaterial({ name = "spec://cloth-without-lane", doubleSided = true })
+        end, "tecs: double-sided mesh materials require meshes.doubleSided = true")
+        assert.is_false(without.meshes.doubleSided)
+        assert.is_nil(without.meshes._backend._doubleCommands)
+        without:destroy()
+
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 1, 1, 1 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                materialCapacity = 4,
+                doubleSided = true,
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local mesh, bounds = renderer.meshes:registerMesh(triangleMesh("spec://double-sided-triangle"))
+        local material = renderer.meshes:registerMaterial({
+            name = "spec://double-sided-red",
+            model = renderer.meshes.MATERIAL_UNLIT,
+            doubleSided = true,
+            baseR = 1,
+            baseG = 0,
+            baseB = 0,
+        })
+        world:spawn(
+            tecs.Transform3D.new({ x = 0.5, y = -0.5, scaleX = -1 }),
+            mesh,
+            bounds,
+            material,
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+
+        local pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2 + 6, SIZE / 2 + 6)
+        assert.is_true(pixel.r > 240)
+        assert.is_true(renderer.meshes.doubleSided)
+        assert.is_not_nil(renderer.meshes._backend.doubleSidedPipeline)
+        assert.is_not_nil(renderer.meshes._backend._doubleCommands)
+        renderer:destroy()
+    end)
+
+    it("isolates mipmapped mesh residency from packed texture domains", function()
+        assert.has_error(function()
+            Renderer.newRenderer(device.handle, FORMAT, {
+                sprites = false,
+                meshes = { mipmaps = true },
+            })
+        end, "tecs: meshes.mipmaps requires packTextures = false")
+
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                textureWidth = 4,
+                textureHeight = 4,
+                textureLayers = 2,
+                packTextures = false,
+                mipmaps = true,
+            },
+        })
+        assert.is_true(renderer.meshes.mipmaps)
+        assert.is_true(renderer.meshes._backend.images.mipmaps)
+        assert.are.equal(3, renderer.meshes._backend.images.levels)
+        local texture = renderer.meshes:registerTexture(solid("spec://small-mip", 255, 255, 255))
+        assert.are.equal(1, texture)
+        local region = renderer.meshes._backend._textureRegions[texture]
+        assert.are.equal(0.25, region.u1)
+        assert.are.equal(0.25, region.v1)
+        renderer:destroy()
+    end)
+
+    it("allocates and shades optional point and spot mesh lights", function()
+        local without = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = { capacity = 4, vertexCapacity = 16, indexCapacity = 24 },
+        })
+        assert.is_false(without.meshes.localLights)
+        assert.is_nil(without.deferred._meshLightBuffer)
+        assert.is_nil(without.deferred._meshBinPipeline)
+        without:destroy()
+
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 0, 0, 0 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                lights = { capacity = 4 },
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local mesh, bounds = renderer.meshes:registerMesh(triangleMesh("spec://locally-lit-triangle"))
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5 }),
+            mesh,
+            bounds,
+            components.MeshMaterial(),
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+        world:spawn(tecs.Transform3D.new({ z = 1 }), components.PointLight3D(4, 1, 0, 0, 8))
+        world:spawn(tecs.Transform3D.new({ z = 1 }), components.SpotLight3D(4, math.rad(15), math.rad(35), 0, 0, 1, 8))
+
+        local pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2 - 6, SIZE / 2 + 6)
+        assert.is_true(pixel.r > 20, "the point light reaches the mesh")
+        assert.is_true(pixel.b > 20, "the spot light reaches the mesh")
+        assert.are.equal(2, renderer.meshes.lightCount)
+        assert.is_not_nil(renderer.deferred._meshLightBuffer)
+        assert.is_not_nil(renderer.deferred._meshBinPipeline)
         renderer:destroy()
     end)
 

@@ -21,6 +21,8 @@ local record SamplerOptions
     --- three axes. Clamp is what a texture array wants, where an image
     --- occupying part of a cell would otherwise sample its neighbor's padding.
     address: integer
+    --- Uses linear filtering between mip levels and defaults to false.
+    mipmaps: boolean
 end
 
 --- An immutable sampler, and the type `create` returns.
@@ -59,9 +61,8 @@ Sampler.ADDRESS_CLAMP = tonumber(C.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE) as 
 
 --- Creates a sampler.
 ---
---- One mip level, no anisotropy and no comparison: nothing here generates
---- mips, so a sampler that could filter between them would be describing a
---- texture that does not exist.
+--- Mipmap filtering is independently enabled because the paired texture must
+--- own the matching levels. Anisotropy and comparison remain disabled.
 --- @param device The `SDL_GPUDevice`, which is `Device.handle` and not the
 ---     wrapper around it.
 --- @param options Nil takes every default: nearest filtering, clamped edges.
@@ -82,10 +83,12 @@ function Sampler.create(device: loader.CPtr, options: SamplerOptions): Sampler
     local settings = info[0] as loader.CStruct
     settings.min_filter = filter
     settings.mag_filter = filter
-    settings.mipmap_mode = 0
+    settings.mipmap_mode = options.mipmaps and C.SDL_GPU_SAMPLERMIPMAPMODE_LINEAR or C.SDL_GPU_SAMPLERMIPMAPMODE_NEAREST
     settings.address_mode_u = address
     settings.address_mode_v = address
     settings.address_mode_w = address
+    settings.min_lod = 0.0
+    settings.max_lod = options.mipmaps and 1000.0 or 0.0
     settings.enable_anisotropy = false
     settings.enable_compare = false
     settings.props = 0

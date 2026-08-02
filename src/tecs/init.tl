@@ -227,6 +227,12 @@ local record gfx
     --- default to white at 1.
     PointLight2D: components.PointLight2D
 
+    --- An omnidirectional 3D light positioned by `Transform3D`.
+    PointLight3D: components.PointLight3D
+
+    --- A conical 3D light positioned and aimed by `Transform3D`.
+    SpotLight3D: components.SpotLight3D
+
     --- Keeps a renderable's fragments inside one rectangle. `index` names a
     --- region set with `renderer.sprites:setClipRegion`, and 0, the default, means
     --- no clipping. A region is a single rectangle, so nesting is the

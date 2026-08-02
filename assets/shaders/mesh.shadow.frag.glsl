@@ -8,6 +8,9 @@ layout(location = 0) out float outDepth;
 #include "meshmaterial.glsl"
 
 void main() {
+    // Shadow maps deliberately keep two-sided casting. Thin authored surfaces
+    // otherwise lose their shadow when the light projection reverses winding,
+    // while double-sided visible shading remains a material decision.
     int alphaMode = meshAlphaMode(vMaterial);
     if (alphaMode == 2) { discard; }
     if (alphaMode == MESH_ALPHA_MASK) {

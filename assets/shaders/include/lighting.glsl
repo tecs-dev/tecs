@@ -44,6 +44,33 @@ int lightTileOf(vec2 world, vec4 bounds) {
     return cell.y * LIGHT_TILES + cell.x;
 }
 
+// Which fixed tile a target fragment occupies. `viewport` carries width and
+// height in xy and its framebuffer origin in zw, so split-screen views index
+// the same local 32 by 32 grid as a full-frame view.
+int screenLightTileOf(vec2 fragment, vec4 viewport) {
+    vec2 size = max(viewport.xy, vec2(1.0));
+    vec2 across = (fragment - viewport.zw) / size;
+    ivec2 cell = clamp(ivec2(floor(across * float(LIGHT_TILES))),
+                       ivec2(0), ivec2(LIGHT_TILES - 1));
+    return cell.y * LIGHT_TILES + cell.x;
+}
+
+struct MeshLight {
+    vec4 positionRadius;
+    vec4 colorIntensity;
+    vec4 directionOuter;
+    vec4 coneType;
+};
+
+float meshLightCone(MeshLight light, vec3 surfaceToLight) {
+    if (light.coneType.y < 0.5) {
+        return 1.0;
+    }
+    vec3 fromLight = -surfaceToLight;
+    float cosine = dot(fromLight, normalize(light.directionOuter.xyz));
+    return smoothstep(light.directionOuter.w, light.coneType.x, cosine);
+}
+
 // Shared metallic-roughness direct-light term. The distribution is
 // Trowbridge-Reitz GGX, visibility is Smith with Schlick-GGX, and Fresnel is
 // Schlick's approximation. Keeping this here makes deferred opaque surfaces

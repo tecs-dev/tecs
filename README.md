@@ -34,14 +34,15 @@ start a graphics stack.
   sprite animation, and particles.
 - Optional 3D rendering with indexed mesh residency, ordered GPU frustum
   culling, texture and PBR material residency, glTF/GLB skinning and animation,
-  and independently allocated transparent, directional-shadow, skeletal, and
-  morph-target deformation, vertex-color, and fog lanes.
+  large-primitive chunking, and independently allocated transparent,
+  double-sided, directional-shadow, point/spot-light, skeletal, morph-target,
+  vertex-color, fog, mipmapped-texture, and BC3 texture lanes.
 - Optional half-resolution bloom composed before transparent meshes and the
   2D forward lane, so a mixed renderer can keep its HUD crisp.
 - Input, audio, physics, assets, workers, async I/O, HTTP, file watching, and
   a debug server.
 
-General post-processing, tiled maps, and multi-camera are not yet built.
+General post-processing and tiled maps are not yet built.
 
 Mesh shadows use one camera-centered directional map, not the 2D occluder-mask
 pipeline. Their mark, scan, compact, map, and shader resources exist only when
@@ -71,6 +72,20 @@ camera-distance fog to mesh variants only. Top-level `bloom` adds two scaled
 targets and three fullscreen passes only when configured. None of the three
 changes the resources or shaders of a 2D-only renderer.
 
+Mesh images follow that isolation rule too. Unpacked RGBA8 arrays can generate
+complete mip chains on the GPU. An explicitly selected BC3 array instead
+uploads importer-built chains without expanding them in GPU memory. The
+Sponza fetch command is both a pinned cache and a deterministic import step;
+it leaves source and derived files ignored while retaining the upstream
+notice. The glTF worker also remaps primitives above 65,536 triangles into
+independently bounded culling commands, so one oversized source range does not
+turn instance culling into an all-or-nothing million-triangle draw.
+
+Point and spot lights also live behind one mesh option. Their component queries,
+record buffer, screen-tile lists, compute dispatch, bindings, and Cook-Torrance
+shader variants do not exist in a mesh domain that omits `lights`, and no part
+of that path enters a 2D-only renderer.
+
 A mixed renderer keeps HUD work in the sprite domain. A highest,
 screen-space, unlit layer with `overlay = true` routes even fully opaque 2D
 content through the existing sorted forward lane after meshes and bloom. It
@@ -98,6 +113,8 @@ cargo xtask example gltf3d     # Run the textured 3D example
 cargo xtask example skinning3d # Run the GPU skeletal-deformation example
 cargo xtask example animated3d # Run the CC0 animated and lit glTF hero
 cargo xtask example morph3d    # Run decoded glTF morph-weight animation
+cargo xtask fetch sponza       # Cache the pinned large lighting scene
+cargo xtask example sponza3d   # Run point and spot lights in Sponza
 cargo xtask bench meshshadows  # Measure the optional mesh-shadow lane
 cargo xtask bench meshskinning # Measure the optional mesh-skinning lane
 cargo xtask bench meshmorphing # Measure the optional mesh-morphing lane

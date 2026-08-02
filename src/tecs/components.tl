@@ -36,6 +36,9 @@ optional [`MeshMorph`](tealdoc:tecs.components.MeshMorph),
 [`Tint`](tealdoc:tecs.components.Tint), and
 [`Renderable3D`](tealdoc:tecs.components.Renderable3D) describe an opaque mesh
 for the optional mesh domain.
+[`PointLight3D`](tealdoc:tecs.components.PointLight3D) and
+[`SpotLight3D`](tealdoc:tecs.components.SpotLight3D) enter the optional tiled
+local-light lane. Their pose comes from `tecs.Transform3D`.
 [`Material`](tealdoc:tecs.components.Material) remains the compiled 2D shader
 identity; mesh material data has its own persisted name and resident slot.
 
@@ -179,6 +182,68 @@ ecs.newFFIComponent({
         {"intensity", "float"},
     },
     defaults = {64, 256, 1, 1, 1, 1},
+})
+
+--- Represents an omnidirectional light in the 3D mesh domain.
+local record PointLight3D is Component
+    --- Caller-writable. Sets the light's positive reach in world units.
+    radius: number
+    --- Caller-writable. Sets non-negative red radiance.
+    r: number
+    --- Caller-writable. Sets non-negative green radiance.
+    g: number
+    --- Caller-writable. Sets non-negative blue radiance.
+    b: number
+    --- Caller-writable. Scales the light's non-negative radiance.
+    intensity: number
+end
+
+ecs.newFFIComponent({
+    name = "PointLight3D",
+    container = PointLight3D,
+    fields = {
+        {"radius", "float"},
+        {"r", "float"},
+        {"g", "float"},
+        {"b", "float"},
+        {"intensity", "float"},
+    },
+    defaults = {10, 1, 1, 1, 1},
+})
+
+--- Represents a conical light aimed by its entity's `Transform3D` rotation.
+local record SpotLight3D is Component
+    --- Caller-writable. Sets the light's positive reach in world units.
+    radius: number
+    --- Caller-writable. Sets the fully lit half-angle in radians. It must be
+    --- non-negative and no greater than `outerAngle`.
+    innerAngle: number
+    --- Caller-writable. Sets the cutoff half-angle in radians. It must be
+    --- positive and less than pi over two.
+    outerAngle: number
+    --- Caller-writable. Sets non-negative red radiance.
+    r: number
+    --- Caller-writable. Sets non-negative green radiance.
+    g: number
+    --- Caller-writable. Sets non-negative blue radiance.
+    b: number
+    --- Caller-writable. Scales the light's non-negative radiance.
+    intensity: number
+end
+
+ecs.newFFIComponent({
+    name = "SpotLight3D",
+    container = SpotLight3D,
+    fields = {
+        {"radius", "float"},
+        {"innerAngle", "float"},
+        {"outerAngle", "float"},
+        {"r", "float"},
+        {"g", "float"},
+        {"b", "float"},
+        {"intensity", "float"},
+    },
+    defaults = {10, math.rad(20), math.rad(30), 1, 1, 1, 1},
 })
 
 --- Interned image names.
@@ -866,6 +931,15 @@ local record components
     --- default to white at 1.
     PointLight2D: PointLight2D
 
+    --- Read-only. Exposes an omnidirectional mesh light positioned by the
+    --- entity's `tecs.Transform3D`. The mesh domain must enable `lights`.
+    PointLight3D: PointLight3D
+
+    --- Read-only. Exposes a conical mesh light positioned and aimed along
+    --- local negative z by the entity's `tecs.Transform3D`. The mesh domain
+    --- must enable `lights`.
+    SpotLight3D: SpotLight3D
+
     --- Read-only. Exposes the clip component, which keeps a renderable's
     --- fragments inside one rectangle. `index` names a region set with
     --- `renderer.sprites:setClipRegion`, and 0, the default, means no clipping. A
@@ -966,6 +1040,8 @@ components.MeshMaterial = MeshMaterial
 components.Bounds3D = Bounds3D
 components.Material = Material
 components.PointLight2D = PointLight2D
+components.PointLight3D = PointLight3D
+components.SpotLight3D = SpotLight3D
 components.Clip = Clip
 components.Occluder2D = Occluder2D
 components.DropShadow2D = DropShadow2D

@@ -1,4 +1,5 @@
 #version 450
+#pragma tecs variants MESH_DOUBLE_SIDED=1
 // Marks opaque and blended mesh commands in one frustum walk. This shader is
 // loaded only by a mesh domain that opted into transparency; opaque-only
 // domains keep the smaller mesh.mark pipeline and its three-pass chain.
@@ -47,7 +48,11 @@ void main() {
                 visible = 0u;
             }
         }
-        blended = int(instances.value[i * 16u + 12u]) == ALPHA_BLEND ? visible : 0u;
+        int lane = int(instances.value[i * 16u + 12u]);
+        blended = (lane & 3) == ALPHA_BLEND ? visible : 0u;
+#ifdef MESH_DOUBLE_SIDED
+        if ((lane & 4) != 0) { visible = blended; }
+#endif
         clearCommand(i);
     }
 

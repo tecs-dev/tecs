@@ -1,0 +1,108 @@
+--- Loads the pinned Khronos Sponza scene with mipmaps and local 3D lights.
+
+local root = os.getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
+if root:sub(-1) == "/" then
+    root = root:sub(1, -2)
+end
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
+
+local tecs <const> = require("tecs")
+local Transform3D <const> = tecs.Transform3D
+local PointLight3D <const> = tecs.gfx.PointLight3D
+local SpotLight3D <const> = tecs.gfx.SpotLight3D
+local Tint <const> = tecs.gfx.Tint
+local Renderable3D <const> = tecs.gfx.Renderable3D
+
+local function game(world: tecs.World, app: tecs.Application)
+    local meshes <const> = app.renderer.meshes
+    local camera <const> = meshes.camera
+    camera.y = 6.0
+    camera.z = 24.0
+    camera.rotationX = math.sin(math.rad(-8) * 0.5)
+    camera.rotationW = math.cos(math.rad(-8) * 0.5)
+    camera.verticalFov = math.rad(58)
+    camera.near = 0.1
+    camera.far = 120
+
+    local pointColors <const>: {{number}} = {
+        {-8, 4.0, 1.5, 1.0, 0.48, 0.20},
+        {0, 4.5, -1.0, 0.25, 0.52, 1.0},
+        {8, 4.0, 1.5, 1.0, 0.32, 0.16},
+    }
+    for _, light in ipairs(pointColors) do
+        world:spawn(
+            Transform3D.new({x = light[1], y = light[2], z = light[3]}),
+            PointLight3D(13, light[4], light[5], light[6], 18)
+        )
+    end
+    world:spawn(
+        Transform3D.new({
+            x = 0,
+            y = 11,
+            z = -2,
+            rotationX = math.sin(math.rad(-90) * 0.5),
+            rotationW = math.cos(math.rad(-90) * 0.5),
+        }),
+        SpotLight3D(20, math.rad(18), math.rad(32), 0.75, 0.85, 1.0, 28)
+    )
+
+    tecs.assets.loadGLTF(tecs.io.files.assetPath("external/sponza/Sponza.tecs.gltf")):onSettle(function(
+        loaded: tecs.Future<tecs.assets.Model>
+    )
+        if loaded.status ~= "ready" then
+            error("sponza3d: fetch the scene first with `cargo xtask fetch sponza`: " .. loaded.error, 0)
+        end
+        local instance <const> = meshes:registerModel(loaded.value):newInstance()
+        for _, primitive in ipairs(instance.primitives) do
+            world:spawn(
+                primitive.transform,
+                primitive.mesh,
+                primitive.bounds,
+                primitive.material,
+                Tint(1, 1, 1, 1),
+                Renderable3D()
+            )
+        end
+        print(("sponza3d: loaded %d cullable primitives under point and spot lights"):format(#instance.primitives))
+    end)
+end
+
+return tecs.newApplication({
+    window = {title = "Tecs Sponza lighting", width = 1280, height = 720},
+    ambientLight = {0.025, 0.03, 0.04},
+    sprites = false,
+    bloom = {scale = 0.5, threshold = 0.72, knee = 0.12, intensity = 0.55},
+    meshes = {
+        capacity = 256,
+        vertexCapacity = 262144,
+        indexCapacity = 1048576,
+        materialCapacity = 64,
+        textureWidth = 1024,
+        textureHeight = 1024,
+        textureLayers = 72,
+        packTextures = false,
+        mipmaps = true,
+        textureFormat = tecs.assets.IMAGE_BC3,
+        doubleSided = true,
+        lights = {capacity = 64},
+        fog = {start = 45, finish = 90, r = 0.07, g = 0.09, b = 0.13},
+        shadows = {
+            scale = 1,
+            distance = 42,
+            directionX = -0.35,
+            directionY = -1,
+            directionZ = -0.25,
+            r = 1.0,
+            g = 0.88,
+            b = 0.72,
+            intensity = 2.0,
+            strength = 0.75,
+            softness = 1.5,
+        },
+    },
+    maxEntities = 512,
+    debug = true,
+    debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
+    quitOnEscape = true,
+    plugin = game,
+})

@@ -9,7 +9,11 @@ local loader <const> = require("tecs.ffi.loader")
 
 local record gltf
     decodeFile: function(path: string): {string: any}
+    _splitPrimitive: function(source: {string: any}, maxIndices?: integer): {{string: any}}
 end
+
+--- At most 65,536 triangles enter one independently culled mesh command.
+local MAX_CHUNK_INDICES <const> = 65536 * 3
 
 local COMPONENT_BYTES <const>: {integer: integer} = {
     [5120] = 1,
@@ -735,6 +739,126 @@ local function decodePrimitive(
     }
 end
 
+local function splitPrimitive(source: {string: any}, requestedMax?: integer): {{string: any}}
+    local maxIndices <const> = requestedMax or MAX_CHUNK_INDICES
+    if maxIndices < 3 or maxIndices % 3 ~= 0 then
+        error("tecs: glTF chunk size must be a positive triangle index count", 0)
+    end
+    local sourceIndexCount <const> = source.indexCount as integer
+    if sourceIndexCount <= maxIndices then
+        return {source}
+    end
+    local sourceVertexCount <const> = source.vertexCount as integer
+    local sourceIndices <const> = ffi.cast("const uint32_t *", source.indices as string)
+    local sourceVertices <const> = ffi.cast("const float *", source.vertices as string)
+    local sourceColors = source.colorVertices ~= nil and ffi.cast("const float *", source.colorVertices as string)
+        or nil
+    local sourceSkin = source.skinVertices ~= nil and ffi.cast("const float *", source.skinVertices as string) or nil
+    local sourceMorph = source.morphVertices ~= nil and ffi.cast("const float *", source.morphVertices as string) or nil
+    local targetCount <const> = source.morphTargetCount as integer
+    local chunks: {{string: any}} = {}
+    for first = 0, sourceIndexCount - 1, maxIndices do
+        local count <const> = math.min(maxIndices, sourceIndexCount - first)
+        local bySource: {integer: integer} = {}
+        local sources: {integer} = {}
+        local indices <const> = ffi.new("uint32_t[?]", count) as loader.CArray
+        for lane = 0, count - 1 do
+            local old <const> = tonumber(sourceIndices[first + lane]) as integer
+            local mapped = bySource[old]
+            if mapped == nil then
+                mapped = #sources
+                bySource[old] = mapped
+                sources[#sources + 1] = old
+            end
+            indices[lane] = mapped
+        end
+        local vertexCount <const> = #sources
+        local vertices <const> = ffi.new("float[?]", vertexCount * 12) as loader.CArray
+        local colors: loader.CArray = nil
+        local skin: loader.CArray = nil
+        local morph: loader.CArray = nil
+        if sourceColors ~= nil then
+            colors = ffi.new("float[?]", vertexCount * 4) as loader.CArray
+        end
+        if sourceSkin ~= nil then
+            skin = ffi.new("float[?]", vertexCount * 8) as loader.CArray
+        end
+        if sourceMorph ~= nil then
+            morph = ffi.new("float[?]", vertexCount * targetCount * 9) as loader.CArray
+        end
+        local minX, minY, minZ = math.huge, math.huge, math.huge
+        local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+        local morphRadius = 0.0
+        for new, old in ipairs(sources) do
+            local destination <const> = (new - 1) * 12
+            local origin <const> = old * 12
+            for lane = 0, 11 do
+                vertices[destination + lane] = sourceVertices[origin + lane]
+            end
+            local x, y, z <const> = vertices[destination] as number,
+                vertices[destination + 1] as number,
+                vertices[destination + 2] as number
+            minX, minY, minZ = math.min(minX, x), math.min(minY, y), math.min(minZ, z)
+            maxX, maxY, maxZ = math.max(maxX, x), math.max(maxY, y), math.max(maxZ, z)
+            if colors ~= nil then
+                for lane = 0, 3 do
+                    colors[(new - 1) * 4 + lane] = sourceColors[old * 4 + lane]
+                end
+            end
+            if skin ~= nil then
+                for lane = 0, 7 do
+                    skin[(new - 1) * 8 + lane] = sourceSkin[old * 8 + lane]
+                end
+            end
+            local displacement = 0.0
+            if morph ~= nil then
+                for target = 0, targetCount - 1 do
+                    local destinationMorph <const> = (target * vertexCount + new - 1) * 9
+                    local sourceMorphAt <const> = (target * sourceVertexCount + old) * 9
+                    for lane = 0, 8 do
+                        morph[destinationMorph + lane] = sourceMorph[sourceMorphAt + lane]
+                    end
+                    local dx, dy, dz <const> = morph[destinationMorph] as number,
+                        morph[destinationMorph + 1] as number,
+                        morph[destinationMorph + 2] as number
+                    displacement = displacement + math.sqrt(dx * dx + dy * dy + dz * dz)
+                end
+            end
+            morphRadius = math.max(morphRadius, displacement)
+        end
+        local centerX, centerY, centerZ <const> = (minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5
+        local radiusSquared = 0.0
+        for row = 0, vertexCount - 1 do
+            local at <const> = row * 12
+            local dx <const> = (vertices[at] as number) - centerX
+            local dy <const> = (vertices[at + 1] as number) - centerY
+            local dz <const> = (vertices[at + 2] as number) - centerZ
+            radiusSquared = math.max(radiusSquared, dx * dx + dy * dy + dz * dz)
+        end
+        chunks[#chunks + 1] = {
+            name = (source.name as string) .. "#chunk-" .. #chunks,
+            vertices = ffi.string(vertices as string, vertexCount * 48),
+            colorVertices = colors ~= nil and ffi.string(colors as string, vertexCount * 16) or nil,
+            indices = ffi.string(indices as string, count * 4),
+            skinVertices = skin ~= nil and ffi.string(skin as string, vertexCount * 32) or nil,
+            morphVertices = morph ~= nil and ffi.string(morph as string, vertexCount * targetCount * 36) or nil,
+            morphTargetCount = targetCount,
+            morphWeights = source.morphWeights,
+            vertexCount = vertexCount,
+            indexCount = count,
+            centerX = centerX,
+            centerY = centerY,
+            centerZ = centerZ,
+            radius = math.sqrt(radiusSquared) + morphRadius,
+            material = source.material,
+            maxJoint = source.maxJoint,
+        }
+    end
+    return chunks
+end
+
+gltf._splitPrimitive = splitPrimitive
+
 local function identity(): {number}
     return {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
 end
@@ -930,6 +1054,7 @@ function gltf.decodeFile(path: string): {string: any}
         }
     end
 
+    local mipmaps: boolean = nil
     for index, texture in ipairs(document.textures as {{string: any}} or {}) do
         if texture.source == nil or images[(texture.source as integer) + 1] == nil then
             error(("tecs: %s texture %d names a missing image"):format(path, index - 1), 0)
@@ -941,9 +1066,16 @@ function gltf.decodeFile(path: string): {string: any}
                 or (sampler.wrapS ~= nil and sampler.wrapS ~= 10497)
                 or (sampler.wrapT ~= nil and sampler.wrapT ~= 10497)
                 or (sampler.magFilter ~= nil and sampler.magFilter ~= 9729)
-                or (sampler.minFilter ~= nil and sampler.minFilter ~= 9729)
+                or (sampler.minFilter ~= nil and sampler.minFilter ~= 9729 and sampler.minFilter ~= 9987)
             then
                 error(("tecs: %s texture %d needs an unsupported sampler"):format(path, index - 1), 0)
+            end
+            if sampler.minFilter ~= nil then
+                local requested <const> = sampler.minFilter == 9987
+                if mipmaps ~= nil and mipmaps ~= requested then
+                    error(("tecs: %s mixes mipmapped and non-mipmapped texture samplers"):format(path), 0)
+                end
+                mipmaps = requested
             end
         end
     end
@@ -974,9 +1106,6 @@ function gltf.decodeFile(path: string): {string: any}
                 ("tecs: %s material %d has invalid alpha mode %s"):format(path, index - 1, tostring(source.alphaMode)),
                 0
             )
-        end
-        if source.doubleSided == true then
-            error(("tecs: %s material %d needs unsupported double-sided rendering"):format(path, index - 1), 0)
         end
         if source.extensions ~= nil then
             for extension in pairs(source.extensions as {string: any}) do
@@ -1015,6 +1144,7 @@ function gltf.decodeFile(path: string): {string: any}
                 and ((source.normalTexture as {string: any}).scale as number or 1.0) or 1.0,
             occlusionStrength = source.occlusionTexture ~= nil
                 and ((source.occlusionTexture as {string: any}).strength as number or 1.0) or 1.0,
+            doubleSided = source.doubleSided == true,
         }
     end
 
@@ -1032,8 +1162,11 @@ function gltf.decodeFile(path: string): {string: any}
         end
         for primitiveIndex, primitive in ipairs(source.primitives as {{string: any}}) do
             local name <const> = path .. "#mesh-" .. (meshIndex - 1) .. "-primitive-" .. (primitiveIndex - 1)
-            meshes[#meshes + 1] = decodePrimitive(document, buffers, primitive, name, defaultWeights)
-            primitiveIndices[#primitiveIndices + 1] = #meshes
+            local decoded <const> = decodePrimitive(document, buffers, primitive, name, defaultWeights)
+            for _, chunk in ipairs(splitPrimitive(decoded)) do
+                meshes[#meshes + 1] = chunk
+                primitiveIndices[#primitiveIndices + 1] = #meshes
+            end
         end
         byMesh[meshIndex] = primitiveIndices
         weightsByMesh[meshIndex] = defaultWeights
@@ -1268,6 +1401,7 @@ function gltf.decodeFile(path: string): {string: any}
         meshes = meshes,
         images = images,
         materials = materials,
+        mipmaps = mipmaps == true,
         skins = skins,
         nodes = modelNodes,
         animations = animations,

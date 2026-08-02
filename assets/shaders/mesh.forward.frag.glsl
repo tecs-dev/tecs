@@ -2,6 +2,18 @@
 #pragma tecs variants MESH_SHADOWS=1
 #pragma tecs variants MESH_FOG=1
 #pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1
+#pragma tecs variants MESH_DOUBLE_SIDED=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_DOUBLE_SIDED=1
+#pragma tecs variants MESH_FOG=1 MESH_DOUBLE_SIDED=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_DOUBLE_SIDED=1
+#pragma tecs variants MESH_LIGHTS=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_LIGHTS=1
+#pragma tecs variants MESH_FOG=1 MESH_LIGHTS=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1
+#pragma tecs variants MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1
+#pragma tecs variants MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1
 // Shades alpha-blended mesh surfaces after deferred composition. Meshes are
 // sorted back to front before this pass and use premultiplied alpha so one
 // pipeline handles the complete glTF BLEND contract.
@@ -52,13 +64,30 @@ layout(set = 3, binding = 2) uniform MeshFog { vec4 color; } meshFog;
 #endif
 
 #include "lighting.glsl"
+#ifdef MESH_LIGHTS
+layout(set = 2, binding = MESH_LIGHT_BINDING + 3) readonly buffer MeshLights {
+    MeshLight item[];
+} meshLights;
+layout(set = 2, binding = MESH_LIGHT_BINDING + 4) readonly buffer MeshTileCounts {
+    uint count[];
+} meshTiles;
+layout(set = 2, binding = MESH_LIGHT_BINDING + 5) readonly buffer MeshTileLights {
+    uint index[];
+} meshTileLights;
+#endif
 #ifdef MESH_SHADOWS
 #include "meshshadow.glsl"
 #endif
 #include "meshmaterial.glsl"
 
 void main() {
+#ifdef MESH_DOUBLE_SIDED
+    if (!gl_FrontFacing && !meshDoubleSided(vMaterial)) { discard; }
+#endif
     MeshSurface surface = meshMaterial(vMaterial, vUV, vColor, vNormal, vTangent);
+#ifdef MESH_DOUBLE_SIDED
+    if (!gl_FrontFacing) { surface.normal = -surface.normal; }
+#endif
     vec3 color = surface.albedo.rgb;
     if (surface.lit >= 0.5) {
         vec3 viewDirection = normalize(camera.position.xyz - vWorld);
@@ -70,6 +99,20 @@ void main() {
                 * meshShadowVisibility(vWorld, surface.normal),
             surface.orm.g, surface.orm.b);
 #endif
+#ifdef MESH_LIGHTS
+        int tile = screenLightTileOf(gl_FragCoord.xy, scene.viewport);
+        int count = int(meshTiles.count[tile]);
+        int base = tile * LIGHT_TILE_SLOTS;
+        for (int slot = 0; slot < count; slot++) {
+            MeshLight light = meshLights.item[meshTileLights.index[base + slot]];
+            vec3 toLight = light.positionRadius.xyz - vWorld;
+            float distance = length(toLight);
+            float attenuation = clamp(1.0 - distance / light.positionRadius.w, 0.0, 1.0);
+            attenuation *= attenuation * meshLightCone(light, normalize(toLight));
+            color += cookTorrance(surface.albedo.rgb, surface.normal, viewDirection, normalize(toLight),
+                light.colorIntensity.rgb * light.colorIntensity.a * attenuation, surface.orm.g, surface.orm.b);
+        }
+#else
         int tile = lightTileOf(vWorld.xy, scene.bounds);
         int count = int(tiles.count[tile]);
         int base = tile * LIGHT_TILE_SLOTS;
@@ -83,6 +126,7 @@ void main() {
             color += cookTorrance(surface.albedo.rgb, surface.normal, viewDirection, normalize(toLight),
                 light.color.rgb * light.color.a * attenuation, surface.orm.g, surface.orm.b);
         }
+#endif
     }
     color += surface.emission;
 #ifdef MESH_FOG

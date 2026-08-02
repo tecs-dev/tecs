@@ -18,6 +18,8 @@ use tecs_build_support::registry::{self, Options as RegistryOptions};
 use tecs_build_support::repository_root;
 use tecs_build_support::{staging, tooling};
 
+mod example_assets;
+
 #[derive(Debug, Parser)]
 #[command(name = "cargo xtask", about = "Build and maintain Tecs")]
 struct Arguments {
@@ -52,6 +54,11 @@ enum Task {
         preset: Option<Preset>,
         #[arg(last = true)]
         arguments: Vec<OsString>,
+    },
+    /// Fetch a pinned large example asset into the ignored local cache.
+    Fetch {
+        /// Asset name. Currently supports `sponza`.
+        name: String,
     },
     /// Build the shader pack consumed by release packages.
     Shaders {
@@ -261,6 +268,7 @@ fn main() -> Result<()> {
                 &arguments,
             )?;
         }
+        Task::Fetch { name } => example_assets::fetch(&root, &name)?,
         Task::Shaders { preset } => {
             product::shaders(&root, preset.map_or_else(host_default, Ok)?)?;
         }

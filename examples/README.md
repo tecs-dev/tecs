@@ -9,6 +9,8 @@ cargo xtask example gltf3d
 cargo xtask example skinning3d
 cargo xtask example animated3d
 cargo xtask example morph3d
+cargo xtask fetch sponza
+cargo xtask example sponza3d
 ```
 
 `ui-demo.tl` is the complete engine showcase. It exercises the sprite renderer,
@@ -36,3 +38,11 @@ materials, animation sampling, GPU skinning, and lighting in one scene.
 `morph3d.tl` loads a glTF morph target and weight animation, then samples it
 into an instance-owned GPU weight vector. Geometry and clip data remain shared;
 only the changing weights belong to the instance.
+
+`sponza3d.tl` uses the ignored large-asset cache populated by `cargo xtask
+fetch sponza`. The fetch is pinned to one Khronos glTF Sample Assets revision
+and retains the upstream notice. It also preprocesses source images into full
+BC3 mip chains and writes a derived glTF. The demo keeps those textures
+compressed in GPU memory and exercises double-sided materials, independently
+GPU-culled primitive chunks, Cook-Torrance point and spot lights, directional
+shadows, fog, and bloom.

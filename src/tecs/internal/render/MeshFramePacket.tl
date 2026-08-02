@@ -14,6 +14,7 @@ refers to a Lua entity.
 
 local loader <const> = require("tecs.ffi.loader")
 local dirtyranges <const> = require("tecs.gpu.dirtyranges")
+local meshlightlayout <const> = require("tecs.gpu.meshlightlayout")
 
 local type Camera3D = require("tecs.gfx.Camera3D")
 
@@ -28,6 +29,14 @@ local record MeshFramePacket
     rewritten: integer
     --- Resident instances whose materials require the optional forward lane.
     blendCount: integer
+    --- Resident opaque or masked instances requiring the optional
+    --- double-sided lane.
+    doubleSidedCount: integer
+    --- Optional packed point and spot lights. Nil when local mesh lighting was
+    --- not enabled for the domain.
+    lights: loader.CArray
+    --- Packed 3D local lights written this frame.
+    lightCount: integer
 
     --- World-space camera x copied during extraction.
     cameraX: number
@@ -59,7 +68,7 @@ local record MeshFramePacket
 
     --- Creates a reusable empty packet.
     --- @return A packet with allocated matrix and range storage.
-    create: function(skinning?: boolean, morphing?: boolean): MeshFramePacket
+    create: function(skinning?: boolean, morphing?: boolean, lightCapacity?: integer): MeshFramePacket
 
     --- Begins writing one frame through a staging slot.
     --- @param slot The zero-based staging slot selected by the renderer.
@@ -74,13 +83,18 @@ end
 
 local MeshFramePacketMT <const>: metatable<MeshFramePacket> = {__index = MeshFramePacket}
 
-function MeshFramePacket.create(skinning?: boolean, morphing?: boolean): MeshFramePacket
+function MeshFramePacket.create(skinning?: boolean, morphing?: boolean, lightCapacity?: integer): MeshFramePacket
     local self = setmetatable({} as MeshFramePacket, MeshFramePacketMT)
     self.slot = 0
     self.count = 0
     self.dropped = 0
     self.rewritten = 0
     self.blendCount = 0
+    self.doubleSidedCount = 0
+    self.lightCount = 0
+    if lightCapacity ~= nil then
+        self.lights = loader.newArray("float[?]", lightCapacity * meshlightlayout.FLOATS)
+    end
     self.cameraX = 0.0
     self.cameraY = 0.0
     self.cameraZ = 0.0
@@ -102,6 +116,7 @@ end
 
 function MeshFramePacket:begin(slot: integer)
     self.slot = slot
+    self.lightCount = 0
     self.instanceRanges:clear()
     self.boundsRanges:clear()
     self.commandRanges:clear()

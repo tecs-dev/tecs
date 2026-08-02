@@ -260,6 +260,81 @@ Schlick approximation. Sprite materials keep Lambert diffuse lighting: their
 shape normals and one scalar parameter do not define a metallic-roughness PBR
 surface, and the cheaper term stays isolated from every mesh shader variant.
 
+## Local 3D lights and imported textures
+
+Point and spot lights are another independently allocated mesh lane:
+
+```teal
+return tecs.newApplication({
+    sprites = false,
+    meshes = {
+        lights = {capacity = 256},
+        doubleSided = true,
+        packTextures = false,
+        mipmaps = true,
+    },
+    plugin = function(world: tecs.World)
+        world:spawn(
+            tecs.Transform3D.new({x = 2, y = 4, z = 1}),
+            tecs.gfx.PointLight3D(12, 1.0, 0.6, 0.25, 18)
+        )
+        world:spawn(
+            tecs.Transform3D.new({x = 0, y = 8, z = 2}),
+            tecs.gfx.SpotLight3D(
+                20,
+                math.rad(18),
+                math.rad(32),
+                0.7,
+                0.85,
+                1.0,
+                28
+            )
+        )
+    end,
+})
+```
+
+`PointLight3D` uses its transform position. `SpotLight3D` also rotates local
+negative Z through the transform quaternion. Radius, color, intensity, and cone
+angles are fixed-layout FFI fields. The renderer bins enabled lights into a
+32-by-32 screen grid for every 3D view. Omitting `meshes.lights` creates no
+queries, buffers, binning dispatch, bindings, or local-light shader variants.
+
+Ordinary glTF images decode to RGBA8. Unpacked mipmapped arrays accept smaller
+images by repeating their edge through the rest of the fixed layer before GPU
+mip generation, so neighboring texels never bleed into the sampled UV region.
+For a large imported scene, select an offline-compressed array instead:
+
+```teal
+return tecs.newApplication({
+    sprites = false,
+    meshes = {
+        textureWidth = 1024,
+        textureHeight = 1024,
+        textureLayers = 72,
+        textureFormat = tecs.assets.IMAGE_BC3,
+        packTextures = false,
+        mipmaps = true,
+    },
+    plugin = game,
+})
+```
+
+`cargo xtask fetch sponza` downloads a pinned Khronos scene, retains its
+upstream notice, and writes `Sponza.tecs.gltf` plus complete BC3 mip chains in
+the ignored `assets/external` cache. BC3 uses one quarter of RGBA8 texture
+memory including equivalent mip chains. Creation raises if the selected GPU
+cannot sample BC3 arrays; it never silently decodes into a larger fallback.
+The format option uses an integer constant and affects only the mesh array.
+
+Every authored glTF primitive becomes an independent bounded culling command.
+The worker additionally splits any primitive above 65,536 triangles, remaps
+only the vertices that each chunk references, and preserves color, skin, and
+morph streams. This keeps a million-triangle source primitive from becoming
+one all-or-nothing frustum test. Small primitives take the existing path.
+Run `cargo xtask example sponza3d` for double-sided materials, compressed
+mipmaps, point and spot lights, shadows, fog, and bloom together.
+
 ## Optional mesh shadows
 
 Enable the mesh domain's directional light and shadow resources at renderer

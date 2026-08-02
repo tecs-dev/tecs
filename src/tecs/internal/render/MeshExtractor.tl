@@ -20,6 +20,7 @@ local MeshFramePacket <const> = require("tecs.internal.render.MeshFramePacket")
 local components <const> = require("tecs.components")
 local timing <const> = require("tecs.timing")
 local meshlayout <const> = require("tecs.gpu.meshlayout")
+local meshlightlayout <const> = require("tecs.gpu.meshlightlayout")
 
 local EXTRACT <const> = timing.stage("extract")
 local Transform3D <const> = ecs.Transform3D
@@ -30,8 +31,10 @@ local max <const> = math.max
 local record MeshExtractorOptions
     capacity: integer
     transparency: boolean
+    doubleSided: boolean
     skinning: boolean
     morphing: boolean
+    lightCapacity: integer
 end
 
 local record MeshDraw
@@ -66,9 +69,14 @@ local record MeshExtractor
     _drawByAsset: {integer: MeshDraw}
     _materialSlotByAsset: {integer: integer}
     _alphaModeBySlot: {integer: integer}
+    _doubleSidedBySlot: {integer: boolean}
     _transparency: boolean
+    _doubleSided: boolean
     _skinning: boolean
     _morphing: boolean
+    _lightCapacity: integer
+    _pointLights: types.Query
+    _spotLights: types.Query
     _skinSlotByAsset: {integer: integer}
     _morphByAsset: {integer: MorphRegion}
     _extractSeconds: number
@@ -84,18 +92,135 @@ function MeshExtractor.create(options: MeshExtractorOptions): MeshExtractor
     self._drawByAsset = {}
     self._materialSlotByAsset = {}
     self._alphaModeBySlot = {[0] = 0}
+    self._doubleSidedBySlot = {[0] = false}
     self._transparency = options.transparency
+    self._doubleSided = options.doubleSided
     self._skinning = options.skinning
     self._morphing = options.morphing
+    self._lightCapacity = options.lightCapacity or 0
     self._skinSlotByAsset = {}
     self._morphByAsset = {}
     self._extractSeconds = 0.0
     return self
 end
 
-function MeshExtractor:registerMaterial(asset: integer, slot: integer, alphaMode: integer)
+local function validLight(radius: number, r: number, g: number, b: number, intensity: number)
+    if radius <= 0.0 then
+        error("tecs: a 3D light radius must be greater than 0", 2)
+    end
+    if r < 0.0 or g < 0.0 or b < 0.0 or intensity < 0.0 then
+        error("tecs: 3D light colors and intensity must be non-negative", 2)
+    end
+end
+
+local function packLight(
+    packet: MeshFramePacket,
+    capacity: integer,
+    transform: ecs.Transform3D,
+    radius: number,
+    r: number,
+    g: number,
+    b: number,
+    intensity: number,
+    directionX: number,
+    directionY: number,
+    directionZ: number,
+    outerCosine: number,
+    innerCosine: number,
+    kind: integer
+)
+    local count <const> = packet.lightCount
+    if count >= capacity then
+        return
+    end
+    local lights <const> = packet.lights
+    local base <const> = count * meshlightlayout.FLOATS
+    lights[base], lights[base + 1], lights[base + 2], lights[base + 3] = transform.x, transform.y, transform.z, radius
+    lights[base + 4], lights[base + 5], lights[base + 6], lights[base + 7] = r, g, b, intensity
+    lights[base + 8], lights[base + 9], lights[base + 10], lights[base + 11] = directionX,
+        directionY,
+        directionZ,
+        outerCosine
+    lights[base + 12], lights[base + 13], lights[base + 14], lights[base + 15] = innerCosine, kind, 0.0, 0.0
+    packet.lightCount = count + 1
+end
+
+local function syncLights(self: MeshExtractor, packet: MeshFramePacket)
+    if self._lightCapacity == 0 then
+        return
+    end
+    for archetype, length in self._pointLights:iter() do
+        local transforms <const> = archetype:get(Transform3D)
+        local sources <const> = archetype:get(components.PointLight3D)
+        for row = 1, length do
+            local source <const> = sources[row]
+            validLight(source.radius, source.r, source.g, source.b, source.intensity)
+            packLight(
+                packet,
+                self._lightCapacity,
+                transforms[row],
+                source.radius,
+                source.r,
+                source.g,
+                source.b,
+                source.intensity,
+                0.0,
+                0.0,
+                0.0,
+                -2.0,
+                1.0,
+                0
+            )
+        end
+    end
+    for archetype, length in self._spotLights:iter() do
+        local transforms <const> = archetype:get(Transform3D)
+        local sources <const> = archetype:get(components.SpotLight3D)
+        for row = 1, length do
+            local transform <const> = transforms[row]
+            local source <const> = sources[row]
+            validLight(source.radius, source.r, source.g, source.b, source.intensity)
+            if
+                source.innerAngle < 0.0
+                or source.outerAngle <= 0.0
+                or source.innerAngle > source.outerAngle
+                or source.outerAngle >= math.pi * 0.5
+            then
+                error("tecs: a 3D spot light requires 0 <= innerAngle <= outerAngle < pi / 2", 2)
+            end
+            local qx, qy, qz, qw = transform.rotationX, transform.rotationY, transform.rotationZ, transform.rotationW
+            local lengthSquared <const> = qx * qx + qy * qy + qz * qz + qw * qw
+            if lengthSquared <= 0.0 then
+                error("tecs: a 3D spot light transform requires a non-zero rotation quaternion", 2)
+            end
+            local inverse <const> = 1.0 / lengthSquared
+            local directionX <const> = -2.0 * (qx * qz + qw * qy) * inverse
+            local directionY <const> = 2.0 * (qw * qx - qy * qz) * inverse
+            local directionZ <const> = (2.0 * (qx * qx + qy * qy) - lengthSquared) * inverse
+            packLight(
+                packet,
+                self._lightCapacity,
+                transform,
+                source.radius,
+                source.r,
+                source.g,
+                source.b,
+                source.intensity,
+                directionX,
+                directionY,
+                directionZ,
+                math.cos(source.outerAngle),
+                math.cos(source.innerAngle),
+                1
+            )
+        end
+    end
+end
+
+function MeshExtractor:registerMaterial(asset: integer, slot: integer, alphaMode: integer, doubleSided?: boolean)
     self._materialSlotByAsset[asset] = slot
     self._alphaModeBySlot[slot] = alphaMode
+    self._doubleSidedBySlot[slot] = doubleSided
 end
 
 function MeshExtractor:setStaging(
@@ -164,6 +289,7 @@ function MeshExtractor:extract(packet: MeshFramePacket)
     local dropped = 0
     local missing = 0
     local blended = 0
+    local doubleSided = 0
 
     for archetype, length in self._renderables:iter() do
         local transforms <const> = archetype:get(Transform3D)
@@ -226,9 +352,12 @@ function MeshExtractor:extract(packet: MeshFramePacket)
                     instances[base + 10] = meshSlot
                     instances[base + 11] = materialSlot
                     local alphaMode <const> = self._transparency and self._alphaModeBySlot[materialSlot] or 0
-                    instances[base + 12] = alphaMode
+                    local bothFaces <const> = self._doubleSided and self._doubleSidedBySlot[materialSlot] == true
+                    instances[base + 12] = alphaMode + (bothFaces and 4 or 0)
                     if alphaMode == 2 then
                         blended = blended + 1
+                    elseif bothFaces then
+                        doubleSided = doubleSided + 1
                     end
                     instances[base + 13] = tint.r
                     instances[base + 14] = tint.g
@@ -350,6 +479,8 @@ function MeshExtractor:extract(packet: MeshFramePacket)
     packet.dropped = dropped
     packet.rewritten = written
     packet.blendCount = blended
+    packet.doubleSidedCount = doubleSided
+    syncLights(self, packet)
     self._extractSeconds = timing.finish(EXTRACT, started)
 
     if missing ~= 0 then
@@ -369,6 +500,10 @@ function MeshExtractor:install(world: types.World, packet: MeshFramePacket, publ
             components.Renderable3D,
         },
     })
+    if self._lightCapacity > 0 then
+        self._pointLights = world:newQuery({include = {Transform3D, components.PointLight3D}})
+        self._spotLights = world:newQuery({include = {Transform3D, components.SpotLight3D}})
+    end
     world:addSystem({
         -- This system name is externally typed and stays stable if the module
         -- later moves.

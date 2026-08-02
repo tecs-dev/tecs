@@ -36,6 +36,14 @@
 #pragma tecs variants SHADOWS=1 MESH_FOG=1 MESH_PBR=1
 #pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_PBR=1
 #pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_FOG=1 MESH_PBR=1
+#pragma tecs variants MESH_LIGHTS=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_LIGHTS=1 MESH_PBR=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_LIGHTS=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_LIGHTS=1 MESH_PBR=1
+#pragma tecs variants MESH_FOG=1 MESH_LIGHTS=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PBR=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PBR=1
 
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 outColor;
@@ -124,6 +132,18 @@ layout(set = 3, binding = 0) uniform Scene {
 } scene;
 
 #include "lighting.glsl"
+
+#ifdef MESH_LIGHTS
+layout(set = 2, binding = LIGHT_BINDING + 3) readonly buffer MeshLights {
+    MeshLight item[];
+} meshLights;
+layout(set = 2, binding = LIGHT_BINDING + 4) readonly buffer MeshTileCounts {
+    uint count[];
+} meshTiles;
+layout(set = 2, binding = LIGHT_BINDING + 5) readonly buffer MeshTileLights {
+    uint index[];
+} meshTileLights;
+#endif
 
 // Above this the green channel says an occluder really covers the pixel. Below
 // it the pixel is either empty or in the halo the blur spread, and a halo that
@@ -303,37 +323,62 @@ void main() {
     // the scene. Without this the loop runs its whole body for every light
     // however far away it is, since falloff clamps to zero rather than
     // rejecting, and a scene's light count would be a per-pixel cost.
-    int tile = lightTileOf(world, scene.bounds);
-    int count = int(tiles.count[tile]);
-    int base = tile * LIGHT_TILE_SLOTS;
-    for (int slot = 0; slot < count; slot++) {
-        Light light = lights.item[tileLights.index[base + slot]];
-        vec3 toLight = light.position.xyz - surfaceWorld;
-        float distance = length(toLight);
-        float radius = max(light.position.w, 1.0);
+    if (
+#ifdef MESH_LIGHTS
+        !mesh
+#else
+        true
+#endif
+    ) {
+        int tile = lightTileOf(world, scene.bounds);
+        int count = int(tiles.count[tile]);
+        int base = tile * LIGHT_TILE_SLOTS;
+        for (int slot = 0; slot < count; slot++) {
+            Light light = lights.item[tileLights.index[base + slot]];
+            vec3 toLight = light.position.xyz - surfaceWorld;
+            float distance = length(toLight);
+            float radius = max(light.position.w, 1.0);
 
-        // Smooth falloff to zero at the radius so a light has bounded reach
-        // and the lighting cost stays proportional to what it touches.
-        float attenuation = clamp(1.0 - distance / radius, 0.0, 1.0);
-        attenuation *= attenuation;
+            // Smooth falloff to zero at the radius so a light has bounded reach
+            // and the lighting cost stays proportional to what it touches.
+            float attenuation = clamp(1.0 - distance / radius, 0.0, 1.0);
+            attenuation *= attenuation;
 
-        float lambert = max(dot(normal, normalize(toLight)), 0.0);
+            float lambert = max(dot(normal, normalize(toLight)), 0.0);
 #ifdef SHADOWS
-        float reaching = attenuation * lambert;
-        if (scene.ambient.a > 0.5 && reaching > MARCH_FLOOR) {
-            attenuation *= 1.0 - marchShadow(world, light.position.xy, light.position.z, attenuation, noise);
-        }
+            float reaching = attenuation * lambert;
+            if (scene.ambient.a > 0.5 && reaching > MARCH_FLOOR) {
+                attenuation *= 1.0 - marchShadow(world, light.position.xy, light.position.z, attenuation, noise);
+            }
 #endif
 #ifdef MESH_PBR
-        if (mesh) {
-            accumulated += cookTorrance(albedo.rgb, normal, viewDirection, normalize(toLight),
-                light.color.rgb * light.color.a * attenuation, orm.g, orm.b);
-        } else
+            if (mesh) {
+                accumulated += cookTorrance(albedo.rgb, normal, viewDirection, normalize(toLight),
+                    light.color.rgb * light.color.a * attenuation, orm.g, orm.b);
+            } else
 #endif
-        {
-            accumulated += albedo.rgb * light.color.rgb * light.color.a * attenuation * lambert;
+            {
+                accumulated += albedo.rgb * light.color.rgb * light.color.a * attenuation * lambert;
+            }
         }
     }
+
+#ifdef MESH_LIGHTS
+    if (mesh) {
+        int tile = screenLightTileOf(gl_FragCoord.xy, scene.viewport);
+        int count = int(meshTiles.count[tile]);
+        int base = tile * LIGHT_TILE_SLOTS;
+        for (int slot = 0; slot < count; slot++) {
+            MeshLight light = meshLights.item[meshTileLights.index[base + slot]];
+            vec3 toLight = light.positionRadius.xyz - surfaceWorld;
+            float distance = length(toLight);
+            float attenuation = clamp(1.0 - distance / light.positionRadius.w, 0.0, 1.0);
+            attenuation *= attenuation * meshLightCone(light, normalize(toLight));
+            accumulated += cookTorrance(albedo.rgb, normal, viewDirection, normalize(toLight),
+                light.colorIntensity.rgb * light.colorIntensity.a * attenuation, orm.g, orm.b);
+        }
+    }
+#endif
 
 #ifdef SHADOWS
     // After the loop and over the ambient too, which is the whole of what makes

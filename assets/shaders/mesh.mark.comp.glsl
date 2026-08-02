@@ -1,5 +1,9 @@
 #version 450
 #pragma tecs variants MESH_ALPHA=1
+#pragma tecs variants MESH_SINGLE_SIDED=1
+#pragma tecs variants MESH_ALPHA=1 MESH_SINGLE_SIDED=1
+#pragma tecs variants MESH_DOUBLE_SIDED=1
+#pragma tecs variants MESH_ALPHA=1 MESH_DOUBLE_SIDED=1
 // Marks visible mesh instances, assigns a stable rank within each workgroup,
 // and clears the indirect destination while no later pass can race it.
 layout(local_size_x = 256) in;
@@ -7,7 +11,7 @@ layout(local_size_x = 256) in;
 layout(set = 0, binding = 0) readonly buffer Bounds {
     vec4 sphere[];
 } bounds;
-#ifdef MESH_ALPHA
+#if defined(MESH_ALPHA) || defined(MESH_SINGLE_SIDED) || defined(MESH_DOUBLE_SIDED)
 layout(set = 0, binding = 1) readonly buffer Instances { float value[]; } instances;
 #endif
 
@@ -35,8 +39,17 @@ void main() {
                 keep = 0u;
             }
         }
+#if defined(MESH_ALPHA) || defined(MESH_SINGLE_SIDED) || defined(MESH_DOUBLE_SIDED)
+        int lane = int(instances.value[i * 16u + 12u]);
 #ifdef MESH_ALPHA
-        if (int(instances.value[i * 16u + 12u]) == 2) { keep = 0u; }
+        if ((lane & 3) == 2) { keep = 0u; }
+#endif
+#ifdef MESH_SINGLE_SIDED
+        if ((lane & 4) != 0) { keep = 0u; }
+#endif
+#ifdef MESH_DOUBLE_SIDED
+        if ((lane & 4) == 0) { keep = 0u; }
+#endif
 #endif
 
         // Every command is defined before compaction. This is a separate GPU

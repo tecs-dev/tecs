@@ -42,6 +42,10 @@ int meshAlphaMode(int material) {
     return int(materials.value[material * MESH_MATERIAL_FLOATS + 7]);
 }
 
+bool meshDoubleSided(int material) {
+    return materials.value[material * MESH_MATERIAL_FLOATS + 35] != 0.0;
+}
+
 vec4 meshBaseColor(int material, vec2 uv, vec4 tint) {
     int base = material * MESH_MATERIAL_FLOATS;
     vec4 baseFactor = vec4(

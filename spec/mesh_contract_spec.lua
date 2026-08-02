@@ -6,6 +6,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
+local ffi = require("ffi")
 local assets = require("tecs.assets")
 local loader = require("tecs.ffi.loader")
 local components = require("tecs.components")
@@ -13,6 +14,7 @@ local Camera3D = require("tecs.gfx.Camera3D")
 local MeshExtractor = require("tecs.internal.render.MeshExtractor")
 local MeshFramePacket = require("tecs.internal.render.MeshFramePacket")
 local frustum = require("tecs.internal.render.frustum")
+local gltf = require("tecs.internal.gltf")
 
 local function triangle(name)
     return assets.newMesh({
@@ -303,17 +305,51 @@ describe("the 3D scene contract", function()
                 })
             end, "tecs: mesh 'bad://morph-position-count' morph target 1 needs three position deltas per vertex")
         end)
+
+        it("splits oversized imported primitives into independent culling chunks", function()
+            local vertices = ffi.new("float[?]", 6 * 12)
+            vertices[12] = 1
+            vertices[24 + 1] = 1
+            vertices[36] = 10
+            vertices[48] = 11
+            vertices[60], vertices[60 + 1] = 10, 1
+            local indices = ffi.new("uint32_t[6]", { 0, 1, 2, 3, 4, 5 })
+            local chunks = gltf._splitPrimitive({
+                name = "fixture://two-triangles",
+                vertices = ffi.string(vertices, 6 * 48),
+                indices = ffi.string(indices, 6 * 4),
+                vertexCount = 6,
+                indexCount = 6,
+                morphTargetCount = 0,
+                morphWeights = {},
+                material = 2,
+                maxJoint = -1,
+            }, 3)
+
+            assert.are.equal(2, #chunks)
+            assert.are.equal(3, chunks[1].vertexCount)
+            assert.are.equal(3, chunks[2].vertexCount)
+            assert.are.equal(3, chunks[1].indexCount)
+            assert.are.equal(3, chunks[2].indexCount)
+            assert.are.equal("fixture://two-triangles#chunk-0", chunks[1].name)
+            assert.are.equal("fixture://two-triangles#chunk-1", chunks[2].name)
+            near(chunks[1].centerX, 0.5)
+            near(chunks[2].centerX, 10.5)
+            assert.are.equal(2, chunks[2].material)
+        end)
     end)
 
     describe("MeshExtractor", function()
-        local function extractorScene(capacity, transparency, skinning, morphing)
+        local function extractorScene(capacity, transparency, skinning, morphing, doubleSided, lightCapacity)
             local world = tecs.ecs.newWorld()
-            local packet = MeshFramePacket.create(skinning, morphing)
+            local packet = MeshFramePacket.create(skinning, morphing, lightCapacity)
             local extractor = MeshExtractor.create({
                 capacity = capacity,
                 transparency = transparency,
+                doubleSided = doubleSided,
                 skinning = skinning,
                 morphing = morphing,
+                lightCapacity = lightCapacity,
             })
             local instances = loader.newArray("float[?]", capacity * 16)
             local bounds = loader.newArray("float[?]", capacity * 4)
@@ -467,6 +503,52 @@ describe("the 3D scene contract", function()
             extractor:extract(packet)
             assert.are.equal(1, packet.blendCount)
             assert.are.equal(2, instances[12])
+        end)
+
+        it("classifies double-sided materials into an independent lane", function()
+            local world, extractor, packet, instances = extractorScene(2, false, false, false, true)
+            local meshAsset = components.meshId("procedural://cloth")
+            local materialAsset = components.meshMaterialId("procedural://cloth-material")
+            extractor:registerMesh(meshAsset, 0, 0, 0, 3)
+            extractor:registerMaterial(materialAsset, 1, 0, true)
+            world:spawn(
+                tecs.Transform3D(),
+                components.Mesh(meshAsset, 0),
+                components.Bounds3D(),
+                components.MeshMaterial(materialAsset, 1),
+                components.Tint(),
+                components.Renderable3D()
+            )
+
+            extractor:extract(packet)
+            assert.are.equal(1, packet.doubleSidedCount)
+            assert.are.equal(4, instances[12])
+        end)
+
+        it("packs optional point and transform-aimed spot lights", function()
+            local world, extractor, packet = extractorScene(1, false, false, false, false, 2)
+            world:spawn(tecs.Transform3D.new({ x = 1, y = 2, z = 3 }), components.PointLight3D(9, 0.1, 0.2, 0.3, 4))
+            local half = math.sqrt(0.5)
+            world:spawn(
+                tecs.Transform3D.new({ x = 4, y = 5, z = 6, rotationX = -half, rotationW = half }),
+                components.SpotLight3D(12, math.rad(20), math.rad(30), 0.6, 0.7, 0.8, 5)
+            )
+
+            extractor:extract(packet)
+
+            assert.are.equal(2, packet.lightCount)
+            near(packet.lights[0], 1)
+            near(packet.lights[1], 2)
+            near(packet.lights[2], 3)
+            near(packet.lights[3], 9)
+            near(packet.lights[4], 0.1)
+            near(packet.lights[5], 0.2)
+            near(packet.lights[6], 0.3)
+            near(packet.lights[7], 4)
+            near(packet.lights[16 + 9], -1, "spot direction y")
+            near(packet.lights[16 + 11], math.cos(math.rad(30)), "spot outer cosine")
+            near(packet.lights[16 + 12], math.cos(math.rad(20)), "spot inner cosine")
+            assert.are.equal(1, packet.lights[16 + 13])
         end)
 
         it("raises for unregistered geometry after exhausting the query", function()

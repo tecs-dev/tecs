@@ -13,6 +13,9 @@ on the GPU. A domain created with `transparency = true` also classifies glTF
 `BLEND` materials, compacts them separately, and stably sorts their complete
 commands back to front. A domain without that option creates none of the
 sorting buffers, compute pipelines, or forward graphics pipeline.
+A domain created with `doubleSided = true` classifies opaque and masked
+materials into a second compacted command lane and draws it through a cull-none
+pipeline. A domain without that option creates none of those resources.
 A domain created with `shadows` adds one camera-centered directional shadow
 map. Opaque and masked meshes cast; opaque, masked, and blended meshes receive.
 The map, its pipeline, and the lighting shader variant do not exist otherwise.
@@ -27,6 +30,13 @@ deformation lanes exist, morphing runs before skinning.
 A domain created with `vertexColors = true` adds a separate immutable RGBA
 vertex stream and matching shader variants. The base vertex stride is unchanged
 when the lane is disabled.
+A domain created with `lights` extracts point and spot lights into its own
+buffer and bins them in screen tiles for each 3D view. A domain without it
+creates no local-light buffers, compute pipeline, queries, or shader variant.
+Mipmapped RGBA8 layers generate their chains on the GPU after upload. A domain
+using `TEXTURE_BC3` instead consumes complete chains prepared by the asset
+importer and keeps them compressed in GPU memory. This format is an explicit
+integer option and never changes the sprite texture array.
 ]=]
 
 local type types = require("tecs.types")
@@ -52,6 +62,7 @@ local DEFAULT_TEXTURE_LAYERS <const> = 16
 local DEFAULT_JOINT_CAPACITY <const> = 4096
 local DEFAULT_MORPH_VERTEX_CAPACITY <const> = 1048576
 local DEFAULT_MORPH_WEIGHT_CAPACITY <const> = 65536
+local meshlightlayout <const> = require("tecs.gpu.meshlightlayout")
 
 local record MeshMaterialOptions
     --- Caller-writable. Supplies the stable, non-empty material name used by
@@ -63,6 +74,9 @@ local record MeshMaterialOptions
     --- Caller-writable. Selects opaque, masked, or blended rendering with an
     --- `ALPHA_*` integer constant and defaults to `ALPHA_OPAQUE`.
     alphaMode: integer
+    --- Caller-writable. Renders both triangle faces and defaults to false.
+    --- This requires `meshes.doubleSided = true`.
+    doubleSided: boolean
     --- Caller-writable. Selects a texture returned by `registerTexture`, or
     --- zero for the white fallback.
     baseColorTexture: integer
@@ -168,6 +182,13 @@ local record MeshMorphingOptions
     weightCapacity: integer
 end
 
+--- Configures independently allocated point and spot light resources.
+local record MeshLightOptions
+    --- Caller-writable. Sets the extracted 3D local-light ceiling and defaults
+    --- to 256. Lights beyond it are ignored in stable extraction order.
+    capacity: integer
+end
+
 --- Controls linear camera-distance fog at runtime.
 local interface MeshFogTuning
     --- Caller-writable. Sets the distance where fog begins and defaults to 20.
@@ -212,9 +233,20 @@ local record MeshDomainOptions
     --- Caller-writable. Packs multiple images into each texture layer and
     --- defaults to true.
     packTextures: boolean
+    --- Caller-writable. Allocates and linearly filters a complete mip chain.
+    --- This requires `packTextures = false`. Smaller RGBA images repeat their
+    --- edge through the rest of the cell before mip generation.
+    mipmaps: boolean
+    --- Caller-writable. Selects decoded RGBA8 or imported BC3 storage with a
+    --- `TEXTURE_*` integer constant and defaults to `TEXTURE_RGBA8`. BC3
+    --- requires mipmaps and disables texture packing.
+    textureFormat: integer
     --- Caller-writable. Enables the independently allocated transparent mesh
     --- lane and defaults to false.
     transparency: boolean
+    --- Caller-writable. Enables independently allocated double-sided command
+    --- and pipeline resources and defaults to false.
+    doubleSided: boolean
     --- Caller-writable. Enables and configures one independently allocated
     --- directional mesh-shadow lane. Nil disables it.
     shadows: MeshShadowOptions
@@ -226,6 +258,10 @@ local record MeshDomainOptions
     --- per-instance metadata and weights, and shader variants. Nil disables
     --- GPU morphing.
     morphing: MeshMorphingOptions
+    --- Caller-writable. Enables independently allocated point and spot light
+    --- extraction, buffers, screen-tile binning, and shader variants. Nil
+    --- disables local 3D lights.
+    lights: MeshLightOptions
     --- Caller-writable. Enables a separate immutable linear RGBA vertex-color
     --- stream and shader variants. Defaults to false. A colored procedural or
     --- glTF mesh requires this option.
@@ -244,6 +280,7 @@ local record MeshDomain
     type Shadow = MeshShadowTuning
     type SkinningOptions = MeshSkinningOptions
     type MorphingOptions = MeshMorphingOptions
+    type LightOptions = MeshLightOptions
     type FogOptions = MeshFogOptions
     type Fog = MeshFogTuning
     type RegisteredPrimitive = RegisteredPrimitive
@@ -259,6 +296,10 @@ local record MeshDomain
     ALPHA_MASK: integer
     --- Read-only. Selects a material drawn in the sorted forward lane.
     ALPHA_BLEND: integer
+    --- Read-only. Selects decoded RGBA8 mesh textures.
+    TEXTURE_RGBA8: integer
+    --- Read-only. Selects imported BC3 mesh textures with complete mip chains.
+    TEXTURE_BC3: integer
 
     --- Caller-writable. Controls the perspective view used by this domain.
     camera: Camera3D
@@ -294,12 +335,26 @@ local record MeshDomain
     --- Read-only. Reports whether this domain owns the optional transparent
     --- command and pipeline resources.
     transparency: boolean
+    --- Read-only. Reports whether this domain owns optional double-sided
+    --- command and pipeline resources.
+    doubleSided: boolean
+    --- Read-only. Reports whether mesh images own complete mip chains.
+    mipmaps: boolean
+    --- Read-only. Reports the selected `TEXTURE_*` storage format.
+    textureFormat: integer
     --- Read-only. Reports whether this domain owns mesh-shadow resources.
     shadows: boolean
     --- Read-only. Reports whether this domain owns GPU skinning resources.
     skinning: boolean
     --- Read-only. Reports whether this domain owns GPU morph resources.
     morphing: boolean
+    --- Read-only. Reports whether point and spot mesh lights are enabled.
+    localLights: boolean
+    --- Read-only. Reports the fixed local-light capacity, or zero when the
+    --- lane is disabled.
+    lightCapacity: integer
+    --- Read-only. Reports local lights extracted for the last frame.
+    lightCount: integer
     --- Read-only. Reports whether this domain owns vertex-color resources.
     vertexColors: boolean
     --- Read-only. Reports whether mesh fog shader variants are enabled.
@@ -372,6 +427,8 @@ MeshDomain.MATERIAL_UNLIT = 1
 MeshDomain.ALPHA_OPAQUE = 0
 MeshDomain.ALPHA_MASK = 1
 MeshDomain.ALPHA_BLEND = 2
+MeshDomain.TEXTURE_RGBA8 = assets.IMAGE_RGBA8
+MeshDomain.TEXTURE_BC3 = assets.IMAGE_BC3
 
 local function positive(name: string, value: integer): integer
     if value < 1 or value ~= math.floor(value) then
@@ -408,6 +465,12 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
             "mesh morph weight capacity", morphing.weightCapacity or DEFAULT_MORPH_WEIGHT_CAPACITY
         )
     end
+    local lightCapacity = 0
+    if options.lights ~= nil then
+        lightCapacity = positive(
+            "mesh light capacity", (options.lights as MeshLightOptions).capacity or meshlightlayout.DEFAULT_CAPACITY
+        )
+    end
 
     local self = setmetatable({} as MeshDomain, MeshDomainMT)
     self.capacity = capacity
@@ -426,9 +489,24 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self.morphVertexCount = 0
     self.morphWeightCount = 0
     self.transparency = options.transparency == true
+    self.doubleSided = options.doubleSided == true
+    self.mipmaps = options.mipmaps == true
+    self.textureFormat = options.textureFormat or MeshDomain.TEXTURE_RGBA8
+    if self.textureFormat ~= MeshDomain.TEXTURE_RGBA8 and self.textureFormat ~= MeshDomain.TEXTURE_BC3 then
+        error("tecs: meshes.textureFormat must be a MeshDomain.TEXTURE_* constant", 2)
+    end
+    if self.mipmaps and options.packTextures ~= false then
+        error("tecs: meshes.mipmaps requires packTextures = false", 2)
+    end
+    if self.textureFormat == MeshDomain.TEXTURE_BC3 and not self.mipmaps then
+        error("tecs: meshes.TEXTURE_BC3 requires mipmaps = true", 2)
+    end
     self.shadows = options.shadows ~= nil
     self.skinning = options.skinning ~= nil
     self.morphing = options.morphing ~= nil
+    self.localLights = options.lights ~= nil
+    self.lightCapacity = lightCapacity
+    self.lightCount = 0
     self.vertexColors = options.vertexColors == true
     self.fogging = options.fog ~= nil
     if self.shadows then
@@ -461,7 +539,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self._centerYByAsset = {}
     self._centerZByAsset = {}
     self._radiusByAsset = {}
-    self._packet = MeshFramePacket.create(self.skinning, self.morphing)
+    self._packet = MeshFramePacket.create(self.skinning, self.morphing, self.localLights and lightCapacity or nil)
 
     local backend <const> = MeshBackend.create(
         device,
@@ -475,13 +553,17 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
             textureHeight = textureHeight,
             textureLayers = textureLayers,
             packTextures = options.packTextures ~= false,
+            mipmaps = self.mipmaps,
+            textureFormat = self.textureFormat,
             transparency = self.transparency,
+            doubleSided = self.doubleSided,
             shadows = self.shadow as MeshBackend.ShadowOptions,
             skinning = self.skinning,
             jointCapacity = jointCapacity,
             morphing = self.morphing,
             morphVertexCapacity = morphVertexCapacity,
             morphWeightCapacity = morphWeightCapacity,
+            localLights = self.localLights,
             vertexColors = self.vertexColors,
             fog = self.fog as MeshBackend.FogOptions,
         }
@@ -495,8 +577,10 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     local extractor <const> = MeshExtractor.create({
         capacity = capacity,
         transparency = self.transparency,
+        doubleSided = self.doubleSided,
         skinning = self.skinning,
         morphing = self.morphing,
+        lightCapacity = lightCapacity,
     })
     self._extractor = extractor
     self.camera = extractor.camera
@@ -550,12 +634,17 @@ function MeshDomain:registerMaterial(options: MeshMaterialOptions): components.M
     if alphaMode == MeshDomain.ALPHA_BLEND and not self.transparency then
         error("tecs: alpha-blended mesh materials require meshes.transparency = true", 2)
     end
+    local doubleSided <const> = options.doubleSided == true
+    if doubleSided and not self.doubleSided then
+        error("tecs: double-sided mesh materials require meshes.doubleSided = true", 2)
+    end
     local slot <const> = self._backend:registerMaterial(
         asset,
         {
             name = options.name,
             model = model,
             alphaMode = alphaMode,
+            doubleSided = doubleSided,
             baseColorTexture = options.baseColorTexture or 0,
             normalTexture = options.normalTexture or 0,
             metallicRoughnessTexture = options.metallicRoughnessTexture or 0,
@@ -575,7 +664,7 @@ function MeshDomain:registerMaterial(options: MeshMaterialOptions): components.M
             occlusionStrength = options.occlusionStrength or 1.0,
         }
     )
-    self._extractor:registerMaterial(asset, slot, alphaMode)
+    self._extractor:registerMaterial(asset, slot, alphaMode, doubleSided)
     self.materialCount = self._backend.materialCount
     return components.MeshMaterial(asset, slot)
 end
@@ -605,6 +694,16 @@ function MeshDomain:registerModel(model: assets.Model): Model3D
                 end
             end
         end
+        if not self.doubleSided then
+            for _, material in ipairs(model.materials) do
+                if material.doubleSided then
+                    error("tecs: double-sided mesh materials require meshes.doubleSided = true", 0)
+                end
+            end
+        end
+        if model.mipmaps and not self.mipmaps then
+            error("tecs: the model's sampler requires meshes.mipmaps = true", 0)
+        end
         local textures: {integer} = {}
         local function texture(index: integer): integer
             if index == 0 then
@@ -628,6 +727,7 @@ function MeshDomain:registerModel(model: assets.Model): Model3D
                 name = material.name,
                 model = material.model,
                 alphaMode = material.alphaMode,
+                doubleSided = material.doubleSided,
                 baseColorTexture = texture(material.baseColorImage),
                 normalTexture = texture(material.normalImage),
                 metallicRoughnessTexture = texture(material.metallicRoughnessImage),
@@ -685,6 +785,7 @@ function MeshDomain:_install(world: types.World)
             self.count = packet.count
             self.dropped = packet.dropped
             self.rewritten = packet.rewritten
+            self.lightCount = packet.lightCount
         end
     )
 end

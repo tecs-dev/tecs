@@ -8,4 +8,6 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+image.workspace = true
+serde_json.workspace = true
 tecs-build-support = { path = "../native/rust/build-support" }

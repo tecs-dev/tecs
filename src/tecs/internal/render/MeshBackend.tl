@@ -104,13 +104,17 @@ local record MeshBackendOptions
     textureHeight: integer
     textureLayers: integer
     packTextures: boolean
+    mipmaps: boolean
+    textureFormat: integer
     transparency: boolean
+    doubleSided: boolean
     shadows: MeshShadowOptions
     skinning: boolean
     jointCapacity: integer
     morphing: boolean
     morphVertexCapacity: integer
     morphWeightCapacity: integer
+    localLights: boolean
     vertexColors: boolean
     fog: MeshFogOptions
 end
@@ -119,6 +123,7 @@ local record MeshMaterialData
     name: string
     model: integer
     alphaMode: integer
+    doubleSided: boolean
     baseColorTexture: integer
     normalTexture: integer
     metallicRoughnessTexture: integer
@@ -161,6 +166,7 @@ local record MeshBackend
     images: TextureArray
     sampler: Sampler
     pipeline: GraphicsPipeline
+    doubleSidedPipeline: GraphicsPipeline
     blendPipeline: GraphicsPipeline
     shadowPipeline: GraphicsPipeline
     materialCapacity: integer
@@ -191,16 +197,23 @@ local record MeshBackend
     _slots: Buffer
     _blocks: Buffer
     _visibleCommands: Buffer
+    _doubleSlots: Buffer
+    _doubleBlocks: Buffer
+    _doubleCommands: Buffer
     _shadowCommands: Buffer
     _markPipeline: ComputePipeline
     _scanPipeline: ComputePipeline
     _compactPipeline: ComputePipeline
+    _doubleMarkPipeline: ComputePipeline
     _shadowMarkPipeline: ComputePipeline
     _rankPipeline: ComputePipeline
     _placePipeline: ComputePipeline
     _markPass: ComputePass
     _scanPass: ComputePass
     _compactPass: ComputePass
+    _doubleMarkPass: ComputePass
+    _doubleScanPass: ComputePass
+    _doubleCompactPass: ComputePass
     _blendScanPass: ComputePass
     _blendCompactPass: ComputePass
     _rankPass: ComputePass
@@ -212,6 +225,11 @@ local record MeshBackend
     _scanWrites: {loader.CValue}
     _compactWrites: {loader.CValue}
     _compactReads: {loader.CValue}
+    _doubleMarkWrites: {loader.CValue}
+    _doubleMarkReads: {loader.CValue}
+    _doubleScanWrites: {loader.CValue}
+    _doubleCompactWrites: {loader.CValue}
+    _doubleCompactReads: {loader.CValue}
     _shadowMarkWrites: {loader.CValue}
     _shadowMarkReads: {loader.CValue}
     _shadowCompactWrites: {loader.CValue}
@@ -250,16 +268,21 @@ local record MeshBackend
     _forwardBuffers: {loader.CValue}
     _forwardTextures: {loader.CValue}
     _transparent: boolean
+    _doubleSided: boolean
     _blending: boolean
     _shadows: boolean
     _skinning: boolean
     _morphing: boolean
+    _localLights: boolean
     _vertexColors: boolean
     _fogging: boolean
+    _mipmaps: boolean
+    _textureFormat: integer
     _fog: MeshFogOptions
     _fogUniform: loader.CArray
     _cameraUniform: loader.CArray
     _shadowActive: boolean
+    _doubleSidedActive: boolean
     _shadow: MeshShadowOptions
     _shadowUniform: loader.CArray
 end
@@ -288,8 +311,10 @@ local function vertexDefines(
     return defines
 end
 
-local function fragmentDefines(shadows: boolean, fogging: boolean): {string: string}
-    if not shadows and not fogging then
+local function fragmentDefines(
+    shadows: boolean, fogging: boolean, doubleSided?: boolean, localLights?: boolean
+): {string: string}
+    if not shadows and not fogging and not doubleSided and not localLights then
         return nil
     end
     local defines: {string: string} = {}
@@ -298,6 +323,12 @@ local function fragmentDefines(shadows: boolean, fogging: boolean): {string: str
     end
     if fogging then
         defines.MESH_FOG = "1"
+    end
+    if doubleSided then
+        defines.MESH_DOUBLE_SIDED = "1"
+    end
+    if localLights then
+        defines.MESH_LIGHTS = "1"
     end
     return defines
 end
@@ -309,13 +340,14 @@ local function buildGeometry(
     skinning: boolean,
     morphing: boolean,
     vertexColors: boolean,
-    fogging: boolean
+    fogging: boolean,
+    doubleSided?: boolean
 ): GraphicsPipeline
     local albedoFormat, normalFormat, ormFormat, emissionFormat = deferred:geometryFormats()
     local vertex = Shader.load(
         device, "mesh.vert", {defines = vertexDefines(skinning, morphing, vertexColors, fogging)}
     )
-    local fragment = Shader.load(device, "mesh.frag", {defines = fragmentDefines(shadows, fogging)})
+    local fragment = Shader.load(device, "mesh.frag", {defines = fragmentDefines(shadows, fogging, doubleSided)})
     local pipeline = GraphicsPipeline.create(
         device,
         {
@@ -323,8 +355,8 @@ local function buildGeometry(
             fragmentShader = fragment,
             colorFormats = {albedoFormat, normalFormat, ormFormat, emissionFormat},
             depth = deferred:geometryDepth(),
-            cull = GraphicsPipeline.CULL_BACK,
-            name = "mesh.opaque",
+            cull = doubleSided and GraphicsPipeline.CULL_NONE or GraphicsPipeline.CULL_BACK,
+            name = doubleSided and "mesh.doubleSided" or "mesh.opaque",
         }
     )
     vertex:destroy()
@@ -339,12 +371,16 @@ local function buildForward(
     skinning: boolean,
     morphing: boolean,
     vertexColors: boolean,
-    fogging: boolean
+    fogging: boolean,
+    doubleSided?: boolean,
+    localLights?: boolean
 ): GraphicsPipeline
     local vertex = Shader.load(
         device, "mesh.vert", {defines = vertexDefines(skinning, morphing, vertexColors, fogging)}
     )
-    local fragment = Shader.load(device, "mesh.forward.frag", {defines = fragmentDefines(shadows, fogging)})
+    local fragment = Shader.load(
+        device, "mesh.forward.frag", {defines = fragmentDefines(shadows, fogging, doubleSided, localLights)}
+    )
     local pipeline = GraphicsPipeline.create(
         device,
         {
@@ -352,7 +388,7 @@ local function buildForward(
             fragmentShader = fragment,
             colorFormat = deferred:forwardFormat(),
             depth = deferred:forwardDepth(),
-            cull = GraphicsPipeline.CULL_BACK,
+            cull = doubleSided and GraphicsPipeline.CULL_NONE or GraphicsPipeline.CULL_BACK,
             blendMode = GraphicsPipeline.BLEND_PREMULTIPLIED,
             name = "mesh.forward",
         }
@@ -414,12 +450,16 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._textureByName = {}
     self._count = 0
     self._transparent = options.transparency
+    self._doubleSided = options.doubleSided
     self._blending = false
     self._shadows = options.shadows ~= nil
     self._skinning = options.skinning
     self._morphing = options.morphing
+    self._localLights = options.localLights
     self._vertexColors = options.vertexColors
     self._fogging = options.fog ~= nil
+    self._mipmaps = options.mipmaps
+    self._textureFormat = options.textureFormat
     self._fog = options.fog
     if self._transparent then
         self._cameraUniform = loader.newArray("float[4]")
@@ -429,6 +469,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
         self._fogUniform = loader.newArray("float[4]")
     end
     self._shadowActive = false
+    self._doubleSidedActive = false
     self._shadow = options.shadows
     if self._shadows then
         self._shadowUniform = loader.newArray("float[?]", SHADOW_FLOATS)
@@ -559,9 +600,13 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
             height = options.textureHeight,
             layers = options.textureLayers,
             pack = options.packTextures,
+            mipmaps = options.mipmaps,
+            format = options.textureFormat,
         }
     )
-    self.sampler = Sampler.create(device, {filter = Sampler.FILTER_LINEAR, address = Sampler.ADDRESS_REPEAT})
+    self.sampler = Sampler.create(
+        device, {filter = Sampler.FILTER_LINEAR, address = Sampler.ADDRESS_REPEAT, mipmaps = options.mipmaps}
+    )
 
     -- Slot zero is neutral metallic-roughness PBR. Negative texture layers
     -- select shader constants, so the texture array need not spend residency
@@ -596,8 +641,14 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
             name = "mesh.visibleCommands",
         }
     )
+    local markDefines: {string: string} = nil
+    if self._doubleSided then
+        markDefines = {MESH_SINGLE_SIDED = "1"}
+    end
     self._markPipeline = ComputePipeline.load(
-        device, self._transparent and "mesh.lanes.mark.comp" or "mesh.mark.comp", {}
+        device,
+        self._transparent and "mesh.lanes.mark.comp" or "mesh.mark.comp",
+        {defines = self._transparent and self._doubleSided and {MESH_DOUBLE_SIDED = "1"} or markDefines}
     )
     self._scanPipeline = ComputePipeline.load(device, "mesh.scan.comp", {})
     self._compactPipeline = ComputePipeline.load(device, "mesh.compact.comp", {})
@@ -607,6 +658,11 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._scanWrites = {}
     self._compactWrites = {}
     self._compactReads = {}
+    self._doubleMarkWrites = {}
+    self._doubleMarkReads = {}
+    self._doubleScanWrites = {}
+    self._doubleCompactWrites = {}
+    self._doubleCompactReads = {}
     self._shadowMarkWrites = {}
     self._shadowMarkReads = {}
     self._shadowCompactWrites = {}
@@ -622,6 +678,31 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self.pipeline = buildGeometry(
         device, deferred, self._shadows, self._skinning, self._morphing, self._vertexColors, self._fogging
     )
+    if self._doubleSided then
+        local groups <const> = math.ceil(self.capacity / CULL_GROUP)
+        self._doubleSlots = Buffer.create(
+            device, {usage = {"computeRead", "computeWrite"}, size = self.capacity * 4, name = "mesh.doubleSided.slots"}
+        )
+        self._doubleBlocks = Buffer.create(
+            device, {usage = {"computeRead", "computeWrite"}, size = groups * 4, name = "mesh.doubleSided.blocks"}
+        )
+        self._doubleCommands = Buffer.create(
+            device,
+            {
+                usage = {"indirect", "computeWrite"},
+                size = self.capacity * meshlayout.COMMAND_BYTES,
+                name = "mesh.doubleSided.commands",
+            }
+        )
+        local doubleDefines <const>: {string: string} = {MESH_DOUBLE_SIDED = "1"}
+        if self._transparent then
+            doubleDefines.MESH_ALPHA = "1"
+        end
+        self._doubleMarkPipeline = ComputePipeline.load(device, "mesh.mark.comp", {defines = doubleDefines})
+        self.doubleSidedPipeline = buildGeometry(
+            device, deferred, self._shadows, self._skinning, self._morphing, self._vertexColors, self._fogging, true
+        )
+    end
     if self._shadows then
         self._shadowCommands = Buffer.create(
             device,
@@ -631,8 +712,10 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
                 name = "mesh.shadow.commands",
             }
         )
-        if self._transparent then
-            self._shadowMarkPipeline = ComputePipeline.load(device, "mesh.mark.comp", {defines = {MESH_ALPHA = "1"}})
+        if self._transparent or self._doubleSided then
+            self._shadowMarkPipeline = ComputePipeline.load(
+                device, "mesh.mark.comp", {defines = self._transparent and {MESH_ALPHA = "1"} or nil}
+            )
         end
         self.shadowPipeline = buildShadow(device, deferred, self._skinning, self._morphing, self._vertexColors)
     end
@@ -673,7 +756,15 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
         self._rankPipeline = ComputePipeline.load(device, "mesh.rank.comp", {})
         self._placePipeline = ComputePipeline.load(device, "mesh.place.comp", {})
         self.blendPipeline = buildForward(
-            device, deferred, self._shadows, self._skinning, self._morphing, self._vertexColors, self._fogging
+            device,
+            deferred,
+            self._shadows,
+            self._skinning,
+            self._morphing,
+            self._vertexColors,
+            self._fogging,
+            self._doubleSided,
+            self._localLights
         )
     end
     return self
@@ -688,7 +779,28 @@ function MeshBackend:registerTexture(image: assets.Image): integer
     if image.pixels == nil then
         error(("tecs: image '%s' has been released"):format(image.path), 2)
     end
-    local region <const> = self.images:add(image.pixels, image.width, image.height, image.pitch)
+    if image.format ~= self._textureFormat then
+        error(
+            ("tecs: image '%s' uses texture format %d, but the mesh domain uses %d"):format(
+                image.path, image.format, self._textureFormat
+            ),
+            2
+        )
+    end
+    local region: TextureArray.Region
+    if image.format == assets.IMAGE_BC3 then
+        region = self.images:addCompressed(
+            image.pixels,
+            image.width,
+            image.height,
+            image.storageWidth,
+            image.storageHeight,
+            image.levels,
+            image.byteCount
+        )
+    else
+        region = self.images:add(image.pixels, image.width, image.height, image.pitch)
+    end
     image:release()
     self.textureCount = self.textureCount + 1
     self._textureRegions[self.textureCount] = region
@@ -751,6 +863,7 @@ function MeshBackend:registerMaterial(asset: integer, data: MeshMaterialData): i
     values[7] = data.alphaMode
     values[28], values[29], values[30], values[31] = data.baseR, data.baseG, data.baseB, data.baseA
     values[32], values[33], values[34] = data.emissiveR, data.emissiveG, data.emissiveB
+    values[35] = data.doubleSided and 1 or 0
     values[36], values[37] = data.metallic, data.roughness
     values[38], values[39] = data.normalScale, data.occlusionStrength
     self.materials:upload(values, MATERIAL_FLOATS * 4, slot * MATERIAL_FLOATS * 4)
@@ -1017,6 +1130,7 @@ local function writeShadowUniform(self: MeshBackend, packet: MeshFramePacket)
 end
 
 function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boolean)
+    self.images:generateMipmaps()
     if upload ~= false then
         local slot <const> = packet.slot
         self.instances:markSlotRanges(slot, packet.instanceRanges)
@@ -1056,7 +1170,12 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
     end
     self._count = packet.count
     self._viewProjection = packet.viewProjection
-    self._deferred:setMeshView(packet.cameraX, packet.cameraY, packet.cameraZ, packet.inverseViewProjection)
+    self._deferred:setMeshView(
+        packet.cameraX, packet.cameraY, packet.cameraZ, packet.viewProjection, packet.inverseViewProjection
+    )
+    if self._localLights and upload ~= false then
+        self._deferred:setMeshLightData(packet.lights, packet.lightCount)
+    end
     if self._transparent then
         self._cameraUniform[0], self._cameraUniform[1], self._cameraUniform[2], self._cameraUniform[3] = packet.cameraX,
             packet.cameraY,
@@ -1081,6 +1200,7 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
         self._deferred:setMeshFog(fog.r, fog.g, fog.b)
     end
     self._blending = self._transparent and packet.blendCount > 0
+    self._doubleSidedActive = self._doubleSided and packet.doubleSidedCount > 0
     self._shadowActive = self._shadows and packet.count > packet.blendCount
     if self._shadows then
         writeShadowUniform(self, packet)
@@ -1156,8 +1276,10 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
     markWrites[3] = self._visibleCommands.handle
     local markReads <const> = self._markReads
     markReads[1] = self._bounds.handle
-    if self._transparent then
+    if self._transparent or self._doubleSided then
         markReads[2] = self.instances.handle
+    end
+    if self._transparent then
         markWrites[4] = self._blendSlots.handle
         markWrites[5] = self._blendBlocks.handle
         markWrites[6] = self._blendCommands.handle
@@ -1193,6 +1315,48 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
     C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
     compact:dispatch(groups)
     compact:finish()
+
+    if self._doubleSidedActive then
+        local doubleMarkWrites <const> = self._doubleMarkWrites
+        doubleMarkWrites[1] = self._doubleSlots.handle
+        doubleMarkWrites[2] = self._doubleBlocks.handle
+        doubleMarkWrites[3] = self._doubleCommands.handle
+        local doubleMarkReads <const> = self._doubleMarkReads
+        doubleMarkReads[1] = self._bounds.handle
+        doubleMarkReads[2] = self.instances.handle
+        local doubleMark <const> = ComputePass.begin(frame.commandBuffer, doubleMarkWrites, self._doubleMarkPass)
+        self._doubleMarkPass = doubleMark
+        doubleMark:bindPipeline(self._doubleMarkPipeline.handle)
+        doubleMark:bindStorageBuffers(0, doubleMarkReads)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+        doubleMark:dispatch(groups)
+        doubleMark:finish()
+
+        local doubleScanWrites <const> = self._doubleScanWrites
+        doubleScanWrites[1] = self._doubleBlocks.handle
+        local doubleScan <const> = ComputePass.begin(frame.commandBuffer, doubleScanWrites, self._doubleScanPass)
+        self._doubleScanPass = doubleScan
+        doubleScan:bindPipeline(self._scanPipeline.handle)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+        doubleScan:dispatch(1)
+        doubleScan:finish()
+
+        local doubleCompactWrites <const> = self._doubleCompactWrites
+        doubleCompactWrites[1] = self._doubleCommands.handle
+        local doubleCompactReads <const> = self._doubleCompactReads
+        doubleCompactReads[1] = self._doubleSlots.handle
+        doubleCompactReads[2] = self._doubleBlocks.handle
+        doubleCompactReads[3] = self.commands.handle
+        local doubleCompact <const> = ComputePass.begin(
+            frame.commandBuffer, doubleCompactWrites, self._doubleCompactPass
+        )
+        self._doubleCompactPass = doubleCompact
+        doubleCompact:bindPipeline(self._compactPipeline.handle)
+        doubleCompact:bindStorageBuffers(0, doubleCompactReads)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+        doubleCompact:dispatch(groups)
+        doubleCompact:finish()
+    end
 
     if self._blending then
         local blendScanWrites <const> = self._blendScanWrites
@@ -1340,6 +1504,10 @@ function MeshBackend:recordGeometry(context: Deferred.PassContext)
     end
     context.pass:bindIndexBuffer(self.indices.handle, RenderPass.INDEX_UINT32)
     context.pass:drawIndexedIndirect(self._visibleCommands.handle, 0, self._count)
+    if self._doubleSidedActive then
+        context.pass:bindPipeline(self.doubleSidedPipeline.handle)
+        context.pass:drawIndexedIndirect(self._doubleCommands.handle, 0, self._count)
+    end
 end
 
 function MeshBackend:recordForward(context: Deferred.PassContext)
@@ -1392,8 +1560,12 @@ function MeshBackend:rebuildPipeline(deferred: Deferred)
     local geometry <const> = buildGeometry(
         self._device, deferred, self._shadows, self._skinning, self._morphing, self._vertexColors, self._fogging
     )
+    local markDefines: {string: string} = nil
+    if self._doubleSided then
+        markDefines = self._transparent and {MESH_DOUBLE_SIDED = "1"} or {MESH_SINGLE_SIDED = "1"}
+    end
     local mark <const> = ComputePipeline.load(
-        self._device, self._transparent and "mesh.lanes.mark.comp" or "mesh.mark.comp", {}
+        self._device, self._transparent and "mesh.lanes.mark.comp" or "mesh.mark.comp", {defines = markDefines}
     )
     local scan <const> = ComputePipeline.load(self._device, "mesh.scan.comp", {})
     local compact <const> = ComputePipeline.load(self._device, "mesh.compact.comp", {})
@@ -1402,15 +1574,44 @@ function MeshBackend:rebuildPipeline(deferred: Deferred)
     local place: ComputePipeline = nil
     local shadow: GraphicsPipeline = nil
     local shadowMark: ComputePipeline = nil
+    local doubleGeometry: GraphicsPipeline = nil
+    local doubleMark: ComputePipeline = nil
+    if self._doubleSided then
+        doubleGeometry = buildGeometry(
+            self._device,
+            deferred,
+            self._shadows,
+            self._skinning,
+            self._morphing,
+            self._vertexColors,
+            self._fogging,
+            true
+        )
+        local doubleDefines <const>: {string: string} = {MESH_DOUBLE_SIDED = "1"}
+        if self._transparent then
+            doubleDefines.MESH_ALPHA = "1"
+        end
+        doubleMark = ComputePipeline.load(self._device, "mesh.mark.comp", {defines = doubleDefines})
+    end
     if self._shadows then
         shadow = buildShadow(self._device, deferred, self._skinning, self._morphing, self._vertexColors)
-        if self._transparent then
-            shadowMark = ComputePipeline.load(self._device, "mesh.mark.comp", {defines = {MESH_ALPHA = "1"}})
+        if self._transparent or self._doubleSided then
+            shadowMark = ComputePipeline.load(
+                self._device, "mesh.mark.comp", {defines = self._transparent and {MESH_ALPHA = "1"} or nil}
+            )
         end
     end
     if self._transparent then
         blend = buildForward(
-            self._device, deferred, self._shadows, self._skinning, self._morphing, self._vertexColors, self._fogging
+            self._device,
+            deferred,
+            self._shadows,
+            self._skinning,
+            self._morphing,
+            self._vertexColors,
+            self._fogging,
+            self._doubleSided,
+            self._localLights
         )
         rank = ComputePipeline.load(self._device, "mesh.rank.comp", {})
         place = ComputePipeline.load(self._device, "mesh.place.comp", {})
@@ -1420,6 +1621,12 @@ function MeshBackend:rebuildPipeline(deferred: Deferred)
         self._scanPipeline,
         self._compactPipeline
     self.pipeline, self._markPipeline, self._scanPipeline, self._compactPipeline = geometry, mark, scan, compact
+    if self._doubleSided then
+        local oldDoubleGeometry, oldDoubleMark <const> = self.doubleSidedPipeline, self._doubleMarkPipeline
+        self.doubleSidedPipeline, self._doubleMarkPipeline = doubleGeometry, doubleMark
+        oldDoubleGeometry:destroy()
+        oldDoubleMark:destroy()
+    end
     if self._shadows then
         local oldShadow, oldShadowMark <const> = self.shadowPipeline, self._shadowMarkPipeline
         self.shadowPipeline, self._shadowMarkPipeline = shadow, shadowMark
@@ -1478,6 +1685,13 @@ function MeshBackend:destroy()
     self._scanPipeline:destroy()
     self._compactPipeline:destroy()
     self.pipeline:destroy()
+    if self._doubleSided then
+        self._doubleSlots:destroy()
+        self._doubleBlocks:destroy()
+        self._doubleCommands:destroy()
+        self._doubleMarkPipeline:destroy()
+        self.doubleSidedPipeline:destroy()
+    end
     if self._shadows then
         self._shadowCommands:destroy()
         if self._shadowMarkPipeline ~= nil then

@@ -82,6 +82,13 @@ grid over what the camera can see so the lighting pass reads a tile's worth
 rather than the whole buffer. It is here rather than in the graph because
 the graph is a graph of render passes; the same is true of the instance
 cull, which runs ahead of `render` for the same reason.
+
+When the mesh domain enables local lights, a second optional dispatch bins
+world-space point and spot lights for the active 3D view. Its buffers and
+shader bindings are separate from the established 2D light records, and are
+absent when the option is omitted. Opaque and transparent mesh material paths
+apply the same Cook-Torrance direct-light function to directional, point, and
+spot lights.
 ]=]
 
 local loader <const> = require("tecs.ffi.loader")
@@ -94,6 +101,7 @@ local Frame <const> = require("tecs.gpu.Frame")
 local ComputePipeline <const> = require("tecs.gpu.ComputePipeline")
 local ComputePass <const> = require("tecs.gpu.ComputePass")
 local lightlayout <const> = require("tecs.gpu.lightlayout")
+local meshlightlayout <const> = require("tecs.gpu.meshlightlayout")
 
 local C <const> = sdl.C
 
@@ -111,6 +119,7 @@ local LIGHT_FLOATS <const> = lightlayout.FLOATS
 local LIGHT_STRIDE <const> = lightlayout.BYTES
 local TILE_COUNT <const> = lightlayout.TILE_COUNT
 local TILE_SLOTS <const> = lightlayout.TILE_SLOTS
+local MESH_LIGHT_STRIDE <const> = meshlightlayout.BYTES
 
 --- Threads per binning workgroup, matching the shader's local size.
 local BIN_GROUP <const> = 64
@@ -304,6 +313,9 @@ local record DeferredOptions
     --- Engine-owned. Enables depth reconstruction and Cook-Torrance shading
     --- for opaque mesh surfaces.
     meshPBR: boolean
+    --- Engine-owned. Enables optional 3D point and spot light resources at
+    --- this fixed capacity. Nil omits every related buffer and shader variant.
+    meshLightCapacity: integer
     --- Engine-owned. Enables repeated view composition through shared
     --- intermediate targets.
     multiCamera: boolean
@@ -343,6 +355,8 @@ local record Deferred
     --- Lights the lighting pass reads. Set by `setLights` and kept until it is
     --- called again, so a frame that says nothing lights as the last one did.
     lightCount: integer
+    --- Optional 3D point and spot lights written for the current frame.
+    meshLightCount: integer
     --- Ambient color in use, as three components. Written by `create` and
     --- read at the top of every lighting pass, so assigning to it takes effect
     --- on the next frame without rebuilding anything.
@@ -378,6 +392,16 @@ local record Deferred
     --- rather than the same one, because both are rewritten at every use and
     --- sharing would mean the order of two passes decided what either bound.
     _forwardBuffers: {loader.CValue}
+    _meshLights: boolean
+    _meshLightCapacity: integer
+    _meshLightBuffer: Buffer
+    _meshTileCounts: Buffer
+    _meshTileLights: Buffer
+    _meshBinWrites: {loader.CValue}
+    _meshBinReads: {loader.CValue}
+    _meshBinPass: ComputePass
+    _meshBinPipeline: ComputePipeline
+    _meshBinUniform: loader.CArray
     --- The binning pass, begun again each frame rather than allocated per
     --- frame; see `ComputePass.begin` for what that asks of a caller.
     _binPass: ComputePass
@@ -436,6 +460,7 @@ local record Deferred
     _meshCameraY: number
     _meshCameraZ: number
     _inverseViewProjection: loader.CArray
+    _meshViewProjection: loader.CArray
     _sceneBytes: integer
     _meshFogR: number
     _meshFogG: number
@@ -580,8 +605,8 @@ local function sceneUniform(self: Deferred, width: number, height: number): load
     -- Out to the vec4 the block is laid out in. The light count is not here:
     -- what bounds a shading loop is a tile's own count, and a second number
     -- saying something close to it is a second number to keep in step.
-    scene[6] = 0.0
-    scene[7] = 0.0
+    scene[6] = self._viewportX
+    scene[7] = self._viewportY
     -- As `render` resolved them for this frame, so the grid a fragment looks a
     -- tile up in is the grid the dispatch filled.
     scene[8] = self._frameViewX
@@ -663,6 +688,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     local self = setmetatable({} as Deferred, DeferredMT)
     self._device = device
     self.lightCount = 0
+    self.meshLightCount = 0
     self.ambient = options.ambient or {0.08, 0.08, 0.10}
     self._destroyed = false
 
@@ -674,6 +700,11 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     local meshShadows <const> = options.meshShadowScale ~= nil
     local meshFog <const> = options.meshFog == true
     local meshPBR <const> = options.meshPBR == true
+    local meshLights <const> = options.meshLightCapacity ~= nil
+    local meshLightCapacity <const> = options.meshLightCapacity or 0
+    if meshLights and (meshLightCapacity < 1 or meshLightCapacity ~= math.floor(meshLightCapacity)) then
+        error("tecs: mesh light capacity must be a positive integer", 2)
+    end
     local multiCamera <const> = options.multiCamera == true
     local bloom <const> = options.bloom ~= nil
     local bloomOptions <const> = options.bloom or {}
@@ -694,8 +725,11 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self._meshShadows = meshShadows
     self._meshFog = meshFog
     self._meshPBR = meshPBR
+    self._meshLights = meshLights
+    self._meshLightCapacity = meshLightCapacity
     self._meshCameraX, self._meshCameraY, self._meshCameraZ = 0.0, 0.0, 0.0
     self._inverseViewProjection = loader.newArray("float[16]")
+    self._meshViewProjection = loader.newArray("float[16]")
     self._bloom = bloom
     self._multiCamera = multiCamera
     self._firstView, self._lastView = true, true
@@ -785,6 +819,37 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self._binReads = {self._lightBuffer.handle}
     self._lightingBuffers = {self._lightBuffer.handle, self._tileCounts.handle, self._tileLights.handle}
     self._forwardBuffers = {self._lightBuffer.handle, self._tileCounts.handle, self._tileLights.handle}
+    if meshLights then
+        self._meshLightBuffer = Buffer.create(
+            device,
+            {
+                usage = {"storage", "computeRead"},
+                size = meshLightCapacity * MESH_LIGHT_STRIDE,
+                name = "tecs.meshLights",
+            }
+        )
+        self._meshTileCounts = Buffer.create(
+            device, {usage = {"storage", "computeWrite"}, size = TILE_COUNT * 4, name = "tecs.meshLightTileCounts"}
+        )
+        self._meshTileLights = Buffer.create(
+            device,
+            {
+                usage = {"storage", "computeWrite"},
+                size = TILE_COUNT * TILE_SLOTS * 4,
+                name = "tecs.meshLightTiles",
+            }
+        )
+        self._meshBinPipeline = ComputePipeline.load(device, "mesh.lightbin.comp", {})
+        self._meshBinUniform = loader.newArray("float[20]")
+        self._meshBinWrites = {self._meshTileCounts.handle, self._meshTileLights.handle}
+        self._meshBinReads = {self._meshLightBuffer.handle}
+        self._lightingBuffers[4] = self._meshLightBuffer.handle
+        self._lightingBuffers[5] = self._meshTileCounts.handle
+        self._lightingBuffers[6] = self._meshTileLights.handle
+        self._forwardBuffers[4] = self._meshLightBuffer.handle
+        self._forwardBuffers[5] = self._meshTileCounts.handle
+        self._forwardBuffers[6] = self._meshTileLights.handle
+    end
 
     local graph = PassGraph.create(device, swapchainFormat)
     graph:target({
@@ -911,7 +976,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     end
 
     local lightingDefines: {string: string} = nil
-    if shadows or meshShadows or meshFog or meshPBR then
+    if shadows or meshShadows or meshFog or meshPBR or meshLights then
         lightingDefines = {}
         if shadows then
             lightingDefines.SHADOWS = "1"
@@ -924,6 +989,9 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         end
         if meshPBR then
             lightingDefines.MESH_PBR = "1"
+        end
+        if meshLights then
+            lightingDefines.MESH_LIGHTS = "1"
         end
     end
     self._lightingPipeline = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting", lightingDefines)
@@ -1079,6 +1147,11 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
             buffers[1] = self._lightBuffer.handle
             buffers[2] = self._tileCounts.handle
             buffers[3] = self._tileLights.handle
+            if self._meshLights then
+                buffers[4] = self._meshLightBuffer.handle
+                buffers[5] = self._meshTileCounts.handle
+                buffers[6] = self._meshTileLights.handle
+            end
 
             context.pass:bindPipeline(self._lightingPipeline.handle)
             context.pass:bindFragmentStorageBuffers(0, buffers)
@@ -1258,6 +1331,25 @@ function Deferred:setLightData(data: loader.CArray, count: integer)
     self._lightBuffer:markDirty(0, bytes)
 end
 
+--- Replaces the optional mesh-local point and spot light set.
+--- @param data Lights already packed in `meshlightlayout` order.
+--- @param count Lights in `data`, clamped to the configured capacity.
+function Deferred:setMeshLightData(data: loader.CArray, count: integer)
+    if not self._meshLights then
+        error("tecs: mesh local lights are not enabled", 2)
+    end
+    if count > self._meshLightCapacity then
+        count = self._meshLightCapacity
+    end
+    self.meshLightCount = count
+    if count == 0 then
+        return
+    end
+    local bytes <const> = count * MESH_LIGHT_STRIDE
+    loader.copyTo(self._meshLightBuffer:map(), data as loader.CValue, bytes)
+    self._meshLightBuffer:markDirty(0, bytes)
+end
+
 --- Replaces the light set from records rather than from packed floats.
 ---
 --- The record form is what a caller assembling a handful of lights by hand
@@ -1361,6 +1453,9 @@ function Deferred:render(
     lastView?: boolean
 )
     self._lightBuffer:flush(frame.commandBuffer)
+    if self._meshLights then
+        self._meshLightBuffer:flush(frame.commandBuffer)
+    end
     local width <const> = viewportWidth or frame.width
     local height <const> = viewportHeight or frame.height
     self._viewportX, self._viewportY = viewportX or 0, viewportY or 0
@@ -1393,6 +1488,29 @@ function Deferred:render(
     pass:dispatch(math.ceil(TILE_COUNT / BIN_GROUP))
     pass:finish()
 
+    if self._meshLights then
+        local meshBin <const> = self._meshBinUniform
+        for lane = 0, 15 do
+            meshBin[lane] = self._meshViewProjection[lane]
+        end
+        meshBin[16] = self.meshLightCount
+        meshBin[17] = width
+        meshBin[18] = height
+        meshBin[19] = 0.0
+        local meshWrites <const> = self._meshBinWrites
+        meshWrites[1] = self._meshTileCounts.handle
+        meshWrites[2] = self._meshTileLights.handle
+        local meshReads <const> = self._meshBinReads
+        meshReads[1] = self._meshLightBuffer.handle
+        local meshPass <const> = ComputePass.begin(frame.commandBuffer, meshWrites, self._meshBinPass)
+        self._meshBinPass = meshPass
+        meshPass:bindPipeline(self._meshBinPipeline.handle)
+        meshPass:bindStorageBuffers(0, meshReads)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, meshBin, 80)
+        meshPass:dispatch(math.ceil(TILE_COUNT / BIN_GROUP))
+        meshPass:finish()
+    end
+
     self.graph:execute(frame)
 end
 
@@ -1417,9 +1535,10 @@ function Deferred:rebuildPipelines()
     local bloomExtract: GraphicsPipeline = nil
     local bloomBlur: GraphicsPipeline = nil
     local bin: ComputePipeline = nil
+    local meshBin: ComputePipeline = nil
     local built, reason = pcall(function(): string
         local defines: {string: string} = nil
-        if self._shadows or self._meshShadows or self._meshFog or self._meshPBR then
+        if self._shadows or self._meshShadows or self._meshFog or self._meshPBR or self._meshLights then
             defines = {}
             if self._shadows then
                 defines.SHADOWS = "1"
@@ -1432,6 +1551,9 @@ function Deferred:rebuildPipelines()
             end
             if self._meshPBR then
                 defines.MESH_PBR = "1"
+            end
+            if self._meshLights then
+                defines.MESH_LIGHTS = "1"
             end
         end
         lighting = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting", defines)
@@ -1457,6 +1579,9 @@ function Deferred:rebuildPipelines()
             blur = buildPipeline(device, "occluder.blur.frag", RGBA8, "occluderBlur", nil)
         end
         bin = ComputePipeline.load(device, "deferred.lightbin.comp", {})
+        if self._meshLights then
+            meshBin = ComputePipeline.load(device, "mesh.lightbin.comp", {})
+        end
     end)
     if not built then
         if lighting ~= nil then
@@ -1483,6 +1608,9 @@ function Deferred:rebuildPipelines()
         if bin ~= nil then
             bin:destroy()
         end
+        if meshBin ~= nil then
+            meshBin:destroy()
+        end
         error(reason, 0)
     end
 
@@ -1494,6 +1622,7 @@ function Deferred:rebuildPipelines()
     local oldBloomExtract <const> = self._bloomExtractPipeline
     local oldBloomBlur <const> = self._bloomBlurPipeline
     local oldBin <const> = self._binPipeline
+    local oldMeshBin <const> = self._meshBinPipeline
     self._lightingPipeline = lighting
     self._compositePipeline = composite
     self._presentPipeline = present
@@ -1502,6 +1631,7 @@ function Deferred:rebuildPipelines()
     self._bloomExtractPipeline = bloomExtract
     self._bloomBlurPipeline = bloomBlur
     self._binPipeline = bin
+    self._meshBinPipeline = meshBin
     oldLighting:destroy()
     oldComposite:destroy()
     oldPresent:destroy()
@@ -1516,6 +1646,9 @@ function Deferred:rebuildPipelines()
         oldBloomBlur:destroy()
     end
     oldBin:destroy()
+    if oldMeshBin ~= nil then
+        oldMeshBin:destroy()
+    end
 end
 
 --- Returns the four formats a geometry pipeline must be created against.
@@ -1578,6 +1711,11 @@ function Deferred:bindLighting(context: PassGraph.PassContext, firstSlot?: integ
     buffers[1] = self._lightBuffer.handle
     buffers[2] = self._tileCounts.handle
     buffers[3] = self._tileLights.handle
+    if self._meshLights then
+        buffers[4] = self._meshLightBuffer.handle
+        buffers[5] = self._meshTileCounts.handle
+        buffers[6] = self._meshTileLights.handle
+    end
     context.pass:bindFragmentStorageBuffers(firstSlot or 0, buffers)
     C.SDL_PushGPUFragmentUniformData(
         context.commandBuffer,
@@ -1670,10 +1808,14 @@ end
 --- @param x World-space camera x.
 --- @param y World-space camera y.
 --- @param z World-space camera z.
+--- @param viewProjection Sixteen column-major world-to-clip floats.
 --- @param inverseViewProjection Sixteen column-major clip-to-world floats.
-function Deferred:setMeshView(x: number, y: number, z: number, inverseViewProjection: loader.CArray)
+function Deferred:setMeshView(
+    x: number, y: number, z: number, viewProjection: loader.CArray, inverseViewProjection: loader.CArray
+)
     self._meshCameraX, self._meshCameraY, self._meshCameraZ = x, y, z
     for lane = 0, 15 do
+        self._meshViewProjection[lane] = viewProjection[lane]
         self._inverseViewProjection[lane] = inverseViewProjection[lane]
     end
 end
@@ -1773,6 +1915,12 @@ function Deferred:destroy()
         self._blurPipeline:destroy()
     end
     self._binPipeline:destroy()
+    if self._meshLights then
+        self._meshBinPipeline:destroy()
+        self._meshLightBuffer:destroy()
+        self._meshTileCounts:destroy()
+        self._meshTileLights:destroy()
+    end
     self._lightBuffer:destroy()
     self._tileCounts:destroy()
     self._tileLights:destroy()
