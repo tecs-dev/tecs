@@ -16,6 +16,7 @@ local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local pool <const> = require("tecs.utils.pool")
 local RelationshipStore <const> = require("tecs.internal.RelationshipStore")
 local BitsetImpl <const> = require("tecs.utils.Bitset")
+local type tasks = require("tecs.internal.taskruntime")
 
 local type Component = types.components.Component
 local type Query = types.Query
@@ -353,6 +354,16 @@ local record internal
         messages: types.events.MessageBus
         _ffiSliceId: integer
         _eventPool: pool.TablePool
+        -- True while a suspending phase holds one logical world update across
+        -- several host frames. Internal application timing reads this only.
+        _updateStalled: boolean
+        -- One reusable coroutine owns the complete logical update. These are
+        -- internal Task-runtime values kept opaque here to avoid coupling the
+        -- ECS type graph to its scheduler implementation.
+        _updateScheduler: tasks.Scheduler
+        _updateTask: tasks.Task<any>
+        _updateBody: function(tasks.Scope)
+        _updateDt: number
 
         -- ----- Entity store -----
         allocator: IdAllocator
@@ -502,7 +513,7 @@ local record internal
         clearObservers: function(self: WorldImpl, address: integer)
         enqueueCommit: function(self: WorldImpl)
         _commit: function(self: WorldImpl)
-        update: function(self: WorldImpl, dt: number)
+        update: function(self: WorldImpl, dt: number): boolean
         enablePhase: function(self: WorldImpl, phase: Phase)
         disablePhase: function(self: WorldImpl, phase: Phase)
         registerPhase: function(self: WorldImpl, phase: Phase)

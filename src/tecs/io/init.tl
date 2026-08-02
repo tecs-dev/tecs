@@ -59,29 +59,21 @@ buffer or byte-view reader retains an immutable snapshot that outlives later
 closure; opening a buffer writer borrows the mutable buffer, clears its
 logical length, and requires it to remain open through the writer's close.
 
-Resolution and client connection return asynchronous
-[`Future`](tealdoc:tecs.Future) values. An
-[`Application`](tealdoc:tecs.Application) polls [`runtime`](/modules/runtime/) once per
-iteration, so a game waits on status without driving I/O itself:
+Resolution and client connection return their values directly. Inside a
+system, either call transparently suspends only while its operation is pending:
 
 ```teal
 local address <const> = tecs.io.resolve("game.example")
-
-local function update()
-    if address.status == "ready" then
-        print(address.value.text)
-    end
-end
+local socket <const> = tecs.io.connect(address, 443)
+print(address.text)
 ```
 
 An `Application` calls `tecs.runtime.poll` automatically once per host
-iteration. Game systems and update functions must not drive either pump. A
-headless program normally calls `tecs.runtime.poll` once per manual loop;
-`tecs.io.poll` remains the narrower operation for code deliberately driving
-only generic network futures. A future's bounded `wait` is available when
-blocking is the honest operation. Stream transfers already block until their
-bytes have moved. Listening, accepting, reading, writing, and receiving are
-nonblocking.
+iteration. Game systems and update functions must not drive either pump. The
+same calls block when used outside a world update, which is the direct model a
+startup path or headless tool needs. Stream transfers already block until
+their bytes have moved. Listening, accepting, reading, writing, and receiving
+remain nonblocking.
 
 Every address, TCP socket, listener, UDP socket, and UDP packet owns a
 resource. Close it explicitly. A GC finalizer releases an abandoned network
@@ -103,7 +95,8 @@ Naming `tecs.io` loads none of its children. Reading `files`, `http`, `mcp`,
 local ffi <const> = require("ffi")
 local binding <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
-local Future <const> = require("tecs.Future")
+local Future <const> = require("tecs.internal.completion")
+local task <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
 local buffer <const> = require("tecs.io.buffer")
 local filters <const> = require("tecs.io.filters")
@@ -621,19 +614,19 @@ local record binaryIO
     --- @return Returns true after shutdown or when networking never started.
     --- @return Returns the live-resource reason when shutdown refuses.
     shutdown: function(): boolean, string
-    --- Begins resolving a hostname.
+    --- Resolves a hostname.
     --- @param host The caller supplies a DNS name or numeric address of at most
     ---     253 bytes. Empty strings and embedded NUL bytes raise.
-    --- @return Returns a future over a caller-owned address. `tecs.io.poll` or
-    ---     `Future:wait` settles it.
-    resolve: function(host: string): FutureType<Address>
-    --- Begins connecting to a resolved address.
+    --- @return Returns a caller-owned address. The call suspends its system
+    ---     while DNS is pending, or blocks outside a world update.
+    resolve: function(host: string): Address
+    --- Connects to a resolved address.
     --- @param address The caller supplies an address from this module. A closed
-    ---     address returns an already-failed future.
+    ---     address raises.
     --- @param port The caller supplies a remote port from 1 to 65535.
-    --- @return Returns a future over a caller-owned connection. `tecs.io.poll` or
-    ---     `Future:wait` settles it.
-    connect: function(address: Address, port: integer): FutureType<TCPSocket>
+    --- @return Returns a caller-owned connection. The call suspends its system
+    ---     while connecting, or blocks outside a world update.
+    connect: function(address: Address, port: integer): TCPSocket
     --- Binds a TCP listener. A nil address listens on all local interfaces.
     --- @param port The caller supplies a local port from 0 to 65535. Zero lets
     ---     the platform choose one but leaves `TCPListener.port` at zero.
@@ -657,10 +650,10 @@ local record binaryIO
     --- plugin, or update function must not call it. Only a headless program
     --- without an application owns a manual call, normally once per loop while
     --- `pending()` is greater than zero.
-    --- @return Returns how many resolution or connection futures settled
+    --- @return Returns how many resolution or connection operations completed
     ---     during this call, including failures.
     poll: function(): integer
-    --- Returns the number of pending resolution or connection futures.
+    --- Returns the number of pending resolution or connection operations.
     ---
     --- @return Returns zero after every operation settles or cancels.
     pending: function(): integer
@@ -1210,7 +1203,7 @@ local function operation(kind: OperationKind, host: string, handle: loader.CPtr)
     return source
 end
 
-function binaryIO.resolve(host: string): FutureType<binaryIO.Address>
+local function resolveFuture(host: string): FutureType<binaryIO.Address>
     if type(host) ~= "string" or host == "" then
         error("tecs: resolve needs a hostname", 2)
     end
@@ -1231,7 +1224,11 @@ function binaryIO.resolve(host: string): FutureType<binaryIO.Address>
     return operation("resolve", host, handle).future as FutureType<binaryIO.Address>
 end
 
-function binaryIO.connect(address: binaryIO.Address, port: integer): FutureType<binaryIO.TCPSocket>
+function binaryIO.resolve(host: string): binaryIO.Address
+    return task.awaitCompletion(resolveFuture(host) as Future<binaryIO.Address>, "address resolution")
+end
+
+local function connectFuture(address: binaryIO.Address, port: integer): FutureType<binaryIO.TCPSocket>
     validPort(port, false, 2)
     local valid, addressReason <const> = validAddress(address, false, 2)
     if not valid then
@@ -1246,6 +1243,10 @@ function binaryIO.connect(address: binaryIO.Address, port: integer): FutureType<
         return Future.failed(loader.toString(C.tecsRustError())) as FutureType<binaryIO.TCPSocket>
     end
     return operation("connect", address.host, handle).future as FutureType<binaryIO.TCPSocket>
+end
+
+function binaryIO.connect(address: binaryIO.Address, port: integer): binaryIO.TCPSocket
+    return task.awaitCompletion(connectFuture(address, port) as Future<binaryIO.TCPSocket>, "TCP connection")
 end
 
 function binaryIO.listen(port: integer, address?: binaryIO.Address): binaryIO.TCPListener, string

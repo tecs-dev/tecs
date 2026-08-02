@@ -410,20 +410,31 @@ pub fn test_package(root: &Path, preset: Preset) -> Result<()> {
 pub fn benchmark(root: &Path, preset: Preset, name: &str, arguments: &[OsString]) -> Result<()> {
     let source = match name {
         "shapes" | "physics" | "sprites" | "text" | "particles" | "latency" | "http" | "io"
-        | "tcp" | "data" | "meshcontract" | "meshshadows" | "meshskinning" | "meshmorphing" | "modelanimation" | "bitset" | "snapshot" => name,
+        | "tcp" | "data" | "meshcontract" | "meshshadows" | "meshskinning" | "meshmorphing"
+        | "modelanimation" | "bitset" | "snapshot" | "task" | "tasksystems" | "phaserunner"
+        | "updaterunner" => name,
         "alloc" | "allocation" => "allocation",
         _ => anyhow::bail!(
             "unknown benchmark {name:?}; expected shapes, physics, sprites, text, \
-             particles, latency, http, io, tcp, data, meshcontract, meshshadows, meshskinning, meshmorphing, modelanimation, bitset, snapshot, or allocation"
+             particles, latency, http, io, tcp, data, meshcontract, meshshadows, meshskinning, meshmorphing, modelanimation, bitset, snapshot, task, tasksystems, phaserunner, updaterunner, or allocation"
         ),
     };
     if matches!(
         source,
-        "io" | "tcp" | "data" | "meshcontract" | "modelanimation" | "bitset" | "snapshot"
+        "io" | "tcp"
+            | "data"
+            | "meshcontract"
+            | "modelanimation"
+            | "bitset"
+            | "snapshot"
+            | "task"
+            | "tasksystems"
+            | "phaserunner"
+            | "updaterunner"
     ) && preset.sanitize
     {
         anyhow::bail!(
-            "the io, tcp, data, meshcontract, modelanimation, bitset, and snapshot benchmarks run under system LuaJIT, not the instrumented native host; \
+            "the io, tcp, data, meshcontract, modelanimation, bitset, snapshot, task, tasksystems, phaserunner, and updaterunner benchmarks run under system LuaJIT, not the instrumented native host; \
              sanitizer preset {preset} would not sanitize it"
         );
     }
@@ -437,7 +448,16 @@ pub fn benchmark(root: &Path, preset: Preset, name: &str, arguments: &[OsString]
     )?;
     let mut command = if matches!(
         source,
-        "io" | "tcp" | "data" | "meshcontract" | "modelanimation" | "bitset" | "snapshot"
+        "io" | "tcp"
+            | "data"
+            | "meshcontract"
+            | "modelanimation"
+            | "bitset"
+            | "snapshot"
+            | "task"
+            | "tasksystems"
+            | "phaserunner"
+            | "updaterunner"
     ) {
         let mut command = Command::new("luajit");
         command.arg(entry);

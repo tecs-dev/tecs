@@ -19,6 +19,7 @@ local sdl = require("tecs.ffi.sdl3")
 local http = require("tecs.io.http")
 local httpClients = require("tecs.io.http.clients")
 local uri = require("tecs.io.URI")
+local task = require("tecs.internal.taskruntime")
 local tecsIO = tecs.io
 
 local min = math.min
@@ -133,8 +134,108 @@ local function listenSomewhere()
 end
 
 describe("http.newClient", function()
-    local server, port, client
+    local server, port, client, rawClient
     local silent, silentPort
+
+    -- Most transport cases need to drive both ends of the loopback connection
+    -- from this Lua thread. Production code calls `Client:send` directly from
+    -- a system; this test adapter observes the client's private callback seam
+    -- so the fixture can keep pumping its server while a request is pending.
+    local function observedClient(raw)
+        local methods = {}
+        local Pending = {}
+        local PendingMT = {
+            __index = function(self, key)
+                if key == "value" then
+                    if self.status == "ready" then
+                        return self._value
+                    end
+                    error(self.error or "the HTTP request is still pending")
+                end
+                return Pending[key]
+            end,
+        }
+
+        local function settle(pending, status, value, reason)
+            if pending.status ~= "pending" then
+                return
+            end
+            pending.status = status
+            pending._value = value
+            pending.error = reason
+            local listeners = pending._listeners
+            pending._listeners = nil
+            if listeners ~= nil then
+                for index = 1, #listeners do
+                    pcall(listeners[index], pending)
+                end
+            end
+        end
+
+        function Pending:onSettle(listener)
+            if self.status == "pending" then
+                self._listeners = self._listeners or {}
+                self._listeners[#self._listeners + 1] = listener
+            else
+                pcall(listener, self)
+            end
+            return self
+        end
+
+        function Pending:map(transform)
+            local derived = setmetatable({ status = "pending" }, PendingMT)
+            self:onSettle(function(done)
+                if done.status == "ready" then
+                    local ok, value = pcall(transform, done._value)
+                    settle(derived, ok and "ready" or "failed", ok and value or nil, ok and nil or tostring(value))
+                else
+                    settle(derived, done.status, nil, done.error)
+                end
+            end)
+            return derived
+        end
+
+        function Pending:wait(timeoutMs)
+            local remaining = timeoutMs or 30000
+            while self.status == "pending" and remaining > 0 do
+                local slice = math.min(raw.sliceMs, remaining)
+                raw:advance(slice)
+                remaining = remaining - slice
+            end
+            return self
+        end
+
+        function Pending:cancel()
+            if self.status == "pending" then
+                self._cancel()
+                settle(self, "canceled", nil, "canceled")
+            end
+        end
+
+        function methods:send(request)
+            local pending = setmetatable({ status = "pending" }, PendingMT)
+            pending._cancel = raw:_subscribe(request, function(status, response, reason)
+                settle(pending, status, response, reason)
+            end)
+            return pending
+        end
+
+        function methods:cancel(pending)
+            pending:cancel()
+        end
+
+        return setmetatable(methods, {
+            __index = function(_, key)
+                local value = raw[key]
+                if type(value) == "function" then
+                    return function(_, ...)
+                        return value(raw, ...)
+                    end
+                end
+                return value
+            end,
+        })
+    end
 
     it("uses the shared io stream surface", function()
         assert.is_function(tecsIO.newStringStream)
@@ -164,7 +265,8 @@ describe("http.newClient", function()
     -- into the next. Building the listener per test keeps every request paired
     -- with its own client and makes the suite deterministic.
     before_each(function()
-        client = http.newClient({ userAgent = "tecs-spec/1.0" })
+        rawClient = http.newClient({ userAgent = "tecs-spec/1.0" })
+        client = observedClient(rawClient)
         server, port = listenSomewhere()
         -- A second listener that is never polled. A connection to it completes,
         -- because the kernel accepts into the backlog, and then nothing ever
@@ -1013,6 +1115,15 @@ describe("http.newClient", function()
         end)
     end)
 
+    it("settles a Future canceled directly through its client", function()
+        local pending = client:send({ url = url("/client-canceled") })
+        assert.are.equal("pending", pending.status)
+
+        client:cancel(pending)
+        assert.are.equal("canceled", pending.status)
+        assert.are.equal(0, client:pending())
+    end)
+
     it("settles every transfer it still holds when it is closed", function()
         local one = client:send({ url = url("/closing-one") })
         local two = client:send({ url = url("/closing-two") })
@@ -1047,7 +1158,6 @@ describe("http.newClient", function()
         assert.is_truthy(tostring(sent[2]):find("client is closed", 1, true))
         assert.are.equal(0, client:pending())
         assert.is_nil(next(client._byId))
-        assert.is_nil(next(client._byFuture))
     end)
 
     it("refuses to be pumped from inside its own pump", function()
@@ -1099,7 +1209,8 @@ describe("http.newClient", function()
 
     it("lets a request override maxBytes with unbounded zero", function()
         client:close()
-        client = http.newClient({ maxBytes = 8 })
+        rawClient = http.newClient({ maxBytes = 8 })
+        client = observedClient(rawClient)
         local pending = client:send({ url = url("/unbounded"), maxBytes = 0 })
         drive(pending, function()
             server:respond(200, "OK", BODY, "text/plain")
@@ -1158,6 +1269,115 @@ describe("http.newClient", function()
         end)
     end)
 
+    it("streams upload and download backpressure through one persistent Task", function()
+        local sink, received = partialSink(3)
+        local scheduler = task.newScheduler()
+        local rootTask = scheduler:spawnImmediate(function()
+            return rawClient:send({
+                url = url("/task-stream"),
+                method = "POST",
+                body = chunkSource(BODY, 5),
+                into = sink,
+            })
+        end)
+        assert.are.equal("pending", rootTask.status)
+
+        local seen
+        for turn = 1, 2000 do
+            client:pump()
+            server:poll(turn * 0.05, function(request)
+                seen = request
+                server:respond(200, "OK", BODY, "text/plain")
+            end)
+            scheduler:step()
+            if rootTask.status ~= "pending" then
+                break
+            end
+            sdl.C.SDL_Delay(1)
+        end
+
+        assert.are.equal("ready", rootTask.status, rootTask.error)
+        assert.are.equal(BODY, seen.body)
+        assert.are.equal(200, rootTask.value.status)
+        assert.are.equal(BODY, received:getString())
+        assert.are.equal(0, client:pending())
+        received:close()
+    end)
+
+    it("cancels an HTTP transfer when its blocked Task is canceled", function()
+        local scheduler = task.newScheduler()
+        local rootTask = scheduler:spawnImmediate(function()
+            return rawClient:send({ url = silentUrl("/task-cancel") })
+        end)
+
+        assert.are.equal("pending", rootTask.status)
+        assert.are.equal(1, client:pending())
+        rootTask:cancel("entity despawned")
+        assert.are.equal(0, client:pending())
+        assert.are.equal(1, scheduler:step())
+        assert.are.equal("canceled", rootTask.status)
+        assert.are.equal("entity despawned", rootTask.error)
+    end)
+
+    it("finishes a synchronous HTTP rejection without scheduler enrollment", function()
+        local scheduler = task.newScheduler()
+        local rootTask = scheduler:spawnImmediate(function()
+            return rawClient:send({ url = uri.new("file:///not-http") })
+        end)
+
+        assert.are.equal("failed", rootTask.status)
+        assert.is_truthy(rootTask.error:find("not an http or https url", 1, true))
+        assert.are.equal(0, scheduler:step())
+        assert.are.equal(0, client:pending())
+    end)
+
+    it("does not allocate a public completion object for a direct send", function()
+        local scheduler = task.newScheduler()
+        local rootTask = scheduler:spawnImmediate(function()
+            return rawClient:send({ url = uri.new("file:///task-direct") })
+        end)
+        assert.are.equal("failed", rootTask.status)
+        assert.are.equal(0, rawClient:pending())
+    end)
+
+    it("transparently suspends a run system for HTTP", function()
+        local world = tecs.ecs.newWorld()
+        local Loaded = tecs.ecs.newComponent({
+            name = "HttpTaskSystemLoaded",
+            container = {},
+            fields = { "status" },
+            defaults = { 0 },
+        })
+        local entity = world:spawn(Loaded(0))
+        world:addSystem({
+            name = "LoadManifest",
+            phase = tecs.ecs.phases.Update,
+            run = function(_, taskWorld)
+                local response = rawClient:send({ url = url("/task-system") })
+                taskWorld:set(entity, Loaded, Loaded(response.status))
+            end,
+        })
+
+        world:update(1 / 60)
+        assert.is_true(world._updateStalled)
+        assert.are.equal(0, world:get(entity, Loaded).status)
+        for turn = 1, 2000 do
+            client:pump()
+            server:poll(turn * 0.05, function()
+                server:respond(204, "No Content", "", "text/plain")
+            end)
+            world:update(1 / 60)
+            if not world._updateStalled then
+                break
+            end
+            sdl.C.SDL_Delay(1)
+        end
+
+        assert.are.equal(204, world:get(entity, Loaded).status)
+        assert.is_false(world._updateStalled)
+        assert.are.equal(0, world._scopeDepth)
+    end)
+
     -- The loop's half. A game builds a client and sends a request; nothing in
     -- a frame belongs to it and nothing in a frame is written by hand. What
     -- `tecs.Application` calls each iteration is `clients.pump`, so that is
@@ -1188,7 +1408,7 @@ describe("http.newClient", function()
             -- last reference to one deliberately does not, or a request nobody
             -- kept would stop moving whenever a collection happened to run.
             local before = http.getOpenClientCount()
-            local extra = http.newClient({ userAgent = "tecs-spec/1.0" })
+            local extra = observedClient(http.newClient({ userAgent = "tecs-spec/1.0" }))
             assert.are.equal(before + 1, http.getOpenClientCount())
 
             local pending = extra:send({ url = silentUrl("/never-answered") })

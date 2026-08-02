@@ -2,13 +2,12 @@
 An asynchronous HTTP client driven from the SDL loop.
 
 Reqwest and Tokio own the sockets and background threads. `send` copies a
-request into Rust and returns a `Future` immediately. `pump` drains response
-chunks and completions back on the Lua thread, which means a foreign thread
-never enters LuaJIT and future listeners always run from the SDL loop.
+request into Rust and suspends its calling system until `pump` drains the
+response back on the Lua thread. A foreign thread never enters LuaJIT.
 
 A response status is still an answer rather than a transfer failure: 404
-settles a ready future whose `Response:ok()` is false. DNS, TLS, connection,
-timeout, and body-limit errors settle a failed future.
+returns a response whose `Response:ok()` is false. DNS, TLS, connection,
+timeout, and body-limit errors raise at the suspended call.
 
 Request readers feed a bounded Rust upload channel from the SDL thread.
 Response chunks append to one owned buffer or pass through one reusable
@@ -19,7 +18,7 @@ enter LuaJIT, and neither file direction materializes the whole body.
 local ffi <const> = require("ffi")
 local loader <const> = require("tecs.ffi.loader")
 local log <const> = require("tecs.log")
-local Future <const> = require("tecs.Future")
+local task <const> = require("tecs.internal.taskruntime")
 local buffer <const> = require("tecs.io.buffer")
 local pump <const> = require("tecs.io.pump")
 local stream <const> = require("tecs.io.stream")
@@ -150,7 +149,7 @@ local record client
 
     record Transfer
         id: integer
-        future: Future<Response>
+        listener: function(string, Response, string)
         response: Response
         sink: iotypes.WritableStream
         writer: iotypes.Writer
@@ -163,17 +162,14 @@ local record client
         url: string
     end
 
-    --- A reqwest connection pool and `Future.Source`.
+    --- A reqwest connection pool.
     record Client
-        --- Maximum duration of one blocking future-wait slice.
+        --- Maximum duration of one blocking pump slice.
         sliceMs: number
-        --- Default budget for a future wait without an explicit timeout.
-        defaultWaitMs: number
 
         _handle: loader.CPtr
         _options: Options
         _insecure: {string: boolean}
-        _byFuture: {Future<Response>: Transfer}
         _byId: {integer: Transfer}
         _uploadOrder: {Transfer}
         _uploadCursor: integer
@@ -181,19 +177,20 @@ local record client
         _pumping: boolean
         _eventSize: loader.CArray
 
-        --- Starts a transfer and returns its future immediately.
-        send: function(self: Client, request: Request): Future<Response>
+        -- Internal completion view used by the coroutine adapter.
+        _subscribe: function(self: Client, request: Request, listener: function(string, Response, string)): function()
+
+        --- Sends a request and returns its completed response.
+        send: function(self: Client, request: Request): Response
         --- Drains every event currently ready without blocking.
         pump: function(self: Client): integer
         --- Returns the number of unsettled transfers.
         pending: function(self: Client): integer
-        --- Stops the transfer belonging to a future.
-        cancel: function(self: Client, future: Future<any>)
         --- Stops all transfers and releases the connection pool.
         close: function(self: Client)
-        --- `Future.Source`: the non-blocking form of `pump`.
+        --- The non-blocking form of `pump`.
         poll: function(self: Client): integer
-        --- `Future.Source`: waits at most `ms` for an event, then drains.
+        --- Waits at most `ms` for an event, then drains.
         advance: function(self: Client, ms: number): integer
     end
 
@@ -307,8 +304,15 @@ local function release(self: Client, transfer: Transfer)
     end
     removeUpload(self, transfer)
     self._byId[transfer.id] = nil
-    self._byFuture[transfer.future] = nil
     self._pending = self._pending - 1
+end
+
+local function settleTransfer(transfer: Transfer, status: string, response?: Response, reason?: string)
+    local listener = transfer.listener
+    transfer.listener = nil
+    if listener ~= nil then
+        listener(status, response, reason)
+    end
 end
 
 local function closeSource(transfer: Transfer)
@@ -374,7 +378,7 @@ local function failTransfer(self: Client, transfer: Transfer, reason: string)
     if not ok and (reason == nil or reason == "") then
         reason = closeFailure
     end
-    transfer.future:fail(reason or ("tecs: %s: transfer failed"):format(transfer.url))
+    settleTransfer(transfer, "failed", nil, reason or ("tecs: %s: transfer failed"):format(transfer.url))
 end
 
 local function completeTransfer(
@@ -385,7 +389,9 @@ local function completeTransfer(
     local ok <const>, failure = finishWriter(transfer, true)
     if not ok then
         releaseResponseBuffers(transfer)
-        transfer.future:fail(("tecs: %s: %s"):format(transfer.url, failure or "response destination failed"))
+        settleTransfer(
+            transfer, "failed", nil, ("tecs: %s: %s"):format(transfer.url, failure or "response destination failed")
+        )
         return
     end
 
@@ -395,7 +401,9 @@ local function completeTransfer(
     local responseURI <const>, uriFailure = URI.new(effectiveUrl ~= "" and effectiveUrl or transfer.url)
     if responseURI == nil then
         releaseResponseBuffers(transfer)
-        transfer.future:fail(("tecs: %s: invalid effective URI: %s"):format(transfer.url, uriFailure))
+        settleTransfer(
+            transfer, "failed", nil, ("tecs: %s: invalid effective URI: %s"):format(transfer.url, uriFailure)
+        )
         return
     end
     response.url = responseURI
@@ -417,7 +425,10 @@ local function completeTransfer(
     end) as (boolean, any)
     if not prepared then
         releaseResponseBuffers(transfer)
-        transfer.future:fail(
+        settleTransfer(
+            transfer,
+            "failed",
+            nil,
             ("tecs: %s: response body could not be finalized: %s"):format(transfer.url, tostring(body))
         )
         return
@@ -427,7 +438,7 @@ local function completeTransfer(
         transfer.responseScratch:close()
         transfer.responseScratch = nil
     end
-    transfer.future:complete(response)
+    settleTransfer(transfer, "ready", response)
 end
 
 local function writeChunk(self: Client, transfer: Transfer, pointer: loader.CPtr): string
@@ -702,7 +713,7 @@ local function streamContentLength(source: ReadableStream): integer, string
     return length as integer
 end
 
-function Client:send(request: Request): Future<Response>
+local function startTransfer(self: Client, request: Request, listener: function(string, Response, string)): Transfer
     if self._handle == nil then
         error("tecs: this http client is closed", 2)
     end
@@ -714,7 +725,8 @@ function Client:send(request: Request): Future<Response>
     local url <const> = requestURI:toString()
     local scheme <const> = requestURI:scheme()
     if scheme ~= "http" and scheme ~= "https" then
-        return Future.failed(("tecs: %s is not an http or https url"):format(url)) as Future<Response>
+        listener("failed", nil, ("tecs: %s is not an http or https url"):format(url))
+        return nil
     end
 
     local givenBody <const> = request.body
@@ -728,10 +740,9 @@ function Client:send(request: Request): Future<Response>
 
     local id <const> = nextId
     nextId = nextId + 1
-    local future <const> = Future.pending(self as Future.Source) as Future<Response>
     local transfer <const>: Transfer = {
         id = id,
-        future = future,
+        listener = listener,
         response = setmetatable({status = 0, headers = {}, url = requestURI} as Response, ResponseMT),
         sink = sink,
         sourcePending = 0,
@@ -754,8 +765,8 @@ function Client:send(request: Request): Future<Response>
         local bodyLengthFailure: string
         bodyLength, bodyLengthFailure = streamContentLength(source)
         if bodyLengthFailure ~= nil then
-            future:fail(bodyLengthFailure)
-            return future
+            settleTransfer(transfer, "failed", nil, bodyLengthFailure)
+            return nil
         end
     elseif carries then
         bodyKind = BODY_INLINE
@@ -766,15 +777,18 @@ function Client:send(request: Request): Future<Response>
     local merged <const> = mergedHeaders(self, request, source)
     local contentLength <const>, contentLengthFailure <const> = declaredContentLength(merged)
     if contentLengthFailure ~= nil then
-        future:fail(contentLengthFailure)
-        return future
+        settleTransfer(transfer, "failed", nil, contentLengthFailure)
+        return nil
     end
     if contentLength ~= nil then
         if bodyLength >= 0 and bodyLength ~= contentLength then
-            future:fail(
+            settleTransfer(
+                transfer,
+                "failed",
+                nil,
                 ("tecs: Content-Length is %d, but the request body contains %d bytes"):format(contentLength, bodyLength)
             )
-            return future
+            return nil
         end
         if bodyKind == BODY_UPLOAD then
             bodyLength = contentLength
@@ -819,41 +833,47 @@ function Client:send(request: Request): Future<Response>
     native.insecure = host ~= nil and self._insecure[host] and 1 or 0
 
     if (tonumber(H.tecsHttpClientSend(self._handle, nativeArray)) or 0) == 0 then
-        future:fail(("tecs: cannot start %s: %s"):format(url, nativeError()))
-        return future
+        settleTransfer(transfer, "failed", nil, ("tecs: cannot start %s: %s"):format(url, nativeError()))
+        return nil
     end
 
     if bodyKind == BODY_UPLOAD then
         local opened <const>, reader, reason = pcall(source.newReader, source) as (boolean, iotypes.Reader, string)
         if not opened or reader == nil then
             H.tecsHttpClientCancel(self._handle, id)
-            future:fail(
+            settleTransfer(
+                transfer,
+                "failed",
+                nil,
                 opened and (reason or "tecs: the request body could not be opened")
                     or ("tecs: the request body could not be opened: %s"):format(tostring(reader))
             )
-            return future
+            return nil
         end
         transfer.sourceReader = reader
         local allocated <const>, scratch = pcall(stream.newBuffer) as (boolean, iotypes.Buffer)
         if not allocated then
             H.tecsHttpClientCancel(self._handle, id)
             closeSource(transfer)
-            future:fail(("tecs: the request body buffer could not be allocated: %s"):format(tostring(scratch)))
-            return future
+            settleTransfer(
+                transfer,
+                "failed",
+                nil,
+                ("tecs: the request body buffer could not be allocated: %s"):format(tostring(scratch))
+            )
+            return nil
         end
         transfer.sourceScratch = scratch
         self._uploadOrder[#self._uploadOrder + 1] = transfer
     end
 
-    self._byFuture[future] = transfer
     self._byId[id] = transfer
     self._pending = self._pending + 1
-    return future
+    return transfer
 end
 
-function Client:cancel(future: Future<any>)
-    local transfer <const> = self._byFuture[future as Future<Response>]
-    if transfer == nil then
+local function cancelTransfer(self: Client, transfer: Transfer, reason: string, notify: boolean)
+    if self._byId[transfer.id] ~= transfer then
         return
     end
     H.tecsHttpClientCancel(self._handle, transfer.id)
@@ -861,7 +881,69 @@ function Client:cancel(future: Future<any>)
     closeSource(transfer)
     finishWriter(transfer, false)
     releaseResponseBuffers(transfer)
-    transfer.future:abandon("canceled")
+    if notify then
+        settleTransfer(transfer, "canceled", nil, reason)
+    else
+        transfer.listener = nil
+    end
+end
+
+function Client:send(request: Request): Response
+    if not task.active() then
+        local outcome: {string: any} = nil
+        self:_subscribe(
+            request,
+            function(status: string, response: Response, reason: string)
+                outcome = {status = status, response = response, reason = reason}
+            end
+        )
+        while outcome == nil do
+            self:advance(self.sliceMs)
+        end
+        if outcome.status == "ready" then
+            return outcome.response as Response
+        end
+        if outcome.status == "failed" then
+            error(outcome.reason as string or "HTTP request failed", 2)
+        end
+        error("tecs: HTTP request was canceled: " .. (outcome.reason as string or "canceled"), 2)
+    end
+    local outcome <const> = task.awaitCallback(function(resume: function({string: any})): function()
+        return self:_subscribe(
+            request,
+            function(status: string, response: Response, reason: string)
+                resume({status = status, response = response, reason = reason})
+            end
+        )
+    end)
+    if outcome.status == "ready" then
+        return outcome.response as Response
+    end
+    if outcome.status == "failed" then
+        error(outcome.reason as string or "HTTP request failed", 2)
+    end
+    error("tecs: HTTP request was canceled: " .. (outcome.reason as string or "canceled"), 2)
+end
+
+function Client:_subscribe(request: Request, listener: function(string, Response, string)): function()
+    if type(listener) ~= "function" then
+        error("tecs: HTTP completion subscription needs a listener", 2)
+    end
+    local transfer <const> = startTransfer(self, request, listener)
+    if transfer == nil then
+        return function() end
+    end
+    local active = true
+    return function()
+        if not active then
+            return
+        end
+        active = false
+        -- Cancellation releases this sole consumer before stopping native
+        -- work, so a canceled Task cannot be retained or resumed by it.
+        transfer.listener = nil
+        cancelTransfer(self, transfer, "canceled", false)
+    end
 end
 
 function Client:close()
@@ -886,7 +968,7 @@ function Client:close()
         closeSource(transfer)
         finishWriter(transfer, false)
         releaseResponseBuffers(transfer)
-        transfer.future:abandon("the http client was closed")
+        settleTransfer(transfer, "canceled", nil, "the http client was closed")
     end
 
     H.tecsHttpClientDestroy(handle)
@@ -971,11 +1053,9 @@ function client.newClient(options?: Options): Client
 
     local self <const> = setmetatable({} as Client, ClientMT)
     self.sliceMs = SLICE_MS
-    self.defaultWaitMs = timeoutMs
     self._handle = handle
     self._options = settings
     self._insecure = insecure
-    self._byFuture = {}
     self._byId = {}
     self._uploadOrder = {}
     self._uploadCursor = 1

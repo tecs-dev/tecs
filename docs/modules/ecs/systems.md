@@ -40,6 +40,63 @@ world:addPlugin(spinPlugin)
 The pipeline calls `run(dt, world)`. Fixed phases supply the fixed timestep;
 variable phases supply the frame delta.
 
+## Asynchronous work
+
+Every system is resumable. There is no second system kind, explicit hold
+boundary, callback, or completion handle. Call an asynchronous engine function and use
+its returned value directly:
+
+```teal
+local record AssetBytes is tecs.ecs.Component
+    bytes: string
+end
+
+tecs.ecs.newComponent({
+    name = "game.AssetBytes",
+    container = AssetBytes,
+    fields = {"bytes"},
+})
+
+local function assetPlugin(): tecs.Plugin
+    return function(world: tecs.World)
+        local missing <const> = world:newQuery({include = {AssetPath}})
+        world:addSystem({
+            name = "game.LoadAsset",
+            phase = tecs.ecs.phases.PreUpdate,
+            run = function(_dt: number, runWorld: tecs.World)
+                for archetype, length, entities in missing:iter() do
+                    local paths <const> = archetype:get(AssetPath)
+                    for row = 1, length do
+                        local bytes <const> = tecs.assets.loadString(paths[row].path)
+                        runWorld:set(entities[row], AssetBytes, AssetBytes(bytes))
+                    end
+                end
+            end,
+        })
+    end
+end
+```
+
+When the value is already available, the call returns inline and performs no
+scheduler turn. When it must wait, Tecs parks the world update at that exact
+Lua stack frame. Events and process-wide I/O continue to pump, and the
+application may render the last completed frame. The next system and phase do
+not run early.
+
+The coroutine preserves query iterators and locals. Tecs already defers world
+mutations while a query is open, so a spawn after a wait remains ordered and
+commits when the iterator closes. The same mechanism works in fixed phases:
+the fixed step resumes without replaying its earlier systems or advancing its
+clock twice.
+
+Calling the same asynchronous API outside a world update blocks until it has
+the same value. This is useful during startup and in headless tools. Plugin
+authors do not choose between synchronous and asynchronous variants.
+
+One persistent coroutine belongs to the logical world update, not to every
+entity. Iterating ten thousand entities does not create ten thousand tasks.
+Only operations that actually wait enter the scheduler.
+
 ## Frame placement
 
 `Application` drives three groups:

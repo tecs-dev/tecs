@@ -24,6 +24,7 @@ flate2 = { version = "1.1", default-features = false, features = ["rust_backend"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 image_dds = { version = "0.7.2", default-features = false, features = ["ddsfile", "image"] }
 libc = "0.2"
+mio = { version = "1", features = ["net", "os-poll"] }
 path-clean = "1.0"
 pathdiff = { version = "0.2", features = ["camino"] }
 rapier2d = { version = "0.34.0", default-features = false, features = ["dim2", "enhanced-determinism", "f32", "parallel", "serde-serialize"] }

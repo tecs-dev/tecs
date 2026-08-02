@@ -20,6 +20,8 @@ local content = require("tecs.platform.content")
 local adapter = require("tecs.platform.adapter")
 local assets = require("tecs.assets")
 local workers = require("tecs.workers")
+local runtime = require("tecs.runtime")
+local task = require("tecs.internal.taskruntime")
 
 local C = sdl.C
 
@@ -504,23 +506,42 @@ describe("io.files", function()
 
         it("atomically writes copied bytes on a worker", function()
             local source = buffer.new("before")
-            local future = files.writeAtomicAsync(at("async.bin"), source)
+            local scheduler = task.newScheduler()
+            local writing = scheduler:spawnImmediate(function()
+                return files.writeAtomic(at("async.bin"), source)
+            end)
             source:setString("after")
             source:close()
 
-            future:wait(5000)
-            assert.are.equal("ready", future.status)
-            assert.is_true(future.value)
+            for _ = 1, 5000 do
+                runtime.poll()
+                scheduler:step()
+                if writing.status ~= "pending" then
+                    break
+                end
+                sdl.C.SDL_Delay(1)
+            end
+            assert.are.equal("ready", writing.status, writing.error)
+            assert.is_true(writing.value)
             assert.are.equal("before", files.read(at("async.bin")))
         end)
 
-        it("settles an asynchronous write failure as failed", function()
+        it("returns an asynchronous write failure from the same function", function()
             files.createDirectory(at("async-occupied"))
-            local future = files.writeAtomicAsync(at("async-occupied"), "replacement")
-            future:wait(5000)
-            assert.are.equal("failed", future.status)
-            assert.is_string(future.error)
-            assert.is_true(#future.error > 0)
+            local scheduler = task.newScheduler()
+            local writing = scheduler:spawnImmediate(function()
+                return files.writeAtomic(at("async-occupied"), "replacement")
+            end)
+            for _ = 1, 5000 do
+                runtime.poll()
+                scheduler:step()
+                if writing.status ~= "pending" then
+                    break
+                end
+                sdl.C.SDL_Delay(1)
+            end
+            assert.are.equal("ready", writing.status, writing.error)
+            assert.is_false(writing.value)
         end)
 
         it("leaves no temporary file when atomic replacement fails", function()

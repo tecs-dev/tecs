@@ -23,10 +23,172 @@ local files = require("tecs.io.files")
 local content = require("tecs.platform.content")
 local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
-local assets = require("tecs.assets")
-local Future = require("tecs.Future")
-
+local rawAssets = require("tecs.assets")
+local task = require("tecs.internal.taskruntime")
 local C = sdl.C
+
+-- The public loader blocks outside a system. These transport-focused cases
+-- need to observe work before it settles, so they run each direct call in the
+-- same private scheduler that a world update uses.
+local assets = {}
+local Future = {}
+local scheduler
+local observed = {}
+local callbacks = {}
+
+local Pending = {}
+local PendingMT = {
+    __index = function(self, key)
+        if key == "status" or key == "error" then
+            return self._task[key]
+        elseif key == "value" then
+            if self._task.status == "ready" then
+                return self._task.value
+            end
+            error(self._task.error or "the asset is still loading")
+        end
+        return Pending[key]
+    end,
+}
+
+local function observe(running)
+    local pending = setmetatable({ _task = running, _listeners = {} }, PendingMT)
+    observed[#observed + 1] = pending
+    local function settled()
+        callbacks[#callbacks + 1] = function()
+            local listeners = pending._listeners
+            pending._listeners = {}
+            for index = 1, #listeners do
+                listeners[index](pending)
+            end
+        end
+    end
+    if running.status == "pending" then
+        running._onSettle = settled
+    else
+        settled()
+    end
+    return pending
+end
+
+local function flushCallbacks()
+    while #callbacks > 0 do
+        local ready = callbacks
+        callbacks = {}
+        for index = 1, #ready do
+            ready[index]()
+        end
+    end
+end
+
+function Pending:onSettle(listener)
+    if self._task.status == "pending" then
+        self._listeners[#self._listeners + 1] = listener
+    else
+        listener(self)
+    end
+    return self
+end
+
+function Pending:cancel()
+    self._task:cancel()
+    scheduler:step()
+    flushCallbacks()
+end
+
+function Pending:map(transform)
+    local upstream = self
+    return observe(scheduler:spawnImmediate(function()
+        local settled = task.awaitCallback(function(resume)
+            upstream:onSettle(resume)
+            return function() end
+        end)
+        return transform(settled.value)
+    end))
+end
+
+local function start(call)
+    if task.active() then
+        return observe(scheduler:spawn(call))
+    end
+    return observe(scheduler:spawnImmediate(call))
+end
+
+function assets.install()
+    rawAssets.install()
+end
+
+function assets.shutdown()
+    rawAssets.shutdown()
+    scheduler:step()
+    flushCallbacks()
+end
+
+function assets.loadImage(path)
+    return start(function()
+        return rawAssets.loadImage(path)
+    end)
+end
+
+function assets.loadString(path)
+    return start(function()
+        return rawAssets.loadString(path)
+    end)
+end
+
+function assets.loadGLTF(path)
+    return start(function()
+        return rawAssets.loadGLTF(path)
+    end)
+end
+
+function assets.loadSound(path, mode, threshold)
+    return start(function()
+        return rawAssets.loadSound(path, mode, threshold)
+    end)
+end
+
+function assets.pending()
+    return rawAssets.pending()
+end
+
+function assets.update()
+    local count = rawAssets.update()
+    scheduler:step()
+    flushCallbacks()
+    return count
+end
+
+function assets.waitAll(timeoutMs)
+    local deadline = tonumber(C.SDL_GetTicks()) + (timeoutMs or 30000)
+    repeat
+        rawAssets.waitAll(math.max(0, deadline - tonumber(C.SDL_GetTicks())))
+        scheduler:step()
+        flushCallbacks()
+        local pending = false
+        for index = 1, #observed do
+            if observed[index].status == "pending" then
+                pending = true
+                break
+            end
+        end
+    until not pending or tonumber(C.SDL_GetTicks()) >= deadline
+end
+
+function Future.all(inputs)
+    return start(function()
+        local values = {}
+        for index = 1, #inputs do
+            local input = inputs[index]
+            local settled = task.awaitCallback(function(resume)
+                input:onSettle(resume)
+                return function() end
+            end)
+            values[index] = settled.value
+        end
+        return values
+    end)
+end
 
 -- Four by four: the left half red, the right half green.
 local FIXTURE = "spec/fixtures/split.png"
@@ -35,6 +197,9 @@ describe("assets", function()
     local window, device
 
     setup(function()
+        scheduler = task.newScheduler()
+        observed = {}
+        callbacks = {}
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
         window = newWindow({ title = "assets", width = 64, height = 64 })
         device = Device.create(window, { debug = true })

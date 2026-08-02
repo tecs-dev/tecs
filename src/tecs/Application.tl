@@ -1036,7 +1036,7 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
         -- Answered on this thread, inside the frame, so a tool reads a world
         -- that is not mid-update. Polled before the guard below, so it keeps
         -- answering after a crash.
-        if self.mcp ~= nil then
+        if self.mcp ~= nil and not ((self.world as {string: any})._updateStalled as boolean) then
             self.mcp:poll()
         end
 
@@ -1046,7 +1046,12 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
             -- counting would hand the frame after a resume an `elapsed` with
             -- however long the fix took folded into it, and anything driven
             -- off it would jump by that much.
-            self.elapsed = self.elapsed + dt
+            -- A suspending phase is one logical update spread over several
+            -- host frames. Its first turn already counted this update's dt;
+            -- continuation turns render again but do not advance simulation.
+            if not ((self.world as {string: any})._updateStalled as boolean) then
+                self.elapsed = self.elapsed + dt
+            end
             self:_simulate(dt)
         end
     end

@@ -12,7 +12,8 @@ the runtime lifecycle hooks remain internal here.
 local ffi <const> = require("ffi")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
-local Future <const> = require("tecs.Future")
+local Future <const> = require("tecs.internal.completion")
+local task <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
 local time <const> = require("tecs.platform.time")
 local buffer <const> = require("tecs.io.buffer")
@@ -98,7 +99,7 @@ local record ProcessImpl
     stdin: ProcessWriter
     stdout: ProcessReader
     stderr: ProcessReader
-    finished: FutureExit
+    _finished: FutureExit
     _state: State
 end
 
@@ -512,6 +513,10 @@ function ProcessImpl:isRunning(): boolean
     return self._state.running
 end
 
+function ProcessImpl:wait(): ProcessExit
+    return task.awaitCompletion(self._finished as Future<ProcessExit>, "process wait")
+end
+
 function ProcessImpl:kill(force?: boolean): boolean, string
     local state <const> = self._state
     if state.closed or not state.running then
@@ -871,7 +876,7 @@ function process.new(options: ProcessOptions): Process, string
             stdin = state.input ~= nil and newWriter(state) or nil,
             stdout = state.output ~= nil and newReader(state, "stdout") or nil,
             stderr = state.errors ~= nil and newReader(state, "stderr") or nil,
-            finished = state.finished,
+            _finished = state.finished,
             _state = state,
         } as ProcessImpl,
         ProcessMT

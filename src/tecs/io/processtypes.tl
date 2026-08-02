@@ -6,7 +6,6 @@ Keeping these declarations beside the process module prevents the general
 can still depend on them without requiring the public module.
 ]=]
 
-local type Future = require("tecs.Future")
 local type types = require("tecs.io.types")
 local type Path = require("tecs.io.Path")
 local type coretypes = require("tecs.types")
@@ -256,10 +255,10 @@ local interface Process is Closeable
     --- process owns it.
     stderr: ProcessReader
 
-    --- Read-only. Settles ready with the exit description after the child
-    --- stops. Canceling this future does not terminate the separately owned
-    --- process.
-    finished: Future<ProcessExit>
+    --- Waits for the child to stop and returns its exit description.
+    --- @param self The process to wait for.
+    --- @return Returns how the child stopped.
+    wait: function(self: Process): ProcessExit
 
     --- Returns whether the child has not stopped yet.
     ---

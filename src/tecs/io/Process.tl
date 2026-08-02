@@ -72,7 +72,6 @@ and a reason. Deadlines and explicit kills set the exit's `killed` fields.
 local implementation <const> = require("tecs.internal.process")
 local type types = require("tecs.io.processtypes")
 local type Closeable = require("tecs.types").Closeable
-local type Future = require("tecs.Future")
 
 local record Process is Closeable
     --- `InputMode` selects where a child reads standard input.
@@ -118,10 +117,13 @@ local record Process is Closeable
     --- process owns it.
     stderr: Reader
 
-    --- Read-only. Settles ready with the exit description after the child
-    --- stops. Canceling this future does not terminate the separately owned
-    --- process.
-    finished: Future<Exit>
+    --- Waits for the child to stop and returns its exit description.
+    ---
+    --- Inside a system, the call suspends the logical world update without
+    --- blocking the host thread. Outside a world update, it blocks.
+    --- @param self The process to wait for.
+    --- @return Returns how the child stopped.
+    wait: function(self: Process): Exit
 
     --- Returns whether the child has not stopped yet.
     ---

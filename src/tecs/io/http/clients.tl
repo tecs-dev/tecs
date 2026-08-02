@@ -1,8 +1,8 @@
 --[=[
 Every open HTTP client in this process, and the one call that turns them.
 
-Reqwest moves sockets on Rust's Tokio threads, but a future may settle only
-when the SDL thread drains its client's event queue. `assets` and `proc`
+Reqwest moves sockets on Rust's Tokio threads, but a suspended system may
+resume only when the SDL thread drains its client's event queue. `assets` and `proc`
 are module singletons, so the loop names them and calls them. A client is
 not: a game constructs it, may construct several, and may keep none of them
 anywhere the loop could reach. So the clients come to the loop instead.
@@ -23,8 +23,8 @@ rejects the cycle even through a type-only one.
 
 ## A client that is dropped is still pumped
 
-The list holds its clients, so a game that sends a request and keeps only
-the future still gets an answer. The cost is that a client nobody closes is
+The list holds its clients, so a suspended request keeps receiving events. The
+cost is that a client nobody closes is
 never collected and its sockets stay open: `close` is what ends a client,
 not losing the last reference to it. That is the same bargain `proc` makes
 with a child nobody waits for, and the alternative -- a weak list -- is a

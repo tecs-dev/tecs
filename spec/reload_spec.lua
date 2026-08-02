@@ -276,7 +276,7 @@ describe("mcp reload_image", function()
 
         local ok, _, text = callTool({ path = "spec/fixtures/nothing.png" })
         assert.is_false(ok)
-        assert.is_truthy(text:find("did not load", 1, true), "unexpected refusal: " .. text)
+        assert.is_truthy(text:find("nothing.png", 1, true), "unexpected refusal: " .. text)
         assert.is_nil(handed, "a file that did not decode must not reach the array")
     end)
 

@@ -8,12 +8,11 @@ returns handle zero.
 
 ## Playback
 
-`load` returns a [`Future`](tealdoc:tecs.Future) for one shared clip per path.
-Starting the load never blocks the frame. Reading a pending future's `value`
-does, so that dereference is for startup, tools, and tests rather than a frame.
+`load` returns one shared clip per path. Inside a system it suspends the
+logical world update while the asset worker reads. Outside an update it blocks.
 
 ```teal
-local step <const> = app.audio:load("assets/sfx/step.ogg").value
+local step <const> = app.audio:load("assets/sfx/step.ogg")
 app.audio:setLimit("footstep", {
     voices = 3,
     cooldown = 0.05,
@@ -88,8 +87,6 @@ local adapter <const> = require("tecs.platform.adapter")
 local audiobackend <const> = require("tecs.platform.audiobackend")
 local platformaudio <const> = require("tecs.platform.audio")
 local log <const> = require("tecs.log")
-
-local Future <const> = require("tecs.Future")
 
 local type Backend = audiobackend.Backend
 local type Component = ecs.Component
@@ -459,10 +456,9 @@ local record audio
 
         --- Represents one shared playable sound after its load.
         ---
-        --- `load` settles a future with this only after reading succeeds.
-        --- `clip` also exposes the cached instance while its load is pending or
-        --- after it fails, which is why the status and error remain visible.
-        --- Every load for the same path shares one instance.
+        --- `load` returns this only after reading succeeds. `clip` also exposes
+        --- the cached failure state, which is why the status and error remain
+        --- visible. Every load for the same path shares one instance.
         record Clip
             --- Read-only. Reports the path used to load the clip,
             --- exactly as given. This is a clip's
@@ -479,13 +475,8 @@ local record audio
             --- `audio` debug tool's clip list, so they are a compatibility
             --- surface rather than identifiers this tree renames in one commit.
             ---
-            --- The first three are [`Future`](tealdoc:tecs.Future)'s, because a
-            --- clip's first three states are its load's. `"released"` has no
-            --- counterpart there: a released clip is a load that succeeded and
-            --- then had its samples given back, and a future has no word for
-            --- that because a future ends at the answer. `"canceled"` never
-            --- appears here, because the only thing that gives up a clip's load
-            --- is `destroy`, which has written `"released"` by then.
+            --- `"released"` means the load succeeded and the owning audio
+            --- instance later returned its samples.
             status: string
             --- Read-only. Reports the error when loading fails.
             error: string
@@ -728,26 +719,6 @@ local record audio
         --- code should use the clip methods.
         _clips: {integer: Clip}
 
-        --- Engine-owned. Stores loads in flight by clip index. Ordinary game
-        --- code should ignore this field, which lets `destroy` give up
-        --- what the drain ran out of time on.
-        _inFlight: {integer: Future<assets.Sound>}
-
-        --- Engine-owned. Stores the caller futures still watching cached loads.
-        --- Ordinary game code should ignore this field. Each caller gets one,
-        --- so canceling it does not cancel another caller or the cache's own
-        --- interest. `destroy` cancels them before giving up the owned load.
-        _loadCallers: {Future<Audio.Clip>: boolean}
-
-        --- Engine-owned. Counts the loads in `_inFlight`. Ordinary game code
-        --- should use `loading`.
-        ---
-        --- A count rather than a walk of the table above, because it is read on
-        --- a frame and because it is what `waitForLoads` and `destroy` test
-        --- before entering the loader's drain: this instance having nothing
-        --- outstanding is the one case where the drain's process-wide scope
-        --- would make it wait on somebody else's work for nothing.
-        _loading: integer
         --- Engine-owned. Stores the random stream used for pitch variance.
         --- Ordinary game code should ignore this field. It remains private until `install`
         --- points it at the world's `tecs.audio` stream, so a save carries the
@@ -910,18 +881,11 @@ end
 ---
 --- Shared rather than closed over an instance: nothing here reads the mixer,
 --- so every `Audio` settles its loads through the same function.
-local function settleClip(clip: Audio.Clip, settled: Future<assets.Sound>)
-    if settled.status == "ready" then
-        local sound <const> = settled.value
-        clip._sound = sound
-        clip.resident = sound.resident
-        clip.duration = sound.durationMs >= 0 and sound.durationMs / 1000 or 0.0
-        clip.status = "ready"
-        return
-    end
-    clip.status = "failed"
-    clip.error = settled.error
-    LOGGER:error("cannot load '%s': %s", clip.path, settled.error or "unknown")
+local function settleClip(clip: Audio.Clip, sound: assets.Sound)
+    clip._sound = sound
+    clip.resident = sound.resident
+    clip.duration = sound.durationMs >= 0 and sound.durationMs / 1000 or 0.0
+    clip.status = "ready"
 end
 
 -------------------------------------------------------------------------------
@@ -979,9 +943,6 @@ function audio.newAudio(config?: Audio.Config): Audio
     self._limits = {}
     self._buckets = {}
     self._clips = {}
-    self._inFlight = {}
-    self._loadCallers = {}
-    self._loading = 0
     self._random = random.newRandom()
     self._now = 0.0
     -- One options record, overwritten per play. Every field is set each time,
@@ -998,23 +959,10 @@ end
 
 --- Stops everything and closes the output.
 ---
---- Blocks until this instance's loads have settled, since a clip arriving
---- afterwards would hold a pointer into a library that has released everything
---- it made. A load the wait ran out of time on is given up instead.
---- This method stops every voice without a fade, moves every clip to
+--- Stops every voice without a fade, moves every clip to
 --- `"released"`, and removes this mixer from every world that installed it.
 --- There is no reopening: make a new instance instead.
 function Audio:destroy()
-    -- Drained first. A clip that arrived after the mixer had gone would hold a
-    -- pointer into a library that has released everything it made. The drain is
-    -- the loader's, so it covers every load in the process and not only this
-    -- instance's, which can lengthen this wait and cannot shorten it: the
-    -- guarantee this needs survives the wider scope, and the count is what keeps
-    -- an instance with nothing outstanding from paying for it.
-    if self._loading > 0 then
-        assets.waitAll()
-    end
-
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
         if voice.track ~= nil then
@@ -1040,27 +988,6 @@ function Audio:destroy()
         clip.status = "released"
     end
     self._clips = {}
-    -- Cancel every caller link first. Each one gives its watcher on the owned
-    -- asset future back, so canceling the root below can reach zero even when a
-    -- caller kept the future after this Audio was destroyed.
-    local callers <const> = self._loadCallers
-    self._loadCallers = {}
-    for caller in pairs(callers) do
-        caller:cancel()
-    end
-    -- Whatever the wait above ran out of time on is given up rather than left
-    -- to settle into a mixer that has gone. A canceled decode still has its
-    -- address destroyed when the worker answers, so nothing is leaked by it.
-    --
-    -- Taken off the instance before the walk: canceling a load settles it, and
-    -- its settlement runs the listener that clears its own entry, so walking the
-    -- live table would be a `pairs` over something a listener is changing.
-    local outstanding <const> = self._inFlight
-    self._inFlight = {}
-    for _, loading in pairs(outstanding) do
-        loading:cancel()
-    end
-    self._loading = 0
 
     if self._mixer ~= nil then
         self._backend.close(self._mixer)
@@ -1085,44 +1012,26 @@ end
 -- Clips
 -------------------------------------------------------------------------------
 
---- Returns one future for this caller over the shared cached load.
-local function callerLoad(self: Audio, clip: Audio.Clip, loading: Future<assets.Sound>): Future<Audio.Clip>
-    local caller <const> = loading:map(function(): Audio.Clip return clip end)
-    self._loadCallers[caller] = true
-    caller:onSettle(function(settled: Future<Audio.Clip>) self._loadCallers[settled] = nil end)
-    return caller
-end
-
---- Queues a sound for loading and returns a future for its clip.
+--- Loads a sound and returns its cached clip.
 ---
---- Loading the same path twice returns distinct futures over one load and one
---- eventual clip; a clip is the file, and playing it twice over is two voices
---- reading one clip. Canceling one caller's future does not cancel another or
---- the cached load. `options.stream` overrides the duration threshold that
---- otherwise decides whether the clip is held in memory.
+--- Loading the same path twice returns the same clip. A clip is the file, and
+--- playing it twice is two voices reading one clip. `options.stream` overrides
+--- the duration threshold that otherwise decides whether it stays in memory.
 ---
---- @param path Must be non-empty. Not checked here: a path that does not exist
----     returns a failed future a frame or two later, so this never raises for
----     a missing file.
---- @return A caller-owned [`Future`](tealdoc:tecs.Future) that settles with the
----     cached clip after the load succeeds. Concurrent calls return distinct
----     futures whose ready values are the same table. A later call returns an
----     already-settled future. Only the first call reads `options`.
-function Audio:load(path: string, options?: Audio.LoadOptions): Future<Audio.Clip>
+--- @param path Must be non-empty. A missing or unreadable file raises after
+---     the asset worker reports it.
+--- @return Returns the cached clip. Only the first call reads `options`.
+function Audio:load(path: string, options?: Audio.LoadOptions): Audio.Clip
     local id = clipId(path)
     local existing = self._clips[id]
     if existing ~= nil then
         if existing.status == "ready" then
-            return Future.settled(existing)
+            return existing
         end
         if existing.status == "failed" then
-            return Future.failed(existing.error or ("cannot load " .. path))
+            error("tecs: " .. (existing.error or ("cannot load " .. path)), 2)
         end
-        local inFlight <const> = self._inFlight[id]
-        if inFlight ~= nil then
-            return callerLoad(self, existing, inFlight)
-        end
-        return Future.failed("cannot load " .. path)
+        error("tecs: clip load is already active for " .. path, 2)
     end
 
     -- The worker is what reads the file, and a game that only ever plays
@@ -1148,24 +1057,15 @@ function Audio:load(path: string, options?: Audio.LoadOptions): Future<Audio.Cli
     }
     self._clips[id] = clip
 
-    -- The listener is attached where the work starts rather than added to a
-    -- list something else drains, so nothing walks the outstanding loads on a
-    -- frame where none of them finished.
-    local loading <const> = assets.loadSound(path, mode, self._streamMs)
-    self._inFlight[id] = loading
-    self._loading = self._loading + 1
-    loading:onSettle(function(settled: Future<assets.Sound>)
-        self._inFlight[id] = nil
-        self._loading = self._loading - 1
-        if settled.status == "canceled" then
-            -- Given up at destroy. There is no mixer left to point a clip at,
-            -- and reporting it as a load that failed would be a line in the log
-            -- about something nobody asked for any more.
-            return
-        end
-        settleClip(clip, settled)
-    end)
-    return callerLoad(self, clip, loading)
+    local ok <const>, loaded = pcall(assets.loadSound, path, mode, self._streamMs) as (boolean, any)
+    if not ok then
+        clip.status = "failed"
+        clip.error = tostring(loaded)
+        LOGGER:error("cannot load '%s': %s", path, clip.error)
+        error(clip.error, 2)
+    end
+    settleClip(clip, loaded as assets.Sound)
+    return clip
 end
 
 --- Returns the clip represented by an index, or nil when this instance has not
@@ -1176,51 +1076,6 @@ end
 ---     instance loaded answers nil here.
 function Audio:clip(id: integer): Audio.Clip
     return self._clips[id]
-end
-
---- Blocks until every load this instance has queued has settled.
----
---- For startup and tests. A frame should let `update` resolve them instead.
---- Every load settles, whatever it settled as, so one missing file does not
---- leave the rest unwaited for.
----
---- Waiting drains the loader, so loads another subsystem queued settle here as
---- well and a slow one elsewhere lengthens this wait. It cannot shorten it, and
---- an instance with nothing in flight drains nothing.
----
---- @param timeoutMs **Milliseconds**, unlike the seconds everything else on
----     this surface takes, because it is a wait on the asset worker rather
----     than an audio duration. Omitting it does not wait forever: it takes a
----     5000 ms default. Running out is not reported, so read `loading`
----     afterwards to tell a finished wait from a timed-out one.
-function Audio:waitForLoads(timeoutMs?: number)
-    if self._loading == 0 then
-        return
-    end
-    -- A drain over the loader's live count rather than a join over the futures
-    -- in `_inFlight`, for three reasons and only one of them is failure.
-    -- `Future.all` reads its inputs once, so a load that a listener starts while
-    -- this is waiting is not among them and the wait answers with a decode
-    -- outstanding, which is what `destroy` must never do. Joining also takes a
-    -- hold on each input that only canceling the join gives back, so `destroy`'s
-    -- cancel would decrement to one rather than to zero and abandon nothing. And
-    -- a join fails on its first failed input, which a missing file reaches as
-    -- fast as the worker can look.
-    --
-    -- The loader settles its barrier after a result has run that result's
-    -- listeners, so a load chained onto one holds it pending rather than
-    -- slipping past it. No join has that property.
-    assets.waitAll(timeoutMs)
-end
-
---- Returns the number of loads this instance is still waiting on.
----
---- @return Loads not yet settled, which counts loads rather than clips. A
----     failed load counts as settled, so zero means every `load` has an answer
----     and not that every answer was a success. Zero after `waitForLoads` is
----     what tells a finished wait from a timed-out one.
-function Audio:loading(): integer
-    return self._loading
 end
 
 --- Re-reads a clip's file over the clip already loaded from it.
@@ -1265,21 +1120,15 @@ function Audio:reload(path: string): boolean, string
     if not assets.installed() then
         assets.install()
     end
-    -- This one load rather than the loader's whole drain: a future has a source,
-    -- so waiting on it is precise, and a reload has no reason to spend its
-    -- budget on decodes somebody else started.
-    local loading = assets.loadSound(path, "resident", self._streamMs)
-    loading:wait()
-    if loading.status ~= "ready" then
-        local reason = loading.error or ("still " .. loading.status)
-        loading:cancel()
-        return false, ("'%s' did not load: %s"):format(path, reason)
+    local loaded, reason = pcall(assets.loadSound, path, "resident", self._streamMs) as (boolean, any)
+    if not loaded then
+        return false, ("'%s' did not load: %s"):format(path, tostring(reason))
     end
 
     -- Swapped before the old one is let go, so the clip is never pointing at a
     -- clip that has been released.
     local previous = clip._sound
-    settleClip(clip, loading)
+    settleClip(clip, reason as assets.Sound)
     if previous ~= nil then
         previous:release()
     end

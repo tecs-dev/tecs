@@ -603,7 +603,7 @@ local client <const> = http.newClient({
     timeoutMs = 10000,
     maxBytes = 1024 * 1024,
 })
-local response <const> = client:send({url = endpoint}).value
+local response <const> = client:send({url = endpoint})
 print(response.status, response.url:host())
 response.body:close()
 client:close()

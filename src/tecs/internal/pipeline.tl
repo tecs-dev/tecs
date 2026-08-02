@@ -18,6 +18,14 @@ local record RegisteredSystem is SystemConfig
     id: string
 end
 
+-- Kept structural so the ordinary ECS pipeline does not depend on the Task
+-- runtime. Only the opt-in suspending-phase path calls this interface.
+local record SuspendingPhase
+    start: function(self: SuspendingPhase, dt: number): boolean
+    poll: function(self: SuspendingPhase): boolean
+    cancel: function(self: SuspendingPhase, reason?: string)
+end
+
 -- `jit.zone` has no Teal type declarations; go through an opaque require.
 local function loadUntyped(modName: string): any
     return require(modName)
@@ -89,6 +97,18 @@ local record PipelineImpl is Pipeline
     systemNameRegistry: {string: integer}
 
     anonymousSystemCount: integer
+
+    suspendingPhases: {integer: SuspendingPhase}
+    suspendingPhaseCount: integer
+    suspendedPhase: SuspendingPhase
+    suspendedStage: integer
+    suspendedIndex: integer
+    suspendedDt: number
+    stalled: boolean
+
+    _installSuspendingPhase: function(self: PipelineImpl, phase: Phase, runner: SuspendingPhase)
+    _cancelSuspendingPhases: function(self: PipelineImpl, reason?: string)
+    _updateSuspending: function(self: PipelineImpl, dt: number, world: World)
 end
 
 -- The most fixed steps one update runs before the overload policy decides what
@@ -167,6 +187,13 @@ function pipeline.new(fixedTimestep: number, fixedMaxSteps?: integer, fixedOverl
             phaseGroups = {},
             systemNameRegistry = {},
             anonymousSystemCount = 0,
+            suspendingPhases = {},
+            suspendingPhaseCount = 0,
+            suspendedPhase = nil,
+            suspendedStage = 0,
+            suspendedIndex = 0,
+            suspendedDt = 0,
+            stalled = false,
         },
         {__index = PipelineImpl}
     )
@@ -540,9 +567,152 @@ local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
     end
 end
 
+local STAGE_BEFORE <const> = 1
+local STAGE_FIXED <const> = 2
+local STAGE_AFTER <const> = 3
+
+local function clearSuspension(self: PipelineImpl)
+    self.suspendedPhase = nil
+    self.suspendedStage = 0
+    self.suspendedIndex = 0
+    self.suspendedDt = 0
+    self.stalled = false
+end
+
+local function runSuspendingPhase(
+    self: PipelineImpl, phase: Phase, dt: number, world: World, stage: integer, nextIndex: integer
+): boolean
+    if not self.phaseStates[phase.position] then
+        return true
+    end
+
+    local group = self.phaseGroups[phase.position]
+    if group ~= nil and group.count > 0 then
+        runGroup(group, dt, world)
+    end
+
+    local runner = self.suspendingPhases[phase.position]
+    if runner == nil then
+        return true
+    end
+    local ok <const>, complete = pcall(runner.start, runner, dt) as (boolean, any)
+    if not ok then
+        clearSuspension(self)
+        error(complete, 0)
+    end
+    if complete as boolean then
+        return true
+    end
+
+    self.suspendedPhase = runner
+    self.suspendedStage = stage
+    self.suspendedIndex = nextIndex
+    self.stalled = true
+    return false
+end
+
+-- Slow path used only by a world with an installed suspending phase. A phase
+-- boundary becomes a continuation point across host frames; incoming frame dt
+-- values are ignored until the held update completes.
+function PipelineImpl:_updateSuspending(dt: number, world: World)
+    local stage = STAGE_BEFORE
+    local index = 1
+    local heldDt = dt
+
+    local suspended = self.suspendedPhase
+    if suspended ~= nil then
+        heldDt = self.suspendedDt
+        stage = self.suspendedStage
+        index = self.suspendedIndex
+        local ok <const>, complete = pcall(suspended.poll, suspended) as (boolean, any)
+        if not ok then
+            clearSuspension(self)
+            error(complete, 0)
+        end
+        if not complete as boolean then
+            self.stalled = true
+            return
+        end
+        self.suspendedPhase = nil
+        self.stalled = false
+    else
+        self.suspendedDt = dt
+    end
+
+    if stage == STAGE_BEFORE then
+        for phaseIndex = index, #BEFORE_FIXED_PHASES do
+            if not runSuspendingPhase(
+                self, BEFORE_FIXED_PHASES[phaseIndex], heldDt, world, STAGE_BEFORE, phaseIndex + 1
+            ) then
+                return
+            end
+        end
+        stage = STAGE_FIXED
+    end
+
+    if stage == STAGE_FIXED then
+        zone("fixedLoop")
+        runFixedLoop(self, heldDt, world)
+        zone()
+        stage = STAGE_AFTER
+        index = 1
+    end
+
+    if stage == STAGE_AFTER then
+        for phaseIndex = index, #AFTER_FIXED_PHASES do
+            if not runSuspendingPhase(
+                self, AFTER_FIXED_PHASES[phaseIndex], heldDt, world, STAGE_AFTER, phaseIndex + 1
+            ) then
+                return
+            end
+        end
+    end
+
+    clearSuspension(self)
+end
+
+local function isFramePhase(phase: Phase): boolean
+    for index = 1, #BEFORE_FIXED_PHASES do
+        if BEFORE_FIXED_PHASES[index] == phase then
+            return true
+        end
+    end
+    for index = 1, #AFTER_FIXED_PHASES do
+        if AFTER_FIXED_PHASES[index] == phase then
+            return true
+        end
+    end
+    return false
+end
+
+function PipelineImpl:_installSuspendingPhase(phase: Phase, runner: SuspendingPhase)
+    if not isFramePhase(phase) then
+        error("tecs: suspending systems currently need a non-fixed frame phase", 2)
+    end
+    if self.suspendingPhases[phase.position] ~= nil then
+        error("tecs: phase " .. (phase.name or tostring(phase)) .. " already has suspending systems", 2)
+    end
+    self.suspendingPhases[phase.position] = runner
+    self.suspendingPhaseCount = self.suspendingPhaseCount + 1
+end
+
+function PipelineImpl:_cancelSuspendingPhases(reason?: string)
+    for _, runner in pairs(self.suspendingPhases) do
+        runner:cancel(reason or "world shutdown")
+    end
+    clearSuspension(self)
+end
+
 function PipelineImpl:update(dt: number, world: World)
     if self.dirty then
         recreatePipeline(self)
+    end
+
+    -- Preserve the current three-flat-group dispatch after one predictable
+    -- opt-in branch unless a world explicitly installs a suspending phase.
+    if self.suspendingPhaseCount > 0 then
+        self:_updateSuspending(dt, world)
+        return
     end
 
     zone("beforeFixed")

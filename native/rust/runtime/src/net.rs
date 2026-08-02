@@ -3,6 +3,7 @@
 //! `tecs.io` calls the opaque operations, sockets, and packets through the
 //! generated Rust FFI table and exposes them as Teal objects and futures.
 
+use std::collections::{HashMap, VecDeque};
 use std::ffi::c_int;
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
@@ -12,7 +13,17 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use mio::event::Event;
+use mio::net::TcpStream as MioTcpStream;
+use mio::{Events, Interest, Poll, Token};
+use sdl3_sys::timer::SDL_GetTicksNS;
+
 use crate::set_error;
+
+const READY_READABLE: u32 = 1;
+const READY_WRITABLE: u32 = 2;
+const READY_ERROR: u32 = 4;
+const READY_CLOSED: u32 = 8;
 
 pub struct TecsNetAddress {
     address: IpAddr,
@@ -30,9 +41,23 @@ pub struct TecsNetOperation {
 }
 
 pub struct TecsNetStream {
-    stream: TcpStream,
+    stream: MioTcpStream,
     pending: Vec<u8>,
     sent: usize,
+    reactor: usize,
+}
+
+struct ReactorReady {
+    token: u32,
+    readiness: u32,
+    ready_ns: u64,
+}
+
+pub struct TecsNetReactor {
+    poll: Poll,
+    events: Events,
+    registrations: HashMap<u32, *mut TecsNetStream>,
+    ready: VecDeque<ReactorReady>,
 }
 
 pub struct TecsNetServer {
@@ -59,10 +84,46 @@ fn stream(socket: TcpStream) -> io::Result<TecsNetStream> {
     socket.set_nonblocking(true)?;
     socket.set_nodelay(true)?;
     Ok(TecsNetStream {
-        stream: socket,
+        stream: MioTcpStream::from_std(socket),
         pending: Vec::new(),
         sent: 0,
+        reactor: 0,
     })
+}
+
+fn interest(bits: u32) -> Option<Interest> {
+    match bits & (READY_READABLE | READY_WRITABLE) {
+        READY_READABLE => Some(Interest::READABLE),
+        READY_WRITABLE => Some(Interest::WRITABLE),
+        3 => Some(Interest::READABLE.add(Interest::WRITABLE)),
+        _ => None,
+    }
+}
+
+fn readiness(event: &Event) -> u32 {
+    let mut bits = 0;
+    if event.is_readable() {
+        bits |= READY_READABLE;
+    }
+    if event.is_writable() {
+        bits |= READY_WRITABLE;
+    }
+    if event.is_error() {
+        bits |= READY_ERROR;
+    }
+    if event.is_read_closed() || event.is_write_closed() {
+        bits |= READY_CLOSED;
+    }
+    bits
+}
+
+unsafe fn unwatch(reactor: &mut TecsNetReactor, stream: &mut TecsNetStream) -> io::Result<()> {
+    reactor.poll.registry().deregister(&mut stream.stream)?;
+    reactor
+        .registrations
+        .retain(|_, registered| !ptr::eq(*registered, stream));
+    stream.reactor = 0;
+    Ok(())
 }
 
 fn wait_until(timeout_ms: u32, mut ready: impl FnMut() -> io::Result<bool>) -> io::Result<bool> {
@@ -299,6 +360,190 @@ pub unsafe extern "C" fn tecsNetAddressDestroy(address: *mut TecsNetAddress) {
 }
 
 #[no_mangle]
+pub extern "C" fn tecsNetReactorCreate() -> *mut TecsNetReactor {
+    match Poll::new() {
+        Ok(poll) => Box::into_raw(Box::new(TecsNetReactor {
+            poll,
+            events: Events::with_capacity(1024),
+            registrations: HashMap::new(),
+            ready: VecDeque::new(),
+        })),
+        Err(error) => {
+            set_error(error);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsNetReactorWatch(
+    reactor: *mut TecsNetReactor,
+    stream: *mut TecsNetStream,
+    token: u32,
+    interest_bits: u32,
+) -> c_int {
+    if reactor.is_null() || stream.is_null() {
+        set_error("network reactor or stream is null");
+        return 0;
+    }
+    if token == 0 {
+        set_error("network reactor token is zero");
+        return 0;
+    }
+    let Some(interest) = interest(interest_bits) else {
+        set_error("network reactor interest is empty");
+        return 0;
+    };
+    // SAFETY: The caller supplies live reactor and stream values and does not
+    // call the reactor concurrently.
+    let reactor = unsafe { &mut *reactor };
+    let stream = unsafe { &mut *stream };
+    if stream.reactor != 0 {
+        set_error("network stream already has a reactor watch");
+        return 0;
+    }
+    if reactor.registrations.contains_key(&token) {
+        set_error("network reactor token is already watched");
+        return 0;
+    }
+    if let Err(error) =
+        reactor
+            .poll
+            .registry()
+            .register(&mut stream.stream, Token(token as usize), interest)
+    {
+        set_error(error);
+        return 0;
+    }
+    stream.reactor = ptr::from_mut(reactor) as usize;
+    reactor.registrations.insert(token, stream);
+    1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsNetReactorUnwatch(
+    reactor: *mut TecsNetReactor,
+    stream: *mut TecsNetStream,
+    token: u32,
+) -> c_int {
+    if reactor.is_null() || stream.is_null() {
+        set_error("network reactor or stream is null");
+        return 0;
+    }
+    // SAFETY: The caller supplies live reactor and stream values and does not
+    // call the reactor concurrently.
+    let reactor = unsafe { &mut *reactor };
+    let stream = unsafe { &mut *stream };
+    let Some(registered) = reactor.registrations.get(&token) else {
+        set_error("network reactor token is not watched");
+        return 0;
+    };
+    if !ptr::eq(*registered, stream) {
+        set_error("network reactor token belongs to another stream");
+        return 0;
+    }
+    if let Err(error) = unsafe { unwatch(reactor, stream) } {
+        set_error(error);
+        return 0;
+    }
+    1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsNetReactorPoll(
+    reactor: *mut TecsNetReactor,
+    timeout_ms: u32,
+) -> c_int {
+    if reactor.is_null() {
+        set_error("network reactor is null");
+        return -1;
+    }
+    // SAFETY: The caller supplies a live reactor and does not call it
+    // concurrently.
+    let reactor = unsafe { &mut *reactor };
+    if !reactor.ready.is_empty() {
+        return c_int::try_from(reactor.ready.len()).unwrap_or(c_int::MAX);
+    }
+
+    let TecsNetReactor {
+        poll,
+        events,
+        registrations,
+        ready,
+    } = reactor;
+    if let Err(error) = poll.poll(events, Some(Duration::from_millis(timeout_ms.into()))) {
+        set_error(error);
+        return -1;
+    }
+
+    for event in events.iter() {
+        let Ok(token) = u32::try_from(event.token().0) else {
+            continue;
+        };
+        let Some(stream) = registrations.remove(&token) else {
+            continue;
+        };
+        // SAFETY: A registration keeps the stream live until its one-shot
+        // readiness is consumed or either owner explicitly destroys itself.
+        let stream = unsafe { &mut *stream };
+        if let Err(error) = poll.registry().deregister(&mut stream.stream) {
+            set_error(error);
+            return -1;
+        }
+        stream.reactor = 0;
+        ready.push_back(ReactorReady {
+            token,
+            readiness: readiness(event),
+            // SAFETY: SDL's monotonic clock is process-global and requires no
+            // initialization before it can be read.
+            ready_ns: unsafe { SDL_GetTicksNS() },
+        });
+    }
+    c_int::try_from(ready.len()).unwrap_or(c_int::MAX)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsNetReactorNext(
+    reactor: *mut TecsNetReactor,
+    token: *mut u32,
+    readiness: *mut u32,
+    ready_ns: *mut u64,
+) -> c_int {
+    if reactor.is_null() || token.is_null() || readiness.is_null() || ready_ns.is_null() {
+        set_error("network reactor or output is null");
+        return -1;
+    }
+    // SAFETY: The caller supplies a live reactor and writable outputs.
+    let reactor = unsafe { &mut *reactor };
+    let Some(event) = reactor.ready.pop_front() else {
+        return 0;
+    };
+    unsafe {
+        *token = event.token;
+        *readiness = event.readiness;
+        *ready_ns = event.ready_ns;
+    }
+    1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsNetReactorDestroy(reactor: *mut TecsNetReactor) {
+    if reactor.is_null() {
+        return;
+    }
+    // SAFETY: The caller transfers the one owned reactor.
+    let mut reactor = unsafe { Box::from_raw(reactor) };
+    let registrations = std::mem::take(&mut reactor.registrations);
+    for (_, stream) in registrations {
+        // SAFETY: Registered streams coordinate destruction through their
+        // reactor field and therefore remain live here.
+        let stream = unsafe { &mut *stream };
+        let _ = reactor.poll.registry().deregister(&mut stream.stream);
+        stream.reactor = 0;
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn tecsNetListen(
     address: *const TecsNetAddress,
     port: u16,
@@ -518,6 +763,13 @@ pub unsafe extern "C" fn tecsNetStreamWait(stream: *mut TecsNetStream, timeout_m
 #[no_mangle]
 pub unsafe extern "C" fn tecsNetStreamDestroy(stream: *mut TecsNetStream) {
     if !stream.is_null() {
+        // SAFETY: A watched stream and its reactor point at each other until
+        // one of their destroy paths removes the registration.
+        let stream_ref = unsafe { &mut *stream };
+        if stream_ref.reactor != 0 {
+            let reactor = stream_ref.reactor as *mut TecsNetReactor;
+            let _ = unsafe { unwatch(&mut *reactor, stream_ref) };
+        }
         // SAFETY: The caller transfers one owned stream.
         drop(unsafe { Box::from_raw(stream) });
     }

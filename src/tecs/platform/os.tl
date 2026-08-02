@@ -66,7 +66,8 @@ local loader <const> = require("tecs.ffi.loader")
 local adapter <const> = require("tecs.platform.adapter")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local shaderpack <const> = require("tecs.gpu.shaderpack")
-local Future <const> = require("tecs.Future")
+local Future <const> = require("tecs.internal.completion")
+local task <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
 local buffer <const> = require("tecs.io.buffer")
 local type coretypes = require("tecs.types")
@@ -632,29 +633,33 @@ local function trackDialog(handle: loader.CPtr): Future<DialogResult>
     return future
 end
 
+local function awaitDialog(pending: Future<DialogResult>): DialogResult
+    return task.awaitCompletion(pending, "native dialog")
+end
+
 --- Opens a native file picker.
-function platformOS.openFile(options?: DialogOptions): Future<DialogResult>
+function platformOS.openFile(options?: DialogOptions): DialogResult
     local given = options or {} as DialogOptions
     local names, patterns, count = filterArrays(given)
     local window = given.window ~= nil and given.window.handle or nil
-    return trackDialog(
-        D.tecsDialogOpenFile(window, names, patterns, count, given.defaultLocation, given.multiple == true)
+    return awaitDialog(
+        trackDialog(D.tecsDialogOpenFile(window, names, patterns, count, given.defaultLocation, given.multiple == true))
     )
 end
 
 --- Opens a native save-file picker. Returns at most one path.
-function platformOS.saveFile(options?: DialogOptions): Future<DialogResult>
+function platformOS.saveFile(options?: DialogOptions): DialogResult
     local given = options or {} as DialogOptions
     local names, patterns, count = filterArrays(given)
     local window = given.window ~= nil and given.window.handle or nil
-    return trackDialog(D.tecsDialogSaveFile(window, names, patterns, count, given.defaultLocation))
+    return awaitDialog(trackDialog(D.tecsDialogSaveFile(window, names, patterns, count, given.defaultLocation)))
 end
 
 --- Opens a native folder picker.
-function platformOS.openFolder(options?: DialogOptions): Future<DialogResult>
+function platformOS.openFolder(options?: DialogOptions): DialogResult
     local given = options or {} as DialogOptions
     local window = given.window ~= nil and given.window.handle or nil
-    return trackDialog(D.tecsDialogOpenFolder(window, given.defaultLocation, given.multiple == true))
+    return awaitDialog(trackDialog(D.tecsDialogOpenFolder(window, given.defaultLocation, given.multiple == true)))
 end
 
 --- Settles file and folder dialogs that have answered.

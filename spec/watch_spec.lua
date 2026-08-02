@@ -292,10 +292,9 @@ describe("the file watcher", function()
         -- Neither of these will decode, which is beside the point: what is
         -- being asserted is that asking for a path as an image is what makes
         -- it an image here.
-        assets.loadImage(dir .. "art.png")
-        assets.loadSound(dir .. "voice.wav", "auto", 10000)
+        assert.is_false(pcall(assets.loadImage, dir .. "art.png"))
+        assert.is_false(pcall(assets.loadSound, dir .. "voice.wav", "auto", 10000))
         files.read(dir .. "level.json")
-        assets.waitAll(500)
 
         watcher.install({ root = dir })
         local kinds = {}
@@ -326,7 +325,7 @@ describe("the file watcher", function()
         write(dir .. "level.json", "{}")
         write(dir .. "specwatchfont.ttf", source)
         files.read(dir .. "level.json")
-        text.newTTF({ source = dir .. "specwatchfont.ttf" }):wait()
+        text.newTTF({ source = dir .. "specwatchfont.ttf" })
 
         watcher.install({ root = dir })
         local kinds = {}

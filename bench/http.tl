@@ -11,8 +11,9 @@
 ---     cargo xtask bench http
 ---
 --- `BENCH_HTTP_BYTES`, `BENCH_HTTP_WARMUP`, and `BENCH_HTTP_SAMPLES` control
---- payload size and sample counts. `BENCH_HTTP_FORCE_FAILURE=1` verifies that
---- a guarded application error makes the benchmark process fail after cleanup.
+--- payload size and sample counts. Every request runs through the coroutine
+--- completion path. `BENCH_HTTP_FORCE_FAILURE=1` verifies
+--- that a guarded application error makes the benchmark process fail after cleanup.
 --- No external service or network is used.
 
 local floor <const> = math.floor
@@ -40,8 +41,9 @@ local tecs <const> = require("tecs")
 local ffi <const> = require("ffi")
 local time <const> = require("tecs.platform.time")
 local buffer <const> = require("tecs.io.buffer")
-local type Future = require("tecs.Future")
 local type iotypes = require("tecs.io.types")
+local type tasks = require("tecs.internal.taskruntime")
+local task <const> = require("tecs.internal.taskruntime")
 
 local tecsIO <const> = tecs.io
 local http <const> = tecs.io.http
@@ -52,6 +54,7 @@ local BYTES <const> = floor(tonumber(getenv("BENCH_HTTP_BYTES")) or (4 * 1024 * 
 local WARMUP <const> = floor(tonumber(getenv("BENCH_HTTP_WARMUP")) or 20)
 local SAMPLES <const> = floor(tonumber(getenv("BENCH_HTTP_SAMPLES")) or 100)
 local FORCE_FAILURE <const> = getenv("BENCH_HTTP_FORCE_FAILURE") == "1"
+local COMPLETION <const> = "coroutine"
 local READ_CHUNK <const> = 64 * 1024
 
 if BYTES < 1 then
@@ -340,7 +343,8 @@ uploadFile:close()
 
 local mode = 1
 local iteration = 0
-local pending: Future<tecs.io.http.Response> = nil
+local pendingTask: tasks.Task<tecs.io.http.Response> = nil
+local scheduler <const> = task.newScheduler()
 local started = 0.0
 local expectedServerHash = crc32("")
 local sink: BufferSink = nil
@@ -374,7 +378,19 @@ local function begin()
         expectedServerHash = crc32("")
     end
     started = time.now()
-    pending = client:send(request)
+    pendingTask = scheduler:spawnImmediate(function(): tecs.io.http.Response return client:send(request) end)
+end
+
+local function completionStatus(): string
+    return pendingTask.status
+end
+
+local function completionError(): string
+    return pendingTask.error
+end
+
+local function completionResponse(): tecs.io.http.Response
+    return pendingTask.value
 end
 
 local benchmarkFailure: string = nil
@@ -407,20 +423,25 @@ return tecs.newApplication({
             run = function()
                 local advanced <const>, advanceFailure = protect(function()
                     pollServer(server, MODES[mode]:match("^download") ~= nil and PAYLOAD_RESPONSE or EMPTY_RESPONSE)
-                    if pending.status == "pending" then
+                    if pendingTask.status == "pending" then
+                        scheduler:step()
+                    end
+                    local status <const> = completionStatus()
+                    if status == "pending" then
                         return
                     end
                     local elapsed <const> = (time.now() - started) * 1000.0
-                    if pending.status ~= "ready" then
-                        error(pending.error, 0)
+                    if status ~= "ready" then
+                        error(completionError(), 0)
                     end
+                    local response <const> = completionResponse()
                     local name <const> = MODES[mode]
                     local serverHash <const> = validateRequest(server)
                     if serverHash ~= expectedServerHash then
                         error(("tecs: %s upload hash mismatch"):format(name), 0)
                     end
                     if name == "download-buffer" then
-                        local body <const> = (pending.value.body as ReadableStream):readAll()
+                        local body <const> = (response.body as ReadableStream):readAll()
                         if crc32(body) ~= PAYLOAD_HASH then
                             error("tecs: default Buffer download hash mismatch", 0)
                         end
@@ -469,6 +490,7 @@ return tecs.newApplication({
                     end
                 end
                 if benchmarkFailure == nil then
+                    print("completion: " .. COMPLETION)
                     print("mode                 p50 ms   p95 ms   MiB/s")
                     for index = 1, #results do
                         local result <const> = results[index]

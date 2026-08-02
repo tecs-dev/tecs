@@ -1,26 +1,27 @@
 --[=[
 Reads bytes and decodes images and sounds on a worker.
 
-Each load returns a [`Future`](tealdoc:tecs.Future) immediately:
+Loads return their values directly. Inside a system dispatched by
+`world:update`, a worker decode transparently suspends the logical update:
 
 ```teal no-format
 return tecs.newApplication({
     plugin = function(world: tecs.World, app: tecs.Application)
-        tecs.assets.loadImage(
-            tecs.io.files.assetPath("sprites/hero.png")
-        )
-            :map(function(image: tecs.assets.Image): tecs.gfx.Sprite
-                return app.renderer.sprites:registerImage(image)
-            end)
-            :onSettle(function(sprite: tecs.Future<tecs.gfx.Sprite>)
-                if sprite.status == "ready" then
-                    world:spawn(
-                        tecs.Transform2D(100, 100),
-                        sprite.value,
-                        tecs.gfx.Renderable2D()
-                    )
-                end
-            end)
+        world:addSystem({
+            name = "game.SpawnHero",
+            phase = tecs.ecs.phases.Startup,
+            run = function()
+                local image <const> = tecs.assets.loadImage(
+                    tecs.io.files.assetPath("sprites/hero.png")
+                )
+                local sprite <const> = app.renderer.sprites:registerImage(image)
+                world:spawn(
+                    tecs.Transform2D(100, 100),
+                    sprite,
+                    tecs.gfx.Renderable2D()
+                )
+            end,
+        })
     end,
 })
 ```
@@ -52,17 +53,15 @@ glTF images remain decoded RGBA8.
 
 [`Application`](tealdoc:tecs.Application) installs and shuts down the process-wide worker, and
 [`runtime.poll`](/modules/runtime/#tecs.runtime.poll) updates it. Headless code
-must call `install`, pump with `tecs.runtime.poll` or wait with `waitAll`, then
-call `shutdown`. Drain wanted results before shutdown because in-flight
-futures otherwise remain pending.
+must call `install` before loading and `shutdown` afterwards. A load outside a
+world update blocks and pumps its worker until the value or failure arrives.
 
-Cancel a pending future to release one caller's interest. Release a ready
-payload when its consumer takes ownership. The final release frees the decoded
-memory.
+Release a payload after its consumer takes ownership. The final release frees
+the decoded memory.
 
-Overlapping image loads for one path share a decode. Each caller receives its
-own future and a hold on the same image. A later load after settlement decodes
-again. Sound loads never share.
+Overlapping image loads for one path share a decode and receive holds on the
+same image. A later load after settlement decodes again. Sound loads never
+share.
 
 `loadString` reads a complete file into a binary-safe string without
 interpreting it. Image loads accept PNG, JPEG and static SVG. SVG renders at
@@ -73,8 +72,7 @@ formats linked into the current build. Sound mode `"resident"` decodes the
 complete clip, `"stream"` opens a source for each voice, and `"auto"` chooses
 from the duration threshold.
 
-Use `Future.all` to join independent loads. Release each ready payload after
-its consumer takes ownership.
+Release each payload after its consumer takes ownership.
 ]=]
 
 local ffi <const> = require("ffi")
@@ -83,9 +81,16 @@ local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local workers <const> = require("tecs.workers")
 local content <const> = require("tecs.platform.content")
-local Future <const> = require("tecs.Future")
+local Future <const> = require("tecs.internal.completion")
+local task <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
 local meshlayout <const> = require("tecs.gpu.meshlayout")
+
+local record FutureOperations
+    _subscribe: function(future: Future<any>, listener: function(Future<any>)): function()
+end
+
+local futureOperations <const> = Future as FutureOperations
 
 local runtimePoll: function(): integer
 local function pollRuntime(): integer
@@ -231,8 +236,8 @@ end
 --- Represents decoded pixels or an imported compressed mip chain and the
 --- caller's hold on them.
 ---
---- What a `loadImage` future settles to. Reference counts govern the pixels rather than
---- owned outright, because two loads of one path that overlap share a decode:
+--- What `loadImage` returns. Reference counts govern the pixels rather than
+--- owning them outright, because two overlapping loads share a decode:
 --- each caller holds the same [`Image`](tealdoc:tecs.assets.Image), and the last caller to release it
 --- one that frees. Reading `pixels` after that is reading freed memory, which
 --- is why a released image reads nil there rather than looking uploadable.
@@ -283,9 +288,8 @@ local record Image
     _bytes: string
 
     --- Engine-owned. Counts callers holding these pixels. Ordinary game code
-    --- should ignore this field. The count includes one per load of the path whose
-    --- future actually settled, so a caller that canceled before settlement is
-    --- not counted and one that joined an in-flight decode is.
+    --- should ignore this field. The count includes one per completed load of
+    --- the path.
     _refs: integer
 
     --- Gives up this caller's hold on the pixels, and frees at the last.
@@ -301,7 +305,7 @@ end
 
 --- Represents a loaded clip and the caller's hold on it.
 ---
---- What a `loadSound` future settles to. Two overlapping loads of one path do
+--- What `loadSound` returns. Two overlapping loads of one path do
 --- not share, unlike images, so a [`Sound`](tealdoc:tecs.assets.Sound)
 --- normally has one holder; the count is
 --- here so that releasing twice frees once rather than twice.
@@ -693,8 +697,9 @@ local record assets
     --- model containing alpha blending requires a mesh domain created with
     --- `transparency = true`.
     --- @param path The caller supplies a `.gltf` or `.glb` asset path.
-    --- @return Returns a pending future that owns its ready model.
-    loadGLTF: function(path: string): Future<Model>
+    --- @return Returns the decoded model. The call suspends its system while
+    ---     the worker runs, or blocks when called outside a world update.
+    loadGLTF: function(path: string): Model
 
     --- Reports whether the loading worker is running.
     ---
@@ -1499,24 +1504,31 @@ local function claim(image: Image): Image
     return image
 end
 
---- Queues an image for loading and answers a future for it immediately.
----
---- Two loads of one path that overlap share a decode, because decoding the same
---- PNG twice at once duplicates work without producing another result.
---- They share the [`Image`](tealdoc:tecs.assets.Image), so the last caller to release it
---- one that frees, and each of them holds a future of its own, so one canceling
---- is invisible to the others. A load that starts after the first has settled
---- decodes again: nothing here is a cache.
----
---- @param path The caller supplies a PNG, JPEG or static SVG path. The loader
----     renders SVG at its intrinsic width and height, uses bundled JetBrains
----     Mono for text, and ignores external image references. Another format
----     fails during decoding.
---- @return A pending future, never nil. Raises instead when `install` has not run.
----     Failures reach it as a failed settlement, not through this call: a missing file
----     is a future that fails once the worker has looked. Canceling it gives up this
----     caller's interest in the decode, and the last caller to do so abandons it.
-function assets.loadImage(path: string): Future<Image>
+local function awaitRoot<T>(root: Future<T>, operation: string): T
+    if not task.active() then
+        root:wait()
+        if root.status == "ready" then
+            return root.value
+        end
+        if root.status == "failed" then
+            error(("tecs: %s failed: %s"):format(operation, root.error or "failed"), 3)
+        end
+        error(("tecs: %s was canceled: %s"):format(operation, root.error or "canceled"), 3)
+    end
+    local settled <const> = task.awaitCallback(function(resume: function(Future<T>)): function()
+        return futureOperations._subscribe(root as Future<any>, resume as function(Future<any>))
+    end)
+    if settled.status == "ready" then
+        return settled.value
+    end
+    if settled.status == "failed" then
+        error(("tecs: %s failed: %s"):format(operation, settled.error or "failed"), 3)
+    end
+    error(("tecs: %s was canceled: %s"):format(operation, settled.error or "canceled"), 3)
+end
+
+--- Returns the one root settlement shared by overlapping image consumers.
+local function imageRoot(path: string): Future<any>
     content.note(path, "image")
     local shared = imagesInFlight[path]
     if shared == nil then
@@ -1525,27 +1537,68 @@ function assets.loadImage(path: string): Future<Image>
         worker:send({id = id, kind = "image", path = path})
         shared = root
     end
-    -- Derived rather than the root itself. Two callers holding one object would
-    -- make "the future the caller holds" ambiguous as a map key, which three
-    -- subsystems in this tree already use it as, and would leave this module
-    -- with no way to count how many of them survived to settlement.
-    return shared:map(claim) as Future<Image>
+    return shared
 end
 
---- Queues a complete file read and answers a future for its bytes immediately.
+-- Internal callback view of one image load. This is the operation boundary the
+-- Task prototype consumes directly: it adds one interest to the shared root,
+-- reports one terminal outcome, and returns the matching cancellation action.
+-- This private subscription is how a suspended system observes the shared
+-- decode without allocating another completion object.
+local function subscribeImage(
+    path: string, listener: function(status: string, image: Image, reason: string)
+): function()
+    if type(listener) ~= "function" then
+        error("tecs: image subscription needs a listener", 3)
+    end
+    local shared <const> = imageRoot(path)
+    return futureOperations._subscribe(
+        shared,
+        function(settled: Future<any>)
+            if settled.status == "ready" then
+                listener("ready", claim(settled.value as Image), nil)
+            else
+                listener(settled.status, nil, settled.error)
+            end
+        end
+    )
+end
+
+-- Kept outside the typed public module record. Engine internals may adapt the
+-- callback operation directly while the supported surface stays value-based.
+(assets as {string: any})._subscribeImage = subscribeImage
+
+--- Loads an image and returns its decoded pixels.
+---
+--- Two loads of one path that overlap share a decode, because decoding the same
+--- PNG twice at once duplicates work without producing another result.
+--- They share the [`Image`](tealdoc:tecs.assets.Image), so the last caller to
+--- release it frees the pixels. A load that starts after the first has settled
+--- decodes again: nothing here is a cache.
+---
+--- @param path The caller supplies a PNG, JPEG or static SVG path. The loader
+---     renders SVG at its intrinsic width and height, uses bundled JetBrains
+---     Mono for text, and ignores external image references. Another format
+---     fails during decoding.
+--- @return Returns the decoded image. Inside a system, the call suspends only
+---     while its decode is pending. A missing file or decode failure raises.
+function assets.loadImage(path: string): Image
+    return claim(awaitRoot(imageRoot(path), "image load") as Image)
+end
+
+--- Reads a complete file and returns its bytes.
 ---
 --- The returned string preserves embedded NUL bytes. Overlapping reads of one
---- path share the worker task while each caller receives its own future, so one
---- caller may cancel without affecting another. A later read after settlement
---- reads the file again.
+--- path share the worker task. A later read after settlement reads the file
+--- again.
 ---
 --- @param path The caller supplies an absolute path or one from
 ---     [`assetPath`](/modules/io/files/#tecs.io.files.assetPath).
 --- @param kind The caller supplies the content kind used by file watching, or
 ---     omits it to record a document.
---- @return Returns a pending [`Future`](tealdoc:tecs.Future). A missing or
----     unreadable file settles it as failed.
-function assets.loadString(path: string, kind?: string): Future<string>
+--- @return Returns the complete bytes. A missing or unreadable file raises
+---     after the worker reports the failure.
+function assets.loadString(path: string, kind?: string): string
     content.note(path, kind or "document")
     local shared = bytesInFlight[path]
     if shared == nil then
@@ -1554,18 +1607,18 @@ function assets.loadString(path: string, kind?: string): Future<string>
         worker:send({id = id, kind = "bytes", path = path})
         shared = root
     end
-    return shared:map(function(bytes: string): string return bytes end) as Future<string>
+    return awaitRoot(shared as Future<string>, "file load")
 end
 
-function assets.loadGLTF(path: string): Future<Model>
+function assets.loadGLTF(path: string): Model
     content.note(path, "model")
     local root, id = queue("model", path)
     root._watchers = 1
     worker:send({id = id, kind = "model", path = path})
-    return root as Future<Model>
+    return awaitRoot(root as Future<Model>, "model load")
 end
 
---- Queues a sound for loading and answers a future for it immediately.
+--- Loads a sound and returns its decoded or streaming payload.
 ---
 --- Whatever the mixer's decoders can read loads, so the format is the file's
 --- business rather than the caller's.
@@ -1578,20 +1631,18 @@ end
 --- in order ahead of every decode without a lock.
 ---
 --- Two overlapping loads of one path do not share, unlike images: each gets its
---- own clip, because that is what `MIX_LoadAudio` produces. So this answers the
---- root future rather than a link over one, and the
---- [`Sound`](tealdoc:tecs.assets.Sound) it settles to has
---- exactly one holder.
+--- own clip, because that is what `MIX_LoadAudio` produces. The returned
+--- [`Sound`](tealdoc:tecs.assets.Sound) has exactly one holder.
 ---
 --- @param mode "resident", "stream" or "auto". Any other value selects "stream".
 --- @param streamMs The boundary "auto" decides on, in milliseconds. Read only under
 ---     "auto", and a file whose length the container cannot state streams whatever it says.
---- @return A pending future, or a failed future when mixer initialization
----     fails. This is the only failure reported without waiting for the worker.
-function assets.loadSound(path: string, mode: string, streamMs: integer): Future<Sound>
+--- @return Returns the loaded sound. Mixer initialization or decode failure
+---     raises.
+function assets.loadSound(path: string, mode: string, streamMs: integer): Sound
     content.note(path, "sound")
     if not sdl3mixer.init() then
-        return Future.failed("cannot load " .. path)
+        error("tecs: cannot load " .. path, 2)
     end
     local root, id = queue("sound", path)
     -- The one caller is the watcher `Future.pending` counts, so this root is
@@ -1605,14 +1656,14 @@ function assets.loadSound(path: string, mode: string, streamMs: integer): Future
         mode = mode,
         streamMs = streamMs,
     })
-    return root as Future<Sound>
+    return awaitRoot(root as Future<Sound>, "sound load")
 end
 
 -------------------------------------------------------------------------------
 -- Draining
 -------------------------------------------------------------------------------
 
---- Takes finished loads and settles their futures. Call once per frame.
+--- Takes finished loads and resumes their waiting systems. Call once per frame.
 ---
 --- Polls, never blocks, and drains everything the worker has answered rather than one
 --- result. Nothing settles without this, so a game that stops calling it has loads that
@@ -1658,8 +1709,8 @@ end
 
 --- Stops the loading worker.
 ---
---- Blocks until the thread exits. This call drops loads still in flight and leaves their
---- futures pending forever, so drain with `waitAll` first when their results matter.
+--- Blocks until the thread exits. This call cancels loads still in flight, so
+--- drain with `waitAll` first when their results matter.
 --- Releasing an [`Image`](tealdoc:tecs.assets.Image) or a
 --- [`Sound`](tealdoc:tecs.assets.Sound) that already settled still works afterwards; this
 --- frees nothing.

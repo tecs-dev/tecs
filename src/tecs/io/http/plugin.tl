@@ -1,10 +1,11 @@
 --[=[
 A request as an entity, for a world that would rather spawn one.
 
-`Client:send` answers a future, which is the right shape for a loading
-screen and the wrong one for a game that wants the request to be a thing in
-the world: something the debug server can list, something a system can
-react to, something that dies when the entity that asked for it does.
+`Client:send` suspends the calling system, which is the right shape for one
+ordered request and the wrong one for a game that wants the request itself to
+be a thing in the world: something the debug server can list, something a
+system can react to, something that dies when the entity that asked for it
+does.
 
     world:addPlugin(tecs.io.http.plugin.install)
 
@@ -13,8 +14,8 @@ react to, something that dies when the entity that asked for it does.
     })
 
 Some frames later the entity carries a `Response` instead, and a system
-with `include = {http.Response}` sees it. Nothing polls a future, and the
-request is inspectable the whole way through because it is a component.
+with `include = {http.Response}` sees it. The request is inspectable the whole
+way through because it is a component.
 
 ## Boundaries
 
@@ -57,7 +58,6 @@ is work for no one.
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
 local storekeys <const> = require("tecs.internal.storekeys")
-local Future <const> = require("tecs.Future")
 local client <const> = require("tecs.io.http.client")
 local URI <const> = require("tecs.io.URI")
 local stream <const> = require("tecs.io.stream")
@@ -130,11 +130,10 @@ local record plugin
     --- On an entity whose request is in flight. Internal, and the reason a
     --- request is sent once rather than every frame.
     ---
-    --- A marker, and the future it stands for is not a field on it: a future
-    --- holds listeners and the source that settles them, so nothing a save
-    --- writes can carry one. Transient for the same reason, which is what makes
-    --- a save taken mid-request coherent: the `Request` survives, this does not,
-    --- and the load sends it again.
+    --- A marker, while the callback and transfer state remain in the plugin.
+    --- It is transient because runtime transport state cannot be saved. A save
+    --- taken mid-request keeps the `Request`, drops this marker, and sends the
+    --- request again after loading.
     record Pending is Component
     end
 
@@ -269,14 +268,26 @@ local CLIENT <const> = storekeys.newKey("tecs.http.client", nil as Client)
 
 local installed <const>: {World: boolean} = setmetatable({}, {__mode = "k"} as metatable<{World: boolean}>)
 
---- The future each in-flight request waits on, keyed by entity.
+--- The callback result each in-flight request waits on, keyed by entity.
 ---
---- Here rather than on `Pending`, because a future is not data: it holds
---- listeners and the source that settles them, and a snapshot writer that
---- reached one walks a cyclic graph of runtime state rather than refusing it.
+--- Here rather than on `Pending`, because a transfer callback is runtime state
+--- rather than component data.
 --- One of these is built per install and captured by the plugin's system and
 --- observers, so it lives exactly as long as the world does.
-local type Waiting = {integer: Future<client.Response>}
+local record Wait
+    status: string
+    response: client.Response
+    reason: string
+    cancel: function()
+end
+
+local record ClientOperations
+    _subscribe: function(
+        self: ClientOperations, request: client.Request, listener: function(string, client.Response, string)
+    ): function()
+end
+
+local type Waiting = {integer: Wait}
 
 function plugin.clientOf(world: World): Client
     return world.resources[CLIENT]
@@ -292,7 +303,7 @@ function plugin.close(world: World)
 end
 
 --- Starts every request that has been spawned and not yet sent.
-local function start(world: World, owned: Client, unsent: types.Query, futures: Waiting)
+local function start(world: World, owned: Client, unsent: types.Query, waiting: Waiting)
     for archetype, length, entities in unsent:iter() do
         local requests <const> = archetype:get(plugin.Request) as {Request}
         for row = 1, length do
@@ -301,11 +312,18 @@ local function start(world: World, owned: Client, unsent: types.Query, futures: 
             -- A malformed request raises rather than settling, and raising out
             -- of a system would take the frame with it. So it becomes the
             -- response it would have become anyway.
-            local ok <const>, result = pcall(owned.send, owned, request as client.Request) as (boolean, any)
-            if ok then
-                futures[entity] = result as Future<client.Response>
-                world:set(entity, plugin.Pending)
-            else
+            local wait: Wait = {status = "pending", response = nil, reason = nil, cancel = nil}
+            local ok <const>, result = pcall(function(): function()
+                return (owned as ClientOperations):_subscribe(
+                    request as client.Request,
+                    function(status: string, response: client.Response, reason: string)
+                        wait.status = status
+                        wait.response = response
+                        wait.reason = reason
+                    end
+                )
+            end) as (boolean, any)
+            if not ok then
                 world:set(
                     entity,
                     plugin.Response({
@@ -317,26 +335,30 @@ local function start(world: World, owned: Client, unsent: types.Query, futures: 
                     })
                 )
                 world:remove(entity, plugin.Request)
+            else
+                wait.cancel = result as function()
+                waiting[entity] = wait
+                world:set(entity, plugin.Pending)
             end
         end
     end
 end
 
---- Turns every settled future into a `Response`.
-local function finish(world: World, inFlight: types.Query, futures: Waiting)
+--- Turns every completed transfer into a `Response`.
+local function finish(world: World, inFlight: types.Query, waiting: Waiting)
     for _, length, entities in inFlight:iter() do
         for row = 1, length do
             local entity <const> = entities[row] as integer
-            local future <const> = futures[entity]
-            if future == nil then
+            local wait <const> = waiting[entity]
+            if wait == nil then
                 -- A marker with no transfer behind it, which is what a hand-set
                 -- `Pending` is. Dropping it puts the `Request` back in front of
                 -- `start` rather than leaving the entity waiting on nothing.
                 world:remove(entity, plugin.Pending)
-            elseif future.status ~= "pending" then
+            elseif wait.status ~= "pending" then
                 local settled: Response
-                if future.status == "ready" then
-                    local answer <const> = future.value
+                if wait.status == "ready" then
+                    local answer <const> = wait.response
                     settled = plugin.Response({
                         status = answer.status,
                         headers = answer.headers,
@@ -350,10 +372,10 @@ local function finish(world: World, inFlight: types.Query, futures: Waiting)
                         headers = {},
                         body = stream.newEmptyStream(),
                         url = request ~= nil and request.url or nil,
-                        error = future.error,
+                        error = wait.reason,
                     })
                 end
-                futures[entity] = nil
+                waiting[entity] = nil
                 world:set(entity, settled)
                 world:remove(entity, plugin.Pending)
                 world:remove(entity, plugin.Request)
@@ -371,7 +393,7 @@ function plugin.install(world: World, options?: Options)
     local owned <const> = client.newClient(options)
     world.resources[CLIENT] = owned
 
-    local futures <const>: Waiting = {}
+    local waiting <const>: Waiting = {}
 
     local unsent <const> = world:newQuery({
         name = "tecs.http.Unsent",
@@ -391,20 +413,20 @@ function plugin.install(world: World, options?: Options)
     world:addSystem({
         name = "tecs.http.Drive",
         phase = ecs.phases.First,
-        run = function() start(world, owned, unsent, futures); finish(world, inFlight, futures) end,
+        run = function() start(world, owned, unsent, waiting); finish(world, inFlight, waiting) end,
     })
 
     -- An entity that asked for something and then died wanted the answer, and
     -- nothing is left to give it to. Canceling is reference counted, so this
-    -- stops the transfer only if nothing else is waiting on the same future.
+    -- stops the transfer represented by this entity.
     world:observe(
         0,
         ecs.OnDespawn,
         function(event: ecs.OnDespawn)
-            local future <const> = futures[event.entity]
-            if future ~= nil then
-                futures[event.entity] = nil
-                future:cancel()
+            local wait <const> = waiting[event.entity]
+            if wait ~= nil then
+                waiting[event.entity] = nil
+                wait.cancel()
             end
         end
     )
@@ -412,15 +434,15 @@ function plugin.install(world: World, options?: Options)
     -- A load replaces the world in place rather than despawning what was in it,
     -- so the observer above never hears about the requesters it removed. The
     -- entities that were going to read those responses are gone, and `Pending`
-    -- is transient so nothing is left to drive the futures to a `Response`
+    -- is transient so nothing is left to drive the transfers to a `Response`
     -- either: the transfers stop here or they run for nobody.
     world:observe(
         0,
         ecs.FinishSnapshotLoad,
         function(_event: ecs.FinishSnapshotLoad)
-            for entity, future in pairs(futures) do
-                futures[entity] = nil
-                future:cancel()
+            for entity, wait in pairs(waiting) do
+                waiting[entity] = nil
+                wait.cancel()
             end
         end
     )

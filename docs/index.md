@@ -294,7 +294,6 @@ Inside one of those, one level and no deeper:
 On `tecs` itself, because no one module owns them:
 
 - [`tecs.Application`](/modules/Application) - the object an entry file returns, and what the host drives
-- [`tecs.Future`](/modules/Future) - a value that settles once
 - [`tecs.newApplication`](/modules/Application) - builds the application an entry file returns
 - [`tecs.scoped`](/modules/#tecs.scoped) - closes explicitly owned resources when one callback ends
 - [`tecs.Transform2D`](/modules/ecs/builtins#transform) - where an entity is, and the one component every subsystem moves

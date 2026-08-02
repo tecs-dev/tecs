@@ -1379,6 +1379,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30d65c71f1ce40ab09135ce117d742b9f8a19ff91a41a8b57ed50bc2de59c427"
 dependencies = [
  "libc",
+ "log",
  "wasi",
  "windows-sys 0.61.2",
 ]
@@ -2459,6 +2460,7 @@ dependencies = [
  "flate2",
  "image",
  "libc",
+ "mio",
  "path-clean",
  "pathdiff",
  "rapier2d",

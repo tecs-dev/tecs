@@ -23,7 +23,6 @@ local ecs <const> = require("tecs.ecs")
 -- that declares them loads, so a plain `require("tecs")` would demand a
 -- graphics stack from a test, a server or a tool that only wanted the ECS.
 local type Application = require("tecs.Application")
-local type Future = require("tecs.Future")
 local type scopeModule = require("tecs.scope")
 local type audio = require("tecs.audio")
 local type Renderer = require("tecs.Renderer")
@@ -319,12 +318,11 @@ local record gfx
     --- Needs `textPlugin` installed on the world.
     Text: text.Text
 
-    --- Starts loading a TrueType or OpenType source font with SDL_ttf.
+    --- Loads a TrueType or OpenType source font with SDL_ttf.
     --- @param options The caller supplies a source path and may select the
     ---     raster point size and snapshot identity.
-    --- @return A future that settles with an immutable font after its source
-    ---     bytes have been read and opened.
-    newTTF: function(options: text.TTFOptions): Future<text.Font>
+    --- @return An immutable font after its source bytes have been read and opened.
+    newTTF: function(options: text.TTFOptions): text.Font
 
     --- Extent of a `Text` in world units, laid out the way the system lays it
     --- out and without touching any entity.
@@ -401,13 +399,6 @@ local record tecs
     --- What `newApplication` takes. Named here so a game can annotate the
     --- table it passes without reaching through the class for it.
     type ApplicationConfig = Application.Config
-
-    --- A value that settles once, and the combinators over it.
-    ---
-    --- At the root because every subsystem that answers later returns one:
-    --- an asset decode, a child process, an HTTP transfer and a DNS lookup are
-    --- all `Future<T>`, and no one of them owns the type.
-    Future: Future
 
     --- `Scope` owns explicitly registered resources for one lexical lifetime.
     type Scope = scopeModule.Scope
@@ -548,7 +539,6 @@ end
 --- own record type it.
 local SURFACE <const>: {string: Namespace} = {
     Application = {module = "tecs.Application"},
-    Future = {module = "tecs.Future"},
     newApplication = {module = "tecs.Application", member = "newApplication"},
     scoped = {module = "tecs.scope", member = "scoped"},
     assets = {module = "tecs.assets"},

@@ -5,6 +5,8 @@
 ---
 ---   string  `TCPSocket:write` and `TCPSocket:read`.
 ---   buffer  `TCPSocket:writeFrom` and `TCPSocket:readInto`.
+---   task    The same Buffer calls through two persistent Tasks and the
+---           native one-shot readiness reactor.
 ---
 --- The Buffer row allocates its source and destination once, reserves the
 --- destination once, and reuses both through warmup and measured samples.
@@ -12,10 +14,11 @@
 --- only the intermediate Lua string. The string fixture is also reused, while
 --- each `read` necessarily returns a new Lua string.
 ---
---- Each chunk is queued, fully drained from the local send queue, and fully
---- consumed by the peer before the next chunk starts. This keeps the workload
---- independent of socket-buffer size and leaves no bytes for the next sample.
---- Hashing runs before measured samples and is never inside their window.
+--- The synchronous rows queue, fully drain, and consume each chunk before the
+--- next one. The Task row keeps one writer and one reader active for the full
+--- operation, which lets the native reactor pipeline them without blocking
+--- the Lua thread. Every row leaves no bytes for the next sample. Hashing runs
+--- before measured samples and is never inside their window.
 ---
 --- Clean latency and Lua allocation share one pass with collection stopped.
 --- The clock starts after the before-heap reading and stops before the
@@ -35,8 +38,8 @@
 ---   BENCH_TCP_SAMPLES     Measured operations per row. Defaults to 600.
 ---   BENCH_TCP_TIMEOUT_MS  Maximum wait for one drain, read, or setup step.
 ---                         Defaults to 2000.
----   BENCH_TCP_CASES       Comma-separated `string` and `buffer`. Defaults to
----                         both.
+---   BENCH_TCP_CASES       Comma-separated `string`, `buffer`, and `task`.
+---                         Defaults to all three.
 ---   BENCH_TCP_VALIDATE    Set to 1 for correctness only, with no timings.
 ---
 --- The xtask runs this benchmark under system LuaJIT without a window, GPU, or
@@ -65,12 +68,16 @@ local tecs <const> = require("tecs")
 local sdl <const> = require("tecs.ffi.sdl3")
 local type binaryIO = require("tecs.io")
 local type iotypes = require("tecs.io.types")
+local type tasks = require("tecs.internal.taskruntime")
+local task <const> = require("tecs.internal.taskruntime")
+local tasknet <const> = require("tecs.internal.tasknet")
 
 local C <const> = sdl.C
 local ioModule <const> = tecs.io
 local data <const> = tecs.data
 local time <const> = tecs.platform.time
 local now <const> = time.now
+local ticksNanoseconds <const> = time.ticksNanoseconds
 
 local type IOBuffer = iotypes.Buffer
 local type TCPSocket = binaryIO.TCPSocket
@@ -85,6 +92,7 @@ local MAX_CHUNK <const> = 64 * 1024
 local CASE_NAMES <const>: {string: boolean} = {
     ["string"] = true,
     ["buffer"] = true,
+    ["task"] = true,
 }
 
 local function integerEnvironment(name: string, default: integer): integer
@@ -188,20 +196,11 @@ local function listen(): binaryIO.TCPListener, integer
 end
 
 local function resolved(): binaryIO.Address
-    local future <const> = ioModule.resolve("127.0.0.1")
-    future:wait(TIMEOUT_MS)
-    if future.status ~= "ready" then
-        error("bench: loopback resolution failed: " .. (future.error or future.status), 0)
-    end
-    return future.value
+    return ioModule.resolve("127.0.0.1")
 end
 
 local function connected(address: binaryIO.Address, server: binaryIO.TCPListener, port: integer): TCPSocket, TCPSocket
-    local future <const> = ioModule.connect(address, port)
-    future:wait(TIMEOUT_MS)
-    if future.status ~= "ready" then
-        error("bench: loopback connection failed: " .. (future.error or future.status), 0)
-    end
+    local socket <const> = ioModule.connect(address, port)
     local ready <const>, waitReason = server:wait(TIMEOUT_MS)
     if not ready then
         error("bench: loopback accept timed out: " .. (waitReason or "timeout"), 0)
@@ -210,7 +209,7 @@ local function connected(address: binaryIO.Address, server: binaryIO.TCPListener
     if peer == nil then
         error("bench: loopback accept failed: " .. (acceptReason or "no connection"), 0)
     end
-    return future.value, peer
+    return socket, peer
 end
 
 local function drain(connection: TCPSocket)
@@ -334,6 +333,9 @@ local function run()
     local peer: TCPSocket
     local sourceBuffer: IOBuffer
     local destinationBuffer: IOBuffer
+    local latencySource: IOBuffer
+    local latencyDestination: IOBuffer
+    local reactor: tasknet.Reactor
 
     local ran <const>, failure = pcall(function()
         if not C.SDL_Init(0) then
@@ -357,6 +359,46 @@ local function run()
         sourceBuffer = ioModule.newBuffer(chunk)
         destinationBuffer = ioModule.newBuffer()
         destinationBuffer:ensureCapacity(CHUNK)
+        latencySource = ioModule.newBuffer("x")
+        latencyDestination = ioModule.newBuffer()
+        latencyDestination:ensureCapacity(1)
+        reactor = assert(tasknet.newReactor())
+        local asyncClient <const> = reactor:wrap(client)
+        local asyncPeer <const> = reactor:wrap(peer)
+
+        local function taskTransfer(pieces?: {string}): integer
+            return tasknet.run(
+                reactor,
+                function(scope: tasks.Scope): integer
+                    local writing <const> = scope:spawn(function()
+                        for _ = 1, CHUNKS do
+                            local queued <const>, writeReason = asyncClient:writeFrom(sourceBuffer)
+                            if queued == nil then
+                                error("bench: loopback task write failed: " .. (writeReason or "unknown"), 0)
+                            end
+                            if queued ~= CHUNK then
+                                error(format("bench: loopback task queued %d of %d bytes", queued, CHUNK), 0)
+                            end
+                        end
+                    end)
+                    local total = 0
+                    while total < BYTES_PER_OPERATION do
+                        destinationBuffer:clear()
+                        local read <const>, readReason = asyncPeer:readInto(destinationBuffer, 0, CHUNK)
+                        if read == nil then
+                            error("bench: loopback task read failed: " .. (readReason or "unknown"), 0)
+                        end
+                        total = total + read
+                        if pieces ~= nil then
+                            pieces[#pieces + 1] = destinationBuffer:getString()
+                        end
+                    end
+                    writing:join()
+                    return total
+                end,
+                TIMEOUT_MS
+            )
+        end
 
         local cases <const>: {Case} = {
             {
@@ -422,6 +464,16 @@ local function run()
                 end,
                 visibleCapacity = sourceBuffer:capacity() + destinationBuffer:capacity(),
             },
+            {
+                label = "task",
+                validate = function(): string
+                    local pieces: {string} = {}
+                    taskTransfer(pieces)
+                    return concat(pieces)
+                end,
+                operation = taskTransfer,
+                visibleCapacity = sourceBuffer:capacity() + destinationBuffer:capacity(),
+            },
         }
 
         if VALIDATE then
@@ -474,10 +526,57 @@ local function run()
                     expectedHash
                 )
             )
+        elseif SELECTED_CASES["task"] then
+            local dispatch: {number} = {}
+            local function dispatchOnce(): number
+                return tasknet.run(
+                    reactor,
+                    function(scope: tasks.Scope): number
+                        local writing <const> = scope:spawn(function()
+                            task.yield()
+                            local queued <const>, reason = asyncClient:writeFrom(latencySource)
+                            if queued ~= 1 then
+                                error("bench: task latency write failed: " .. (reason or tostring(queued)), 0)
+                            end
+                        end)
+                        latencyDestination:clear()
+                        local read <const>, reason = asyncPeer:readInto(latencyDestination, 0, 1)
+                        if read ~= 1 then
+                            error("bench: task latency read failed: " .. (reason or tostring(read)), 0)
+                        end
+                        writing:join()
+                        return ticksNanoseconds() - asyncPeer:lastReadyNs()
+                    end,
+                    TIMEOUT_MS
+                )
+            end
+            for _ = 1, WARMUP do
+                dispatchOnce()
+            end
+            for sample = 1, SAMPLES do
+                dispatch[sample] = dispatchOnce()
+            end
+            sort(dispatch)
+            print(
+                format(
+                    "task reactor dispatch: p50 %.3f us, p95 %.3f us (native poll return to resumed coroutine)",
+                    percentile(dispatch, 0.50) / 1000.0,
+                    percentile(dispatch, 0.95) / 1000.0
+                )
+            )
         end
     end) as (boolean, any)
 
     collect("restart")
+    if reactor ~= nil then
+        reactor:close()
+    end
+    if latencySource ~= nil and not latencySource:isReleased() then
+        latencySource:close()
+    end
+    if latencyDestination ~= nil and not latencyDestination:isReleased() then
+        latencyDestination:close()
+    end
     if sourceBuffer ~= nil and not sourceBuffer:isReleased() then
         sourceBuffer:close()
     end

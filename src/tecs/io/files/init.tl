@@ -25,9 +25,9 @@ end
 ```
 
 Filesystem outcomes return a status and a platform reason. Invalid arguments
-raise because they indicate a defect in the calling program. Operations are
-synchronous except `writeAtomicAsync`, whose worker-backed future is advanced
-by `tecs.runtime.poll`. `glob` exposes a caller-owned pull stream so recursive
+raise because they indicate a defect in the calling program. An atomic write
+inside a system moves its commit to a worker and suspends the system until the
+result is ready. `glob` exposes a caller-owned pull stream so recursive
 enumeration does not retain a complete tree. Temporary files,
 temporary directories, and streams are [`Closeable`](tealdoc:tecs.Closeable)
 and fit directly in `tecs.scoped`.
@@ -53,7 +53,8 @@ local loader <const> = require("tecs.ffi.loader")
 local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
 local workers <const> = require("tecs.workers")
-local Future <const> = require("tecs.Future")
+local Future <const> = require("tecs.internal.completion")
+local taskruntime <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
 local type types = require("tecs.io.types")
 local type Closeable = require("tecs.types").Closeable
@@ -1304,7 +1305,7 @@ end
 ---     synchronous call and are not copied or closed.
 --- @return Returns whether the platform confirmed the atomic durable write.
 --- @return Returns the platform or unsupported reason when the first return is false.
-function files.writeAtomic(path: PathInput, bytes: ByteInput): boolean, string
+local function writeAtomicSync(path: PathInput, bytes: ByteInput): boolean, string
     local rendered <const> = required(path, "writeAtomic")
     if bytes == nil then
         error("tecs: io.files.writeAtomic needs bytes to write", 2)
@@ -1328,28 +1329,11 @@ function files.writeAtomic(path: PathInput, bytes: ByteInput): boolean, string
     return backend.writeAtomic(rendered, bytes)
 end
 
---- Durably and atomically writes a complete file on a worker.
----
---- The returned [`Future`](tealdoc:tecs.Future) becomes ready with true after
---- the same commit performed by `writeAtomic`, or fails with its platform
---- reason. The call copies a buffer or byte view before returning, so the
---- caller may mutate or close it immediately. String bytes cross the worker
---- channel by value as well. `tecs.runtime.poll` advances the future each
---- frame; `Future:wait` advances it in headless code.
----
---- Canceling the future stops interest in its result but cannot safely
---- interrupt a filesystem commit already in progress. The shared worker exits
---- automatically after its last queued result is drained. A non-SDL storage
---- backend receives a failed future because a separate worker state cannot
---- inherit the main state's installed Lua backend.
----
---- @param path The caller supplies the destination file.
---- @param bytes The caller supplies the complete binary contents.
---- @return Returns a future which becomes ready with true or fails.
-function files.writeAtomicAsync(path: PathInput, bytes: ByteInput): Future<boolean>
-    local rendered <const> = required(path, "writeAtomicAsync")
+--- Starts the worker half of an atomic write for a suspended system.
+local function writeAtomicFuture(path: PathInput, bytes: ByteInput): Future<boolean>
+    local rendered <const> = required(path, "writeAtomic")
     if bytes == nil then
-        error("tecs: io.files.writeAtomicAsync needs bytes to write", 2)
+        error("tecs: io.files.writeAtomic needs bytes to write", 2)
     end
     local copied: string
     if type(bytes) == "string" then
@@ -1363,7 +1347,7 @@ function files.writeAtomicAsync(path: PathInput, bytes: ByteInput): Future<boole
             or type(dynamic.isReleased) ~= "function"
             or (dynamic.isReleased as function(any): boolean)(bytes)
         then
-            error("tecs: io.files.writeAtomicAsync needs a byte string or open io.Buffer or io.ByteView", 2)
+            error("tecs: io.files.writeAtomic needs a byte string or open io.Buffer or io.ByteView", 2)
         end
         local input <const> = bytes as ByteView
         copied = loader.toBytes(input:getFFIPointer() as loader.CValue, input:length())
@@ -1385,6 +1369,31 @@ function files.writeAtomicAsync(path: PathInput, bytes: ByteInput): Future<boole
     atomicPending = atomicPending + 1
     atomicWorker:send({id = id, path = rendered, bytes = copied})
     return future
+end
+
+--- Durably and atomically writes a complete file.
+---
+--- Inside a system on the SDL storage backend, the copy and commit run on a
+--- worker and suspend the logical world update. Outside a world update, the
+--- same call completes synchronously. Buffers and views are copied before a
+--- suspended write begins.
+---
+--- @param path The caller supplies the destination file.
+--- @param bytes The caller supplies the complete binary contents.
+--- @return Returns whether the platform confirmed the atomic durable write.
+--- @return Returns the platform or unsupported reason when the first return is false.
+function files.writeAtomic(path: PathInput, bytes: ByteInput): boolean, string
+    if not taskruntime.active() then
+        return writeAtomicSync(path, bytes)
+    end
+    local pending <const> = writeAtomicFuture(path, bytes)
+    local ok <const>, result = pcall(
+        taskruntime.awaitCompletion, pending as Future<boolean>, "atomic write"
+    ) as (boolean, any)
+    if not ok then
+        return false, tostring(result)
+    end
+    return result as boolean, nil
 end
 
 --- Opens a file through one seekable cursor.

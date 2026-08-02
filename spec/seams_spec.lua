@@ -233,6 +233,7 @@ local REACH = {
             "tecs/data/init.lua",
             "tecs/io/mcp/transport.lua",
             "tecs/io/init.lua",
+            "tecs/internal/tasknet.lua",
             "tecs/math/noise.lua",
             "tecs/regex.lua",
             "tecs/ui.lua",

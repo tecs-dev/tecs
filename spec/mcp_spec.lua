@@ -259,13 +259,10 @@ describe("mcp over a socket", function()
     end)
 
     local function connect()
-        local resolved = tecsIO.resolve("127.0.0.1"):wait(2000)
-        assert.are.equal("ready", resolved.status, resolved.error)
-        local address = resolved.value
-        local connected = tecsIO.connect(address, PORT):wait(2000)
+        local address = tecsIO.resolve("127.0.0.1")
+        local connected = tecsIO.connect(address, PORT)
         address:close()
-        assert.are.equal("ready", connected.status, connected.error)
-        return connected.value
+        return connected
     end
 
     local function request(body, extraHeaders, pollTool)

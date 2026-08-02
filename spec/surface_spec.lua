@@ -310,9 +310,8 @@ describe("the public surface", function()
             assert.are.equal(require("tecs.Application").newApplication, tecs.newApplication)
         end)
 
-        it("carries the two classes that belong to no subsystem", function()
+        it("carries the application class that belongs to no subsystem", function()
             assert.is_true(rawequal(tecs.Application, require("tecs.Application")))
-            assert.is_true(rawequal(tecs.Future, require("tecs.Future")))
         end)
 
         it("exposes generic event construction", function()

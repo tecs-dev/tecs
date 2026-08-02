@@ -1,5 +1,5 @@
 --[=[
-A value that settles once, and the combinators over it.
+Internal one-shot completion state used by native and worker producers.
 
 Assets, child processes, and HTTP requests return
 [`Future`](tealdoc:tecs.Future)`<T>`. Compose their
@@ -824,6 +824,40 @@ local function unlisten(upstream: Future<any>, at: integer)
     -- measures, so a hole costs nothing and moving them would cost correctness.
     upstream._listeners[at] = nil
 end
+
+-- Internal allocation-free consumer view. The operation retains one shared
+-- root Future, while a Task or another engine adapter owns only this listener
+-- and its cancellation function. Cancellation detaches the closure before it
+-- releases the root interest, so abandoned native work cannot retain a dead
+-- Task until its eventual result arrives.
+local function subscribeInternal(future: Future<any>, listener: function(Future<any>)): function()
+    if future == nil or type(listener) ~= "function" then
+        error("tecs: Future subscription needs a future and listener", 3)
+    end
+    future._watchers = future._watchers + 1
+    local active = true
+    local at: integer
+    at = listen(
+        future,
+        function(settled: Future<any>)
+            if not active then
+                return
+            end
+            active = false
+            listener(settled)
+        end
+    )
+    return function()
+        if not active then
+            return
+        end
+        active = false
+        unlisten(future, at)
+        future:cancel()
+    end
+end
+
+(Future as {string: any})._subscribe = subscribeInternal
 
 function Future:cancel()
     if self.status ~= "pending" then

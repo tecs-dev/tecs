@@ -35,13 +35,13 @@ local function uiExamplePlugin(world: tecs.World, app: tecs.Application)
                 name = "example-heading-24",
                 size = 24,
                 raster = "alpha",
-            }):wait().value
+            })
             local font <const> = tecs.gfx.newTTF({
                 source = "fonts/JetBrainsMono-ExtraBold.ttf",
                 name = "example-ui-16",
                 size = 16,
                 raster = "alpha",
-            }):wait().value
+            })
             local root <const> = world:spawn(
                 ui.Style({
                     width = "100%",

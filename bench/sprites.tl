@@ -400,12 +400,7 @@ return tecs.newApplication({
         if not assets.installed() then
             assets.install()
         end
-        local decoding <const> = assets.loadImage(files.assetPath(ATLAS))
-        assets.waitAll()
-        if decoding.status ~= "ready" then
-            error(("tecs: cannot load '%s': %s"):format(ATLAS, decoding.error or decoding.status))
-        end
-        local decoded <const> = decoding.value
+        local decoded <const> = assets.loadImage(files.assetPath(ATLAS))
         local imageWidth <const> = decoded.width
         local imageHeight <const> = decoded.height
         resident = renderer.sprites:registerImage(decoded)

@@ -1,22 +1,23 @@
 --[=[
-The process-wide pump for asynchronous work that settles on the Lua thread.
+The process-wide pump for asynchronous work that resumes on the Lua thread.
 
 An [`Application`](tealdoc:tecs.Application) calls `poll` once per host
 iteration. A headless program calls the same function from its own loop:
 
 ```teal no-format
-tecs.scoped(function(scope)
-    local client <const> = scope:own(tecs.io.http.newClient())
-    local request <const> = client:send({
-        url = assert(tecs.io.URI.new("https://example.com/data")),
-    })
-
-    while request.status == "pending" do
-        tecs.runtime.poll()
-    end
-
-    print(request.value.status)
-end)
+local world <const> = tecs.ecs.newWorld()
+world:addSystem({
+    name = "FetchData",
+    run = function()
+        tecs.scoped(function(scope)
+            local client <const> = scope:own(tecs.io.http.newClient())
+            local response <const> = client:send({
+                url = assert(tecs.io.URI.new("https://example.com/data")),
+            })
+            print(response.status)
+        end)
+    end,
+})
 ```
 
 Each facility registers only while it has an active service or pending work.
@@ -30,17 +31,17 @@ The pump covers process-wide completion sources: process signals, asset loads,
 child processes, native dialogs, generic asynchronous I/O, open HTTP clients,
 and the installed content watcher. It deliberately has no `pending` operation. An installed file
 watcher and an idle reusable HTTP client remain active without work that can
-finish, so one process-wide count could not mean either "futures pending" or
-"safe to exit". Inspect the future or the facility-specific pending count.
+finish, so one process-wide count could not mean "safe to exit". Inspect the
+facility-specific pending count instead.
 
 The runtime does not turn synchronous readers and writers into asynchronous
 values and does not own application resources. It therefore has no `shutdown`
 operation either: MCP polls against a particular world, audio reaps a
 particular mixer, and resource owners must retain their own teardown order.
 
-Every future settled by `poll` settles on the Lua thread that called it, and
-its listeners run before `poll` returns. Call it from the application's main
-Lua state, not from a native callback or another OS thread.
+Every completion drained by `poll` resumes its suspended system on the Lua
+thread that called it. Call it from the application's main Lua state, not from
+a native callback or another OS thread.
 ]=]
 
 local record runtime
