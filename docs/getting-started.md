@@ -133,26 +133,22 @@ return tecs.newApplication({
         transparency = true,
     },
     plugin = function(world: tecs.World, app: tecs.Application)
-        tecs.assets.loadGLTF(
+        local loaded <const> = tecs.assets.loadGLTF(
             tecs.io.files.assetPath("models/glass.gltf")
-        ):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)
-            if loaded.status ~= "ready" then
-                error(loaded.error, 0)
-            end
-            local instance <const> = app.renderer.meshes
-                :registerModel(loaded.value)
-                :newInstance()
-            for _, primitive in ipairs(instance.primitives) do
-                world:spawn(
-                    primitive.transform,
-                    primitive.mesh,
-                    primitive.bounds,
-                    primitive.material,
-                    tecs.gfx.Tint(),
-                    tecs.gfx.Renderable3D()
-                )
-            end
-        end)
+        )
+        local instance <const> = app.renderer.meshes
+            :registerModel(loaded)
+            :newInstance()
+        for _, primitive in ipairs(instance.primitives) do
+            world:spawn(
+                primitive.transform,
+                primitive.mesh,
+                primitive.bounds,
+                primitive.material,
+                tecs.gfx.Tint(),
+                tecs.gfx.Renderable3D()
+            )
+        end
     end,
 })
 ```

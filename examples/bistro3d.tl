@@ -128,31 +128,25 @@ local function game(world: tecs.World, app: tecs.Application)
         end,
     })
 
-    tecs.assets.loadGLTF(tecs.io.files.assetPath("external/bistro/Bistro.tecs.gltf")):onSettle(function(
-        loaded: tecs.Future<tecs.assets.Model>
-    )
-        if loaded.status ~= "ready" then
-            error("bistro3d: fetch the scene first with `cargo xtask fetch bistro`: " .. loaded.error, 0)
-        end
-        local instance <const> = meshes:registerModel(loaded.value):newInstance()
-        for _, primitive in ipairs(instance.primitives) do
-            world:spawn(
-                primitive.transform,
-                primitive.mesh,
-                primitive.bounds,
-                primitive.material,
-                Tint(1, 1, 1, 1),
-                Renderable3D()
-            )
-        end
-        print(
-            ("bistro3d: loaded %d GPU-cullable chunks, %d vertices, %d indices, %d materials, and %d textures"):format(
-                #instance.primitives, meshes.vertexCount, meshes.indexCount, meshes.materialCount, meshes.textureCount
-            )
+    local loaded <const> = tecs.assets.loadGLTF(tecs.io.files.assetPath("external/bistro/Bistro.tecs.gltf"))
+    local instance <const> = meshes:registerModel(loaded):newInstance()
+    for _, primitive in ipairs(instance.primitives) do
+        world:spawn(
+            primitive.transform,
+            primitive.mesh,
+            primitive.bounds,
+            primitive.material,
+            Tint(1, 1, 1, 1),
+            Renderable3D()
         )
-        print("bistro3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
-        print("bistro3d: mouse wheel blends continuously between night and day")
-    end)
+    end
+    print(
+        ("bistro3d: loaded %d GPU-cullable chunks, %d vertices, %d indices, %d materials, and %d textures"):format(
+            #instance.primitives, meshes.vertexCount, meshes.indexCount, meshes.materialCount, meshes.textureCount
+        )
+    )
+    print("bistro3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
+    print("bistro3d: mouse wheel blends continuously between night and day")
 end
 
 return tecs.newApplication({
