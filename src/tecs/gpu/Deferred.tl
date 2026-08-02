@@ -32,6 +32,14 @@ Opaque and masked geometry sample them while filling the G-buffer; blended
 geometry samples them in forward. A renderer without that option keeps the
 original targets, shader variants, and pass list.
 
+Four optional passes run immediately after geometry when the mesh domain
+enables screen-space ambient occlusion. The first reconstructs opaque mesh
+positions from depth into a scaled R8 target, the next two edge-blur it, and a
+final multiply draw folds it into the G-buffer's authored ambient occlusion.
+That placement leaves direct light, sprites, transparent meshes, and the
+lighting shader family unchanged. A renderer without the option allocates no
+AO targets, sampler, uniforms, or pipelines.
+
 Composite and present are two passes rather than one because a pass writing
 the swapchain is the end of the frame: the swapchain texture belongs to the
 presenter once submitted, is not created with the sampled usage bit, and is
@@ -97,6 +105,7 @@ local PassGraph <const> = require("tecs.gpu.PassGraph")
 local Shader <const> = require("tecs.gpu.Shader")
 local Buffer <const> = require("tecs.gpu.Buffer")
 local GraphicsPipeline <const> = require("tecs.gpu.GraphicsPipeline")
+local Sampler <const> = require("tecs.gpu.Sampler")
 local Frame <const> = require("tecs.gpu.Frame")
 local ComputePipeline <const> = require("tecs.gpu.ComputePipeline")
 local ComputePass <const> = require("tecs.gpu.ComputePass")
@@ -141,6 +150,8 @@ local MESH_SHADOW_SCENE_FLOATS <const> = 32
 local MESH_PBR_FLOATS <const> = 20
 local MESH_PROBE_FLOATS <const> = 28
 local MESH_FOG_FLOATS <const> = 4
+local SSAO_FLOATS <const> = 40
+local SSAO_BYTES <const> = SSAO_FLOATS * 4
 
 --- Floats the block a shadow draw is placed from holds: a matrix and four
 --- parameters.
@@ -253,6 +264,38 @@ local record BloomOptions
     intensity: number
 end
 
+--- Controls screen-space ambient occlusion for opaque mesh surfaces.
+local record MeshSSAOOptions
+    --- Caller-writable at creation. Sets both AO target axes relative to the
+    --- frame and defaults to 0.5. It must be greater than zero and no more
+    --- than one.
+    scale: number
+    --- Caller-writable. Sets the world-space sampling radius and defaults to
+    --- one world unit. It must be positive.
+    radius: number
+    --- Caller-writable. Sets the world-space self-occlusion bias and defaults
+    --- to 0.025. It must be non-negative.
+    bias: number
+    --- Caller-writable. Scales detected occlusion and defaults to one. It must
+    --- be non-negative.
+    intensity: number
+    --- Caller-writable. Raises visibility to this positive contrast power and
+    --- defaults to 1.5.
+    power: number
+end
+
+--- Controls the runtime values of enabled mesh SSAO.
+local record MeshSSAOTuning
+    --- Caller-writable. Sets the world-space sampling radius.
+    radius: number
+    --- Caller-writable. Sets the world-space self-occlusion bias.
+    bias: number
+    --- Caller-writable. Scales detected occlusion.
+    intensity: number
+    --- Caller-writable. Raises visibility to this contrast power.
+    power: number
+end
+
 local record DeferredOptions
     --- Draws into the G-buffer. Writes location 0 for albedo, location 1 for a
     --- normal biased into unsigned range, location 2 for ORM, and location 3
@@ -333,6 +376,9 @@ local record DeferredOptions
     --- Engine-owned. Enables the mesh local-light shadow shader and binding
     --- contract. The mesh backend owns the atlas and matrix buffer.
     meshLocalShadows: boolean
+    --- Engine-owned. Enables optional opaque-mesh SSAO. Nil omits both
+    --- targets, all four passes, and their three pipelines.
+    meshSSAO: MeshSSAOOptions
     --- Engine-owned. Enables repeated view composition through shared
     --- intermediate targets.
     multiCamera: boolean
@@ -354,6 +400,8 @@ local record Deferred
     --- What turns shadows on, and the only place their numbers are described.
     ShadowOptions: ShadowOptions
     BloomOptions: BloomOptions
+    SSAOOptions: MeshSSAOOptions
+    SSAO: MeshSSAOTuning
     --- The occluder mask draw, which puts a caster's own silhouette into the
     --- mask every light marches against.
     MASK: integer
@@ -416,6 +464,15 @@ local record Deferred
     _meshLocalShadowMatrices: loader.CValue
     _meshLocalShadowBias: number
     _meshLocalShadowSoftness: number
+    _meshSSAO: boolean
+    _meshSSAOTuning: MeshSSAOTuning
+    _ssaoUniform: loader.CArray
+    _ssaoBlurUniform: loader.CArray
+    _ssaoTextures: {loader.CValue}
+    _ssaoSampler: Sampler
+    _ssaoPipeline: GraphicsPipeline
+    _ssaoBlurPipeline: GraphicsPipeline
+    _ssaoApplyPipeline: GraphicsPipeline
     _meshLightCapacity: integer
     _meshLightBuffer: Buffer
     _meshTileCounts: Buffer
@@ -744,9 +801,25 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     local meshProbe <const> = options.meshProbe == true
     local meshLights <const> = options.meshLightCapacity ~= nil
     local meshLocalShadows <const> = options.meshLocalShadows == true
+    local meshSSAO <const> = options.meshSSAO ~= nil
+    local ssaoOptions <const> = options.meshSSAO or {}
+    local ssaoScale <const> = ssaoOptions.scale or 0.5
+    local ssaoRadius <const> = ssaoOptions.radius or 1.0
+    local ssaoBias <const> = ssaoOptions.bias or 0.025
+    local ssaoIntensity <const> = ssaoOptions.intensity or 1.0
+    local ssaoPower <const> = ssaoOptions.power or 1.5
     local meshLightCapacity <const> = options.meshLightCapacity or 0
     if meshLights and (meshLightCapacity < 1 or meshLightCapacity ~= math.floor(meshLightCapacity)) then
         error("tecs: mesh light capacity must be a positive integer", 2)
+    end
+    if meshSSAO and not meshPBR then
+        error("tecs: mesh SSAO requires opaque mesh depth", 2)
+    end
+    if ssaoScale <= 0.0 or ssaoScale > 1.0 then
+        error("tecs: mesh SSAO scale must be greater than 0 and no more than 1", 2)
+    end
+    if ssaoRadius <= 0.0 or ssaoBias < 0.0 or ssaoIntensity < 0.0 or ssaoPower <= 0.0 then
+        error("tecs: mesh SSAO radius and power must be positive; bias and intensity must be non-negative", 2)
     end
     local multiCamera <const> = options.multiCamera == true
     local bloom <const> = options.bloom ~= nil
@@ -779,6 +852,19 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     if meshLocalShadows then
         self._meshLocalShadowTextures = {}
         self._meshLocalShadowBias, self._meshLocalShadowSoftness = 0.002, 1.0
+    end
+    self._meshSSAO = meshSSAO
+    if meshSSAO then
+        self._meshSSAOTuning = {
+            radius = ssaoRadius,
+            bias = ssaoBias,
+            intensity = ssaoIntensity,
+            power = ssaoPower,
+        }
+        self._ssaoUniform = loader.newArray("float[?]", SSAO_FLOATS)
+        self._ssaoBlurUniform = loader.newArray("float[4]")
+        self._ssaoTextures = {}
+        self._ssaoSampler = Sampler.create(device, {filter = Sampler.FILTER_LINEAR})
     end
     self._meshLightCapacity = meshLightCapacity
     self._meshCameraX, self._meshCameraY, self._meshCameraZ = 0.0, 0.0, 0.0
@@ -991,6 +1077,23 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         })
     end
 
+    if meshSSAO then
+        graph:target({
+            -- Compatibility surface: games may add passes around the AO lane,
+            -- so this externally typed target name does not follow internals.
+            name = "meshSSAO",
+            format = R8,
+            scale = ssaoScale,
+            clear = {r = 1, g = 1, b = 1, a = 1},
+        })
+        graph:target({
+            name = "meshSSAOTemp",
+            format = R8,
+            scale = ssaoScale,
+            clear = {r = 1, g = 1, b = 1, a = 1},
+        })
+    end
+
     if meshShadows then
         for cascade = 1, MESH_SHADOW_CASCADES do
             graph:target({
@@ -1071,6 +1174,13 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         self._bloomExtractPipeline = buildPipeline(device, "bloom.extract.frag", lightingFormat, "bloomExtract", nil)
         self._bloomBlurPipeline = buildPipeline(device, "bloom.blur.frag", lightingFormat, "bloomBlur", nil)
     end
+    if meshSSAO then
+        self._ssaoPipeline = buildPipeline(device, "mesh.ssao.frag", R8, "meshSSAO", nil)
+        self._ssaoBlurPipeline = buildPipeline(device, "mesh.ssao.blur.frag", R8, "meshSSAOBlur", nil)
+        self._ssaoApplyPipeline = buildPipeline(
+            device, "mesh.ssao.apply.frag", RGBA8, "meshSSAOApply", nil, GraphicsPipeline.BLEND_MULTIPLY
+        )
+    end
     self._compositePipeline = buildPipeline(
         device,
         "deferred.composite.frag",
@@ -1131,6 +1241,82 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
             end
         end,
     })
+
+    if meshSSAO then
+        graph:pass({
+            name = "meshSSAO",
+            inputs = {"normal", "depth"},
+            outputs = {"meshSSAO"},
+            execute = function(context: PassGraph.PassContext)
+                local ssaoTuning <const> = self._meshSSAOTuning
+                if
+                    ssaoTuning.radius <= 0.0
+                    or ssaoTuning.bias < 0.0
+                    or ssaoTuning.intensity < 0.0
+                    or ssaoTuning.power <= 0.0
+                then
+                    error(
+                        "tecs: mesh SSAO radius and power must be positive; bias and intensity must be non-negative", 2
+                    )
+                end
+                local uniform <const> = self._ssaoUniform
+                for lane = 0, 15 do
+                    uniform[lane] = self._meshViewProjection[lane]
+                    uniform[16 + lane] = self._inverseViewProjection[lane]
+                end
+                uniform[32], uniform[33], uniform[34], uniform[35] = ssaoTuning.radius,
+                    ssaoTuning.bias,
+                    ssaoTuning.intensity,
+                    ssaoTuning.power
+                uniform[36], uniform[37], uniform[38], uniform[39] = self._meshCameraX,
+                    self._meshCameraY,
+                    self._meshCameraZ,
+                    0.0
+                context.pass:bindPipeline(self._ssaoPipeline.handle)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, uniform, SSAO_BYTES)
+                context.pass:draw(3)
+            end,
+        })
+        graph:pass({
+            name = "meshSSAOBlurX",
+            inputs = {"meshSSAO", "depth", "normal"},
+            outputs = {"meshSSAOTemp"},
+            execute = function(context: PassGraph.PassContext)
+                local blur <const> = self._ssaoBlurUniform
+                blur[0], blur[1], blur[2], blur[3] = 1.0 / context.width, 0.0, 0.0, 0.0
+                context.pass:bindPipeline(self._ssaoBlurPipeline.handle)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, blur, 16)
+                context.pass:draw(3)
+            end,
+        })
+        graph:pass({
+            name = "meshSSAOBlurY",
+            inputs = {"meshSSAOTemp", "depth", "normal"},
+            outputs = {"meshSSAO"},
+            execute = function(context: PassGraph.PassContext)
+                local blur <const> = self._ssaoBlurUniform
+                blur[0], blur[1], blur[2], blur[3] = 0.0, 1.0 / context.height, 0.0, 0.0
+                context.pass:bindPipeline(self._ssaoBlurPipeline.handle)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, blur, 16)
+                context.pass:draw(3)
+            end,
+        })
+        graph:pass({
+            -- Multiplies only ORM red. The shader writes one into every other
+            -- channel and into non-mesh pixels, preserving material data and
+            -- the sprite lane without a lighting shader variant.
+            name = "meshSSAOApply",
+            inputs = {"meshSSAO", "normal"},
+            outputs = {"orm"},
+            clear = PassGraph.LOAD,
+            execute = function(context: PassGraph.PassContext)
+                context.pass:bindPipeline(self._ssaoApplyPipeline.handle)
+                self._ssaoTextures[1] = self.graph:texture("meshSSAO").handle
+                context.pass:bindTextures(0, self._ssaoTextures, self._ssaoSampler.handle)
+                context.pass:draw(3)
+            end,
+        })
+    end
 
     if shadows then
         graph:pass({
@@ -1619,6 +1805,9 @@ function Deferred:rebuildPipelines()
     local blur: GraphicsPipeline = nil
     local bloomExtract: GraphicsPipeline = nil
     local bloomBlur: GraphicsPipeline = nil
+    local ssao: GraphicsPipeline = nil
+    local ssaoBlur: GraphicsPipeline = nil
+    local ssaoApply: GraphicsPipeline = nil
     local bin: ComputePipeline = nil
     local meshBin: ComputePipeline = nil
     local built, reason = pcall(function(): string
@@ -1660,6 +1849,13 @@ function Deferred:rebuildPipelines()
         if self._bloom then
             bloomExtract = buildPipeline(device, "bloom.extract.frag", lightingFormat, "bloomExtract", nil)
             bloomBlur = buildPipeline(device, "bloom.blur.frag", lightingFormat, "bloomBlur", nil)
+        end
+        if self._meshSSAO then
+            ssao = buildPipeline(device, "mesh.ssao.frag", R8, "meshSSAO", nil)
+            ssaoBlur = buildPipeline(device, "mesh.ssao.blur.frag", R8, "meshSSAOBlur", nil)
+            ssaoApply = buildPipeline(
+                device, "mesh.ssao.apply.frag", RGBA8, "meshSSAOApply", nil, GraphicsPipeline.BLEND_MULTIPLY
+            )
         end
         composite = buildPipeline(
             device,
@@ -1705,6 +1901,11 @@ function Deferred:rebuildPipelines()
         if bloomBlur ~= nil then
             bloomBlur:destroy()
         end
+        if ssao ~= nil then
+            ssao:destroy()
+            ssaoBlur:destroy()
+            ssaoApply:destroy()
+        end
         if bin ~= nil then
             bin:destroy()
         end
@@ -1721,6 +1922,9 @@ function Deferred:rebuildPipelines()
     local oldBlur <const> = self._blurPipeline
     local oldBloomExtract <const> = self._bloomExtractPipeline
     local oldBloomBlur <const> = self._bloomBlurPipeline
+    local oldSSAO <const> = self._ssaoPipeline
+    local oldSSAOBlur <const> = self._ssaoBlurPipeline
+    local oldSSAOApply <const> = self._ssaoApplyPipeline
     local oldBin <const> = self._binPipeline
     local oldMeshBin <const> = self._meshBinPipeline
     self._lightingPipeline = lighting
@@ -1730,6 +1934,9 @@ function Deferred:rebuildPipelines()
     self._blurPipeline = blur
     self._bloomExtractPipeline = bloomExtract
     self._bloomBlurPipeline = bloomBlur
+    self._ssaoPipeline = ssao
+    self._ssaoBlurPipeline = ssaoBlur
+    self._ssaoApplyPipeline = ssaoApply
     self._binPipeline = bin
     self._meshBinPipeline = meshBin
     oldLighting:destroy()
@@ -1744,6 +1951,11 @@ function Deferred:rebuildPipelines()
     if oldBloomExtract ~= nil then
         oldBloomExtract:destroy()
         oldBloomBlur:destroy()
+    end
+    if oldSSAO ~= nil then
+        oldSSAO:destroy()
+        oldSSAOBlur:destroy()
+        oldSSAOApply:destroy()
     end
     oldBin:destroy()
     if oldMeshBin ~= nil then
@@ -1852,6 +2064,15 @@ function Deferred:setMeshLocalShadowBinding(
     self._meshLocalShadowSoftness = softness
     self._lightingBuffers[7] = matrices
     self._forwardBuffers[7] = matrices
+end
+
+--- Returns the retained runtime tuning for enabled mesh SSAO.
+--- @return Returns the caller-writable table owned by this pipeline.
+function Deferred:meshSSAOTuning(): MeshSSAOTuning
+    if not self._meshSSAO then
+        error("tecs: mesh SSAO is not enabled", 2)
+    end
+    return self._meshSSAOTuning
 end
 
 --- Flushes any pending light writes onto a frame's command buffer.
@@ -2054,6 +2275,12 @@ function Deferred:destroy()
     if self._bloom then
         self._bloomExtractPipeline:destroy()
         self._bloomBlurPipeline:destroy()
+    end
+    if self._meshSSAO then
+        self._ssaoSampler:destroy()
+        self._ssaoPipeline:destroy()
+        self._ssaoBlurPipeline:destroy()
+        self._ssaoApplyPipeline:destroy()
     end
     self._presentPipeline:destroy()
     if self._viewCompositePipeline ~= nil then

@@ -37,7 +37,7 @@ start a graphics stack.
   large-primitive chunking, and independently allocated transparent,
   double-sided, directional-shadow, point/spot-light, skeletal, morph-target,
   vertex-color, fog, ambient-probe, specular-environment, mipmapped-texture,
-  and BC3 texture lanes.
+  BC3 texture, and screen-space ambient-occlusion lanes.
 - Optional packed-HDR bloom at a caller-selected scale, composed before
   transparent meshes and the 2D forward lane so a mixed renderer can keep its
   HUD crisp.
@@ -99,6 +99,16 @@ packed-HDR targets and three fullscreen passes only when configured. Packed
 R11G11B10 keeps highlights above white at the same four bytes per pixel as the
 ordinary RGBA8 lighting target. None of the three changes the resources or
 shaders of a 2D-only renderer.
+
+Mesh screen-space ambient occlusion is another isolated branch. It
+reconstructs opaque positions from the existing depth and normal targets,
+writes and edge-blurs scaled R8 visibility, then multiplies only the authored
+ambient-occlusion channel before lighting. That reuses the existing PBR
+contract instead of adding SSAO branches or samplers to every lighting shader.
+Its sample rotation is anchored in world space so camera translation does not
+rotate the pattern across stationary geometry. Omitting `meshes.ssao` keeps its
+two targets, linear upsampling sampler, uniforms, and three pipelines absent.
+Sprites, transparent meshes, and direct light are not darkened by it.
 
 Mesh images follow that isolation rule too. Unpacked RGBA8 arrays can generate
 complete mip chains on the GPU. An explicitly selected BC3 array instead
@@ -175,7 +185,7 @@ cargo xtask fetch sponza       # Cache the pinned large lighting scene
 cargo xtask example sponza3d   # Run point and spot lights in Sponza
 cargo xtask fetch bistro       # Import the pinned large Bistro stress scene
 cargo xtask example bistro3d   # Run Bistro with probe and direct lighting
-cargo xtask bench meshshadows  # Measure directional and local mesh shadows
+cargo xtask bench meshshadows  # Measure mesh shadows, local lights, and SSAO
 cargo xtask bench meshskinning # Measure the optional mesh-skinning lane
 cargo xtask bench meshmorphing # Measure the optional mesh-morphing lane
 cargo xtask bench modelanimation  # Measure CPU pose and palette sampling

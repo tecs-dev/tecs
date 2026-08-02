@@ -79,12 +79,20 @@ local function game(world: tecs.World, app: tecs.Application)
     meshes.camera.far = 50
 
     local controller <const> = FlyCamera3D.new(app.input, meshes.camera, {moveSpeed = 5, sprintMultiplier = 4})
+    local ssaoIntensity <const> = meshes.ssao.intensity
     world:addSystem({
         name = "example.AnimatedFlyCamera",
         phase = tecs.ecs.phases.Update,
-        run = function(dt: number) controller:update(dt) end,
+        run = function(dt: number)
+            controller:update(dt)
+            if app.input:keyPressed("O") then
+                meshes.ssao.intensity = meshes.ssao.intensity > 0.0 and 0.0 or ssaoIntensity
+                print(("animated3d: SSAO %s"):format(meshes.ssao.intensity > 0.0 and "on" or "off"))
+            end
+        end,
     })
     print("animated3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
+    print("animated3d: O toggles half-resolution screen-space ambient occlusion")
 
     local floor, floorBounds = meshes:registerMesh(tecs.assets.newMesh({
         name = "example://animated-hero-floor",
@@ -216,6 +224,7 @@ return tecs.newApplication({
         skinning = {jointCapacity = 64},
         morphing = {vertexCapacity = 64, weightCapacity = 8},
         vertexColors = true,
+        ssao = {scale = 0.5, radius = 0.9, bias = 0.025, intensity = 1.15, power = 1.5},
         shadows = {
             scale = 1,
             distance = 12,

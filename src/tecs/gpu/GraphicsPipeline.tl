@@ -143,6 +143,9 @@ local record GraphicsPipeline
     BLEND_MIN: integer
     --- Keeps the larger source or target value per channel.
     BLEND_MAX: integer
+    --- Multiplies the target color by the source color while preserving
+    --- target alpha.
+    BLEND_MULTIPLY: integer
     --- Rejects every fragment in the depth test.
     COMPARE_NEVER: integer
     --- Keeps fragments with a smaller depth.
@@ -205,6 +208,7 @@ GraphicsPipeline.BLEND_ALPHA = 1
 GraphicsPipeline.BLEND_PREMULTIPLIED = 2
 GraphicsPipeline.BLEND_MIN = 3
 GraphicsPipeline.BLEND_MAX = 4
+GraphicsPipeline.BLEND_MULTIPLY = 5
 GraphicsPipeline.COMPARE_NEVER = tonumber(C.SDL_GPU_COMPAREOP_NEVER) as integer
 GraphicsPipeline.COMPARE_LESS = tonumber(C.SDL_GPU_COMPAREOP_LESS) as integer
 GraphicsPipeline.COMPARE_EQUAL = tonumber(C.SDL_GPU_COMPAREOP_EQUAL) as integer
@@ -224,6 +228,8 @@ GraphicsPipeline.COMPARE_ALWAYS = tonumber(C.SDL_GPU_COMPAREOP_ALWAYS) as intege
 local BLEND_FACTOR_SRC_ALPHA <const> = tonumber(C.SDL_GPU_BLENDFACTOR_SRC_ALPHA) as integer
 local BLEND_FACTOR_ONE_MINUS_SRC_ALPHA <const> = tonumber(C.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA) as integer
 local BLEND_FACTOR_ONE <const> = tonumber(C.SDL_GPU_BLENDFACTOR_ONE) as integer
+local BLEND_FACTOR_ZERO <const> = tonumber(C.SDL_GPU_BLENDFACTOR_ZERO) as integer
+local BLEND_FACTOR_SRC_COLOR <const> = tonumber(C.SDL_GPU_BLENDFACTOR_SRC_COLOR) as integer
 local BLEND_OP_ADD <const> = tonumber(C.SDL_GPU_BLENDOP_ADD) as integer
 local BLEND_OP_MIN <const> = tonumber(C.SDL_GPU_BLENDOP_MIN) as integer
 local BLEND_OP_MAX <const> = tonumber(C.SDL_GPU_BLENDOP_MAX) as integer
@@ -270,7 +276,7 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
         source = ALPHA_SOURCES[mode]
         if source == nil then
             extreme = EXTREME_OPS[mode]
-            if extreme == nil then
+            if extreme == nil and mode ~= GraphicsPipeline.BLEND_MULTIPLY then
                 error(("tecs: invalid blend mode %s"):format(tostring(mode)), 2)
             end
         end
@@ -295,6 +301,14 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
             blend.src_alpha_blendfactor = BLEND_FACTOR_ONE
             blend.dst_alpha_blendfactor = BLEND_FACTOR_ONE
             blend.alpha_blend_op = extreme
+        elseif mode == GraphicsPipeline.BLEND_MULTIPLY then
+            blend.enable_blend = true
+            blend.src_color_blendfactor = BLEND_FACTOR_ZERO
+            blend.dst_color_blendfactor = BLEND_FACTOR_SRC_COLOR
+            blend.color_blend_op = BLEND_OP_ADD
+            blend.src_alpha_blendfactor = BLEND_FACTOR_ZERO
+            blend.dst_alpha_blendfactor = BLEND_FACTOR_ONE
+            blend.alpha_blend_op = BLEND_OP_ADD
         else
             blend.enable_blend = true
             blend.src_color_blendfactor = source

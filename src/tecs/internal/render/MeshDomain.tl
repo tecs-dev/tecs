@@ -42,6 +42,10 @@ A domain created with `environment` owns a separate six-layer mipmapped image,
 adds roughness-dependent specular environment lighting, and can draw that image
 as the sky. Its six decoded RGBA8 faces are registered once after asynchronous
 loading. A domain without it allocates and binds none of those resources.
+A domain created with `ssao` reconstructs opaque positions from depth into a
+scaled single-channel target, edge-blurs it, and multiplies it into authored
+ambient occlusion. Its targets, sampler, uniforms, and three pipelines are
+absent otherwise, and its result never reaches transparent meshes or sprites.
 Mipmapped RGBA8 layers generate their chains on the GPU after upload. A domain
 using `TEXTURE_BC3` instead consumes complete chains prepared by the asset
 importer and keeps them compressed in GPU memory. This format is an explicit
@@ -391,6 +395,9 @@ local record MeshDomainOptions
     --- Caller-writable. Enables a six-face specular environment and optional
     --- skybox. Nil allocates no environment texture or sampler.
     environment: MeshEnvironmentOptions
+    --- Caller-writable. Enables half-resolution screen-space ambient
+    --- occlusion for opaque meshes. Nil allocates no AO targets or pipelines.
+    ssao: Deferred.SSAOOptions
 end
 
 local type RegisteredPrimitive = Model3D.Primitive
@@ -411,6 +418,8 @@ local interface MeshDomain is DomainStats
     type EnvironmentOptions = MeshEnvironmentOptions
     type Environment = MeshEnvironmentTuning
     type EnvironmentFaces = MeshEnvironmentFaces
+    type SSAOOptions = Deferred.SSAOOptions
+    type SSAO = Deferred.SSAO
     type RegisteredPrimitive = RegisteredPrimitive
     type Model3D = Model3D
 
@@ -494,6 +503,9 @@ local interface MeshDomain is DomainStats
     environmentSize: integer
     --- Read-only. Reports whether all six environment faces were uploaded.
     environmentReady: boolean
+    --- Caller-writable. Controls enabled screen-space ambient occlusion. Nil
+    --- while the domain omits `ssao`.
+    ssao: Deferred.SSAO
     --- Caller-writable. Controls the enabled directional light and shadow cascades.
     --- Nil while shadows are disabled.
     shadow: MeshShadowTuning
@@ -617,6 +629,8 @@ local record MeshDomainModule
     type EnvironmentOptions = MeshEnvironmentOptions
     type Environment = MeshEnvironmentTuning
     type EnvironmentFaces = MeshEnvironmentFaces
+    type SSAOOptions = Deferred.SSAOOptions
+    type SSAO = Deferred.SSAO
     type RegisteredPrimitive = RegisteredPrimitive
     type Model3D = Model3D
 
@@ -759,6 +773,7 @@ function MeshDomainModule._create(
             "mesh environment size", (options.environment as MeshEnvironmentOptions).size or DEFAULT_ENVIRONMENT_SIZE
         ) or 0
     self.environmentReady = false
+    self.ssao = options.ssao ~= nil and deferred:meshSSAOTuning() or nil
     if self.shadows then
         local shadow <const> = options.shadows or {}
         self.shadow = {

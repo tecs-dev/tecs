@@ -6,7 +6,8 @@
 --- `BENCH_MESH_SHADOWS=0` and `BENCH_MESH_SHADOWS=1` to isolate the optional
 --- directional cascades. Set `BENCH_MESH_LOCAL_LIGHTS=1` to add tiled point
 --- and spot lights, then `BENCH_MESH_LOCAL_SHADOWS=1` to add their atlas,
---- light-volume compaction, and shadow raster passes.
+--- light-volume compaction, and shadow raster passes. Set
+--- `BENCH_MESH_SSAO=1` to add scaled ambient-occlusion sampling and blur.
 
 local getenv <const> = os.getenv
 local floor <const> = math.floor
@@ -34,6 +35,7 @@ local FRAMES <const> = floor(tonumber(getenv("BENCH_FRAMES")) or 300)
 local SHADOWS <const> = getenv("BENCH_MESH_SHADOWS") ~= "0"
 local LOCAL_SHADOWS <const> = getenv("BENCH_MESH_LOCAL_SHADOWS") == "1"
 local LOCAL_LIGHTS <const> = getenv("BENCH_MESH_LOCAL_LIGHTS") == "1" or LOCAL_SHADOWS
+local SSAO <const> = getenv("BENCH_MESH_SSAO") == "1"
 local WIDTH <const> = 1280
 local HEIGHT <const> = 720
 
@@ -173,6 +175,7 @@ return tecs.newApplication({
                 capacity = 4,
                 shadows = LOCAL_SHADOWS and {capacity = 2, size = 256} or nil,
             } or nil,
+        ssao = SSAO and {scale = 0.5, radius = 1.0, bias = 0.025, intensity = 1.0, power = 1.5} or nil,
         shadows = SHADOWS
             and {
                 distance = 120,
@@ -208,12 +211,13 @@ return tecs.newApplication({
             run = function()
                 print(
                     (
-                        "mesh shadows directional=%s local-lights=%s local-shadows=%s: "
+                        "mesh visuals directional-shadows=%s local-lights=%s local-shadows=%s ssao=%s: "
                         .. "%d submitted instances after %d warmup frames"
                     ):format(
                         SHADOWS and "on" or "off",
                         LOCAL_LIGHTS and "on" or "off",
                         LOCAL_SHADOWS and "on" or "off",
+                        SSAO and "on" or "off",
                         app.renderer.meshes.count,
                         WARMUP
                     )

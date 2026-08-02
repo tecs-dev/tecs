@@ -164,7 +164,7 @@ The domain exposes registration methods, configuration, and residency counts;
 its GPU buffers belong to the internal backend and are not part of the game
 API.
 
-## Vertex colors, fog, bloom, and a 2D HUD
+## Vertex colors, fog, SSAO, bloom, and a 2D HUD
 
 Enable each expensive lane explicitly and keep the base 2D and rigid-mesh
 paths unchanged:
@@ -185,6 +185,13 @@ return tecs.newApplication({
             r = 0.12,
             g = 0.16,
             b = 0.24,
+        },
+        ssao = {
+            scale = 0.5,
+            radius = 0.9,
+            bias = 0.025,
+            intensity = 1.0,
+            power = 1.5,
         },
     },
     plugin = function(world: tecs.World, app: tecs.Application)
@@ -219,6 +226,19 @@ Fog is linear camera-distance fog and applies after both metallic-roughness
 and unlit material dispatch, in deferred and transparent mesh passes. Its
 runtime fields are available on `app.renderer.meshes.fog`. Omitting
 `meshes.fog` keeps the fog-free shaders and uniform path.
+
+SSAO reconstructs opaque mesh positions from depth and samples the surrounding
+world-space hemisphere. `scale` selects the two R8 target sizes and defaults to
+0.5. `radius` and `bias` are world units; `intensity` and `power` control the
+amount and contrast. Two edge-aware blur passes preserve depth and normal
+boundaries, and linear upsampling avoids block-sized transitions at the default
+half resolution. The result multiplies the material's authored occlusion before
+lighting, so it affects ambient and environment light but not direct light.
+Change the four runtime fields through `app.renderer.meshes.ssao`; changing
+`scale` requires recreating the renderer. Omitting `meshes.ssao` allocates no AO
+targets, sampler, uniforms, or pipelines. Transparent meshes and sprites remain
+outside this opaque G-buffer effect. Run `cargo xtask example animated3d` and
+press O to compare it on a CC0 animated character and floor.
 
 Bloom preserves resolved opaque highlights in packed HDR, extracts them into
 two scaled blur targets, and adds them before transparent meshes and sprites.

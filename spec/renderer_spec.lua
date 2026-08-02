@@ -643,6 +643,84 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    it("isolates mesh SSAO and darkens nearby opaque geometry", function()
+        local without = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = { capacity = 4, vertexCapacity = 16, indexCapacity = 24 },
+        })
+        assert.is_nil(without.meshes.ssao)
+        assert.is_nil(without.deferred.graph._targets.meshSSAO)
+        assert.is_nil(without.deferred._ssaoPipeline)
+        without:destroy()
+
+        assert.has_error(function()
+            Renderer.newRenderer(device.handle, FORMAT, {
+                sprites = false,
+                meshes = { ssao = { scale = 1.1 } },
+            })
+        end, "tecs: mesh SSAO scale must be greater than 0 and no more than 1")
+
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 1, 1, 1 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 32,
+                indexCapacity = 32,
+                ssao = { scale = 0.5, radius = 0.8, bias = 0.01, intensity = 2, power = 2 },
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local plane, planeBounds = renderer.meshes:registerMesh(planeMesh("spec://ssao-plane"))
+        local caster, casterBounds = renderer.meshes:registerMesh(triangleMesh("spec://ssao-caster"))
+        world:spawn(
+            tecs.Transform3D(),
+            plane,
+            planeBounds,
+            components.MeshMaterial(),
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.25, y = -0.25, z = 0.35, scaleX = 0.5, scaleY = 0.5 }),
+            caster,
+            casterBounds,
+            components.MeshMaterial(),
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+
+        local occluded = frameOnce(world, renderer)
+        renderer.meshes.ssao.intensity = 0
+        local unoccluded = frameOnce(world, renderer)
+        local changed, maximum = 0, 0
+        for y = 4, SIZE - 5 do
+            for x = 4, SIZE - 5 do
+                local before = screen:getPixel(unoccluded, x, y).r
+                local after = screen:getPixel(occluded, x, y).r
+                if before > 20 and before - after > 4 then
+                    changed = changed + 1
+                    maximum = math.max(maximum, before - after)
+                end
+            end
+        end
+        assert.is_true(changed > 8, "SSAO should darken a visible contact region")
+        assert.is_true(maximum > 15, "SSAO should produce a visible contrast change")
+        assert.is_not_nil(renderer.meshes.ssao)
+        assert.is_not_nil(renderer.deferred.graph._targets.meshSSAO)
+        assert.is_not_nil(renderer.deferred.graph._targets.meshSSAOTemp)
+        assert.is_not_nil(renderer.deferred._ssaoPipeline)
+        renderer:rebuildPipelines()
+
+        renderer.meshes.ssao.radius = 0
+        assert.has_error(function()
+            frameOnce(world, renderer)
+        end, "tecs: mesh SSAO radius and power must be positive; bias and intensity must be non-negative")
+        renderer:destroy()
+    end)
+
     it("keeps ambient probes out of ordinary mesh domains and shades opted-in PBR meshes", function()
         local without = Renderer.newRenderer(device.handle, FORMAT, {
             sprites = false,

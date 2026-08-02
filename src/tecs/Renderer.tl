@@ -187,6 +187,7 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
         meshLocalShadows = options.meshes ~= nil
             and options.meshes.lights ~= nil
             and options.meshes.lights.shadows ~= nil,
+        meshSSAO = options.meshes ~= nil and options.meshes.ssao or nil,
         bloom = options.bloom,
         multiCamera = self._multiCamera,
         geometry = noContribution,
