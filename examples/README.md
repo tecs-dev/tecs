@@ -74,7 +74,9 @@ source GLB is removed after a successful import, and running without the cache
 reports the fetch command before a window opens.
 
 The Bistro demo moves faster than Sponza to cover the exterior's larger
-authored scale. The controller is noclip by
-design, so neither scene adds render geometry to Rapier merely for navigation.
-Its title reports FPS and its bloom profile is tuned for the exterior's small
-emissive lamps and bright Cook-Torrance highlights.
+authored scale. The controller is noclip by design, so neither scene adds
+render geometry to Rapier merely for navigation. Scroll the mouse wheel up
+toward day or down toward night; ambient and probe light, the directional sun
+or moon, fog, and lamp intensity blend continuously. Its title reports FPS,
+and quarter-resolution packed-HDR bloom gives its lamps a wider glow while
+reducing the blur targets to one quarter of their former pixel count.

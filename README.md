@@ -37,8 +37,9 @@ start a graphics stack.
   large-primitive chunking, and independently allocated transparent,
   double-sided, directional-shadow, point/spot-light, skeletal, morph-target,
   vertex-color, fog, ambient-probe, mipmapped-texture, and BC3 texture lanes.
-- Optional half-resolution bloom composed before transparent meshes and the
-  2D forward lane, so a mixed renderer can keep its HUD crisp.
+- Optional packed-HDR bloom at a caller-selected scale, composed before
+  transparent meshes and the 2D forward lane so a mixed renderer can keep its
+  HUD crisp.
 - Input, audio, physics, assets, workers, async I/O, HTTP, file watching, and
   a debug server.
 
@@ -67,7 +68,9 @@ the mesh domain opts in. Shadow culling reuses the ordered GPU compaction
 shape: off-camera casters inside the light volume remain, while instances
 outside that volume submit no geometry to the shadow raster pass. A surviving
 mesh still submits its complete resident index range; this is instance culling,
-not per-triangle culling inside one mesh.
+not per-triangle culling inside one mesh. The camera center snaps in light
+space to the map's texel grid so movement does not slide stationary shadows
+between samples.
 
 Mesh skinning follows the same isolation rule. Rigid meshes retain the fixed
 48-byte vertex and 64-byte instance records. `meshes.skinning` adds separate
@@ -90,8 +93,10 @@ Vertex colors follow the same rule. `meshes.vertexColors = true` adds one
 separate RGBA stream and matching geometry and shadow shader variants; rigid
 geometry keeps its 48-byte base stride. `meshes.fog` adds linear,
 camera-distance fog to mesh variants only. Top-level `bloom` adds two scaled
-targets and three fullscreen passes only when configured. None of the three
-changes the resources or shaders of a 2D-only renderer.
+packed-HDR targets and three fullscreen passes only when configured. Packed
+R11G11B10 keeps highlights above white at the same four bytes per pixel as the
+ordinary RGBA8 lighting target. None of the three changes the resources or
+shaders of a 2D-only renderer.
 
 Mesh images follow that isolation rule too. Unpacked RGBA8 arrays can generate
 complete mip chains on the GPU. An explicitly selected BC3 array instead

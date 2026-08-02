@@ -14,6 +14,8 @@ void main() {
     vec3 color = texture(sceneTexture, vUV).rgb;
     float brightness = max(max(color.r, color.g), color.b);
     float knee = max(bloom.tuning.y, 1e-4);
-    float contribution = smoothstep(bloom.tuning.x - knee, bloom.tuning.x + knee, brightness);
+    float soft = clamp(brightness - bloom.tuning.x + knee, 0.0, 2.0 * knee);
+    soft = soft * soft / (4.0 * knee + 1e-4);
+    float contribution = max(brightness - bloom.tuning.x, soft) / max(brightness, 1e-4);
     outColor = vec4(color * contribution * bloom.tuning.z, 1.0);
 }

@@ -17,8 +17,10 @@ A domain created with `doubleSided = true` classifies opaque and masked
 materials into a second compacted command lane and draws it through a cull-none
 pipeline. A domain without that option creates none of those resources.
 A domain created with `shadows` adds one camera-centered directional shadow
-map. Opaque and masked meshes cast; opaque, masked, and blended meshes receive.
-The map, its pipeline, and the lighting shader variant do not exist otherwise.
+map. Its light-space center snaps to shadow texels so camera translation does
+not slide the sampling grid under stationary geometry. Opaque and masked
+meshes cast; opaque, masked, and blended meshes receive. The map, its pipeline,
+and the lighting shader variant do not exist otherwise.
 A domain created with `skinning` adds separate vertex influence,
 per-instance palette-offset, and joint-matrix buffers plus skinned geometry and
 shadow shader variants. A rigid domain retains the original vertex and
@@ -612,6 +614,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
             transparency = self.transparency,
             doubleSided = self.doubleSided,
             shadows = self.shadow as MeshBackend.ShadowOptions,
+            shadowScale = options.shadows ~= nil and (options.shadows.scale or 1.0) or 1.0,
             skinning = self.skinning,
             jointCapacity = jointCapacity,
             morphing = self.morphing,

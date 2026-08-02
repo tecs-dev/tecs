@@ -626,7 +626,12 @@ describe("ecs.Renderer", function()
         assert.is_true(renderer.meshes.fogging)
         assert.is_not_nil(renderer.deferred.graph._targets.bloomA)
         assert.is_not_nil(renderer.deferred.graph._targets.bloomB)
+        assert.are.equal(tonumber(C.SDL_GPU_TEXTUREFORMAT_R11G11B10_UFLOAT), renderer.deferred.graph:formatOf("lit"))
+        assert.are.equal(tonumber(C.SDL_GPU_TEXTUREFORMAT_R11G11B10_UFLOAT), renderer.deferred.graph:formatOf("bloomA"))
         assert.is_not_nil(renderer.deferred._bloomExtractPipeline)
+        renderer:rebuildPipelines()
+        pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2 - 6, SIZE / 2 + 6)
+        assert.are.equal(255, pixel.g)
         renderer:destroy()
     end)
 
@@ -980,6 +985,39 @@ describe("ecs.Renderer", function()
                 meshes = { shadows = { scale = 0 } },
             })
         end, "tecs: mesh shadow scale must be greater than 0")
+    end)
+
+    it("keeps a camera-centered mesh shadow projection on its texel grid", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = {
+                capacity = 1,
+                vertexCapacity = 3,
+                indexCapacity = 3,
+                shadows = {
+                    scale = 0.5,
+                    distance = 4,
+                    directionX = 0,
+                    directionY = -1,
+                    directionZ = 0,
+                },
+            },
+        })
+        renderer:install(world)
+
+        frameOnce(world, renderer)
+        local first = renderer.meshes._backend._shadowUniform[13]
+        renderer.meshes.camera.x = 0.1
+        frameOnce(world, renderer)
+        local withinTexel = renderer.meshes._backend._shadowUniform[13]
+        renderer.meshes.camera.x = 0.2
+        frameOnce(world, renderer)
+        local nextTexel = renderer.meshes._backend._shadowUniform[13]
+
+        assert.are.equal(first, withinTexel)
+        assert.are_not.equal(first, nextTexel)
+        renderer:destroy()
     end)
 
     it("allocates alpha-aware shadow culling only for the combined lanes", function()

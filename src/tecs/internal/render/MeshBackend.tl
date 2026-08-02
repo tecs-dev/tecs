@@ -119,6 +119,7 @@ local record MeshBackendOptions
     transparency: boolean
     doubleSided: boolean
     shadows: MeshShadowOptions
+    shadowScale: number
     skinning: boolean
     jointCapacity: integer
     morphing: boolean
@@ -299,6 +300,7 @@ local record MeshBackend
     _shadowActive: boolean
     _doubleSidedActive: boolean
     _shadow: MeshShadowOptions
+    _shadowScale: number
     _shadowUniform: loader.CArray
 end
 
@@ -495,6 +497,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._shadowActive = false
     self._doubleSidedActive = false
     self._shadow = options.shadows
+    self._shadowScale = options.shadowScale or 1.0
     if self._shadows then
         self._shadowUniform = loader.newArray("float[?]", SHADOW_FLOATS)
     end
@@ -1104,7 +1107,7 @@ function MeshBackend:regionOf(asset: integer): MeshRegion
     return self._regionByAsset[asset]
 end
 
-local function writeShadowUniform(self: MeshBackend, packet: MeshFramePacket)
+local function writeShadowUniform(self: MeshBackend, packet: MeshFramePacket, frame: Frame)
     local shadow <const> = self._shadow
     local distance <const> = shadow.distance
     if distance <= 0.0 then
@@ -1140,6 +1143,17 @@ local function writeShadowUniform(self: MeshBackend, packet: MeshFramePacket)
     local vx, vy, vz = dy * rz - dz * ry, dz * rx - dx * rz, dx * ry - dy * rx
 
     local cx, cy, cz <const> = packet.cameraX, packet.cameraY, packet.cameraZ
+    local centerRight = rx * cx + ry * cy + rz * cz
+    local centerUp = vx * cx + vy * cy + vz * cz
+    local centerDepth = dx * cx + dy * cy + dz * cz
+    local shadowWidth <const> = math.max(1, math.floor(frame.width * self._shadowScale))
+    local shadowHeight <const> = math.max(1, math.floor(frame.height * self._shadowScale))
+    local texelRight <const> = distance * 2.0 / shadowWidth
+    local texelUp <const> = distance * 2.0 / shadowHeight
+    local texelDepth <const> = distance * 2.0 / 65535.0
+    centerRight = math.floor(centerRight / texelRight + 0.5) * texelRight
+    centerUp = math.floor(centerUp / texelUp + 0.5) * texelUp
+    centerDepth = math.floor(centerDepth / texelDepth + 0.5) * texelDepth
     local inverse <const> = 1.0 / distance
     local depthInverse <const> = 0.5 * inverse
     local uniform <const> = self._shadowUniform
@@ -1147,9 +1161,9 @@ local function writeShadowUniform(self: MeshBackend, packet: MeshFramePacket)
     uniform[1], uniform[5], uniform[9] = vx * inverse, vy * inverse, vz * inverse
     uniform[2], uniform[6], uniform[10] = dx * depthInverse, dy * depthInverse, dz * depthInverse
     uniform[3], uniform[7], uniform[11] = 0.0, 0.0, 0.0
-    uniform[12] = -(rx * cx + ry * cy + rz * cz) * inverse
-    uniform[13] = -(vx * cx + vy * cy + vz * cz) * inverse
-    uniform[14] = 0.5 - (dx * cx + dy * cy + dz * cz) * depthInverse
+    uniform[12] = -centerRight * inverse
+    uniform[13] = -centerUp * inverse
+    uniform[14] = 0.5 - centerDepth * depthInverse
     uniform[15] = 1.0
     uniform[16], uniform[17], uniform[18], uniform[19] = dx, dy, dz, shadow.intensity
     uniform[20], uniform[21], uniform[22], uniform[23] = shadow.r, shadow.g, shadow.b, shadow.strength
@@ -1266,7 +1280,7 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
     self._doubleSidedActive = self._doubleSided and packet.doubleSidedCount > 0
     self._shadowActive = self._shadows and packet.count > packet.blendCount
     if self._shadows then
-        writeShadowUniform(self, packet)
+        writeShadowUniform(self, packet, frame)
     end
     if self._count == 0 then
         return

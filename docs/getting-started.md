@@ -217,12 +217,15 @@ and unlit material dispatch, in deferred and transparent mesh passes. Its
 runtime fields are available on `app.renderer.meshes.fog`. Omitting
 `meshes.fog` keeps the fog-free shaders and uniform path.
 
-Bloom extracts resolved opaque brightness, blurs it through two scaled
-targets, and adds it before transparent meshes and sprites. Omitting `bloom`
-declares no bloom targets or passes. A light component has no visible geometry
-of its own, so it blooms the bright opaque surfaces it illuminates rather than
-drawing a halo at its position. Transparent lamps and UI remain outside this
-branch. Run `cargo xtask example scene3d` for the complete mixed-domain setup.
+Bloom preserves resolved opaque highlights in packed HDR, extracts them into
+two scaled blur targets, and adds them before transparent meshes and sprites.
+The packed lighting and blur formats retain values above white without using
+more bytes per pixel than RGBA8. `threshold` and `knee` are non-negative HDR
+brightness values. Omitting `bloom` declares no bloom targets or passes. A
+light component has no visible geometry of its own, so it blooms the bright
+opaque surfaces it illuminates rather than drawing a halo at its position.
+Transparent lamps and UI remain outside this branch. Run `cargo xtask example
+scene3d` for the complete mixed-domain setup.
 
 ## Multiple cameras
 
@@ -383,6 +386,11 @@ cache. Run `cargo xtask example bistro3d` to exercise 2.9 million vertices,
 8.5 million indices, 1,593 independently culled chunks, the ambient probe,
 local lights, shadows, fog, and bloom together.
 
+The Bistro example starts near late afternoon. Scroll the mouse wheel up
+toward day or down toward night. The control continuously blends ambient and
+probe light, the directional sun or moon, fog, and the four lamp lights
+without rebuilding renderer resources.
+
 ## Optional mesh shadows
 
 Enable the mesh domain's directional light and shadow resources at renderer
@@ -415,9 +423,11 @@ return tecs.newApplication({
 to `app.renderer.meshes.shadow` and may change between frames. `distance` is
 the half extent of a camera-centered light volume; meshes outside it are
 removed by the same ordered GPU mark, scan, and compact shape used for camera
-culling. Culling rejects complete mesh instances; one surviving mesh still
-draws its full resident index range. Opaque and masked materials cast and
-receive. Blended materials receive but do not cast.
+culling. The light-space center snaps to the map's texel grid, so translating
+the camera does not slide the shadow samples across stationary receivers.
+Culling rejects complete mesh instances; one surviving mesh still draws its
+full resident index range. Opaque and masked materials cast and receive.
+Blended materials receive but do not cast.
 
 Omitting `meshes.shadows` preserves the shadow-free mesh shaders and allocates
 no map, shadow command buffer, cull pipeline, or graphics pipeline. The 2D

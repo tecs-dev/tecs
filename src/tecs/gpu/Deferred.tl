@@ -108,6 +108,10 @@ local C <const> = sdl.C
 --- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local RGBA8 <const> = 4
 
+--- Packed positive HDR color. It has the same four-byte footprint as RGBA8,
+--- and bloom does not need alpha in its lighting or blur intermediates.
+local R11G11B10 <const> = tonumber(C.SDL_GPU_TEXTUREFORMAT_R11G11B10_UFLOAT) as integer
+
 --- One channel, which is all the drop-shadow target has to say. Read from the
 --- generated cdef rather than copied out of the header, for the reason the
 --- blend factors are.
@@ -228,15 +232,18 @@ local record ShadowOptions
 end
 
 --- Configures the optional bloom branch.
+---
+--- Enabling bloom keeps the lighting and blur intermediates in packed HDR so
+--- values above white reach extraction without increasing bytes per pixel.
 local record BloomOptions
     --- Caller-writable. Sets both bloom targets relative to the frame and
     --- defaults to 0.5. It must be positive.
     scale: number
-    --- Caller-writable. Sets the resolved brightness threshold from zero
-    --- through one and defaults to 0.8.
+    --- Caller-writable. Sets the non-negative HDR brightness threshold and
+    --- defaults to 0.8.
     threshold: number
-    --- Caller-writable. Softens the threshold from zero through one and
-    --- defaults to 0.1.
+    --- Caller-writable. Sets the non-negative HDR width of the threshold's
+    --- soft knee and defaults to 0.1.
     knee: number
     --- Caller-writable. Scales the blurred contribution and defaults to 0.7.
     intensity: number
@@ -322,8 +329,8 @@ local record DeferredOptions
     --- Engine-owned. Enables repeated view composition through shared
     --- intermediate targets.
     multiCamera: boolean
-    --- Enables an optional half-resolution bloom branch. Nil omits both
-    --- targets and all three passes.
+    --- Enables an optional packed-HDR bloom branch. Nil omits both targets
+    --- and all three passes.
     bloom: BloomOptions
 end
 
@@ -427,6 +434,7 @@ local record Deferred
     _bloomUniform: loader.CArray
     _bloomStep: loader.CArray
     _bloom: boolean
+    _lightingFormat: integer
     _multiCamera: boolean
     _firstView: boolean
     _lastView: boolean
@@ -724,11 +732,12 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     local bloomThreshold <const> = bloomOptions.threshold or 0.8
     local bloomKnee <const> = bloomOptions.knee or 0.1
     local bloomIntensity <const> = bloomOptions.intensity or 0.7
+    local lightingFormat <const> = bloom and R11G11B10 or RGBA8
     if bloomScale <= 0.0 then
         error("tecs: bloom scale must be greater than 0", 2)
     end
-    if bloomThreshold < 0.0 or bloomThreshold > 1.0 or bloomKnee < 0.0 or bloomKnee > 1.0 then
-        error("tecs: bloom threshold and knee must be between 0 and 1", 2)
+    if bloomThreshold < 0.0 or bloomKnee < 0.0 then
+        error("tecs: bloom threshold and knee must be greater than or equal to 0", 2)
     end
     if bloomIntensity < 0.0 then
         error("tecs: bloom intensity must be greater than or equal to 0", 2)
@@ -747,6 +756,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self._inverseViewProjection = loader.newArray("float[16]")
     self._meshViewProjection = loader.newArray("float[16]")
     self._bloom = bloom
+    self._lightingFormat = lightingFormat
     self._multiCamera = multiCamera
     self._firstView, self._lastView = true, true
     self._viewportX, self._viewportY, self._viewportWidth, self._viewportHeight = 0, 0, 0, 0
@@ -910,7 +920,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     })
     graph:target({
         name = "lit",
-        format = RGBA8,
+        format = lightingFormat,
         clear = {r = 0, g = 0, b = 0, a = 1},
     })
     graph:target({
@@ -934,7 +944,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
             -- Compatibility surface: games may add passes around this target
             -- by name, so the string stays stable if bloom moves internally.
             name = "bloomA",
-            format = RGBA8,
+            format = lightingFormat,
             scale = bloomScale,
             clear = {r = 0, g = 0, b = 0, a = 1},
         })
@@ -942,7 +952,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
             -- Compatibility surface: games may add passes around this target
             -- by name, so the string stays stable if bloom moves internally.
             name = "bloomB",
-            format = RGBA8,
+            format = lightingFormat,
             scale = bloomScale,
             clear = {r = 0, g = 0, b = 0, a = 1},
         })
@@ -1013,13 +1023,15 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
             lightingDefines.MESH_LIGHTS = "1"
         end
     end
-    self._lightingPipeline = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting", lightingDefines)
+    self._lightingPipeline = buildPipeline(
+        device, "deferred.lighting.frag", lightingFormat, "lighting", lightingDefines
+    )
     if shadows then
         self._blurPipeline = buildPipeline(device, "occluder.blur.frag", RGBA8, "occluderBlur", nil)
     end
     if bloom then
-        self._bloomExtractPipeline = buildPipeline(device, "bloom.extract.frag", RGBA8, "bloomExtract", nil)
-        self._bloomBlurPipeline = buildPipeline(device, "bloom.blur.frag", RGBA8, "bloomBlur", nil)
+        self._bloomExtractPipeline = buildPipeline(device, "bloom.extract.frag", lightingFormat, "bloomExtract", nil)
+        self._bloomBlurPipeline = buildPipeline(device, "bloom.blur.frag", lightingFormat, "bloomBlur", nil)
     end
     self._compositePipeline = buildPipeline(
         device,
@@ -1580,10 +1592,11 @@ function Deferred:rebuildPipelines()
                 defines.MESH_LIGHTS = "1"
             end
         end
-        lighting = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting", defines)
+        local lightingFormat <const> = self._lightingFormat
+        lighting = buildPipeline(device, "deferred.lighting.frag", lightingFormat, "lighting", defines)
         if self._bloom then
-            bloomExtract = buildPipeline(device, "bloom.extract.frag", RGBA8, "bloomExtract", nil)
-            bloomBlur = buildPipeline(device, "bloom.blur.frag", RGBA8, "bloomBlur", nil)
+            bloomExtract = buildPipeline(device, "bloom.extract.frag", lightingFormat, "bloomExtract", nil)
+            bloomBlur = buildPipeline(device, "bloom.blur.frag", lightingFormat, "bloomBlur", nil)
         end
         composite = buildPipeline(
             device,
