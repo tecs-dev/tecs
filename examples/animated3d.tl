@@ -90,6 +90,7 @@ local function game(world: tecs.World, app: tecs.Application)
         end
         local model <const> = meshes:registerModel(loaded.value)
         local instance <const> = model:newInstance()
+        local entities: {integer} = {}
         for index, primitive in ipairs(instance.primitives) do
             -- Skinning can move vertices beyond the file's bind-pose sphere.
             -- The example owns a conservative bound that covers every clip.
@@ -120,6 +121,12 @@ local function game(world: tecs.World, app: tecs.Application)
                     Renderable3D()
                 )
             end
+            entities[index] = entity
+        end
+        -- The asset listener runs outside system dispatch, so this publishes
+        -- the deferred spawns before bind reads their Transform3D columns.
+        world:enqueueCommit()
+        for index, entity in ipairs(entities) do
             instance:bind(world, index, entity)
         end
         local clip = 1
