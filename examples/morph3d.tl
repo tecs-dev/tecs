@@ -88,45 +88,36 @@ local function game(world: tecs.World, app: tecs.Application)
     }))
     world:spawn(Transform3D(), floor, floorBounds, MeshMaterial(), Tint(0.22, 0.25, 0.3, 1), Renderable3D())
 
-    assets.loadGLTF(files.assetPath("models/morph-cube.gltf")):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)
-        if loaded.status ~= "ready" then
-            error(loaded.error, 0)
-        end
-        local model <const> = meshes:registerModel(loaded.value)
-        local instance <const> = model:newInstance()
-        local placement <const> = Transform3D()
-        instance.transform = placement
-        local entities: {integer} = {}
-        for index, primitive in ipairs(instance.primitives) do
-            local entity <const> = world:spawn(
-                primitive.transform,
-                primitive.mesh,
-                primitive.bounds,
-                primitive.material,
-                primitive.morph,
-                Tint(1, 1, 1, 1),
-                Renderable3D()
-            )
-            entities[index] = entity
-        end
-        world:enqueueCommit()
-        for index, entity in ipairs(entities) do
-            instance:bind(world, index, entity)
-        end
-        instance:play("StretchAndTwist", {speed = 0.65})
-        local turn = 0.0
-        world:addSystem({
-            name = "example.AnimateMorph",
-            phase = tecs.ecs.phases.Update,
-            run = function(dt: number)
-                turn = (turn + dt * 0.45) % (math.pi * 2)
-                placement.rotationY = math.sin(turn * 0.5)
-                placement.rotationW = math.cos(turn * 0.5)
-                instance:update(dt)
-            end,
-        })
-        print("morph3d: rotating six colored faces while cycling two GPU morph targets")
-    end)
+    local loaded <const> = assets.loadGLTF(files.assetPath("models/morph-cube.gltf"))
+    local model <const> = meshes:registerModel(loaded)
+    local instance <const> = model:newInstance()
+    local placement <const> = Transform3D()
+    instance.transform = placement
+    for index, primitive in ipairs(instance.primitives) do
+        local entity <const> = world:spawn(
+            primitive.transform,
+            primitive.mesh,
+            primitive.bounds,
+            primitive.material,
+            primitive.morph,
+            Tint(1, 1, 1, 1),
+            Renderable3D()
+        )
+        instance:bind(world, index, entity)
+    end
+    instance:play("StretchAndTwist", {speed = 0.65})
+    local turn = 0.0
+    world:addSystem({
+        name = "example.AnimateMorph",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number)
+            turn = (turn + dt * 0.45) % (math.pi * 2)
+            placement.rotationY = math.sin(turn * 0.5)
+            placement.rotationW = math.cos(turn * 0.5)
+            instance:update(dt)
+        end,
+    })
+    print("morph3d: rotating six colored faces while cycling two GPU morph targets")
 end
 
 return tecs.newApplication({

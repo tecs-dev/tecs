@@ -258,7 +258,7 @@ The host loads `tecs` before the entry file. A game can use these names without 
 - [`tecs.events`](/modules/events) - typed events and address-based message buses
 - [`tecs.gfx`](/modules/gfx/) - the camera, the components, the renderer, text, and the vocabularies below
 - [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
-- [`tecs.io`](/modules/io/) - binary I/O, nonblocking sockets, HTTP, and external tools
+- [`tecs.io`](/modules/io/) - binary I/O, cooperative sockets, HTTP, and external tools
 - [`tecs.log`](/modules/log) - named, leveled platform logging
 - [`tecs.math`](/modules/math) - angle math and two-dimensional geometry
 - [`tecs.physics`](/modules/physics) - Rapier 2D, solved across a shared thread pool

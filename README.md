@@ -161,6 +161,13 @@ outside `world:update` use the same direct-value API and block while pumping
 the producer. Private completion state may bridge a native worker queue, but
 it is not a second user-facing execution model.
 
+The producer still matches the work. TCP and UDP try their syscall first and
+use a process-wide `mio` readiness reactor only after `WouldBlock`; no worker
+thread sits waiting on a socket. DNS, image and model decoding, compression,
+and other CPU-heavy or blocking library calls run on Rust-owned workers. Both
+paths settle onto the same Lua-thread continuation, so that implementation
+split does not create a second game API.
+
 ## Build
 
 Cargo and `xtask` own the build, generated bindings, tests, and packaging.

@@ -261,13 +261,17 @@ const uint8_t *tecsNetAddressText(const TecsNetAddress *address, size_t *length)
 TecsNetAddress *tecsNetAddressClone(const TecsNetAddress *address);
 void tecsNetAddressDestroy(TecsNetAddress *address);
 
-/* A reactor watch is one-shot. Poll removes a ready stream before queueing
+/* A reactor watch is one-shot. Poll removes a ready endpoint before queueing
  * its token, so the caller drains the operation and explicitly watches again
  * only after it reaches would-block. Interest uses bit 1 for readable and bit
  * 2 for writable. Readiness adds bit 4 for an error and bit 8 for closure. */
 TecsNetReactor *tecsNetReactorCreate(void);
 int tecsNetReactorWatch(TecsNetReactor *reactor, TecsNetStream *stream, uint32_t token, uint32_t interest);
 int tecsNetReactorUnwatch(TecsNetReactor *reactor, TecsNetStream *stream, uint32_t token);
+int tecsNetReactorWatchServer(TecsNetReactor *reactor, TecsNetServer *server, uint32_t token, uint32_t interest);
+int tecsNetReactorUnwatchServer(TecsNetReactor *reactor, TecsNetServer *server, uint32_t token);
+int tecsNetReactorWatchDatagram(TecsNetReactor *reactor, TecsNetDatagram *socket, uint32_t token, uint32_t interest);
+int tecsNetReactorUnwatchDatagram(TecsNetReactor *reactor, TecsNetDatagram *socket, uint32_t token);
 int tecsNetReactorPoll(TecsNetReactor *reactor, uint32_t timeoutMs);
 int tecsNetReactorNext(TecsNetReactor *reactor, uint32_t *token, uint32_t *readiness, uint64_t *readyNs);
 void tecsNetReactorDestroy(TecsNetReactor *reactor);

@@ -97,6 +97,36 @@ One persistent coroutine belongs to the logical world update, not to every
 entity. Iterating ten thousand entities does not create ten thousand tasks.
 Only operations that actually wait enter the scheduler.
 
+Socket I/O uses the same direct form. This system does not poll, retain a
+future, or declare itself asynchronous:
+
+```teal
+world:addSystem({
+    name = "game.ReceivePacket",
+    phase = tecs.ecs.phases.PreUpdate,
+    run = function()
+        tecs.scoped(function(scope)
+            local packet <const> = scope:own(assert(inbox:receive()))
+            decodePacket(packet.bytes)
+        end)
+    end,
+})
+```
+
+The native call runs first. A ready socket returns inline; only
+`WouldBlock` reaches the scheduler:
+
+```mermaid
+flowchart TD
+    call["System calls a direct I/O API"] --> ready{"Operation ready?"}
+    ready -->|Yes| value["Return the value inline"]
+    ready -->|No| park["Park the logical world update"]
+    park --> pump["Application pumps events and native readiness"]
+    pump --> resume["Resume the same Lua call"]
+    resume --> ordered["Finish later systems in schedule order"]
+    ordered --> commit["Commit the completed phase once"]
+```
+
 ## Frame placement
 
 `Application` drives three groups:

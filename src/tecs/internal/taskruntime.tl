@@ -1,8 +1,7 @@
--- Prototype coroutine scheduler for the one-path asynchronous I/O design.
+-- Coroutine scheduler for resumable systems and structured internal work.
 --
--- This is deliberately internal. It proves the scheduling, structured task,
--- cancellation, and readiness handoff mechanics before any public I/O method
--- or Application lifecycle is changed.
+-- This stays internal because suspension is an implementation detail of direct
+-- engine calls. Games register ordinary systems and do not manage tasks.
 
 local type Future = require("tecs.internal.completion")
 
@@ -644,7 +643,7 @@ function taskruntime.onSettle<T>(task: TaskImpl<T>, observer: function(TaskImpl<
         error("tecs: onSettle needs a task and an observer", 2)
     end
     if task._onSettle ~= nil then
-        error("tecs: a prototype task can have only one settlement observer", 2)
+        error("tecs: a task can have only one settlement observer", 2)
     end
     if task.status ~= "pending" then
         observer(task)
@@ -776,7 +775,7 @@ function taskruntime.enterBarrier(subject: string)
     end
     local scope <const> = task.scope as {string: any}
     if scope.barrier ~= nil then
-        error("tecs: suspension barriers cannot nest in the prototype", 2)
+        error("tecs: suspension barriers cannot nest", 2)
     end
     scope.barrier = subject
 end

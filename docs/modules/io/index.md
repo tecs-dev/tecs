@@ -1,5 +1,5 @@
 ---
-description: "Binary I/O, nonblocking sockets, HTTP, files, and external tools"
+description: "Binary I/O, cooperative sockets, HTTP, files, and external tools"
 ---
 
 # tecs.io

@@ -5,8 +5,8 @@
 ---
 ---   string  `TCPSocket:write` and `TCPSocket:read`.
 ---   buffer  `TCPSocket:writeFrom` and `TCPSocket:readInto`.
----   task    The same Buffer calls through two persistent Tasks and the
----           native one-shot readiness reactor.
+---   task    The same Buffer calls directly from two cooperative Tasks through
+---           the process-wide readiness pump used by ordinary systems.
 ---
 --- The Buffer row allocates its source and destination once, reserves the
 --- destination once, and reuses both through warmup and measured samples.
@@ -70,10 +70,10 @@ local type binaryIO = require("tecs.io")
 local type iotypes = require("tecs.io.types")
 local type tasks = require("tecs.internal.taskruntime")
 local task <const> = require("tecs.internal.taskruntime")
-local tasknet <const> = require("tecs.internal.tasknet")
 
 local C <const> = sdl.C
 local ioModule <const> = tecs.io
+local runtime <const> = tecs.runtime
 local data <const> = tecs.data
 local time <const> = tecs.platform.time
 local now <const> = time.now
@@ -262,6 +262,25 @@ local function consumeBuffer(connection: TCPSocket, destination: IOBuffer, count
     return consumed
 end
 
+local function runTasks<T>(body: function(tasks.Scope): T...): T
+    local scheduler <const> = task.newScheduler()
+    local rootTask <const> = scheduler:spawn(body)
+    local deadline <const> = now() + TIMEOUT_MS / 1000
+    while rootTask.status == "pending" do
+        scheduler:step()
+        if rootTask.status == "pending" then
+            runtime.poll()
+            if now() >= deadline then
+                error("bench: cooperative TCP tasks timed out", 0)
+            end
+        end
+    end
+    if rootTask.status ~= "ready" then
+        error("bench: cooperative TCP task failed: " .. (rootTask.error or rootTask.status), 0)
+    end
+    return rootTask.value
+end
+
 local type Operation = function(): integer
 local type Validation = function(): string
 
@@ -335,7 +354,6 @@ local function run()
     local destinationBuffer: IOBuffer
     local latencySource: IOBuffer
     local latencyDestination: IOBuffer
-    local reactor: tasknet.Reactor
 
     local ran <const>, failure = pcall(function()
         if not C.SDL_Init(0) then
@@ -362,42 +380,34 @@ local function run()
         latencySource = ioModule.newBuffer("x")
         latencyDestination = ioModule.newBuffer()
         latencyDestination:ensureCapacity(1)
-        reactor = assert(tasknet.newReactor())
-        local asyncClient <const> = reactor:wrap(client)
-        local asyncPeer <const> = reactor:wrap(peer)
-
         local function taskTransfer(pieces?: {string}): integer
-            return tasknet.run(
-                reactor,
-                function(scope: tasks.Scope): integer
-                    local writing <const> = scope:spawn(function()
-                        for _ = 1, CHUNKS do
-                            local queued <const>, writeReason = asyncClient:writeFrom(sourceBuffer)
-                            if queued == nil then
-                                error("bench: loopback task write failed: " .. (writeReason or "unknown"), 0)
-                            end
-                            if queued ~= CHUNK then
-                                error(format("bench: loopback task queued %d of %d bytes", queued, CHUNK), 0)
-                            end
+            return runTasks(function(scope: tasks.Scope): integer
+                local writing <const> = scope:spawn(function()
+                    for _ = 1, CHUNKS do
+                        local queued <const>, writeReason = client:writeFrom(sourceBuffer)
+                        if queued == nil then
+                            error("bench: loopback task write failed: " .. (writeReason or "unknown"), 0)
                         end
-                    end)
-                    local total = 0
-                    while total < BYTES_PER_OPERATION do
-                        destinationBuffer:clear()
-                        local read <const>, readReason = asyncPeer:readInto(destinationBuffer, 0, CHUNK)
-                        if read == nil then
-                            error("bench: loopback task read failed: " .. (readReason or "unknown"), 0)
-                        end
-                        total = total + read
-                        if pieces ~= nil then
-                            pieces[#pieces + 1] = destinationBuffer:getString()
+                        if queued ~= CHUNK then
+                            error(format("bench: loopback task queued %d of %d bytes", queued, CHUNK), 0)
                         end
                     end
-                    writing:join()
-                    return total
-                end,
-                TIMEOUT_MS
-            )
+                end)
+                local total = 0
+                while total < BYTES_PER_OPERATION do
+                    destinationBuffer:clear()
+                    local read <const>, readReason = peer:readInto(destinationBuffer, 0, CHUNK)
+                    if read == nil then
+                        error("bench: loopback task read failed: " .. (readReason or "unknown"), 0)
+                    end
+                    total = total + read
+                    if pieces ~= nil then
+                        pieces[#pieces + 1] = destinationBuffer:getString()
+                    end
+                end
+                writing:join()
+                return total
+            end)
         end
 
         local cases <const>: {Case} = {
@@ -529,26 +539,23 @@ local function run()
         elseif SELECTED_CASES["task"] then
             local dispatch: {number} = {}
             local function dispatchOnce(): number
-                return tasknet.run(
-                    reactor,
-                    function(scope: tasks.Scope): number
-                        local writing <const> = scope:spawn(function()
-                            task.yield()
-                            local queued <const>, reason = asyncClient:writeFrom(latencySource)
-                            if queued ~= 1 then
-                                error("bench: task latency write failed: " .. (reason or tostring(queued)), 0)
-                            end
-                        end)
-                        latencyDestination:clear()
-                        local read <const>, reason = asyncPeer:readInto(latencyDestination, 0, 1)
-                        if read ~= 1 then
-                            error("bench: task latency read failed: " .. (reason or tostring(read)), 0)
+                local started <const> = ticksNanoseconds()
+                runTasks(function(scope: tasks.Scope)
+                    local writing <const> = scope:spawn(function()
+                        task.yield()
+                        local queued <const>, reason = client:writeFrom(latencySource)
+                        if queued ~= 1 then
+                            error("bench: task latency write failed: " .. (reason or tostring(queued)), 0)
                         end
-                        writing:join()
-                        return ticksNanoseconds() - asyncPeer:lastReadyNs()
-                    end,
-                    TIMEOUT_MS
-                )
+                    end)
+                    latencyDestination:clear()
+                    local read <const>, reason = peer:readInto(latencyDestination, 0, 1)
+                    if read ~= 1 then
+                        error("bench: task latency read failed: " .. (reason or tostring(read)), 0)
+                    end
+                    writing:join()
+                end)
+                return ticksNanoseconds() - started
             end
             for _ = 1, WARMUP do
                 dispatchOnce()
@@ -559,7 +566,7 @@ local function run()
             sort(dispatch)
             print(
                 format(
-                    "task reactor dispatch: p50 %.3f us, p95 %.3f us (native poll return to resumed coroutine)",
+                    "task cooperative wake: p50 %.3f us, p95 %.3f us (park, readiness poll, and resume)",
                     percentile(dispatch, 0.50) / 1000.0,
                     percentile(dispatch, 0.95) / 1000.0
                 )
@@ -568,9 +575,6 @@ local function run()
     end) as (boolean, any)
 
     collect("restart")
-    if reactor ~= nil then
-        reactor:close()
-    end
     if latencySource ~= nil and not latencySource:isReleased() then
         latencySource:close()
     end
