@@ -267,9 +267,13 @@ pub unsafe extern "C" fn tecsImageDecodeRequestDestroy(request: *mut TecsImageDe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn decodes_on_the_cpu_lane_and_transfers_image_ownership() {
+        let _guard = TEST_LOCK.lock().unwrap();
         let bytes = Box::into_raw(Box::new(TecsBytes {
             bytes: br#"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="3"/>"#
                 .to_vec()
@@ -288,6 +292,7 @@ mod tests {
 
     #[test]
     fn keeps_decode_failures_on_the_request() {
+        let _guard = TEST_LOCK.lock().unwrap();
         let bytes = Box::into_raw(Box::new(TecsBytes {
             bytes: b"not an image".to_vec().into_boxed_slice(),
         }));
@@ -301,5 +306,46 @@ mod tests {
                 .is_empty()
         );
         unsafe { tecsImageDecodeRequestDestroy(request) };
+    }
+
+    #[test]
+    fn immediately_abandons_thousands_of_decode_requests() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        const SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="3"/>"#;
+        for index in 0..2_000 {
+            loop {
+                let bytes = Box::into_raw(Box::new(TecsBytes {
+                    bytes: SVG.to_vec().into_boxed_slice(),
+                }));
+                let request = unsafe { tecsImageDecodeStart(bytes) };
+                if request.is_null() {
+                    thread::yield_now();
+                    continue;
+                }
+                if index % 2 == 0 {
+                    thread::yield_now();
+                }
+                unsafe { tecsImageDecodeRequestDestroy(request) };
+                break;
+            }
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let counts = pool()
+                .counts
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if counts.requests == 0 {
+                assert_eq!(counts.bytes, 0);
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "abandoned CPU jobs did not drain"
+            );
+            drop(counts);
+            thread::yield_now();
+        }
     }
 }

@@ -96,31 +96,47 @@ unsafe extern "C" fn dialog_callback(
     file_list: *const *const c_char,
     filter: c_int,
 ) {
-    let Some(dialog) = (unsafe { userdata.cast::<TecsDialog>().as_ref() }) else {
+    let mut paths = Vec::new();
+    let error = if file_list.is_null() {
+        Some(error_text(unsafe { SDL_GetError() }))
+    } else {
+        let mut index = 0;
+        loop {
+            let path = unsafe { *file_list.add(index) };
+            if path.is_null() {
+                break;
+            }
+            paths.push(unsafe { CStr::from_ptr(path) }.to_owned());
+            index += 1;
+        }
+        None
+    };
+    unsafe { publish_dialog(userdata.cast(), filter, paths, error) };
+}
+
+/// Publishes a callback result and assumes ownership only when the caller has
+/// already abandoned it. State inspection remains under the lock, so the side
+/// that releases the allocation does so only after ownership has transferred.
+unsafe fn publish_dialog(
+    dialog: *mut TecsDialog,
+    filter: c_int,
+    paths: Vec<CString>,
+    error: Option<CString>,
+) {
+    let Some(dialog_ref) = (unsafe { dialog.as_ref() }) else {
         return;
     };
     let abandoned = {
-        let mut state = lock(dialog);
+        let mut state = lock(dialog_ref);
         state.filter = filter;
-        if file_list.is_null() {
-            state.error = Some(error_text(unsafe { SDL_GetError() }));
-        } else {
-            let mut index = 0;
-            loop {
-                let path = unsafe { *file_list.add(index) };
-                if path.is_null() {
-                    break;
-                }
-                state.paths.push(unsafe { CStr::from_ptr(path) }.to_owned());
-                index += 1;
-            }
-            state.cancelled = state.paths.is_empty();
-        }
+        state.cancelled = error.is_none() && paths.is_empty();
+        state.paths = paths;
+        state.error = error;
         state.ready = true;
         state.abandoned
     };
     if abandoned {
-        unsafe { drop(Box::from_raw(userdata.cast::<TecsDialog>())) };
+        unsafe { drop(Box::from_raw(dialog)) };
     }
 }
 
@@ -366,6 +382,8 @@ pub unsafe extern "C" fn tecsDialogAbandon(dialog: *mut TecsDialog) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
 
     #[test]
     fn marks_a_pending_dialog_abandoned_until_completion() {
@@ -374,16 +392,41 @@ mod tests {
         unsafe { tecsDialogAbandon(dialog) };
         assert!(lock(unsafe { &*dialog }).abandoned);
 
-        lock(unsafe { &*dialog }).ready = true;
-        unsafe { tecsDialogAbandon(dialog) };
+        unsafe { publish_dialog(dialog, -1, Vec::new(), None) };
     }
 
     #[test]
     fn abandon_releases_an_already_completed_dialog() {
         let dialog = unsafe { create_dialog(ptr::null(), ptr::null(), 0, ptr::null()) };
         assert!(!dialog.is_null());
-        lock(unsafe { &*dialog }).ready = true;
+        unsafe { publish_dialog(dialog, -1, Vec::new(), None) };
 
         unsafe { tecsDialogAbandon(dialog) };
+    }
+
+    #[test]
+    fn completion_and_abandonment_can_race_repeatedly() {
+        for _ in 0..2_000 {
+            let dialog = unsafe { create_dialog(ptr::null(), ptr::null(), 0, ptr::null()) };
+            assert!(!dialog.is_null());
+            let pointer = dialog as usize;
+            let barrier = Arc::new(Barrier::new(2));
+            let callback_barrier = barrier.clone();
+            let callback = thread::spawn(move || {
+                callback_barrier.wait();
+                unsafe {
+                    publish_dialog(
+                        pointer as *mut TecsDialog,
+                        -1,
+                        vec![CString::new("/tmp/result").unwrap()],
+                        None,
+                    )
+                };
+            });
+
+            barrier.wait();
+            unsafe { tecsDialogAbandon(dialog) };
+            callback.join().unwrap();
+        }
     }
 }

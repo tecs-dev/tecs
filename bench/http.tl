@@ -2,9 +2,10 @@
 ---
 --- This measures the HTTP-specific seams rather than `tecs.io.Stream` alone:
 --- four request sources cross the bounded upload channel, and two response
---- destinations cross the bounded event queue. Every case sends one request
---- at a time to an in-process TCP server, validates the body hash, discards
---- warmup samples, and reports p50/p95 latency plus payload throughput.
+--- destinations cross the bounded event queue. The nonblocking server drains
+--- every readable packet per turn so its own polling cadence does not cap the
+--- client. Every case sends one request at a time, validates the body hash,
+--- discards warmup samples, and reports p50/p95 latency plus payload throughput.
 ---
 --- Run this only on a quiet machine:
 ---
@@ -300,44 +301,45 @@ local function pollServer(server: Server, response: string): boolean
             return false
         end
     end
-    local readable <const>, readyReason = server.connection:wait(0)
-    if readyReason ~= nil then
-        error(readyReason, 0)
-    end
-    if not readable then
-        return false
-    end
-    local read <const>, reason = server.connection:readInto(server.pending, server.pending:length(), READ_CHUNK)
-    if reason ~= nil then
-        -- The client may retire an idle keep-alive connection between
-        -- requests. Accept that only at a request boundary and let the next
-        -- poll accept the replacement connection.
-        if reason == "connection closed" and server.pending:length() == 0 and server.bodyOffset == nil then
-            server.connection:close()
-            server.connection = nil
+    while true do
+        local readable <const>, readyReason = server.connection:wait(0)
+        if readyReason ~= nil then
+            error(readyReason, 0)
+        end
+        if not readable then
             return false
         end
-        error(reason, 0)
-    end
-    if server.bodyOffset == nil and read ~= nil then
-        local request <const> = server.pending:getString()
-        local boundary <const> = request:find("\r\n\r\n", 1, true)
-        if boundary ~= nil then
-            server.bodyLength = floor(
-                tonumber(request:sub(1, boundary - 1):lower():match("content%-length:%s*(%d+)")) or 0
-            )
-            server.bodyOffset = boundary + 3
+        local read <const>, reason = server.connection:readInto(server.pending, server.pending:length(), READ_CHUNK)
+        if reason ~= nil then
+            -- The client may retire an idle keep-alive connection between
+            -- requests. Accept that only at a request boundary and let the
+            -- next poll accept the replacement connection.
+            if reason == "connection closed" and server.pending:length() == 0 and server.bodyOffset == nil then
+                server.connection:close()
+                server.connection = nil
+                return false
+            end
+            error(reason, 0)
+        end
+        if server.bodyOffset == nil and read ~= nil then
+            local request <const> = server.pending:getString()
+            local boundary <const> = request:find("\r\n\r\n", 1, true)
+            if boundary ~= nil then
+                server.bodyLength = floor(
+                    tonumber(request:sub(1, boundary - 1):lower():match("content%-length:%s*(%d+)")) or 0
+                )
+                server.bodyOffset = boundary + 3
+            end
+        end
+        if server.bodyOffset ~= nil and server.pending:length() >= server.bodyOffset + server.bodyLength then
+            local ok <const>, writeReason = server.connection:write(response)
+            if not ok then
+                error(writeReason, 0)
+            end
+            server.writing = true
+            return false
         end
     end
-    if server.bodyOffset == nil or server.pending:length() < server.bodyOffset + server.bodyLength then
-        return false
-    end
-    local ok <const>, writeReason = server.connection:write(response)
-    if not ok then
-        error(writeReason, 0)
-    end
-    server.writing = true
-    return false
 end
 
 local function validateRequest(server: Server): integer
@@ -566,7 +568,7 @@ return tecs.newApplication({
                         print(("%-20s %8.3f %8.3f %8.1f"):format(result.name, p50, p95, throughput))
                     end
                     print(
-                        "boundedness: upload = 16 x 64 KiB = 1 MiB; "
+                        "boundedness: upload = 4 x 256 KiB = 1 MiB; "
                             .. "download = 64 x 64 KiB = 4 MiB; every body hash validated"
                     )
                 end

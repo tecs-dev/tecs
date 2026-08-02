@@ -22,8 +22,9 @@ use tokio::task::AbortHandle;
 use tokio_stream::wrappers::ReceiverStream;
 
 const EVENT_QUEUE_CAPACITY: usize = 64;
-const UPLOAD_QUEUE_CAPACITY: usize = 16;
-const TRANSFER_CHUNK_BYTES: usize = 64 * 1024;
+const UPLOAD_QUEUE_CAPACITY: usize = 4;
+const UPLOAD_CHUNK_BYTES: usize = 256 * 1024;
+const RESPONSE_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_HEADER_BYTES: usize = 256 * 1024;
 
 const EVENT_HEADERS: u32 = 1;
@@ -576,8 +577,8 @@ async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
             .await;
             return;
         }
-        for start in (0..chunk.len()).step_by(TRANSFER_CHUNK_BYTES) {
-            let end = (start + TRANSFER_CHUNK_BYTES).min(chunk.len());
+        for start in (0..chunk.len()).step_by(RESPONSE_CHUNK_BYTES) {
+            let end = (start + RESPONSE_CHUNK_BYTES).min(chunk.len());
             if !shared
                 .send(Event::Chunk {
                     id,
@@ -807,8 +808,8 @@ pub unsafe extern "C" fn tecsHttpClientUpload(
         set_error("HTTP upload finish needs an empty byte slice");
         return UPLOAD_CLOSED;
     }
-    if length > TRANSFER_CHUNK_BYTES {
-        set_error("HTTP upload chunks cannot exceed 65536 bytes");
+    if length > UPLOAD_CHUNK_BYTES {
+        set_error("HTTP upload chunks cannot exceed 262144 bytes");
         return UPLOAD_CLOSED;
     }
     // SAFETY: Null was rejected and the caller promises a live client.
@@ -1100,7 +1101,7 @@ mod tests {
     }
 
     #[test]
-    fn upload_queue_refuses_the_seventeenth_chunk_without_copying() {
+    fn upload_queue_stays_bounded_before_copying() {
         // The production constructor installs this before it builds either
         // client. This test constructs the client directly to isolate queue
         // backpressure, so it must establish the same process invariant.
@@ -1128,7 +1129,7 @@ mod tests {
             receiver: Mutex::new(event_receiver),
             handles: Mutex::new(HashMap::new()),
         }));
-        let chunk = vec![b'x'; TRANSFER_CHUNK_BYTES];
+        let chunk = vec![b'x'; UPLOAD_CHUNK_BYTES];
         for _ in 0..UPLOAD_QUEUE_CAPACITY {
             // SAFETY: The client and source remain live for the synchronous copy.
             assert_eq!(
@@ -1136,9 +1137,9 @@ mod tests {
                 UPLOAD_ACCEPTED
             );
         }
-        // Sixteen 64 KiB pieces are one MiB. The next offer encounters
+        // Four 256 KiB pieces are one MiB. The next offer encounters
         // backpressure before constructing a Bytes allocation.
-        assert_eq!(UPLOAD_QUEUE_CAPACITY * TRANSFER_CHUNK_BYTES, 1024 * 1024);
+        assert_eq!(UPLOAD_QUEUE_CAPACITY * UPLOAD_CHUNK_BYTES, 1024 * 1024);
         // SAFETY: The client and source still remain live.
         assert_eq!(
             unsafe { tecsHttpClientUpload(client, 7, chunk.as_ptr(), chunk.len(), 0) },

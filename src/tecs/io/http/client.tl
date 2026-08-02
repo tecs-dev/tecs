@@ -58,7 +58,7 @@ local BODY_UPLOAD <const> = 2
 local UPLOAD_CLOSED <const> = -1
 local UPLOAD_BACKPRESSURE <const> = 0
 local UPLOAD_ACCEPTED <const> = 1
-local CHUNK <const> = 64 * 1024
+local CHUNK <const> = 256 * 1024
 local UPLOAD_STEPS <const> = 16
 local MAX_BODY_BUFFER_BYTES <const> = 1024 * 1024
 
