@@ -221,8 +221,8 @@ local PAGE_OVERRIDES = {
         layout = "home",
         hero_title = "Build games with LuaJIT",
         hero_text = "Typed. GPU-driven. One data model.",
-        hero_image = "/images/desert.png",
-        hero_image_alt = "A cactus and an armadillo in the desert sun",
+        hero_image = "/images/tecs.png",
+        hero_image_alt = "Tecs",
         hero_actions = {
             { text = "Get started", path = "getting-started", theme = "brand" },
             { text = "Modules", path = "modules", theme = "alt" },
@@ -616,42 +616,15 @@ return {
             title = "Tecs",
             description = "Typed entity component system and game engine for Lua.",
             site_url = "https://tecs.dev",
-            -- The mark is a 32 by 32 pixel cactus, drawn on a grid to
-            -- match Jersey 15, the pixel face the wordmark beside it is set
-            -- in. The grid is the artwork at 32 and at 16, so the small sizes
-            -- are the same drawing rather than a separate one kept in step.
-            --
-            -- The favicon is the PNG rather than the SVG, and the SVG is
-            -- offered beside it in `head` below. An SVG icon on its own is
-            -- the whole icon or nothing: a browser that will not render one
-            -- has no second choice and falls back to its default globe, and
-            -- there is no /favicon.ico here to catch it.
-            logo = "/images/cactus.svg",
-            favicon = "/images/cactus-32.png",
+            -- No logo: the wordmark in `docs/site.css` is the mark, and an
+            -- image beside it would say the name twice.
+            favicon = "/images/logo.svg",
             github = "https://github.com/tecs-dev/tecs",
             public = "docs/public",
             -- The wordmark is visible in the first paint. Start its tiny local
             -- Latin face with the document instead of discovering it after
             -- the stylesheet arrives.
             head = {
-                -- Offered to browsers that render SVG icons, which scale it
-                -- cleanly past 32. The PNG above is what everything else gets.
-                {
-                    tag = "link",
-                    attributes = {
-                        rel = "icon",
-                        type = "image/svg+xml",
-                        href = "/images/cactus.svg",
-                    },
-                },
-                {
-                    tag = "link",
-                    attributes = {
-                        rel = "apple-touch-icon",
-                        sizes = "180x180",
-                        href = "/images/cactus-180.png",
-                    },
-                },
                 {
                     tag = "link",
                     attributes = {
@@ -678,7 +651,7 @@ return {
             -- because that is what turns a type name in a code block into a
             -- link. Absent, those blocks render unhighlighted.
             lexers = "vendor/scintillua/lexers",
-            social_image = "/images/social.png",
+            social_image = "/images/tecs.png",
             copyright = "Copyright Michael Dowling",
             license = "MIT or Apache-2.0, at your option",
             -- No row for MIT and Apache-2.0: the license line above already
