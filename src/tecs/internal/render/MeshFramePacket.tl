@@ -135,9 +135,8 @@ function MeshFramePacket:setCamera(camera: Camera3D, width: number, height: numb
     self.near = camera.near
     self.far = camera.far
 
-    local source <const> = camera:matrix(width, height)
+    local source <const>, inverseSource <const> = camera:matrices(width, height)
     local destination <const> = self.viewProjection
-    local inverseSource <const> = camera:inverseMatrix(width, height)
     local inverseDestination <const> = self.inverseViewProjection
     for index = 0, 15 do
         destination[index] = source[index]

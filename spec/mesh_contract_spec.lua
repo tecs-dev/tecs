@@ -595,6 +595,25 @@ describe("the 3D scene contract", function()
             assert.are.equal(1, packet.lights[16 + 13])
         end)
 
+        it("stops processing lights after the configured capacity", function()
+            local world, extractor, packet = extractorScene(1, false, false, false, false, 1)
+            world:spawn(tecs.Transform3D(), components.PointLight3D(9, 1, 1, 1, 2))
+            world:spawn(tecs.Transform3D(), components.SpotLight3D(0, 0, 0, -1, -1, -1, -1))
+            world:enqueueCommit()
+
+            extractor:extract(packet)
+            assert.are.equal(1, packet.lightCount)
+
+            local marker = tecs.ecs.newTagComponent({ name = "MeshExtractorAfterLightCapacity" })
+            world:spawn(marker)
+            world:enqueueCommit()
+            local found = 0
+            for _, length in world:newQuery({ include = { marker } }):iter() do
+                found = found + length
+            end
+            assert.are.equal(1, found)
+        end)
+
         it("raises for unregistered geometry after exhausting the query", function()
             local world, extractor, packet = extractorScene(1)
             local asset = components.meshId("procedural://missing")
@@ -667,8 +686,8 @@ describe("the 3D scene contract", function()
                 near = 0.2,
                 far = 300,
             })
-            local matrix = camera:matrix(853, 480)
-            local inverse = camera:inverseMatrix(853, 480)
+            local matrix, inverse = camera:matrices(853, 480)
+            assert.are_not.equal(matrix, inverse)
             local clipX, clipY, clipZ, clipW = clipPoint(matrix, -1.5, 0.75, -6)
             local worldX, worldY, worldZ, worldW = clipPoint(inverse, clipX, clipY, clipZ)
             -- clipPoint assumes an input w of one, so include the actual clip

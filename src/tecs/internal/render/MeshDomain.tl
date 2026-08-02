@@ -47,7 +47,6 @@ integer option and never changes the sprite texture array.
 local type types = require("tecs.types")
 local type assets = require("tecs.assets")
 local loader <const> = require("tecs.ffi.loader")
-local Buffer <const> = require("tecs.gpu.Buffer")
 local Frame <const> = require("tecs.gpu.Frame")
 local Deferred <const> = require("tecs.gpu.Deferred")
 local Camera3D <const> = require("tecs.gfx.Camera3D")
@@ -405,19 +404,6 @@ local record MeshDomain
     --- Caller-writable. Controls enabled mesh environment lighting. Nil while
     --- the probe is disabled.
     probe: MeshProbeTuning
-    --- Engine-owned. Exposes immutable vertex storage to the opaque
-    --- mesh pass. Ordinary game code should ignore it.
-    vertices: Buffer
-    --- Engine-owned. Exposes immutable 32-bit index storage to the
-    --- opaque mesh pass. Ordinary game code should ignore it.
-    indices: Buffer
-    --- Engine-owned. Exposes mesh instances to the opaque draw and GPU cull
-    --- passes. Ordinary game code should ignore it.
-    instances: Buffer
-    --- Engine-owned. Exposes the resident material table to the mesh fragment
-    --- stage. Ordinary game code should ignore it.
-    materials: Buffer
-
     --- Registers immutable CPU geometry in this domain.
     --- @param mesh The caller supplies CPU geometry that this call consumes.
     --- @return Returns a mesh component ready to spawn.
@@ -627,10 +613,6 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
         }
     )
     self._backend = backend
-    self.vertices = backend.vertices
-    self.indices = backend.indices
-    self.instances = backend.instances
-    self.materials = backend.materials
 
     local extractor <const> = MeshExtractor.create({
         capacity = capacity,

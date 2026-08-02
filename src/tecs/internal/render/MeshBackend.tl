@@ -442,6 +442,39 @@ local function buildShadow(
     return pipeline
 end
 
+local function configureVertexBindings(self: MeshBackend, buffers: {loader.CValue})
+    buffers[1] = self.vertices.handle
+    buffers[2] = self.instances.handle
+    local slot = 3
+    if self._vertexColors then
+        buffers[slot] = self._colorVertices.handle
+        slot = slot + 1
+    end
+    if self._morphing then
+        buffers[slot] = self._morphVertices.handle
+        buffers[slot + 1] = self._instanceMorphs.handle
+        buffers[slot + 2] = self._morphWeights.handle
+        slot = slot + 3
+    end
+    if self._skinning then
+        buffers[slot] = self._skinVertices.handle
+        if self._morphing then
+            buffers[slot + 1] = self._jointMatrices.handle
+        else
+            buffers[slot + 1] = self._instanceSkins.handle
+            buffers[slot + 2] = self._jointMatrices.handle
+        end
+    end
+end
+
+local function configureDrawBindings(self: MeshBackend)
+    configureVertexBindings(self, self._geometryBuffers)
+    configureVertexBindings(self, self._forwardBuffers)
+    self._fragmentBuffers[1] = self.materials.handle
+    self._fragmentTextures[1] = self.images.handle
+    self._forwardTextures[1] = self.images.handle
+end
+
 function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: MeshBackendOptions): MeshBackend
     local self = setmetatable({} as MeshBackend, MeshBackendMT)
     self.capacity = options.capacity
@@ -799,6 +832,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
             self._probing
         )
     end
+    configureDrawBindings(self)
     return self
 end
 
@@ -1172,6 +1206,20 @@ local function writeShadowUniform(self: MeshBackend, packet: MeshFramePacket, fr
     self._deferred:setMeshLight(-dx, -dy, -dz, shadow.intensity, shadow.r, shadow.g, shadow.b)
 end
 
+local function writeProbeFace(uniform: loader.CArray, base: integer, color: {number}, intensity: number)
+    if color == nil or #color < 3 then
+        error("tecs: each mesh probe face must contain red, green, and blue", 3)
+    end
+    local r <const>, g <const>, b <const> = color[1], color[2], color[3]
+    if r < 0.0 or g < 0.0 or b < 0.0 then
+        error("tecs: mesh probe colors must be non-negative", 3)
+    end
+    uniform[base], uniform[base + 1], uniform[base + 2], uniform[base + 3] = r * intensity,
+        g * intensity,
+        b * intensity,
+        0.0
+end
+
 function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boolean)
     self.images:generateMipmaps()
     if upload ~= false then
@@ -1248,32 +1296,16 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
     end
     if self._probing then
         local probe <const> = self._probe
-        local faces <const>: {{number}} = {
-            probe.positiveX,
-            probe.negativeX,
-            probe.positiveY,
-            probe.negativeY,
-            probe.positiveZ,
-            probe.negativeZ,
-        }
         if probe.intensity < 0.0 then
             error("tecs: mesh probe intensity must be non-negative", 2)
         end
         local uniform <const> = self._probeUniform
-        for face = 1, 6 do
-            local color <const> = faces[face]
-            if color == nil or #color < 3 then
-                error("tecs: each mesh probe face must contain red, green, and blue", 2)
-            end
-            local base <const> = (face - 1) * 4
-            for channel = 1, 3 do
-                if color[channel] < 0.0 then
-                    error("tecs: mesh probe colors must be non-negative", 2)
-                end
-                uniform[base + channel - 1] = color[channel] * probe.intensity
-            end
-            uniform[base + 3] = 0.0
-        end
+        writeProbeFace(uniform, 0, probe.positiveX, probe.intensity)
+        writeProbeFace(uniform, 4, probe.negativeX, probe.intensity)
+        writeProbeFace(uniform, 8, probe.positiveY, probe.intensity)
+        writeProbeFace(uniform, 12, probe.negativeY, probe.intensity)
+        writeProbeFace(uniform, 16, probe.positiveZ, probe.intensity)
+        writeProbeFace(uniform, 20, probe.negativeZ, probe.intensity)
         self._deferred:setMeshProbe(uniform)
     end
     self._blending = self._transparent and packet.blendCount > 0
@@ -1512,36 +1544,9 @@ function MeshBackend:recordShadowMap(context: Deferred.PassContext)
     end
     context.pass:bindPipeline(self.shadowPipeline.handle)
     context.pass:pushVertexUniform(0, self._shadowUniform, 64)
-    local buffers <const> = self._geometryBuffers
-    buffers[1] = self.vertices.handle
-    buffers[2] = self.instances.handle
-    local bufferSlot = 3
-    if self._vertexColors then
-        buffers[bufferSlot] = self._colorVertices.handle
-        bufferSlot = bufferSlot + 1
-    end
-    if self._morphing then
-        buffers[bufferSlot] = self._morphVertices.handle
-        buffers[bufferSlot + 1] = self._instanceMorphs.handle
-        buffers[bufferSlot + 2] = self._morphWeights.handle
-        bufferSlot = bufferSlot + 3
-    end
-    if self._skinning then
-        buffers[bufferSlot] = self._skinVertices.handle
-        if self._morphing then
-            buffers[bufferSlot + 1] = self._jointMatrices.handle
-        else
-            buffers[bufferSlot + 1] = self._instanceSkins.handle
-            buffers[bufferSlot + 2] = self._jointMatrices.handle
-        end
-    end
-    context.pass:bindVertexStorageBuffers(0, buffers)
-    local fragmentBuffers <const> = self._fragmentBuffers
-    fragmentBuffers[1] = self.materials.handle
-    context.pass:bindFragmentStorageBuffers(0, fragmentBuffers)
-    local textures <const> = self._fragmentTextures
-    textures[1] = self.images.handle
-    context.pass:bindTextures(0, textures, self.sampler.handle)
+    context.pass:bindVertexStorageBuffers(0, self._geometryBuffers)
+    context.pass:bindFragmentStorageBuffers(0, self._fragmentBuffers)
+    context.pass:bindTextures(0, self._fragmentTextures, self.sampler.handle)
     context.pass:bindIndexBuffer(self.indices.handle, RenderPass.INDEX_UINT32)
     context.pass:drawIndexedIndirect(self._shadowCommands.handle, 0, self._count)
 end
@@ -1554,36 +1559,9 @@ function MeshBackend:recordGeometry(context: Deferred.PassContext)
     context.pass:pushVertexUniform(
         0, self._fogging and self._viewUniform or self._viewProjection, self._fogging and 96 or 64
     )
-    local buffers <const> = self._geometryBuffers
-    buffers[1] = self.vertices.handle
-    buffers[2] = self.instances.handle
-    local bufferSlot = 3
-    if self._vertexColors then
-        buffers[bufferSlot] = self._colorVertices.handle
-        bufferSlot = bufferSlot + 1
-    end
-    if self._morphing then
-        buffers[bufferSlot] = self._morphVertices.handle
-        buffers[bufferSlot + 1] = self._instanceMorphs.handle
-        buffers[bufferSlot + 2] = self._morphWeights.handle
-        bufferSlot = bufferSlot + 3
-    end
-    if self._skinning then
-        buffers[bufferSlot] = self._skinVertices.handle
-        if self._morphing then
-            buffers[bufferSlot + 1] = self._jointMatrices.handle
-        else
-            buffers[bufferSlot + 1] = self._instanceSkins.handle
-            buffers[bufferSlot + 2] = self._jointMatrices.handle
-        end
-    end
-    context.pass:bindVertexStorageBuffers(0, buffers)
-    local fragmentBuffers <const> = self._fragmentBuffers
-    fragmentBuffers[1] = self.materials.handle
-    context.pass:bindFragmentStorageBuffers(0, fragmentBuffers)
-    local textures <const> = self._fragmentTextures
-    textures[1] = self.images.handle
-    context.pass:bindTextures(self._shadows and 1 or 0, textures, self.sampler.handle)
+    context.pass:bindVertexStorageBuffers(0, self._geometryBuffers)
+    context.pass:bindFragmentStorageBuffers(0, self._fragmentBuffers)
+    context.pass:bindTextures(self._shadows and 1 or 0, self._fragmentTextures, self.sampler.handle)
     if self._shadows then
         C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, self._shadowUniform, SHADOW_BYTES)
     end
@@ -1603,37 +1581,10 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
     context.pass:pushVertexUniform(
         0, self._fogging and self._viewUniform or self._viewProjection, self._fogging and 96 or 64
     )
-    local buffers <const> = self._forwardBuffers
-    buffers[1] = self.vertices.handle
-    buffers[2] = self.instances.handle
-    local bufferSlot = 3
-    if self._vertexColors then
-        buffers[bufferSlot] = self._colorVertices.handle
-        bufferSlot = bufferSlot + 1
-    end
-    if self._morphing then
-        buffers[bufferSlot] = self._morphVertices.handle
-        buffers[bufferSlot + 1] = self._instanceMorphs.handle
-        buffers[bufferSlot + 2] = self._morphWeights.handle
-        bufferSlot = bufferSlot + 3
-    end
-    if self._skinning then
-        buffers[bufferSlot] = self._skinVertices.handle
-        if self._morphing then
-            buffers[bufferSlot + 1] = self._jointMatrices.handle
-        else
-            buffers[bufferSlot + 1] = self._instanceSkins.handle
-            buffers[bufferSlot + 2] = self._jointMatrices.handle
-        end
-    end
-    context.pass:bindVertexStorageBuffers(0, buffers)
-    local fragmentBuffers <const> = self._fragmentBuffers
-    fragmentBuffers[1] = self.materials.handle
-    context.pass:bindFragmentStorageBuffers(0, fragmentBuffers)
+    context.pass:bindVertexStorageBuffers(0, self._forwardBuffers)
+    context.pass:bindFragmentStorageBuffers(0, self._fragmentBuffers)
     self._deferred:bindLighting(context, 1)
-    local textures <const> = self._forwardTextures
-    textures[1] = self.images.handle
-    context.pass:bindTextures(self._shadows and 1 or 0, textures, self.sampler.handle)
+    context.pass:bindTextures(self._shadows and 1 or 0, self._forwardTextures, self.sampler.handle)
     if self._shadows then
         C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, self._shadowUniform, SHADOW_BYTES)
     end

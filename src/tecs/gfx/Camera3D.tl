@@ -17,10 +17,11 @@ camera.rotationY = math.sin(math.rad(15) * 0.5)
 camera.rotationW = math.cos(math.rad(15) * 0.5)
 ```
 
-`matrix` writes a column-major world-to-clip matrix with depth in `[0, 1]`.
-`inverseMatrix` writes its clip-to-world inverse. Each method reuses its own
-sixteen-float array, so copy a result before retaining it across another call
-on the same camera.
+`matrix` writes a column-major world-to-clip matrix with depth in `[0, 1]`,
+and `inverseMatrix` writes its clip-to-world inverse. `matrices` writes both
+from one camera calculation for code that needs the pair. Each result uses a
+separate camera-owned sixteen-float array and remains valid until that same
+result is written again.
 ]=]
 
 local loader <const> = require("tecs.ffi.loader")
@@ -94,7 +95,6 @@ local record Camera3D
     --- Engine-owned. Stores the sixteen floats that `inverseMatrix` rewrites.
     --- Ordinary game code should ignore this field.
     _inverseMatrix: loader.CArray
-
     --- Creates a perspective camera.
     --- @param options Omit for an identity camera at the origin looking along negative z.
     --- @return A camera whose fields the caller assigns directly.
@@ -121,19 +121,33 @@ local record Camera3D
     --- @return The camera's own sixteen-float array, valid until the next call
     ---     to `inverseMatrix` on this camera.
     inverseMatrix: function(self, width: number, height: number): loader.CArray
+
+    --- Writes the world-to-clip matrix and its clip-to-world inverse.
+    ---
+    --- This method normalizes the camera quaternion and derives the projection
+    --- once, then writes both arrays. Use it when both matrices describe the
+    --- same view.
+    --- @param width The positive viewport width in pixels.
+    --- @param height The positive viewport height in pixels.
+    --- @return The camera's own world-to-clip sixteen-float array, valid until
+    ---     the next call to `matrix` or `matrices` on this camera.
+    --- @return The camera's own clip-to-world sixteen-float array, valid until
+    ---     the next call to `inverseMatrix` or `matrices` on this camera.
+    matrices: function(self, width: number, height: number): loader.CArray, loader.CArray
 end
 
 local Camera3DMT <const>: metatable<Camera3D> = {__index = Camera3D}
 
-local function validateProjection(verticalFov: number, near: number, far: number)
+local function validateProjection(verticalFov: number, near: number, far: number, level?: integer)
+    level = level or 3
     if verticalFov <= 0.0 or verticalFov >= PI then
-        error("Camera3D verticalFov must be greater than 0 and less than pi", 3)
+        error("Camera3D verticalFov must be greater than 0 and less than pi", level)
     end
     if near <= 0.0 then
-        error("Camera3D near must be greater than 0", 3)
+        error("Camera3D near must be greater than 0", level)
     end
     if far <= near then
-        error("Camera3D far must be greater than near", 3)
+        error("Camera3D far must be greater than near", level)
     end
 end
 
@@ -160,16 +174,16 @@ function Camera3D.newCamera3D(options?: Camera3DOptions): Camera3D
     return self
 end
 
-function Camera3D:inverseMatrix(width: number, height: number): loader.CArray
+local function writeMatrices(self: Camera3D, width: number, height: number, writeView: boolean, writeInverse: boolean)
     if width <= 0.0 or height <= 0.0 then
-        error("Camera3D viewport width and height must be greater than 0", 2)
+        error("Camera3D viewport width and height must be greater than 0", 3)
     end
-    validateProjection(self.verticalFov, self.near, self.far)
+    validateProjection(self.verticalFov, self.near, self.far, 4)
 
     local qx, qy, qz, qw = self.rotationX, self.rotationY, self.rotationZ, self.rotationW
     local magnitude <const> = sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
     if magnitude == 0.0 then
-        error("Camera3D rotation quaternion must not be zero", 2)
+        error("Camera3D rotation quaternion must not be zero", 3)
     end
     local inverseMagnitude <const> = 1.0 / magnitude
     qx, qy, qz, qw = qx * inverseMagnitude, qy * inverseMagnitude, qz * inverseMagnitude, qw * inverseMagnitude
@@ -185,85 +199,51 @@ function Camera3D:inverseMatrix(width: number, height: number): loader.CArray
     local horizontal <const> = focal * height / width
     local depth <const> = self.far / (self.near - self.far)
     local depthOffset <const> = self.far * self.near / (self.near - self.far)
-    local inverseDepthOffset <const> = 1.0 / depthOffset
-    local m <const> = self._inverseMatrix
+    if writeView then
+        local tx <const> = -(r00 * self.x + r10 * self.y + r20 * self.z)
+        local ty <const> = -(r01 * self.x + r11 * self.y + r21 * self.z)
+        local tz <const> = -(r02 * self.x + r12 * self.y + r22 * self.z)
+        local m <const> = self._matrix
 
-    -- Inverse projection followed by the local-to-world camera transform.
-    -- Written by columns so it is directly consumable by GLSL.
-    m[0], m[1], m[2], m[3] = r00 / horizontal, r10 / horizontal, r20 / horizontal, 0.0
-    m[4], m[5], m[6], m[7] = r01 / focal, r11 / focal, r21 / focal, 0.0
-    m[8], m[9], m[10], m[11] = self.x * inverseDepthOffset,
-        self.y * inverseDepthOffset,
-        self.z * inverseDepthOffset,
-        inverseDepthOffset
-    m[12], m[13], m[14], m[15] = -r02 + self.x * depth * inverseDepthOffset,
-        -r12 + self.y * depth * inverseDepthOffset,
-        -r22 + self.z * depth * inverseDepthOffset,
-        depth * inverseDepthOffset
-    return m
+        -- Projection multiplied by the inverse camera transform, written
+        -- directly in column-major order without temporary matrices.
+        m[0], m[1], m[2], m[3] = horizontal * r00, focal * r01, depth * r02, -r02
+        m[4], m[5], m[6], m[7] = horizontal * r10, focal * r11, depth * r12, -r12
+        m[8], m[9], m[10], m[11] = horizontal * r20, focal * r21, depth * r22, -r22
+        m[12], m[13], m[14], m[15] = horizontal * tx, focal * ty, depth * tz + depthOffset, -tz
+    end
+    if writeInverse then
+        local inverseDepthOffset <const> = 1.0 / depthOffset
+        local m <const> = self._inverseMatrix
+
+        -- Inverse projection followed by the local-to-world camera transform.
+        -- Written by columns so it is directly consumable by GLSL.
+        m[0], m[1], m[2], m[3] = r00 / horizontal, r10 / horizontal, r20 / horizontal, 0.0
+        m[4], m[5], m[6], m[7] = r01 / focal, r11 / focal, r21 / focal, 0.0
+        m[8], m[9], m[10], m[11] = self.x * inverseDepthOffset,
+            self.y * inverseDepthOffset,
+            self.z * inverseDepthOffset,
+            inverseDepthOffset
+        m[12], m[13], m[14], m[15] = -r02 + self.x * depth * inverseDepthOffset,
+            -r12 + self.y * depth * inverseDepthOffset,
+            -r22 + self.z * depth * inverseDepthOffset,
+            depth * inverseDepthOffset
+    end
 end
 
 function Camera3D:matrix(width: number, height: number): loader.CArray
-    if width <= 0.0 or height <= 0.0 then
-        error("Camera3D viewport width and height must be greater than 0", 2)
-    end
-    validateProjection(self.verticalFov, self.near, self.far)
+    writeMatrices(self, width, height, true, false)
+    return self._matrix
+end
 
-    local qx, qy, qz, qw = self.rotationX, self.rotationY, self.rotationZ, self.rotationW
-    local magnitude <const> = sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
-    if magnitude == 0.0 then
-        error("Camera3D rotation quaternion must not be zero", 2)
-    end
-    local inverseMagnitude <const> = 1.0 / magnitude
-    qx = qx * inverseMagnitude
-    qy = qy * inverseMagnitude
-    qz = qz * inverseMagnitude
-    qw = qw * inverseMagnitude
+function Camera3D:inverseMatrix(width: number, height: number): loader.CArray
+    writeMatrices(self, width, height, false, true)
+    return self._inverseMatrix
+end
 
-    local xx, yy, zz = qx * qx, qy * qy, qz * qz
-    local xy, xz, yz = qx * qy, qx * qz, qy * qz
-    local wx, wy, wz = qw * qx, qw * qy, qw * qz
-
-    -- Local-to-world rotation. The view uses its transpose below.
-    local r00 = 1.0 - 2.0 * (yy + zz)
-    local r01 = 2.0 * (xy - wz)
-    local r02 = 2.0 * (xz + wy)
-    local r10 = 2.0 * (xy + wz)
-    local r11 = 1.0 - 2.0 * (xx + zz)
-    local r12 = 2.0 * (yz - wx)
-    local r20 = 2.0 * (xz - wy)
-    local r21 = 2.0 * (yz + wx)
-    local r22 = 1.0 - 2.0 * (xx + yy)
-
-    local tx = -(r00 * self.x + r10 * self.y + r20 * self.z)
-    local ty = -(r01 * self.x + r11 * self.y + r21 * self.z)
-    local tz = -(r02 * self.x + r12 * self.y + r22 * self.z)
-
-    local focal <const> = 1.0 / tan(self.verticalFov * 0.5)
-    local horizontal <const> = focal * height / width
-    local depth <const> = self.far / (self.near - self.far)
-    local depthOffset <const> = self.far * self.near / (self.near - self.far)
-    local m = self._matrix
-
-    -- Projection multiplied by the inverse camera transform, written directly
-    -- in column-major order so no temporary matrices are allocated.
-    m[0] = horizontal * r00
-    m[1] = focal * r01
-    m[2] = depth * r02
-    m[3] = -r02
-    m[4] = horizontal * r10
-    m[5] = focal * r11
-    m[6] = depth * r12
-    m[7] = -r12
-    m[8] = horizontal * r20
-    m[9] = focal * r21
-    m[10] = depth * r22
-    m[11] = -r22
-    m[12] = horizontal * tx
-    m[13] = focal * ty
-    m[14] = depth * tz + depthOffset
-    m[15] = -tz
-    return m
+function Camera3D:matrices(width: number, height: number): loader.CArray, loader.CArray
+    writeMatrices(self, width, height, true, true)
+    return self._matrix, self._inverseMatrix
 end
 
 return Camera3D

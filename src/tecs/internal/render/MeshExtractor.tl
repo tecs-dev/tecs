@@ -3,9 +3,10 @@ Turns 3D scene columns into mesh-domain staging and a frame packet.
 
 This extractor is intentionally independent of sprite layout and queries. It
 writes a fixed mesh instance record and a world-space bounding sphere directly
-into mapped staging. The first version rewrites the resident mesh range each
-frame, matching the headless contract benchmark; retained dirty-gated runs can
-replace that policy without changing the packet or backend.
+into mapped staging. It rewrites the compact resident range each frame because
+archetype iteration order can change after structural mutation. The frame
+packet keeps this policy separate from device upload so a measured retained
+strategy can replace it without changing the backend contract.
 
 Optional skin and morph columns write compact locator records. A combined
 domain appends the skin offset to each morph locator so its vertex shader stays
@@ -116,7 +117,6 @@ end
 
 local function packLight(
     packet: MeshFramePacket,
-    capacity: integer,
     transform: ecs.Transform3D,
     radius: number,
     r: number,
@@ -131,9 +131,6 @@ local function packLight(
     kind: integer
 )
     local count <const> = packet.lightCount
-    if count >= capacity then
-        return
-    end
     local lights <const> = packet.lights
     local base <const> = count * meshlightlayout.FLOATS
     lights[base], lights[base + 1], lights[base + 2], lights[base + 3] = transform.x, transform.y, transform.z, radius
@@ -153,12 +150,15 @@ local function syncLights(self: MeshExtractor, packet: MeshFramePacket)
     for archetype, length in self._pointLights:iter() do
         local transforms <const> = archetype:get(Transform3D)
         local sources <const> = archetype:get(components.PointLight3D)
-        for row = 1, length do
+        local stop = self._lightCapacity - packet.lightCount
+        if stop > length then
+            stop = length
+        end
+        for row = 1, stop do
             local source <const> = sources[row]
             validLight(source.radius, source.r, source.g, source.b, source.intensity)
             packLight(
                 packet,
-                self._lightCapacity,
                 transforms[row],
                 source.radius,
                 source.r,
@@ -177,7 +177,11 @@ local function syncLights(self: MeshExtractor, packet: MeshFramePacket)
     for archetype, length in self._spotLights:iter() do
         local transforms <const> = archetype:get(Transform3D)
         local sources <const> = archetype:get(components.SpotLight3D)
-        for row = 1, length do
+        local stop = self._lightCapacity - packet.lightCount
+        if stop > length then
+            stop = length
+        end
+        for row = 1, stop do
             local transform <const> = transforms[row]
             local source <const> = sources[row]
             validLight(source.radius, source.r, source.g, source.b, source.intensity)
@@ -200,7 +204,6 @@ local function syncLights(self: MeshExtractor, packet: MeshFramePacket)
             local directionZ <const> = (2.0 * (qx * qx + qy * qy) - lengthSquared) * inverse
             packLight(
                 packet,
-                self._lightCapacity,
                 transform,
                 source.radius,
                 source.r,

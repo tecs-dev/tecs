@@ -107,6 +107,12 @@ notice. The glTF worker also remaps primitives above 65,536 triangles into
 independently bounded culling commands, so one oversized source range does not
 turn instance culling into an all-or-nothing million-triangle draw.
 
+Mesh residency is intentionally owned below the public domain. Games register
+geometry, textures, and materials through `MeshDomain` and observe compact
+counts, while only the backend can reach the raw GPU buffers. Draw-resource
+handle lists are assembled once with that residency instead of being rebuilt
+for the shadow, deferred, and transparent passes every frame.
+
 Point and spot lights also live behind one mesh option. Their component queries,
 record buffer, screen-tile lists, compute dispatch, bindings, and Cook-Torrance
 shader variants do not exist in a mesh domain that omits `lights`, and no part

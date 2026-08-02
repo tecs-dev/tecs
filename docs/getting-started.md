@@ -160,6 +160,9 @@ return tecs.newApplication({
 The mesh domain frustum-culls and depth-sorts complete indexed commands on the
 GPU. It draws transparent meshes before the sprite forward lane, so sprites
 retain deterministic overlay ordering in a renderer that enables both domains.
+The domain exposes registration methods, configuration, and residency counts;
+its GPU buffers belong to the internal backend and are not part of the game
+API.
 
 ## Vertex colors, fog, bloom, and a 2D HUD
 
