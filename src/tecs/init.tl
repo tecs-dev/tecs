@@ -23,7 +23,6 @@ local ecs <const> = require("tecs.ecs")
 -- that declares them loads, so a plain `require("tecs")` would demand a
 -- graphics stack from a test, a server or a tool that only wanted the ECS.
 local type Application = require("tecs.Application")
-local type Future = require("tecs.Future")
 local type scopeModule = require("tecs.scope")
 local type audio = require("tecs.audio")
 local type Renderer = require("tecs.Renderer")
@@ -56,7 +55,6 @@ local type log = require("tecs.log")
 local type angleMath = require("tecs.math")
 local type data = require("tecs.data")
 local type regex = require("tecs.regex")
-local type runtime = require("tecs.runtime")
 local type loader = require("tecs.ffi.loader")
 local type Closeable = types.Closeable
 
@@ -325,12 +323,11 @@ local record gfx
     --- Needs `textPlugin` installed on the world.
     Text: text.Text
 
-    --- Starts loading a TrueType or OpenType source font with SDL_ttf.
+    --- Loads a TrueType or OpenType source font with SDL_ttf.
     --- @param options The caller supplies a source path and may select the
     ---     raster point size and snapshot identity.
-    --- @return A future that settles with an immutable font after its source
-    ---     bytes have been read and opened.
-    newTTF: function(options: text.TTFOptions): Future<text.Font>
+    --- @return An immutable font after its source bytes have been read and opened.
+    newTTF: function(options: text.TTFOptions): text.Font
 
     --- Extent of a `Text` in world units, laid out the way the system lays it
     --- out and without touching any entity.
@@ -408,13 +405,6 @@ local record tecs
     --- table it passes without reaching through the class for it.
     type ApplicationConfig = Application.Config
 
-    --- A value that settles once, and the combinators over it.
-    ---
-    --- At the root because every subsystem that answers later returns one:
-    --- an asset decode, a child process, an HTTP transfer and a DNS lookup are
-    --- all `Future<T>`, and no one of them owns the type.
-    Future: Future<any>
-
     --- `Scope` owns explicitly registered resources for one lexical lifetime.
     type Scope = scopeModule.Scope
 
@@ -422,12 +412,13 @@ local record tecs
     ---
     --- Every [`Closeable`](tealdoc:tecs.Closeable) registered through the
     --- callback's [`Scope`](tealdoc:tecs.Scope) closes in reverse order after
-    --- the callback returns or raises. Cleanup attempts every close. The
-    --- callback must not yield, and a captured scope refuses registration
-    --- after cleanup starts.
+    --- the callback returns or raises. Cleanup attempts every close. Inside a
+    --- system, the callback may suspend through a cooperative engine call;
+    --- owned resources remain live until it resumes and cleanup begins. A
+    --- captured scope refuses registration after cleanup starts.
     ---
-    --- @param body The synchronous callback that owns the scope and every
-    ---     resource registered through it. Returned values are ignored.
+    --- @param body The lexical callback that owns the scope and every resource
+    ---     registered through it. Returned values are ignored.
     scoped: function(body: function(scopeModule.Scope))
 
     --- Builds the application an entry file returns.
@@ -488,7 +479,6 @@ local record tecs
     math: angleMath
     platform: platform
     regex: regex
-    runtime: runtime
     sequence: sequence
     ui: ui
     workers: workers
@@ -554,7 +544,6 @@ end
 --- own record type it.
 local SURFACE <const>: {string: Namespace} = {
     Application = {module = "tecs.Application"},
-    Future = {module = "tecs.Future"},
     newApplication = {module = "tecs.Application", member = "newApplication"},
     scoped = {module = "tecs.scope", member = "scoped"},
     assets = {module = "tecs.assets"},
@@ -618,7 +607,6 @@ local SURFACE <const>: {string: Namespace} = {
         },
     },
     regex = {module = "tecs.regex"},
-    runtime = {module = "tecs.runtime"},
     sequence = {module = "tecs.sequence"},
     ui = {module = "tecs.ui"},
     workers = {module = "tecs.workers"},

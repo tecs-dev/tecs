@@ -337,6 +337,7 @@ local record input
         --- The application calls this before it folds events. Ordinary game
         --- code must not call it.
         beginFrame: function(self: Input)
+        _releaseHeld: function(self: Input)
 
         --- Engine-owned. Selects latched edges for a fixed step.
         ---
@@ -840,6 +841,10 @@ local function releaseHeld(self: Input)
     end
     self.penTouching = false
     self.penPressure = 0.0
+end
+
+function Input:_releaseHeld()
+    releaseHeld(self)
 end
 
 local function touchKey(event: eventStream.Event): string

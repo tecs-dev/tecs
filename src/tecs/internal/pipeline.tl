@@ -2,6 +2,7 @@ local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
 local phases <const> = require("tecs.internal.phases")
 local fixedtracking <const> = require("tecs.internal.fixedtracking")
+local zones <const> = require("tecs.internal.zones")
 local EMPTY <const> = require("tecs.utils.pool").EMPTY
 
 local table_new <const> = require("table.new") as function(integer, integer): {any}
@@ -18,12 +19,6 @@ local record RegisteredSystem is SystemConfig
     id: string
 end
 
--- `jit.zone` has no Teal type declarations; go through an opaque require.
-local function loadUntyped(modName: string): any
-    return require(modName)
-end
-local zone = loadUntyped("jit.zone") as function(?string): string
-
 -- Flattened parallel arrays for a group of systems. Avoids per-system
 -- hash reads in the hot loop.
 local record FlatGroup
@@ -33,6 +28,14 @@ local record FlatGroup
     names: {string}
     commitBefores: {boolean}
     commitAfters: {boolean}
+    count: integer
+end
+
+-- Only enabled, nonempty phases enter an update span. Rebuilding this cache
+-- when the pipeline changes removes empty-phase scans from every frame while
+-- preserving one commit boundary per phase.
+local record PhaseSpan
+    groups: {FlatGroup}
     count: integer
 end
 
@@ -77,9 +80,9 @@ local record PipelineImpl is Pipeline
 
     count: integer
 
-    beforeFixedGroup: FlatGroup
-    fixedGroup: FlatGroup
-    afterFixedGroup: FlatGroup
+    beforeFixedSpan: PhaseSpan
+    fixedSpan: PhaseSpan
+    afterFixedSpan: PhaseSpan
 
     -- Per-phase flat caches for run(phase). Group phases contain the
     -- concatenated flat lists of their children.
@@ -120,8 +123,13 @@ local EMPTY_GROUP <const>: FlatGroup = {
     count = 0,
 }
 
+local EMPTY_SPAN <const>: PhaseSpan = {
+    groups = {},
+    count = 0,
+}
+
 -- The list of phases for each span of flatSystems.
-local BEFORE_FIXED_PHASES <const> = {phases.First, phases.PreUpdate}
+local BEFORE_FIXED_PHASES <const> = {phases.Ingress, phases.First, phases.PreUpdate}
 local FIXED_PHASES <const> = phases.FixedUpdateGroup.children
 local AFTER_FIXED_PHASES <const> = {
     phases.Update,
@@ -161,9 +169,9 @@ function pipeline.new(fixedTimestep: number, fixedMaxSteps?: integer, fixedOverl
             fixedStepsDropped = 0,
             nextDropReport = 1,
             count = 0,
-            beforeFixedGroup = EMPTY_GROUP,
-            fixedGroup = EMPTY_GROUP,
-            afterFixedGroup = EMPTY_GROUP,
+            beforeFixedSpan = EMPTY_SPAN,
+            fixedSpan = EMPTY_SPAN,
+            afterFixedSpan = EMPTY_SPAN,
             phaseGroups = {},
             systemNameRegistry = {},
             anonymousSystemCount = 0,
@@ -319,23 +327,20 @@ local function buildFlatGroup(configs: {RegisteredSystem}): FlatGroup
     }
 end
 
--- Collect systems from a list of phases into one flat registered-system list.
-local function collectPhaseSystems(self: PipelineImpl, phaseList: {Phase}): {RegisteredSystem}
-    local result: {RegisteredSystem} = {}
-    local n = 0
+local function buildPhaseSpan(self: PipelineImpl, phaseList: {Phase}): PhaseSpan
+    local groups: {FlatGroup} = table_new(#phaseList, 0) as {FlatGroup}
+    local count = 0
     for i = 1, #phaseList do
         local phase = phaseList[i]
         if self.phaseStates[phase.position] then
-            local phaseSystems = self.systems[phase.position]
-            if phaseSystems then
-                for j = 1, #phaseSystems do
-                    n = n + 1
-                    result[n] = phaseSystems[j]
-                end
+            local group = self.phaseGroups[phase.position]
+            if group ~= nil and group.count > 0 then
+                count = count + 1
+                groups[count] = group
             end
         end
     end
-    return result
+    return {groups = groups, count = count}
 end
 
 local function recreatePipeline(self: PipelineImpl)
@@ -354,11 +359,6 @@ local function recreatePipeline(self: PipelineImpl)
     end
     self.count = count
 
-    -- Build flat groups for the three update regions.
-    self.beforeFixedGroup = buildFlatGroup(collectPhaseSystems(self, BEFORE_FIXED_PHASES))
-    self.fixedGroup = buildFlatGroup(collectPhaseSystems(self, FIXED_PHASES))
-    self.afterFixedGroup = buildFlatGroup(collectPhaseSystems(self, AFTER_FIXED_PHASES))
-
     -- Build per-phase flat caches for run(phase).
     self.phaseGroups = {}
     for i = 1, #phases.index do
@@ -369,6 +369,10 @@ local function recreatePipeline(self: PipelineImpl)
             self.phaseGroups[i] = EMPTY_GROUP
         end
     end
+
+    self.beforeFixedSpan = buildPhaseSpan(self, BEFORE_FIXED_PHASES)
+    self.fixedSpan = buildPhaseSpan(self, FIXED_PHASES)
+    self.afterFixedSpan = buildPhaseSpan(self, AFTER_FIXED_PHASES)
 
     self.dirty = false
 end
@@ -392,9 +396,14 @@ local function runGroupBody(group: FlatGroup, dt: number, world: World)
         worldImpl._runningSystem = true
         local runIf = runIfArr[i]
         if not runIf or runIf(dt, world, nameArr[i]) then
-            zone(idArr[i])
+            local profiling <const> = zones.active
+            if profiling then
+                zones.push(idArr[i])
+            end
             runs[i](dt, world)
-            zone()
+            if profiling then
+                zones.push()
+            end
         end
         worldImpl._runningSystem = false
         if commitAfters[i] or worldImpl._commitRequested then
@@ -418,7 +427,9 @@ local function phaseFailure(failure: any): string
         world._runningSystem = false
         world._commitRequested = false
     end
-    zone()
+    if zones.active then
+        zones.push()
+    end
     return traceback(tostring(failure), 2)
 end
 
@@ -437,20 +448,16 @@ local function runGroup(group: FlatGroup, dt: number, world: World)
     end
 end
 
--- Execute enabled leaf phases in order, publishing once after each phase.
--- Systems within one phase therefore batch together and intentionally do not
--- observe one another's structural changes unless its configuration declares
--- an additional barrier.
-local function runPhaseList(self: PipelineImpl, phaseList: {Phase}, dt: number, world: World)
-    for i = 1, #phaseList do
-        local phase = phaseList[i]
-        if self.phaseStates[phase.position] then
-            local group = self.phaseGroups[phase.position]
-            if group and group.count > 0 then
-                runGroup(group, dt, world)
-                (world as internal.WorldImpl):_commit()
-            end
-        end
+-- Execute cached nonempty leaf phases in order, publishing once after each
+-- phase. Systems within one phase batch together and intentionally do not
+-- observe one another's structural changes unless configured with another
+-- barrier.
+local function runPhaseSpan(span: PhaseSpan, dt: number, world: World)
+    local groups = span.groups
+    local worldImpl = world as internal.WorldImpl
+    for index = 1, span.count do
+        runGroup(groups[index], dt, world)
+        worldImpl:_commit()
     end
 end
 
@@ -511,7 +518,7 @@ local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
         return
     end
 
-    local hasWork = self.fixedGroup.count > 0
+    local hasWork = self.fixedSpan.count > 0
     local maxSteps = self.fixedMaxSteps
     local steps = 0
 
@@ -523,7 +530,7 @@ local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
         self.fixedStepCount = self.fixedStepCount + 1
         fixedtracking.beginStep(world)
         if hasWork then
-            runPhaseList(self, FIXED_PHASES, fixedTimestep, world)
+            runPhaseSpan(self.fixedSpan, fixedTimestep, world)
         end
         fixedtracking.finishStep(world)
         self.fixedAccumulator = self.fixedAccumulator - fixedTimestep
@@ -545,17 +552,30 @@ function PipelineImpl:update(dt: number, world: World)
         recreatePipeline(self)
     end
 
-    zone("beforeFixed")
-    runPhaseList(self, BEFORE_FIXED_PHASES, dt, world)
-    zone()
+    local profiling <const> = zones.active
+    if profiling then
+        zones.push("beforeFixed")
+    end
+    runPhaseSpan(self.beforeFixedSpan, dt, world)
+    if profiling then
+        zones.push()
+    end
 
-    zone("fixedLoop")
+    if profiling then
+        zones.push("fixedLoop")
+    end
     runFixedLoop(self, dt, world)
-    zone()
+    if profiling then
+        zones.push()
+    end
 
-    zone("afterFixed")
-    runPhaseList(self, AFTER_FIXED_PHASES, dt, world)
-    zone()
+    if profiling then
+        zones.push("afterFixed")
+    end
+    runPhaseSpan(self.afterFixedSpan, dt, world)
+    if profiling then
+        zones.push()
+    end
 end
 
 function PipelineImpl:enablePhase(phase: Phase)

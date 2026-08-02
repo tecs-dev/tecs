@@ -529,7 +529,6 @@ mcp.register({
             muted = sound:muted(),
             sounding = sound:sounding(),
             maxVoices = sound:maxVoices(),
-            loading = sound:loading(),
             decoders = #decoders > 0 and decoders or data.empty_array,
             clips = #clips > 0 and clips or data.empty_array,
             groups = #groups > 0 and groups or data.empty_array,
@@ -602,15 +601,8 @@ function tools.reloadImage(path: string): integer, integer, integer
 
     -- Nothing in `assets` is a cache, so this decodes the file as it is now
     -- rather than answering with what the first load produced.
-    local decoding = assets.loadImage(path)
-    assets.waitAll()
-    if decoding.status ~= "ready" then
-        local reason = decoding.error or ("still " .. decoding.status)
-        decoding:cancel()
-        error(("'%s' did not load: %s"):format(path, reason), 0)
-    end
-
-    local _, region = target.sprites:replaceImage(decoding.value)
+    local image = assets.loadImage(path)
+    local _, region = target.sprites:replaceImage(image)
     return region.layer, region.width, region.height
 end
 

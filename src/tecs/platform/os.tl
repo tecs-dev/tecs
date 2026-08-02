@@ -25,8 +25,7 @@ reads may return only the value this process wrote.
 SDL applications already receive `SIGINT` and `SIGTERM` as the public
 `tecs.platform.events.on.quit` event and then run their normal shutdown
 lifecycle. A headless loop can retain a [`SignalListener`](tealdoc:tecs.platform.os.SignalListener)
-instead. `tecs.runtime.poll` transfers signals out of the native handler, and
-`next` drains them without waiting:
+instead. `next` transfers native signal flags and drains one without waiting:
 
 ```teal
 tecs.scoped(function(scope: tecs.Scope)
@@ -34,7 +33,6 @@ tecs.scoped(function(scope: tecs.Scope)
 
     local running = true
     while running do
-        tecs.runtime.poll()
         local signal <const> = signals:next()
         if signal == "interrupt" or signal == "terminate" then
             running = false
@@ -44,12 +42,20 @@ end)
 ```
 
 The native handler only sets atomic flags. It never calls Lua, allocates, or
-locks. Repeated instances of one signal may coalesce before the next runtime
-poll, as operating-system signals ordinarily may. When different signals are
-pending in one poll, `next` returns them in the enum order rather than claiming
+locks. Repeated instances of one signal may coalesce before the next listener
+read, as operating-system signals ordinarily may. When different signals are
+pending in one read, `next` returns them in enum order rather than claiming
 an arrival order the operating system did not preserve. Closing the last
 listener stops interception, so a later signal follows the platform's
 termination behavior again.
+
+## Native dialogs
+
+File and folder dialogs return their result directly. Inside a system they
+suspend the logical world update while the operating system owns the dialog;
+outside an update they block while pumping the native bridge. The Rust bridge
+copies the platform callback result into a queue, and Lua observes it only from
+the Application or the blocking call.
 
 ]=]
 -- Implementation details:
@@ -66,7 +72,8 @@ local loader <const> = require("tecs.ffi.loader")
 local adapter <const> = require("tecs.platform.adapter")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local shaderpack <const> = require("tecs.gpu.shaderpack")
-local Future <const> = require("tecs.Future")
+local Completion <const> = require("tecs.internal.completion")
+local task <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
 local buffer <const> = require("tecs.io.buffer")
 local type coretypes = require("tecs.types")
@@ -158,7 +165,7 @@ end
 
 --- A caller-owned queue of process signals for a headless loop.
 ---
---- [`runtime.poll`](/modules/runtime/#tecs.runtime.poll) fills the queue. The
+--- Reading the listener transfers pending native flags into its queue. The
 --- listener owns no thread and invokes no callback. Close it to stop
 --- interception after the last listener closes. Repeated closure remains
 --- safe.
@@ -171,7 +178,7 @@ local interface SignalListener is Closeable
 
     --- Returns the number of signals waiting to be read.
     ---
-    --- Signals of the same kind may coalesce before a runtime poll. The count
+    --- Signals of the same kind may coalesce before a read. The count
     --- covers deliveries already transferred to this listener.
     --- @param self The open listener to inspect.
     --- @return Returns the queued delivery count.
@@ -378,6 +385,7 @@ end
 
 local listeners <const>: {SignalListenerImpl: boolean} = {}
 local listenerCount = 0
+local updateSignals: function(): integer
 
 function SignalListenerImpl:isClosed(): boolean
     return self._closed
@@ -391,6 +399,7 @@ end
 
 function SignalListenerImpl:pending(): integer
     openListener(self, "pending")
+    updateSignals()
     local count = 0
     for index = 1, #SIGNALS do
         count = count + self._pending[index]
@@ -400,6 +409,7 @@ end
 
 function SignalListenerImpl:next(): ProcessSignal
     openListener(self, "next")
+    updateSignals()
     for index = 1, #SIGNALS do
         if self._pending[index] > 0 then
             self._pending[index] = self._pending[index] - 1
@@ -423,7 +433,7 @@ function SignalListenerImpl:close(): boolean, string
     return true
 end
 
-local function updateSignals(): integer
+updateSignals = function(): integer
     local mask <const> = tonumber(R.tecsSignalsPoll()) as integer
     if mask == 0 then
         return 0
@@ -521,16 +531,17 @@ function platformOS.messageBox(kind: string, title: string, message: string, win
 end
 
 -------------------------------------------------------------------------------
--- Asynchronous file and folder dialogs
+-- Cooperative file and folder dialogs
 -------------------------------------------------------------------------------
 
 --- SDL retains the file-dialog callback and may enter it from a thread LuaJIT
---- did not create. The Rust dialog bridge owns that callback and copies its answer;
---- this source polls the copied result and settles futures on the main thread.
+--- did not create. The Rust dialog bridge owns that callback and copies its
+--- answer; this source polls the copied result and settles private completion
+--- state on the main thread.
 
 local record DialogEntry
     handle: loader.CPtr
-    future: Future<DialogResult>
+    completion: Completion<DialogResult>
 end
 
 local record DialogSource
@@ -547,7 +558,7 @@ local function finishDialog(entry: DialogEntry)
     local handle = entry.handle
     local errorPointer = D.tecsDialogError(handle)
     if errorPointer ~= nil then
-        entry.future:fail(loader.toString(errorPointer))
+        entry.completion:fail(loader.toString(errorPointer))
     else
         local paths: {string} = {}
         local count = tonumber(D.tecsDialogPathCount(handle)) as integer
@@ -555,7 +566,7 @@ local function finishDialog(entry: DialogEntry)
             paths[index + 1] = loader.toString(D.tecsDialogPath(handle, index))
         end
         local selected = tonumber(D.tecsDialogFilter(handle)) as integer
-        entry.future:complete({
+        entry.completion:complete({
             paths = paths,
             filter = selected >= 0 and selected + 1 or 0,
             canceled = D.tecsDialogCancelled(handle) as boolean,
@@ -618,55 +629,79 @@ local function filterArrays(options: DialogOptions): loader.CArray, loader.CArra
     return names, patterns, #filters
 end
 
-local function trackDialog(handle: loader.CPtr): Future<DialogResult>
+local function trackDialog(handle: loader.CPtr): Completion<DialogResult>
     if handle == nil then
-        return Future.failed("cannot allocate file-dialog state") as Future<DialogResult>
+        return Completion.failed("cannot allocate file-dialog state") as Completion<DialogResult>
     end
-    local future = Future.pending(dialogSource as Future.Source) as Future<DialogResult>
-    pendingDialogs[#pendingDialogs + 1] = {handle = handle, future = future}
+    local completion = Completion.pending(dialogSource as Completion.Source) as Completion<DialogResult>
+    pendingDialogs[#pendingDialogs + 1] = {handle = handle, completion = completion}
     if #pendingDialogs == 1 then
         runtime.register("dialogs", 30, pollDialogs)
     end
     -- A setup allocation can fail before SDL opens anything.
     dialogSource:poll()
-    return future
+    return completion
 end
 
---- Opens a native file picker.
-function platformOS.openFile(options?: DialogOptions): Future<DialogResult>
+local function awaitDialog(pending: Completion<DialogResult>): DialogResult
+    return task.awaitCompletion(pending, "native dialog")
+end
+
+--- Opens a native file picker and returns its selection.
+---
+--- Inside a system, the call suspends until the dialog closes. Outside a world
+--- update, it blocks while pumping the native bridge.
+--- @param options The caller supplies the owner window, filters, starting
+---     location, and multiple-selection flag, or omits every option.
+--- @return Returns selected paths and filter state. Cancellation returns a
+---     result with `canceled` true rather than failing.
+function platformOS.openFile(options?: DialogOptions): DialogResult
     local given = options or {} as DialogOptions
     local names, patterns, count = filterArrays(given)
     local window = given.window ~= nil and given.window.handle or nil
-    return trackDialog(
-        D.tecsDialogOpenFile(window, names, patterns, count, given.defaultLocation, given.multiple == true)
+    task.checkWait("native dialog")
+    return awaitDialog(
+        trackDialog(D.tecsDialogOpenFile(window, names, patterns, count, given.defaultLocation, given.multiple == true))
     )
 end
 
---- Opens a native save-file picker. Returns at most one path.
-function platformOS.saveFile(options?: DialogOptions): Future<DialogResult>
+--- Opens a native save-file picker and returns at most one path.
+---
+--- Inside a system, the call suspends until the dialog closes. Outside a world
+--- update, it blocks while pumping the native bridge.
+--- @param options The caller supplies the owner window, filters, and starting
+---     location, or omits every option. The `multiple` field is ignored.
+--- @return Returns the selected path and filter state. Cancellation returns a
+---     result with `canceled` true rather than failing.
+function platformOS.saveFile(options?: DialogOptions): DialogResult
     local given = options or {} as DialogOptions
     local names, patterns, count = filterArrays(given)
     local window = given.window ~= nil and given.window.handle or nil
-    return trackDialog(D.tecsDialogSaveFile(window, names, patterns, count, given.defaultLocation))
+    task.checkWait("native dialog")
+    return awaitDialog(trackDialog(D.tecsDialogSaveFile(window, names, patterns, count, given.defaultLocation)))
 end
 
---- Opens a native folder picker.
-function platformOS.openFolder(options?: DialogOptions): Future<DialogResult>
+--- Opens a native folder picker and returns its selection.
+---
+--- Inside a system, the call suspends until the dialog closes. Outside a world
+--- update, it blocks while pumping the native bridge.
+--- @param options The caller supplies the owner window, starting location, and
+---     multiple-selection flag, or omits every option. Filters are ignored.
+--- @return Returns selected folders. Cancellation returns a result with
+---     `canceled` true rather than failing.
+function platformOS.openFolder(options?: DialogOptions): DialogResult
     local given = options or {} as DialogOptions
     local window = given.window ~= nil and given.window.handle or nil
-    return trackDialog(D.tecsDialogOpenFolder(window, given.defaultLocation, given.multiple == true))
+    task.checkWait("native dialog")
+    return awaitDialog(trackDialog(D.tecsDialogOpenFolder(window, given.defaultLocation, given.multiple == true)))
 end
 
 --- Settles file and folder dialogs that have answered.
----
---- [`runtime.poll`](/modules/runtime/#tecs.runtime.poll) calls this while a
---- dialog is open. It remains public for a test or a specialized headless loop
---- that deliberately drives dialogs alone.
-function platformOS.updateDialogs(): integer
+local function updateDialogs(): integer
     return dialogSource:poll()
 end
 
-dialogRuntimePoll = platformOS.updateDialogs
+dialogRuntimePoll = updateDialogs
 
 local resolved: Capabilities = nil
 local cachedGeneration = -1

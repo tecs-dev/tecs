@@ -195,6 +195,17 @@ local REACH = {
     },
     {
         bucket = "direct",
+        reason = "The engine runtime owns bounded asynchronous file transfers "
+            .. "and CPU image decoding. SDL supplies the portable file queue "
+            .. "and decoder while Rust keeps their worker callbacks outside "
+            .. "the Lua VM.",
+        modules = {
+            "tecs/internal/cpuimage.lua",
+            "tecs/internal/fileasync.lua",
+        },
+    },
+    {
+        bucket = "direct",
         reason = "Camino, path-clean, and pathdiff are pinned pure-Rust path "
             .. "semantics shared by every platform. The Lua object adds no "
             .. "operating-system service for a port to replace.",
@@ -233,6 +244,7 @@ local REACH = {
             "tecs/data/init.lua",
             "tecs/io/mcp/transport.lua",
             "tecs/io/init.lua",
+            "tecs/internal/netreactor.lua",
             "tecs/math/noise.lua",
             "tecs/regex.lua",
             "tecs/ui.lua",

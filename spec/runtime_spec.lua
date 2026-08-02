@@ -2,7 +2,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local process = require("tecs.internal.runtime")
-local runtime = require("tecs.runtime")
+local runtime = process
 
 local NAMES = {
     "spec.runtime.first",
@@ -17,7 +17,7 @@ local function clear()
     end
 end
 
-describe("tecs.runtime", function()
+describe("the internal process runtime", function()
     before_each(clear)
     after_each(clear)
 

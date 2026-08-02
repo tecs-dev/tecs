@@ -67,6 +67,16 @@ local function recorder()
         end
 end
 
+--- Drives the scheduler-owned half of a watcher update. `scan` only admits
+--- stable changes; handlers run from Ingress so a suspended logical update
+--- cannot observe a later save.
+local function dispatchIngress()
+    watcher._sealIngress()
+    local fired = watcher._dispatchIngress()
+    watcher._finishIngress()
+    return fired
+end
+
 describe("the file watcher", function()
     local dir
 
@@ -143,6 +153,7 @@ describe("the file watcher", function()
         version = 2
         watcher.scan()
         watcher.scan()
+        dispatchIngress()
 
         assert.are.equal(1, seen)
         assert.is_true(calls >= 3, "the watcher did not ask the installed backend")
@@ -175,6 +186,7 @@ describe("the file watcher", function()
         assert.are.equal(0, watcher.scan(), "a change was acted on before it settled")
         assert.are.same({ dir .. "edited.glsl" }, watcher.unsettled())
         assert.are.equal(1, watcher.scan())
+        assert.are.equal(1, dispatchIngress())
 
         assert.are.equal(1, #seen)
         assert.are.equal(dir .. "edited.glsl", seen[1].path)
@@ -194,6 +206,7 @@ describe("the file watcher", function()
         watcher.scan()
         watcher.scan()
         watcher.scan()
+        dispatchIngress()
 
         assert.are.equal(1, #seen, "an accepted change fired again on a later poll")
         assert.are.equal(1, watcher.dispatched())
@@ -223,6 +236,7 @@ describe("the file watcher", function()
         write(dir .. "saving.glsl", SECOND)
         assert.are.equal(0, watcher.scan(), "a file still growing was reloaded")
         assert.are.equal(1, watcher.scan())
+        dispatchIngress()
 
         assert.are.equal(1, #seen, "a save in two steps reloaded more than once")
         assert.are.equal(SECOND, seen[1].contents, "the reloader was handed a partial file")
@@ -240,6 +254,7 @@ describe("the file watcher", function()
         write(dir .. "again.glsl", SECOND)
         watcher.scan()
         watcher.scan()
+        dispatchIngress()
 
         assert.are.equal(1, #seen, "a file that was empty once stopped being watched")
         assert.are.equal(SECOND, seen[1].contents)
@@ -257,7 +272,8 @@ describe("the file watcher", function()
 
         write(dir .. "broken.glsl", SECOND)
         watcher.scan()
-        assert.are.equal(0, watcher.scan(), "a reloader that raised was counted as a reload")
+        assert.are.equal(1, watcher.scan())
+        assert.are.equal(0, dispatchIngress(), "a reloader that raised was counted as a reload")
         assert.are.equal(1, calls)
 
         -- Still running, and still willing to try the next save.
@@ -265,6 +281,7 @@ describe("the file watcher", function()
         write(dir .. "broken.glsl", FIRST)
         watcher.scan()
         watcher.scan()
+        assert.are.equal(0, dispatchIngress())
         assert.are.equal(2, calls)
     end)
 
@@ -275,7 +292,8 @@ describe("the file watcher", function()
 
         write(dir .. "level.json", '{"rooms":2}')
         watcher.scan()
-        assert.are.equal(0, watcher.scan())
+        assert.are.equal(1, watcher.scan())
+        assert.are.equal(0, dispatchIngress())
 
         -- Accepted all the same, or an unclaimed file would be seen changing
         -- on every poll for the rest of the run.
@@ -292,10 +310,9 @@ describe("the file watcher", function()
         -- Neither of these will decode, which is beside the point: what is
         -- being asserted is that asking for a path as an image is what makes
         -- it an image here.
-        assets.loadImage(dir .. "art.png")
-        assets.loadSound(dir .. "voice.wav", "auto", 10000)
+        assert.is_false(pcall(assets.loadImage, dir .. "art.png"))
+        assert.is_false(pcall(assets.loadSound, dir .. "voice.wav", "auto", 10000))
         files.read(dir .. "level.json")
-        assets.waitAll(500)
 
         watcher.install({ root = dir })
         local kinds = {}
@@ -310,6 +327,7 @@ describe("the file watcher", function()
         write(dir .. "level.json", '{"rooms":2}')
         watcher.scan()
         watcher.scan()
+        dispatchIngress()
 
         assert.are.equal("image", kinds[dir .. "art.png"])
         assert.are.equal("sound", kinds[dir .. "voice.wav"])
@@ -326,7 +344,7 @@ describe("the file watcher", function()
         write(dir .. "level.json", "{}")
         write(dir .. "specwatchfont.ttf", source)
         files.read(dir .. "level.json")
-        text.newTTF({ source = dir .. "specwatchfont.ttf" }):wait()
+        text.newTTF({ source = dir .. "specwatchfont.ttf" })
 
         watcher.install({ root = dir })
         local kinds = {}
@@ -340,6 +358,7 @@ describe("the file watcher", function()
         write(dir .. "specwatchfont.ttf", source .. "\0")
         watcher.scan()
         watcher.scan()
+        dispatchIngress()
 
         assert.are.equal("font", kinds[dir .. "specwatchfont.ttf"], "the source was read as a font")
         assert.are.equal("document", kinds[dir .. "level.json"], "and a level is still a level")
@@ -370,6 +389,7 @@ describe("the file watcher", function()
 
         write(dir .. "eager.glsl", SECOND)
         assert.are.equal(1, watcher.scan())
+        assert.are.equal(1, dispatchIngress())
         assert.are.equal(1, #seen)
     end)
 

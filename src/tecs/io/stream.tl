@@ -1,13 +1,18 @@
 --[=[
-Binary storage descriptors and synchronous transfers.
+Binary storage descriptors and contextual byte transfers.
 
 A stream carries the recipe for opening bytes, not a cursor. Every reader and
 writer owns its position. Replayable memory and file streams can therefore
 open independent readers; a borrowed handle deliberately cannot.
 
-High-level operations synchronously pump bounded chunks through directional
-endpoints. A caller that wants asynchronous transfer runs the operation in a
-worker rather than making every stream carry scheduling state.
+Readers and writers are one pull and push contract. They return bytes or a
+write result directly. Memory completes inline; an endpoint whose progress
+depends on file, process, socket, or HTTP work may suspend the calling system
+through the same method. Transforms preserve that suspension through their
+ordinary call stack, and high-level transfers pump bounded reusable chunks.
+
+Scheduling state remains private to concrete endpoints. A game does not select
+an asynchronous Reader, poll a Future, or drive a callback form.
 ]=]
 
 local ffi <const> = require("ffi")
@@ -103,12 +108,20 @@ local record HandleStream is Backing, ReadWriteStream
     _state: HandleState
 end
 
+--- A one-shot reader supplied by an internal progressive transport.
+local record ReaderStream is Backing, ReadableStream
+    _reader: Reader
+    _length: integer
+    _opened: boolean
+end
+
 local StringStreamMT <const>: metatable<StringStream> = {__index = StringStream}
 local BufferStreamMT <const>: metatable<BufferStream> = {__index = BufferStream}
 local ByteStreamMT <const>: metatable<ByteStream> = {__index = ByteStream}
 local ViewStreamMT <const>: metatable<ViewStream> = {__index = ViewStream}
 local FileStreamMT <const>: metatable<FileStream> = {__index = FileStream}
 local HandleStreamMT <const>: metatable<HandleStream> = {__index = HandleStream}
+local ReaderStreamMT <const>: metatable<ReaderStream> = {__index = ReaderStream}
 
 --- A cursor over a string, buffer, or borrowed pointer.
 local record MemoryReader is Reader
@@ -1328,6 +1341,63 @@ function HandleStream:writeView(sourceView: ByteView, offset?: integer, count?: 
     return writeView(self, sourceView, offset, count)
 end
 
+-- Internal progressive reader stream
+
+function ReaderStream:contentLength(): integer | nil
+    return self._length
+end
+function ReaderStream:contentType(): string | nil
+    return self._contentType
+end
+function ReaderStream:isReadable(): boolean
+    return not self._closed
+end
+function ReaderStream:isWritable(): boolean
+    return false
+end
+function ReaderStream:isReplayable(): boolean
+    return false
+end
+function ReaderStream:newReader(): Reader, string
+    if self._closed then
+        return nil, "the stream is closed"
+    end
+    if self._opened or self._reader == nil then
+        return nil, "the one-shot stream already opened its reader"
+    end
+    self._opened = true
+    local reader <const> = self._reader
+    self._reader = nil
+    return reader
+end
+function ReaderStream:readAll(maxBytes?: integer): string, string
+    return readAll(self, maxBytes)
+end
+function ReaderStream:transferToBuffer(maxBytes?: integer): IOBuffer, string
+    return transferToBuffer(self, maxBytes)
+end
+function ReaderStream:transferTo(destination: WritableStream): integer, string
+    return transferTo(self, destination)
+end
+function ReaderStream:transferToFile(path: string): integer, string
+    return transferToFile(self, path)
+end
+function ReaderStream:discard(): integer, string
+    return discard(self)
+end
+function ReaderStream:close(): boolean, string
+    if self._closed then
+        return true
+    end
+    self._closed = true
+    if not self._opened and self._reader ~= nil then
+        local reader <const> = self._reader
+        self._reader = nil
+        return reader:close()
+    end
+    return true
+end
+
 --- Creates a replayable readable empty source.
 local function newEmptyStream(contentTypeValue?: string): ReadableStream
     return rawSetMetatable(
@@ -1637,6 +1707,7 @@ ByteStream.withMetadata = withMetadata
 ViewStream.withMetadata = withMetadata
 FileStream.withMetadata = withMetadata
 HandleStream.withMetadata = withMetadata
+ReaderStream.withMetadata = withMetadata
 MetadataStream.withMetadata = withMetadata
 MetadataReadableStream.withMetadata = withMetadata
 MetadataWritableStream.withMetadata = withMetadata
@@ -1665,6 +1736,26 @@ local record stream
     _borrowBytes: function(source: ReadableStream): BorrowedBytes
     _snapshot: function(source: Stream, what: string): {string: any}
     _restore: function(saved: {string: any}, what: string): Stream
+    _newReaderStream: function(reader: Reader, contentType?: string, contentLength?: integer): ReadableStream
+end
+
+local function newReaderStream(reader: Reader, contentTypeValue?: string, contentLengthValue?: integer): ReadableStream
+    if reader == nil then
+        error("tecs: reader stream needs a Reader", 2)
+    end
+    if contentLengthValue ~= nil then
+        contentLengthValue = nonNegative(contentLengthValue, "reader stream content length", 2)
+    end
+    return rawSetMetatable(
+        {
+            _reader = reader,
+            _length = contentLengthValue,
+            _contentType = contentTypeValue,
+            _opened = false,
+            _closed = false,
+        } as ReaderStream,
+        ReaderStreamMT
+    ) as ReadableStream
 end
 
 return {
@@ -1681,4 +1772,5 @@ return {
     _borrowBytes = borrowedBytes,
     _snapshot = snapshotStream,
     _restore = restoreStream,
+    _newReaderStream = newReaderStream,
 } as stream

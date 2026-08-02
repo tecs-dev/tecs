@@ -32,7 +32,7 @@ return tecs.newApplication({
             font = tecs.gfx.newTTF({
                 source = "fonts/JetBrainsMono-ExtraBold.ttf",
                 size = 64,
-            }).value,
+            }),
             size = 96,
         })
         local textWidth <const>, textHeight <const> = tecs.gfx.measureText(greeting)

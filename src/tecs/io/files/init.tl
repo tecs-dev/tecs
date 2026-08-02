@@ -25,9 +25,9 @@ end
 ```
 
 Filesystem outcomes return a status and a platform reason. Invalid arguments
-raise because they indicate a defect in the calling program. Operations are
-synchronous except `writeAtomicAsync`, whose worker-backed future is advanced
-by `tecs.runtime.poll`. `glob` exposes a caller-owned pull stream so recursive
+raise because they indicate a defect in the calling program. An atomic write
+inside a system moves its commit to a worker and suspends the system until the
+result is ready. `glob` exposes a caller-owned pull stream so recursive
 enumeration does not retain a complete tree. Temporary files,
 temporary directories, and streams are [`Closeable`](tealdoc:tecs.Closeable)
 and fit directly in `tecs.scoped`.
@@ -52,8 +52,10 @@ local buffer <const> = require("tecs.io.buffer")
 local loader <const> = require("tecs.ffi.loader")
 local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
+local fileasync <const> = require("tecs.internal.fileasync")
 local workers <const> = require("tecs.workers")
-local Future <const> = require("tecs.Future")
+local Completion <const> = require("tecs.internal.completion")
+local taskruntime <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
 local type types = require("tecs.io.types")
 local type Closeable = require("tecs.types").Closeable
@@ -202,6 +204,20 @@ local record files
 
     --- `SymlinkKind` selects a file or directory symbolic link.
     type SymlinkKind = SymlinkKind
+
+    --- Writes bytes to a file, replacing its complete contents.
+    ---
+    --- The default SDL backend transfers through its bounded asynchronous file
+    --- queue. The call suspends a logical update or blocks an ordinary caller
+    --- until the complete write settles. It retains an immutable source range
+    --- for SDL instead of copying a buffer through a Lua string. Embedded NUL
+    --- bytes remain data and an empty input creates an empty file.
+    --- @param path The caller supplies the destination file.
+    --- @param bytes The caller supplies an immutable string or byte view and
+    ---     retains ownership.
+    --- @return Returns whether the platform wrote the complete file.
+    --- @return Returns the platform reason when the first return is false.
+    write: function(path: PathInput, bytes: storagebackend.ByteInput): boolean, string
 end
 
 local type Info = files.Info
@@ -216,6 +232,7 @@ local type Reader = types.Reader
 local type SeekOrigin = types.Seekable.Origin
 local type IOBuffer = types.Buffer
 local type ByteView = types.ByteView
+local writeFile: function(path: PathInput, bytes: ByteInput): boolean, string
 
 local ATOMIC_WRITER <const> = [[
 local tecs = require("tecs")
@@ -229,7 +246,7 @@ end
 ]]
 
 local record AtomicEntry
-    future: Future<boolean>
+    completion: Completion<boolean>
 end
 
 local record AtomicSource
@@ -309,9 +326,9 @@ local function settleAtomic(result: {string: any}): boolean
     atomicEntries[id] = nil
     atomicPending = atomicPending - 1
     if result.ok then
-        entry.future:complete(true)
+        entry.completion:complete(true)
     else
-        entry.future:fail(tostring(result.reason or "atomic write failed"))
+        entry.completion:fail(tostring(result.reason or "atomic write failed"))
     end
     stopAtomicWorker()
     return true
@@ -342,7 +359,7 @@ function AtomicSource:advance(ms: number): integer
     return settleAtomic(result as {string: any}) and 1 or 0
 end
 
-function AtomicSource:cancel(_future: Future<any>)
+function AtomicSource:cancel(_completion: Completion<any>)
     -- An operating-system write cannot be interrupted safely. Its result is
     -- still drained so the worker and copied task bytes can be released.
 end
@@ -961,7 +978,75 @@ end
 ---     to record a document.
 --- @return Returns the file bytes, or nil when the platform cannot read them.
 function files.read(path: PathInput, kind?: string): string
-    return content.read(required(path, "read"), kind)
+    local rendered <const> = required(path, "read")
+    local backend <const> = adapter.storage()
+    if backend ~= storagebackend.sdl then
+        local bytes <const> = content.read(rendered, kind)
+        return bytes
+    end
+    taskruntime.checkWait("file read")
+    local ok <const>, result = pcall(
+        taskruntime.awaitCompletion, fileasync.read(rendered), "file read"
+    ) as (boolean, fileasync.NativeRead | string)
+    if not ok then
+        return nil
+    end
+    local read <const> = result as fileasync.NativeRead
+    local bytes <const> = read.length == 0 and "" or loader.toBytes(read.pointer as loader.CValue, read.length)
+    fileasync.release(read)
+    content.note(rendered, kind or "document")
+    return bytes
+end
+
+--- Reads a whole file directly into an owned buffer.
+---
+--- The operation preserves bytes before `offset`, grows the destination as
+--- needed, and returns the number of bytes written. On the SDL backend the
+--- file transfer runs through SDL AsyncIO and never materializes a Lua string.
+--- Inside a system it may suspend the logical update; elsewhere the identical
+--- call blocks its caller until the transfer settles.
+---
+--- @param path The caller supplies an absolute path or one from `assetPath`.
+--- @param destination The caller supplies an open destination buffer and keeps ownership of it.
+--- @param offset The caller supplies a zero-based destination offset or omits it for zero.
+--- @param kind The caller supplies the content kind for watching, or omits it to record a document.
+--- @return Returns the number of bytes copied into the destination.
+--- @return Returns the platform reason when the first return is nil.
+function files.readInto(path: PathInput, destination: IOBuffer, offset?: integer, kind?: string): integer, string
+    local rendered <const> = required(path, "readInto")
+    if destination == nil or type((destination as {string: any}).length) ~= "function" then
+        error("tecs: io.files.readInto needs an open io.Buffer", 2)
+    end
+    offset = offset or 0
+    if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 then
+        error("tecs: io.files.readInto offset must be a non-negative integer", 2)
+    end
+    local backend <const> = adapter.storage()
+    if backend ~= storagebackend.sdl then
+        local bytes <const> = files.read(rendered, kind)
+        if bytes == nil then
+            return nil, ("cannot read %s"):format(rendered)
+        end
+        destination:setString(bytes, offset)
+        return #bytes
+    end
+    taskruntime.checkWait("file read")
+    local ok <const>, result = pcall(
+        taskruntime.awaitCompletion, fileasync.read(rendered), "file read"
+    ) as (boolean, fileasync.NativeRead | string)
+    if not ok then
+        return nil, tostring(result)
+    end
+    local read <const> = result as fileasync.NativeRead
+    local count <const> = read.length
+    local output <const>, previous = buffer.prepareWrite(destination, offset, count)
+    if count > 0 then
+        ffi.copy(output as ffi.CData, read.pointer as ffi.CData, count)
+    end
+    buffer.commitWrite(destination, offset, count, previous)
+    fileasync.release(read)
+    content.note(rendered, kind or "document")
+    return count
 end
 
 --- Iterates over the lines in a whole file.
@@ -1039,19 +1124,36 @@ local function bufferedFile(backend: storagebackend.Backend, path: string, mode:
     local appending <const> = mode == "a" or mode == "a+"
     local initial = ""
 
+    -- Tests and embedded platforms may deliberately remove direct endpoint
+    -- support while retaining the backend table. In that case this is the
+    -- documented whole-file fallback and must use the backend's read/write
+    -- functions rather than bypassing them through the native SDL queue.
+    local nativeAsync <const> = backend == storagebackend.sdl and backend.open ~= nil
     if mode == "r" or mode == "r+" then
-        initial = backend.read(path)
+        initial = nativeAsync and files.read(path) or backend.read(path)
         if initial == nil then
             return nil, ("cannot read %s"):format(path)
         end
     elseif mode == "w" or mode == "w+" then
-        local ok <const>, reason = backend.write(path, "")
+        local ok: boolean
+        local reason: string
+        if nativeAsync then
+            ok, reason = writeFile(path, "")
+        else
+            ok, reason = backend.write(path, "")
+        end
         if not ok then
             return nil, reason
         end
     else
-        initial = backend.read(path) or ""
-        local ok <const>, reason = backend.append(path, "")
+        initial = (nativeAsync and files.read(path) or backend.read(path)) or ""
+        local ok: boolean
+        local reason: string
+        if nativeAsync then
+            ok, reason = writeFile(path, initial)
+        else
+            ok, reason = backend.append(path, "")
+        end
         if not ok then
             return nil, reason
         end
@@ -1229,7 +1331,15 @@ local function bufferedFile(backend: storagebackend.Backend, path: string, mode:
         if not writable then
             return true
         end
-        if appending then
+        if nativeAsync then
+            local view <const> = bytes:view()
+            local ok <const>, reason = writeFile(path, view)
+            view:close()
+            if ok then
+                appendedThrough = bytes:length()
+            end
+            return ok, reason
+        elseif appending then
             if appendedThrough == bytes:length() then
                 return true
             end
@@ -1260,23 +1370,52 @@ local function bufferedFile(backend: storagebackend.Backend, path: string, mode:
     return file as File
 end
 
---- Writes `bytes` to `path`, replacing whatever was there.
----
---- The string's length controls the binary write, so embedded NUL bytes remain
---- data and an empty string creates an empty file. The parent directory must
---- already exist.
----
---- @param path The caller supplies the destination file.
---- @param bytes The caller supplies the complete binary contents.
---- @return Returns whether the platform wrote the complete file.
---- @return Returns the platform reason when the first return is false.
-function files.write(path: PathInput, bytes: string): boolean, string
+writeFile = function(path: PathInput, bytes: ByteInput): boolean, string
     local rendered <const> = required(path, "write")
     if bytes == nil then
         error("tecs: io.files.write needs bytes to write", 2)
     end
-    return adapter.storage().write(rendered, bytes)
+    local backend <const> = adapter.storage()
+    if backend ~= storagebackend.sdl then
+        if type(bytes) == "string" then
+            return backend.write(rendered, bytes as string)
+        end
+        return backend.write(rendered, (bytes as ByteView):getString())
+    end
+    taskruntime.checkWait("file write")
+    local pointer: loader.BytePointer
+    local length: integer
+    local owner: any
+    local closeOwner = false
+    if type(bytes) == "string" then
+        owner = bytes
+        pointer = ffi.cast("const uint8_t *", owner as string) as loader.BytePointer
+        length = #(owner as string)
+    else
+        local view <const> = bytes as ByteView
+        if view:isReleased() then
+            error("tecs: io.files.write needs an open io.Buffer or io.ByteView", 2)
+        end
+        -- Retain a private immutable view so the caller may release or mutate
+        -- its own alias after this system parks. The native SDL transfer
+        -- borrows this stable range and the completion drain closes it.
+        local held <const> = view:view()
+        owner = held
+        closeOwner = true
+        pointer = held:getFFIPointer()
+        length = held:length()
+    end
+    local ok <const>, result = pcall(
+        taskruntime.awaitCompletion, fileasync.write(rendered, pointer, length, owner, closeOwner), "file write"
+    ) as (boolean, fileasync.NativeRead | string)
+    if not ok then
+        return false, tostring(result)
+    end
+    fileasync.release(result as fileasync.NativeRead)
+    return true
 end
+
+files.write = writeFile
 
 --- Durably writes `bytes` and atomically replaces `path`.
 ---
@@ -1304,7 +1443,7 @@ end
 ---     synchronous call and are not copied or closed.
 --- @return Returns whether the platform confirmed the atomic durable write.
 --- @return Returns the platform or unsupported reason when the first return is false.
-function files.writeAtomic(path: PathInput, bytes: ByteInput): boolean, string
+local function writeAtomicSync(path: PathInput, bytes: ByteInput): boolean, string
     local rendered <const> = required(path, "writeAtomic")
     if bytes == nil then
         error("tecs: io.files.writeAtomic needs bytes to write", 2)
@@ -1328,28 +1467,11 @@ function files.writeAtomic(path: PathInput, bytes: ByteInput): boolean, string
     return backend.writeAtomic(rendered, bytes)
 end
 
---- Durably and atomically writes a complete file on a worker.
----
---- The returned [`Future`](tealdoc:tecs.Future) becomes ready with true after
---- the same commit performed by `writeAtomic`, or fails with its platform
---- reason. The call copies a buffer or byte view before returning, so the
---- caller may mutate or close it immediately. String bytes cross the worker
---- channel by value as well. `tecs.runtime.poll` advances the future each
---- frame; `Future:wait` advances it in headless code.
----
---- Canceling the future stops interest in its result but cannot safely
---- interrupt a filesystem commit already in progress. The shared worker exits
---- automatically after its last queued result is drained. A non-SDL storage
---- backend receives a failed future because a separate worker state cannot
---- inherit the main state's installed Lua backend.
----
---- @param path The caller supplies the destination file.
---- @param bytes The caller supplies the complete binary contents.
---- @return Returns a future which becomes ready with true or fails.
-function files.writeAtomicAsync(path: PathInput, bytes: ByteInput): Future<boolean>
-    local rendered <const> = required(path, "writeAtomicAsync")
+--- Starts the worker half of an atomic write for a suspended system.
+local function writeAtomicCompletion(path: PathInput, bytes: ByteInput): Completion<boolean>
+    local rendered <const> = required(path, "writeAtomic")
     if bytes == nil then
-        error("tecs: io.files.writeAtomicAsync needs bytes to write", 2)
+        error("tecs: io.files.writeAtomic needs bytes to write", 2)
     end
     local copied: string
     if type(bytes) == "string" then
@@ -1363,28 +1485,54 @@ function files.writeAtomicAsync(path: PathInput, bytes: ByteInput): Future<boole
             or type(dynamic.isReleased) ~= "function"
             or (dynamic.isReleased as function(any): boolean)(bytes)
         then
-            error("tecs: io.files.writeAtomicAsync needs a byte string or open io.Buffer or io.ByteView", 2)
+            error("tecs: io.files.writeAtomic needs a byte string or open io.Buffer or io.ByteView", 2)
         end
         local input <const> = bytes as ByteView
         copied = loader.toBytes(input:getFFIPointer() as loader.CValue, input:length())
     end
     local backend <const> = adapter.storage()
     if backend.writeAtomic == nil or backend ~= storagebackend.sdl then
-        return Future.failed(
-            ("asynchronous atomic durable writes are not supported by the %s storage backend"):format(backend.name)
-        ) as Future<boolean>
+        return Completion.failed(
+            ("background atomic durable writes are not supported by the %s storage backend"):format(backend.name)
+        ) as Completion<boolean>
     end
     local started <const>, reason = ensureAtomicWorker()
     if not started then
-        return Future.failed(reason) as Future<boolean>
+        return Completion.failed(reason) as Completion<boolean>
     end
     local id <const> = nextAtomicId
     nextAtomicId = nextAtomicId + 1
-    local future <const> = Future.pending(atomicSource as Future.Source) as Future<boolean>
-    atomicEntries[id] = {future = future}
+    local completion <const> = Completion.pending(atomicSource as Completion.Source) as Completion<boolean>
+    atomicEntries[id] = {completion = completion}
     atomicPending = atomicPending + 1
     atomicWorker:send({id = id, path = rendered, bytes = copied})
-    return future
+    return completion
+end
+
+--- Durably and atomically writes a complete file.
+---
+--- Inside a system on the SDL storage backend, the copy and commit run on a
+--- worker and suspend the logical world update. Outside a world update, the
+--- same call completes synchronously. Buffers and views are copied before a
+--- suspended write begins.
+---
+--- @param path The caller supplies the destination file.
+--- @param bytes The caller supplies the complete binary contents.
+--- @return Returns whether the platform confirmed the atomic durable write.
+--- @return Returns the platform or unsupported reason when the first return is false.
+function files.writeAtomic(path: PathInput, bytes: ByteInput): boolean, string
+    local mode <const> = taskruntime.checkWait("atomic write")
+    if mode == "blocking" then
+        return writeAtomicSync(path, bytes)
+    end
+    local pending <const> = writeAtomicCompletion(path, bytes)
+    local ok <const>, result = pcall(
+        taskruntime.awaitCompletion, pending as Completion<boolean>, "atomic write"
+    ) as (boolean, any)
+    if not ok then
+        return false, tostring(result)
+    end
+    return result as boolean, nil
 end
 
 --- Opens a file through one seekable cursor.
@@ -1414,6 +1562,9 @@ function files.open(path: PathInput, mode?: FileMode): File, string
         error("tecs: io.files.open mode must be 'r', 'w', 'a', 'r+', 'w+', or 'a+'", 2)
     end
     local backend <const> = adapter.storage()
+    if backend == storagebackend.sdl then
+        return bufferedFile(backend, rendered, mode)
+    end
     if backend.open ~= nil then
         local opened <const>, reason = backend.open(rendered, mode)
         return opened as File, reason

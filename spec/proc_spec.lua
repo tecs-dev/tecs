@@ -10,11 +10,9 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local ffi = require("ffi")
 local Application = require("tecs.Application")
-local Future = require("tecs.Future")
 local processModule = require("tecs.internal.process")
 local path = require("tecs.io.Path")
 local process = require("tecs.io.Process")
-local runtime = require("tecs.runtime")
 local sdl = require("tecs.ffi.sdl3")
 local tecsIO = require("tecs.io")
 
@@ -162,34 +160,19 @@ describe("streaming processes", function()
         assert.are.equal("request\n", reply, readReason)
         assert.are.equal("", child.stdout:read(64))
 
-        local exit = child.finished:wait(20000)
-        assert.are.equal("ready", exit.status, exit.error)
-        assert.are.equal(0, exit.value.exitCode)
+        local exit = child:wait()
+        assert.are.equal(0, exit.exitCode)
 
         child:close()
     end)
 
-    it("reports no-data separately from EOF in nonblocking reads", function()
-        local child = newProcess({ args = { "/bin/sh", "-c", "sleep 0.1; printf ready" } })
-        local bytes, reason = child.stdout:readAvailable()
-        assert.is_nil(bytes)
-        assert.is_nil(reason)
-
-        local received = ""
-        local deadline = now() + 20000
-        while now() < deadline do
-            runtime.poll()
-            bytes, reason = child.stdout:readAvailable()
-            assert.is_nil(reason)
-            if bytes == "" then
-                break
-            elseif bytes ~= nil then
-                received = received .. bytes
-            end
-        end
-
-        assert.are.equal("ready", received)
-        assert.is_true(child.stdout:isEOF())
+    it("does not expose a second nonblocking pipe API", function()
+        local child = newProcess({ args = { "/bin/echo", "one reader" } })
+        assert.is_nil(child.stdout.readAvailable)
+        assert.is_nil(child.stdout.readAvailableInto)
+        assert.is_nil(child.stdin.writeAvailable)
+        assert.is_nil(child.stdin.writeAvailableFrom)
+        assert.is_nil(child.stdin.writeAvailableView)
         child:close()
     end)
 
@@ -203,42 +186,6 @@ describe("streaming processes", function()
 
         child:close()
         destination:close()
-    end)
-
-    it("moves available pipe bytes directly between reusable buffers", function()
-        local child = newProcess({ args = { "/bin/cat" } })
-        local source = tecsIO.newBuffer("nonblocking buffer")
-        local destination = tecsIO.newBuffer()
-        local sent = 0
-        local deadline = now() + 20000
-
-        while sent < source:length() and now() < deadline do
-            local wrote, writeReason = child.stdin:writeAvailableFrom(source, sent)
-            assert.is_nil(writeReason)
-            if wrote ~= nil then
-                sent = sent + wrote
-            else
-                runtime.poll()
-            end
-        end
-        child.stdin:close()
-
-        while now() < deadline do
-            local got, readReason = child.stdout:readAvailableInto(destination, destination:length(), 64)
-            assert.is_nil(readReason)
-            if got == 0 then
-                break
-            elseif got == nil then
-                runtime.poll()
-            end
-        end
-
-        assert.are.equal(source:length(), sent)
-        assert.are.equal(source:getString(), destination:getString())
-
-        child:close()
-        destination:close()
-        source:close()
     end)
 
     it("drains output larger than an operating-system pipe", function()
@@ -283,12 +230,11 @@ describe("streaming processes", function()
             args = { "/bin/sh", "-c", "sleep 30" },
             timeoutMs = 100,
         })
-        local exit = child.finished:wait(20000)
+        local exit = child:wait()
 
-        assert.are.equal("ready", exit.status, exit.error)
-        assert.is_true(exit.value.killed)
-        assert.is_true(exit.value.timedOut)
-        assert.is_false(exit.value:succeeded())
+        assert.is_true(exit.killed)
+        assert.is_true(exit.timedOut)
+        assert.is_false(exit:succeeded())
         assert.is_true(now() - started < 5000)
         child:close()
     end)
@@ -298,35 +244,33 @@ describe("streaming processes", function()
         local killed, reason = child:kill(true)
         assert.is_true(killed, reason)
 
-        local exit = child.finished:wait(20000)
-        assert.are.equal("ready", exit.status, exit.error)
-        assert.is_true(exit.value.killed)
+        local exit = child:wait()
+        assert.is_true(exit.killed)
         child:close()
     end)
 
-    it("joins several process-exit futures", function()
+    it("waits for several process exits", function()
         local children = {
             newProcess({ args = { "/bin/sh", "-c", "sleep 0.1; exit 1" } }),
             newProcess({ args = { "/bin/sh", "-c", "exit 2" } }),
             newProcess({ args = { "/bin/sh", "-c", "exit 3" } }),
         }
-        local joined = Future.all({
-            children[1].finished,
-            children[2].finished,
-            children[3].finished,
-        }):wait(20000)
+        local exits = {
+            children[1]:wait(),
+            children[2]:wait(),
+            children[3]:wait(),
+        }
 
-        assert.are.equal("ready", joined.status, joined.error)
-        assert.are.equal(1, joined.value[1].exitCode)
-        assert.are.equal(2, joined.value[2].exitCode)
-        assert.are.equal(3, joined.value[3].exitCode)
+        assert.are.equal(1, exits[1].exitCode)
+        assert.are.equal(2, exits[2].exitCode)
+        assert.are.equal(3, exits[3].exitCode)
 
         for _, child in ipairs(children) do
             child:close()
         end
     end)
 
-    it("closing a process closes its endpoints and settles its future", function()
+    it("closing a process closes its endpoints and makes its exit available", function()
         local child = newProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
         local input = child.stdin
         local output = child.stdout
@@ -335,8 +279,7 @@ describe("streaming processes", function()
 
         assert.is_true(input:isClosed())
         assert.is_true(output:isClosed())
-        assert.are.equal("ready", child.finished.status)
-        assert.is_true(child.finished.value.killed)
+        assert.is_true(child:wait().killed)
     end)
 
     it("runs without initializing an SDL subsystem", function()
@@ -369,7 +312,7 @@ describe("streaming processes", function()
             return Application.newApplication(config)
         end
 
-        it("polls a process future once per host iteration", function()
+        it("polls a process once per host iteration", function()
             local child
             local app = build({
                 plugin = function()
@@ -379,13 +322,13 @@ describe("streaming processes", function()
             assert.is_true(app:_init())
 
             for _ = 1, 400 do
-                if child.finished.status ~= "pending" then
+                if not child:isRunning() then
                     break
                 end
                 app:_iterate(nil, 0, nil)
             end
 
-            assert.are.equal("ready", child.finished.status)
+            assert.is_false(child:isRunning())
             child:close()
             app:_shutdown()
         end)
@@ -400,8 +343,7 @@ describe("streaming processes", function()
             assert.is_true(app:_init())
 
             assert.is_true(app:_shutdown())
-            assert.are.equal("ready", child.finished.status)
-            assert.is_true(child.finished.value.killed)
+            assert.is_true(child:wait().killed)
         end)
     end)
 end)

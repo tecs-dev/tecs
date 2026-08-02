@@ -26,9 +26,10 @@ const UPLOAD_QUEUE_CAPACITY: usize = 16;
 const TRANSFER_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_HEADER_BYTES: usize = 256 * 1024;
 
-const EVENT_CHUNK: u32 = 1;
-const EVENT_COMPLETE: u32 = 2;
-const EVENT_FAILED: u32 = 3;
+const EVENT_HEADERS: u32 = 1;
+const EVENT_CHUNK: u32 = 2;
+const EVENT_COMPLETE: u32 = 3;
+const EVENT_FAILED: u32 = 4;
 const BODY_NONE: u32 = 0;
 const BODY_INLINE: u32 = 1;
 const BODY_UPLOAD: u32 = 2;
@@ -102,15 +103,18 @@ pub struct TecsHttpRequest {
 }
 
 enum Event {
+    Headers {
+        id: u64,
+        status: u16,
+        headers: Box<[u8]>,
+        url: Box<[u8]>,
+    },
     Chunk {
         id: u64,
         data: Bytes,
     },
     Complete {
         id: u64,
-        status: u16,
-        headers: Box<[u8]>,
-        url: Box<[u8]>,
     },
     Failed {
         id: u64,
@@ -512,6 +516,18 @@ async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
         return;
     }
 
+    if !shared
+        .send(Event::Headers {
+            id,
+            status,
+            headers,
+            url: effective_url,
+        })
+        .await
+    {
+        return;
+    }
+
     let mut response = response;
     let mut received = 0_u64;
     loop {
@@ -574,14 +590,7 @@ async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
         }
     }
 
-    let _ = shared
-        .send(Event::Complete {
-            id,
-            status,
-            headers,
-            url: effective_url,
-        })
-        .await;
+    let _ = shared.send(Event::Complete { id }).await;
 
     drop(host_permit);
     drop(total_permit);
@@ -843,7 +852,10 @@ fn try_next(client: &TecsHttpClient) -> Option<Event> {
     loop {
         let event = receiver.try_recv().ok()?;
         let id = match &event {
-            Event::Chunk { id, .. } | Event::Complete { id, .. } | Event::Failed { id, .. } => *id,
+            Event::Headers { id, .. }
+            | Event::Chunk { id, .. }
+            | Event::Complete { id, .. }
+            | Event::Failed { id, .. } => *id,
         };
         let canceled = !client
             .handles
@@ -924,6 +936,7 @@ pub unsafe extern "C" fn tecsHttpEventKind(event: *const TecsHttpEvent) -> u32 {
     }
     // SAFETY: Null was rejected.
     match &unsafe { &*event }.event {
+        Event::Headers { .. } => EVENT_HEADERS,
         Event::Chunk { .. } => EVENT_CHUNK,
         Event::Complete { .. } => EVENT_COMPLETE,
         Event::Failed { .. } => EVENT_FAILED,
@@ -942,7 +955,10 @@ pub unsafe extern "C" fn tecsHttpEventId(event: *const TecsHttpEvent) -> u64 {
     }
     // SAFETY: Null was rejected.
     match &unsafe { &*event }.event {
-        Event::Chunk { id, .. } | Event::Complete { id, .. } | Event::Failed { id, .. } => *id,
+        Event::Headers { id, .. }
+        | Event::Chunk { id, .. }
+        | Event::Complete { id, .. }
+        | Event::Failed { id, .. } => *id,
     }
 }
 
@@ -958,7 +974,7 @@ pub unsafe extern "C" fn tecsHttpEventStatus(event: *const TecsHttpEvent) -> u16
     }
     // SAFETY: Null was rejected.
     match &unsafe { &*event }.event {
-        Event::Complete { status, .. } => *status,
+        Event::Headers { status, .. } => *status,
         _ => 0,
     }
 }
@@ -998,7 +1014,7 @@ pub unsafe extern "C" fn tecsHttpEventHeaders(
     }
     // SAFETY: Null was rejected.
     match &unsafe { &*event }.event {
-        Event::Complete { headers, .. } => event_data(headers, length),
+        Event::Headers { headers, .. } => event_data(headers, length),
         _ => event_data(&[], length),
     }
 }
@@ -1018,7 +1034,7 @@ pub unsafe extern "C" fn tecsHttpEventUrl(
     }
     // SAFETY: Null was rejected.
     match &unsafe { &*event }.event {
-        Event::Complete { url, .. } => event_data(url, length),
+        Event::Headers { url, .. } => event_data(url, length),
         _ => event_data(&[], length),
     }
 }
@@ -1200,7 +1216,8 @@ mod tests {
         assert_eq!(unsafe { tecsHttpClientSend(client, &request) }, 1);
 
         let mut body = Vec::new();
-        let mut completion = None;
+        let mut headers_event = None;
+        let mut complete = false;
         for _ in 0..10 {
             // SAFETY: The client remains live until the end of the test.
             let event = unsafe { tecsHttpClientNext(client, 1_000) };
@@ -1209,17 +1226,21 @@ mod tests {
             }
             // SAFETY: This event is live until it is destroyed below.
             match &unsafe { &*event }.event {
-                Event::Chunk { id, data } => {
-                    assert_eq!(*id, 42);
-                    body.extend_from_slice(data);
-                }
-                Event::Complete {
+                Event::Headers {
                     id,
                     status,
                     headers,
                     url,
                 } => {
-                    completion = Some((*id, *status, headers.to_vec(), url.to_vec()));
+                    headers_event = Some((*id, *status, headers.to_vec(), url.to_vec()));
+                }
+                Event::Chunk { id, data } => {
+                    assert_eq!(*id, 42);
+                    body.extend_from_slice(data);
+                }
+                Event::Complete { id } => {
+                    assert_eq!(*id, 42);
+                    complete = true;
                 }
                 Event::Failed { error, .. } => {
                     panic!("request failed: {}", String::from_utf8_lossy(error));
@@ -1227,7 +1248,7 @@ mod tests {
             }
             // SAFETY: Ownership is returned exactly once.
             unsafe { tecsHttpEventDestroy(event) };
-            if completion.is_some() {
+            if complete {
                 break;
             }
         }
@@ -1237,7 +1258,8 @@ mod tests {
         server.join().unwrap();
 
         assert_eq!(body, b"hello");
-        let (id, status, headers, effective_url) = completion.expect("completion event");
+        assert!(complete);
+        let (id, status, headers, effective_url) = headers_event.expect("headers event");
         assert_eq!(id, 42);
         assert_eq!(status, 200);
         assert!(headers

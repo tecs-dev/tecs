@@ -410,20 +410,28 @@ pub fn test_package(root: &Path, preset: Preset) -> Result<()> {
 pub fn benchmark(root: &Path, preset: Preset, name: &str, arguments: &[OsString]) -> Result<()> {
     let source = match name {
         "shapes" | "physics" | "sprites" | "text" | "particles" | "latency" | "http" | "io"
-        | "tcp" | "data" | "meshcontract" | "meshshadows" | "meshskinning" | "meshmorphing" | "modelanimation" | "bitset" | "snapshot" => name,
+        | "tcp" | "data" | "meshcontract" | "meshshadows" | "meshskinning" | "meshmorphing"
+        | "modelanimation" | "bitset" | "snapshot" | "task" | "tasksystems" => name,
         "alloc" | "allocation" => "allocation",
         _ => anyhow::bail!(
             "unknown benchmark {name:?}; expected shapes, physics, sprites, text, \
-             particles, latency, http, io, tcp, data, meshcontract, meshshadows, meshskinning, meshmorphing, modelanimation, bitset, snapshot, or allocation"
+             particles, latency, http, io, tcp, data, meshcontract, meshshadows, meshskinning, meshmorphing, modelanimation, bitset, snapshot, task, tasksystems, or allocation"
         ),
     };
     if matches!(
         source,
-        "io" | "tcp" | "data" | "meshcontract" | "modelanimation" | "bitset" | "snapshot"
+        "io" | "tcp"
+            | "data"
+            | "meshcontract"
+            | "modelanimation"
+            | "bitset"
+            | "snapshot"
+            | "task"
+            | "tasksystems"
     ) && preset.sanitize
     {
         anyhow::bail!(
-            "the io, tcp, data, meshcontract, modelanimation, bitset, and snapshot benchmarks run under system LuaJIT, not the instrumented native host; \
+            "the io, tcp, data, meshcontract, modelanimation, bitset, snapshot, task, and tasksystems benchmarks run under system LuaJIT, not the instrumented native host; \
              sanitizer preset {preset} would not sanitize it"
         );
     }
@@ -437,7 +445,14 @@ pub fn benchmark(root: &Path, preset: Preset, name: &str, arguments: &[OsString]
     )?;
     let mut command = if matches!(
         source,
-        "io" | "tcp" | "data" | "meshcontract" | "modelanimation" | "bitset" | "snapshot"
+        "io" | "tcp"
+            | "data"
+            | "meshcontract"
+            | "modelanimation"
+            | "bitset"
+            | "snapshot"
+            | "task"
+            | "tasksystems"
     ) {
         let mut command = Command::new("luajit");
         command.arg(entry);
@@ -2944,6 +2959,9 @@ fn link_spirv_cross(
             .arg(format!("@rpath/{}", shared_name("spirvcrossc")));
     } else {
         command.args(["-shared", "-Wl,--whole-archive"]);
+    }
+    if preset.sanitize {
+        command.args(["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]);
     }
     command.arg("-o").arg(&output).arg(anchor).args(&archives);
     if std::env::consts::OS != "macos" {

@@ -44,6 +44,11 @@ features:
       component, query, system, and engine APIs before the game runs.
     icon:
       src: /images/teal.svg
+  - title: Blocking code without blocked frames
+    details: >-
+      <a href="/cooperative-io">Direct I/O calls</a> automatically park a
+      system only when work must wait, while SDL keeps the application alive.
+    icon: ↕️
 ---
 
 ## Install
@@ -258,13 +263,12 @@ The host loads `tecs` before the entry file. A game can use these names without 
 - [`tecs.events`](/modules/events) - typed events and address-based message buses
 - [`tecs.gfx`](/modules/gfx/) - the camera, the components, the renderer, text, and the vocabularies below
 - [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
-- [`tecs.io`](/modules/io/) - binary I/O, nonblocking sockets, HTTP, and external tools
+- [`tecs.io`](/modules/io/) - binary I/O, cooperative sockets, HTTP, and external tools
 - [`tecs.log`](/modules/log) - named, leveled platform logging
 - [`tecs.math`](/modules/math) - angle math and two-dimensional geometry
 - [`tecs.physics`](/modules/physics) - Rapier 2D, solved across a shared thread pool
 - [`tecs.platform`](/modules/platform/) - platform events, operating-system services, time, and windows
 - [`tecs.regex`](/modules/regex) - compiled regular expressions over Lua byte strings
-- [`tecs.runtime`](/modules/runtime) - process-wide polling for asynchronous work
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
 - [`tecs.ui`](/modules/ui) - retained layout, scrolling, clipping, and interaction over existing drawing components
 - [`tecs.workers`](/modules/workers) - typed background jobs
@@ -294,7 +298,6 @@ Inside one of those, one level and no deeper:
 On `tecs` itself, because no one module owns them:
 
 - [`tecs.Application`](/modules/Application) - the object an entry file returns, and what the host drives
-- [`tecs.Future`](/modules/Future) - a value that settles once
 - [`tecs.newApplication`](/modules/Application) - builds the application an entry file returns
 - [`tecs.scoped`](/modules/#tecs.scoped) - closes explicitly owned resources when one callback ends
 - [`tecs.Transform2D`](/modules/ecs/builtins#transform) - where an entity is, and the one component every subsystem moves

@@ -1,19 +1,19 @@
 --[=[
 Every open HTTP client in this process, and the one call that turns them.
 
-Reqwest moves sockets on Rust's Tokio threads, but a future may settle only
-when the SDL thread drains its client's event queue. `assets` and `proc`
+Reqwest moves sockets on Rust's Tokio threads, but a suspended system may
+resume only when the SDL thread drains its client's event queue. `assets` and `proc`
 are module singletons, so the loop names them and calls them. A client is
 not: a game constructs it, may construct several, and may keep none of them
 anywhere the loop could reach. So the clients come to the loop instead.
-Building one registers it here, closing one takes it off, and `tecs.runtime`
-turns whatever is on the list once per poll.
+Building one registers it here, closing one takes it off, and the Application
+runtime turns whatever is on the list once per host iteration.
 
 ## Process-wide client registry
 
 The process pump has to reach the list without starting the HTTP runtime.
-`tecs.io.http` resolves the native boundary when it is required, so an
-`tecs.runtime` requiring it would make every program start HTTP machinery,
+`tecs.io.http` resolves the native boundary when it is required, so the
+internal runtime requiring it would make every program start HTTP machinery,
 including ones that never make a request. This module names no library and
 costs a table.
 
@@ -23,8 +23,8 @@ rejects the cycle even through a type-only one.
 
 ## A client that is dropped is still pumped
 
-The list holds its clients, so a game that sends a request and keeps only
-the future still gets an answer. The cost is that a client nobody closes is
+The list holds its clients, so a suspended request keeps receiving events. The
+cost is that a client nobody closes is
 never collected and its sockets stay open: `close` is what ends a client,
 not losing the last reference to it. That is the same bargain `proc` makes
 with a child nobody waits for, and the alternative -- a weak list -- is a
@@ -101,9 +101,8 @@ end
 
 --- Turns every open client once, and answers how many transfers settled.
 ---
---- The client registry's pump. `tecs.runtime` calls this while any client is
---- open; direct callers can drive only the clients when that distinction
---- matters.
+--- The client registry's private pump. The Application calls this while any
+--- client is open; a blocking direct request drives only its own client.
 function clients.pump(): integer
     if count == 0 then
         return 0

@@ -16,7 +16,7 @@ world:spawn(
         text = "tecs\n1200 entities",
         font = tecs.gfx.newTTF({
             source = "fonts/JetBrainsMono-ExtraBold.ttf",
-        }).value,
+        }),
         size = 28,
         align = "center",
     })
@@ -28,8 +28,9 @@ column clean and the displayed glyphs unchanged.
 
 ## Fonts and layout
 
-`newTTF` reads source font bytes off the main thread and returns a
-[`Future`](tealdoc:tecs.Future). SDL_ttf and HarfBuzz shape and lay out UTF-8.
+`newTTF` reads source font bytes off the main thread and returns the opened
+font. It transparently suspends when called by a system. SDL_ttf and HarfBuzz
+shape and lay out UTF-8.
 Tecs asks SDL_ttf for glyph images lazily, caches each glyph once per renderer,
 and keeps its own one-instance-per-glyph producer.
 
@@ -68,7 +69,6 @@ local layersModule <const> = require("tecs.gfx.layers")
 local ffi <const> = require("ffi")
 
 local type Renderer = require("tecs.Renderer")
-local Future <const> = require("tecs.Future")
 local type TextureArray = require("tecs.gpu.TextureArray")
 
 local type Component = ecs.Component
@@ -119,7 +119,7 @@ end
 
 --- Represents a shaped TrueType or OpenType font.
 ---
---- A font is immutable after its future settles. Its source bytes remain
+--- A font is immutable after `newTTF` returns. Its source bytes remain
 --- resident because SDL_ttf reads them lazily for the font's lifetime.
 local record Font
     --- Read-only. Reports the caller-selected identity that snapshots store.
@@ -285,17 +285,16 @@ local record text
     --- Read-only. Exposes the text component.
     Text: Text
 
-    --- Starts loading and opening a source font with SDL_ttf.
+    --- Loads and opens a source font with SDL_ttf.
     ---
-    --- The file read happens on the asset worker. The future settles only
-    --- after SDL_ttf has opened the bytes, selected the raster mode, and
+    --- The file read happens on the asset worker. The call suspends its system
+    --- until SDL_ttf has opened the bytes, selected the raster mode, and
     --- verified the requested point size.
     --- @param options The caller must set `source`. `name` defaults to that
     ---     path, `size` defaults to 48 points, and `raster` defaults to
     ---     `"sdf"`.
-    --- @return Returns a [`Future`](tealdoc:tecs.Future) for an immutable
-    ---     [`Font`](tealdoc:tecs.gfx.text.Font).
-    newTTF: function(options: TTFOptions): Future<Font>
+    --- @return Returns an immutable [`Font`](tealdoc:tecs.gfx.text.Font).
+    newTTF: function(options: TTFOptions): Font
     --- Returns a text item's width and height in world units.
     ---
     --- Uses the same layout as the plugin without adding or changing an
@@ -397,7 +396,7 @@ local function openFont(bytes: string, options: TTFOptions): Font
     return font
 end
 
-function text.newTTF(options: TTFOptions): Future<Font>
+function text.newTTF(options: TTFOptions): Font
     if options == nil or options.source == nil or options.source == "" then
         error("tecs: a TTF font needs a `source` path", 2)
     end
@@ -417,9 +416,7 @@ function text.newTTF(options: TTFOptions): Future<Font>
     if not assets.installed() then
         assets.install()
     end
-    return assets.loadString(resolve(requested.source), "font"):map(function(bytes: string): Font
-        return openFont(bytes, requested)
-    end)
+    return openFont(assets.loadString(resolve(requested.source), "font"), requested)
 end
 
 -------------------------------------------------------------------------------

@@ -27,6 +27,7 @@ local record Allocation
     bytes: loader.CArray
     capacity: integer
     references: integer
+    pins: integer
 end
 local record OwnedBuffer is IOBuffer
     _allocation: Allocation
@@ -41,6 +42,7 @@ local record OwnedView is ByteView
 end
 local record OwnedWriteRange is WriteRange
     _buffer: OwnedBuffer
+    _allocation: Allocation
     _pointer: loader.BytePointer
     _offset: integer
     _capacity: integer
@@ -78,7 +80,7 @@ local function integer(value: integer, what: string, level: integer): integer
     return value
 end
 local function allocation(capacity: integer): Allocation
-    return {bytes = loader.newArray("uint8_t[?]", max(1, capacity)), capacity = capacity, references = 1}
+    return {bytes = loader.newArray("uint8_t[?]", max(1, capacity)), capacity = capacity, references = 1, pins = 0}
 end
 local function open(self: OwnedBuffer, level: integer)
     if self._released then
@@ -98,6 +100,9 @@ local function range(length: integer, offset: integer, count: integer, what: str
 end
 local function detach(self: OwnedBuffer, minimum: integer)
     local old <const> = self._allocation
+    if old.pins > 0 then
+        error("tecs: io.Buffer has an active native write range", 3)
+    end
     if old.references == 1 and minimum <= old.capacity then
         return
     end
@@ -160,6 +165,9 @@ local function commitBufferWrite(destination: IOBuffer, offset: integer, count: 
 end
 function OwnedBuffer:newReader(): Reader
     open(self, 2)
+    if self._allocation.pins > 0 then
+        error("tecs: io.Buffer has an active native write range", 2)
+    end
     return rawSetMetatable({_view = self:view(), _at = 0, _closed = false} as BufferReader, BufferReaderMT) as Reader
 end
 function OwnedBuffer:newStream(contentType?: string): ReadWriteStream
@@ -216,6 +224,9 @@ function OwnedBuffer:resize(length: integer)
 end
 function OwnedBuffer:getString(offset?: integer, count?: integer): string
     open(self, 2)
+    if self._allocation.pins > 0 then
+        error("tecs: io.Buffer has an active native write range", 2)
+    end
     offset, count = range(self._length, offset, count, "io.Buffer", 2)
     return count == 0 and ""
         or ffi.string(
@@ -236,6 +247,9 @@ function OwnedBuffer:setString(bytes: string, offset?: integer)
 end
 function OwnedBuffer:view(offset?: integer, count?: integer): ByteView
     open(self, 2)
+    if self._allocation.pins > 0 then
+        error("tecs: io.Buffer has an active native write range", 2)
+    end
     offset, count = range(self._length, offset, count, "io.Buffer", 2)
     local held <const> = self._allocation
     held.references = held.references + 1
@@ -245,9 +259,17 @@ function OwnedBuffer:view(offset?: integer, count?: integer): ByteView
 end
 function OwnedBuffer:reserveRange(offset: integer, minimum: integer): WriteRange
     local pointer <const> = prepareWrite(self, offset, minimum)
+    local held <const> = self._allocation
+    held.references = held.references + 1
+    held.pins = held.pins + 1
     return rawSetMetatable(
         {
-            _buffer = self, _pointer = pointer, _offset = offset, _capacity = minimum, _released = false
+            _buffer = self,
+            _allocation = held,
+            _pointer = pointer,
+            _offset = offset,
+            _capacity = minimum,
+            _released = false,
         } as OwnedWriteRange,
         OwnedWriteRangeMT
     ) as WriteRange
@@ -262,6 +284,9 @@ function OwnedBuffer:isReleased(): boolean
 end
 function OwnedBuffer:close(): boolean, string
     if not self._released then
+        if self._allocation.pins > 0 then
+            return false, "io.Buffer has an active native write range"
+        end
         self._released = true
         self._allocation.references = self._allocation.references - 1
         self._allocation = nil
@@ -346,12 +371,20 @@ function OwnedWriteRange:commit(used: integer)
     if used > self._capacity then
         error("tecs: io.Buffer.WriteRange commit is past its capacity", 2)
     end
+    if self._buffer._allocation ~= self._allocation then
+        error("tecs: io.Buffer storage changed while a native write range was active", 2)
+    end
     commitWrite(self._buffer, self._offset, used)
     self:close()
 end
 function OwnedWriteRange:close(): boolean, string
-    self._released = true
-    self._pointer = nil
+    if not self._released then
+        self._released = true
+        self._pointer = nil
+        self._allocation.pins = self._allocation.pins - 1
+        self._allocation.references = self._allocation.references - 1
+        self._allocation = nil
+    end
     return true
 end
 function BufferReader:read(count: integer): string, string

@@ -229,9 +229,7 @@ describe("ecs.Renderer", function()
     end
 
     local function readyFixture()
-        local loading = assets.loadImage(FIXTURE)
-        assets.waitAll()
-        return loading.value
+        return assets.loadImage(FIXTURE)
     end
 
     local function frameAt(world, renderer, dt)
@@ -1425,13 +1423,11 @@ describe("ecs.Renderer", function()
 
     it("samples a registered texture through a Sprite", function()
         local world, renderer = newScene()
-        local loading = assets.loadImage(FIXTURE)
-        assets.waitAll()
-        assert.are.equal("ready", loading.status)
+        local image = assets.loadImage(FIXTURE)
 
         -- registerImage returns a ready Sprite: an image smaller than a cell
         -- does not reach the cell's edge, so the UV range is not 0..1.
-        local sprite = renderer.sprites:registerImage(loading.value)
+        local sprite = renderer.sprites:registerImage(image)
         world:spawn(
             Transform2D(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 1.0, 1.0, 1.0),
@@ -4065,7 +4061,6 @@ describe("ecs.Renderer", function()
                 source = "fonts/JetBrainsMono-ExtraBold.ttf",
                 size = 64,
             })
-                :wait().value
 
             -- The atlas decodes on a worker, so the font arrives no earlier
             -- than the frame after the one that asked for it.

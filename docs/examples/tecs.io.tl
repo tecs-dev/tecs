@@ -539,55 +539,27 @@ destination:close()
 bytes:close()
 -- #endregion tecs.io.WritableStream.writeBuffer
 
--- #region tecs.io.poll
-while tecs.io.pending() > 0 do
-    tecs.io.poll()
-end
--- #endregion tecs.io.poll
-
 -- #region tecs.io.listen
 local listener <const>, listenReason = tecs.io.listen(8080)
 
 assert(listener, listenReason)
-local client: tecs.io.TCPSocket = nil
-local request = ""
+-- `accept` and `read` return only when their operation completes. In a normal
+-- system they park that logical update; in a headless server they block this
+-- caller. A persistent server belongs in a headless host or an engine-owned
+-- bounded service instead of waiting forever in a gameplay system.
+local client <const>, acceptReason = listener:accept()
+assert(client, acceptReason)
+local request <const>, readReason = client:read()
+assert(request, readReason)
 
--- Call this once per frame. It serves one HTTP/1.1 request at a time; a real
--- server keeps one request buffer per connected socket.
-local function pollWebServer()
-    if client == nil then
-        client = listener:accept()
-        return
-    end
-
-    local chunk <const>, readReason = client:read()
-    if readReason ~= nil then
-        client:close()
-        client = nil
-        request = ""
-        return
-    end
-    if chunk == nil then
-        return
-    end
-    request = request .. chunk
-    if request:find("\r\n\r\n", 1, true) == nil then
-        return
-    end
-
-    local body <const> = "Hello from Tecs\n"
-    local response <const> = (
-        "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n" .. "Content-Type: text/plain\r\nConnection: close\r\n\r\n%s"
-    ):format(#body, body)
-    local sent <const>, sendReason = client:write(response)
-    assert(sent, sendReason)
-    assert(client:drain(1000))
-    client:close()
-    client = nil
-    request = ""
-end
-
-pollWebServer()
+local body <const> = "Hello from Tecs\n"
+local response <const> = (
+    "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n" .. "Content-Type: text/plain\r\nConnection: close\r\n\r\n%s"
+):format(#body, body)
+local sent <const>, sendReason = client:write(response)
+assert(sent, sendReason)
+assert(client:drain(1000))
+client:close()
 
 listener:close()
 -- #endregion tecs.io.listen
@@ -603,20 +575,20 @@ local client <const> = http.newClient({
     timeoutMs = 10000,
     maxBytes = 1024 * 1024,
 })
-local response <const> = client:send({url = endpoint}).value
+local response <const> = client:send({url = endpoint})
 print(response.status, response.url:host())
 response.body:close()
 client:close()
 -- #endregion tecs.io.http.newClient
 
--- #region tecs.io.watcher.poll
+-- #region tecs.io.watcher.install
 local watcher <const> = tecs.io.watcher
 
-local function runHeadlessWatcher(keepRunning: function(): boolean)
+local function enableReloading()
+    watcher.on("document", function(change: watcher.Change) print("changed " .. change.path) end)
     watcher.install({intervalSeconds = 0.25})
-    while keepRunning() do
-        watcher.poll()
-    end
-    watcher.uninstall()
 end
--- #endregion tecs.io.watcher.poll
+-- The Application advances the watcher and dispatches the handler from its
+-- Ingress phase. Call watcher.uninstall() to stop it.
+enableReloading()
+-- #endregion tecs.io.watcher.install

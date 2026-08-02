@@ -37,14 +37,12 @@ describe("gfx.text", function()
             name = "text-sdf-64",
             size = 64,
         })
-            :wait().value
         alphaFont = text.newTTF({
             source = "fonts/JetBrainsMono-ExtraBold.ttf",
             name = "text-alpha-16",
             size = 16,
             raster = "alpha",
         })
-            :wait().value
     end)
 
     teardown(function()
@@ -119,8 +117,9 @@ describe("gfx.text", function()
         assert.are.equal("alpha", alphaFont.raster)
         assert.are.equal(16, alphaFont.size)
 
-        local failed = text.newTTF({ source = "fonts/missing.ttf" }):wait(1000)
-        assert.are.equal("failed", failed.status)
+        assert.has_error(function()
+            text.newTTF({ source = "fonts/missing.ttf" })
+        end)
         assert.has_error(function()
             text.newTTF({ source = "fonts/JetBrainsMono-ExtraBold.ttf", raster = "lcd" })
         end, "tecs: a TTF font `raster` must be 'sdf' or 'alpha'")

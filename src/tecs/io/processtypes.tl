@@ -6,12 +6,10 @@ Keeping these declarations beside the process module prevents the general
 can still depend on them without requiring the public module.
 ]=]
 
-local type Future = require("tecs.Future")
 local type types = require("tecs.io.types")
 local type Path = require("tecs.io.Path")
 local type coretypes = require("tecs.types")
 
-local type Buffer = types.Buffer
 local type ByteView = types.ByteView
 local type Reader = types.Reader
 local type Writer = types.Writer
@@ -132,9 +130,8 @@ end
 
 --- A caller-owned reader over one live child-process output pipe.
 ---
---- Blocking `read` and `readInto` satisfy the ordinary reader workflow.
---- `readAvailable` and `readAvailableInto` never wait and distinguish a pipe
---- with no bytes ready from end of file.
+--- `read` and `readInto` return ready bytes inline and otherwise wait according
+--- to the caller's execution context.
 local interface ProcessReader is Reader
     --- Returns whether this endpoint has been closed.
     ---
@@ -147,98 +144,26 @@ local interface ProcessReader is Reader
     --- @param self The process reader to inspect.
     --- @return Returns true after end of file.
     isEOF: function(self: ProcessReader): boolean
-
-    --- Reads immediately available bytes without waiting.
-    ---
-    --- Nil without a reason means the pipe remains open but has no bytes
-    --- ready. An empty string means end of file.
-    --- @param self The process reader whose pipe advances.
-    --- @param maxBytes The caller supplies 1 through 65,536 bytes or omits it
-    ---     for 16,384.
-    --- @return Returns available bytes, nil when none are ready, or an empty
-    ---     string at end of file.
-    --- @return Returns a reason only when reading fails.
-    readAvailable: function(self: ProcessReader, maxBytes?: integer): string, string
-
-    --- Reads immediately available bytes into reusable storage.
-    ---
-    --- Nil without a reason means no bytes are ready. Zero means end of file.
-    --- @param self The process reader whose pipe advances.
-    --- @param destination The caller supplies an open destination buffer and
-    ---     retains ownership.
-    --- @param offset The caller supplies a non-negative destination offset or
-    ---     omits it for zero.
-    --- @param maxBytes The caller supplies 1 through 65,536 bytes or omits it
-    ---     for 16,384.
-    --- @return Returns bytes read, nil when none are ready, or zero at end of
-    ---     file.
-    --- @return Returns a reason only when reading fails.
-    readAvailableInto: function(
-        self: ProcessReader, destination: Buffer, offset?: integer, maxBytes?: integer
-    ): integer, string
 end
 
 --- A caller-owned writer over one live child-process input pipe.
 ---
---- Blocking `write`, `writeFrom`, and `writeView` wait for OS-pipe capacity.
---- The available forms return immediately and may accept only a prefix, so a
---- frame loop can apply backpressure without accumulating an unbounded queue.
+--- `write`, `writeFrom`, and `writeView` return inline when the pipe has room
+--- and otherwise wait according to the caller's execution context.
 local interface ProcessWriter is Writer
     --- Returns whether this endpoint has sent EOF or been closed.
     ---
     --- @param self The process writer to inspect.
     --- @return Returns true after `close`.
     isClosed: function(self: ProcessWriter): boolean
-
-    --- Writes as many immediately acceptable string bytes as possible.
-    ---
-    --- Nil without a reason means the pipe has no capacity yet.
-    --- @param self The process writer whose pipe advances.
-    --- @param bytes The caller supplies binary bytes including embedded NULs.
-    --- @param offset The caller supplies a zero-based string offset or omits
-    ---     it for zero.
-    --- @param count The caller supplies a byte count or omits it for the
-    ---     remainder.
-    --- @return Returns bytes accepted, or nil when none fit immediately.
-    --- @return Returns a reason only when writing fails.
-    writeAvailable: function(self: ProcessWriter, bytes: string, offset?: integer, count?: integer): integer, string
-
-    --- Writes an immediately acceptable buffer prefix without a Lua string.
-    ---
-    --- @param self The process writer whose pipe advances.
-    --- @param source The caller supplies an open source buffer and retains
-    ---     ownership.
-    --- @param offset The caller supplies a zero-based source offset or omits
-    ---     it for zero.
-    --- @param count The caller supplies a byte count or omits it for the
-    ---     remainder.
-    --- @return Returns bytes accepted, or nil when none fit immediately.
-    --- @return Returns a reason only when writing fails.
-    writeAvailableFrom: function(
-        self: ProcessWriter, source: Buffer, offset?: integer, count?: integer
-    ): integer, string
-
-    --- Writes an immediately acceptable immutable-view prefix.
-    ---
-    --- @param self The process writer whose pipe advances.
-    --- @param source The caller supplies an open source view and retains
-    ---     ownership.
-    --- @param offset The caller supplies a zero-based source offset or omits
-    ---     it for zero.
-    --- @param count The caller supplies a byte count or omits it for the
-    ---     remainder.
-    --- @return Returns bytes accepted, or nil when none fit immediately.
-    --- @return Returns a reason only when writing fails.
-    writeAvailableView: function(
-        self: ProcessWriter, source: ByteView, offset?: integer, count?: integer
-    ): integer, string
 end
 
 --- A caller-owned child process and its independently closable pipes.
 ---
 --- The process owns every non-nil endpoint. Closing an endpoint closes only
 --- that pipe; closing the process closes all three, forcibly terminates and
---- reaps a live child, and settles `finished`. Repeated closure remains safe.
+--- reaps a live child, and completes its private wait state. Repeated closure
+--- remains safe.
 local interface Process is Closeable
     --- Read-only. Reports the operating-system process identifier.
     pid: integer
@@ -256,10 +181,10 @@ local interface Process is Closeable
     --- process owns it.
     stderr: ProcessReader
 
-    --- Read-only. Settles ready with the exit description after the child
-    --- stops. Canceling this future does not terminate the separately owned
-    --- process.
-    finished: Future<ProcessExit>
+    --- Waits for the child to stop and returns its exit description.
+    --- @param self The process to wait for.
+    --- @return Returns how the child stopped.
+    wait: function(self: Process): ProcessExit
 
     --- Returns whether the child has not stopped yet.
     ---
@@ -279,10 +204,9 @@ local interface Process is Closeable
 
     --- Feeds stdin and captures stdout and stderr without pipe deadlock.
     ---
-    --- The call blocks the current Lua thread, drains both output pipes while
-    --- feeding input, closes stdin after the final byte, and returns only
-    --- after the child exits and both captured pipes reach EOF. Run it in a
-    --- worker when blocking is inappropriate.
+    --- The call drains both output pipes while feeding input, closes stdin
+    --- after the final byte, and returns after the child exits and both pipes
+    --- reach EOF. It suspends a normal system or blocks an ordinary caller.
     --- @param self The open process whose piped endpoints are consumed.
     --- @param options The caller supplies complete input and an output limit,
     ---     or omits both.

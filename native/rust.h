@@ -14,12 +14,15 @@
 
 typedef struct TecsImage TecsImage;
 typedef struct TecsBytes TecsBytes;
+typedef struct TecsAsyncFileRequest TecsAsyncFileRequest;
+typedef struct TecsImageDecodeRequest TecsImageDecodeRequest;
 typedef struct TecsTemporaryPath TecsTemporaryPath;
 typedef struct TecsWindowHitRegions TecsWindowHitRegions;
 typedef struct TecsMcpServer TecsMcpServer;
 typedef struct TecsMcpRequest TecsMcpRequest;
 typedef struct TecsNetAddress TecsNetAddress;
 typedef struct TecsNetOperation TecsNetOperation;
+typedef struct TecsNetReactor TecsNetReactor;
 typedef struct TecsNetStream TecsNetStream;
 typedef struct TecsNetServer TecsNetServer;
 typedef struct TecsNetDatagram TecsNetDatagram;
@@ -123,6 +126,7 @@ typedef struct TecsWindowHitRegion {
 typedef struct SDL_Window SDL_Window;
 
 const char *tecsRustError(void);
+int tecsHostEventBatchAcknowledge(void *host, uint64_t token);
 
 /* Immutable procedural noise fields. Algorithm and fractal values are private
  * discriminants selected by the tecs.math.noise binding. */
@@ -227,6 +231,31 @@ const uint8_t *tecsBytesData(const TecsBytes *bytes);
 size_t tecsBytesLength(const TecsBytes *bytes);
 void tecsBytesDestroy(TecsBytes *bytes);
 
+/* Finite regular-file transfers. Opening and metadata run on a bounded
+ * blocking lane; bytes move through one process SDL_AsyncIO queue. A write
+ * borrows `bytes` until its request settles or shutdown completes. */
+TecsAsyncFileRequest *tecsAsyncFileRead(const uint8_t *path, size_t pathLength);
+TecsAsyncFileRequest *tecsAsyncFileWrite(const uint8_t *path, size_t pathLength, const uint8_t *bytes, size_t length,
+                                         int flush);
+uint32_t tecsAsyncFilePoll(void);
+uint32_t tecsAsyncFileWait(uint32_t waitMs);
+int tecsAsyncFileStatus(const TecsAsyncFileRequest *request);
+const uint8_t *tecsAsyncFileData(const TecsAsyncFileRequest *request);
+size_t tecsAsyncFileLength(const TecsAsyncFileRequest *request);
+const char *tecsAsyncFileError(const TecsAsyncFileRequest *request);
+TecsBytes *tecsAsyncFileTakeBytes(TecsAsyncFileRequest *request);
+void tecsAsyncFileDestroy(TecsAsyncFileRequest *request);
+void tecsAsyncFileShutdown(void);
+
+/* CPU image decoding uses a bounded pool separate from file-open workers. The
+ * start call consumes bytes whether or not the job can be accepted. */
+TecsImageDecodeRequest *tecsImageDecodeStart(TecsBytes *bytes);
+int tecsImageDecodeStatus(const TecsImageDecodeRequest *request);
+uint32_t tecsImageDecodeWait(TecsImageDecodeRequest *request, uint32_t waitMs);
+const char *tecsImageDecodeError(const TecsImageDecodeRequest *request);
+TecsImage *tecsImageDecodeTake(TecsImageDecodeRequest *request);
+void tecsImageDecodeRequestDestroy(TecsImageDecodeRequest *request);
+
 /* Declarative window hit testing. SDL retains this callback, so Rust owns it
  * and the copied region list instead of allowing SDL to enter Lua. */
 TecsWindowHitRegions *tecsWindowHitRegionsCreate(SDL_Window *window, const TecsWindowHitRegion *regions, size_t count);
@@ -260,6 +289,21 @@ const uint8_t *tecsNetAddressText(const TecsNetAddress *address, size_t *length)
 TecsNetAddress *tecsNetAddressClone(const TecsNetAddress *address);
 void tecsNetAddressDestroy(TecsNetAddress *address);
 
+/* A reactor watch is one-shot. Poll removes a ready endpoint before queueing
+ * its token, so the caller drains the operation and explicitly watches again
+ * only after it reaches would-block. Interest uses bit 1 for readable and bit
+ * 2 for writable. Readiness adds bit 4 for an error and bit 8 for closure. */
+TecsNetReactor *tecsNetReactorCreate(void);
+int tecsNetReactorWatch(TecsNetReactor *reactor, TecsNetStream *stream, uint32_t token, uint32_t interest);
+int tecsNetReactorUnwatch(TecsNetReactor *reactor, TecsNetStream *stream, uint32_t token);
+int tecsNetReactorWatchServer(TecsNetReactor *reactor, TecsNetServer *server, uint32_t token, uint32_t interest);
+int tecsNetReactorUnwatchServer(TecsNetReactor *reactor, TecsNetServer *server, uint32_t token);
+int tecsNetReactorWatchDatagram(TecsNetReactor *reactor, TecsNetDatagram *socket, uint32_t token, uint32_t interest);
+int tecsNetReactorUnwatchDatagram(TecsNetReactor *reactor, TecsNetDatagram *socket, uint32_t token);
+int tecsNetReactorPoll(TecsNetReactor *reactor, uint32_t timeoutMs);
+int tecsNetReactorNext(TecsNetReactor *reactor, uint32_t *token, uint32_t *readiness);
+void tecsNetReactorDestroy(TecsNetReactor *reactor);
+
 TecsNetServer *tecsNetListen(const TecsNetAddress *address, uint16_t port);
 TecsNetStream *tecsNetServerAccept(TecsNetServer *server);
 int tecsNetServerWait(TecsNetServer *server, uint32_t timeoutMs);
@@ -276,6 +320,8 @@ void tecsNetStreamDestroy(TecsNetStream *stream);
 TecsNetDatagram *tecsNetDatagramBind(const TecsNetAddress *address, uint16_t port);
 int tecsNetDatagramSend(TecsNetDatagram *socket, const TecsNetAddress *address, uint16_t port, const uint8_t *bytes,
                         size_t length);
+int tecsNetDatagramSendWait(TecsNetDatagram *socket, const TecsNetAddress *address, uint16_t port, const uint8_t *bytes,
+                            size_t length, uint32_t timeoutMs);
 TecsNetPacket *tecsNetDatagramReceive(TecsNetDatagram *socket);
 int tecsNetDatagramWait(TecsNetDatagram *socket, uint32_t timeoutMs);
 void tecsNetDatagramDestroy(TecsNetDatagram *socket);

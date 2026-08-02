@@ -167,6 +167,47 @@ placement after the shared authored hierarchy, and writes only explicitly
 bound entity transforms. Nil placement retains the direct transform path. It
 adds no system or per-frame work to a model that is never sampled.
 
+## Async design
+
+Asynchronous operations return their values directly. A system does not choose
+between a callback, a future, and a coroutine API. During `world:update`, Tecs
+runs the logical update in one persistent coroutine. An operation that must
+wait parks that coroutine at the call site; an operation that is ready returns
+inline. The application keeps pumping I/O and may render the last completed
+world state until the update resumes in the same system and schedule position.
+
+The coroutine belongs to the world update, not to an entity or an I/O call.
+This keeps entity loops from creating a task per spawn and amortizes the
+coroutine and scheduler state across frames. Startup, shutdown, and calls made
+outside `world:update` use the same direct-value API and block while pumping
+the producer. Private completion state may bridge a native worker queue, but
+it is not a second user-facing execution model.
+
+The producer still matches the work. TCP, UDP, and process pipes try their
+syscall first and use a process-wide `mio` readiness reactor only after
+`WouldBlock`; no worker thread sits waiting on a handle. One bounded Tokio
+service resolves names and establishes connections. Regular-file transfers
+use a bounded SDL AsyncIO queue, uncovered file operations use a separate
+bounded blocking lane, and image decoding uses a bounded CPU lane. Every path
+settles onto the same Lua-thread continuation, so that implementation split
+does not create a second game API or let CPU work starve I/O progress.
+
+Byte contracts are contextual. Memory Readers, Writers, buffers, and
+transforms return inline. A socket or process-pipe endpoint first uses that
+same direct call and parks only when the handle is not ready. File endpoints
+wait through SDL AsyncIO. HTTP returns at headers and exposes a bounded,
+one-shot streaming body. Outside a resumable world update these calls block
+their caller while advancing only the producer they need. There is no public
+runtime pump or nonblocking twin to keep in sync.
+
+External input is retained at logical-update boundaries. SDL callbacks append
+copied events to a bounded native queue; a new update seals one immutable
+batch, folds input once, and dispatches observers from the scheduler-owned
+`Ingress` phase. If an observer suspends, later SDL events wait for the next
+update. Watcher changes use the same bounded Ingress boundary. The scheduler
+therefore commits a phase once and extraction never observes half of an
+external batch.
+
 ## Build
 
 Cargo and `xtask` own the build, generated bindings, tests, and packaging.

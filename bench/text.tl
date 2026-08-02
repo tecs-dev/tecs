@@ -104,7 +104,7 @@ return tecs.newApplication({
         local font = text.newTTF({
             source = "fonts/JetBrainsMono-ExtraBold.ttf",
             size = 64,
-        }).value
+        })
         transientFont = font
 
         math.randomseed(42)

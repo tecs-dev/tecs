@@ -26,35 +26,31 @@ local function game(world: tecs.World, app: tecs.Application)
     })
     print("gltf3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
 
-    assets.loadGLTF(files.assetPath("models/triangle.gltf")):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)
-        if loaded.status ~= "ready" then
-            error(loaded.error, 0)
+    local model <const> = assets.loadGLTF(files.assetPath("models/triangle.gltf"))
+    local instance <const> = meshes:registerModel(model):newInstance()
+    for _, primitive in ipairs(instance.primitives) do
+        if primitive.skin ~= nil then
+            world:spawn(
+                primitive.transform,
+                primitive.mesh,
+                primitive.bounds,
+                primitive.material,
+                primitive.skin,
+                Tint(1, 1, 1, 1),
+                Renderable3D()
+            )
+        else
+            world:spawn(
+                primitive.transform,
+                primitive.mesh,
+                primitive.bounds,
+                primitive.material,
+                Tint(1, 1, 1, 1),
+                Renderable3D()
+            )
         end
-        local instance <const> = meshes:registerModel(loaded.value):newInstance()
-        for _, primitive in ipairs(instance.primitives) do
-            if primitive.skin ~= nil then
-                world:spawn(
-                    primitive.transform,
-                    primitive.mesh,
-                    primitive.bounds,
-                    primitive.material,
-                    primitive.skin,
-                    Tint(1, 1, 1, 1),
-                    Renderable3D()
-                )
-            else
-                world:spawn(
-                    primitive.transform,
-                    primitive.mesh,
-                    primitive.bounds,
-                    primitive.material,
-                    Tint(1, 1, 1, 1),
-                    Renderable3D()
-                )
-            end
-        end
-        print("gltf3d: loaded textured glTF geometry and transparent PBR material data")
-    end)
+    end
+    print("gltf3d: loaded textured glTF geometry and transparent PBR material data")
 end
 
 return tecs.newApplication({

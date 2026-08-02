@@ -73,19 +73,18 @@ Snapshots omit:
 - GPU buffers and device handles
 - audio voices and playback positions
 - open files and worker threads
-- futures and native work in flight
+- suspended operations and native work in flight
 - Lua locals, closures, and entity-address observers
 
-A [`Future`](/modules/Future) is never a component field, and the omission above is
-what that rule buys. A future holds listeners and the source that settles them,
-so the binary encoder walks a cyclic graph of runtime state rather than refusing
-the component: the save fails with `too deep to serialize` and names nothing.
-Keep the future in a table beside the world and give the entity a transient
-marker, which is what [`tecs.io.http`](/modules/io/http) does with `Pending`.
+An active operation is never a component field. Its coroutine, native handle,
+and completion listener are runtime state rather than snapshot data. Give an
+entity a transient marker when an engine-owned resolver must remember work
+outside that entity, which is what [`tecs.io.http`](/modules/io/http) does with
+`Pending`.
 
-A sequence cursor waiting on a future saves the provider name, entity, and key.
-Load restores the cursor without restoring the future. `isPending` then returns
-false, and the cursor resumes on the next fixed step. Reissue and retrack the
+A sequence cursor waiting on external work saves the provider name, entity,
+and key. Load restores the cursor without restoring that operation.
+`isPending` then returns false, and the cursor resumes on the next fixed step. Reissue and retrack the
 work when the wait must continue.
 
 Load replaces the world in place and despawns nothing, so a subsystem holding
@@ -113,7 +112,7 @@ Custom codecs must turn process-local numbers into durable names:
 - `tecs.audio.Sound` saves the clip path and group name. Load starts a new
   voice instead of restoring playback progress.
 - `tecs.gfx.Text` saves authored fields and the font name. Load resolves only
-  fonts whose `newTTF` future already returned under that name; a missing font
+  fonts that `newTTF` already returned under that name; a missing font
   produces no layout.
 - `tecs.physics.RigidBody` saves no component value. The physics snapshot
   handler stores Rapier's complete versioned state under `"tecs.physics"` and

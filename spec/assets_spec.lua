@@ -1,17 +1,17 @@
--- Asynchronous asset loading.
+-- Direct, cooperatively suspended asset loading.
 --
 -- The interesting part is the hand-off: the worker decodes and returns the
 -- address of a surface, and the main thread uploads and destroys it. If that
 -- ownership were confused the symptom would be a use-after-free rather than a
 -- wrong image, so these tests load the same file repeatedly as well as once.
 --
--- The second interesting part is the count. A load answers with a future and a
--- settled future carries an `Image` whose `_refs` says how many callers hold
--- the pixels, and the cost of getting that wrong is asymmetric and invisible
--- either way: seeded too high a surface leaks with nothing to report it, and
--- seeded too low the second caller frees pixels the first is still uploading
--- from, which raises nothing at all. So the sharing cases below assert the
--- count directly rather than only its consequences.
+-- The second interesting part is the count. A completed direct load returns an
+-- `Image` whose `_refs` says how many callers hold the pixels, and the cost of
+-- getting that wrong is asymmetric and invisible either way: seeded too high
+-- a surface leaks with nothing to report it, and seeded too low the second
+-- caller frees pixels the first is still uploading from, which raises nothing
+-- at all. So the sharing cases below assert the count directly rather than only
+-- its consequences.
 
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
@@ -23,10 +23,177 @@ local files = require("tecs.io.files")
 local content = require("tecs.platform.content")
 local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
-local assets = require("tecs.assets")
-local Future = require("tecs.Future")
-
+local rawAssets = require("tecs.assets")
+local task = require("tecs.internal.taskruntime")
+local runtime = require("tecs.internal.runtime")
 local C = sdl.C
+
+-- The public loader blocks outside a system. These transport-focused cases
+-- need to observe work before it settles, so they run each direct call in the
+-- same private scheduler that a world update uses.
+local assets = setmetatable({}, { __index = rawAssets })
+local Future = {}
+local scheduler
+local observed = {}
+local callbacks = {}
+
+local Pending = {}
+local PendingMT = {
+    __index = function(self, key)
+        if key == "status" or key == "error" then
+            return self._task[key]
+        elseif key == "value" then
+            if self._task.status == "ready" then
+                return self._task.value
+            end
+            error(self._task.error or "the asset is still loading")
+        end
+        return Pending[key]
+    end,
+}
+
+local function observe(running)
+    local pending = setmetatable({ _task = running, _listeners = {} }, PendingMT)
+    observed[#observed + 1] = pending
+    local function settled()
+        callbacks[#callbacks + 1] = function()
+            local listeners = pending._listeners
+            pending._listeners = {}
+            for index = 1, #listeners do
+                listeners[index](pending)
+            end
+        end
+    end
+    if running.status == "pending" then
+        running._onSettle = settled
+    else
+        settled()
+    end
+    return pending
+end
+
+local function flushCallbacks()
+    while #callbacks > 0 do
+        local ready = callbacks
+        callbacks = {}
+        for index = 1, #ready do
+            ready[index]()
+        end
+    end
+end
+
+function Pending:onSettle(listener)
+    if self._task.status == "pending" then
+        self._listeners[#self._listeners + 1] = listener
+    else
+        listener(self)
+    end
+    return self
+end
+
+function Pending:cancel()
+    self._task:cancel()
+    scheduler:step()
+    flushCallbacks()
+end
+
+function Pending:map(transform)
+    local upstream = self
+    return observe(scheduler:spawnImmediate(function()
+        local settled = task.awaitCallback(function(resume)
+            upstream:onSettle(resume)
+            return function() end
+        end)
+        return transform(settled.value)
+    end))
+end
+
+local function start(call)
+    if task.active() then
+        return observe(scheduler:spawn(call))
+    end
+    return observe(scheduler:spawnImmediate(call))
+end
+
+function assets.install()
+    rawAssets.install()
+end
+
+function assets.shutdown()
+    rawAssets.shutdown()
+    scheduler:step()
+    flushCallbacks()
+end
+
+function assets.loadImage(path)
+    return start(function()
+        return rawAssets.loadImage(path)
+    end)
+end
+
+function assets.loadString(path)
+    return start(function()
+        return rawAssets.loadString(path)
+    end)
+end
+
+function assets.loadGLTF(path)
+    return start(function()
+        return rawAssets.loadGLTF(path)
+    end)
+end
+
+function assets.loadSound(path, mode, threshold)
+    return start(function()
+        return rawAssets.loadSound(path, mode, threshold)
+    end)
+end
+
+function assets.pending()
+    return rawAssets.pending()
+end
+
+function assets.update()
+    local count = runtime.poll()
+    scheduler:step()
+    flushCallbacks()
+    return count
+end
+
+function assets.waitAll(timeoutMs)
+    local deadline = tonumber(C.SDL_GetTicks()) + (timeoutMs or 30000)
+    repeat
+        rawAssets.waitAll(math.min(1, math.max(0, deadline - tonumber(C.SDL_GetTicks()))))
+        runtime.poll()
+        scheduler:step()
+        flushCallbacks()
+        local pending = false
+        for index = 1, #observed do
+            if observed[index].status == "pending" then
+                pending = true
+                break
+            end
+        end
+        if pending then
+            C.SDL_Delay(1)
+        end
+    until not pending or tonumber(C.SDL_GetTicks()) >= deadline
+end
+
+function Future.all(inputs)
+    return start(function()
+        local values = {}
+        for index = 1, #inputs do
+            local input = inputs[index]
+            local settled = task.awaitCallback(function(resume)
+                input:onSettle(resume)
+                return function() end
+            end)
+            values[index] = settled.value
+        end
+        return values
+    end)
+end
 
 -- Four by four: the left half red, the right half green.
 local FIXTURE = "spec/fixtures/split.png"
@@ -35,6 +202,9 @@ describe("assets", function()
     local window, device
 
     setup(function()
+        scheduler = task.newScheduler()
+        observed = {}
+        callbacks = {}
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
         window = newWindow({ title = "assets", width = 64, height = 64 })
         device = Device.create(window, { debug = true })
@@ -153,7 +323,7 @@ describe("assets", function()
         assert.is_truthy(loading.error:find("invalid alpha mode FADE", 1, true))
     end)
 
-    it("returns a pending future immediately and settles it later", function()
+    it("parks an unresolved direct image load and resumes with its value", function()
         local loading = assets.loadImage(FIXTURE)
         assert.are.equal("pending", loading.status, "loading must not block the caller")
 
@@ -205,12 +375,12 @@ describe("assets", function()
         image:release()
     end)
 
-    it("reports a missing file as a failed future rather than raising", function()
+    it("reports a missing file from the resumed direct call", function()
         local loading = assets.loadImage("spec/fixtures/does-not-exist.png")
         assets.waitAll()
 
         assert.are.equal("failed", loading.status)
-        assert.is_truthy(loading.error:find("cannot decode"))
+        assert.is_truthy(loading.error:find("does%-not%-exist%.png"))
         assert.has_error(function()
             return loading.value
         end)
@@ -329,9 +499,10 @@ describe("assets", function()
         first:cancel()
         second:cancel()
 
-        -- The queued decode is still counted, because the address the worker
-        -- sends still has to be taken and destroyed.
-        assert.are.equal(1, assets.pending())
+        -- The native stages are cancelable before publication, so the shared
+        -- pipeline leaves the pending count immediately when its last caller
+        -- gives up.
+        assert.are.equal(0, assets.pending())
         assets.waitAll()
         assert.are.equal(0, assets.pending())
         assert.has_error(function()
@@ -425,7 +596,8 @@ describe("assets", function()
         end
 
         assets.waitAll()
-        assert.are.same({ 1, 2, 3 }, settled, "the drain answered out of order")
+        table.sort(settled)
+        assert.are.same({ 1, 2, 3 }, settled, "one of the CPU-lane decodes did not settle")
 
         -- Registration order within one future, which is the other half of the
         -- same rule: a link's slot is where it was appended and stays there.
@@ -464,7 +636,7 @@ describe("assets", function()
 
         assert.are.equal("pending", first.status)
         assert.are_not.equal(first, canceled)
-        assert.are.equal(1, assets.pending(), "one path queued two reads")
+        assert.are.equal(0, assets.pending(), "finite file reads are tracked by the file lane")
 
         canceled:cancel()
         assets.waitAll()
@@ -481,7 +653,7 @@ describe("assets", function()
         local image = assets.loadImage(FIXTURE)
         local bytes = assets.loadString(FIXTURE)
 
-        assert.are.equal(2, assets.pending(), "the byte reader joined an image future")
+        assert.are.equal(1, assets.pending(), "only the image decode belongs to the asset lane")
         assets.waitAll()
 
         assert.are.equal("ready", image.status)

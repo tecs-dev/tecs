@@ -23,7 +23,8 @@ local files = require("tecs.io.files")
 local tecsIO = require("tecs.io")
 local log = require("tecs.log")
 local mcp = require("tecs.io.mcp")
-local runtime = require("tecs.runtime")
+local runtime = require("tecs.internal.runtime")
+local task = require("tecs.internal.taskruntime")
 
 local FIXTURE = "spec/fixtures/split.png"
 
@@ -35,6 +36,19 @@ local CHECKPOINT = "spec-checkpoint.bin"
 local function build(config)
     config.window = { title = "application", width = 64, height = 64 }
     return Application.newApplication(config)
+end
+
+local function iterateEvents(app, batch)
+    local original = events.source
+    events.source = function(emit)
+        for index = 1, #batch do
+            emit(batch[index])
+        end
+    end
+    local ok, result = pcall(app._iterate, app, nil, 0, nil)
+    events.source = original
+    assert.is_true(ok, result)
+    return result
 end
 
 describe("Application", function()
@@ -50,6 +64,85 @@ describe("Application", function()
         assert.are.equal(0, app._fpsFrames)
         assert.are.equal(10.5, app._fpsStarted)
         app:_shutdown()
+    end)
+
+    it("renders while a suspending phase holds simulation time still", function()
+        local gate = task.newGate()
+        local lastRuns = 0
+        local app = build({
+            plugin = function(world)
+                world:addSystem({
+                    name = "BeforeApplicationSuspension",
+                    phase = phases.Last,
+                    run = function()
+                        lastRuns = lastRuns + 1
+                    end,
+                })
+                world:addSystem({
+                    name = "ApplicationSuspension",
+                    phase = phases.Last,
+                    run = function()
+                        gate:wait()
+                    end,
+                })
+            end,
+        })
+        assert.is_true(app:_init())
+
+        assert.is_true(app:_iterate(nil, 0, nil))
+        local heldElapsed = app.elapsed
+        assert.is_true(app.world._updateStalled)
+        assert.are.equal(1, lastRuns)
+        assert.is_nil(app:crashed())
+
+        assert.is_true(app:_iterate(nil, 0, nil))
+        assert.are.equal(heldElapsed, app.elapsed)
+        assert.are.equal(1, lastRuns)
+        assert.is_nil(app:crashed())
+
+        gate:complete(true)
+        assert.is_true(app:_iterate(nil, 0, nil))
+        assert.is_false(app.world._updateStalled)
+        assert.are.equal(heldElapsed, app.elapsed)
+        assert.are.equal(1, lastRuns)
+        assert.is_nil(app:crashed())
+        assert.is_true(app:_shutdown())
+    end)
+
+    it("starts a fresh logical update after a held system fails", function()
+        local gate = task.newGate()
+        local attempts = 0
+        local app = build({
+            debug = true,
+            plugin = function(world)
+                world:addSystem({
+                    name = "FailHeldApplicationUpdateOnce",
+                    phase = phases.Last,
+                    run = function()
+                        attempts = attempts + 1
+                        if attempts == 1 then
+                            gate:wait()
+                            error("held system boom")
+                        end
+                    end,
+                })
+            end,
+        })
+        assert.is_true(app:_init())
+
+        assert.is_true(app:_iterate(nil, 0, nil))
+        assert.is_true(app.world._updateStalled)
+        gate:complete(true)
+        assert.is_true(app:_iterate(nil, 0, nil))
+        assert.is_truthy(app:crashed():find("held system boom", 1, true))
+        assert.is_false(app.world._updateStalled)
+
+        assert.is_true(app:clearCrash())
+        assert.is_true(app:_iterate(nil, 0, nil))
+        assert.are.equal(2, attempts)
+        assert.is_false(app.world._updateStalled)
+        assert.is_nil(app:crashed())
+        assert.is_true(app:_shutdown())
     end)
 
     it("polls the process runtime once per host iteration", function()
@@ -102,49 +195,27 @@ describe("Application", function()
         app:_shutdown()
     end)
 
-    it("settles asset loads without the game pumping them", function()
-        local loading
+    it("returns loaded assets without a Future or a game pump", function()
+        local image
         local app = build({
             plugin = function()
-                loading = assets.loadImage(FIXTURE)
+                image = assets.loadImage(FIXTURE)
             end,
         })
         assert.is_true(app:_init())
-        assert.are.equal("pending", loading.status)
-
-        -- Nothing in this application draws text or plays a sound, so the two
-        -- subsystems with pumps of their own never run. Only the loop's own
-        -- call can settle this.
-        for _ = 1, 200 do
-            if loading.status ~= "pending" then
-                break
-            end
-            app:_iterate(nil, 0, nil)
-        end
-
-        assert.are.equal("ready", loading.status, "the loop never drained the loading worker")
-        assert.is_not_nil(loading.value.pixels)
-        loading.value:release()
+        assert.is_not_nil(image.pixels)
+        image:release()
 
         app:_shutdown()
     end)
 
-    it("settles I/O sources without the game polling them", function()
+    it("returns resolved addresses without a Future or a game poll", function()
         local app = build({})
         assert.is_true(app:_init())
 
         local address = tecsIO.resolve("127.0.0.1")
-        assert.are.equal("pending", address.status)
-        assert.are.equal(1, tecsIO.pending())
-
-        local deadline = time.now() + 2
-        while address.status == "pending" and time.now() < deadline do
-            app:_iterate(nil, 0, nil)
-        end
-
-        assert.are.equal("ready", address.status, address.error)
         assert.are.equal(0, tecsIO.pending())
-        address.value:close()
+        address:close()
         local stopped, reason = tecsIO.shutdown()
         assert.is_true(stopped, reason)
 
@@ -271,17 +342,17 @@ describe("Application", function()
             })
             assert.is_true(app:_init())
 
-            app:_receive({ kind = "keyDown", scancode = 44, down = true })
+            iterateEvents(app, { { kind = "keyDown", scancode = 44, down = true } })
 
             assert.are.equal(1, keys)
             assert.are.equal(0, drops, "an observer was called for a kind it did not ask for")
             app:_shutdown()
         end)
 
-        it("hands the observer the record itself rather than a copy", function()
-            -- Delivery costs one field store and no copy, which is what makes
-            -- a device-rate stream affordable. The borrow rule that follows
-            -- from it is the one this vocabulary already had.
+        it("hands the observer the sealed borrowed event", function()
+            -- A replay source is copied once while its logical-update batch is
+            -- sealed. Ingress then borrows that retained record without a
+            -- second per-observer copy.
             local received
             local app = build({
                 plugin = function(world)
@@ -299,9 +370,13 @@ describe("Application", function()
                 dx = 1.0,
                 dy = 2.0,
             }
-            app:_receive(sent)
+            iterateEvents(app, { sent })
 
-            assert.is_true(rawequal(sent, received), "the event was copied on its way to the observer")
+            assert.are.equal("mouseMotion", received.kind)
+            assert.are.equal(4.0, received.x)
+            assert.are.equal(8.0, received.y)
+            assert.are.equal(1.0, received.dx)
+            assert.are.equal(2.0, received.dy)
             app:_shutdown()
         end)
 
@@ -316,10 +391,12 @@ describe("Application", function()
             })
             assert.is_true(app:_init())
 
-            app:_receive({
-                kind = "keyDown",
-                scancode = app.input:scancode("space"),
-                down = true,
+            iterateEvents(app, {
+                {
+                    kind = "keyDown",
+                    scancode = app.input:scancode("space"),
+                    down = true,
+                },
             })
 
             assert.is_true(downInHandler, "an observer saw the input state from before the event it was told about")
@@ -371,7 +448,7 @@ describe("Application", function()
             })
             assert.is_true(app:_init())
 
-            app:_receive({ kind = "keyDown", scancode = 44, down = true })
+            iterateEvents(app, { { kind = "keyDown", scancode = 44, down = true } })
 
             assert.is_truthy(app:crashed():match("observer boom"))
             app:_shutdown()
@@ -745,7 +822,7 @@ describe("Application", function()
             app:_iterate(nil, 0, nil)
             assert.is_truthy(app:crashed():match("system boom"))
 
-            app:_receive({ kind = "keyDown", scancode = 44, down = true })
+            iterateEvents(app, { { kind = "keyDown", scancode = 44, down = true } })
             assert.are.equal(0, observed, "an observer ran in a game that had stopped")
             assert.is_truthy(app:crashed():match("system boom"), "a later throw replaced the traceback")
 
@@ -756,8 +833,11 @@ describe("Application", function()
             assert.is_true(app.quitRequested, "quit stopped working after a crash")
 
             -- And the observer is delivered to again once the crash is cleared.
+            -- The host would stop after a real quit; reset this internal flag
+            -- because this assertion deliberately keeps the same fixture.
+            app.quitRequested = false
             app:clearCrash()
-            app:_receive({ kind = "keyDown", scancode = 44, down = true })
+            iterateEvents(app, { { kind = "keyDown", scancode = 44, down = true } })
             assert.are.equal(1, observed, "clearing the crash did not restore delivery")
             app:_shutdown()
         end)

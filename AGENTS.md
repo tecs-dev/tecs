@@ -184,13 +184,14 @@ putting every outcome in one allocated result wrapper.
   `nil, reason`. A synchronous operation whose useful answer is whether it
   succeeded returns `false, reason`. The reason is a non-empty string suitable
   for context in a log or a raised error.
-- An asynchronous operational failure settles its `Future` as `"failed"`
-  with its reason. It does not raise later from the pump that discovers the
-  failure. Reading `future.value` may raise because that read is the explicit
-  blocking dereference defined by `Future`.
-- Cancellation is `"canceled"`, separate from failure. Giving up on work is
-  not evidence that the work failed, and recovery handlers must not treat it
-  as one.
+- A cooperative operation preserves the failure shape on its declaration.
+  An operation declared as `value, reason` returns that pair after resuming.
+  An operation declared with only a value raises its operational reason from
+  that direct call. The pump that discovers a failure never raises later and
+  out of context; it resumes the suspended call that owns the outcome.
+- Cancellation remains separate from operational failure in private producer
+  state. World shutdown uses it to unwind a suspended system and its lexical
+  resource scopes rather than presenting a failed operation to later code.
 - `close`, `flush`, and similar final operations report failures discovered
   only after buffered work reaches its destination. An earlier successful
   write does not suppress that delayed error. Finalizers remain a leak safety
@@ -198,9 +199,10 @@ putting every outcome in one allocated result wrapper.
   whose completion matters.
 
 Do not introduce a `Result` record, tuple wrapper, or per-call allocation only
-to make these shapes look uniform. Their uniformity is semantic: raises mean
-the caller broke the contract, returned reasons mean valid synchronous work
-failed, and failed futures mean valid asynchronous work failed. Document an
+to make these shapes look uniform. Their uniformity is semantic: programmer
+errors raise before valid work starts, returned reasons report failures where
+the signature exposes a reason, and a direct value-only operation raises its
+operational failure at the call that requested the value. Document an
 intentional exception on its declaration.
 
 ### Binding a C library that calls back
@@ -335,9 +337,9 @@ Use active voice. Never use an em dash. Name sections for their subject, not as 
 that narrate the same calls.
 
 An example that calls a Tecs module inside a frame or other hot loop binds that
-module to a local outside the loop. Show `local tecsIO <const> = tecs.io` and
-call `tecsIO.poll()` in the loop instead of repeatedly resolving through
-`tecs.io`.
+module to a local outside the loop. Show
+`local time <const> = tecs.platform.time` and call `time.now()` in the loop
+instead of repeatedly resolving through `tecs.platform.time`.
 
 A tag earns its place by saying what the signature cannot: units, the coordinate space, what nil
 means, what happens at a boundary, whether a returned table is the caller's to keep or a view

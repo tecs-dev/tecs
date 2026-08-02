@@ -28,12 +28,7 @@ local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local shaderpack <const> = require("tecs.gpu.shaderpack")
 local materials <const> = require("tecs.gpu.materials")
 local type uiTypes = require("tecs.ui")
-local type assetTypes = require("tecs.assets")
-local type componentTypes = require("tecs.components")
 local type UiEvent = uiTypes.Event
-local type Image = assetTypes.Image
-local type Sprite = componentTypes.Sprite
-local type Future = require("tecs.Future")
 local Transform2D <const> = tecs.Transform2D
 local RelativeTransform2D <const> = tecs.ecs.RelativeTransform2D
 local ChildOf <const> = tecs.ecs.ChildOf
@@ -179,13 +174,13 @@ return tecs.newApplication({
             name = "demo-display-32",
             size = 32,
             raster = "alpha",
-        }).value
+        })
         local font <const> = tecs.gfx.newTTF({
             source = "fonts/JetBrainsMono-ExtraBold.ttf",
             name = "demo-ui-16",
             size = 16,
             raster = "alpha",
-        }).value
+        })
         -- The UI is retained layout over the same entities and instance
         -- producers. Retained layout positions containers; these leaves remain
         -- ordinary rectangles, circles, images, and text.
@@ -835,27 +830,22 @@ return tecs.newApplication({
         -- Images remain sprites. Loading and residency are asynchronous. The
         -- card reserves its place, then the natural 64x64 image supplies the
         -- missing width from its intrinsic ratio when it becomes ready.
-        tecs.assets.loadImage(tecs.io.files.assetPath("demo/ui-badge.svg")):map(function(image: Image): Sprite
-            local sprite <const> = app.renderer.sprites:registerImage(image)
-            return sprite
-        end):onSettle(function(sprite: Future<Sprite>)
-            if sprite.status == "ready" then
-                world:spawn(
-                    ui.Style({
-                        position = "absolute",
-                        height = 64,
-                        inset = {left = 14, top = 16},
-                    }),
-                    ui.Intrinsic("image"),
-                    ui.Paint(true),
-                    RelativeTransform2D(0, 0, 3),
-                    sprite.value,
-                    Tint(1, 1, 1, 1),
-                    Renderable2D(),
-                    ChildOf(imageCard)
-                )
-            end
-        end)
+        local image <const> = tecs.assets.loadImage(tecs.io.files.assetPath("demo/ui-badge.svg"))
+        local sprite <const> = app.renderer.sprites:registerImage(image)
+        world:spawn(
+            ui.Style({
+                position = "absolute",
+                height = 64,
+                inset = {left = 14, top = 16},
+            }),
+            ui.Intrinsic("image"),
+            ui.Paint(true),
+            RelativeTransform2D(0, 0, 3),
+            sprite,
+            Tint(1, 1, 1, 1),
+            Renderable2D(),
+            ChildOf(imageCard)
+        )
 
         -- Plugin spawns remain staged until Startup begins, so select the
         -- initial scene here rather than reading its Style before it exists.

@@ -23,9 +23,9 @@ sessions refcount, so the zone stack is on whenever any channel needs it.
 local string_format <const> = string.format
 local table_concat <const> = table.concat
 local table_sort <const> = table.sort
-local table_remove <const> = table.remove
 
 local log <const> = require("tecs.log")
+local zones <const> = require("tecs.internal.zones")
 local LOGGER <const> = log.get("tecs.profile")
 
 --- Profiling tools for Tecs.
@@ -170,50 +170,7 @@ local function loadUntyped(modName: string): any
     return require(modName)
 end
 
-local zone = loadUntyped("jit.zone") as {string}
-local zoneMeta <const> = getmetatable(zone) as {any: any}
-
-local function noopCall(_t: {any: any}, _name: any): any
-end
-
--- Monotonic counter bumped on every zone push/pop. Lets the sample callback
--- detect when the zone stack has changed without scanning it on every sample.
-local zoneVersion = 0
-
--- The pop branch tolerates an empty stack: a session may flip zones live
--- mid-frame (e.g. from inside a system running under MCP), leaving a noop
--- push without a matching real push. table_remove on empty returns nil
--- silently, which is the recovery we want.
-local function realCall(t: {any: any}, name: any): any
-    local arr = t as {any}
-    zoneVersion = zoneVersion + 1
-    if name then
-        arr[#arr + 1] = name
-    else
-        return table_remove(arr)
-    end
-end
-
-local zoneRefs = 0
-
-local function acquireZones()
-    zoneRefs = zoneRefs + 1
-    if zoneRefs == 1 then
-        zoneMeta.__call = realCall
-    end
-end
-
-local function releaseZones()
-    zoneRefs = zoneRefs - 1
-    if zoneRefs <= 0 then
-        zoneRefs = 0
-        local arr = zone as {any}
-        for i = #arr, 1, -1 do
-            arr[i] = nil
-        end
-        zoneMeta.__call = noopCall
-    end
-end
+local zone <const> = zones.stack
 
 local function activeZpath(): string
     local d = #zone
@@ -296,7 +253,7 @@ end
 
 -- Two-level aggregate: `agg[zpath][stack] = SampleRecord`. Splitting the
 -- key avoids a `zpath .. "|" .. stack` concat per sample, and the outer
--- zpath lookup is cached via zoneVersion so in steady-state hot loops
+-- Zpath lookup is cached via the shared zone version so in steady-state hot loops
 -- each sample is a single table access on the inner map.
 local type SampleAgg = {string: {string: SampleRecord}}
 
@@ -379,7 +336,8 @@ function profile.sample(opts?: profile.SampleOptions): profile.SampleSession
     local paused = false
 
     -- Zpath cache: only rebuild the slash-joined path when the zone stack
-    -- actually changes. realCall bumps zoneVersion on every push/pop, so a
+    -- actually changes. The zone controller bumps its version on every push
+    -- or pop, so a
     -- constant zone context across samples costs one integer compare.
     -- cachedInner rides alongside cachedZpath so we skip the outer agg
     -- lookup too once the zpath is stable.
@@ -393,7 +351,7 @@ function profile.sample(opts?: profile.SampleOptions): profile.SampleSession
         end
         local zpath: string
         local inner: {string: SampleRecord}
-        if zoneVersion == cachedVersion then
+        if zones.version == cachedVersion then
             zpath = cachedZpath
             inner = cachedInner
         else
@@ -411,7 +369,7 @@ function profile.sample(opts?: profile.SampleOptions): profile.SampleSession
                 inner = {}
                 agg[zpath] = inner
             end
-            cachedVersion = zoneVersion
+            cachedVersion = zones.version
             cachedZpath = zpath
             cachedInner = inner
         end
@@ -440,7 +398,7 @@ function profile.sample(opts?: profile.SampleOptions): profile.SampleSession
         end
     end
 
-    acquireZones()
+    zones.acquire()
     profileStart("li" .. string_format("%d", intervalMs), callback)
     sampleActive = true
 
@@ -498,7 +456,7 @@ function profile.SampleSession:stop(filename?: string): string
     s._stopped = true
     profileStop()
     sampleActive = false
-    releaseZones()
+    zones.release()
     local filtered = filterByZone(s._agg as SampleAgg, s._zoneFilter as string)
     local text = encodeCollapsed(filtered)
     if filename then
@@ -698,7 +656,7 @@ function profile.trace(opts?: profile.TraceOptions): profile.TraceSession
         end
     end
 
-    acquireZones()
+    zones.acquire()
     jitAttach(callback, "trace")
     traceActive = true
 
@@ -742,7 +700,7 @@ function profile.TraceSession:stop(filename?: string): profile.TraceReport
     s._stopped = true
     jitAttach(s._callback)
     traceActive = false
-    releaseZones()
+    zones.release()
 
     local sites: {profile.AbortSite} = {}
     for _, site in pairs(s._sites as {string: profile.AbortSite}) do

@@ -40,6 +40,113 @@ world:addPlugin(spinPlugin)
 The pipeline calls `run(dt, world)`. Fixed phases supply the fixed timestep;
 variable phases supply the frame delta.
 
+## Asynchronous work
+
+Every frame system dispatched by `world:update` is resumable. There is no
+second system kind, explicit hold boundary, callback, or completion handle.
+Call a cooperative engine function and use its returned value directly:
+
+```teal
+local record AssetBytes is tecs.ecs.Component
+    bytes: string
+end
+
+tecs.ecs.newComponent({
+    name = "game.AssetBytes",
+    container = AssetBytes,
+    fields = {"bytes"},
+})
+
+local function assetPlugin(): tecs.Plugin
+    return function(world: tecs.World)
+        local missing <const> = world:newQuery({include = {AssetPath}})
+        world:addSystem({
+            name = "game.LoadAsset",
+            phase = tecs.ecs.phases.PreUpdate,
+            run = function(_dt: number, runWorld: tecs.World)
+                for archetype, length, entities in missing:iter() do
+                    local paths <const> = archetype:get(AssetPath)
+                    for row = 1, length do
+                        local bytes <const> = tecs.assets.loadString(paths[row].path)
+                        runWorld:set(entities[row], AssetBytes, AssetBytes(bytes))
+                    end
+                end
+            end,
+        })
+    end
+end
+```
+
+When the value is already available, the call returns inline and performs no
+scheduler turn. When it must wait, Tecs parks the world update at that exact
+Lua stack frame. Events and process-wide I/O continue to pump, and the
+application may render the last completed frame. The next system and phase do
+not run early.
+
+The coroutine preserves query iterators and locals. Tecs already defers world
+mutations while a query is open, so a spawn after a wait remains ordered and
+commits when the iterator closes. The same mechanism works in fixed phases:
+the fixed step resumes without replaying its earlier systems or advancing its
+clock twice.
+
+Calling the same cooperative API outside a world update, including from
+startup, shutdown, or `runPhase`, blocks while pumping its producer until it
+has the same value. This is useful during initialization and in headless tools.
+Plugin authors do not choose between synchronous and asynchronous variants.
+
+One persistent coroutine belongs to the logical world update, not to every
+entity. Iterating ten thousand entities does not create ten thousand tasks.
+Only operations that actually wait enter the scheduler.
+
+Cooperation does not make every byte operation asynchronous. The API follows
+the kind of work:
+
+| Work                                     | Behavior inside a system | Native execution            |
+| ---------------------------------------- | ------------------------ | --------------------------- |
+| Cached asset or ready socket             | Returns inline           | Immediate lookup or syscall |
+| DNS resolution or TCP connection         | Suspends the update      | Bounded Tokio service       |
+| Socket blocked on readiness              | Suspends the update      | Process-wide `mio` reactor  |
+| HTTP request                             | Suspends the update      | Reqwest and Tokio service   |
+| Asset decode                             | Suspends the update      | Bounded CPU lane            |
+| Regular file transfer                    | Suspends the update      | SDL AsyncIO                 |
+| `Process:wait` or native dialog          | Suspends the update      | Native completion bridge    |
+| Memory Reader, Writer, or transform      | Returns inline           | Calling Lua thread          |
+| Socket or process-pipe Reader and Writer | Suspends when not ready  | Native readiness reactor    |
+
+CPU-heavy transforms and blocking libraries belong on workers. Users never
+receive a future, poll a second nonblocking API, or manually manage a
+coroutine.
+
+Socket I/O uses the same direct form. This system does not poll, retain a
+future, or declare itself asynchronous:
+
+```teal
+world:addSystem({
+    name = "game.ReceivePacket",
+    phase = tecs.ecs.phases.PreUpdate,
+    run = function()
+        tecs.scoped(function(scope)
+            local packet <const> = scope:own(assert(inbox:receive()))
+            decodePacket(packet.bytes)
+        end)
+    end,
+})
+```
+
+The native call runs first. A ready socket returns inline; only
+`WouldBlock` reaches the scheduler:
+
+```mermaid
+flowchart TD
+    call["System calls a direct I/O API"] --> ready{"Operation ready?"}
+    ready -->|Yes| value["Return the value inline"]
+    ready -->|No| park["Park the logical world update"]
+    park --> pump["Application pumps events and native readiness"]
+    pump --> resume["Resume the same Lua call"]
+    resume --> ordered["Finish later systems in schedule order"]
+    ordered --> commit["Commit the completed phase once"]
+```
+
 ## Frame placement
 
 `Application` drives three groups:

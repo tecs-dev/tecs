@@ -206,7 +206,7 @@ local function gamePlugin(world: tecs.World, app: tecs.Application)
                 name = "game-ui-16",
                 size = 16,
                 raster = "alpha",
-            }):wait().value
+            })
             spawnInterface(world, app, font)
         end,
     })
@@ -252,24 +252,20 @@ The asset loader decodes pixels asynchronously. The renderer registers them
 and returns the ordinary sprite consumed by `Intrinsic("image")`:
 
 ```teal
-tecs.assets.loadImage(
+local image <const> = tecs.assets.loadImage(
     tecs.io.files.assetPath("images/portrait.png")
-):map(function(image: tecs.assets.Image): tecs.gfx.Sprite
-    return app.renderer.sprites:registerImage(image)
-end):onSettle(function(loaded: tecs.Future<tecs.gfx.Sprite>)
-    if loaded.status == "ready" then
-        world:spawn(
-            ui.Style({height = 64}),
-            ui.Intrinsic("image"),
-            ui.Paint(true),
-            RelativeTransform2D(0, 0, 2),
-            loaded.value,
-            Tint(1, 1, 1, 1),
-            Renderable2D(),
-            ChildOf(panel)
-        )
-    end
-end)
+)
+local sprite <const> = app.renderer.sprites:registerImage(image)
+world:spawn(
+    ui.Style({height = 64}),
+    ui.Intrinsic("image"),
+    ui.Paint(true),
+    RelativeTransform2D(0, 0, 2),
+    sprite,
+    Tint(1, 1, 1, 1),
+    Renderable2D(),
+    ChildOf(panel)
+)
 ```
 
 ### Create a clipped scrolling list

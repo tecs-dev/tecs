@@ -49,31 +49,21 @@ owns the scheduled lifecycle:
 | Frame | The phases driven by `world:update(dt)` |
 | Shutdown | `PreShutdown`, `Shutdown`, and `PostShutdown` |
 
-Every iteration runs the same eight steps in the same order, and the order is
-the contract: a system reads what the steps above it settled during this frame
-rather than one frame later.
+Each host iteration drains bounded native progress, then starts or resumes one
+logical world update. File, socket, process, HTTP, dialog, and asset operations
+may park that update without blocking SDL. A parked update resumes at the
+original call site; later systems do not overtake it, and the scheduler commits
+each completed phase once.
 
-1. The application starts the input frame and drains every platform event SDL
-   delivered since the previous iteration. A quit request ends the iteration
-   here.
-2. `tecs.runtime.poll` settles process-wide asynchronous work: finished asset
-   loads, child processes, dialogs, generic I/O, HTTP clients, and file changes.
-3. The debug server answers, `world:update(dt)` runs the phases, and the
-   renderer records and submits one frame.
-4. The audio mixer updates, which reaps the voices it has finished with.
+Platform events belong to that same logical update. The host seals one retained
+batch, input folds it once, and the first engine-owned `Ingress` system emits
+its events in sequence order. An observer may suspend like any other system.
+Events arriving meanwhile stay pending for the next update, so input and event
+state cannot change underneath the suspended observer.
 
-Steps 2 and 4 run whatever else is true of the process. A decode
-that finished, a child that exited, a transfer that completed and a file that
-changed have all already happened, and a voice the mixer is done with has to be
-reaped either way, so a suspended run and a crashed one keep settling them.
-Step 7 is the one the guards hold back. A suspended application skips all of
-it, and a crashed one skips the world update and the rendering while still
-answering the debug server, so an agent that was watching gets the traceback.
-
-Event observers run inside step 1, before the world update and outside every
-phase. They see input state after the application folds the event in. Store
-event state in a component or a resource when a scheduled system has to react
-to it.
+The process completion pump, audio cleanup, and debug control plane continue
+while gameplay is parked or crashed. Rendering uses only the latest completed
+world state and never extracts a half-finished phase.
 
 ## Checkpoints and crashes
 
@@ -108,6 +98,7 @@ local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
 local type internal = require("tecs.internal.types")
 local sdl <const> = require("tecs.ffi.sdl3")
+local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local time <const> = require("tecs.platform.time")
 local events <const> = require("tecs.platform.events")
@@ -126,19 +117,35 @@ local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
 local files <const> = require("tecs.io.files")
 local process <const> = require("tecs.internal.process")
-local runtime <const> = require("tecs.runtime")
+local runtime <const> = require("tecs.internal.runtime")
+local fileasync <const> = require("tecs.internal.fileasync")
 
 -- Host-only event conversion operations. The public events record omits these
 -- engine-facing helpers, while the implementation table retains them for the
 -- application lifecycle.
 local record EventHost
-    drain: function(queue: loader.CValue, count: integer, handler: function(events.Event), arrivals?: loader.CValue)
+    drain: function(
+        queue: loader.CValue,
+        count: integer,
+        handler: function(events.Event),
+        arrivals?: loader.CValue,
+        sequences?: loader.CValue,
+        hostOnly?: boolean
+    )
     isInput: function(kind: string): boolean
     setTouchScale: function(width: number, height: number)
 end
 
 local eventHost <const> = events as EventHost
 local watcher <const> = require("tecs.io.watcher")
+
+local record WatcherHost
+    _sealIngress: function()
+    _dispatchIngress: function(): integer
+    _finishIngress: function()
+end
+
+local watcherHost <const> = watcher as WatcherHost
 local log <const> = require("tecs.log")
 local mcp <const> = require("tecs.io.mcp")
 local timing <const> = require("tecs.timing")
@@ -148,6 +155,7 @@ local shaderpack <const> = require("tecs.gpu.shaderpack")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 
 local C <const> = sdl.C
+local R <const> = rust.C
 local K <const> = sdl.K
 
 -- The stages of a frame, named once. Extraction is registered by the renderer,
@@ -403,6 +411,18 @@ local record Application
     _simulate: function(self: Application, dt: number)
     _recover: function(self: Application)
     _receive: function(self: Application, event: events.Event)
+    _dispatchEvent: function(self: Application, event: events.Event)
+    _dispatchIngress: function(self: Application)
+    _finishEventBatch: function(self: Application)
+    _eventQueue: loader.CValue
+    _eventCount: integer
+    _eventArrivals: loader.CValue
+    _eventSequences: loader.CValue
+    _eventHost: loader.CValue
+    _eventToken: number
+    _eventOverflow: boolean
+    _eventBatchOpen: boolean
+    _replayEvents: {events.Event}
     --- The frame this iteration acquired, held so that recovery can resolve one
     --- the throw left open. It survives into the next iteration and is
     --- harmless there: a frame that submitted or canceled is already
@@ -566,6 +586,16 @@ local function receive(event: events.Event)
     receiving:_receive(event)
 end
 
+local function dispatch(event: events.Event)
+    receiving:_dispatchEvent(event)
+end
+
+local replayEvents: {events.Event} = nil
+
+local function captureReplay(event: events.Event)
+    replayEvents[#replayEvents + 1] = events.copy(event)
+end
+
 --- Builds an application. Return the result from the entry chunk.
 ---
 --- Reached as `tecs.newApplication`, at the root rather than under a module,
@@ -588,6 +618,9 @@ function Application.newApplication(config: Application.Config): Application
     self._fpsStarted = 0.0
     self._fpsFrames = 0
     self._checkpointStaged = false
+    self._eventCount = 0
+    self._eventBatchOpen = false
+    self._eventOverflow = false
     return self
 end
 
@@ -870,6 +903,16 @@ function Application:_init(): boolean
     -- addition, not a device that was there all along.
     self.input:refreshDevices()
 
+    -- Registered before the game plugin, so platform dispatch is the first
+    -- system in Ingress. The batch was folded before the logical update began;
+    -- this second walk emits the same sealed records inside ordinary deferred
+    -- scheduler semantics and may suspend like any other system.
+    self.world:addSystem({
+        name = "tecs.platform.events",
+        phase = ecs.phases.Ingress,
+        run = function() self:_dispatchIngress() end,
+    })
+
     -- The game. Registration first, then the startup phases the registration
     -- put systems in, and both guarded: a game that throws while starting up
     -- leaves a traceback and a live debug server rather than a dead process,
@@ -923,7 +966,7 @@ function Application:_init(): boolean
     return true
 end
 
---- Folds one event into engine state, then emits it on the world's bus.
+--- Folds one event into the logical update's stable engine state.
 ---
 --- Observers see every event, including ones the engine acted on. An engine
 --- that consumed events would leave a game unable to tell the difference
@@ -932,19 +975,6 @@ end
 --- The application folds input first, so an observer reading `app.input` inside its handler
 --- sees the press it is being told about rather than the state before it.
 ---
---- Where this sits in the frame is worth being plain about, because an observer
---- is not a system. The drain runs before `world:update`, so an observer fires
---- ahead of every system in the frame the event belongs to, outside every
---- phase: no fixed step, no pause or state gating, and the world applies mutations at
---- once rather than deferred to a phase boundary. A game wanting a reaction in
---- phase does what `Input` does, which is fold the event into something a
---- system reads.
----
---- The application emits nothing for a kind nobody requested, which makes a
---- device-rate stream of motion cost a table lookup rather than a dispatch. The
---- application emits the record as it stands instead of copying it into an
---- event instance, so an observer receives the same reused record every other consumer sees
---- and the same borrow rule applies to it.
 function Application:_receive(event: events.Event)
     -- Before anything acts on the event, so what is measured is the wait from
     -- the host's stamp rather than from some point inside the reaction.
@@ -971,22 +1001,15 @@ function Application:_receive(event: events.Event)
     -- method at the instant they arrive and drained here afterwards, and on
     -- Android the drain is after the resume, so acting on them here would be
     -- acting a suspension too late. Observers still see them, like any event.
+end
 
-    -- Everything above this line is engine state, and it keeps being folded
-    -- after a crash: quit still closes the window, input still tracks what is
-    -- held, and `send_event` still reaches both, which is what makes it one of
-    -- the tools that answers while crashed.
-    --
-    -- Nothing below it runs. A game whose systems stopped is not in a state to
-    -- handle an event either, and delivering one has a specific cost rather
-    -- than a vague risk: an observer that throws is a second crash, and the
-    -- traceback it produces is the one nobody needed. Delivery resumes when
-    -- `clearCrash` does.
+--- Emits one already-folded event from the Ingress phase.
+function Application:_dispatchEvent(event: events.Event)
     if self._crashed ~= nil then
         return
     end
 
-    local eventType = events.typeOf(kind)
+    local eventType = events.typeOf(event.kind)
     if eventType == nil then
         return
     end
@@ -1005,26 +1028,96 @@ function Application:_receive(event: events.Event)
     emittingEvent = nil
 end
 
+function Application:_dispatchIngress()
+    receiving = self
+    local replay <const> = self._replayEvents
+    if replay ~= nil then
+        for index = 1, #replay do
+            self:_dispatchEvent(replay[index])
+        end
+    else
+        eventHost.drain(self._eventQueue, self._eventCount, dispatch, self._eventArrivals, self._eventSequences, true)
+    end
+    watcherHost._dispatchIngress()
+end
+
+function Application:_finishEventBatch()
+    if not self._eventBatchOpen then
+        return
+    end
+    if self._eventHost ~= nil and self._eventToken ~= nil then
+        if tonumber(R.tecsHostEventBatchAcknowledge(self._eventHost, self._eventToken)) == 0 then
+            error("tecs: the host refused the completed platform event batch", 2)
+        end
+    end
+    self._eventQueue = nil
+    self._eventCount = 0
+    self._eventArrivals = nil
+    self._eventSequences = nil
+    self._eventHost = nil
+    self._eventToken = nil
+    self._eventOverflow = false
+    self._eventBatchOpen = false
+    self._replayEvents = nil
+    watcherHost._finishIngress()
+end
+
 --- Called once per iteration by the host. Returning false stops the loop.
 ---
---- `arrivals` is the host's parallel array of arrival stamps, one per queued
---- event.
-function Application:_iterate(queue: loader.CValue, count: integer, arrivals: loader.CValue): boolean
+--- `arrivals` and `sequences` are host-owned parallel arrays retained until
+--- this logical update completes.
+function Application:_iterate(
+    queue: loader.CValue,
+    count: integer,
+    arrivals: loader.CValue,
+    sequences?: loader.CValue,
+    host?: loader.CValue,
+    token?: number,
+    overflow?: integer
+): boolean
     local dt = time.step()
     local frameStart = timing.begin()
 
-    -- Everything SDL delivered since the previous iteration, taken whole by
-    -- this iteration's step. Holding a batch back for a later step would cost
-    -- an event a frame, which is what the latency stages are there to catch.
-    self.input:beginFrame()
-    receiving = self
-    eventHost.drain(queue, count, receive, arrivals)
+    local worldImpl <const> = self.world as {string: any}
+    if not self.suspended and not worldImpl._updateStalled and not self._eventBatchOpen then
+        self._eventQueue = queue
+        self._eventCount = count or 0
+        self._eventArrivals = arrivals
+        self._eventSequences = sequences
+        self._eventHost = host
+        self._eventToken = token
+        self._eventOverflow = overflow ~= nil and overflow ~= 0
+        self._eventBatchOpen = true
+        watcherHost._sealIngress()
+
+        -- This is the logical-update latch. Continuation iterations neither
+        -- clear edges nor fold events that arrived after the batch was sealed.
+        self.input:beginFrame()
+        receiving = self
+        if events.source ~= nil then
+            replayEvents = {}
+            events.source(captureReplay)
+            self._replayEvents = replayEvents
+            replayEvents = nil
+            local replay <const> = self._replayEvents
+            for index = 1, #replay do
+                self:_receive(replay[index])
+            end
+        else
+            eventHost.drain(queue, self._eventCount, receive, arrivals, sequences, true)
+        end
+        if self._eventOverflow then
+            self.input:_releaseHeld()
+            LOGGER:error("the platform event queue overflowed; held input was released")
+        end
+    end
 
     if self.quitRequested then
+        self:_finishEventBatch()
         return false
     end
 
-    -- Process-wide asynchronous work settles on this Lua thread, whether or
+    -- Process-wide completions and readiness drain on this Lua thread, whether or
     -- not a world system happened to ask for it. This stays outside the
     -- suspension and crash guards: completed work is already complete, and a
     -- changed shader may be exactly what repairs a crashed run. The runtime
@@ -1036,7 +1129,7 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
         -- Answered on this thread, inside the frame, so a tool reads a world
         -- that is not mid-update. Polled before the guard below, so it keeps
         -- answering after a crash.
-        if self.mcp ~= nil then
+        if self.mcp ~= nil and not ((self.world as {string: any})._updateStalled as boolean) then
             self.mcp:poll()
         end
 
@@ -1046,9 +1139,21 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
             -- counting would hand the frame after a resume an `elapsed` with
             -- however long the fix took folded into it, and anything driven
             -- off it would jump by that much.
-            self.elapsed = self.elapsed + dt
+            -- A suspending phase is one logical update spread over several
+            -- host frames. Its first turn already counted this update's dt;
+            -- continuation turns render again but do not advance simulation.
+            if not ((self.world as {string: any})._updateStalled as boolean) then
+                self.elapsed = self.elapsed + dt
+            end
             self:_simulate(dt)
         end
+    end
+
+    -- A parked update keeps the exact native batch and reused event record.
+    -- Completion or a guarded crash ends that lifetime; events accumulated by
+    -- SDL meanwhile become the next update's pending batch.
+    if self._eventBatchOpen and (self._crashed ~= nil or not worldImpl._updateStalled) then
+        self:_finishEventBatch()
     end
 
     -- Outside the suspension guard and outside the crash guard. Voices the
@@ -1319,6 +1424,8 @@ function Application:_shutdown(): boolean
     -- Teardown closes every process, which forcibly terminates and reaps any
     -- live child before SDL shuts down.
     process.shutdown()
+    -- SDL owns the transfer queue, so settle or cancel it before SDL_Quit.
+    fileasync.shutdown()
     log.closeFile()
 
     if self.device ~= nil then

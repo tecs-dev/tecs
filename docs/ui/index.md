@@ -162,7 +162,7 @@ local function gamePlugin(world: tecs.World, app: tecs.Application)
                 name = "game-ui-16",
                 size = 16,
                 raster = "alpha",
-            }):wait().value
+            })
             spawnInterface(world, app, font)
         end,
     })
@@ -483,7 +483,7 @@ local uiFont <const> = tecs.gfx.newTTF({
     name = "settings-ui-16",
     size = 16,
     raster = "alpha",
-}):wait().value
+})
 
 world:spawn(
     ui.Style({maxWidth = "100%"}),
@@ -523,34 +523,29 @@ world:spawn(
 
 ### Load an image and preserve its aspect ratio
 
-Images remain asynchronously loaded sprites. This example fixes the height at
-64 logical pixels and lets `Intrinsic("image")` derive the width from the
-registered sprite region:
+Images load off-thread and return directly, suspending a system only when the
+decode is not ready. This example fixes the height at 64 logical pixels and
+lets `Intrinsic("image")` derive the width from the registered sprite region:
 
 ```teal
-tecs.assets.loadImage(
+local image <const> = tecs.assets.loadImage(
     tecs.io.files.assetPath("images/portrait.png")
-):map(function(image: tecs.assets.Image): tecs.gfx.Sprite
-    return app.renderer.sprites:registerImage(image)
-end):onSettle(function(loaded: tecs.Future<tecs.gfx.Sprite>)
-    if loaded.status == "ready" then
-        world:spawn(
-            ui.Style({height = 64}),
-            ui.Intrinsic("image"),
-            ui.Paint(true),
-            RelativeTransform2D(0, 0, 2),
-            loaded.value,
-            Tint(1, 1, 1, 1),
-            Renderable2D(),
-            ChildOf(card)
-        )
-    end
-end)
+)
+local sprite <const> = app.renderer.sprites:registerImage(image)
+world:spawn(
+    ui.Style({height = 64}),
+    ui.Intrinsic("image"),
+    ui.Paint(true),
+    RelativeTransform2D(0, 0, 2),
+    sprite,
+    Tint(1, 1, 1, 1),
+    Renderable2D(),
+    ChildOf(card)
+)
 ```
 
-The callback captures `world`, `app`, and `card` from the application plugin
-and startup function shown earlier. It spawns only after the image has entered
-the renderer, so no placeholder sprite or per-frame polling is required.
+The system resumes only after the image is ready and then spawns it without a
+placeholder sprite or per-frame polling.
 
 ### Give another leaf a natural size
 
@@ -1077,7 +1072,7 @@ CSS cascade, or parallel widget renderer.
 ## Run the examples
 
 The repository demo shows layout, rectangle and circle materials, text, an
-asynchronously loaded image, nested clipping, wheel scrolling, pointer
+cooperatively loaded image, nested clipping, wheel scrolling, pointer
 capture, bubbling events, and keyboard navigation:
 
 ```bash

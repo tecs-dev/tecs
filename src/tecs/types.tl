@@ -741,7 +741,7 @@ local record types
         registerPhase: function(self, phase: Phase)
     end
 
-    --- System configuration used when adding systems to the world
+    --- System configuration used when adding systems to the world.
     interface SystemConfig
         --- Caller-writable. Optional, and unique across the whole pipeline: registering a
         --- second system under a name already taken errors. Omitting it
@@ -756,8 +756,11 @@ local record types
         --- one.
         phase: Phase
 
-        --- Caller-writable. Required. Receives `(dt, world)`, where `dt` is seconds and, in a
-        --- fixed phase, is the fixed timestep rather than frame time.
+        --- Caller-writable. Required. Receives `(dt, world)`, where `dt` is
+        --- seconds and, in a fixed phase, is the fixed timestep rather than
+        --- frame time. When `world:update` dispatches the system, an
+        --- asynchronous engine call returns inline when ready and
+        --- transparently suspends that logical update when it must wait.
         run: System
 
         --- Caller-writable. Names of systems this one must run before. A name that no system
@@ -771,7 +774,7 @@ local record types
         --- registration order.
         after: {string}
 
-        --- Optional gate evaluated immediately before each dispatch, so a
+        --- Caller-writable. Optional gate evaluated immediately before each dispatch, so a
         --- false answer skips this frame only and does not unregister
         --- anything. Receives the same `dt` the system would have, plus the
         --- system's name, which is what a self-removing predicate passes back
@@ -1035,10 +1038,16 @@ local record types
         --- @param systemName The name of the system to remove.
         removeSystem: function(self, systemName: string)
 
-        --- Update the world.
+        --- Updates or resumes one logical world update.
         ---
-        --- @param dt The time since the last update.
-        update: function(self, dt: number)
+        --- An asynchronous call inside a system can suspend the update. The
+        --- application continues pumping I/O and calls this again until it
+        --- completes. A headless loop that drives a world directly must do
+        --- the same; `dt` is ignored while resuming suspended work.
+        --- @param dt The time since the last completed update.
+        --- @return Returns true when the logical update completed, or false
+        ---     when a system is still waiting.
+        update: function(self, dt: number): boolean
 
         --- Requests publication of the world's staged structural mutations.
         ---
@@ -1615,7 +1624,8 @@ local record types
         ---     handle.
         --- @return The snapshot, in whichever form was asked for. Taken from the
         ---     world as it stands, so this is a point-in-time copy and later
-        ---     changes do not reach it.
+        ---     changes do not reach it. Raises while a logical world update is
+        ---     suspended, because its deferred phase is not committed state.
         saveSnapshot: function(self, opts?: SnapshotOptions): SnapshotOutput
 
         --- Restore the world from either binary or table form.
@@ -1630,7 +1640,7 @@ local record types
         --- @return What the snapshot said about itself. The prelude is read
         ---     first but handed back last, so a caller that meant to reject an
         ---     unwanted version reads it after the world has already been
-        ---     replaced.
+        ---     replaced. Raises while a logical world update is suspended.
         loadSnapshot: function(self, source: any): SnapshotPrelude
 
         --- Register named save/load callbacks for custom snapshot data.

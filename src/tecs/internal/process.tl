@@ -12,7 +12,8 @@ the runtime lifecycle hooks remain internal here.
 local ffi <const> = require("ffi")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
-local Future <const> = require("tecs.Future")
+local Completion <const> = require("tecs.internal.completion")
+local task <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
 local time <const> = require("tecs.platform.time")
 local buffer <const> = require("tecs.io.buffer")
@@ -34,8 +35,8 @@ local type ProcessResult = processtypes.ProcessResult
 local type ProcessReader = processtypes.ProcessReader
 local type ProcessWriter = processtypes.ProcessWriter
 local type Process = processtypes.Process
-local type FutureExit = Future<ProcessExit>
-local type Source = Future.Source
+local type ExitCompletion = Completion<ProcessExit>
+local type Source = Completion.Source
 
 local DEFAULT_READ_BYTES <const> = 16 * 1024
 local MAX_READ_BYTES <const> = 64 * 1024
@@ -61,7 +62,7 @@ local record State
     timedOut: boolean
     deadline: number
     exitCode: integer
-    finished: FutureExit
+    finished: ExitCompletion
     at: integer
 end
 
@@ -98,7 +99,7 @@ local record ProcessImpl
     stdin: ProcessWriter
     stdout: ProcessReader
     stderr: ProcessReader
-    finished: FutureExit
+    _finished: ExitCompletion
     _state: State
 end
 
@@ -111,6 +112,14 @@ local ProcessMT <const>: metatable<ProcessImpl> = {__index = ProcessImpl}
 local live <const>: {State} = {}
 local count = 0
 local exitOut <const> = loader.newArray("int[1]")
+
+local record PipeWaiter
+    active: boolean
+    resume: function(boolean)
+end
+
+local pipeWaiters: {PipeWaiter} = {}
+local MAX_PIPE_WAITERS <const> = 1024
 
 local source: Source
 local pollRuntime: function(): integer
@@ -256,6 +265,15 @@ local function pollAll(): integer
         end
         index = index - 1
     end
+    local waiters <const> = pipeWaiters
+    pipeWaiters = {}
+    for waiterIndex = 1, #waiters do
+        local waiter <const> = waiters[waiterIndex]
+        if waiter.active then
+            waiter.active = false
+            waiter.resume(true)
+        end
+    end
     return settled
 end
 
@@ -315,6 +333,22 @@ local function closeReader(reader: ReaderImpl, eof: boolean)
     destroyWhenReleased(reader._state)
 end
 
+local function waitForPipe(what: string)
+    local mode <const> = task.checkWait(what)
+    if mode == "blocking" then
+        source:advance(1)
+        return
+    end
+    task.awaitCallback(function(resume: function(boolean)): function()
+        if #pipeWaiters >= MAX_PIPE_WAITERS then
+            error("tecs: too many process pipe operations are waiting", 3)
+        end
+        local waiter <const>: PipeWaiter = {active = true, resume = resume}
+        pipeWaiters[#pipeWaiters + 1] = waiter
+        return function() waiter.active = false end
+    end)
+end
+
 function ReaderImpl:isClosed(): boolean
     return self._closed or streamFor(self) == nil
 end
@@ -346,7 +380,7 @@ local function available(reader: ReaderImpl, output: loader.BytePointer, countVa
     return nil
 end
 
-function ReaderImpl:readAvailable(maxBytes?: integer): string, string
+function ReaderImpl:_readAvailable(maxBytes?: integer): string, string
     local wanted <const> = integerIn(maxBytes or DEFAULT_READ_BYTES, 1, MAX_READ_BYTES, "process read size", 2)
     if wanted > self._capacity then
         self._scratch = loader.newArray("uint8_t[?]", wanted)
@@ -365,15 +399,15 @@ end
 function ReaderImpl:read(maxBytes: integer): string, string
     local wanted <const> = min(math.max(1, maxBytes), MAX_READ_BYTES)
     while true do
-        local bytes <const>, reason = self:readAvailable(wanted)
+        local bytes <const>, reason = self:_readAvailable(wanted)
         if bytes ~= nil or reason ~= nil then
             return bytes, reason
         end
-        source:advance(1)
+        waitForPipe("process pipe read")
     end
 end
 
-function ReaderImpl:readAvailableInto(destination: IOBuffer, offset?: integer, maxBytes?: integer): integer, string
+function ReaderImpl:_readAvailableInto(destination: IOBuffer, offset?: integer, maxBytes?: integer): integer, string
     local wanted <const> = integerIn(maxBytes or DEFAULT_READ_BYTES, 1, MAX_READ_BYTES, "process read size", 2)
     local at <const> = offset or 0
     if type(at) ~= "number" or at ~= floor(at) or at < 0 then
@@ -391,11 +425,11 @@ end
 
 function ReaderImpl:readInto(destination: IOBuffer, offset?: integer, maxBytes?: integer): integer, string
     while true do
-        local got <const>, reason = self:readAvailableInto(destination, offset, maxBytes)
+        local got <const>, reason = self:_readAvailableInto(destination, offset, maxBytes)
         if got ~= nil or reason ~= nil then
             return got, reason
         end
-        source:advance(1)
+        waitForPipe("process pipe read")
     end
 end
 
@@ -430,28 +464,6 @@ local function writeAvailablePointer(
     return nil
 end
 
-function WriterImpl:writeAvailable(bytes: string, offset?: integer, countValue?: integer): integer, string
-    if type(bytes) ~= "string" then
-        error("tecs: process write needs a byte string", 2)
-    end
-    local at <const>, length = range(#bytes, offset, countValue, "process write", 2)
-    local pointer <const> = ffi.cast("const uint8_t *", bytes) as loader.BytePointer
-    return writeAvailablePointer(self, pointer + at, length)
-end
-
-function WriterImpl:writeAvailableFrom(sourceBuffer: IOBuffer, offset?: integer, countValue?: integer): integer, string
-    local at <const>, length = range(sourceBuffer:length(), offset, countValue, "process buffer write", 2)
-    return writeAvailablePointer(self, sourceBuffer:getFFIPointer() + at, length)
-end
-
-function WriterImpl:writeAvailableView(sourceView: ByteView, offset?: integer, countValue?: integer): integer, string
-    if sourceView == nil or sourceView:isReleased() then
-        error("tecs: process write needs an open io.ByteView", 2)
-    end
-    local at <const>, length = range(sourceView:length(), offset, countValue, "process view write", 2)
-    return writeAvailablePointer(self, sourceView:getFFIPointer() + at, length)
-end
-
 local function writeAll(writer: WriterImpl, pointer: loader.BytePointer, length: integer): integer, string
     if length == 0 then
         return writeAvailablePointer(writer, pointer, 0)
@@ -463,7 +475,7 @@ local function writeAll(writer: WriterImpl, pointer: loader.BytePointer, length:
             if reason ~= nil then
                 return nil, reason
             end
-            source:advance(1)
+            waitForPipe("process pipe write")
         else
             at = at + wrote
         end
@@ -510,6 +522,10 @@ end
 function ProcessImpl:isRunning(): boolean
     pollState(self._state)
     return self._state.running
+end
+
+function ProcessImpl:wait(): ProcessExit
+    return task.awaitCompletion(self._finished as Completion<ProcessExit>, "process wait")
 end
 
 function ProcessImpl:kill(force?: boolean): boolean, string
@@ -637,7 +653,7 @@ function ProcessImpl:communicate(options?: CommunicateOptions): ProcessResult, s
 
         if not stdoutEOF then
             while true do
-                local got <const>, readReason = (self.stdout as ProcessReader):readAvailableInto(
+                local got <const>, readReason = (self.stdout as ReaderImpl):_readAvailableInto(
                     output, output:length(), MAX_READ_BYTES
                 )
                 if got == nil then
@@ -656,7 +672,7 @@ function ProcessImpl:communicate(options?: CommunicateOptions): ProcessResult, s
 
         if not stderrEOF then
             while true do
-                local got <const>, readReason = (self.stderr as ProcessReader):readAvailableInto(
+                local got <const>, readReason = (self.stderr as ReaderImpl):_readAvailableInto(
                     errors, errors:length(), MAX_READ_BYTES
                 )
                 if got == nil then
@@ -681,7 +697,7 @@ function ProcessImpl:communicate(options?: CommunicateOptions): ProcessResult, s
             progressed = true
         end
         if not progressed then
-            C.SDL_Delay(1)
+            waitForPipe("process communication")
         end
     end
 
@@ -863,7 +879,7 @@ function process.new(options: ProcessOptions): Process, string
         finished = nil,
         at = 0,
     }
-    state.finished = Future.pending(source) as FutureExit
+    state.finished = Completion.pending(source) as ExitCompletion
 
     local value <const> = setmetatable(
         {
@@ -871,7 +887,7 @@ function process.new(options: ProcessOptions): Process, string
             stdin = state.input ~= nil and newWriter(state) or nil,
             stdout = state.output ~= nil and newReader(state, "stdout") or nil,
             stderr = state.errors ~= nil and newReader(state, "stderr") or nil,
-            finished = state.finished,
+            _finished = state.finished,
             _state = state,
         } as ProcessImpl,
         ProcessMT

@@ -101,115 +101,93 @@ local function game(world: tecs.World, app: tecs.Application)
     }))
     world:spawn(Transform3D(), floor, floorBounds, MeshMaterial(), Tint(0.26, 0.29, 0.34, 1), Renderable3D())
 
-    assets.loadGLTF(files.assetPath("models/hero.glb")):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)
-        if loaded.status ~= "ready" then
-            error(loaded.error, 0)
-        end
-        local model <const> = meshes:registerModel(loaded.value)
-        local instance <const> = model:newInstance()
-        local placement <const> = Transform3D(-1.7, 0, 0)
-        placement.rotationY = 1
-        placement.rotationW = 0
-        instance.transform = placement
-        local entities: {integer} = {}
-        for index, primitive in ipairs(instance.primitives) do
-            -- Skinning can move vertices beyond the file's bind-pose sphere.
-            -- The example owns a conservative bound that covers every clip.
-            local animatedBounds <const> = Bounds3D(
-                primitive.bounds.centerX,
-                primitive.bounds.centerY,
-                primitive.bounds.centerZ,
-                primitive.bounds.radius + 1.5
-            )
-            local entity: integer
-            if primitive.skin ~= nil then
-                entity = world:spawn(
-                    primitive.transform,
-                    primitive.mesh,
-                    animatedBounds,
-                    primitive.material,
-                    primitive.skin,
-                    Tint(1, 1, 1, 1),
-                    Renderable3D()
-                )
-            else
-                entity = world:spawn(
-                    primitive.transform,
-                    primitive.mesh,
-                    animatedBounds,
-                    primitive.material,
-                    Tint(1, 1, 1, 1),
-                    Renderable3D()
-                )
-            end
-            entities[index] = entity
-        end
-        -- The asset listener runs outside system dispatch, so this publishes
-        -- the deferred spawns before bind reads their Transform3D columns.
-        world:enqueueCommit()
-        for index, entity in ipairs(entities) do
-            instance:bind(world, index, entity)
-        end
-        local clip = 1
-        local clipTime = 0.0
-        instance:play(CLIPS[clip])
-        world:addSystem({
-            name = "example.AnimateLitHero",
-            phase = tecs.ecs.phases.Update,
-            run = function(dt: number)
-                clipTime = clipTime + dt
-                if clipTime >= 4.0 then
-                    clipTime = clipTime - 4.0
-                    clip = clip % #CLIPS + 1
-                    instance:play(CLIPS[clip])
-                end
-                instance:update(dt)
-            end,
-        })
-        print("animated3d: cycling CC0 idle, walk, and attack clips under Cook-Torrance light")
-    end)
-
-    assets.loadGLTF(files.assetPath("models/morph-cube.gltf")):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)
-        if loaded.status ~= "ready" then
-            error(loaded.error, 0)
-        end
-        local model <const> = meshes:registerModel(loaded.value)
-        local instance <const> = model:newInstance()
-        local placement <const> = Transform3D(2.6, 1.45, 0)
-        placement.scaleX = 0.72
-        placement.scaleY = 0.72
-        placement.scaleZ = 0.72
-        instance.transform = placement
-        local entities: {integer} = {}
-        for index, primitive in ipairs(instance.primitives) do
-            entities[index] = world:spawn(
+    local loadedHero <const> = assets.loadGLTF(files.assetPath("models/hero.glb"))
+    local model <const> = meshes:registerModel(loadedHero)
+    local instance <const> = model:newInstance()
+    local placement <const> = Transform3D(-1.7, 0, 0)
+    placement.rotationY = 1
+    placement.rotationW = 0
+    instance.transform = placement
+    for index, primitive in ipairs(instance.primitives) do
+        -- Skinning can move vertices beyond the file's bind-pose sphere.
+        -- The example owns a conservative bound that covers every clip.
+        local animatedBounds <const> = Bounds3D(
+            primitive.bounds.centerX, primitive.bounds.centerY, primitive.bounds.centerZ, primitive.bounds.radius + 1.5
+        )
+        local entity: integer
+        if primitive.skin ~= nil then
+            entity = world:spawn(
                 primitive.transform,
                 primitive.mesh,
-                primitive.bounds,
+                animatedBounds,
                 primitive.material,
-                primitive.morph,
+                primitive.skin,
+                Tint(1, 1, 1, 1),
+                Renderable3D()
+            )
+        else
+            entity = world:spawn(
+                primitive.transform,
+                primitive.mesh,
+                animatedBounds,
+                primitive.material,
                 Tint(1, 1, 1, 1),
                 Renderable3D()
             )
         end
-        world:enqueueCommit()
-        for index, entity in ipairs(entities) do
-            instance:bind(world, index, entity)
-        end
-        instance:play("StretchAndTwist", {speed = 0.65})
-        local turn = 0.0
-        world:addSystem({
-            name = "example.AnimateMorphCompanion",
-            phase = tecs.ecs.phases.Update,
-            run = function(dt: number)
-                turn = (turn + dt * 0.45) % (math.pi * 2)
-                placement.rotationY = math.sin(turn * 0.5)
-                placement.rotationW = math.cos(turn * 0.5)
-                instance:update(dt)
-            end,
-        })
-        print("animated3d: added the independently placed GPU morph companion")
-    end)
+        instance:bind(world, index, entity)
+    end
+    local clip = 1
+    local clipTime = 0.0
+    instance:play(CLIPS[clip])
+    world:addSystem({
+        name = "example.AnimateLitHero",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number)
+            clipTime = clipTime + dt
+            if clipTime >= 4.0 then
+                clipTime = clipTime - 4.0
+                clip = clip % #CLIPS + 1
+                instance:play(CLIPS[clip])
+            end
+            instance:update(dt)
+        end,
+    })
+    print("animated3d: cycling CC0 idle, walk, and attack clips under Cook-Torrance light")
+
+    local loadedMorph <const> = assets.loadGLTF(files.assetPath("models/morph-cube.gltf"))
+    local morphModel <const> = meshes:registerModel(loadedMorph)
+    local morphInstance <const> = morphModel:newInstance()
+    local morphPlacement <const> = Transform3D(2.6, 1.45, 0)
+    morphPlacement.scaleX = 0.72
+    morphPlacement.scaleY = 0.72
+    morphPlacement.scaleZ = 0.72
+    morphInstance.transform = morphPlacement
+    for index, primitive in ipairs(morphInstance.primitives) do
+        local entity <const> = world:spawn(
+            primitive.transform,
+            primitive.mesh,
+            primitive.bounds,
+            primitive.material,
+            primitive.morph,
+            Tint(1, 1, 1, 1),
+            Renderable3D()
+        )
+        morphInstance:bind(world, index, entity)
+    end
+    morphInstance:play("StretchAndTwist", {speed = 0.65})
+    local turn = 0.0
+    world:addSystem({
+        name = "example.AnimateMorphCompanion",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number)
+            turn = (turn + dt * 0.45) % (math.pi * 2)
+            morphPlacement.rotationY = math.sin(turn * 0.5)
+            morphPlacement.rotationW = math.cos(turn * 0.5)
+            morphInstance:update(dt)
+        end,
+    })
+    print("animated3d: added the independently placed GPU morph companion")
 end
 
 return tecs.newApplication({

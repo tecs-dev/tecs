@@ -41,20 +41,15 @@ local function bind()
 end
 
 local function resolved()
-    local future = tecsIO.resolve("127.0.0.1")
-    future:wait(2000)
-    assert.are.equal("ready", future.status, future.error)
-    return future.value
+    return tecsIO.resolve("127.0.0.1")
 end
 
 local function connected(address, server, port)
-    local future = tecsIO.connect(address, port)
-    future:wait(2000)
-    assert.are.equal("ready", future.status, future.error)
+    local client = tecsIO.connect(address, port)
     assert.is_true(server:wait(2000))
     local accepted, reason = server:accept()
     assert.is_not_nil(accepted, reason)
-    return future.value, accepted
+    return client, accepted
 end
 
 local function readExactly(connection, length, chunk)
@@ -102,60 +97,24 @@ describe("tecs.io", function()
         assert.is_nil(tecsIO.quit)
     end)
 
-    it("resolves numeric loopback asynchronously", function()
-        local future = tecsIO.resolve("127.0.0.1")
-        assert.are.equal("pending", future.status)
-        assert.are.equal(1, tecsIO.pending())
-
-        local deadline = C.SDL_GetTicks() + 2000
-        while future.status == "pending" and C.SDL_GetTicks() < deadline do
-            tecsIO.poll()
-        end
-
-        assert.are.equal("ready", future.status, future.error)
-        assert.are.equal("127.0.0.1", future.value.host)
-        assert.is_string(future.value.text)
+    it("resolves numeric loopback directly", function()
+        local address = tecsIO.resolve("127.0.0.1")
+        assert.are.equal("127.0.0.1", address.host)
+        assert.is_string(address.text)
         assert.are.equal(0, tecsIO.pending())
-        future.value:close()
-        assert.is_true(future.value:isClosed())
-        future.value:close()
-    end)
-
-    it("cancels resolution without leaving work pending", function()
-        local future = tecsIO.resolve("127.0.0.1")
-        future:cancel()
-
-        assert.are.equal("canceled", future.status)
-        assert.are.equal(0, tecsIO.pending())
-    end)
-
-    it("cancels a pending client connection", function()
-        local address = resolved()
-        local server, port = listen()
-        local future = tecsIO.connect(address, port)
-
-        future:cancel()
-        assert.are.equal("canceled", future.status)
-        assert.are.equal(0, tecsIO.pending())
-
-        server:close()
+        address:close()
+        assert.is_true(address:isClosed())
         address:close()
     end)
 
-    it("advances a client connection through the frame poll", function()
+    it("connects directly while the native reactor advances in the background", function()
         local address = resolved()
         local server, port = listen()
-        local future = tecsIO.connect(address, port)
-        local deadline = C.SDL_GetTicks() + 2000
-        while future.status == "pending" and C.SDL_GetTicks() < deadline do
-            tecsIO.poll()
-        end
-
-        assert.are.equal("ready", future.status, future.error)
+        local client = tecsIO.connect(address, port)
         assert.is_true(server:wait(2000))
         local accepted = assert(server:accept())
 
-        future.value:close()
+        client:close()
         accepted:close()
         server:close()
         address:close()
@@ -216,14 +175,12 @@ describe("tecs.io", function()
         address:close()
     end)
 
-    it("leaves a destination buffer unchanged when no TCP bytes are ready", function()
+    it("leaves a destination buffer unchanged for a zero-byte TCP read", function()
         local address = resolved()
         local server, port = listen()
         local client, peer = connected(address, server, port)
         local destination = tecsIO.newBuffer("kept")
 
-        assert.are.same({ nil }, { client:readInto(destination, 8, 32) })
-        assert.are.equal("kept", destination:getString())
         assert.are.equal(0, client:readInto(destination, 8, 0))
         assert.are.equal("kept", destination:getString())
         assert.has_error(function()
@@ -246,14 +203,11 @@ describe("tecs.io", function()
         address:close()
     end)
 
-    it("reports no connection input without blocking", function()
+    it("reports readiness without changing direct read semantics", function()
         local address = resolved()
         local server, port = listen()
         local client, peer = connected(address, server, port)
 
-        local bytes, reason = client:read()
-        assert.is_nil(bytes)
-        assert.is_nil(reason)
         assert.is_false(client:wait(0))
         assert.are.equal(0, client:pendingWrites())
 
@@ -344,17 +298,13 @@ describe("tecs.io", function()
     it("reclaims abandoned owned network handles", function()
         local address = resolved()
         local listener, port = listen()
-        local connecting = tecsIO.connect(address, port)
-        connecting:wait(2000)
-        assert.are.equal("ready", connecting.status, connecting.error)
-        local client = connecting.value
+        local client = tecsIO.connect(address, port)
         assert.is_true(listener:wait(2000))
         local accepted = assert(listener:accept())
         local datagram = assert(tecsIO.bind(0))
 
         address = nil
         listener = nil
-        connecting = nil
         client = nil
         accepted = nil
         datagram = nil

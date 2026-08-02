@@ -21,6 +21,8 @@ local events <const> = require("tecs.internal.events")
 local FFIEvents <const> = require("tecs.internal.ffi.FFIEvents")
 local bundleModule <const> = require("tecs.internal.bundle")
 local snapshotModule <const> = require("tecs.internal.snapshot")
+local taskruntime <const> = require("tecs.internal.taskruntime")
+local type tasks = require("tecs.internal.taskruntime")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local table_clear <const> = require("table.clear")
 local C <const> = require("ffi")
@@ -54,6 +56,8 @@ local UINT32_ARR_T <const> = C.typeof("uint32_t[?]")
 local WorldImpl = internal.WorldImpl
 
 local WORLD_MT <const>: metatable<WorldImpl> = {__index = WorldImpl}
+
+local runWorldUpdate: function(WorldImpl)
 
 -- Per-world relationshipStores map with lazy store creation.
 local function makeRelationshipStoresMT(world: WorldImpl): metatable<{Component: RelationshipStore}>
@@ -102,6 +106,11 @@ function WorldImpl.new(config?: types.World.Config): World
             messages = events.MessageBus.new(),
             _ffiSliceId = GLOBAL_FFI_EVENTS:acquireSlice(),
             _eventPool = pool.newTablePool({clearOn = "acquire", maxSize = 32}),
+            _updateStalled = false,
+            _updateScheduler = taskruntime.newScheduler(),
+            _updateTask = nil,
+            _updateBody = nil,
+            _updateDt = 0,
             allocator = allocator,
             _slots = allocator.slots as {integer: EntitySlot},
             archetypeIndex = archetypeIndex,
@@ -162,6 +171,7 @@ function WorldImpl.new(config?: types.World.Config): World
     -- Create pipeline.
     config.pipelineFactory = config.pipelineFactory or pipeline.new
     instance.pipeline = config.pipelineFactory(config.timestep, config.fixedMaxSteps, config.fixedOverload)
+    instance._updateBody = function(_scope: tasks.Scope) runWorldUpdate(instance) end
 
     -- Forward archetype creation into the world event bus.
     instance.archetypeIndex.onNewArchetype = function(archetype: Archetype)
@@ -980,7 +990,8 @@ end
 -------------------------------------------------------------------------------
 
 function WorldImpl:addSystem(config: types.SystemConfig)
-    self.pipeline:addSystem(assert(config, "Missing system config"))
+    config = assert(config, "Missing system config")
+    self.pipeline:addSystem(config)
 end
 
 function WorldImpl:removeSystem(systemName: string)
@@ -1165,6 +1176,14 @@ function WorldImpl:_commit()
         return
     end
 
+    -- Phase boundaries are unconditional, but almost every boundary in a
+    -- steady-state frame has nothing to publish. Keep that overwhelmingly
+    -- common case read-only so it traces as one predictable branch.
+    if not self.isDirty and not self._rebuildKeyIndexAfterCommit then
+        self._commitRequested = false
+        return
+    end
+
     self._committing = true
     repeat
         self._commitRequested = false
@@ -1179,15 +1198,15 @@ function WorldImpl:_commit()
     self._committing = false
 end
 
-function WorldImpl:update(dt: number)
+runWorldUpdate = function(self: WorldImpl)
     -- Publish external input, debug, and asynchronous mutations before any
-    -- system decides whether it should run this update.
+    -- system decides whether it should run this logical update. A suspended
+    -- update resumes below this point and therefore retains its phase snapshot.
     self:_commit()
     if self._ffiSliceId ~= 0 then
         GLOBAL_FFI_EVENTS:clearSlice(self._ffiSliceId)
     end
-    self.pipeline:update(dt, self)
-
+    self.pipeline:update(self._updateDt, self)
     local sampleHierarchyDirty = self._sampleHierarchyDirty
     if sampleHierarchyDirty then
         sampleHierarchyDirty()
@@ -1199,6 +1218,34 @@ function WorldImpl:update(dt: number)
         archetype:clearDirtyComponents()
     end
     table_clear(self._dirtyArchetypes)
+end
+
+function WorldImpl:update(dt: number): boolean
+    local root = self._updateTask as tasks.Task<any>
+    if self._updateStalled then
+        self._updateScheduler:step()
+    else
+        self._updateDt = dt
+        if root == nil then
+            root = self._updateScheduler:spawnReusableImmediate(self._updateBody)
+            self._updateTask = root
+        else
+            self._updateScheduler:restartImmediate(root)
+        end
+    end
+
+    if root.status == "pending" then
+        self._updateStalled = true
+        return false
+    end
+
+    self._updateStalled = false
+    if root.status == "ready" then
+        return true
+    end
+
+    -- The reusable fiber is ready for the next update even after failure.
+    error(("tecs: world update %s: %s"):format(root.status, root.error or root.status), 2)
 end
 
 function WorldImpl:getFixedTiming(): number, number, number
@@ -1235,6 +1282,16 @@ function WorldImpl:startup()
 end
 
 function WorldImpl:shutdown()
+    local root = self._updateTask as tasks.Task<any>
+    if root ~= nil and root.status == "pending" then
+        root:cancel("world shutdown")
+        while root.status == "pending" do
+            if self._updateScheduler:step() == 0 then
+                break
+            end
+        end
+    end
+    self._updateStalled = false
     self:_commit()
     self.pipeline:run(phases.ShutdownGroup, 0, self)
     local sliceId = self._ffiSliceId
@@ -1318,10 +1375,16 @@ function WorldImpl:getStats(fill?: types.World.Stats): types.World.Stats
 end
 
 function WorldImpl:saveSnapshot(opts?: types.World.SnapshotOptions): types.World.SnapshotOutput
+    if self._updateStalled then
+        error("tecs: cannot save a snapshot while a world update is suspended", 2)
+    end
     return snapshotModule.saveSnapshot(self, opts)
 end
 
 function WorldImpl:loadSnapshot(source: any): types.World.SnapshotPrelude
+    if self._updateStalled then
+        error("tecs: cannot load a snapshot while a world update is suspended", 2)
+    end
     local prelude = snapshotModule.loadSnapshot(self, source) as types.World.SnapshotPrelude
     self:_rebuildKeyIndex()
     return prelude

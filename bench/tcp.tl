@@ -5,6 +5,8 @@
 ---
 ---   string  `TCPSocket:write` and `TCPSocket:read`.
 ---   buffer  `TCPSocket:writeFrom` and `TCPSocket:readInto`.
+---   task    The same Buffer calls directly from two cooperative Tasks through
+---           the process-wide readiness pump used by ordinary systems.
 ---
 --- The Buffer row allocates its source and destination once, reserves the
 --- destination once, and reuses both through warmup and measured samples.
@@ -12,10 +14,11 @@
 --- only the intermediate Lua string. The string fixture is also reused, while
 --- each `read` necessarily returns a new Lua string.
 ---
---- Each chunk is queued, fully drained from the local send queue, and fully
---- consumed by the peer before the next chunk starts. This keeps the workload
---- independent of socket-buffer size and leaves no bytes for the next sample.
---- Hashing runs before measured samples and is never inside their window.
+--- The synchronous rows queue, fully drain, and consume each chunk before the
+--- next one. The Task row keeps one writer and one reader active for the full
+--- operation, which lets the native reactor pipeline them without blocking
+--- the Lua thread. Every row leaves no bytes for the next sample. Hashing runs
+--- before measured samples and is never inside their window.
 ---
 --- Clean latency and Lua allocation share one pass with collection stopped.
 --- The clock starts after the before-heap reading and stops before the
@@ -35,8 +38,8 @@
 ---   BENCH_TCP_SAMPLES     Measured operations per row. Defaults to 600.
 ---   BENCH_TCP_TIMEOUT_MS  Maximum wait for one drain, read, or setup step.
 ---                         Defaults to 2000.
----   BENCH_TCP_CASES       Comma-separated `string` and `buffer`. Defaults to
----                         both.
+---   BENCH_TCP_CASES       Comma-separated `string`, `buffer`, and `task`.
+---                         Defaults to all three.
 ---   BENCH_TCP_VALIDATE    Set to 1 for correctness only, with no timings.
 ---
 --- The xtask runs this benchmark under system LuaJIT without a window, GPU, or
@@ -65,12 +68,16 @@ local tecs <const> = require("tecs")
 local sdl <const> = require("tecs.ffi.sdl3")
 local type binaryIO = require("tecs.io")
 local type iotypes = require("tecs.io.types")
+local type tasks = require("tecs.internal.taskruntime")
+local task <const> = require("tecs.internal.taskruntime")
 
 local C <const> = sdl.C
 local ioModule <const> = tecs.io
+local runtime <const> = require("tecs.internal.runtime")
 local data <const> = tecs.data
 local time <const> = tecs.platform.time
 local now <const> = time.now
+local ticksNanoseconds <const> = time.ticksNanoseconds
 
 local type IOBuffer = iotypes.Buffer
 local type TCPSocket = binaryIO.TCPSocket
@@ -85,6 +92,7 @@ local MAX_CHUNK <const> = 64 * 1024
 local CASE_NAMES <const>: {string: boolean} = {
     ["string"] = true,
     ["buffer"] = true,
+    ["task"] = true,
 }
 
 local function integerEnvironment(name: string, default: integer): integer
@@ -103,7 +111,7 @@ local CHUNK <const> = integerEnvironment("BENCH_TCP_CHUNK", MAX_CHUNK)
 local CHUNKS <const> = integerEnvironment("BENCH_TCP_CHUNKS", 16)
 local WARMUP <const> = integerEnvironment("BENCH_TCP_WARMUP", 120)
 local SAMPLES <const> = integerEnvironment("BENCH_TCP_SAMPLES", 600)
-local TIMEOUT_MS <const> = integerEnvironment("BENCH_TCP_TIMEOUT_MS", 2000)
+local TIMEOUT_MS <const> = integerEnvironment("BENCH_TCP_TIMEOUT_MS", 10000)
 
 if CHUNK < 1 or CHUNK > MAX_CHUNK then
     error(format("bench: BENCH_TCP_CHUNK must be from 1 to %d", MAX_CHUNK), 0)
@@ -188,20 +196,11 @@ local function listen(): binaryIO.TCPListener, integer
 end
 
 local function resolved(): binaryIO.Address
-    local future <const> = ioModule.resolve("127.0.0.1")
-    future:wait(TIMEOUT_MS)
-    if future.status ~= "ready" then
-        error("bench: loopback resolution failed: " .. (future.error or future.status), 0)
-    end
-    return future.value
+    return ioModule.resolve("127.0.0.1")
 end
 
 local function connected(address: binaryIO.Address, server: binaryIO.TCPListener, port: integer): TCPSocket, TCPSocket
-    local future <const> = ioModule.connect(address, port)
-    future:wait(TIMEOUT_MS)
-    if future.status ~= "ready" then
-        error("bench: loopback connection failed: " .. (future.error or future.status), 0)
-    end
+    local socket <const> = ioModule.connect(address, port)
     local ready <const>, waitReason = server:wait(TIMEOUT_MS)
     if not ready then
         error("bench: loopback accept timed out: " .. (waitReason or "timeout"), 0)
@@ -210,7 +209,7 @@ local function connected(address: binaryIO.Address, server: binaryIO.TCPListener
     if peer == nil then
         error("bench: loopback accept failed: " .. (acceptReason or "no connection"), 0)
     end
-    return future.value, peer
+    return socket, peer
 end
 
 local function drain(connection: TCPSocket)
@@ -261,6 +260,25 @@ local function consumeBuffer(connection: TCPSocket, destination: IOBuffer, count
         end
     end
     return consumed
+end
+
+local function runTasks<T>(body: function(tasks.Scope): T...): T
+    local scheduler <const> = task.newScheduler()
+    local rootTask <const> = scheduler:spawn(body)
+    local deadline <const> = now() + TIMEOUT_MS / 1000
+    while rootTask.status == "pending" do
+        scheduler:step()
+        if rootTask.status == "pending" then
+            runtime.poll()
+            if now() >= deadline then
+                error("bench: cooperative TCP tasks timed out", 0)
+            end
+        end
+    end
+    if rootTask.status ~= "ready" then
+        error("bench: cooperative TCP task failed: " .. (rootTask.error or rootTask.status), 0)
+    end
+    return rootTask.value
 end
 
 local type Operation = function(): integer
@@ -334,6 +352,8 @@ local function run()
     local peer: TCPSocket
     local sourceBuffer: IOBuffer
     local destinationBuffer: IOBuffer
+    local latencySource: IOBuffer
+    local latencyDestination: IOBuffer
 
     local ran <const>, failure = pcall(function()
         if not C.SDL_Init(0) then
@@ -357,6 +377,38 @@ local function run()
         sourceBuffer = ioModule.newBuffer(chunk)
         destinationBuffer = ioModule.newBuffer()
         destinationBuffer:ensureCapacity(CHUNK)
+        latencySource = ioModule.newBuffer("x")
+        latencyDestination = ioModule.newBuffer()
+        latencyDestination:ensureCapacity(1)
+        local function taskTransfer(pieces?: {string}): integer
+            return runTasks(function(scope: tasks.Scope): integer
+                local writing <const> = scope:spawn(function()
+                    for _ = 1, CHUNKS do
+                        local queued <const>, writeReason = client:writeFrom(sourceBuffer)
+                        if queued == nil then
+                            error("bench: loopback task write failed: " .. (writeReason or "unknown"), 0)
+                        end
+                        if queued ~= CHUNK then
+                            error(format("bench: loopback task queued %d of %d bytes", queued, CHUNK), 0)
+                        end
+                    end
+                end)
+                local total = 0
+                while total < BYTES_PER_OPERATION do
+                    destinationBuffer:clear()
+                    local read <const>, readReason = peer:readInto(destinationBuffer, 0, CHUNK)
+                    if read == nil then
+                        error("bench: loopback task read failed: " .. (readReason or "unknown"), 0)
+                    end
+                    total = total + read
+                    if pieces ~= nil then
+                        pieces[#pieces + 1] = destinationBuffer:getString()
+                    end
+                end
+                writing:join()
+                return total
+            end)
+        end
 
         local cases <const>: {Case} = {
             {
@@ -422,6 +474,16 @@ local function run()
                 end,
                 visibleCapacity = sourceBuffer:capacity() + destinationBuffer:capacity(),
             },
+            {
+                label = "task",
+                validate = function(): string
+                    local pieces: {string} = {}
+                    taskTransfer(pieces)
+                    return concat(pieces)
+                end,
+                operation = taskTransfer,
+                visibleCapacity = sourceBuffer:capacity() + destinationBuffer:capacity(),
+            },
         }
 
         if VALIDATE then
@@ -474,10 +536,51 @@ local function run()
                     expectedHash
                 )
             )
+        elseif SELECTED_CASES["task"] then
+            local dispatch: {number} = {}
+            local function dispatchOnce(): number
+                local started <const> = ticksNanoseconds()
+                runTasks(function(scope: tasks.Scope)
+                    local writing <const> = scope:spawn(function()
+                        task.yield()
+                        local queued <const>, reason = client:writeFrom(latencySource)
+                        if queued ~= 1 then
+                            error("bench: task latency write failed: " .. (reason or tostring(queued)), 0)
+                        end
+                    end)
+                    latencyDestination:clear()
+                    local read <const>, reason = peer:readInto(latencyDestination, 0, 1)
+                    if read ~= 1 then
+                        error("bench: task latency read failed: " .. (reason or tostring(read)), 0)
+                    end
+                    writing:join()
+                end)
+                return ticksNanoseconds() - started
+            end
+            for _ = 1, WARMUP do
+                dispatchOnce()
+            end
+            for sample = 1, SAMPLES do
+                dispatch[sample] = dispatchOnce()
+            end
+            sort(dispatch)
+            print(
+                format(
+                    "task cooperative wake: p50 %.3f us, p95 %.3f us (park, readiness poll, and resume)",
+                    percentile(dispatch, 0.50) / 1000.0,
+                    percentile(dispatch, 0.95) / 1000.0
+                )
+            )
         end
     end) as (boolean, any)
 
     collect("restart")
+    if latencySource ~= nil and not latencySource:isReleased() then
+        latencySource:close()
+    end
+    if latencyDestination ~= nil and not latencyDestination:isReleased() then
+        latencyDestination:close()
+    end
     if sourceBuffer ~= nil and not sourceBuffer:isReleased() then
         sourceBuffer:close()
     end

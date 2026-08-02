@@ -37,8 +37,12 @@ unsafe extern "C" {
 
 struct ChannelState {
     messages: std::collections::VecDeque<Box<[u8]>>,
+    bytes: usize,
     closed: bool,
 }
+
+const MAX_CHANNEL_MESSAGES: usize = 1024;
+const MAX_CHANNEL_BYTES: usize = 256 * 1024 * 1024;
 
 pub struct TecsChannel {
     state: Mutex<ChannelState>,
@@ -65,6 +69,7 @@ pub extern "C" fn tecsChannelCreate() -> *mut TecsChannel {
     Box::into_raw(Box::new(TecsChannel {
         state: Mutex::new(ChannelState {
             messages: std::collections::VecDeque::new(),
+            bytes: 0,
             closed: false,
         }),
         arrived: Condvar::new(),
@@ -121,6 +126,12 @@ pub unsafe extern "C" fn tecsChannelPush(
     if state.closed {
         return false;
     }
+    if state.messages.len() >= MAX_CHANNEL_MESSAGES
+        || state.bytes.saturating_add(bytes.len()) > MAX_CHANNEL_BYTES
+    {
+        return false;
+    }
+    state.bytes += bytes.len();
     state.messages.push_back(bytes);
     channel.arrived.notify_one();
     true
@@ -172,6 +183,7 @@ pub unsafe extern "C" fn tecsChannelPop(
     let Some(bytes) = state.messages.pop_front() else {
         return 0;
     };
+    state.bytes = state.bytes.saturating_sub(bytes.len());
     let size = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
     let message = Box::new(Message { bytes });
     unsafe { *out = Box::into_raw(message).cast() };
