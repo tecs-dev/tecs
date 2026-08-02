@@ -74,7 +74,7 @@ local loader <const> = require("tecs.ffi.loader")
 local adapter <const> = require("tecs.platform.adapter")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local shaderpack <const> = require("tecs.gpu.shaderpack")
-local Future <const> = require("tecs.internal.completion")
+local Completion <const> = require("tecs.internal.completion")
 local task <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
 local buffer <const> = require("tecs.io.buffer")
@@ -540,7 +540,7 @@ end
 
 local record DialogEntry
     handle: loader.CPtr
-    future: Future<DialogResult>
+    completion: Completion<DialogResult>
 end
 
 local record DialogSource
@@ -557,7 +557,7 @@ local function finishDialog(entry: DialogEntry)
     local handle = entry.handle
     local errorPointer = D.tecsDialogError(handle)
     if errorPointer ~= nil then
-        entry.future:fail(loader.toString(errorPointer))
+        entry.completion:fail(loader.toString(errorPointer))
     else
         local paths: {string} = {}
         local count = tonumber(D.tecsDialogPathCount(handle)) as integer
@@ -565,7 +565,7 @@ local function finishDialog(entry: DialogEntry)
             paths[index + 1] = loader.toString(D.tecsDialogPath(handle, index))
         end
         local selected = tonumber(D.tecsDialogFilter(handle)) as integer
-        entry.future:complete({
+        entry.completion:complete({
             paths = paths,
             filter = selected >= 0 and selected + 1 or 0,
             canceled = D.tecsDialogCancelled(handle) as boolean,
@@ -628,21 +628,21 @@ local function filterArrays(options: DialogOptions): loader.CArray, loader.CArra
     return names, patterns, #filters
 end
 
-local function trackDialog(handle: loader.CPtr): Future<DialogResult>
+local function trackDialog(handle: loader.CPtr): Completion<DialogResult>
     if handle == nil then
-        return Future.failed("cannot allocate file-dialog state") as Future<DialogResult>
+        return Completion.failed("cannot allocate file-dialog state") as Completion<DialogResult>
     end
-    local future = Future.pending(dialogSource as Future.Source) as Future<DialogResult>
-    pendingDialogs[#pendingDialogs + 1] = {handle = handle, future = future}
+    local completion = Completion.pending(dialogSource as Completion.Source) as Completion<DialogResult>
+    pendingDialogs[#pendingDialogs + 1] = {handle = handle, completion = completion}
     if #pendingDialogs == 1 then
         runtime.register("dialogs", 30, pollDialogs)
     end
     -- A setup allocation can fail before SDL opens anything.
     dialogSource:poll()
-    return future
+    return completion
 end
 
-local function awaitDialog(pending: Future<DialogResult>): DialogResult
+local function awaitDialog(pending: Completion<DialogResult>): DialogResult
     return task.awaitCompletion(pending, "native dialog")
 end
 

@@ -53,7 +53,7 @@ local loader <const> = require("tecs.ffi.loader")
 local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
 local workers <const> = require("tecs.workers")
-local Future <const> = require("tecs.internal.completion")
+local Completion <const> = require("tecs.internal.completion")
 local taskruntime <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
 local type types = require("tecs.io.types")
@@ -230,7 +230,7 @@ end
 ]]
 
 local record AtomicEntry
-    future: Future<boolean>
+    completion: Completion<boolean>
 end
 
 local record AtomicSource
@@ -310,9 +310,9 @@ local function settleAtomic(result: {string: any}): boolean
     atomicEntries[id] = nil
     atomicPending = atomicPending - 1
     if result.ok then
-        entry.future:complete(true)
+        entry.completion:complete(true)
     else
-        entry.future:fail(tostring(result.reason or "atomic write failed"))
+        entry.completion:fail(tostring(result.reason or "atomic write failed"))
     end
     stopAtomicWorker()
     return true
@@ -343,7 +343,7 @@ function AtomicSource:advance(ms: number): integer
     return settleAtomic(result as {string: any}) and 1 or 0
 end
 
-function AtomicSource:cancel(_future: Future<any>)
+function AtomicSource:cancel(_completion: Completion<any>)
     -- An operating-system write cannot be interrupted safely. Its result is
     -- still drained so the worker and copied task bytes can be released.
 end
@@ -1330,7 +1330,7 @@ local function writeAtomicSync(path: PathInput, bytes: ByteInput): boolean, stri
 end
 
 --- Starts the worker half of an atomic write for a suspended system.
-local function writeAtomicFuture(path: PathInput, bytes: ByteInput): Future<boolean>
+local function writeAtomicCompletion(path: PathInput, bytes: ByteInput): Completion<boolean>
     local rendered <const> = required(path, "writeAtomic")
     if bytes == nil then
         error("tecs: io.files.writeAtomic needs bytes to write", 2)
@@ -1354,21 +1354,21 @@ local function writeAtomicFuture(path: PathInput, bytes: ByteInput): Future<bool
     end
     local backend <const> = adapter.storage()
     if backend.writeAtomic == nil or backend ~= storagebackend.sdl then
-        return Future.failed(
+        return Completion.failed(
             ("background atomic durable writes are not supported by the %s storage backend"):format(backend.name)
-        ) as Future<boolean>
+        ) as Completion<boolean>
     end
     local started <const>, reason = ensureAtomicWorker()
     if not started then
-        return Future.failed(reason) as Future<boolean>
+        return Completion.failed(reason) as Completion<boolean>
     end
     local id <const> = nextAtomicId
     nextAtomicId = nextAtomicId + 1
-    local future <const> = Future.pending(atomicSource as Future.Source) as Future<boolean>
-    atomicEntries[id] = {future = future}
+    local completion <const> = Completion.pending(atomicSource as Completion.Source) as Completion<boolean>
+    atomicEntries[id] = {completion = completion}
     atomicPending = atomicPending + 1
     atomicWorker:send({id = id, path = rendered, bytes = copied})
-    return future
+    return completion
 end
 
 --- Durably and atomically writes a complete file.
@@ -1386,9 +1386,9 @@ function files.writeAtomic(path: PathInput, bytes: ByteInput): boolean, string
     if not taskruntime.active() then
         return writeAtomicSync(path, bytes)
     end
-    local pending <const> = writeAtomicFuture(path, bytes)
+    local pending <const> = writeAtomicCompletion(path, bytes)
     local ok <const>, result = pcall(
-        taskruntime.awaitCompletion, pending as Future<boolean>, "atomic write"
+        taskruntime.awaitCompletion, pending as Completion<boolean>, "atomic write"
     ) as (boolean, any)
     if not ok then
         return false, tostring(result)

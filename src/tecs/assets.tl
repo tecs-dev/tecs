@@ -1,16 +1,20 @@
 --[=[
 Reads bytes and decodes images and sounds on a worker.
 
-Loads return their values directly. Inside a system dispatched by
+Loads return their values directly. Inside a frame system dispatched by
 `world:update`, a worker decode transparently suspends the logical update:
 
 ```teal no-format
 return tecs.newApplication({
     plugin = function(world: tecs.World, app: tecs.Application)
+        local loaded = false
         world:addSystem({
             name = "game.SpawnHero",
-            phase = tecs.ecs.phases.Startup,
+            phase = tecs.ecs.phases.PreUpdate,
             run = function()
+                if loaded then
+                    return
+                end
                 local image <const> = tecs.assets.loadImage(
                     tecs.io.files.assetPath("sprites/hero.png")
                 )
@@ -20,6 +24,7 @@ return tecs.newApplication({
                     sprite,
                     tecs.gfx.Renderable2D()
                 )
+                loaded = true
             end,
         })
     end,
@@ -81,16 +86,10 @@ local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local workers <const> = require("tecs.workers")
 local content <const> = require("tecs.platform.content")
-local Future <const> = require("tecs.internal.completion")
+local Completion <const> = require("tecs.internal.completion")
 local task <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
 local meshlayout <const> = require("tecs.gpu.meshlayout")
-
-local record FutureOperations
-    _subscribe: function(future: Future<any>, listener: function(Future<any>)): function()
-end
-
-local futureOperations <const> = Future as FutureOperations
 
 local runtimePoll: function(): integer
 local function pollRuntime(): integer
@@ -1152,22 +1151,22 @@ local record Entry
     --- is built into.
     kind: string
     path: string
-    root: Future<any>
+    root: Completion<any>
 end
 
 local pending: {integer: Entry} = {}
---- The same entries by root future, so the source's cancel hook can start from
---- the future whose last watcher has gone.
-local byFuture: {Future<any>: Entry} = {}
+--- The same entries by root completion, so the source's cancel hook can start from
+--- the completion whose last watcher has gone.
+local byCompletion: {Completion<any>: Entry} = {}
 --- Counted rather than walked, because `waitAll` reads it in a loop.
 local pendingCount = 0
 --- Tracks queued image decodes that have not answered yet, by path. A second
 --- load of a path in this table joins the first rather than queueing a decode
 --- of the same file beside it.
-local imagesInFlight: {string: Future<any>} = {}
+local imagesInFlight: {string: Completion<any>} = {}
 --- Tracks queued byte reads on the same terms. Separate from image decodes
 --- because the same path may be requested in both representations at once.
-local bytesInFlight: {string: Future<any>} = {}
+local bytesInFlight: {string: Completion<any>} = {}
 local nextId = 1
 local worker: workers.Worker = nil
 
@@ -1200,24 +1199,21 @@ end
 -- Settling
 -------------------------------------------------------------------------------
 
---- Settles when nothing is in flight, so `waitAll` is one `Future:wait` rather
+--- Settles when nothing is in flight, so `waitAll` is one `Completion:wait` rather
 --- than a wall-clock loop written again here.
 ---
 --- Created on demand and dropped once it settles, because a wait that ran out
 --- of time leaves it pending and the next one joins the same drain.
-local idle: Future<integer> = nil
+local idle: Completion<integer> = nil
 
 --- Forgets a load the worker has answered for.
 local function retire(entry: Entry)
     pending[entry.id] = nil
-    byFuture[entry.root] = nil
+    byCompletion[entry.root] = nil
     pendingCount = pendingCount - 1
 
-    -- Dropped at settlement rather than left for the next load of the path.
-    -- `listen` stores a link's closure on the upstream and that closure holds
-    -- the derived future, so a root still reachable through this table would
-    -- keep every future ever derived from it alive for the life of the process.
-    -- Nothing shows that until it is measured, which is why it is said here.
+    -- These tables describe only overlapping work. Dropping the root before
+    -- settlement lets a listener start a fresh load from its callback.
     local shared = entry.kind == "image" and imagesInFlight or entry.kind == "bytes" and bytesInFlight or nil
     if shared ~= nil and shared[entry.path] == entry.root then
         shared[entry.path] = nil
@@ -1227,7 +1223,7 @@ end
 --- Destroys what the worker sent for a decode nobody is waiting on any more.
 ---
 --- Ownership transfers with the address whether or not anyone still wants it,
---- so this function frees the result instead of leaking it to a future that has
+--- so this function frees the result instead of leaking it to a completion that has
 --- already settled "canceled".
 local function discard(result: {string: any})
     if result.image ~= nil then
@@ -1238,7 +1234,7 @@ local function discard(result: {string: any})
     end
 end
 
---- Settles one load result into its associated future.
+--- Settles one load result into its associated completion.
 local function settleResult(result: {string: any}): boolean
     local entry = pending[result.id as integer]
     if entry == nil then
@@ -1270,8 +1266,7 @@ local function settleResult(result: {string: any}): boolean
                 path = entry.path,
                 resident = result.resident as boolean,
                 durationMs = result.durationMs as integer,
-                -- One holder, because sound does not dedupe: this future has one
-                -- caller and no link of the caller's can add another.
+                -- One holder, because sound loads do not deduplicate.
                 _refs = 1,
             } as Sound,
             SoundMT
@@ -1311,9 +1306,8 @@ local function settleResult(result: {string: any}): boolean
             storageHeight = result.height as integer,
             levels = 1,
             byteCount = (result.pitch as integer) * (result.height as integer),
-            -- Zero, and counted up by each surviving caller's own link below. A
-            -- caller that canceled first never runs one, which is what makes this
-            -- exact rather than optimistic.
+            -- Zero, and counted up by each surviving subscriber below. A caller
+            -- that canceled first never receives the image.
             _refs = 0,
         } as Image,
         ImageMT
@@ -1390,14 +1384,14 @@ local DEFAULT_WAIT_MS <const> = 5000
 --- What drives every private loader completion.
 ---
 --- `poll` and `advance` are the same receive with a different budget, which is
---- the whole of what a future needs from a worker channel.
+--- the whole of what a completion needs from a worker channel.
 local record Loader
     sliceMs: number
     defaultWaitMs: number
 
     poll: function(self: Loader): integer
     advance: function(self: Loader, ms: number): integer
-    cancel: function(self: Loader, future: Future<any>)
+    cancel: function(self: Loader, completion: Completion<any>)
 end
 
 local LoaderMT <const>: metatable<Loader> = {__index = Loader}
@@ -1437,20 +1431,20 @@ end
 --- the path, so a later load of it starts a fresh decode rather than joining
 --- one nobody wants; the entry stays queued, and `complete` destroys the
 --- address when it arrives because ownership transfers with it either way.
-function Loader:cancel(future: Future<any>)
-    local entry = byFuture[future]
+function Loader:cancel(completion: Completion<any>)
+    local entry = byCompletion[completion]
     if entry == nil then
         return
     end
     local shared = entry.kind == "image" and imagesInFlight or entry.kind == "bytes" and bytesInFlight or nil
-    if shared ~= nil and shared[entry.path] == future then
+    if shared ~= nil and shared[entry.path] == completion then
         shared[entry.path] = nil
     end
 end
 
 local pump <const> = setmetatable(
     {
-        -- Both live here rather than in `Future`, which is what lets a decode keep
+        -- Both live here rather than in `Completion`, which is what lets a decode keep
         -- a shorter default than a child process without a second convention.
         sliceMs = SLICE_MS,
         defaultWaitMs = DEFAULT_WAIT_MS,
@@ -1458,29 +1452,26 @@ local pump <const> = setmetatable(
     LoaderMT
 )
 
-local source <const> = pump as Future.Source
+local source <const> = pump as Completion.Source
 
 -------------------------------------------------------------------------------
 -- Loading
 -------------------------------------------------------------------------------
 
---- A root future the loader owns and never hands out.
+--- A root completion the loader owns and never hands out.
 ---
---- `Future.pending` counts whoever created a future as one of its watchers,
---- which is right for a caller holding what it created and wrong here. The
---- loader is the producer: the root lives in one of the shared-work tables and
---- every consumer of it is some caller's own derived future. A hold of the
---- loader's own would create a watcher nothing ever gives up, so the count
---- could never reach zero and let the source abandon the decode.
-local function newRoot(): Future<any>
-    local root = Future.pending(source) as Future<any>
+--- `Completion.pending` starts with one watcher, which is right when its caller
+--- owns the operation. The loader owns only the producer side. Each direct load
+--- adds its own subscription, so this removes the producer's initial hold.
+local function newRoot(): Completion<any>
+    local root = Completion.pending(source) as Completion<any>
     root._watchers = 0
     return root
 end
 
---- Registers a load, and answers the future it will settle and the id the
+--- Registers a load, and answers the completion it will settle and the id the
 --- worker will answer with.
-local function queue(kind: string, path: string): Future<any>, integer
+local function queue(kind: string, path: string): Completion<any>, integer
     if worker == nil then
         error("tecs: assets.install must run before loading", 3)
     end
@@ -1489,22 +1480,21 @@ local function queue(kind: string, path: string): Future<any>, integer
     local root = newRoot()
     local entry: Entry = {id = id, kind = kind, path = path, root = root}
     pending[id] = entry
-    byFuture[root] = entry
+    byCompletion[root] = entry
     pendingCount = pendingCount + 1
     return root, id
 end
 
 --- Counts one more holder of the decoded pixels, and answers them.
 ---
---- One per surviving caller of a shared decode: it is the transform of that
---- caller's own link, so it runs exactly when that caller's future settles
---- "ready" and never when the caller canceled first.
+--- One per surviving caller of a shared decode. It runs from that caller's
+--- subscription only when the root settles ready.
 local function claim(image: Image): Image
     image._refs = image._refs + 1
     return image
 end
 
-local function awaitRoot<T>(root: Future<T>, operation: string): T
+local function awaitRoot<T>(root: Completion<T>, operation: string): T
     if not task.active() then
         root:wait()
         if root.status == "ready" then
@@ -1513,10 +1503,13 @@ local function awaitRoot<T>(root: Future<T>, operation: string): T
         if root.status == "failed" then
             error(("tecs: %s failed: %s"):format(operation, root.error or "failed"), 3)
         end
+        if root.status == "pending" then
+            error(("tecs: %s did not complete within its wait budget"):format(operation), 3)
+        end
         error(("tecs: %s was canceled: %s"):format(operation, root.error or "canceled"), 3)
     end
-    local settled <const> = task.awaitCallback(function(resume: function(Future<T>)): function()
-        return futureOperations._subscribe(root as Future<any>, resume as function(Future<any>))
+    local settled <const> = task.awaitCallback(function(resume: function(Completion<T>)): function()
+        return Completion.subscribe(root as Completion<any>, resume as function(Completion<any>))
     end)
     if settled.status == "ready" then
         return settled.value
@@ -1528,7 +1521,7 @@ local function awaitRoot<T>(root: Future<T>, operation: string): T
 end
 
 --- Returns the one root settlement shared by overlapping image consumers.
-local function imageRoot(path: string): Future<any>
+local function imageRoot(path: string): Completion<any>
     content.note(path, "image")
     local shared = imagesInFlight[path]
     if shared == nil then
@@ -1541,7 +1534,7 @@ local function imageRoot(path: string): Future<any>
 end
 
 -- Internal callback view of one image load. This is the operation boundary the
--- Task prototype consumes directly: it adds one interest to the shared root,
+-- Task runtime consumes directly: it adds one interest to the shared root,
 -- reports one terminal outcome, and returns the matching cancellation action.
 -- This private subscription is how a suspended system observes the shared
 -- decode without allocating another completion object.
@@ -1552,9 +1545,9 @@ local function subscribeImage(
         error("tecs: image subscription needs a listener", 3)
     end
     local shared <const> = imageRoot(path)
-    return futureOperations._subscribe(
+    return Completion.subscribe(
         shared,
-        function(settled: Future<any>)
+        function(settled: Completion<any>)
             if settled.status == "ready" then
                 listener("ready", claim(settled.value as Image), nil)
             else
@@ -1607,15 +1600,14 @@ function assets.loadString(path: string, kind?: string): string
         worker:send({id = id, kind = "bytes", path = path})
         shared = root
     end
-    return awaitRoot(shared as Future<string>, "file load")
+    return awaitRoot(shared as Completion<string>, "file load")
 end
 
 function assets.loadGLTF(path: string): Model
     content.note(path, "model")
     local root, id = queue("model", path)
-    root._watchers = 1
     worker:send({id = id, kind = "model", path = path})
-    return awaitRoot(root as Future<Model>, "model load")
+    return awaitRoot(root as Completion<Model>, "model load")
 end
 
 --- Loads a sound and returns its decoded or streaming payload.
@@ -1645,10 +1637,6 @@ function assets.loadSound(path: string, mode: string, streamMs: integer): Sound
         error("tecs: cannot load " .. path, 2)
     end
     local root, id = queue("sound", path)
-    -- The one caller is the watcher `Future.pending` counts, so this root is
-    -- handed out as it is: canceling it takes the count to zero and abandons
-    -- the decode, which is what the only caller giving up should do.
-    root._watchers = 1
     worker:send({
         id = id,
         kind = "sound",
@@ -1656,7 +1644,7 @@ function assets.loadSound(path: string, mode: string, streamMs: integer): Sound
         mode = mode,
         streamMs = streamMs,
     })
-    return awaitRoot(root as Future<Sound>, "sound load")
+    return awaitRoot(root as Completion<Sound>, "sound load")
 end
 
 -------------------------------------------------------------------------------
@@ -1703,7 +1691,7 @@ function assets.waitAll(timeoutMs?: number)
         return
     end
     if idle == nil then
-        idle = Future.pending(source) as Future<integer>
+        idle = Completion.pending(source) as Completion<integer>
     end
     idle:wait(timeoutMs)
 end
@@ -1723,7 +1711,7 @@ function assets.shutdown()
     worker = nil
     runtime.unregister("assets")
     pending = {}
-    byFuture = {}
+    byCompletion = {}
     imagesInFlight = {}
     bytesInFlight = {}
     pendingCount = 0

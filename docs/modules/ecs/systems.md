@@ -42,9 +42,9 @@ variable phases supply the frame delta.
 
 ## Asynchronous work
 
-Every system is resumable. There is no second system kind, explicit hold
-boundary, callback, or completion handle. Call a cooperative engine function
-and use its returned value directly:
+Every frame system dispatched by `world:update` is resumable. There is no
+second system kind, explicit hold boundary, callback, or completion handle.
+Call a cooperative engine function and use its returned value directly:
 
 ```teal
 local record AssetBytes is tecs.ecs.Component
@@ -89,9 +89,10 @@ commits when the iterator closes. The same mechanism works in fixed phases:
 the fixed step resumes without replaying its earlier systems or advancing its
 clock twice.
 
-Calling the same cooperative API outside a world update blocks until it has
-the same value. This is useful during startup and in headless tools. Plugin
-authors do not choose between synchronous and asynchronous variants.
+Calling the same cooperative API outside a world update, including from
+startup, shutdown, or `runPhase`, blocks while pumping its producer until it
+has the same value. This is useful during initialization and in headless tools.
+Plugin authors do not choose between synchronous and asynchronous variants.
 
 One persistent coroutine belongs to the logical world update, not to every
 entity. Iterating ten thousand entities does not create ten thousand tasks.
@@ -103,6 +104,7 @@ the kind of work:
 | Work                                            | Behavior inside a system | Native execution            |
 | ----------------------------------------------- | ------------------------ | --------------------------- |
 | Cached asset or ready socket                    | Returns inline           | Immediate lookup or syscall |
+| DNS resolution or TCP connection                | Suspends the update      | Bounded Tokio service       |
 | Socket blocked on readiness                     | Suspends the update      | Process-wide `mio` reactor  |
 | HTTP request                                    | Suspends the update      | Reqwest and Tokio service   |
 | Asset decode or durable write                   | Suspends the update      | Worker thread               |

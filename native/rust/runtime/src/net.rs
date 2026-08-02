@@ -8,12 +8,12 @@ use std::collections::{HashMap, VecDeque};
 use std::ffi::c_int;
 use std::io::{self, Read, Write};
 use std::net::{
-    IpAddr, SocketAddr, TcpListener as StdTcpListener, TcpStream, ToSocketAddrs,
-    UdpSocket as StdUdpSocket,
+    IpAddr, SocketAddr, TcpListener as StdTcpListener, TcpStream, UdpSocket as StdUdpSocket,
 };
 use std::ptr;
 use std::slice;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -22,7 +22,8 @@ use mio::net::{
     TcpListener as MioTcpListener, TcpStream as MioTcpStream, UdpSocket as MioUdpSocket,
 };
 use mio::{Events, Interest, Poll, Token};
-use sdl3_sys::timer::SDL_GetTicksNS;
+use tokio::runtime::{Builder, Runtime};
+use tokio::task::AbortHandle;
 
 use crate::set_error;
 
@@ -44,6 +45,24 @@ enum OperationValue {
 pub struct TecsNetOperation {
     receiver: Receiver<Result<OperationValue, String>>,
     result: Option<Result<OperationValue, String>>,
+    abort: AbortHandle,
+}
+
+static RUNTIME: OnceLock<Result<Runtime, String>> = OnceLock::new();
+
+fn runtime() -> Result<&'static Runtime, &'static str> {
+    match RUNTIME.get_or_init(|| {
+        Builder::new_multi_thread()
+            .worker_threads(1)
+            .max_blocking_threads(8)
+            .enable_all()
+            .thread_name("tecs-net")
+            .build()
+            .map_err(|error| error.to_string())
+    }) {
+        Ok(runtime) => Ok(runtime),
+        Err(error) => Err(error.as_str()),
+    }
 }
 
 pub struct TecsNetStream {
@@ -56,7 +75,6 @@ pub struct TecsNetStream {
 struct ReactorReady {
     token: u32,
     readiness: u32,
-    ready_ns: u64,
 }
 
 pub struct TecsNetReactor {
@@ -238,10 +256,17 @@ pub unsafe extern "C" fn tecsNetResolve(host: *const u8, length: usize) -> *mut 
             return ptr::null_mut();
         }
     };
+    let runtime = match runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            set_error(error);
+            return ptr::null_mut();
+        }
+    };
     let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let result = (host.as_str(), 0)
-            .to_socket_addrs()
+    let task = runtime.spawn(async move {
+        let result = tokio::net::lookup_host((host.as_str(), 0))
+            .await
             .map_err(|error| error.to_string())
             .and_then(|mut addresses| {
                 addresses
@@ -254,6 +279,7 @@ pub unsafe extern "C" fn tecsNetResolve(host: *const u8, length: usize) -> *mut 
     Box::into_raw(Box::new(TecsNetOperation {
         receiver,
         result: None,
+        abort: task.abort_handle(),
     }))
 }
 
@@ -268,17 +294,29 @@ pub unsafe extern "C" fn tecsNetConnect(
     }
     // SAFETY: The caller supplies a live address.
     let socket_address = SocketAddr::new(unsafe { (*address).address }, port);
+    let runtime = match runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            set_error(error);
+            return ptr::null_mut();
+        }
+    };
     let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let result = TcpStream::connect(socket_address)
-            .and_then(stream)
-            .map(OperationValue::Stream)
-            .map_err(|error| error.to_string());
+    let task = runtime.spawn(async move {
+        let result = match tokio::net::TcpStream::connect(socket_address).await {
+            Ok(socket) => socket
+                .into_std()
+                .and_then(stream)
+                .map(OperationValue::Stream)
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
         let _ = sender.send(result);
     });
     Box::into_raw(Box::new(TecsNetOperation {
         receiver,
         result: None,
+        abort: task.abort_handle(),
     }))
 }
 
@@ -335,7 +373,8 @@ pub unsafe extern "C" fn tecsNetOperationTakeStream(
 pub unsafe extern "C" fn tecsNetOperationDestroy(operation: *mut TecsNetOperation) {
     if !operation.is_null() {
         // SAFETY: The caller transfers one owned operation.
-        drop(unsafe { Box::from_raw(operation) });
+        let operation = unsafe { Box::from_raw(operation) };
+        operation.abort.abort();
     }
 }
 
@@ -674,9 +713,6 @@ pub unsafe extern "C" fn tecsNetReactorPoll(
         ready.push_back(ReactorReady {
             token,
             readiness: readiness(event),
-            // SAFETY: SDL's monotonic clock is process-global and requires no
-            // initialization before it can be read.
-            ready_ns: unsafe { SDL_GetTicksNS() },
         });
     }
     c_int::try_from(ready.len()).unwrap_or(c_int::MAX)
@@ -687,9 +723,8 @@ pub unsafe extern "C" fn tecsNetReactorNext(
     reactor: *mut TecsNetReactor,
     token: *mut u32,
     readiness: *mut u32,
-    ready_ns: *mut u64,
 ) -> c_int {
-    if reactor.is_null() || token.is_null() || readiness.is_null() || ready_ns.is_null() {
+    if reactor.is_null() || token.is_null() || readiness.is_null() {
         set_error("network reactor or output is null");
         return -1;
     }
@@ -701,7 +736,6 @@ pub unsafe extern "C" fn tecsNetReactorNext(
     unsafe {
         *token = event.token;
         *readiness = event.readiness;
-        *ready_ns = event.ready_ns;
     }
     1
 }

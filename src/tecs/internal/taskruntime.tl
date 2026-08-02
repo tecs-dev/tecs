@@ -3,7 +3,7 @@
 -- This stays internal because suspension is an implementation detail of direct
 -- engine calls. Games register ordinary systems and do not manage tasks.
 
-local type Future = require("tecs.internal.completion")
+local type Completion = require("tecs.internal.completion")
 
 local record TaskImpl<T>
     status: string
@@ -599,9 +599,7 @@ local record taskruntime
     newGate: function(cancelWait?: function()): GateImpl
     onSettle: function<T>(task: TaskImpl<T>, observer: function(TaskImpl<T>))
     awaitCallback: function<T>(subscribe: function(resume: function(T)): function()): T
-    awaitFutureSettlement: function<T>(future: Future<T>): Future<T>
-    awaitFuture: function<T>(future: Future<T>): T
-    awaitCompletion: function<T>(future: Future<T>, operation: string): T
+    awaitCompletion: function<T>(completion: Completion<T>, operation: string): T
     run: function<T>(body: function(ScopeImpl): T...): T
     yield: function()
     checkSuspension: function(operation: string)
@@ -654,8 +652,8 @@ end
 
 -- Parks on the runtime's smallest asynchronous boundary. The operation owns
 -- completion and calls `resume` once; the returned function releases this
--- consumer if its Task is canceled first. Future awaiting is an adapter over
--- the same Gate protocol, not a requirement imposed on an operation.
+-- consumer if its Task is canceled first. Producer completions adapt to the
+-- same Gate protocol rather than imposing an execution model on operations.
 function taskruntime.awaitCallback<T>(subscribe: function(resume: function(T)): function()): T
     taskruntime.checkSuspension("asynchronous operation")
     if type(subscribe) ~= "function" then
@@ -676,37 +674,20 @@ function taskruntime.awaitCallback<T>(subscribe: function(resume: function(T)): 
     return value as T
 end
 
-function taskruntime.awaitFutureSettlement<T>(future: Future<T>): Future<T>
-    taskruntime.checkSuspension("Future await")
-    if future == nil then
-        error("tecs: Future await needs a future", 2)
-    end
-
-    local gate <const> = taskruntime.newGate(function() future:cancel() end)
-    future:onSettle(function(settled: Future<T>) gate:complete(settled) end)
-    local settled, reason <const> = gate:wait()
-    if reason ~= nil then
-        error(reason, 2)
-    end
-    return settled as Future<T>
-end
-
-function taskruntime.awaitFuture<T>(future: Future<T>): T
-    local settled <const> = taskruntime.awaitFutureSettlement(future)
-    if settled.status == "ready" then
-        return settled.value
-    end
-    if settled.status == "failed" then
-        error(settled.error, 2)
-    end
-    error("future was canceled: " .. settled.error, 2)
-end
-
 --- Bridges an internal producer completion to the direct-return API model.
-function taskruntime.awaitCompletion<T>(future: Future<T>, operation: string): T
-    local settled = future
+function taskruntime.awaitCompletion<T>(completion: Completion<T>, operation: string): T
+    if completion == nil then
+        error("tecs: " .. operation .. " has no completion", 2)
+    end
+    local settled = completion
     if taskruntime.active() then
-        settled = taskruntime.awaitFutureSettlement(future)
+        local gate <const> = taskruntime.newGate(function() completion:cancel() end)
+        completion:onSettle(function(done: Completion<T>) gate:complete(done) end)
+        local value, reason <const> = gate:wait()
+        if reason ~= nil then
+            error(reason, 2)
+        end
+        settled = value as Completion<T>
     else
         settled:wait()
     end
@@ -715,6 +696,9 @@ function taskruntime.awaitCompletion<T>(future: Future<T>, operation: string): T
     end
     if settled.status == "failed" then
         error(("tecs: %s failed: %s"):format(operation, settled.error or "failed"), 2)
+    end
+    if settled.status == "pending" then
+        error(("tecs: %s did not complete within its wait budget"):format(operation), 2)
     end
     error(("tecs: %s was canceled: %s"):format(operation, settled.error or "canceled"), 2)
 end

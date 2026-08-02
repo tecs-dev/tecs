@@ -35,7 +35,6 @@ local byToken <const>: {integer: Wait} = {}
 local byOwner <const>: {any: Wait} = {}
 local tokenOut <const> = ffi.new("uint32_t[1]") as loader.CArray
 local readinessOut <const> = ffi.new("uint32_t[1]") as loader.CArray
-local readyNsOut <const> = ffi.new("uint64_t[1]") as loader.CArray
 
 local record netreactor
     stream: integer
@@ -132,7 +131,7 @@ function netreactor.poll(): integer
 
     local delivered = 0
     while true do
-        local status <const> = tonumber(C.tecsNetReactorNext(reactor, tokenOut, readinessOut, readyNsOut)) as integer
+        local status <const> = tonumber(C.tecsNetReactorNext(reactor, tokenOut, readinessOut)) as integer
         if status < 0 then
             error("tecs: network readiness drain failed: " .. nativeReason(), 2)
         end

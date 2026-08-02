@@ -12,7 +12,7 @@ the runtime lifecycle hooks remain internal here.
 local ffi <const> = require("ffi")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
-local Future <const> = require("tecs.internal.completion")
+local Completion <const> = require("tecs.internal.completion")
 local task <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
 local time <const> = require("tecs.platform.time")
@@ -35,8 +35,8 @@ local type ProcessResult = processtypes.ProcessResult
 local type ProcessReader = processtypes.ProcessReader
 local type ProcessWriter = processtypes.ProcessWriter
 local type Process = processtypes.Process
-local type FutureExit = Future<ProcessExit>
-local type Source = Future.Source
+local type ExitCompletion = Completion<ProcessExit>
+local type Source = Completion.Source
 
 local DEFAULT_READ_BYTES <const> = 16 * 1024
 local MAX_READ_BYTES <const> = 64 * 1024
@@ -62,7 +62,7 @@ local record State
     timedOut: boolean
     deadline: number
     exitCode: integer
-    finished: FutureExit
+    finished: ExitCompletion
     at: integer
 end
 
@@ -99,7 +99,7 @@ local record ProcessImpl
     stdin: ProcessWriter
     stdout: ProcessReader
     stderr: ProcessReader
-    _finished: FutureExit
+    _finished: ExitCompletion
     _state: State
 end
 
@@ -514,7 +514,7 @@ function ProcessImpl:isRunning(): boolean
 end
 
 function ProcessImpl:wait(): ProcessExit
-    return task.awaitCompletion(self._finished as Future<ProcessExit>, "process wait")
+    return task.awaitCompletion(self._finished as Completion<ProcessExit>, "process wait")
 end
 
 function ProcessImpl:kill(force?: boolean): boolean, string
@@ -868,7 +868,7 @@ function process.new(options: ProcessOptions): Process, string
         finished = nil,
         at = 0,
     }
-    state.finished = Future.pending(source) as FutureExit
+    state.finished = Completion.pending(source) as ExitCompletion
 
     local value <const> = setmetatable(
         {

@@ -102,9 +102,9 @@ Naming `tecs.io` loads none of its children. Reading `files`, `http`, `mcp`,
 ]=]
 
 -- Implementation details:
--- Rust owns the sockets and the process-wide mio reactor. Workers resolve host
--- names and establish client connections, then Lua drains both completion and
--- readiness queues. No native callback enters LuaJIT.
+-- Rust owns the sockets, a bounded Tokio service for resolution and connection,
+-- and the process-wide mio reactor for established endpoints. Lua drains both
+-- completion and readiness queues. No native callback enters LuaJIT.
 --
 -- Reading `tecs.io` does not initialize a protocol. The HTTP and MCP runtimes
 -- start only when their respective subordinate modules are read.
@@ -112,7 +112,7 @@ Naming `tecs.io` loads none of its children. Reading `files`, `http`, `mcp`,
 local ffi <const> = require("ffi")
 local binding <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
-local Future <const> = require("tecs.internal.completion")
+local Completion <const> = require("tecs.internal.completion")
 local netreactor <const> = require("tecs.internal.netreactor")
 local task <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
@@ -139,8 +139,8 @@ local type Process = require("tecs.io.Process")
 local type URI = require("tecs.io.URI")
 local type watcher = require("tecs.io.watcher")
 
-local type FutureType<T> = Future<T>
-local type Source = Future.Source
+local type CompletionType<T> = Completion<T>
+local type Source = Completion.Source
 
 local C <const> = binding.C
 local floor <const> = math.floor
@@ -721,14 +721,14 @@ local record Operation
     kind: OperationKind
     host: string
     handle: loader.CPtr
-    future: FutureType<any>
+    completion: CompletionType<any>
     at: integer
     sliceMs: number
     defaultWaitMs: number
 
     poll: function(self: Operation): integer
     advance: function(self: Operation, ms: number): integer
-    cancel: function(self: Operation, future: FutureType<any>)
+    cancel: function(self: Operation, completion: CompletionType<any>)
 end
 
 local OperationMT <const>: metatable<Operation> = {__index = Operation}
@@ -1340,16 +1340,16 @@ local function finish(operation: Operation, waitMs: integer): integer
         local reason <const> = loader.toString(C.tecsRustError())
         C.tecsNetOperationDestroy(operation.handle)
         operation.handle = nil
-        operation.future:fail(reason)
+        operation.completion:fail(reason)
         return 1
     end
 
     if operation.kind == "resolve" then
         local handle <const> = C.tecsNetOperationTakeAddress(operation.handle)
-        operation.future:complete(addressFrom(handle, operation.host))
+        operation.completion:complete(addressFrom(handle, operation.host))
     else
         local handle <const> = C.tecsNetOperationTakeStream(operation.handle)
-        operation.future:complete(tcpSocketFrom(handle))
+        operation.completion:complete(tcpSocketFrom(handle))
     end
     C.tecsNetOperationDestroy(operation.handle)
     operation.handle = nil
@@ -1370,8 +1370,8 @@ function Operation:advance(ms: number): integer
     return finish(self, floor(ms) as integer)
 end
 
-function Operation:cancel(future: FutureType<any>)
-    if self.at == 0 or self.future ~= future then
+function Operation:cancel(completion: CompletionType<any>)
+    if self.at == 0 or self.completion ~= completion then
         return
     end
     removeOperation(self)
@@ -1387,7 +1387,7 @@ local function operation(kind: OperationKind, host: string, handle: loader.CPtr)
     source.at = #operations + 1
     source.sliceMs = WAIT_SLICE_MS
     source.defaultWaitMs = DEFAULT_WAIT_MS
-    source.future = Future.pending(source as Source) as FutureType<any>
+    source.completion = Completion.pending(source as Source) as CompletionType<any>
     operations[source.at] = source
     if source.at == 1 then
         runtime.register("io", 40, binaryIO.poll)
@@ -1395,7 +1395,7 @@ local function operation(kind: OperationKind, host: string, handle: loader.CPtr)
     return source
 end
 
-local function resolveFuture(host: string): FutureType<binaryIO.Address>
+local function resolveCompletion(host: string): CompletionType<binaryIO.Address>
     if type(host) ~= "string" or host == "" then
         error("tecs: resolve needs a hostname", 2)
     end
@@ -1407,38 +1407,38 @@ local function resolveFuture(host: string): FutureType<binaryIO.Address>
     end
     local ok, reason <const> = ensure()
     if not ok then
-        return Future.failed(reason) as FutureType<binaryIO.Address>
+        return Completion.failed(reason) as CompletionType<binaryIO.Address>
     end
     local handle = C.tecsNetResolve(host, #host)
     if handle == nil then
-        return Future.failed(loader.toString(C.tecsRustError())) as FutureType<binaryIO.Address>
+        return Completion.failed(loader.toString(C.tecsRustError())) as CompletionType<binaryIO.Address>
     end
-    return operation("resolve", host, handle).future as FutureType<binaryIO.Address>
+    return operation("resolve", host, handle).completion as CompletionType<binaryIO.Address>
 end
 
 function binaryIO.resolve(host: string): binaryIO.Address
-    return task.awaitCompletion(resolveFuture(host) as Future<binaryIO.Address>, "address resolution")
+    return task.awaitCompletion(resolveCompletion(host) as Completion<binaryIO.Address>, "address resolution")
 end
 
-local function connectFuture(address: binaryIO.Address, port: integer): FutureType<binaryIO.TCPSocket>
+local function connectCompletion(address: binaryIO.Address, port: integer): CompletionType<binaryIO.TCPSocket>
     validPort(port, false, 2)
     local valid, addressReason <const> = validAddress(address, false, 2)
     if not valid then
-        return Future.failed(addressReason) as FutureType<binaryIO.TCPSocket>
+        return Completion.failed(addressReason) as CompletionType<binaryIO.TCPSocket>
     end
     local ok, reason <const> = ensure()
     if not ok then
-        return Future.failed(reason) as FutureType<binaryIO.TCPSocket>
+        return Completion.failed(reason) as CompletionType<binaryIO.TCPSocket>
     end
     local handle = C.tecsNetConnect(address._handle, port)
     if handle == nil then
-        return Future.failed(loader.toString(C.tecsRustError())) as FutureType<binaryIO.TCPSocket>
+        return Completion.failed(loader.toString(C.tecsRustError())) as CompletionType<binaryIO.TCPSocket>
     end
-    return operation("connect", address.host, handle).future as FutureType<binaryIO.TCPSocket>
+    return operation("connect", address.host, handle).completion as CompletionType<binaryIO.TCPSocket>
 end
 
 function binaryIO.connect(address: binaryIO.Address, port: integer): binaryIO.TCPSocket
-    return task.awaitCompletion(connectFuture(address, port) as Future<binaryIO.TCPSocket>, "TCP connection")
+    return task.awaitCompletion(connectCompletion(address, port) as Completion<binaryIO.TCPSocket>, "TCP connection")
 end
 
 function binaryIO.listen(port: integer, address?: binaryIO.Address): binaryIO.TCPListener, string

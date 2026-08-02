@@ -1,12 +1,11 @@
--- Phase-zero proof for direct-style coroutine I/O. The runtime is internal on
--- purpose: these cases hold the semantics still under discussion without
--- publishing names that converted I/O would then have to preserve.
+-- Production coverage for direct-style coroutine I/O. The runtime stays
+-- internal because games use ordinary systems and direct engine calls.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local task = require("tecs.internal.taskruntime")
-local Future = require("tecs.internal.completion")
+local Completion = require("tecs.internal.completion")
 
 local function stackDepth()
     local depth = 0
@@ -16,7 +15,7 @@ local function stackDepth()
     return depth
 end
 
-describe("internal task runtime prototype", function()
+describe("internal task runtime", function()
     it("preserves direct control flow and locals across an I/O wait", function()
         local gate = task.newGate()
         local result = task.run(function(scope)
@@ -228,51 +227,50 @@ describe("internal task runtime prototype", function()
         end)
     end)
 
-    it("awaits a current Future without polling it", function()
-        local future = Future.pending()
+    it("awaits an internal completion without polling it", function()
+        local completion = Completion.pending()
         local scheduler = task.newScheduler()
         local rootTask = scheduler:spawn(function()
-            return task.awaitFuture(future)
+            return task.awaitCompletion(completion, "decode")
         end)
 
         assert.are.equal(1, scheduler:step())
         assert.are.equal("pending", rootTask.status)
-        future:complete("decoded")
+        completion:complete("decoded")
         assert.are.equal(1, scheduler:step())
         assert.are.equal("ready", rootTask.status)
         assert.are.equal("decoded", rootTask.value)
     end)
 
-    it("can inspect an operational Future failure without failing the Task", function()
-        local future = Future.pending()
+    it("turns an internal completion failure into an operation error", function()
+        local completion = Completion.pending()
         local scheduler = task.newScheduler()
         local rootTask = scheduler:spawn(function()
-            local settled = task.awaitFutureSettlement(future)
-            return settled.status .. ": " .. settled.error
+            return task.awaitCompletion(completion, "decode")
         end)
 
         scheduler:step()
-        future:fail("decode failed")
+        completion:fail("bad pixels")
         scheduler:step()
-        assert.are.equal("ready", rootTask.status)
-        assert.are.equal("failed: decode failed", rootTask.value)
+        assert.are.equal("failed", rootTask.status)
+        assert.matches("tecs: decode failed: bad pixels", rootTask.error, 1, true)
     end)
 
-    it("cancels the awaited Future when its Task is canceled", function()
-        local future = Future.pending()
+    it("cancels the awaited completion when its Task is canceled", function()
+        local completion = Completion.pending()
         local scheduler = task.newScheduler()
         local rootTask = scheduler:spawn(function()
-            return task.awaitFuture(future)
+            return task.awaitCompletion(completion, "decode")
         end)
 
         scheduler:step()
         rootTask:cancel("entity despawned")
-        assert.are.equal("canceled", future.status)
+        assert.are.equal("canceled", completion.status)
         scheduler:step()
         assert.are.equal("canceled", rootTask.status)
     end)
 
-    it("awaits a callback subscription without creating a Future", function()
+    it("awaits a callback subscription without creating a completion", function()
         local resume
         local canceled = 0
         local scheduler = task.newScheduler()
@@ -313,19 +311,46 @@ describe("internal task runtime prototype", function()
     end)
 
     it("detaches an internal completion listener when its consumer cancels", function()
-        local root = Future.pending()
+        local root = Completion.pending()
         root._watchers = 0
         local called = false
-        local cancel = Future._subscribe(root, function()
+        local cancel = Completion.subscribe(root, function()
             called = true
         end)
 
         assert.is_not_nil(root._listeners[1])
         cancel()
-        assert.is_nil(root._listeners[1])
+        assert.is_nil(root._listeners)
         assert.are.equal("canceled", root.status)
         root:complete("too late")
         assert.is_false(called)
+    end)
+
+    it("keeps shared completion work until its last consumer cancels", function()
+        local root = Completion.pending()
+        root._watchers = 0
+        local cancelFirst = Completion.subscribe(root, function() end)
+        local cancelSecond = Completion.subscribe(root, function() end)
+
+        cancelFirst()
+        assert.are.equal("pending", root.status)
+        cancelSecond()
+        assert.are.equal("canceled", root.status)
+    end)
+
+    it("drains reentrant completion listeners without retaining them", function()
+        local root = Completion.pending()
+        local calls = {}
+        root:onSettle(function(settled)
+            calls[#calls + 1] = "first"
+            settled:onSettle(function()
+                calls[#calls + 1] = "second"
+            end)
+        end)
+
+        root:complete("ready")
+        assert.are.same({ "first", "second" }, calls)
+        assert.is_nil(root._listeners)
     end)
 
     it("reports a child failure at join", function()

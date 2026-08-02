@@ -273,7 +273,7 @@ int tecsNetReactorUnwatchServer(TecsNetReactor *reactor, TecsNetServer *server, 
 int tecsNetReactorWatchDatagram(TecsNetReactor *reactor, TecsNetDatagram *socket, uint32_t token, uint32_t interest);
 int tecsNetReactorUnwatchDatagram(TecsNetReactor *reactor, TecsNetDatagram *socket, uint32_t token);
 int tecsNetReactorPoll(TecsNetReactor *reactor, uint32_t timeoutMs);
-int tecsNetReactorNext(TecsNetReactor *reactor, uint32_t *token, uint32_t *readiness, uint64_t *readyNs);
+int tecsNetReactorNext(TecsNetReactor *reactor, uint32_t *token, uint32_t *readiness);
 void tecsNetReactorDestroy(TecsNetReactor *reactor);
 
 TecsNetServer *tecsNetListen(const TecsNetAddress *address, uint16_t port);

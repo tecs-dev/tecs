@@ -163,10 +163,11 @@ it is not a second user-facing execution model.
 
 The producer still matches the work. TCP and UDP try their syscall first and
 use a process-wide `mio` readiness reactor only after `WouldBlock`; no worker
-thread sits waiting on a socket. DNS, image and model decoding, compression,
-and other CPU-heavy or blocking library calls run on Rust-owned workers. Both
-paths settle onto the same Lua-thread continuation, so that implementation
-split does not create a second game API.
+thread sits waiting on a socket. One bounded Tokio service resolves names and
+establishes connections. Image and model decoding, compression, and other
+CPU-heavy or blocking library calls run on Rust-owned workers. Every path
+settles onto the same Lua-thread continuation, so that implementation split
+does not create a second game API.
 
 Synchronous byte contracts remain synchronous. A `Reader`, `Writer`, file
 cursor, or transform returns what it can do on the calling Lua thread. Socket
