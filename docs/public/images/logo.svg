@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 46" width="96" height="46" role="img" aria-label="Tecs">
+  <text x="2" y="32"
+        font-family="'SF Pro Rounded', ui-rounded, 'Hiragino Maru Gothic ProN', 'Quicksand', system-ui, sans-serif"
+        font-size="29" font-weight="700" letter-spacing="0.5"
+        fill="#dd2020">Tecs</text>
+  <rect x="7" y="36" width="58" height="3.5" rx="1" fill="#6b3fb0"/>
+</svg>
