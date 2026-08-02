@@ -1652,6 +1652,18 @@ fn stage_content(
         );
     }
 
+    remove_stale_teal_outputs(
+        &root.join("src"),
+        &paths.lua,
+        &sources,
+        preserve_engine_output,
+    )?;
+    remove_stale_teal_outputs(
+        &root.join("cli"),
+        &paths.lua,
+        &cli_sources,
+        preserve_cli_output,
+    )?;
     remove_shadowing_teal_outputs(&root.join("src"), &paths.lua, &sources)?;
     remove_shadowing_teal_outputs(&root.join("cli"), &paths.lua, &cli_sources)?;
 
@@ -1720,6 +1732,67 @@ fn stage_content(
         fs::copy(root.join(notice), paths.notices.join(notice))?;
     }
     compile_specs(root, paths)?;
+    Ok(())
+}
+
+fn preserve_engine_output(relative: &Path) -> bool {
+    if relative.parent() != Some(Path::new("tecs/ffi")) {
+        return false;
+    }
+    let Some(name) = relative.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    name == "registrystructs.lua" || name.ends_with("cdef.lua") || name.ends_with("const.lua")
+}
+
+fn preserve_cli_output(relative: &Path) -> bool {
+    relative.starts_with("tecscli/templates")
+}
+
+/// Removes compiled modules whose Teal source moved, changed case, or went
+/// away. Incremental builds otherwise keep callable code that is no longer in
+/// the tree, and case-only class renames retain the old spelling on a default
+/// macOS filesystem.
+fn remove_stale_teal_outputs(
+    source_root: &Path,
+    output_root: &Path,
+    sources: &[PathBuf],
+    preserve: fn(&Path) -> bool,
+) -> Result<()> {
+    let mut expected = BTreeSet::new();
+    let mut namespaces = BTreeSet::new();
+    for source in sources {
+        let relative = source.strip_prefix(source_root)?.with_extension("lua");
+        if let Some(Component::Normal(namespace)) = relative.components().next() {
+            namespaces.insert(namespace.to_owned());
+        }
+        expected.insert(relative);
+    }
+
+    if !output_root.is_dir() {
+        return Ok(());
+    }
+    for entry in WalkDir::new(output_root).into_iter() {
+        let entry = entry?;
+        let path = entry.path();
+        if !entry.file_type().is_file()
+            || path.extension().and_then(|extension| extension.to_str()) != Some("lua")
+        {
+            continue;
+        }
+        let relative = path.strip_prefix(output_root)?;
+        let in_namespace = relative
+            .components()
+            .next()
+            .is_some_and(|component| match component {
+                Component::Normal(namespace) => namespaces.contains(namespace),
+                _ => false,
+            });
+        if !in_namespace || expected.contains(relative) || preserve(relative) {
+            continue;
+        }
+        fs::remove_file(path).with_context(|| format!("removing stale {}", path.display()))?;
+    }
     Ok(())
 }
 
@@ -3096,9 +3169,9 @@ mod tests {
 
     use super::{
         copy_dynamic_libraries, fetch_source_at, package_from_flags, package_link_flags,
-        remove_shadowing_teal_outputs, Paths, GLSLANG_REVISION, LUAJIT_REVISION,
-        SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION, SPIRV_CROSS_REVISION,
-        SPIRV_HEADERS_REVISION, SPIRV_TOOLS_REVISION, ZLIB_REVISION,
+        preserve_engine_output, remove_shadowing_teal_outputs, remove_stale_teal_outputs, Paths,
+        GLSLANG_REVISION, LUAJIT_REVISION, SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION,
+        SPIRV_CROSS_REVISION, SPIRV_HEADERS_REVISION, SPIRV_TOOLS_REVISION, ZLIB_REVISION,
     };
 
     #[test]
@@ -3139,6 +3212,33 @@ mod tests {
 
         assert!(!shadow.exists());
         assert!(compiled.is_file());
+    }
+
+    #[test]
+    fn incremental_build_removes_orphaned_and_case_renamed_modules() {
+        let root = tempdir().unwrap();
+        let source_root = root.path().join("src");
+        let output_root = root.path().join("lua");
+        let path_source = source_root.join("tecs/io/Path.tl");
+        let path_output = output_root.join("tecs/io/path.lua");
+        let orphan = output_root.join("tecs/Backend.lua");
+        let generated = output_root.join("tecs/ffi/rustcdef.lua");
+        for path in [&path_source, &path_output, &orphan, &generated] {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"current or stale").unwrap();
+        }
+
+        remove_stale_teal_outputs(
+            &source_root,
+            &output_root,
+            std::slice::from_ref(&path_source),
+            preserve_engine_output,
+        )
+        .unwrap();
+
+        assert!(!path_output.exists());
+        assert!(!orphan.exists());
+        assert!(generated.is_file());
     }
 
     #[test]

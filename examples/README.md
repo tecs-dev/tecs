@@ -45,4 +45,5 @@ and retains the upstream notice. It also preprocesses source images into full
 BC3 mip chains and writes a derived glTF. The demo keeps those textures
 compressed in GPU memory and exercises double-sided materials, independently
 GPU-culled primitive chunks, Cook-Torrance point and spot lights, directional
-shadows, fog, and bloom.
+shadows, fog, and bloom. Running the example without that cache fails before
+opening a window and reports the fetch command.

@@ -261,6 +261,7 @@ fn main() -> Result<()> {
             preset,
             arguments,
         } => {
+            example_assets::require_for_example(&root, &name)?;
             product::run_example(
                 &root,
                 preset.map_or_else(host_default, Ok)?,

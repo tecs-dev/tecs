@@ -333,7 +333,9 @@ only the vertices that each chunk references, and preserves color, skin, and
 morph streams. This keeps a million-triangle source primitive from becoming
 one all-or-nothing frustum test. Small primitives take the existing path.
 Run `cargo xtask example sponza3d` for double-sided materials, compressed
-mipmaps, point and spot lights, shadows, fog, and bloom together.
+mipmaps, point and spot lights, shadows, fog, and bloom together. The example
+command reports the required fetch command before opening a window when its
+ignored scene cache is absent.
 
 ## Optional mesh shadows
 

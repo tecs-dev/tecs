@@ -21,6 +21,19 @@ pub fn fetch(root: &Path, name: &str) -> Result<()> {
     }
 }
 
+pub fn require_for_example(root: &Path, name: &str) -> Result<()> {
+    if name == "sponza3d"
+        && !root
+            .join("assets/external/sponza/Sponza.tecs.gltf")
+            .is_file()
+    {
+        bail!(
+            "the sponza3d example needs its ignored scene cache; run `cargo xtask fetch sponza` first"
+        );
+    }
+    Ok(())
+}
+
 fn fetch_sponza(root: &Path) -> Result<()> {
     let destination = root.join("assets/external/sponza");
     fs::create_dir_all(&destination)
@@ -380,8 +393,10 @@ fn download(url: &str, destination: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_bc3_texture, safe_relative, valid_cached_texture};
+    use super::{encode_bc3_texture, require_for_example, safe_relative, valid_cached_texture};
     use image::{DynamicImage, Rgba, RgbaImage};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn accepts_model_relative_paths() {
@@ -410,5 +425,25 @@ mod tests {
         let mut truncated = bytes;
         truncated.pop();
         assert!(!valid_cached_texture(&truncated, 4));
+    }
+
+    #[test]
+    fn requires_the_sponza_cache_before_opening_its_window() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "tecs-sponza-example-{}-{unique}",
+            std::process::id()
+        ));
+        assert!(require_for_example(&root, "sponza3d").is_err());
+        assert!(require_for_example(&root, "scene3d").is_ok());
+
+        let scene = root.join("assets/external/sponza/Sponza.tecs.gltf");
+        fs::create_dir_all(scene.parent().unwrap()).unwrap();
+        fs::write(&scene, b"{}").unwrap();
+        assert!(require_for_example(&root, "sponza3d").is_ok());
+        fs::remove_dir_all(&root).unwrap();
     }
 }

@@ -16,10 +16,13 @@ local Renderable3D <const> = tecs.gfx.Renderable3D
 local function game(world: tecs.World, app: tecs.Application)
     local meshes <const> = app.renderer.meshes
     local camera <const> = meshes.camera
-    camera.y = 6.0
-    camera.z = 24.0
-    camera.rotationX = math.sin(math.rad(-8) * 0.5)
-    camera.rotationW = math.cos(math.rad(-8) * 0.5)
+    -- Sponza's long gallery runs along X. Start inside it and look toward the
+    -- center rather than placing the camera outside its positive-Z wall.
+    camera.x = 6.0
+    camera.y = 2.5
+    camera.z = 0.0
+    camera.rotationY = math.sin(math.rad(90) * 0.5)
+    camera.rotationW = math.cos(math.rad(90) * 0.5)
     camera.verticalFov = math.rad(58)
     camera.near = 0.1
     camera.far = 120
@@ -32,7 +35,7 @@ local function game(world: tecs.World, app: tecs.Application)
     for _, light in ipairs(pointColors) do
         world:spawn(
             Transform3D.new({x = light[1], y = light[2], z = light[3]}),
-            PointLight3D(13, light[4], light[5], light[6], 18)
+            PointLight3D(13, light[4], light[5], light[6], 6)
         )
     end
     world:spawn(
@@ -43,7 +46,7 @@ local function game(world: tecs.World, app: tecs.Application)
             rotationX = math.sin(math.rad(-90) * 0.5),
             rotationW = math.cos(math.rad(-90) * 0.5),
         }),
-        SpotLight3D(20, math.rad(18), math.rad(32), 0.75, 0.85, 1.0, 28)
+        SpotLight3D(20, math.rad(18), math.rad(32), 0.75, 0.85, 1.0, 8)
     )
 
     tecs.assets.loadGLTF(tecs.io.files.assetPath("external/sponza/Sponza.tecs.gltf")):onSettle(function(
@@ -69,9 +72,9 @@ end
 
 return tecs.newApplication({
     window = {title = "Tecs Sponza lighting", width = 1280, height = 720},
-    ambientLight = {0.025, 0.03, 0.04},
+    ambientLight = {0.08, 0.09, 0.11},
     sprites = false,
-    bloom = {scale = 0.5, threshold = 0.72, knee = 0.12, intensity = 0.55},
+    bloom = {scale = 0.5, threshold = 0.9, knee = 0.12, intensity = 0.35},
     meshes = {
         capacity = 256,
         vertexCapacity = 262144,
@@ -95,7 +98,7 @@ return tecs.newApplication({
             r = 1.0,
             g = 0.88,
             b = 0.72,
-            intensity = 2.0,
+            intensity = 1.0,
             strength = 0.75,
             softness = 1.5,
         },
