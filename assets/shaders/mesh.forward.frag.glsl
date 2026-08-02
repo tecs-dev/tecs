@@ -50,12 +50,25 @@ struct Light {
     vec4 color;
 };
 
-#ifdef MESH_SHADOWS
+#if defined(MESH_SHADOWS) && defined(MESH_PROBE)
 #define MESH_IMAGE_BINDING 1
+#define MESH_ENVIRONMENT_BINDING 2
+#define MESH_MATERIAL_BINDING 3
+#define MESH_LIGHT_BINDING 4
+#elif defined(MESH_SHADOWS)
+#define MESH_IMAGE_BINDING 1
+#define MESH_MATERIAL_BINDING 2
+#define MESH_LIGHT_BINDING 3
+#elif defined(MESH_PROBE)
+#define MESH_ENVIRONMENT_BINDING 1
 #define MESH_MATERIAL_BINDING 2
 #define MESH_LIGHT_BINDING 3
 #else
 #define MESH_LIGHT_BINDING 2
+#endif
+
+#ifdef MESH_PROBE
+layout(set = 2, binding = MESH_ENVIRONMENT_BINDING) uniform sampler2DArray meshEnvironment;
 #endif
 
 layout(set = 2, binding = MESH_LIGHT_BINDING) readonly buffer Lights { Light item[]; } lights;
@@ -78,7 +91,10 @@ layout(set = 3, binding = 3) uniform Camera {
 #ifdef MESH_PROBE
 layout(set = 3, binding = 4) uniform MeshProbe {
     vec4 face[6];
+    vec4 environmentTuning;
 } probe;
+
+#include "environment.glsl"
 
 vec3 ambientCube(vec3 normal) {
     vec3 squared = normal * normal;
@@ -123,6 +139,9 @@ void main() {
         color = surface.albedo.rgb * scene.ambient.rgb * surface.orm.r * (1.0 - surface.orm.b);
 #ifdef MESH_PROBE
         color += surface.albedo.rgb * ambientCube(surface.normal) * surface.orm.r * (1.0 - surface.orm.b);
+        color += environmentSpecular(surface.albedo.rgb, surface.normal, viewDirection,
+            surface.orm.g, surface.orm.b, surface.orm.r,
+            probe.environmentTuning.x, probe.environmentTuning.zw);
 #endif
 #ifdef MESH_SHADOWS
         vec3 sunDirection = normalize(-meshShadow.direction.xyz);

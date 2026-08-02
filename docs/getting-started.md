@@ -327,11 +327,64 @@ meshes = {
 The six RGB faces are world-space irradiance and may exceed one. The shader
 weights them by the squared components of each mesh normal, adds the result to
 `ambientLight`, and applies ambient occlusion and the material's diffuse-metal
-split. This is diffuse probe lighting, not specular image-based lighting.
+split. This is diffuse probe lighting. It remains useful as the lower-cost
+option when glossy image-based reflections are unnecessary.
 Assign through `app.renderer.meshes.probe` to change it at runtime. Omitting
 `meshes.probe` adds no uniform data or fragment work and selects no probe
 pipeline in a 2D or ordinary 3D application. Prebuilt releases currently
 carry those optional variants in the shared shader pack.
+
+Enable a sampled specular environment independently, then register its six
+decoded RGBA8 faces after asynchronous loading:
+
+```teal
+return tecs.newApplication({
+    sprites = false,
+    meshes = {
+        environment = {
+            size = 256,
+            intensity = 1.4,
+            skyboxIntensity = 1.0,
+            rotation = 0.0,
+        },
+    },
+    plugin = function(_world: tecs.World, app: tecs.Application)
+        local names <const>: {string} = {
+            "positive-x.png", "negative-x.png",
+            "positive-y.png", "negative-y.png",
+            "positive-z.png", "negative-z.png",
+        }
+        local loading: {tecs.Future<tecs.assets.Image>} = {}
+        for index, name in ipairs(names) do
+            loading[index] = tecs.assets.loadImage(
+                tecs.io.files.assetPath("environment/studio/" .. name)
+            )
+        end
+        tecs.Future.all(loading):onSettle(function(done: tecs.Future<{tecs.assets.Image}>)
+            if done.status ~= "ready" then
+                error(done.error, 0)
+            end
+            local face <const> = done.value
+            app.renderer.meshes:registerEnvironment({
+                positiveX = face[1], negativeX = face[2],
+                positiveY = face[3], negativeY = face[4],
+                positiveZ = face[5], negativeZ = face[6],
+            })
+        end)
+    end,
+})
+```
+
+Every face must be square, exactly `environment.size` pixels, and decoded as
+RGBA8. Registration validates the complete set before replacing the six GPU
+layers, consumes the images, and generates their mip chain. Material roughness
+selects among those mips; the skybox always samples the sharpest level.
+`app.renderer.meshes.environment` keeps `intensity`, `skyboxIntensity`, and
+`rotation` caller-writable. Set `skyboxIntensity` to zero for reflections over
+another background. Omitting `meshes.environment` creates no environment
+texture, sampler, upload staging, or sampled binding. Run `cargo xtask example
+ibl3d` to compare five roughness values on metallic and dielectric spheres
+under six repository-owned CC0 faces.
 
 Ordinary glTF images decode to RGBA8. Unpacked mipmapped arrays accept smaller
 images by repeating their edge through the rest of the fixed layer before GPU

@@ -135,7 +135,7 @@ local SCENE_FLOATS <const> = 24
 local SCENE_BYTES <const> = SCENE_FLOATS * 4
 local MESH_SHADOW_SCENE_FLOATS <const> = 32
 local MESH_PBR_FLOATS <const> = 20
-local MESH_PROBE_FLOATS <const> = 24
+local MESH_PROBE_FLOATS <const> = 28
 local MESH_FOG_FLOATS <const> = 4
 
 --- Floats the block a shadow draw is placed from holds: a matrix and four
@@ -469,6 +469,8 @@ local record Deferred
     _meshPBR: boolean
     _meshProbe: boolean
     _meshProbeUniform: loader.CArray
+    _meshEnvironmentTextures: {loader.CValue}
+    _meshEnvironmentSampler: loader.CValue
     _meshCameraX: number
     _meshCameraY: number
     _meshCameraZ: number
@@ -748,7 +750,8 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self._meshPBR = meshPBR
     self._meshProbe = meshProbe
     if meshProbe then
-        self._meshProbeUniform = loader.newArray("float[24]")
+        self._meshProbeUniform = loader.newArray("float[28]")
+        self._meshEnvironmentTextures = {}
     end
     self._meshLights = meshLights
     self._meshLightCapacity = meshLightCapacity
@@ -1157,15 +1160,17 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         })
     end
 
+    local lightingInputs <const> = shadows
+        and meshPBR
+        and {"albedo", "normal", "orm", "emission", "depth", "occluders", "dropShadowAO"} or shadows
+        and {"albedo", "normal", "orm", "emission", "occluders", "dropShadowAO"} or meshPBR
+        and {"albedo", "normal", "orm", "emission", "depth"} or {"albedo", "normal", "orm", "emission"}
     graph:pass({
         name = "lighting",
         -- Declaration order is binding order, and the shader numbers its
         -- samplers to match: the G-buffer's four first, then the two a
         -- pipeline built with shadows on adds.
-        inputs = shadows and meshPBR and {"albedo", "normal", "orm", "emission", "depth", "occluders", "dropShadowAO"}
-            or shadows and {"albedo", "normal", "orm", "emission", "occluders", "dropShadowAO"}
-            or meshPBR and {"albedo", "normal", "orm", "emission", "depth"}
-            or {"albedo", "normal", "orm", "emission"},
+        inputs = lightingInputs,
         outputs = {"lit"},
         execute = function(context: PassGraph.PassContext)
             local scene <const> = sceneUniform(
@@ -1185,6 +1190,9 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
             end
 
             context.pass:bindPipeline(self._lightingPipeline.handle)
+            if self._meshProbe then
+                context.pass:bindTextures(#lightingInputs, self._meshEnvironmentTextures, self._meshEnvironmentSampler)
+            end
             context.pass:bindFragmentStorageBuffers(0, buffers)
             C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, scene, self._sceneBytes)
             context.pass:draw(3)
@@ -1851,6 +1859,17 @@ function Deferred:setMeshProbe(values: loader.CArray)
     for lane = 0, MESH_PROBE_FLOATS - 1 do
         self._meshProbeUniform[lane] = values[lane]
     end
+end
+
+--- Sets the sampled environment used by mesh probe shader variants.
+--- @param texture The mesh domain supplies one six-layer sampled texture.
+--- @param sampler The mesh domain supplies the sampler paired with it.
+function Deferred:setMeshEnvironmentBinding(texture: loader.CValue, sampler: loader.CValue)
+    if not self._meshProbe then
+        return
+    end
+    self._meshEnvironmentTextures[1] = texture
+    self._meshEnvironmentSampler = sampler
 end
 
 --- Updates the perspective view used to reconstruct opaque mesh positions.

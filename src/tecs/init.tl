@@ -409,7 +409,7 @@ local record tecs
     --- At the root because every subsystem that answers later returns one:
     --- an asset decode, a child process, an HTTP transfer and a DNS lookup are
     --- all `Future<T>`, and no one of them owns the type.
-    Future: Future
+    Future: Future<any>
 
     --- `Scope` owns explicitly registered resources for one lexical lifetime.
     type Scope = scopeModule.Scope

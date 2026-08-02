@@ -504,6 +504,10 @@ function TextureArray:generateMipmaps()
     if not self._mipsDirty then
         return
     end
+    if self.levels <= 1 then
+        self._mipsDirty = false
+        return
+    end
     local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
     if commandBuffer == nil then
         sdl.fail("SDL_AcquireGPUCommandBuffer")

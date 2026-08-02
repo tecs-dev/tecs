@@ -5,6 +5,7 @@ Each file is a complete application. Run one from the repository root with:
 ```bash
 cargo xtask example ui-demo
 cargo xtask example scene3d
+cargo xtask example ibl3d
 cargo xtask example gltf3d
 cargo xtask example skinning3d
 cargo xtask example animated3d
@@ -27,6 +28,12 @@ lighting, text, UI, input, animation, audio, and debug tools together.
 `scene3d.tl` draws the same Cook-Torrance scene through two ordered 3D views,
 then composes one full-frame 2D HUD view above them. It also combines vertex
 colors, an emissive unlit mesh, directional shadows, fog, and bloom.
+
+`ibl3d.tl` loads six repository-owned CC0 environment faces, generates their
+mip chain on the GPU, and compares five roughness levels across metallic and
+dielectric Cook-Torrance materials. The same environment is visible as the sky
+and in reflections, so face orientation and camera-relative reflection remain
+easy to verify while moving.
 
 `gltf3d.tl` loads a textured glTF 2.0 scene asynchronously, registers its
 geometry, vertex colors, image, and alpha-blended metallic-roughness material with a

@@ -85,6 +85,12 @@ local interface MeshProbeOptions
     intensity: number
 end
 
+local interface MeshEnvironmentOptions
+    intensity: number
+    skyboxIntensity: number
+    rotation: number
+end
+
 local record MeshRegion
     slot: integer
     firstVertex: integer
@@ -129,6 +135,8 @@ local record MeshBackendOptions
     vertexColors: boolean
     fog: MeshFogOptions
     probe: MeshProbeOptions
+    environment: MeshEnvironmentOptions
+    environmentSize: integer
 end
 
 local record MeshMaterialData
@@ -164,6 +172,7 @@ local record MeshBackend
     type MorphRegion = MorphRegion
     type FogOptions = MeshFogOptions
     type ProbeOptions = MeshProbeOptions
+    type EnvironmentOptions = MeshEnvironmentOptions
 
     capacity: integer
     vertexCapacity: integer
@@ -194,6 +203,15 @@ local record MeshBackend
 
     updateSkin: function(self, region: SkinRegion, matrices: {number})
     updateMorph: function(self, region: MorphRegion, weights: {number})
+    registerEnvironment: function(
+        self,
+        positiveX: assets.Image,
+        negativeX: assets.Image,
+        positiveY: assets.Image,
+        negativeY: assets.Image,
+        positiveZ: assets.Image,
+        negativeZ: assets.Image
+    )
 
     _bounds: Buffer
     _skinVertices: Buffer
@@ -290,12 +308,21 @@ local record MeshBackend
     _vertexColors: boolean
     _fogging: boolean
     _probing: boolean
+    _environmentLighting: boolean
     _mipmaps: boolean
     _textureFormat: integer
     _fog: MeshFogOptions
     _fogUniform: loader.CArray
     _probe: MeshProbeOptions
     _probeUniform: loader.CArray
+    _environment: MeshEnvironmentOptions
+    _environmentSize: integer
+    _environmentImages: TextureArray
+    _environmentSampler: Sampler
+    _environmentRegions: {TextureArray.Region}
+    _environmentTextures: {loader.CValue}
+    _probeTexture: loader.CValue
+    _probeSampler: loader.CValue
     _cameraUniform: loader.CArray
     _shadowActive: boolean
     _doubleSidedActive: boolean
@@ -512,11 +539,14 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._localLights = options.localLights
     self._vertexColors = options.vertexColors
     self._fogging = options.fog ~= nil
-    self._probing = options.probe ~= nil
+    self._environmentLighting = options.environment ~= nil
+    self._probing = options.probe ~= nil or self._environmentLighting
     self._mipmaps = options.mipmaps
     self._textureFormat = options.textureFormat
     self._fog = options.fog
     self._probe = options.probe
+    self._environment = options.environment
+    self._environmentSize = options.environmentSize or 0
     if self._transparent then
         self._cameraUniform = loader.newArray("float[4]")
     end
@@ -525,7 +555,7 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
         self._fogUniform = loader.newArray("float[4]")
     end
     if self._probing then
-        self._probeUniform = loader.newArray("float[24]")
+        self._probeUniform = loader.newArray("float[28]")
     end
     self._shadowActive = false
     self._doubleSidedActive = false
@@ -539,6 +569,8 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._fragmentTextures = {}
     self._forwardBuffers = {}
     self._forwardTextures = {}
+    self._environmentRegions = {}
+    self._environmentTextures = {}
     self.vertices = Buffer.create(
         device,
         {
@@ -671,6 +703,37 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self.sampler = Sampler.create(
         device, {filter = Sampler.FILTER_LINEAR, address = Sampler.ADDRESS_REPEAT, mipmaps = options.mipmaps}
     )
+    self._probeTexture = self.images.handle
+    self._probeSampler = self.sampler.handle
+    if self._environmentLighting then
+        self._environmentImages = TextureArray.create(
+            device,
+            {
+                width = self._environmentSize,
+                height = self._environmentSize,
+                layers = 6,
+                pack = false,
+                mipmaps = true,
+                format = assets.IMAGE_RGBA8,
+            }
+        )
+        self._environmentSampler = Sampler.create(
+            device, {filter = Sampler.FILTER_LINEAR, address = Sampler.ADDRESS_CLAMP, mipmaps = true}
+        )
+        local pixels <const> = loader.newArray("uint8_t[?]", self._environmentSize * self._environmentSize * 4)
+        for face = 1, 6 do
+            self._environmentRegions[face] = self._environmentImages:add(
+                pixels as loader.CValue, self._environmentSize, self._environmentSize, self._environmentSize * 4
+            )
+        end
+        self._environmentImages:generateMipmaps()
+        self._probeTexture = self._environmentImages.handle
+        self._probeSampler = self._environmentSampler.handle
+    end
+    if self._probing then
+        self._environmentTextures[1] = self._probeTexture
+        deferred:setMeshEnvironmentBinding(self._probeTexture, self._probeSampler)
+    end
 
     -- Slot zero is neutral metallic-roughness PBR. Negative texture layers
     -- select shader constants, so the texture array need not spend residency
@@ -872,6 +935,53 @@ function MeshBackend:registerTexture(image: assets.Image): integer
     self._textureRegions[self.textureCount] = region
     self._textureByName[image.path] = self.textureCount
     return self.textureCount
+end
+
+function MeshBackend:registerEnvironment(
+    positiveX: assets.Image,
+    negativeX: assets.Image,
+    positiveY: assets.Image,
+    negativeY: assets.Image,
+    positiveZ: assets.Image,
+    negativeZ: assets.Image
+)
+    if not self._environmentLighting then
+        error("tecs: mesh environment lighting is not enabled", 2)
+    end
+    local images <const>: {assets.Image} = {
+        positiveX,
+        negativeX,
+        positiveY,
+        negativeY,
+        positiveZ,
+        negativeZ,
+    }
+    for face, image in ipairs(images) do
+        if image == nil then
+            error(("tecs: mesh environment face %d is required"):format(face), 2)
+        end
+        if image.pixels == nil then
+            error(("tecs: mesh environment image '%s' has been released"):format(image.path), 2)
+        end
+        if image.format ~= assets.IMAGE_RGBA8 then
+            error(("tecs: mesh environment image '%s' must use RGBA8 pixels"):format(image.path), 2)
+        end
+        if image.width ~= self._environmentSize or image.height ~= self._environmentSize then
+            error(
+                ("tecs: mesh environment image '%s' is %dx%d, expected %dx%d"):format(
+                    image.path, image.width, image.height, self._environmentSize, self._environmentSize
+                ),
+                2
+            )
+        end
+    end
+    for face, image in ipairs(images) do
+        self._environmentImages:replace(
+            self._environmentRegions[face], image.pixels, image.width, image.height, image.pitch
+        )
+        image:release()
+    end
+    self._environmentImages:generateMipmaps()
 end
 
 local function writeRegion(target: loader.CArray, at: integer, region: TextureArray.Region)
@@ -1220,6 +1330,10 @@ local function writeProbeFace(uniform: loader.CArray, base: integer, color: {num
         0.0
 end
 
+local function finite(value: number): boolean
+    return value == value and value ~= math.huge and value ~= -math.huge
+end
+
 function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boolean)
     self.images:generateMipmaps()
     if upload ~= false then
@@ -1295,17 +1409,39 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
         self._deferred:setMeshFog(fog.r, fog.g, fog.b)
     end
     if self._probing then
-        local probe <const> = self._probe
-        if probe.intensity < 0.0 then
-            error("tecs: mesh probe intensity must be non-negative", 2)
-        end
         local uniform <const> = self._probeUniform
-        writeProbeFace(uniform, 0, probe.positiveX, probe.intensity)
-        writeProbeFace(uniform, 4, probe.negativeX, probe.intensity)
-        writeProbeFace(uniform, 8, probe.positiveY, probe.intensity)
-        writeProbeFace(uniform, 12, probe.negativeY, probe.intensity)
-        writeProbeFace(uniform, 16, probe.positiveZ, probe.intensity)
-        writeProbeFace(uniform, 20, probe.negativeZ, probe.intensity)
+        local probe <const> = self._probe
+        if probe ~= nil then
+            if probe.intensity < 0.0 then
+                error("tecs: mesh probe intensity must be non-negative", 2)
+            end
+            writeProbeFace(uniform, 0, probe.positiveX, probe.intensity)
+            writeProbeFace(uniform, 4, probe.negativeX, probe.intensity)
+            writeProbeFace(uniform, 8, probe.positiveY, probe.intensity)
+            writeProbeFace(uniform, 12, probe.negativeY, probe.intensity)
+            writeProbeFace(uniform, 16, probe.positiveZ, probe.intensity)
+            writeProbeFace(uniform, 20, probe.negativeZ, probe.intensity)
+        else
+            for lane = 0, 23 do
+                uniform[lane] = 0.0
+            end
+        end
+        local environment <const> = self._environment
+        if environment ~= nil then
+            if
+                not finite(environment.intensity)
+                or not finite(environment.skyboxIntensity)
+                or not finite(environment.rotation)
+                or environment.intensity < 0.0
+                or environment.skyboxIntensity < 0.0
+            then
+                error("tecs: mesh environment values must be finite and intensities non-negative", 2)
+            end
+            uniform[24], uniform[25] = environment.intensity, environment.skyboxIntensity
+            uniform[26], uniform[27] = math.cos(environment.rotation), math.sin(environment.rotation)
+        else
+            uniform[24], uniform[25], uniform[26], uniform[27] = 0.0, 0.0, 1.0, 0.0
+        end
         self._deferred:setMeshProbe(uniform)
     end
     self._blending = self._transparent and packet.blendCount > 0
@@ -1585,6 +1721,9 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
     context.pass:bindFragmentStorageBuffers(0, self._fragmentBuffers)
     self._deferred:bindLighting(context, 1)
     context.pass:bindTextures(self._shadows and 1 or 0, self._forwardTextures, self.sampler.handle)
+    if self._probing then
+        context.pass:bindTextures(self._shadows and 2 or 1, self._environmentTextures, self._probeSampler)
+    end
     if self._shadows then
         C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, self._shadowUniform, SHADOW_BYTES)
     end
@@ -1593,7 +1732,7 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
     end
     C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 3, self._cameraUniform, 16)
     if self._probing then
-        C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 4, self._probeUniform, 96)
+        C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 4, self._probeUniform, 112)
     end
     context.pass:bindIndexBuffer(self.indices.handle, RenderPass.INDEX_UINT32)
     context.pass:drawIndexedIndirect(self._blendSorted.handle, 0, self._count)
@@ -1724,6 +1863,10 @@ function MeshBackend:destroy()
     self.materials:destroy()
     self.images:destroy()
     self.sampler:destroy()
+    if self._environmentLighting then
+        self._environmentImages:destroy()
+        self._environmentSampler:destroy()
+    end
     self._slots:destroy()
     self._blocks:destroy()
     self._visibleCommands:destroy()

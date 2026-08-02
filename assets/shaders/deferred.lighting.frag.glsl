@@ -94,20 +94,27 @@ layout(set = 2, binding = SHADOW_BINDING + 1) uniform sampler2D dropShadowMask;
 #define LIGHT_BINDING SHADOW_BINDING
 #endif
 
+#ifdef MESH_PROBE
+layout(set = 2, binding = LIGHT_BINDING) uniform sampler2DArray meshEnvironment;
+#define STORAGE_BINDING LIGHT_BINDING + 1
+#else
+#define STORAGE_BINDING LIGHT_BINDING
+#endif
+
 struct Light {
     vec4 position;   // xy in world units, z height, w radius
     vec4 color;      // rgb color, a intensity
 };
 
-layout(set = 2, binding = LIGHT_BINDING) readonly buffer Lights {
+layout(set = 2, binding = STORAGE_BINDING) readonly buffer Lights {
     Light item[];
 } lights;
 
-layout(set = 2, binding = LIGHT_BINDING + 1) readonly buffer TileCounts {
+layout(set = 2, binding = STORAGE_BINDING + 1) readonly buffer TileCounts {
     uint count[];
 } tiles;
 
-layout(set = 2, binding = LIGHT_BINDING + 2) readonly buffer TileLights {
+layout(set = 2, binding = STORAGE_BINDING + 2) readonly buffer TileLights {
     uint index[];
 } tileLights;
 
@@ -144,6 +151,8 @@ layout(set = 3, binding = 0) uniform Scene {
 #endif
 #ifdef MESH_PROBE
     vec4 meshProbe[6];
+    // x specular intensity, y skybox intensity, zw environment Y rotation.
+    vec4 meshEnvironmentTuning;
 #endif
 #ifdef MESH_FOG
     vec4 meshFog;
@@ -153,13 +162,13 @@ layout(set = 3, binding = 0) uniform Scene {
 #include "lighting.glsl"
 
 #ifdef MESH_LIGHTS
-layout(set = 2, binding = LIGHT_BINDING + 3) readonly buffer MeshLights {
+layout(set = 2, binding = STORAGE_BINDING + 3) readonly buffer MeshLights {
     MeshLight item[];
 } meshLights;
-layout(set = 2, binding = LIGHT_BINDING + 4) readonly buffer MeshTileCounts {
+layout(set = 2, binding = STORAGE_BINDING + 4) readonly buffer MeshTileCounts {
     uint count[];
 } meshTiles;
-layout(set = 2, binding = LIGHT_BINDING + 5) readonly buffer MeshTileLights {
+layout(set = 2, binding = STORAGE_BINDING + 5) readonly buffer MeshTileLights {
     uint index[];
 } meshTileLights;
 #endif
@@ -197,6 +206,8 @@ vec3 meshWorldOf(vec2 uv, float depth) {
 #endif
 
 #ifdef MESH_PROBE
+#include "environment.glsl"
+
 vec3 ambientCube(vec3 normal) {
     vec3 squared = normal * normal;
     return squared.x * scene.meshProbe[normal.x >= 0.0 ? 0 : 1].rgb
@@ -294,6 +305,15 @@ void main() {
     // it. The G-buffer clears both attachments to zero, so anything nothing drew
     // over also takes this path and stays the clear color.
     if (!lit) {
+#if defined(MESH_PBR) && defined(MESH_PROBE)
+        if (albedo.a <= 0.0 && scene.meshEnvironmentTuning.y > 0.0) {
+            vec3 direction = meshWorldOf(vUV, 1.0) - scene.meshCamera.xyz;
+            outColor = vec4(environmentSample(
+                direction, 0.0, scene.meshEnvironmentTuning.zw)
+                * scene.meshEnvironmentTuning.y, 1.0);
+            return;
+        }
+#endif
         vec3 color = albedo.rgb + emission;
 #ifdef MESH_FOG
         color = mix(color, scene.meshFog.rgb, fog);
@@ -331,6 +351,9 @@ void main() {
         accumulated *= 1.0 - orm.b;
 #ifdef MESH_PROBE
         accumulated += albedo.rgb * ambientCube(normal) * orm.r * (1.0 - orm.b);
+        accumulated += environmentSpecular(albedo.rgb, normal, viewDirection,
+            orm.g, orm.b, orm.r, scene.meshEnvironmentTuning.x,
+            scene.meshEnvironmentTuning.zw);
 #endif
     }
 #endif

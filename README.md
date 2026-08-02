@@ -36,7 +36,8 @@ start a graphics stack.
   culling, texture and PBR material residency, glTF/GLB skinning and animation,
   large-primitive chunking, and independently allocated transparent,
   double-sided, directional-shadow, point/spot-light, skeletal, morph-target,
-  vertex-color, fog, ambient-probe, mipmapped-texture, and BC3 texture lanes.
+  vertex-color, fog, ambient-probe, specular-environment, mipmapped-texture,
+  and BC3 texture lanes.
 - Optional packed-HDR bloom at a caller-selected scale, composed before
   transparent meshes and the 2D forward lane so a mixed renderer can keep its
   HUD crisp.
@@ -118,12 +119,16 @@ record buffer, screen-tile lists, compute dispatch, bindings, and Cook-Torrance
 shader variants do not exist in a mesh domain that omits `lights`, and no part
 of that path enters a 2D-only renderer.
 
-The first environment-lighting lane is an ambient cube rather than a sampled
-cubemap. Six world-space irradiance colors preserve broad directional light
-without adding a texture, sampler, or shader branch to a domain that omits the
-probe. It intentionally covers only the diffuse PBR lobe. Glossy reflections,
-local reflection volumes, and authored lightmaps remain separate future lanes
-instead of making this baseline probe expensive.
+Environment lighting has two costs rather than one compromise. The ambient
+cube keeps six world-space irradiance colors and shades only the diffuse PBR
+lobe without allocating a texture or sampler. The independently enabled
+specular environment owns six mipmapped RGBA8 faces; roughness selects a mip
+and an analytic split-sum BRDF fit supplies the Fresnel response. It can also
+draw the same faces as the sky. A domain that omits `environment` allocates and
+binds none of those image resources, while the two options share one existing
+probe shader family rather than multiplying the variant matrix. Authored GGX
+prefiltered mip chains, local reflection volumes, and lightmaps remain later
+extensions of the sampled lane instead of making the ambient cube expensive.
 
 The probe variants are pipeline-isolated but not yet package-isolated. The
 shared shader pack carries them even when a 2D application never selects one,
@@ -154,6 +159,7 @@ Run `cargo xtask deps` once to install and stage development dependencies, then:
 cargo xtask build              # Build the host development preset
 cargo xtask example ui-demo    # Run the 2D showcase
 cargo xtask example scene3d    # Run the split-screen Cook-Torrance example
+cargo xtask example ibl3d      # Run the CC0 specular-environment comparison
 cargo xtask example gltf3d     # Run the textured 3D example
 cargo xtask example skinning3d # Run the GPU skeletal-deformation example
 cargo xtask example animated3d # Run the CC0 animated and lit glTF hero

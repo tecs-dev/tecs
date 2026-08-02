@@ -706,6 +706,79 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    it("allocates a specular environment only when requested and shades its roughness lane", function()
+        local without = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = { capacity = 4, vertexCapacity = 16, indexCapacity = 24 },
+        })
+        assert.is_false(without.meshes.environmentLighting)
+        assert.are.equal(0, without.meshes.environmentSize)
+        assert.is_nil(without.meshes._backend._environmentImages)
+        assert.is_nil(without.meshes._backend._environmentSampler)
+        without:destroy()
+
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 0, 0, 0 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                materialCapacity = 4,
+                environment = { size = 1, intensity = 2, skyboxIntensity = 0, rotation = 0 },
+            },
+        })
+        renderer:install(world)
+        assert.is_true(renderer.meshes.environmentLighting)
+        assert.are.equal(1, renderer.meshes.environmentSize)
+        assert.is_false(renderer.meshes.environmentReady)
+        assert.is_not_nil(renderer.meshes._backend._environmentImages)
+        assert.is_not_nil(renderer.meshes._backend._environmentSampler)
+
+        renderer.meshes:registerEnvironment({
+            positiveX = solid("spec://environment-positive-x", 0, 0, 0),
+            negativeX = solid("spec://environment-negative-x", 0, 0, 0),
+            positiveY = solid("spec://environment-positive-y", 0, 0, 0),
+            negativeY = solid("spec://environment-negative-y", 0, 0, 0),
+            positiveZ = solid("spec://environment-positive-z", 255, 0, 0),
+            negativeZ = solid("spec://environment-negative-z", 0, 0, 0),
+        })
+        assert.is_true(renderer.meshes.environmentReady)
+
+        renderer.meshes.camera.z = 2
+        local mesh, bounds = renderer.meshes:registerMesh(triangleMesh("spec://environment-triangle"))
+        local material = renderer.meshes:registerMaterial({
+            name = "spec://environment-metal",
+            model = renderer.meshes.MATERIAL_METALLIC_ROUGHNESS,
+            baseR = 1,
+            baseG = 1,
+            baseB = 1,
+            metallic = 1,
+            roughness = 0.05,
+        })
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5 }),
+            mesh,
+            bounds,
+            material,
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+
+        local pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2 - 6, SIZE / 2 + 6)
+        assert.is_true(pixel.r > 0)
+        assert.are.equal(0, pixel.g)
+        assert.are.equal(0, pixel.b)
+
+        renderer.meshes.environment.intensity = -1
+        assert.has_error(function()
+            frameOnce(world, renderer)
+        end, "tecs: mesh environment values must be finite and intensities non-negative")
+        renderer.meshes.environment.intensity = 2
+        renderer:destroy()
+    end)
+
     it("requires an explicit mesh transparency lane", function()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {
             sprites = false,

@@ -38,6 +38,10 @@ creates no local-light buffers, compute pipeline, queries, or shader variant.
 A domain created with `probe` shades meshes from six world-space irradiance
 faces. A domain without it pushes no probe uniform and selects shader variants
 that perform no probe work.
+A domain created with `environment` owns a separate six-layer mipmapped image,
+adds roughness-dependent specular environment lighting, and can draw that image
+as the sky. Its six decoded RGBA8 faces are registered once after asynchronous
+loading. A domain without it allocates and binds none of those resources.
 Mipmapped RGBA8 layers generate their chains on the GPU after upload. A domain
 using `TEXTURE_BC3` instead consumes complete chains prepared by the asset
 importer and keeps them compressed in GPU memory. This format is an explicit
@@ -64,6 +68,7 @@ local DEFAULT_INDEX_CAPACITY <const> = 3145728
 local DEFAULT_MATERIAL_CAPACITY <const> = 1024
 local DEFAULT_TEXTURE_SIZE <const> = 1024
 local DEFAULT_TEXTURE_LAYERS <const> = 16
+local DEFAULT_ENVIRONMENT_SIZE <const> = 64
 local DEFAULT_JOINT_CAPACITY <const> = 4096
 local DEFAULT_MORPH_VERTEX_CAPACITY <const> = 1048576
 local DEFAULT_MORPH_WEIGHT_CAPACITY <const> = 65536
@@ -239,6 +244,52 @@ end
 local record MeshProbeOptions is MeshProbeTuning
 end
 
+--- Controls one mesh-only specular environment at runtime.
+---
+--- The first implementation selects from the GPU-generated mip chain by
+--- material roughness and uses an analytic split-sum BRDF approximation. It
+--- deliberately keeps the six-face upload contract separate from ordinary
+--- material textures so enabling it changes no material residency limits.
+local interface MeshEnvironmentTuning
+    --- Caller-writable. Scales reflected environment light, must be
+    --- non-negative, and defaults to one.
+    intensity: number
+    --- Caller-writable. Scales the environment shown behind geometry, must be
+    --- non-negative, and defaults to one. Zero hides the sky without removing
+    --- reflected environment light.
+    skyboxIntensity: number
+    --- Caller-writable. Rotates the environment around world Y in radians and
+    --- defaults to zero.
+    rotation: number
+end
+
+--- Enables independently allocated specular-environment resources.
+local record MeshEnvironmentOptions is MeshEnvironmentTuning
+    --- Caller-writable. Sets every square face's width and height in pixels,
+    --- defaults to 64, and is fixed at renderer creation.
+    size: integer
+end
+
+--- Supplies the six decoded RGBA8 faces of one specular environment.
+---
+--- Faces use the conventional positive X, negative X, positive Y, negative Y,
+--- positive Z, negative Z order. `registerEnvironment` consumes every image
+--- after validating the complete set.
+local record MeshEnvironmentFaces
+    --- Caller-writable. Supplies the face viewed along positive world X.
+    positiveX: assets.Image
+    --- Caller-writable. Supplies the face viewed along negative world X.
+    negativeX: assets.Image
+    --- Caller-writable. Supplies the face viewed along positive world Y.
+    positiveY: assets.Image
+    --- Caller-writable. Supplies the face viewed along negative world Y.
+    negativeY: assets.Image
+    --- Caller-writable. Supplies the face viewed along positive world Z.
+    positiveZ: assets.Image
+    --- Caller-writable. Supplies the face viewed along negative world Z.
+    negativeZ: assets.Image
+end
+
 local record MeshDomainOptions
     --- Caller-writable. Sets the maximum resident mesh-instance count and
     --- defaults to 65,536.
@@ -303,6 +354,9 @@ local record MeshDomainOptions
     --- Caller-writable. Enables diffuse environment lighting for meshes. Nil
     --- omits its shader variants and runtime work.
     probe: MeshProbeOptions
+    --- Caller-writable. Enables a six-face specular environment and optional
+    --- skybox. Nil allocates no environment texture or sampler.
+    environment: MeshEnvironmentOptions
 end
 
 local type RegisteredPrimitive = Model3D.Primitive
@@ -319,6 +373,9 @@ local interface MeshDomain is DomainStats
     type Fog = MeshFogTuning
     type ProbeOptions = MeshProbeOptions
     type Probe = MeshProbeTuning
+    type EnvironmentOptions = MeshEnvironmentOptions
+    type Environment = MeshEnvironmentTuning
+    type EnvironmentFaces = MeshEnvironmentFaces
     type RegisteredPrimitive = RegisteredPrimitive
     type Model3D = Model3D
 
@@ -391,14 +448,31 @@ local interface MeshDomain is DomainStats
     fogging: boolean
     --- Read-only. Reports whether ambient-cube probe variants are enabled.
     probing: boolean
+    --- Read-only. Reports whether specular-environment resources are enabled.
+    environmentLighting: boolean
+    --- Read-only. Reports the fixed square environment face size, or zero
+    --- while the lane is disabled.
+    environmentSize: integer
+    --- Read-only. Reports whether all six environment faces were uploaded.
+    environmentReady: boolean
     --- Caller-writable. Controls the enabled directional light and shadow map.
     --- Nil while shadows are disabled.
     shadow: MeshShadowTuning
     --- Caller-writable. Controls enabled mesh fog. Nil while fog is disabled.
     fog: MeshFogTuning
-    --- Caller-writable. Controls enabled mesh environment lighting. Nil while
-    --- the probe is disabled.
+    --- Caller-writable. Controls enabled diffuse ambient-cube lighting. Nil
+    --- while the probe is disabled.
     probe: MeshProbeTuning
+    --- Caller-writable. Controls enabled specular environment lighting. Nil
+    --- while the environment lane is disabled.
+    environment: MeshEnvironmentTuning
+    --- Replaces all six faces of the enabled specular environment.
+    ---
+    --- Every face must be a square RGBA8 image of `environmentSize` pixels.
+    --- Validation happens before any upload; a successful call consumes all
+    --- six image holds and regenerates the roughness mip chain.
+    --- @param faces The caller supplies one decoded image per world-space axis.
+    registerEnvironment: function(self, faces: MeshEnvironmentFaces)
     --- Registers immutable CPU geometry in this domain.
     --- @param mesh The caller supplies CPU geometry that this call consumes.
     --- @return Returns a mesh component ready to spawn.
@@ -500,6 +574,9 @@ local record MeshDomainModule
     type Fog = MeshFogTuning
     type ProbeOptions = MeshProbeOptions
     type Probe = MeshProbeTuning
+    type EnvironmentOptions = MeshEnvironmentOptions
+    type Environment = MeshEnvironmentTuning
+    type EnvironmentFaces = MeshEnvironmentFaces
     type RegisteredPrimitive = RegisteredPrimitive
     type Model3D = Model3D
 
@@ -621,6 +698,12 @@ function MeshDomainModule._create(
     self.vertexColors = options.vertexColors == true
     self.fogging = options.fog ~= nil
     self.probing = options.probe ~= nil
+    self.environmentLighting = options.environment ~= nil
+    self.environmentSize = self.environmentLighting
+        and positive(
+            "mesh environment size", (options.environment as MeshEnvironmentOptions).size or DEFAULT_ENVIRONMENT_SIZE
+        ) or 0
+    self.environmentReady = false
     if self.shadows then
         local shadow <const> = options.shadows or {}
         self.shadow = {
@@ -659,6 +742,14 @@ function MeshDomainModule._create(
             intensity = probe.intensity or 1.0,
         }
     end
+    if self.environmentLighting then
+        local environment <const> = options.environment or {}
+        self.environment = {
+            intensity = environment.intensity or 1.0,
+            skyboxIntensity = environment.skyboxIntensity or 1.0,
+            rotation = environment.rotation or 0.0,
+        }
+    end
     self._centerXByAsset = {}
     self._centerYByAsset = {}
     self._centerZByAsset = {}
@@ -694,6 +785,8 @@ function MeshDomainModule._create(
             vertexColors = self.vertexColors,
             fog = self.fog as MeshBackend.FogOptions,
             probe = self.probe as MeshBackend.ProbeOptions,
+            environment = self.environment as MeshBackend.EnvironmentOptions,
+            environmentSize = self.environmentSize,
         }
     )
     self._backend = backend
@@ -718,6 +811,19 @@ function MeshDomainImpl:registerTexture(image: assets.Image): integer
     local texture <const> = self._backend:registerTexture(image)
     self.textureCount = self._backend.textureCount
     return texture
+end
+
+function MeshDomainImpl:registerEnvironment(faces: MeshEnvironmentFaces)
+    if not self.environmentLighting then
+        error("tecs: mesh environment lighting is not enabled", 2)
+    end
+    if faces == nil then
+        error("tecs: mesh environment faces are required", 2)
+    end
+    self._backend:registerEnvironment(
+        faces.positiveX, faces.negativeX, faces.positiveY, faces.negativeY, faces.positiveZ, faces.negativeZ
+    )
+    self.environmentReady = true
 end
 
 function MeshDomainImpl:registerMaterial(options: MeshMaterialOptions): components.MeshMaterial

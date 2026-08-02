@@ -180,7 +180,7 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
         meshShadowMap = noContribution,
         meshFog = meshFog ~= nil,
         meshPBR = options.meshes ~= nil,
-        meshProbe = options.meshes ~= nil and options.meshes.probe ~= nil,
+        meshProbe = options.meshes ~= nil and (options.meshes.probe ~= nil or options.meshes.environment ~= nil),
         meshLightCapacity = options.meshes ~= nil
             and options.meshes.lights ~= nil
             and (options.meshes.lights.capacity or 256) or nil,
