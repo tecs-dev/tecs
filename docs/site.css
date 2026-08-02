@@ -43,6 +43,10 @@
     --tecs-c-lavender: #867795;
     --tecs-c-tan: #9b8d75;
 
+    /* The header art is dark by construction. Wash it toward the active
+     * header surface in the light theme so the navigation stays readable. */
+    --tecs-header-wash: rgba(213, 208, 200, 0.78);
+
     /* One root size, at every width. Pico steps this from 100% to 131.25%
      * across five breakpoints, which makes `rem` a function of the viewport,
      * and browser zoom is a change in the viewport: crossing 1280 or 1536 on
@@ -166,10 +170,10 @@
     scroll-padding-top: calc(var(--tealdoc-header-height) + 0.5rem);
 }
 
-/* The wordmark. Logo red with a purple rule under, which is the one piece of
- * the identity that is a drawing rather than a color, so it is written against
- * tealdoc's classes rather than its tokens. No `logo` is configured, so this
- * is the whole mark. */
+/* The wordmark, which sits beside the controller rather than replacing it.
+ * Logo red with a purple rule under, the one piece of the identity that is a
+ * drawing rather than a color, so it is written against tealdoc's classes
+ * rather than its tokens. */
 .tealdoc-brand-name {
     display: inline-flex;
     align-items: center;
@@ -184,6 +188,65 @@
     text-decoration-color: #a192b1;
     text-decoration-thickness: 2px;
     text-underline-offset: 5px;
+}
+
+/* The mark is authored on a 32 unit grid, so 32px renders it at one pixel per
+ * unit. Tealdoc's default 28px is an arbitrary 0.875 of the size every
+ * measurement in the file was chosen at.
+ *
+ * The artwork is tilted 10 degrees, which means no edge in it is axis-aligned
+ * and the browser antialiases all of them. That is the deliberate cost of the
+ * angle rather than something to tune out here: at 16px, where the favicon
+ * runs, a level version of this mark would be crisper. If it ever needs to be,
+ * the fix is a second untilted file for `favicon` alone, not a change to this
+ * rule.
+ *
+ * It renders through an `<img>`, which cannot read this page's custom
+ * properties, so the file carries one set of colors picked to clear both the
+ * light and the dark header surface rather than shipping a pair and swapping
+ * them. A mark that needs to know the theme is a mark with two failure modes.
+ * The body is the mid lavender for exactly that reason: it is the one value in
+ * this palette that holds against sand and against near-black alike. */
+.tealdoc-logo {
+    width: 32px;
+    height: 32px;
+}
+
+/* A digital horizon emerges from the empty left side of the header and
+ * gathers its scanlines and wireframe grid behind the right side. The fade is
+ * baked into the image, so the header needs no mask or extra layer. */
+.tealdoc-header {
+    background-image:
+        linear-gradient(var(--tecs-header-wash), var(--tecs-header-wash)), url("/images/header-arcade.svg");
+    background-repeat: no-repeat;
+    background-position: right center;
+    background-size: auto 100%;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --tecs-header-wash: rgba(29, 29, 29, 0.08);
+    }
+}
+
+:root:has(.tealdoc-theme-input:checked),
+:root[data-tealdoc-theme="dark"] {
+    --tecs-header-wash: rgba(29, 29, 29, 0.08);
+}
+
+/* In a dark-preferring system the checked toggle asks for the light theme,
+ * which is the inverse of the same checkbox in the default media state. */
+@media (prefers-color-scheme: dark) {
+    :root:has(.tealdoc-theme-input:checked),
+    :root[data-tealdoc-theme="light"] {
+        --tecs-header-wash: rgba(213, 208, 200, 0.78);
+    }
+}
+
+@media (max-width: 900px) {
+    .tealdoc-header {
+        background-image: none;
+    }
 }
 
 .tealdoc-home-hero .tealdoc-hero-starburst {

@@ -616,15 +616,47 @@ return {
             title = "Tecs",
             description = "Typed entity component system and game engine for Lua.",
             site_url = "https://tecs.dev",
-            -- No logo: the wordmark in `docs/site.css` is the mark, and an
-            -- image beside it would say the name twice.
-            favicon = "/images/logo.svg",
+            -- The mark is a controller on a 32 by 32 grid, which is the grid
+            -- the wordmark beside it implies: Jersey 15 is a pixel face. It
+            -- sits beside that wordmark rather than replacing it, so the two
+            -- together are the whole identity.
+            --
+            -- The favicon is the PNG rather than the SVG, and the SVG is
+            -- offered beside it in `head` below. An SVG icon on its own is
+            -- the whole icon or nothing: a browser that will not render one
+            -- has no second choice and falls back to its default globe, and
+            -- there is no /favicon.ico here to catch it.
+            logo = "/images/controller.svg",
+            favicon = "/images/controller-32.png",
             github = "https://github.com/tecs-dev/tecs",
             public = "docs/public",
             -- The wordmark is visible in the first paint. Start its tiny local
             -- Latin face with the document instead of discovering it after
             -- the stylesheet arrives.
             head = {
+                -- Offered to browsers that render SVG icons, which scale it
+                -- cleanly past 32. The PNG above is what everything else gets.
+                {
+                    tag = "link",
+                    attributes = {
+                        rel = "icon",
+                        type = "image/svg+xml",
+                        href = "/images/controller.svg",
+                    },
+                },
+                -- The touch icon carries its own near-black ground, because a
+                -- home screen composites a transparent icon against whatever
+                -- it likes. Its two recesses are lifted off that ground for
+                -- the same reason they are sunk into the body everywhere else:
+                -- at #110f0d on #110f0d they would not be there at all.
+                {
+                    tag = "link",
+                    attributes = {
+                        rel = "apple-touch-icon",
+                        sizes = "180x180",
+                        href = "/images/controller-180.png",
+                    },
+                },
                 {
                     tag = "link",
                     attributes = {
