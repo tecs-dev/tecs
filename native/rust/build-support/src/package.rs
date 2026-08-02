@@ -62,11 +62,6 @@ const WINDOWS_SYSTEM_LIBRARIES: &[&str] = &[
 const COMPILER_NAMES: &[&str] = &["shaderc", "spirvcross", "spirv-cross", "dxcompiler"];
 const LINKED_LIBRARIES: &[(&str, &str, &str)] = &[
     (r"tecs\w*", "MIT OR Apache-2.0", "the engine's own"),
-    (
-        r"spirvcrossc",
-        "Apache-2.0 OR MIT",
-        "the shared FFI library over SPIRV-Cross",
-    ),
     (r"cjson", "MIT", "the vendored lua-cjson"),
     (
         r"SDL3(_mixer|_ttf)?",
@@ -77,11 +72,6 @@ const LINKED_LIBRARIES: &[(&str, &str, &str)] = &[
         r"(luajit|lua51)",
         "MIT",
         "the VM, including PUC-Rio Lua's notice",
-    ),
-    (
-        r"shaderc(_shared)?",
-        "Apache-2.0",
-        "the development shader compiler",
     ),
     (r"z(lib)?", "Zlib", "the public deflate service"),
     (

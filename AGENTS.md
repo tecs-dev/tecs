@@ -8,8 +8,7 @@ top of a renderer-agnostic core.
 
 SDL owns the loop. An entry file returns an application and a Rust host drives it through `SDL_AppInit`,
 `SDL_AppEvent`, `SDL_AppIterate` and `SDL_AppQuit`. Everything below Lua is reached through the FFI against
-generated bindings. Rust owns the host and engine support services; generated C linker glue and a small
-SPIRV-Cross wrapper remain.
+generated bindings. Rust owns the host and engine support services; generated C linker glue remains.
 
 Entities are the interface. Anything that renders or updates per frame is an entity in a world.
 

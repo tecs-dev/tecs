@@ -37,7 +37,7 @@ local files = require("tecs.io.files")
 -- and types libraries rather than being one, and the engine's own native code
 -- reached through it -- the worker channels, the log sink, the solver pool --
 -- ships with the engine on every target and is not a portability question.
-local BINDINGS = { "rust", "sdl3", "sdl3mixer", "sdl3ttf", "shaderc", "spvc" }
+local BINDINGS = { "rust", "sdl3", "sdl3mixer", "sdl3ttf" }
 
 -- Every native entry point that reaches content, and the decoders that take a
 -- path instead of a stream. This is the bug class: the storage seam covers

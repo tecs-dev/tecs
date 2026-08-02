@@ -185,7 +185,7 @@ release for that target compiles them:
 `async-compression`, `atomic-waker`, `autocfg`, `base64`, `bincode`,
 `bitflags`, `block-buffer`, `bumpalo`, `bytemuck`, `byteorder-lite`, `bytes`,
 `camino`, `cc`, `cfg-if`,
-`clap`, `clap_builder`, `clap_complete`, `clap_derive`, `clap_lex`, `combine`,
+`clap`, `clap_builder`, `clap_complete`, `clap_derive`, `clap_lex`, `cmake`, `combine`,
 `compression-codecs`, `compression-core`, `core-foundation`,
 `core-foundation-sys`, `core_maths`, `crc32fast`, `crossbeam-deque`,
 `crossbeam-epoch`, `crossbeam-utils`, `crypto-common`, `data-url`, `digest`,
@@ -200,12 +200,12 @@ release for that target compiles them:
 `icu_normalizer`, `icu_normalizer_data`, `icu_properties`,
 `icu_properties_data`, `icu_provider`, `idna`, `idna_adapter`, `image`,
 `imagesize`, `indexmap`, `ipnet`, `itoa`, `jni`, `jni-macros`, `jni-sys`,
-`jni-sys-macros`, `js-sys`, `kurbo`, `libc`, `libm`, `litemap`, `log`,
+`jni-sys-macros`, `jobserver`, `js-sys`, `kurbo`, `libc`, `libm`, `litemap`, `log`,
 `matrixmultiply`, `memchr`, `miniz_oxide`, `mio`, `moxcms`, `nalgebra`,
 `nalgebra-macros`, `num-bigint`, `num-complex`, `num-derive`, `num-integer`,
 `num-rational`, `num-traits`, `once_cell`, `openssl-probe`, `ordered-float`,
 `parry2d`, `path-clean`, `pathdiff`, `percent-encoding`, `pico-args`,
-`pin-project-lite`, `png`,
+`pin-project-lite`, `pkg-config`, `png`,
 `polycool`, `potential_utf`,
 `proc-macro2`, `profiling`, `profiling-procmacros`, `pxfm`, `quote`,
 `rapier2d`, `rawpointer`, `rayon`, `rayon-core`, `regex`, `regex-automata`,
@@ -214,10 +214,12 @@ release for that target compiles them:
 `rustls-platform-verifier`, `rustls-platform-verifier-android`,
 `rustls-webpki`, `rustversion`, `rustybuzz`, `safe_arch`, `same-file`, `schannel`,
 `sdl3-sys`, `security-framework`, `security-framework-sys`, `semver`, `serde`,
-`serde_arrays`, `serde_core`, `serde_derive`, `sha2`, `shlex`, `signal-hook`,
+`serde_arrays`, `serde_core`, `serde_derive`, `sha2`, `shaderc`, `shaderc-sys`,
+`shlex`, `signal-hook`,
 `signal-hook-registry`, `simba`,
 `simd-adler32`, `simd_cesu8`, `simdutf8`, `simplecss`, `siphasher`,
-`slab`, `slotmap`, `smallvec`, `socket2`, `spade`, `stable_deref_trait`,
+`slab`, `slotmap`, `smallvec`, `socket2`, `spade`, `spirv`, `spirv-cross2`,
+`spirv-cross2-derive`, `spirv-cross-sys`, `stable_deref_trait`,
 `static_assertions`, `strict-num`, `subtle`, `svgtypes`, `syn`, `sync_wrapper`,
 `taffy`,
 `synstructure`, `thiserror`, `thiserror-impl`, `tiny-skia`, `tiny-skia-path`,
@@ -329,7 +331,7 @@ described, and it is off only because nothing here plays a module.
 rather than silently drop its format, and `Audio.decoders()` reports what a
 running build actually has, which is the answer to check against this list.
 
-### SPIRV-Cross
+### Development shader compiler
 
 **SPIRV-Cross**, dual licensed **Apache-2.0 OR MIT** at the recipient's option.
 Its `LICENSE` file is Apache-2.0 alone and understates that; the election is
@@ -337,19 +339,16 @@ stated per file, in every one of the library sources. Its embedded `spirv.h`,
 `spirv.hpp` and `GLSL.std.450.h` are Khronos Free Use, which is MIT-like and
 wants its notice in all copies.
 
-### shaderc
-
 **shaderc**, Apache-2.0, and only in a build that compiles shaders at runtime. A
 release consumes a prebuilt shader pack and links no compiler, which
-`cargo xtask check-package` enforces, so this section applies to a development build
-and to any tool that ships one, not to a shipped game.
+`cargo xtask check-package` enforces. Cargo pins and builds shaderc,
+SPIRV-Cross, glslang, SPIRV-Tools and SPIRV-Headers through the `shaderc`,
+`shaderc-sys`, `spirv-cross2` and `spirv-cross-sys` crates, so this section
+applies to a development build and to any tool that ships one, not to a
+shipped game.
 
-shaderc builds in third-party projects of its own, and vendors none of them. It
-carries a `DEPS` file naming a commit of each and a `git-sync-deps` script that
-clones what that names, so pinning shaderc alone pins the wrapper and leaves the
-compiler inside it moving. The Cargo build pins the three that reach object
-code at the revisions shaderc's own `DEPS` names at the shaderc revision beside
-them:
+The sys crates vendor the upstream source revisions they build. shaderc's
+source graph contributes:
 
 - **SPIRV-Tools**, Apache-2.0
 - **SPIRV-Headers**, MIT

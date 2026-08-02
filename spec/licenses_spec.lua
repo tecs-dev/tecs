@@ -138,9 +138,7 @@ local TOOLING_ONLY = {
     SCINTILLUA = true,
 }
 
--- What each pinned revision is called in the notices. Kept explicit rather than
--- derived from the variable name, because `TECS_SPVC_TAG` is SPIRV-Cross and no
--- rule turns one into the other.
+-- What each pinned native revision is called in the notices.
 local NOTICE_NAMES = {
     SDL3 = "SDL3",
     SDL3_MIXER = "SDL3_mixer",
@@ -148,13 +146,6 @@ local NOTICE_NAMES = {
     FREETYPE = "FreeType",
     HARFBUZZ = "HarfBuzz",
     LUAJIT = "LuaJIT",
-    SHADERC = "shaderc",
-    -- shaderc's own three, pinned here rather than left to the script that
-    -- clones whatever its DEPS file names.
-    GLSLANG = "glslang",
-    SPIRV_TOOLS = "SPIRV-Tools",
-    SPIRV_HEADERS = "SPIRV-Headers",
-    SPIRV_CROSS = "SPIRV-Cross",
     ZLIB = "zlib",
 }
 
@@ -193,6 +184,7 @@ local AGGREGATE_SECTIONS = {
     ["SDL"] = true,
     ["Rust native build foundation"] = true,
     ["What SDL3_mixer decodes"] = true,
+    ["Development shader compiler"] = true,
 }
 
 -- The workspace's own crates, which no notice covers. `tecs-native` is the one

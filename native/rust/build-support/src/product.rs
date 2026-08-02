@@ -54,12 +54,6 @@ pub const HARFBUZZ_REVISION: &str = "564bf9818a18709776856533829c0c04950773d6";
 // comes from.
 pub const LUAJIT_REVISION: &str = "4886b676a698acc4bbdf54adfabb3e33a8c020e8";
 pub const LUAJIT_ROLLING: &str = "2.1.1785577137";
-pub const SHADERC_VERSION: &str = "2026.3";
-pub const SHADERC_REVISION: &str = "2c8cae778eec0283b44acbe7ed1a386865d78799";
-pub const GLSLANG_REVISION: &str = "168d452a4f460d24b588fed08477a81c44ee27a1";
-pub const SPIRV_TOOLS_REVISION: &str = "b707790a898e44038547df54580022fc1cf89c3d";
-pub const SPIRV_HEADERS_REVISION: &str = "29981f65241605e08b0ede4cfeb999fe3b723c6a";
-pub const SPIRV_CROSS_REVISION: &str = "2275d0efc4f2fa46851035d9d3c67c105bc8b99e";
 pub const ZLIB_REVISION: &str = "da607da739fa6047df13e66a2af6b8bec7c2a498";
 
 const C_WARNINGS: &[&str] = &[
@@ -272,7 +266,7 @@ pub fn abi_check(root: &Path, preset: Preset) -> Result<()> {
 
 fn check_product_abi(root: &Path, preset: Preset, paths: &Paths) -> Result<()> {
     let include_directories = if matches!(preset.dependencies, DependencyMode::System) {
-        system_packages(preset)?
+        system_packages()?
             .into_iter()
             .map(|(name, package)| (name, package.includes))
             .collect()
@@ -282,8 +276,6 @@ fn check_product_abi(root: &Path, preset: Preset, paths: &Paths) -> Result<()> {
             ("sdl3", vec![include.clone()]),
             ("sdl3mixer", vec![include.clone()]),
             ("sdl3ttf", vec![include.clone()]),
-            ("shaderc", vec![include.clone()]),
-            ("spvc", vec![include.join("spirv_cross")]),
             ("zlib", vec![include]),
         ])
     };
@@ -593,9 +585,9 @@ fn preflight(root: &Path, preset: Preset) -> Result<()> {
 }
 
 fn build_system(root: &Path, preset: Preset, paths: &Paths) -> Result<PathBuf> {
-    let packages = system_packages(preset)?;
+    let packages = system_packages()?;
     stage_content(root, paths, &packages)?;
-    generate_bindings(root, preset, paths, &packages)?;
+    generate_bindings(root, paths, &packages)?;
     let rust_archive = build_rust(root, preset, paths)?;
     compile_and_link(root, preset, paths, &packages, &rust_archive)?;
     write_build_info(preset, paths)?;
@@ -606,7 +598,7 @@ fn build_pinned(root: &Path, preset: Preset, paths: &Paths) -> Result<PathBuf> {
     ensure_native_host(preset)?;
     let packages = pinned_packages(root, preset, paths)?;
     stage_content(root, paths, &packages)?;
-    generate_bindings(root, preset, paths, &packages)?;
+    generate_bindings(root, paths, &packages)?;
     let rust_archive = build_rust(root, preset, paths)?;
     if preset.is_single() {
         compile_and_link_single(root, preset, paths, &packages, &rust_archive)?;
@@ -703,36 +695,6 @@ fn pinned_packages(
         "https://github.com/madler/zlib.git",
         ZLIB_REVISION,
     )?;
-    let spirv_cross = fetch_source(
-        &source_root,
-        "spirv-cross",
-        "https://github.com/KhronosGroup/SPIRV-Cross.git",
-        SPIRV_CROSS_REVISION,
-    )?;
-    let shaderc = fetch_source(
-        &source_root,
-        "shaderc",
-        "https://github.com/google/shaderc.git",
-        SHADERC_REVISION,
-    )?;
-    fetch_source_at(
-        &source_root,
-        &shaderc.join("third_party/glslang"),
-        "https://github.com/KhronosGroup/glslang.git",
-        GLSLANG_REVISION,
-    )?;
-    fetch_source_at(
-        &source_root,
-        &shaderc.join("third_party/spirv-tools"),
-        "https://github.com/KhronosGroup/SPIRV-Tools.git",
-        SPIRV_TOOLS_REVISION,
-    )?;
-    fetch_source_at(
-        &source_root,
-        &shaderc.join("third_party/spirv-tools/external/spirv-headers"),
-        "https://github.com/KhronosGroup/SPIRV-Headers.git",
-        SPIRV_HEADERS_REVISION,
-    )?;
     let luajit = fetch_source(
         &source_root,
         "luajit",
@@ -814,48 +776,6 @@ fn pinned_packages(
     )?;
     cmake_install(&build_root.join("sdl3-mixer"))?;
 
-    configure_cmake(
-        preset,
-        &spirv_cross,
-        &build_root.join("spirv-cross"),
-        &prefix,
-        &[
-            "-DSPIRV_CROSS_CLI=OFF".into(),
-            "-DSPIRV_CROSS_ENABLE_TESTS=OFF".into(),
-            "-DSPIRV_CROSS_SKIP_INSTALL=OFF".into(),
-            "-DSPIRV_CROSS_SHARED=OFF".into(),
-        ],
-    )?;
-    cmake_install(&build_root.join("spirv-cross"))?;
-
-    configure_cmake(
-        preset,
-        &shaderc,
-        &build_root.join("shaderc"),
-        &prefix,
-        &[
-            "-DSHADERC_SKIP_TESTS=ON".into(),
-            "-DSHADERC_SKIP_EXAMPLES=ON".into(),
-            "-DSHADERC_SKIP_EXECUTABLES=ON".into(),
-            "-DSHADERC_SKIP_COPYRIGHT_CHECK=ON".into(),
-            "-DSHADERC_ENABLE_WERROR_COMPILE=OFF".into(),
-            "-DSHADERC_SKIP_INSTALL=OFF".into(),
-            "-DSPIRV_SKIP_TESTS=ON".into(),
-            "-DSPIRV_SKIP_EXECUTABLES=ON".into(),
-            "-DENABLE_GLSLANG_BINARIES=OFF".into(),
-            "-DGLSLANG_TESTS=OFF".into(),
-            "-DBUILD_SHARED_LIBS=OFF".into(),
-        ],
-    )?;
-    cmake_build(
-        &build_root.join("shaderc"),
-        Some(if shared {
-            "shaderc_shared"
-        } else {
-            "shaderc_combined"
-        }),
-    )?;
-    install_shaderc(&shaderc, &build_root.join("shaderc"), &prefix, shared)?;
     build_luajit(preset, &luajit, &prefix)?;
 
     let library = prefix.join("lib");
@@ -911,28 +831,6 @@ fn pinned_packages(
             } else {
                 "luajit-5.1".into()
             }],
-        ),
-    );
-    packages.insert(
-        "shaderc",
-        pinned_package(
-            "shaderc",
-            vec![prefix.join("include")],
-            vec![library.clone()],
-            vec![if shared {
-                "shaderc_shared".into()
-            } else {
-                "shaderc_combined".into()
-            }],
-        ),
-    );
-    packages.insert(
-        "spvc",
-        pinned_package(
-            "spvc",
-            vec![prefix.join("include/spirv_cross")],
-            vec![library],
-            Vec::new(),
         ),
     );
     let _ = root;
@@ -1416,44 +1314,6 @@ fn cmake_install(build: &Path) -> Result<()> {
     cmake_build(build, Some("install"))
 }
 
-fn install_shaderc(source: &Path, build: &Path, prefix: &Path, shared: bool) -> Result<()> {
-    let include = prefix.join("include/shaderc");
-    fs::create_dir_all(&include)?;
-    copy_tree(&source.join("libshaderc/include/shaderc"), &include, false)?;
-    let library = prefix.join("lib");
-    fs::create_dir_all(&library)?;
-    let mut copied = 0;
-    for entry in WalkDir::new(build).into_iter().filter_map(Result::ok) {
-        if !entry.file_type().is_file() && !entry.file_type().is_symlink() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy();
-        let wanted = if shared {
-            (name.starts_with("libshaderc_shared")
-                && (name.ends_with(".dylib") || name.contains(".so")))
-                || (name.starts_with("shaderc_shared")
-                    && (name.ends_with(".dll") || name.ends_with(".lib")))
-        } else {
-            name == "libshaderc_combined.a" || name == "shaderc_combined.lib"
-        };
-        if wanted {
-            fs::copy(entry.path(), library.join(entry.file_name()))?;
-            copied += 1;
-        }
-    }
-    if copied == 0 {
-        anyhow::bail!(
-            "shaderc build did not produce {}",
-            if shared {
-                "a shared library"
-            } else {
-                "the combined archive"
-            }
-        );
-    }
-    Ok(())
-}
-
 fn build_luajit(preset: Preset, source: &Path, prefix: &Path) -> Result<()> {
     if preset.rust_target.contains("windows") {
         let mut build = Command::new("cmd");
@@ -1509,8 +1369,8 @@ fn build_luajit(preset: Preset, source: &Path, prefix: &Path) -> Result<()> {
     run(&mut install, "installing pinned LuaJIT")
 }
 
-fn system_packages(preset: Preset) -> Result<BTreeMap<&'static str, Package>> {
-    check_system_versions(preset)?;
+fn system_packages() -> Result<BTreeMap<&'static str, Package>> {
+    check_system_versions()?;
     let mut packages = BTreeMap::new();
     for (key, package) in [
         ("sdl3", "sdl3"),
@@ -1520,10 +1380,6 @@ fn system_packages(preset: Preset) -> Result<BTreeMap<&'static str, Package>> {
         ("zlib", "zlib"),
     ] {
         packages.insert(key, pkg_config(key, package)?);
-    }
-    if matches!(preset.shaders, ShaderMode::Runtime) {
-        packages.insert("shaderc", pkg_config("shaderc", "shaderc")?);
-        packages.insert("spvc", pkg_config("spvc", "spirv-cross-c")?);
     }
     Ok(packages)
 }
@@ -1537,21 +1393,18 @@ fn system_packages(preset: Preset) -> Result<BTreeMap<&'static str, Package>> {
 /// answers Ok.
 pub fn check_system_dependencies(preset: Preset) -> Result<()> {
     if matches!(preset.dependencies, DependencyMode::System) {
-        check_system_versions(preset)?;
+        check_system_versions()?;
     }
     Ok(())
 }
 
-fn check_system_versions(preset: Preset) -> Result<()> {
-    let mut requirements = vec![
+fn check_system_versions() -> Result<()> {
+    let requirements = [
         ("SDL3", "sdl3", SDL3_VERSION, false),
         ("SDL3_mixer", "sdl3-mixer", SDL3_MIXER_VERSION, false),
         ("SDL3_ttf", "sdl3-ttf", SDL3_TTF_VERSION, false),
         ("LuaJIT", "luajit", LUAJIT_ROLLING, false),
     ];
-    if matches!(preset.shaders, ShaderMode::Runtime) {
-        requirements.push(("shaderc", "shaderc", SHADERC_VERSION, true));
-    }
     let mut drift = Vec::new();
     for (name, package, revision, prefix) in requirements {
         let found = pkg_output(package, &["--modversion"])?;
@@ -2042,7 +1895,6 @@ struct Binding<'a> {
 
 fn generate_bindings(
     root: &Path,
-    preset: Preset,
     paths: &Paths,
     packages: &BTreeMap<&'static str, Package>,
 ) -> Result<()> {
@@ -2056,15 +1908,6 @@ fn generate_bindings(
     ttf.extend(sdl.clone());
     ttf.extend(native.clone());
     let zlib = package(packages, "zlib")?.includes.clone();
-    let shaderc = packages
-        .get("shaderc")
-        .map(|package| package.includes.clone())
-        .unwrap_or_default();
-    let spvc = packages
-        .get("spvc")
-        .map(|package| package.includes.clone())
-        .unwrap_or_default();
-    let runtime_shaders = matches!(preset.shaders, ShaderMode::Runtime);
     let bindings = vec![
         Binding {
             name: "sdl3",
@@ -2103,32 +1946,6 @@ fn generate_bindings(
             registry_prefix: "TTF_",
             registry_headers: &["SDL3_ttf/SDL_ttf.h", "SDL3_ttf/SDL_textengine.h"],
             enabled: true,
-            _packages: packages,
-        },
-        Binding {
-            name: "shaderc",
-            header: "shaderc/shaderc.h",
-            keeps: &["/shaderc/"],
-            prefix: "shaderc_",
-            needed: &[],
-            includes: shaderc,
-            registry_struct: "TecsShadercApi",
-            registry_prefix: "shaderc_",
-            registry_headers: &["shaderc/shaderc.h"],
-            enabled: runtime_shaders,
-            _packages: packages,
-        },
-        Binding {
-            name: "spvc",
-            header: "spirv_cross_c.h",
-            keeps: &["/spirv_cross_c.h", "/spirv.h"],
-            prefix: "SPVC_",
-            needed: &[],
-            includes: spvc,
-            registry_struct: "TecsSpvcApi",
-            registry_prefix: "spvc_",
-            registry_headers: &["spirv_cross_c.h"],
-            enabled: runtime_shaders,
             _packages: packages,
         },
         Binding {
@@ -2320,10 +2137,6 @@ void tecsRegistryInstall(struct lua_State *L)
         paths.generated.join("worker_anchor.c"),
         "/* Generated by `cargo xtask`. Do not edit. */\nvoid tecsWorkerLibraryAnchor(void);\nvoid tecsWorkerLibraryAnchor(void) {}\n",
     )?;
-    fs::write(
-        paths.generated.join("spvc_anchor.c"),
-        "/* Generated by `cargo xtask`. Do not edit. */\nvoid tecsSpirvCrossLibraryAnchor(void);\nvoid tecsSpirvCrossLibraryAnchor(void) {}\n",
-    )?;
     Ok(())
 }
 
@@ -2343,8 +2156,15 @@ fn build_rust(root: &Path, preset: Preset, paths: &Paths) -> Result<PathBuf> {
         .env("TECS_CONTENT", "../share/tecs/lua/")
         .env("TECS_ENTRY", preset.entry)
         .current_dir(root);
+    let mut features = Vec::new();
     if preset.is_single() {
-        command.args(["--features", "payload"]);
+        features.push("payload");
+    }
+    if matches!(preset.shaders, ShaderMode::Runtime) {
+        features.push("shader-compiler");
+    }
+    if !features.is_empty() {
+        command.args(["--features", &features.join(",")]);
     }
     apply_platform_environment(&mut command, preset);
     run(&mut command, "Rust native service build")?;
@@ -2408,10 +2228,6 @@ fn compile_and_link(
     ] {
         registry_sources.push(paths.generated.join(format!("{name}api.c")));
     }
-    if matches!(preset.shaders, ShaderMode::Runtime) {
-        registry_sources.push(paths.generated.join("shadercapi.c"));
-        registry_sources.push(paths.generated.join("spvcapi.c"));
-    }
     let registry_objects = registry_sources
         .iter()
         .map(|source| {
@@ -2441,12 +2257,6 @@ fn compile_and_link(
         None,
     )?;
 
-    let spirv_cross = if matches!(preset.shaders, ShaderMode::Runtime) {
-        Some(link_spirv_cross(root, preset, paths, packages, &includes)?)
-    } else {
-        None
-    };
-
     let worker_object = compile_c(
         root,
         preset,
@@ -2465,8 +2275,11 @@ fn compile_and_link(
         cjson_archive.as_os_str().to_owned(),
     ];
     worker_flags.extend(force_load(rust_archive));
-    worker_flags.extend(native_dependency_flags(packages, spirv_cross.as_deref())?);
+    worker_flags.extend(native_dependency_flags(packages)?);
     worker_flags.extend(rust_platform_flags());
+    if matches!(preset.shaders, ShaderMode::Runtime) {
+        worker_flags.extend(cpp_runtime_flags());
+    }
     link_shared(
         preset,
         &worker,
@@ -2498,9 +2311,12 @@ fn compile_and_link(
         worker_link.into_os_string(),
         cjson_archive.as_os_str().to_owned(),
     ];
-    final_flags.extend(native_dependency_flags(packages, spirv_cross.as_deref())?);
+    final_flags.extend(native_dependency_flags(packages)?);
     final_flags.push(rust_archive.as_os_str().to_owned());
     final_flags.extend(rust_platform_flags());
+    if matches!(preset.shaders, ShaderMode::Runtime) {
+        final_flags.extend(cpp_runtime_flags());
+    }
     link_executable(preset, paths, &executable, &[main_object], &final_flags)?;
     Ok(())
 }
@@ -2572,8 +2388,6 @@ fn compile_and_link_single(
         "dialogs",
         "http",
         "rust",
-        "shaderc",
-        "spvc",
     ] {
         registry_sources.push(paths.generated.join(format!("{name}api.c")));
     }
@@ -2903,88 +2717,13 @@ fn link_executable(
     run(&mut command, &format!("linking {}", output.display()))
 }
 
-fn link_spirv_cross(
-    root: &Path,
-    preset: Preset,
-    paths: &Paths,
-    packages: &BTreeMap<&'static str, Package>,
-    includes: &[PathBuf],
-) -> Result<PathBuf> {
-    let anchor = compile_c(
-        root,
-        preset,
-        paths,
-        &paths.generated.join("spvc_anchor.c"),
-        includes,
-        CompileOptions {
-            defines: &[],
-            flags: &package_compile_flags(packages),
-            warnings: true,
-        },
-    )?;
-    let package = package(packages, "spvc")?;
-    let directory = package
-        .library_directories
-        .first()
-        .context("SPIRV-Cross has no library directory")?;
-    let mut archives = Vec::new();
-    for name in [
-        "spirv-cross-c",
-        "spirv-cross-cpp",
-        "spirv-cross-msl",
-        "spirv-cross-glsl",
-        "spirv-cross-hlsl",
-        "spirv-cross-reflect",
-        "spirv-cross-util",
-        "spirv-cross-core",
-    ] {
-        let path = directory.join(format!("lib{name}.a"));
-        if !path.is_file() {
-            anyhow::bail!("SPIRV-Cross archive {} was not found", path.display());
-        }
-        archives.push(path);
-    }
-    let output = paths.library.join(shared_name("spirvcrossc"));
-    let mut command = Command::new("c++");
-    if std::env::consts::OS == "macos" {
-        command
-            .args(["-dynamiclib", "-Wl,-all_load", "-arch", target_arch(preset)])
-            .arg(format!(
-                "-mmacosx-version-min={}",
-                preset
-                    .deployment_target
-                    .context("macOS preset has no deployment target")?
-            ))
-            .arg("-install_name")
-            .arg(format!("@rpath/{}", shared_name("spirvcrossc")));
-    } else {
-        command.args(["-shared", "-Wl,--whole-archive"]);
-    }
-    if preset.sanitize {
-        command.args(["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]);
-    }
-    command.arg("-o").arg(&output).arg(anchor).args(&archives);
-    if std::env::consts::OS != "macos" {
-        command.arg("-Wl,--no-whole-archive");
-    }
-    run(&mut command, "linking SPIRV-Cross FFI library")?;
-    Ok(output)
-}
-
-fn native_dependency_flags(
-    packages: &BTreeMap<&'static str, Package>,
-    spirv_cross: Option<&Path>,
-) -> Result<Vec<OsString>> {
+fn native_dependency_flags(packages: &BTreeMap<&'static str, Package>) -> Result<Vec<OsString>> {
     let mut flags = package_link_flags(&[
         package(packages, "sdl3mixer")?,
         package(packages, "sdl3ttf")?,
         package(packages, "sdl3")?,
         package(packages, "zlib")?,
     ]);
-    if let Some(spirv_cross) = spirv_cross {
-        flags.extend(package_link_flags(&[package(packages, "shaderc")?]));
-        flags.push(spirv_cross.as_os_str().to_owned());
-    }
     flags.extend(package_link_flags(&[package(packages, "luajit")?]));
     Ok(flags)
 }
@@ -3059,6 +2798,16 @@ fn rust_platform_flags() -> Vec<OsString> {
             .into_iter()
             .map(OsString::from)
             .collect()
+    }
+}
+
+fn cpp_runtime_flags() -> Vec<OsString> {
+    if std::env::consts::OS == "macos" {
+        vec!["-lc++".into()]
+    } else if std::env::consts::OS == "windows" {
+        Vec::new()
+    } else {
+        vec!["-lstdc++".into()]
     }
 }
 
@@ -3188,8 +2937,7 @@ mod tests {
     use super::{
         copy_dynamic_libraries, fetch_source_at, package_from_flags, package_link_flags,
         preserve_engine_output, remove_shadowing_teal_outputs, remove_stale_teal_outputs, Paths,
-        GLSLANG_REVISION, LUAJIT_REVISION, SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION,
-        SPIRV_CROSS_REVISION, SPIRV_HEADERS_REVISION, SPIRV_TOOLS_REVISION, ZLIB_REVISION,
+        LUAJIT_REVISION, SDL3_MIXER_REVISION, SDL3_REVISION, ZLIB_REVISION,
     };
 
     #[test]
@@ -3310,11 +3058,6 @@ mod tests {
             SDL3_REVISION,
             SDL3_MIXER_REVISION,
             LUAJIT_REVISION,
-            SHADERC_REVISION,
-            GLSLANG_REVISION,
-            SPIRV_TOOLS_REVISION,
-            SPIRV_HEADERS_REVISION,
-            SPIRV_CROSS_REVISION,
             ZLIB_REVISION,
         ] {
             assert_eq!(revision.len(), 40);

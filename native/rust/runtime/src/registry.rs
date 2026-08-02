@@ -16,9 +16,9 @@ unsafe extern "C" {
 
 /// Installs generated native API tables into a Lua state.
 ///
-/// The build owns the list because shader compiler APIs are conditional. Rust
-/// owns the Lua stack operation; generated C only resolves the selected
-/// accessor symbols into parallel name and pointer arrays.
+/// The build owns the list of generated APIs. Rust owns the Lua stack
+/// operation; generated C only resolves the selected accessor symbols into
+/// parallel name and pointer arrays.
 ///
 /// # Safety
 ///

@@ -257,6 +257,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5add81bb678e6cb321aff7fa0dc7689ad82b112dbc032cea19f91d6b8e3582b9"
 dependencies = [
  "find-msvc-tools",
+ "jobserver",
+ "libc",
  "shlex",
 ]
 
@@ -336,6 +338,15 @@ name = "clap_lex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
+
+[[package]]
+name = "cmake"
+version = "0.1.58"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "codespan-reporting"
@@ -1273,6 +1284,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "jobserver"
+version = "0.1.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
+dependencies = [
+ "getrandom 0.4.3",
+ "libc",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1575,6 +1596,12 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pkg-config"
+version = "0.3.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "png"
@@ -1885,6 +1912,12 @@ checksum = "4e27ee8bb91ca0adcf0ecb116293afa12d393f9c2b9b9cd54d33e8078fe19839"
 
 [[package]]
 name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
+name = "roxmltree"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
@@ -2189,6 +2222,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "shaderc"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ab2a6e36d1c1e2320c87e2b806a3e7b0dffaa67b82c14a39dad6cf7637208ae"
+dependencies = [
+ "libc",
+ "shaderc-sys",
+]
+
+[[package]]
+name = "shaderc-sys"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdceb85b2c6d2c27b95ffe2d341063dfded0aca8046f7f60c544bbeaeaf8bcae"
+dependencies = [
+ "cmake",
+ "libc",
+ "link-cplusplus",
+ "pkg-config",
+ "roxmltree 0.20.0",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2306,6 +2362,53 @@ dependencies = [
  "robust",
  "serde",
  "smallvec",
+]
+
+[[package]]
+name = "spirv"
+version = "0.4.0+sdk-1.4.341.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9571ea910ebd84c86af4b3ed27f9dbdc6ad06f17c5f96146b2b671e2976744f"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
+name = "spirv-cross-sys"
+version = "0.7.2+38681a3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9291b270f65ee1e61842d0a4dadc707d3b1669d8001e0900433e341c897d5d1b"
+dependencies = [
+ "bytemuck",
+ "cc",
+ "num-derive",
+ "num-traits",
+]
+
+[[package]]
+name = "spirv-cross2"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e01f93f6f1637a1a72b43d2ca50ebbcd94c3f4c4e94eda8e27144834671f008"
+dependencies = [
+ "bitflags",
+ "bytemuck",
+ "memchr",
+ "spirv",
+ "spirv-cross-sys",
+ "spirv-cross2-derive",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "spirv-cross2-derive"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18017a288e6ce64dd5d56510166baeabb01849483555c031f573c091b6934a64"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2474,7 +2577,9 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "shaderc",
  "signal-hook",
+ "spirv-cross2",
  "taffy",
  "tokio",
  "tokio-stream",
@@ -2893,7 +2998,7 @@ dependencies = [
  "kurbo",
  "log",
  "pico-args",
- "roxmltree",
+ "roxmltree 0.21.1",
  "rustybuzz",
  "simplecss",
  "siphasher",

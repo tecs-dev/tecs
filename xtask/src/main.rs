@@ -220,8 +220,6 @@ fn main() -> Result<()> {
                     "sdl3",
                     "sdl3_mixer",
                     "sdl3_ttf",
-                    "shaderc",
-                    "spirv-cross",
                     "luajit",
                     "clang-format",
                     "stylua",
@@ -232,9 +230,9 @@ fn main() -> Result<()> {
             )?;
             install_dev_tools(&root)?;
             // Homebrew carries one version of each formula and it is the
-            // current one, so five of the packages above are pinned by this
+            // current one, so four of the packages above are pinned by this
             // tree and unpinnable through `brew`: SDL3, SDL3_mixer, SDL3_ttf,
-            // shaderc and LuaJIT. Installing them can therefore leave the
+            // and LuaJIT. Installing them can therefore leave the
             // machine outside the tree's own version gate, which is what a
             // build fails on next. So `deps` runs that gate itself, here,
             // while whoever ran it is still reading the output and knows what

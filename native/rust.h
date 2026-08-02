@@ -31,6 +31,29 @@ typedef struct TecsNoise TecsNoise;
 typedef struct TecsRegex TecsRegex;
 typedef struct TecsUiTree TecsUiTree;
 typedef struct TecsUri TecsUri;
+typedef struct TecsShader TecsShader;
+
+typedef struct TecsShaderDefine {
+    const uint8_t *name;
+    size_t name_length;
+    const uint8_t *value;
+    size_t value_length;
+} TecsShaderDefine;
+
+typedef struct TecsShaderInfo {
+    const uint8_t *code;
+    size_t code_length;
+    const char *entrypoint;
+    uint32_t samplers;
+    uint32_t read_only_storage_textures;
+    uint32_t read_only_storage_buffers;
+    uint32_t read_write_storage_textures;
+    uint32_t read_write_storage_buffers;
+    uint32_t uniform_buffers;
+    uint32_t thread_count_x;
+    uint32_t thread_count_y;
+    uint32_t thread_count_z;
+} TecsShaderInfo;
 
 /* Taffy-backed retained UI layout. An entity id is the tree key, so Lua keeps
  * ownership of the ECS hierarchy and Rust owns only the derived layout cache.
@@ -109,6 +132,14 @@ typedef struct TecsRegexSpan {
     size_t end;
     bool matched;
 } TecsRegexSpan;
+
+/* Cargo-owned GLSL compilation. Stage is 0 vertex, 1 fragment, or 2 compute.
+ * Target is 0 SPIR-V or 1 Metal Shading Language. */
+bool tecsShaderCompilerAvailable(void);
+TecsShader *tecsShaderCompile(const uint8_t *source, size_t source_length, const uint8_t *name, size_t name_length,
+                              uint32_t stage, uint32_t target, const TecsShaderDefine *defines, size_t define_count);
+bool tecsShaderGetInfo(const TecsShader *shader, TecsShaderInfo *info);
+void tecsShaderDestroy(TecsShader *shader);
 
 typedef struct TecsStringView {
     const uint8_t *data;
