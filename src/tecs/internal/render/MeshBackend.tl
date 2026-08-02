@@ -34,6 +34,7 @@ local GraphicsPipeline <const> = require("tecs.gpu.GraphicsPipeline")
 local ComputePipeline <const> = require("tecs.gpu.ComputePipeline")
 local ComputePass <const> = require("tecs.gpu.ComputePass")
 local TextureArray <const> = require("tecs.gpu.TextureArray")
+local Texture <const> = require("tecs.gpu.Texture")
 local Sampler <const> = require("tecs.gpu.Sampler")
 local RenderPass <const> = require("tecs.gpu.RenderPass")
 local Deferred <const> = require("tecs.gpu.Deferred")
@@ -42,6 +43,8 @@ local meshlayout <const> = require("tecs.gpu.meshlayout")
 local meshshadowlayout <const> = require("tecs.gpu.meshshadowlayout")
 local dirtyranges <const> = require("tecs.gpu.dirtyranges")
 local frustum <const> = require("tecs.internal.render.frustum")
+local Camera3D <const> = require("tecs.gfx.Camera3D")
+local meshlocalshadowlayout <const> = require("tecs.gpu.meshlocalshadowlayout")
 
 local C <const> = sdl.C
 local CULL_GROUP <const> = 256
@@ -55,6 +58,10 @@ local SHADOW_FLOATS <const> = meshshadowlayout.UNIFORM_FLOATS
 local SHADOW_BYTES <const> = meshshadowlayout.UNIFORM_BYTES
 local JOINT_FLOATS <const> = 16
 local JOINT_BYTES <const> = JOINT_FLOATS * 4
+local LOCAL_SHADOW_FACES <const> = meshlocalshadowlayout.FACES
+local LOCAL_SHADOW_LIGHT_FLOATS <const> = meshlocalshadowlayout.LIGHT_FLOATS
+local LOCAL_SHADOW_MATRIX_FLOATS <const> = meshlocalshadowlayout.MATRIX_FLOATS
+local R16 <const> = tonumber(C.SDL_GPU_TEXTUREFORMAT_R16_UNORM) as integer
 
 local interface MeshShadowOptions
     distance: number
@@ -138,6 +145,10 @@ local record MeshBackendOptions
     morphVertexCapacity: integer
     morphWeightCapacity: integer
     localLights: boolean
+    localShadowCapacity: integer
+    localShadowSize: integer
+    localShadowBias: number
+    localShadowSoftness: number
     vertexColors: boolean
     fog: MeshFogOptions
     probe: MeshProbeOptions
@@ -312,6 +323,22 @@ local record MeshBackend
     _skinning: boolean
     _morphing: boolean
     _localLights: boolean
+    _localShadows: boolean
+    _localShadowCapacity: integer
+    _localShadowSize: integer
+    _localShadowBias: number
+    _localShadowSoftness: number
+    _localShadowCount: integer
+    _localShadowAtlas: Texture
+    _localShadowSampler: Sampler
+    _localShadowTextures: {loader.CValue}
+    _localShadowAttachments: {RenderPass.Attachment}
+    _localShadowMatrixBuffer: Buffer
+    _localShadowCommands: {Buffer}
+    _localShadowCameras: {Camera3D}
+    _localShadowCullMatrix: loader.CArray
+    _localShadowUniform: loader.CArray
+    _localShadowPass: RenderPass
     _vertexColors: boolean
     _fogging: boolean
     _probing: boolean
@@ -365,9 +392,14 @@ local function vertexDefines(
 end
 
 local function fragmentDefines(
-    shadows: boolean, fogging: boolean, doubleSided?: boolean, localLights?: boolean, probing?: boolean
+    shadows: boolean,
+    fogging: boolean,
+    doubleSided?: boolean,
+    localLights?: boolean,
+    probing?: boolean,
+    localShadows?: boolean
 ): {string: string}
-    if not shadows and not fogging and not doubleSided and not localLights and not probing then
+    if not shadows and not fogging and not doubleSided and not localLights and not probing and not localShadows then
         return nil
     end
     local defines: {string: string} = {}
@@ -385,6 +417,9 @@ local function fragmentDefines(
     end
     if probing then
         defines.MESH_PROBE = "1"
+    end
+    if localShadows then
+        defines.MESH_LOCAL_SHADOWS = "1"
     end
     return defines
 end
@@ -430,13 +465,16 @@ local function buildForward(
     fogging: boolean,
     doubleSided?: boolean,
     localLights?: boolean,
-    probing?: boolean
+    probing?: boolean,
+    localShadows?: boolean
 ): GraphicsPipeline
     local vertex = Shader.load(
         device, "mesh.vert", {defines = vertexDefines(skinning, morphing, vertexColors, fogging)}
     )
     local fragment = Shader.load(
-        device, "mesh.forward.frag", {defines = fragmentDefines(shadows, fogging, doubleSided, localLights, probing)}
+        device,
+        "mesh.forward.frag",
+        {defines = fragmentDefines(shadows, fogging, doubleSided, localLights, probing, localShadows)}
     )
     local pipeline = GraphicsPipeline.create(
         device,
@@ -456,7 +494,7 @@ local function buildForward(
 end
 
 local function buildShadow(
-    device: loader.CPtr, deferred: Deferred, skinning: boolean, morphing: boolean, vertexColors: boolean
+    device: loader.CPtr, format: integer, skinning: boolean, morphing: boolean, vertexColors: boolean
 ): GraphicsPipeline
     local vertex = Shader.load(
         device, "mesh.shadow.vert", {defines = vertexDefines(skinning, morphing, vertexColors, false)}
@@ -467,7 +505,7 @@ local function buildShadow(
         {
             vertexShader = vertex,
             fragmentShader = fragment,
-            colorFormat = deferred:meshShadowFormat(),
+            colorFormat = format,
             cull = GraphicsPipeline.CULL_NONE,
             blendMode = GraphicsPipeline.BLEND_MIN,
             name = "mesh.shadows",
@@ -546,6 +584,12 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._skinning = options.skinning
     self._morphing = options.morphing
     self._localLights = options.localLights
+    self._localShadowCapacity = options.localShadowCapacity or 0
+    self._localShadows = self._localShadowCapacity > 0
+    self._localShadowSize = options.localShadowSize or 0
+    self._localShadowBias = options.localShadowBias or 0.0
+    self._localShadowSoftness = options.localShadowSoftness or 0.0
+    self._localShadowCount = 0
     self._vertexColors = options.vertexColors
     self._fogging = options.fog ~= nil
     self._environmentLighting = options.environment ~= nil
@@ -578,6 +622,16 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
         self._shadowCommands = {}
         for cascade = 1, SHADOW_CASCADES do
             self._shadowMatrices[cascade] = loader.newArray("float[?]", SHADOW_MATRIX_FLOATS)
+        end
+    end
+    if self._localShadows then
+        self._localShadowCommands = {}
+        self._localShadowCameras = {}
+        self._localShadowCullMatrix = loader.newArray("float[16]")
+        self._localShadowUniform = loader.newArray("float[4]")
+        self._localShadowUniform[0], self._localShadowUniform[1] = self._localShadowBias, self._localShadowSoftness
+        for index = 1, self._localShadowCapacity * LOCAL_SHADOW_FACES do
+            self._localShadowCameras[index] = Camera3D.newCamera3D({verticalFov = math.pi * 0.5})
         end
     end
     self._geometryBuffers = {}
@@ -719,6 +773,51 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self.sampler = Sampler.create(
         device, {filter = Sampler.FILTER_LINEAR, address = Sampler.ADDRESS_REPEAT, mipmaps = options.mipmaps}
     )
+    if self._localShadows then
+        local size <const> = self._localShadowSize
+        self._localShadowAtlas = Texture.create(
+            device,
+            {
+                width = size * LOCAL_SHADOW_FACES,
+                height = size * self._localShadowCapacity,
+                format = R16,
+                usage = {"colorTarget", "sampled"},
+                name = "mesh.localShadowAtlas",
+            }
+        )
+        self._localShadowSampler = Sampler.create(
+            device, {filter = Sampler.FILTER_NEAREST, address = Sampler.ADDRESS_CLAMP}
+        )
+        self._localShadowTextures = {self._localShadowAtlas.handle}
+        self._localShadowAttachments = {
+            {texture = self._localShadowAtlas.handle, clear = {r = 1.0, g = 1.0, b = 1.0, a = 1.0}},
+        }
+        self._localShadowMatrixBuffer = Buffer.create(
+            device,
+            {
+                usage = {"storage"},
+                size = self._localShadowCapacity * LOCAL_SHADOW_FACES * LOCAL_SHADOW_MATRIX_FLOATS * 4,
+                name = "mesh.localShadowMatrices",
+            }
+        )
+        for slot = 1, self._localShadowCapacity do
+            self._localShadowCommands[slot] = Buffer.create(
+                device,
+                {
+                    usage = {"indirect", "computeWrite"},
+                    size = self.capacity * meshlayout.COMMAND_BYTES,
+                    name = ("mesh.localShadow%d.commands"):format(slot),
+                }
+            )
+        end
+        deferred:setMeshLocalShadowBinding(
+            self._localShadowAtlas.handle,
+            self._localShadowSampler.handle,
+            self._localShadowMatrixBuffer.handle,
+            self._localShadowBias,
+            self._localShadowSoftness
+        )
+    end
     self._probeTexture = self.images.handle
     self._probeSampler = self.sampler.handle
     if self._environmentLighting then
@@ -857,12 +956,14 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
                 }
             )
         end
+    end
+    if self._shadows or self._localShadows then
         if self._transparent or self._doubleSided then
             self._shadowMarkPipeline = ComputePipeline.load(
                 device, "mesh.mark.comp", {defines = self._transparent and {MESH_ALPHA = "1"} or nil}
             )
         end
-        self.shadowPipeline = buildShadow(device, deferred, self._skinning, self._morphing, self._vertexColors)
+        self.shadowPipeline = buildShadow(device, R16, self._skinning, self._morphing, self._vertexColors)
     end
     if self._transparent then
         local groups <const> = math.ceil(self.capacity / CULL_GROUP)
@@ -910,7 +1011,8 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
             self._fogging,
             self._doubleSided,
             self._localLights,
-            self._probing
+            self._probing,
+            self._localShadows
         )
     end
     configureDrawBindings(self)
@@ -1500,6 +1602,154 @@ local function finite(value: number): boolean
     return value == value and value ~= math.huge and value ~= -math.huge
 end
 
+local function compactShadow(self: MeshBackend, matrix: loader.CArray, commands: Buffer, frame: Frame, groups: integer)
+    local uniform <const> = self._cullUniform
+    frustum.write(matrix, uniform)
+    uniform[24] = self._count
+    uniform[25] = groups
+    uniform[26] = self.capacity
+    uniform[27] = 0.0
+
+    local markWrites <const> = self._shadowMarkWrites
+    markWrites[1] = self._slots.handle
+    markWrites[2] = self._blocks.handle
+    markWrites[3] = commands.handle
+    local markReads <const> = self._shadowMarkReads
+    markReads[1] = self._bounds.handle
+    if self._transparent then
+        markReads[2] = self.instances.handle
+    end
+    local mark <const> = ComputePass.begin(frame.commandBuffer, markWrites, self._markPass)
+    self._markPass = mark
+    mark:bindPipeline((self._shadowMarkPipeline or self._markPipeline).handle)
+    mark:bindStorageBuffers(0, markReads)
+    C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+    mark:dispatch(groups)
+    mark:finish()
+
+    local scanWrites <const> = self._scanWrites
+    scanWrites[1] = self._blocks.handle
+    local scan <const> = ComputePass.begin(frame.commandBuffer, scanWrites, self._scanPass)
+    self._scanPass = scan
+    scan:bindPipeline(self._scanPipeline.handle)
+    C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+    scan:dispatch(1)
+    scan:finish()
+
+    local compactWrites <const> = self._shadowCompactWrites
+    compactWrites[1] = commands.handle
+    local compactReads <const> = self._shadowCompactReads
+    compactReads[1] = self._slots.handle
+    compactReads[2] = self._blocks.handle
+    compactReads[3] = self.commands.handle
+    local compact <const> = ComputePass.begin(frame.commandBuffer, compactWrites, self._compactPass)
+    self._compactPass = compact
+    compact:bindPipeline(self._compactPipeline.handle)
+    compact:bindStorageBuffers(0, compactReads)
+    C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+    compact:dispatch(groups)
+    compact:finish()
+end
+
+local function writeLocalCullMatrix(matrix: loader.CArray, x: number, y: number, z: number, radius: number)
+    local inverseRadius <const> = 1.0 / radius
+    local inverseDepth <const> = 0.5 * inverseRadius
+    for lane = 0, 15 do
+        matrix[lane] = 0.0
+    end
+    matrix[0], matrix[5], matrix[10], matrix[15] = inverseRadius, inverseRadius, inverseDepth, 1.0
+    matrix[12], matrix[13], matrix[14] = -x * inverseRadius, -y * inverseRadius, -(z - radius) * inverseDepth
+end
+
+local FACE_SINE <const> = math.sqrt(0.5)
+
+local function aimPointFace(camera: Camera3D, face: integer)
+    camera.rotationX, camera.rotationY, camera.rotationZ, camera.rotationW = 0.0, 0.0, 0.0, 1.0
+    if face == 1 then
+        camera.rotationY, camera.rotationW = -FACE_SINE, FACE_SINE
+    elseif face == 2 then
+        camera.rotationY, camera.rotationW = FACE_SINE, FACE_SINE
+    elseif face == 3 then
+        camera.rotationX, camera.rotationW = FACE_SINE, FACE_SINE
+    elseif face == 4 then
+        camera.rotationX, camera.rotationW = -FACE_SINE, FACE_SINE
+    elseif face == 5 then
+        camera.rotationY, camera.rotationW = 1.0, 0.0
+    end
+end
+
+local function recordLocalShadows(self: MeshBackend, packet: MeshFramePacket, frame: Frame)
+    local previous <const> = self._localShadowCount
+    local count <const> = packet.shadowLightCount
+    self._localShadowCount = count
+    if count == 0 and previous == 0 then
+        return
+    end
+
+    local lights <const> = packet.shadowLights
+    local size <const> = self._localShadowSize
+    if count > 0 then
+        local matrices <const> = self._localShadowMatrixBuffer:mapSlotAs(packet.slot, "float*")
+        local groups <const> = math.ceil(self._count / CULL_GROUP)
+        for slot = 1, count do
+            local source <const> = (slot - 1) * LOCAL_SHADOW_LIGHT_FLOATS
+            local x <const>, y <const>, z <const>, radius <const> = lights[source] as number,
+                lights[source + 1] as number,
+                lights[source + 2] as number,
+                lights[source + 3] as number
+            local kind <const> = lights[source + 8] as integer
+            local faces <const> = kind == 0 and LOCAL_SHADOW_FACES or 1
+            for face = 1, faces do
+                local camera <const> = self._localShadowCameras[(slot - 1) * LOCAL_SHADOW_FACES + face]
+                camera.x, camera.y, camera.z = x, y, z
+                camera.near, camera.far = radius * 0.001, radius
+                if kind == 0 then
+                    camera.verticalFov = math.pi * 0.5
+                    aimPointFace(camera, face)
+                else
+                    camera.verticalFov = (lights[source + 9] as number) * 2.0
+                    camera.rotationX, camera.rotationY = lights[source + 4] as number, lights[source + 5] as number
+                    camera.rotationZ, camera.rotationW = lights[source + 6] as number, lights[source + 7] as number
+                end
+                local matrix <const> = camera:matrix(size, size)
+                local target <const> = ((slot - 1) * LOCAL_SHADOW_FACES + face - 1) * LOCAL_SHADOW_MATRIX_FLOATS
+                for lane = 0, LOCAL_SHADOW_MATRIX_FLOATS - 1 do
+                    matrices[target + lane] = matrix[lane]
+                end
+            end
+            if self._count > 0 then
+                writeLocalCullMatrix(self._localShadowCullMatrix, x, y, z, radius)
+                compactShadow(self, self._localShadowCullMatrix, self._localShadowCommands[slot], frame, groups)
+            end
+        end
+        local bytes <const> = count * LOCAL_SHADOW_FACES * LOCAL_SHADOW_MATRIX_FLOATS * 4
+        self._localShadowMatrixBuffer:markSlotDirty(packet.slot, 0, bytes)
+        self._localShadowMatrixBuffer:flushSlot(packet.slot, frame.commandBuffer)
+    end
+
+    local pass <const> = RenderPass.begin(frame.commandBuffer, self._localShadowAttachments, nil, self._localShadowPass)
+    self._localShadowPass = pass
+    if count > 0 and self._count > 0 then
+        pass:bindPipeline(self.shadowPipeline.handle)
+        pass:bindVertexStorageBuffers(0, self._geometryBuffers)
+        pass:bindFragmentStorageBuffers(0, self._fragmentBuffers)
+        pass:bindTextures(0, self._fragmentTextures, self.sampler.handle)
+        pass:bindIndexBuffer(self.indices.handle, RenderPass.INDEX_UINT32)
+        for slot = 1, count do
+            local source <const> = (slot - 1) * LOCAL_SHADOW_LIGHT_FLOATS
+            local faces <const> = (lights[source + 8] as integer) == 0 and LOCAL_SHADOW_FACES or 1
+            for face = 1, faces do
+                pass:setViewport((face - 1) * size, (slot - 1) * size, size, size)
+                pass:setScissor((face - 1) * size, (slot - 1) * size, size, size)
+                local camera <const> = self._localShadowCameras[(slot - 1) * LOCAL_SHADOW_FACES + face]
+                pass:pushVertexUniform(0, camera._matrix, LOCAL_SHADOW_MATRIX_FLOATS * 4)
+                pass:drawIndexedIndirect(self._localShadowCommands[slot].handle, 0, self._count)
+            end
+        end
+    end
+    pass:finish()
+end
+
 function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boolean)
     self.images:generateMipmaps()
     if upload ~= false then
@@ -1616,6 +1866,9 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
     if self._shadows then
         writeShadowUniform(self, packet, frame)
     end
+    if self._localShadows and upload ~= false then
+        recordLocalShadows(self, packet, frame)
+    end
     if self._count == 0 then
         return
     end
@@ -1624,52 +1877,7 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
     local uniform <const> = self._cullUniform
     if self._shadowActive then
         for cascade = 1, SHADOW_CASCADES do
-            local commands <const> = self._shadowCommands[cascade]
-            frustum.write(self._shadowMatrices[cascade], uniform)
-            uniform[24] = self._count
-            uniform[25] = groups
-            uniform[26] = self.capacity
-            uniform[27] = 0.0
-
-            local markWrites <const> = self._shadowMarkWrites
-            markWrites[1] = self._slots.handle
-            markWrites[2] = self._blocks.handle
-            markWrites[3] = commands.handle
-            local markReads <const> = self._shadowMarkReads
-            markReads[1] = self._bounds.handle
-            if self._transparent then
-                markReads[2] = self.instances.handle
-            end
-            local mark <const> = ComputePass.begin(frame.commandBuffer, markWrites, self._markPass)
-            self._markPass = mark
-            mark:bindPipeline((self._shadowMarkPipeline or self._markPipeline).handle)
-            mark:bindStorageBuffers(0, markReads)
-            C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
-            mark:dispatch(groups)
-            mark:finish()
-
-            local scanWrites <const> = self._scanWrites
-            scanWrites[1] = self._blocks.handle
-            local scan <const> = ComputePass.begin(frame.commandBuffer, scanWrites, self._scanPass)
-            self._scanPass = scan
-            scan:bindPipeline(self._scanPipeline.handle)
-            C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
-            scan:dispatch(1)
-            scan:finish()
-
-            local compactWrites <const> = self._shadowCompactWrites
-            compactWrites[1] = commands.handle
-            local compactReads <const> = self._shadowCompactReads
-            compactReads[1] = self._slots.handle
-            compactReads[2] = self._blocks.handle
-            compactReads[3] = self.commands.handle
-            local compact <const> = ComputePass.begin(frame.commandBuffer, compactWrites, self._compactPass)
-            self._compactPass = compact
-            compact:bindPipeline(self._compactPipeline.handle)
-            compact:bindStorageBuffers(0, compactReads)
-            C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
-            compact:dispatch(groups)
-            compact:finish()
+            compactShadow(self, self._shadowMatrices[cascade], self._shadowCommands[cascade], frame, groups)
         end
     end
 
@@ -1895,6 +2103,11 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
             self._shadows and SHADOW_CASCADES + 1 or 1, self._environmentTextures, self._probeSampler
         )
     end
+    if self._localShadows then
+        local slot <const> = (self._shadows and SHADOW_CASCADES or 0) + 1 + (self._probing and 1 or 0)
+        context.pass:bindTextures(slot, self._localShadowTextures, self._localShadowSampler.handle)
+        C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 5, self._localShadowUniform, 16)
+    end
     if self._shadows then
         C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, self._shadowUniform, SHADOW_BYTES)
     end
@@ -1946,8 +2159,8 @@ function MeshBackend:rebuildPipeline(deferred: Deferred)
         end
         doubleMark = ComputePipeline.load(self._device, "mesh.mark.comp", {defines = doubleDefines})
     end
-    if self._shadows then
-        shadow = buildShadow(self._device, deferred, self._skinning, self._morphing, self._vertexColors)
+    if self._shadows or self._localShadows then
+        shadow = buildShadow(self._device, R16, self._skinning, self._morphing, self._vertexColors)
         if self._transparent or self._doubleSided then
             shadowMark = ComputePipeline.load(
                 self._device, "mesh.mark.comp", {defines = self._transparent and {MESH_ALPHA = "1"} or nil}
@@ -1965,7 +2178,8 @@ function MeshBackend:rebuildPipeline(deferred: Deferred)
             self._fogging,
             self._doubleSided,
             self._localLights,
-            self._probing
+            self._probing,
+            self._localShadows
         )
         rank = ComputePipeline.load(self._device, "mesh.rank.comp", {})
         place = ComputePipeline.load(self._device, "mesh.place.comp", {})
@@ -1981,7 +2195,7 @@ function MeshBackend:rebuildPipeline(deferred: Deferred)
         oldDoubleGeometry:destroy()
         oldDoubleMark:destroy()
     end
-    if self._shadows then
+    if self._shadows or self._localShadows then
         local oldShadow, oldShadowMark <const> = self.shadowPipeline, self._shadowMarkPipeline
         self.shadowPipeline, self._shadowMarkPipeline = shadow, shadowMark
         oldShadow:destroy()
@@ -2056,6 +2270,16 @@ function MeshBackend:destroy()
         for cascade = 1, SHADOW_CASCADES do
             self._shadowCommands[cascade]:destroy()
         end
+    end
+    if self._localShadows then
+        for slot = 1, self._localShadowCapacity do
+            self._localShadowCommands[slot]:destroy()
+        end
+        self._localShadowMatrixBuffer:destroy()
+        self._localShadowAtlas:destroy()
+        self._localShadowSampler:destroy()
+    end
+    if self._shadows or self._localShadows then
         if self._shadowMarkPipeline ~= nil then
             self._shadowMarkPipeline:destroy()
         end

@@ -330,6 +330,9 @@ local record DeferredOptions
     --- Engine-owned. Enables optional 3D point and spot light resources at
     --- this fixed capacity. Nil omits every related buffer and shader variant.
     meshLightCapacity: integer
+    --- Engine-owned. Enables the mesh local-light shadow shader and binding
+    --- contract. The mesh backend owns the atlas and matrix buffer.
+    meshLocalShadows: boolean
     --- Engine-owned. Enables repeated view composition through shared
     --- intermediate targets.
     multiCamera: boolean
@@ -407,6 +410,12 @@ local record Deferred
     --- sharing would mean the order of two passes decided what either bound.
     _forwardBuffers: {loader.CValue}
     _meshLights: boolean
+    _meshLocalShadows: boolean
+    _meshLocalShadowTextures: {loader.CValue}
+    _meshLocalShadowSampler: loader.CValue
+    _meshLocalShadowMatrices: loader.CValue
+    _meshLocalShadowBias: number
+    _meshLocalShadowSoftness: number
     _meshLightCapacity: integer
     _meshLightBuffer: Buffer
     _meshTileCounts: Buffer
@@ -691,6 +700,13 @@ local function sceneUniform(self: Deferred, width: number, height: number): load
         scene[at + 1] = self._meshFogG
         scene[at + 2] = self._meshFogB
         scene[at + 3] = 0.0
+        at = at + MESH_FOG_FLOATS
+    end
+    if self._meshLocalShadows then
+        scene[at], scene[at + 1], scene[at + 2], scene[at + 3] = self._meshLocalShadowBias,
+            self._meshLocalShadowSoftness,
+            0.0,
+            0.0
     end
     return scene
 end
@@ -727,6 +743,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     local meshPBR <const> = options.meshPBR == true
     local meshProbe <const> = options.meshProbe == true
     local meshLights <const> = options.meshLightCapacity ~= nil
+    local meshLocalShadows <const> = options.meshLocalShadows == true
     local meshLightCapacity <const> = options.meshLightCapacity or 0
     if meshLights and (meshLightCapacity < 1 or meshLightCapacity ~= math.floor(meshLightCapacity)) then
         error("tecs: mesh light capacity must be a positive integer", 2)
@@ -758,6 +775,11 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         self._meshEnvironmentTextures = {}
     end
     self._meshLights = meshLights
+    self._meshLocalShadows = meshLocalShadows
+    if meshLocalShadows then
+        self._meshLocalShadowTextures = {}
+        self._meshLocalShadowBias, self._meshLocalShadowSoftness = 0.002, 1.0
+    end
     self._meshLightCapacity = meshLightCapacity
     self._meshCameraX, self._meshCameraY, self._meshCameraZ = 0.0, 0.0, 0.0
     self._inverseViewProjection = loader.newArray("float[16]")
@@ -804,7 +826,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self._lightScratch = loader.newArray("float[?]", MAX_LIGHTS * LIGHT_FLOATS)
     local sceneFloats <const> = (meshShadows and MESH_SHADOW_SCENE_FLOATS or SCENE_FLOATS) + (
         meshPBR and MESH_PBR_FLOATS or 0
-    ) + (meshProbe and MESH_PROBE_FLOATS or 0) + (meshFog and MESH_FOG_FLOATS or 0)
+    ) + (meshProbe and MESH_PROBE_FLOATS or 0) + (meshFog and MESH_FOG_FLOATS or 0) + (meshLocalShadows and 4 or 0)
     self._sceneBytes = sceneFloats * 4
     self._sceneUniform = loader.newArray("float[?]", sceneFloats)
     self._binUniform = loader.newArray("float[8]")
@@ -882,6 +904,10 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         self._forwardBuffers[4] = self._meshLightBuffer.handle
         self._forwardBuffers[5] = self._meshTileCounts.handle
         self._forwardBuffers[6] = self._meshTileLights.handle
+        if meshLocalShadows then
+            self._lightingBuffers[7] = nil
+            self._forwardBuffers[7] = nil
+        end
     end
 
     local graph = PassGraph.create(device, swapchainFormat)
@@ -1011,7 +1037,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     end
 
     local lightingDefines: {string: string} = nil
-    if shadows or meshShadows or meshFog or meshPBR or meshProbe or meshLights then
+    if shadows or meshShadows or meshFog or meshPBR or meshProbe or meshLights or meshLocalShadows then
         lightingDefines = {}
         if shadows then
             lightingDefines.SHADOWS = "1"
@@ -1030,6 +1056,9 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         end
         if meshLights then
             lightingDefines.MESH_LIGHTS = "1"
+        end
+        if meshLocalShadows then
+            lightingDefines.MESH_LOCAL_SHADOWS = "1"
         end
     end
     self._lightingPipeline = buildPipeline(
@@ -1197,10 +1226,18 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
                 buffers[5] = self._meshTileCounts.handle
                 buffers[6] = self._meshTileLights.handle
             end
+            if self._meshLocalShadows then
+                buffers[7] = self._meshLocalShadowMatrices
+            end
 
             context.pass:bindPipeline(self._lightingPipeline.handle)
+            local textureSlot = #lightingInputs
             if self._meshProbe then
-                context.pass:bindTextures(#lightingInputs, self._meshEnvironmentTextures, self._meshEnvironmentSampler)
+                context.pass:bindTextures(textureSlot, self._meshEnvironmentTextures, self._meshEnvironmentSampler)
+                textureSlot = textureSlot + 1
+            end
+            if self._meshLocalShadows then
+                context.pass:bindTextures(textureSlot, self._meshLocalShadowTextures, self._meshLocalShadowSampler)
             end
             context.pass:bindFragmentStorageBuffers(0, buffers)
             C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, scene, self._sceneBytes)
@@ -1587,7 +1624,13 @@ function Deferred:rebuildPipelines()
     local built, reason = pcall(function(): string
         local defines: {string: string} = nil
         if
-            self._shadows or self._meshShadows or self._meshFog or self._meshPBR or self._meshProbe or self._meshLights
+            self._shadows
+            or self._meshShadows
+            or self._meshFog
+            or self._meshPBR
+            or self._meshProbe
+            or self._meshLights
+            or self._meshLocalShadows
         then
             defines = {}
             if self._shadows then
@@ -1607,6 +1650,9 @@ function Deferred:rebuildPipelines()
             end
             if self._meshLights then
                 defines.MESH_LIGHTS = "1"
+            end
+            if self._meshLocalShadows then
+                defines.MESH_LOCAL_SHADOWS = "1"
             end
         end
         local lightingFormat <const> = self._lightingFormat
@@ -1770,6 +1816,9 @@ function Deferred:bindLighting(context: PassGraph.PassContext, firstSlot?: integ
         buffers[5] = self._meshTileCounts.handle
         buffers[6] = self._meshTileLights.handle
     end
+    if self._meshLocalShadows then
+        buffers[7] = self._meshLocalShadowMatrices
+    end
     context.pass:bindFragmentStorageBuffers(firstSlot or 0, buffers)
     C.SDL_PushGPUFragmentUniformData(
         context.commandBuffer,
@@ -1781,6 +1830,28 @@ function Deferred:bindLighting(context: PassGraph.PassContext, firstSlot?: integ
         ),
         SCENE_BYTES
     )
+end
+
+--- Installs the mesh backend's local-shadow resources into both mesh-light
+--- consumers. The backend retains ownership and destroys them first.
+--- @param texture The fixed six-column local-shadow atlas.
+--- @param sampler The clamped sampler used for depth PCF.
+--- @param matrices The storage buffer containing six matrices per shadow slot.
+--- @param bias Normalized receiver depth bias.
+--- @param softness PCF radius in atlas texels.
+function Deferred:setMeshLocalShadowBinding(
+    texture: loader.CValue, sampler: loader.CValue, matrices: loader.CValue, bias: number, softness: number
+)
+    if not self._meshLocalShadows then
+        error("tecs: mesh local shadows are not enabled", 2)
+    end
+    self._meshLocalShadowTextures[1] = texture
+    self._meshLocalShadowSampler = sampler
+    self._meshLocalShadowMatrices = matrices
+    self._meshLocalShadowBias = bias
+    self._meshLocalShadowSoftness = softness
+    self._lightingBuffers[7] = matrices
+    self._forwardBuffers[7] = matrices
 end
 
 --- Flushes any pending light writes onto a frame's command buffer.

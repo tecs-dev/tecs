@@ -95,6 +95,10 @@ local type Closeable = types.Closeable
 --- positions bands never reads a glyph, and loading one has no reason to load
 --- the rest.
 local record gfx
+    --- Marks a 3D point or spot light for the optional local-shadow atlas when
+    --- included in the component's integer `flags` field.
+    LIGHT_CASTS_SHADOWS: integer
+
     --- The view a frame is drawn from.
     Camera2D: Camera2D
     type Camera2DOptions = Camera2D.Options

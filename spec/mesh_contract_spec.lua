@@ -341,9 +341,17 @@ describe("the 3D scene contract", function()
     end)
 
     describe("MeshExtractor", function()
-        local function extractorScene(capacity, transparency, skinning, morphing, doubleSided, lightCapacity)
+        local function extractorScene(
+            capacity,
+            transparency,
+            skinning,
+            morphing,
+            doubleSided,
+            lightCapacity,
+            shadowCapacity
+        )
             local world = tecs.ecs.newWorld()
-            local packet = MeshFramePacket.create(skinning and not morphing, morphing, lightCapacity)
+            local packet = MeshFramePacket.create(skinning and not morphing, morphing, lightCapacity, shadowCapacity)
             local extractor = MeshExtractor.create({
                 capacity = capacity,
                 transparency = transparency,
@@ -351,6 +359,7 @@ describe("the 3D scene contract", function()
                 skinning = skinning,
                 morphing = morphing,
                 lightCapacity = lightCapacity,
+                shadowCapacity = shadowCapacity,
             })
             local instances = loader.newArray("float[?]", capacity * 16)
             local bounds = loader.newArray("float[?]", capacity * 4)
@@ -593,6 +602,32 @@ describe("the 3D scene contract", function()
             near(packet.lights[16 + 11], math.cos(math.rad(30)), "spot outer cosine")
             near(packet.lights[16 + 12], math.cos(math.rad(20)), "spot inner cosine")
             assert.are.equal(1, packet.lights[16 + 13])
+        end)
+
+        it("selects flagged local shadows without changing unflagged lights", function()
+            local world, extractor, packet = extractorScene(1, false, false, false, false, 3, 1)
+            world:spawn(
+                tecs.Transform3D.new({ x = 1, y = 2, z = 3 }),
+                components.PointLight3D.new({ radius = 9, flags = components.LIGHT_CASTS_SHADOWS })
+            )
+            world:spawn(tecs.Transform3D.new({ x = 4, y = 5, z = 6 }), components.PointLight3D.new({ radius = 7 }))
+            world:spawn(
+                tecs.Transform3D.new({ x = 8, y = 9, z = 10 }),
+                components.SpotLight3D.new({ radius = 12, flags = components.LIGHT_CASTS_SHADOWS })
+            )
+            world:enqueueCommit()
+
+            extractor:extract(packet)
+
+            assert.are.equal(3, packet.lightCount)
+            assert.are.equal(1, packet.shadowLightCount)
+            assert.are.equal(1, packet.lights[14], "the first light names atlas row one")
+            assert.are.equal(0, packet.lights[16 + 14], "an unflagged light names no row")
+            assert.are.equal(0, packet.lights[32 + 14], "capacity overflow names no row")
+            near(packet.shadowLights[0], 1)
+            near(packet.shadowLights[1], 2)
+            near(packet.shadowLights[2], 3)
+            near(packet.shadowLights[3], 9)
         end)
 
         it("stops processing lights after the configured capacity", function()

@@ -23,6 +23,8 @@ local components <const> = require("tecs.components")
 local timing <const> = require("tecs.timing")
 local meshlayout <const> = require("tecs.gpu.meshlayout")
 local meshlightlayout <const> = require("tecs.gpu.meshlightlayout")
+local meshlocalshadowlayout <const> = require("tecs.gpu.meshlocalshadowlayout")
+local bit <const> = require("bit")
 
 local EXTRACT <const> = timing.stage("extract")
 local Transform3D <const> = ecs.Transform3D
@@ -37,6 +39,7 @@ local record MeshExtractorOptions
     skinning: boolean
     morphing: boolean
     lightCapacity: integer
+    shadowCapacity: integer
 end
 
 local record MeshDraw
@@ -77,6 +80,7 @@ local record MeshExtractor
     _skinning: boolean
     _morphing: boolean
     _lightCapacity: integer
+    _shadowCapacity: integer
     _pointLights: types.Query
     _spotLights: types.Query
     _skinSlotByAsset: {integer: integer}
@@ -100,6 +104,7 @@ function MeshExtractor.create(options: MeshExtractorOptions): MeshExtractor
     self._skinning = options.skinning
     self._morphing = options.morphing
     self._lightCapacity = options.lightCapacity or 0
+    self._shadowCapacity = options.shadowCapacity or 0
     self._skinSlotByAsset = {}
     self._morphByAsset = {}
     self._extractSeconds = 0.0
@@ -128,7 +133,8 @@ local function packLight(
     directionZ: number,
     outerCosine: number,
     innerCosine: number,
-    kind: integer
+    kind: integer,
+    shadowSlot: integer
 )
     local count <const> = packet.lightCount
     local lights <const> = packet.lights
@@ -139,8 +145,32 @@ local function packLight(
         directionY,
         directionZ,
         outerCosine
-    lights[base + 12], lights[base + 13], lights[base + 14], lights[base + 15] = innerCosine, kind, 0.0, 0.0
+    lights[base + 12], lights[base + 13], lights[base + 14], lights[base + 15] = innerCosine, kind, shadowSlot, 0.0
     packet.lightCount = count + 1
+end
+
+local function selectShadow(
+    self: MeshExtractor,
+    packet: MeshFramePacket,
+    transform: ecs.Transform3D,
+    radius: number,
+    kind: integer,
+    outerAngle: number
+): integer
+    local slot <const> = packet.shadowLightCount
+    if slot >= self._shadowCapacity then
+        return 0
+    end
+    local values <const> = packet.shadowLights
+    local base <const> = slot * meshlocalshadowlayout.LIGHT_FLOATS
+    values[base], values[base + 1], values[base + 2], values[base + 3] = transform.x, transform.y, transform.z, radius
+    values[base + 4], values[base + 5], values[base + 6], values[base + 7] = transform.rotationX,
+        transform.rotationY,
+        transform.rotationZ,
+        transform.rotationW
+    values[base + 8], values[base + 9], values[base + 10], values[base + 11] = kind, outerAngle, 0.0, 0.0
+    packet.shadowLightCount = slot + 1
+    return slot + 1
 end
 
 local function syncLights(self: MeshExtractor, packet: MeshFramePacket)
@@ -156,10 +186,15 @@ local function syncLights(self: MeshExtractor, packet: MeshFramePacket)
         end
         for row = 1, stop do
             local source <const> = sources[row]
+            local transform <const> = transforms[row]
             validLight(source.radius, source.r, source.g, source.b, source.intensity)
+            local shadowSlot = 0
+            if bit.band(source.flags as integer, components.LIGHT_CASTS_SHADOWS) ~= 0 then
+                shadowSlot = selectShadow(self, packet, transform, source.radius, 0, 0.0)
+            end
             packLight(
                 packet,
-                transforms[row],
+                transform,
                 source.radius,
                 source.r,
                 source.g,
@@ -170,7 +205,8 @@ local function syncLights(self: MeshExtractor, packet: MeshFramePacket)
                 0.0,
                 -2.0,
                 1.0,
-                0
+                0,
+                shadowSlot
             )
         end
     end
@@ -202,6 +238,10 @@ local function syncLights(self: MeshExtractor, packet: MeshFramePacket)
             local directionX <const> = -2.0 * (qx * qz + qw * qy) * inverse
             local directionY <const> = 2.0 * (qw * qx - qy * qz) * inverse
             local directionZ <const> = (2.0 * (qx * qx + qy * qy) - lengthSquared) * inverse
+            local shadowSlot = 0
+            if bit.band(source.flags as integer, components.LIGHT_CASTS_SHADOWS) ~= 0 then
+                shadowSlot = selectShadow(self, packet, transform, source.radius, 1, source.outerAngle)
+            end
             packLight(
                 packet,
                 transform,
@@ -215,7 +255,8 @@ local function syncLights(self: MeshExtractor, packet: MeshFramePacket)
                 directionZ,
                 math.cos(source.outerAngle),
                 math.cos(source.innerAngle),
-                1
+                1,
+                shadowSlot
             )
         end
     end

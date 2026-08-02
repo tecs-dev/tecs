@@ -924,6 +924,67 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    it("casts an opt-in point-light shadow through the local atlas", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 0.03, 0.03, 0.03 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                lights = {
+                    capacity = 4,
+                    shadows = { capacity = 1, size = 128, bias = 0.002, softness = 0 },
+                },
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local plane, planeBounds = renderer.meshes:registerMesh(planeMesh("spec://local-shadow-plane"))
+        local caster, casterBounds = renderer.meshes:registerMesh(triangleMesh("spec://local-shadow-caster"))
+        world:spawn(
+            tecs.Transform3D(),
+            plane,
+            planeBounds,
+            components.MeshMaterial(),
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.2, y = -0.2, z = 0.5, scaleX = 0.4, scaleY = 0.4 }),
+            caster,
+            casterBounds,
+            components.MeshMaterial(),
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.8, y = 0, z = 1.2 }),
+            components.PointLight3D.new({
+                radius = 4,
+                r = 1,
+                g = 0.8,
+                b = 0.6,
+                intensity = 10,
+                flags = components.LIGHT_CASTS_SHADOWS,
+            })
+        )
+
+        local pixels = frameOnce(world, renderer)
+        local shadow = screen:getPixel(pixels, 48, 32)
+        local lit = screen:getPixel(pixels, 17, 32)
+        assert.is_true(renderer.meshes.localShadows)
+        assert.are.equal(1, renderer.meshes.localShadowCount)
+        assert.is_not_nil(renderer.meshes._backend._localShadowAtlas)
+        assert.are.equal(1, #renderer.meshes._backend._localShadowCommands)
+        assert.is_true(
+            lit.r > shadow.r + 25,
+            ("the point caster should darken its projected receiver: lit %d, shadow %d"):format(lit.r, shadow.r)
+        )
+        renderer:destroy()
+    end)
+
     it("sorts alpha-blended mesh commands back to front on the GPU", function()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {

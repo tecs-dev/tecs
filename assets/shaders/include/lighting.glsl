@@ -55,21 +55,72 @@ int screenLightTileOf(vec2 fragment, vec4 viewport) {
     return cell.y * LIGHT_TILES + cell.x;
 }
 
-struct MeshLight {
-    vec4 positionRadius;
-    vec4 colorIntensity;
-    vec4 directionOuter;
-    vec4 coneType;
-};
+#include "meshlight.glsl"
 
-float meshLightCone(MeshLight light, vec3 surfaceToLight) {
-    if (light.coneType.y < 0.5) {
+#ifdef MESH_LOCAL_SHADOWS
+int meshLocalShadowFace(vec3 fromLight) {
+    vec3 magnitude = abs(fromLight);
+    if (magnitude.x >= magnitude.y && magnitude.x >= magnitude.z) {
+        return fromLight.x >= 0.0 ? 0 : 1;
+    }
+    if (magnitude.y >= magnitude.z) {
+        return fromLight.y >= 0.0 ? 2 : 3;
+    }
+    return fromLight.z >= 0.0 ? 4 : 5;
+}
+
+mat4 meshLocalShadowMatrix(int index) {
+    int at = index * 16;
+    return mat4(
+        meshLocalShadowMatrices.value[at], meshLocalShadowMatrices.value[at + 1],
+        meshLocalShadowMatrices.value[at + 2], meshLocalShadowMatrices.value[at + 3],
+        meshLocalShadowMatrices.value[at + 4], meshLocalShadowMatrices.value[at + 5],
+        meshLocalShadowMatrices.value[at + 6], meshLocalShadowMatrices.value[at + 7],
+        meshLocalShadowMatrices.value[at + 8], meshLocalShadowMatrices.value[at + 9],
+        meshLocalShadowMatrices.value[at + 10], meshLocalShadowMatrices.value[at + 11],
+        meshLocalShadowMatrices.value[at + 12], meshLocalShadowMatrices.value[at + 13],
+        meshLocalShadowMatrices.value[at + 14], meshLocalShadowMatrices.value[at + 15]);
+}
+
+float meshLocalShadowVisibility(
+    MeshLight light, vec3 world, vec3 normal, float bias, float softness
+) {
+    int slot = int(light.coneType.z) - 1;
+    if (slot < 0) { return 1.0; }
+
+    vec3 fromLight = world - light.positionRadius.xyz;
+    int face = light.coneType.y < 0.5 ? meshLocalShadowFace(fromLight) : 0;
+    vec4 projected = meshLocalShadowMatrix(slot * 6 + face) * vec4(world, 1.0);
+    vec3 shadow = projected.xyz / projected.w;
+    vec2 localUV = shadow.xy * 0.5 + 0.5;
+    if (shadow.z < 0.0 || shadow.z > 1.0
+            || any(lessThan(localUV, vec2(0.0))) || any(greaterThan(localUV, vec2(1.0)))) {
         return 1.0;
     }
-    vec3 fromLight = -surfaceToLight;
-    float cosine = dot(fromLight, normalize(light.directionOuter.xyz));
-    return smoothstep(light.directionOuter.w, light.coneType.x, cosine);
+
+    ivec2 atlasPixels = textureSize(meshLocalShadowAtlas, 0);
+    float cellPixels = float(atlasPixels.x) / 6.0;
+    vec2 cellOrigin = vec2(float(face) * cellPixels, float(slot) * cellPixels);
+    vec2 atlasUV = (cellOrigin + localUV * cellPixels) / vec2(atlasPixels);
+    vec2 texel = 1.0 / vec2(atlasPixels);
+    vec2 cellMin = (cellOrigin + vec2(0.5)) / vec2(atlasPixels);
+    vec2 cellMax = (cellOrigin + vec2(cellPixels - 0.5)) / vec2(atlasPixels);
+    vec3 toLight = normalize(-fromLight);
+    float receiver = shadow.z - bias * (1.0 + 1.0 - max(dot(normalize(normal), toLight), 0.0));
+    if (softness <= 0.0) {
+        return receiver <= texture(meshLocalShadowAtlas, atlasUV).r ? 1.0 : 0.0;
+    }
+
+    float visible = 0.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec2 sampleUV = clamp(atlasUV + vec2(x, y) * texel * softness, cellMin, cellMax);
+            visible += receiver <= texture(meshLocalShadowAtlas, sampleUV).r ? 1.0 : 0.0;
+        }
+    }
+    return visible / 9.0;
 }
+#endif
 
 // Shared metallic-roughness direct-light term. The distribution is
 // Trowbridge-Reitz GGX, visibility is Smith with Schlick-GGX, and Fresnel is

@@ -276,7 +276,10 @@ Point and spot lights are another independently allocated mesh lane:
 return tecs.newApplication({
     sprites = false,
     meshes = {
-        lights = {capacity = 256},
+        lights = {
+            capacity = 256,
+            shadows = {capacity = 8, size = 256},
+        },
         doubleSided = true,
         packTextures = false,
         mipmaps = true,
@@ -284,19 +287,27 @@ return tecs.newApplication({
     plugin = function(world: tecs.World)
         world:spawn(
             tecs.Transform3D.new({x = 2, y = 4, z = 1}),
-            tecs.gfx.PointLight3D(12, 1.0, 0.6, 0.25, 18)
+            tecs.gfx.PointLight3D.new({
+                radius = 12,
+                r = 1.0,
+                g = 0.6,
+                b = 0.25,
+                intensity = 18,
+                flags = tecs.gfx.LIGHT_CASTS_SHADOWS,
+            })
         )
         world:spawn(
             tecs.Transform3D.new({x = 0, y = 8, z = 2}),
-            tecs.gfx.SpotLight3D(
-                20,
-                math.rad(18),
-                math.rad(32),
-                0.7,
-                0.85,
-                1.0,
-                28
-            )
+            tecs.gfx.SpotLight3D.new({
+                radius = 20,
+                innerAngle = math.rad(18),
+                outerAngle = math.rad(32),
+                r = 0.7,
+                g = 0.85,
+                b = 1.0,
+                intensity = 28,
+                flags = tecs.gfx.LIGHT_CASTS_SHADOWS,
+            })
         )
     end,
 })
@@ -307,6 +318,17 @@ negative Z through the transform quaternion. Radius, color, intensity, and cone
 angles are fixed-layout FFI fields. The renderer bins enabled lights into a
 32-by-32 screen grid for every 3D view. Omitting `meshes.lights` creates no
 queries, buffers, binning dispatch, bindings, or local-light shader variants.
+
+Local shadows are a second opt-in under `meshes.lights`. The renderer chooses
+the first flagged lights in stable extraction order, up to the configured
+shadow capacity. Each selected point light renders six square cells in one
+R16 atlas row; a spot light uses the first cell of its row. One conservative
+GPU compaction per selected light removes instances outside its reach before
+the point light's six faces or the spot cone rasterize. `bias` defaults to
+0.002, and `softness` defaults to a 3-by-3 PCF radius of one texel. Omitting
+`lights.shadows` allocates no atlas, matrices, indirect commands, sampler, or
+shadowed local-light shader variants. Directional cascades remain the separate
+`meshes.shadows` option.
 
 An ambient-cube probe adds diffuse environment light without a texture sample:
 

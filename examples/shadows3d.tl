@@ -1,4 +1,4 @@
---- Shows stable directional shadows across three camera-depth cascades.
+--- Shows directional, point, and spot shadows in one mesh domain.
 
 local root = os.getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
 if root:sub(-1) == "/" then
@@ -13,6 +13,9 @@ local Transform3D <const> = tecs.Transform3D
 local Tint <const> = tecs.gfx.Tint
 local Renderable3D <const> = tecs.gfx.Renderable3D
 local FlyCamera3D <const> = tecs.gfx.FlyCamera3D
+local PointLight3D <const> = tecs.gfx.PointLight3D
+local SpotLight3D <const> = tecs.gfx.SpotLight3D
+local LIGHT_CASTS_SHADOWS <const> = tecs.gfx.LIGHT_CASTS_SHADOWS
 
 local CUBE_POSITIONS <const>: {{number}} = {
     {-1, -1, -1},
@@ -25,8 +28,42 @@ local CUBE_POSITIONS <const>: {{number}} = {
     {-1, 1, 1},
 }
 local CUBE_INDICES <const>: {integer} = {
-    0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4,
-    3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5,
+    0,
+    2,
+    1,
+    0,
+    3,
+    2,
+    4,
+    5,
+    6,
+    4,
+    6,
+    7,
+    0,
+    1,
+    5,
+    0,
+    5,
+    4,
+    3,
+    7,
+    6,
+    3,
+    6,
+    2,
+    0,
+    4,
+    7,
+    0,
+    7,
+    3,
+    1,
+    2,
+    6,
+    1,
+    6,
+    5,
 }
 
 local function cube(): tecs.assets.Mesh
@@ -49,10 +86,54 @@ local function ground(): tecs.assets.Mesh
     return assets.newMesh({
         name = "example://shadow-ground",
         vertices = {
-            -12, 0, 8, 0, 1, 0, 1, 0, 0, 1, 0, 0,
-            12, 0, 8, 0, 1, 0, 1, 0, 0, 1, 1, 0,
-            12, 0, -100, 0, 1, 0, 1, 0, 0, 1, 1, 1,
-            -12, 0, -100, 0, 1, 0, 1, 0, 0, 1, 0, 1,
+            -12,
+            0,
+            8,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            12,
+            0,
+            8,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            1,
+            0,
+            12,
+            0,
+            -100,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            1,
+            1,
+            -12,
+            0,
+            -100,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            1,
         },
         indices = {0, 2, 1, 0, 3, 2},
     })
@@ -112,9 +193,44 @@ local function game(world: tecs.World, app: tecs.Application)
         )
     end
 
+    world:spawn(
+        Transform3D.new({x = -3.2, y = 3.4, z = -8}),
+        PointLight3D.new({
+            radius = 11,
+            r = 1.0,
+            g = 0.28,
+            b = 0.12,
+            intensity = 45,
+            flags = LIGHT_CASTS_SHADOWS,
+        })
+    )
+    world:spawn(
+        Transform3D.new({
+            x = 3.2,
+            y = 6.5,
+            z = -23,
+            rotationX = math.sin(math.rad(-55) * 0.5),
+            rotationW = math.cos(math.rad(-55) * 0.5),
+        }),
+        SpotLight3D.new({
+            radius = 18,
+            innerAngle = math.rad(18),
+            outerAngle = math.rad(30),
+            r = 0.18,
+            g = 0.5,
+            b = 1.0,
+            intensity = 70,
+            flags = LIGHT_CASTS_SHADOWS,
+        })
+    )
+
     local faceNames <const>: {string} = {
-        "positive-x.svg", "negative-x.svg", "positive-y.svg",
-        "negative-y.svg", "positive-z.svg", "negative-z.svg",
+        "positive-x.svg",
+        "negative-x.svg",
+        "positive-y.svg",
+        "negative-y.svg",
+        "positive-z.svg",
+        "negative-z.svg",
     }
     local loading: {tecs.Future<tecs.assets.Image>} = {}
     for index, face in ipairs(faceNames) do
@@ -135,12 +251,12 @@ local function game(world: tecs.World, app: tecs.Application)
         })
     end)
 
-    print("shadows3d: six pillars cross the near, middle, and far cascades")
+    print("shadows3d: warm point and cool spot shadows join three directional cascades")
     print("shadows3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
 end
 
 return tecs.newApplication({
-    window = {title = "Tecs cascaded directional shadows", width = 1100, height = 700},
+    window = {title = "Tecs directional and local shadows", width = 1100, height = 700},
     ambientLight = {0.035, 0.045, 0.065},
     sprites = false,
     bloom = {scale = 0.35, threshold = 0.8, knee = 0.2, intensity = 0.38},
@@ -149,6 +265,10 @@ return tecs.newApplication({
         vertexCapacity = 64,
         indexCapacity = 64,
         materialCapacity = 4,
+        lights = {
+            capacity = 8,
+            shadows = {capacity = 2, size = 256, bias = 0.002, softness = 1},
+        },
         shadows = {
             distance = 100,
             splitLambda = 0.72,

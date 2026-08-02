@@ -71,6 +71,10 @@ local materials <const> = require("tecs.gpu.materials")
 
 local type Component = ecs.Component
 
+--- Selects local-light shadow casting in `PointLight3D.flags` and
+--- `SpotLight3D.flags`.
+local LIGHT_CASTS_SHADOWS <const> = 1
+
 --- Stores the transform as it stood before the current fixed step.
 ---
 --- Presence is the opt-in: an entity carrying it is drawn somewhere between
@@ -196,6 +200,9 @@ local record PointLight3D is Component
     b: number
     --- Caller-writable. Scales the light's non-negative radiance.
     intensity: number
+    --- Caller-writable. Combines `LIGHT_*` integer constants. Zero, the
+    --- default, keeps the light out of the optional local-shadow atlas.
+    flags: integer
 end
 
 ecs.newFFIComponent({
@@ -207,8 +214,9 @@ ecs.newFFIComponent({
         {"g", "float"},
         {"b", "float"},
         {"intensity", "float"},
+        {"flags", "uint32_t"},
     },
-    defaults = {10, 1, 1, 1, 1},
+    defaults = {10, 1, 1, 1, 1, 0},
 })
 
 --- Represents a conical light aimed by its entity's `Transform3D` rotation.
@@ -229,6 +237,9 @@ local record SpotLight3D is Component
     b: number
     --- Caller-writable. Scales the light's non-negative radiance.
     intensity: number
+    --- Caller-writable. Combines `LIGHT_*` integer constants. Zero, the
+    --- default, keeps the light out of the optional local-shadow atlas.
+    flags: integer
 end
 
 ecs.newFFIComponent({
@@ -242,8 +253,9 @@ ecs.newFFIComponent({
         {"g", "float"},
         {"b", "float"},
         {"intensity", "float"},
+        {"flags", "uint32_t"},
     },
-    defaults = {10, math.rad(20), math.rad(30), 1, 1, 1, 1},
+    defaults = {10, math.rad(20), math.rad(30), 1, 1, 1, 1, 0},
 })
 
 --- Interned image names.
@@ -864,6 +876,10 @@ ecs.newComponent({
 -- Transform2D and Transform3D remain ECS builtins because simulation and
 -- rendering share them.
 local record components
+    --- Read-only. Marks a 3D point or spot light for the optional local-shadow
+    --- atlas when included in its `flags` field.
+    LIGHT_CASTS_SHADOWS: integer
+
     --- Read-only. Exposes the transform component used for frame interpolation.
     --- Presence is
     --- the opt-in to interpolation: an entity carrying it is drawn between
@@ -1031,6 +1047,7 @@ local record components
 end
 
 components.PreviousTransform2D = PreviousTransform2D
+components.LIGHT_CASTS_SHADOWS = LIGHT_CASTS_SHADOWS
 components.Tint = Tint
 components.Sprite = Sprite
 components.Mesh = Mesh

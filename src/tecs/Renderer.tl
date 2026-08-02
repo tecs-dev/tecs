@@ -184,6 +184,9 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
         meshLightCapacity = options.meshes ~= nil
             and options.meshes.lights ~= nil
             and (options.meshes.lights.capacity or 256) or nil,
+        meshLocalShadows = options.meshes ~= nil
+            and options.meshes.lights ~= nil
+            and options.meshes.lights.shadows ~= nil,
         bloom = options.bloom,
         multiCamera = self._multiCamera,
         geometry = noContribution,

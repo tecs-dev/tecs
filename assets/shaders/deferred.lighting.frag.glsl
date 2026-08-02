@@ -60,6 +60,22 @@
 #pragma tecs variants SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PROBE=1 MESH_PBR=1
 #pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PROBE=1 MESH_PBR=1
 #pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PBR=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PBR=1
+#pragma tecs variants MESH_FOG=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PBR=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PBR=1
+#pragma tecs variants MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants MESH_FOG=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1 MESH_PBR=1
 
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 outColor;
@@ -96,9 +112,16 @@ layout(set = 2, binding = SHADOW_BINDING + 1) uniform sampler2D dropShadowMask;
 
 #ifdef MESH_PROBE
 layout(set = 2, binding = LIGHT_BINDING) uniform sampler2DArray meshEnvironment;
-#define STORAGE_BINDING LIGHT_BINDING + 1
+#define LOCAL_SHADOW_BINDING LIGHT_BINDING + 1
 #else
-#define STORAGE_BINDING LIGHT_BINDING
+#define LOCAL_SHADOW_BINDING LIGHT_BINDING
+#endif
+
+#ifdef MESH_LOCAL_SHADOWS
+layout(set = 2, binding = LOCAL_SHADOW_BINDING) uniform sampler2D meshLocalShadowAtlas;
+#define STORAGE_BINDING LOCAL_SHADOW_BINDING + 1
+#else
+#define STORAGE_BINDING LOCAL_SHADOW_BINDING
 #endif
 
 struct Light {
@@ -157,9 +180,13 @@ layout(set = 3, binding = 0) uniform Scene {
 #ifdef MESH_FOG
     vec4 meshFog;
 #endif
+#ifdef MESH_LOCAL_SHADOWS
+    // x receiver bias and y PCF radius in atlas texels.
+    vec4 meshLocalShadowTuning;
+#endif
 } scene;
 
-#include "lighting.glsl"
+#include "meshlight.glsl"
 
 #ifdef MESH_LIGHTS
 layout(set = 2, binding = STORAGE_BINDING + 3) readonly buffer MeshLights {
@@ -171,7 +198,14 @@ layout(set = 2, binding = STORAGE_BINDING + 4) readonly buffer MeshTileCounts {
 layout(set = 2, binding = STORAGE_BINDING + 5) readonly buffer MeshTileLights {
     uint index[];
 } meshTileLights;
+#ifdef MESH_LOCAL_SHADOWS
+layout(set = 2, binding = STORAGE_BINDING + 6) readonly buffer MeshLocalShadowMatrices {
+    float value[];
+} meshLocalShadowMatrices;
 #endif
+#endif
+
+#include "lighting.glsl"
 
 // Above this the green channel says an occluder really covers the pixel. Below
 // it the pixel is either empty or in the halo the blur spread, and a halo that
@@ -428,6 +462,10 @@ void main() {
             float distance = length(toLight);
             float attenuation = clamp(1.0 - distance / light.positionRadius.w, 0.0, 1.0);
             attenuation *= attenuation * meshLightCone(light, normalize(toLight));
+#ifdef MESH_LOCAL_SHADOWS
+            attenuation *= meshLocalShadowVisibility(light, surfaceWorld, normal,
+                scene.meshLocalShadowTuning.x, scene.meshLocalShadowTuning.y);
+#endif
             accumulated += cookTorrance(albedo.rgb, normal, viewDirection, normalize(toLight),
                 light.colorIntensity.rgb * light.colorIntensity.a * attenuation, orm.g, orm.b);
         }

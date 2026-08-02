@@ -207,11 +207,30 @@ local record MeshMorphingOptions
     weightCapacity: integer
 end
 
+--- Configures point and spot shadows inside the optional local-light lane.
+local record MeshLocalShadowOptions
+    --- Caller-writable. Sets how many flagged local lights may cast shadows
+    --- and defaults to four. Selection follows stable light extraction order.
+    capacity: integer
+    --- Caller-writable. Sets one atlas cell edge in pixels and defaults to 256.
+    --- A point light consumes six cells and a spot light consumes one.
+    size: integer
+    --- Caller-writable. Sets normalized receiver depth bias and defaults to
+    --- 0.002.
+    bias: number
+    --- Caller-writable. Sets the 3x3 PCF radius in texels. Zero selects one
+    --- sample and the default is one.
+    softness: number
+end
+
 --- Configures independently allocated point and spot light resources.
 local record MeshLightOptions
     --- Caller-writable. Sets the extracted 3D local-light ceiling and defaults
     --- to 256. Lights beyond it are ignored in stable extraction order.
     capacity: integer
+    --- Caller-writable. Enables the independently allocated local-shadow
+    --- atlas. Nil keeps its resources and shader variants absent.
+    shadows: MeshLocalShadowOptions
 end
 
 --- Controls linear camera-distance fog at runtime.
@@ -384,6 +403,7 @@ local interface MeshDomain is DomainStats
     type SkinningOptions = MeshSkinningOptions
     type MorphingOptions = MeshMorphingOptions
     type LightOptions = MeshLightOptions
+    type LocalShadowOptions = MeshLocalShadowOptions
     type FogOptions = MeshFogOptions
     type Fog = MeshFogTuning
     type ProbeOptions = MeshProbeOptions
@@ -452,6 +472,10 @@ local interface MeshDomain is DomainStats
     morphing: boolean
     --- Read-only. Reports whether point and spot mesh lights are enabled.
     localLights: boolean
+    --- Read-only. Reports whether the local-light shadow atlas is enabled.
+    localShadows: boolean
+    --- Read-only. Reports shadowed local lights selected for the last frame.
+    localShadowCount: integer
     --- Read-only. Reports the fixed local-light capacity, or zero when the
     --- lane is disabled.
     lightCapacity: integer
@@ -585,6 +609,7 @@ local record MeshDomainModule
     type SkinningOptions = MeshSkinningOptions
     type MorphingOptions = MeshMorphingOptions
     type LightOptions = MeshLightOptions
+    type LocalShadowOptions = MeshLocalShadowOptions
     type FogOptions = MeshFogOptions
     type Fog = MeshFogTuning
     type ProbeOptions = MeshProbeOptions
@@ -669,10 +694,23 @@ function MeshDomainModule._create(
         )
     end
     local lightCapacity = 0
+    local localShadowCapacity = 0
+    local localShadowSize = 0
+    local localShadowBias = 0.0
+    local localShadowSoftness = 0.0
     if options.lights ~= nil then
-        lightCapacity = positive(
-            "mesh light capacity", (options.lights as MeshLightOptions).capacity or meshlightlayout.DEFAULT_CAPACITY
-        )
+        local lights <const> = options.lights as MeshLightOptions
+        lightCapacity = positive("mesh light capacity", lights.capacity or meshlightlayout.DEFAULT_CAPACITY)
+        if lights.shadows ~= nil then
+            local shadows <const> = lights.shadows as MeshLocalShadowOptions
+            localShadowCapacity = positive("mesh local shadow capacity", shadows.capacity or 4)
+            localShadowSize = positive("mesh local shadow size", shadows.size or 256)
+            localShadowBias = shadows.bias or 0.002
+            localShadowSoftness = shadows.softness or 1.0
+            if localShadowBias < 0.0 or localShadowSoftness < 0.0 then
+                error("tecs: mesh local shadow bias and softness must be non-negative", 2)
+            end
+        end
     end
 
     local self = setmetatable({} as MeshDomainImpl, MeshDomainMT)
@@ -708,6 +746,8 @@ function MeshDomainModule._create(
     self.skinning = options.skinning ~= nil
     self.morphing = options.morphing ~= nil
     self.localLights = options.lights ~= nil
+    self.localShadows = localShadowCapacity > 0
+    self.localShadowCount = 0
     self.lightCapacity = lightCapacity
     self.lightCount = 0
     self.vertexColors = options.vertexColors == true
@@ -773,7 +813,10 @@ function MeshDomainModule._create(
     self._centerZByAsset = {}
     self._radiusByAsset = {}
     self._packet = MeshFramePacket.create(
-        self.skinning and not self.morphing, self.morphing, self.localLights and lightCapacity or nil
+        self.skinning and not self.morphing,
+        self.morphing,
+        self.localLights and lightCapacity or nil,
+        self.localShadows and localShadowCapacity or nil
     )
 
     local backend <const> = MeshBackend.create(
@@ -800,6 +843,10 @@ function MeshDomainModule._create(
             morphVertexCapacity = morphVertexCapacity,
             morphWeightCapacity = morphWeightCapacity,
             localLights = self.localLights,
+            localShadowCapacity = localShadowCapacity,
+            localShadowSize = localShadowSize,
+            localShadowBias = localShadowBias,
+            localShadowSoftness = localShadowSoftness,
             vertexColors = self.vertexColors,
             fog = self.fog as MeshBackend.FogOptions,
             probe = self.probe as MeshBackend.ProbeOptions,
@@ -816,6 +863,7 @@ function MeshDomainModule._create(
         skinning = self.skinning,
         morphing = self.morphing,
         lightCapacity = lightCapacity,
+        shadowCapacity = localShadowCapacity,
     })
     self._extractor = extractor
     self.camera = extractor.camera
@@ -1013,6 +1061,7 @@ function MeshDomainImpl:_install(world: types.World)
             self.dropped = packet.dropped
             self.rewritten = packet.rewritten
             self.lightCount = packet.lightCount
+            self.localShadowCount = packet.shadowLightCount
         end
     )
 end

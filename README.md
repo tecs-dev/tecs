@@ -118,7 +118,13 @@ for the shadow, deferred, and transparent passes every frame.
 Point and spot lights also live behind one mesh option. Their component queries,
 record buffer, screen-tile lists, compute dispatch, bindings, and Cook-Torrance
 shader variants do not exist in a mesh domain that omits `lights`, and no part
-of that path enters a 2D-only renderer.
+of that path enters a 2D-only renderer. Local shadows are a nested option rather
+than a mandatory light cost. Flagged lights occupy stable rows in one R16 atlas:
+a point light uses six columns and a spot light uses the first. Each selected
+light runs one conservative GPU compaction, then reuses that visible command
+across its faces. This avoids six culling passes per point light and binds one
+atlas sampler instead of one texture per light. Omitting `lights.shadows` keeps
+the atlas, matrices, indirect commands, sampler, and shadowed variants absent.
 
 Environment lighting has two costs rather than one compromise. The ambient
 cube keeps six world-space irradiance colors and shades only the diffuse PBR
@@ -169,7 +175,7 @@ cargo xtask fetch sponza       # Cache the pinned large lighting scene
 cargo xtask example sponza3d   # Run point and spot lights in Sponza
 cargo xtask fetch bistro       # Import the pinned large Bistro stress scene
 cargo xtask example bistro3d   # Run Bistro with probe and direct lighting
-cargo xtask bench meshshadows  # Measure the optional mesh-shadow lane
+cargo xtask bench meshshadows  # Measure directional and local mesh shadows
 cargo xtask bench meshskinning # Measure the optional mesh-skinning lane
 cargo xtask bench meshmorphing # Measure the optional mesh-morphing lane
 cargo xtask bench modelanimation  # Measure CPU pose and palette sampling

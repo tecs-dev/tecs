@@ -30,6 +30,22 @@
 #pragma tecs variants MESH_SHADOWS=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_PROBE=1
 #pragma tecs variants MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_PROBE=1
 #pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_PROBE=1
+#pragma tecs variants MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1
+#pragma tecs variants MESH_FOG=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1
+#pragma tecs variants MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1
+#pragma tecs variants MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1
+#pragma tecs variants MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1
+#pragma tecs variants MESH_FOG=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1
+#pragma tecs variants MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1
+#pragma tecs variants MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_LOCAL_SHADOWS=1 MESH_PROBE=1
 // Shades alpha-blended mesh surfaces after deferred composition. Meshes are
 // sorted back to front before this pass and use premultiplied alpha so one
 // pipeline handles the complete glTF BLEND contract.
@@ -50,25 +66,29 @@ struct Light {
     vec4 color;
 };
 
-#if defined(MESH_SHADOWS) && defined(MESH_PROBE)
+#ifdef MESH_SHADOWS
 #define MESH_IMAGE_BINDING 3
-#define MESH_ENVIRONMENT_BINDING 4
-#define MESH_MATERIAL_BINDING 5
-#define MESH_LIGHT_BINDING 6
-#elif defined(MESH_SHADOWS)
-#define MESH_IMAGE_BINDING 3
-#define MESH_MATERIAL_BINDING 4
-#define MESH_LIGHT_BINDING 5
-#elif defined(MESH_PROBE)
-#define MESH_ENVIRONMENT_BINDING 1
-#define MESH_MATERIAL_BINDING 2
-#define MESH_LIGHT_BINDING 3
 #else
-#define MESH_LIGHT_BINDING 2
+#define MESH_IMAGE_BINDING 0
 #endif
+#ifdef MESH_PROBE
+#define MESH_ENVIRONMENT_BINDING MESH_IMAGE_BINDING + 1
+#define MESH_LOCAL_SHADOW_BINDING MESH_ENVIRONMENT_BINDING + 1
+#else
+#define MESH_LOCAL_SHADOW_BINDING MESH_IMAGE_BINDING + 1
+#endif
+#ifdef MESH_LOCAL_SHADOWS
+#define MESH_MATERIAL_BINDING MESH_LOCAL_SHADOW_BINDING + 1
+#else
+#define MESH_MATERIAL_BINDING MESH_LOCAL_SHADOW_BINDING
+#endif
+#define MESH_LIGHT_BINDING MESH_MATERIAL_BINDING + 1
 
 #ifdef MESH_PROBE
 layout(set = 2, binding = MESH_ENVIRONMENT_BINDING) uniform sampler2DArray meshEnvironment;
+#endif
+#ifdef MESH_LOCAL_SHADOWS
+layout(set = 2, binding = MESH_LOCAL_SHADOW_BINDING) uniform sampler2D meshLocalShadowAtlas;
 #endif
 
 layout(set = 2, binding = MESH_LIGHT_BINDING) readonly buffer Lights { Light item[]; } lights;
@@ -87,6 +107,12 @@ layout(set = 3, binding = 1) uniform Scene {
 layout(set = 3, binding = 3) uniform Camera {
     vec4 position;
 } camera;
+
+#ifdef MESH_LOCAL_SHADOWS
+layout(set = 3, binding = 5) uniform MeshLocalShadow {
+    vec4 tuning;
+} localShadow;
+#endif
 
 #ifdef MESH_PROBE
 layout(set = 3, binding = 4) uniform MeshProbe {
@@ -108,7 +134,8 @@ vec3 ambientCube(vec3 normal) {
 layout(set = 3, binding = 2) uniform MeshFog { vec4 color; } meshFog;
 #endif
 
-#include "lighting.glsl"
+#include "meshlight.glsl"
+
 #ifdef MESH_LIGHTS
 layout(set = 2, binding = MESH_LIGHT_BINDING + 3) readonly buffer MeshLights {
     MeshLight item[];
@@ -119,7 +146,13 @@ layout(set = 2, binding = MESH_LIGHT_BINDING + 4) readonly buffer MeshTileCounts
 layout(set = 2, binding = MESH_LIGHT_BINDING + 5) readonly buffer MeshTileLights {
     uint index[];
 } meshTileLights;
+#ifdef MESH_LOCAL_SHADOWS
+layout(set = 2, binding = MESH_LIGHT_BINDING + 6) readonly buffer MeshLocalShadowMatrices {
+    float value[];
+} meshLocalShadowMatrices;
 #endif
+#endif
+#include "lighting.glsl"
 #ifdef MESH_SHADOWS
 #include "meshshadow.glsl"
 #endif
@@ -160,6 +193,10 @@ void main() {
             float distance = length(toLight);
             float attenuation = clamp(1.0 - distance / light.positionRadius.w, 0.0, 1.0);
             attenuation *= attenuation * meshLightCone(light, normalize(toLight));
+#ifdef MESH_LOCAL_SHADOWS
+            attenuation *= meshLocalShadowVisibility(
+                light, vWorld, surface.normal, localShadow.tuning.x, localShadow.tuning.y);
+#endif
             color += cookTorrance(surface.albedo.rgb, surface.normal, viewDirection, normalize(toLight),
                 light.colorIntensity.rgb * light.colorIntensity.a * attenuation, surface.orm.g, surface.orm.b);
         }

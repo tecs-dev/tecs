@@ -4,7 +4,9 @@
 --- of instances. Camera and light-volume culling run every frame while the
 --- extraction upload settles after warmup. Run the same scene with
 --- `BENCH_MESH_SHADOWS=0` and `BENCH_MESH_SHADOWS=1` to isolate the optional
---- shadow cascades, light-volume compaction, and shadow raster passes.
+--- directional cascades. Set `BENCH_MESH_LOCAL_LIGHTS=1` to add tiled point
+--- and spot lights, then `BENCH_MESH_LOCAL_SHADOWS=1` to add their atlas,
+--- light-volume compaction, and shadow raster passes.
 
 local getenv <const> = os.getenv
 local floor <const> = math.floor
@@ -22,12 +24,16 @@ local Mesh <const> = tecs.gfx.Mesh
 local MeshMaterial <const> = tecs.gfx.MeshMaterial
 local Tint <const> = tecs.gfx.Tint
 local Renderable3D <const> = tecs.gfx.Renderable3D
+local PointLight3D <const> = tecs.gfx.PointLight3D
+local SpotLight3D <const> = tecs.gfx.SpotLight3D
 local timing <const> = require("tecs.timing")
 
 local COUNT <const> = floor(tonumber(getenv("BENCH_MESH_COUNT")) or 100000)
 local WARMUP <const> = floor(tonumber(getenv("BENCH_WARMUP")) or 120)
 local FRAMES <const> = floor(tonumber(getenv("BENCH_FRAMES")) or 300)
 local SHADOWS <const> = getenv("BENCH_MESH_SHADOWS") ~= "0"
+local LOCAL_SHADOWS <const> = getenv("BENCH_MESH_LOCAL_SHADOWS") == "1"
+local LOCAL_LIGHTS <const> = getenv("BENCH_MESH_LOCAL_LIGHTS") == "1" or LOCAL_SHADOWS
 local WIDTH <const> = 1280
 local HEIGHT <const> = 720
 
@@ -131,6 +137,23 @@ local function spawnField(world: tecs.World, app: tecs.Application)
             end
         end
     )
+
+    if LOCAL_LIGHTS then
+        local flags <const> = LOCAL_SHADOWS and tecs.gfx.LIGHT_CASTS_SHADOWS or 0
+        world:spawn(
+            Transform3D.new({x = -20, y = 16, z = -60}), PointLight3D.new({radius = 120, intensity = 30, flags = flags})
+        )
+        world:spawn(
+            Transform3D.new({x = 30, y = 35, z = 10, rotationX = -0.38, rotationW = 0.92}),
+            SpotLight3D.new({
+                radius = 180,
+                innerAngle = math.rad(24),
+                outerAngle = math.rad(40),
+                intensity = 40,
+                flags = flags,
+            })
+        )
+    end
 end
 
 timing.enable()
@@ -145,6 +168,11 @@ return tecs.newApplication({
         capacity = COUNT,
         vertexCapacity = 16,
         indexCapacity = 24,
+        lights = LOCAL_LIGHTS
+            and {
+                capacity = 4,
+                shadows = LOCAL_SHADOWS and {capacity = 2, size = 256} or nil,
+            } or nil,
         shadows = SHADOWS
             and {
                 distance = 120,
@@ -179,8 +207,15 @@ return tecs.newApplication({
             phase = tecs.ecs.phases.Shutdown,
             run = function()
                 print(
-                    ("mesh shadows %s: %d submitted instances after %d warmup frames"):format(
-                        SHADOWS and "on" or "off", app.renderer.meshes.count, WARMUP
+                    (
+                        "mesh shadows directional=%s local-lights=%s local-shadows=%s: "
+                        .. "%d submitted instances after %d warmup frames"
+                    ):format(
+                        SHADOWS and "on" or "off",
+                        LOCAL_LIGHTS and "on" or "off",
+                        LOCAL_SHADOWS and "on" or "off",
+                        app.renderer.meshes.count,
+                        WARMUP
                     )
                 )
                 local report <const> = timing.format()

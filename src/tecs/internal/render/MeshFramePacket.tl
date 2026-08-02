@@ -15,6 +15,7 @@ refers to a Lua entity.
 local loader <const> = require("tecs.ffi.loader")
 local dirtyranges <const> = require("tecs.gpu.dirtyranges")
 local meshlightlayout <const> = require("tecs.gpu.meshlightlayout")
+local meshlocalshadowlayout <const> = require("tecs.gpu.meshlocalshadowlayout")
 
 local type Camera3D = require("tecs.gfx.Camera3D")
 
@@ -37,6 +38,11 @@ local record MeshFramePacket
     lights: loader.CArray
     --- Packed 3D local lights written this frame.
     lightCount: integer
+    --- Optional CPU shadow-light records selected from the packed lights. Nil
+    --- when the domain did not enable local shadows.
+    shadowLights: loader.CArray
+    --- Shadowed point and spot lights written this frame.
+    shadowLightCount: integer
 
     --- World-space camera x copied during extraction.
     cameraX: number
@@ -68,7 +74,9 @@ local record MeshFramePacket
 
     --- Creates a reusable empty packet.
     --- @return A packet with allocated matrix and range storage.
-    create: function(skinning?: boolean, morphing?: boolean, lightCapacity?: integer): MeshFramePacket
+    create: function(
+        skinning?: boolean, morphing?: boolean, lightCapacity?: integer, shadowCapacity?: integer
+    ): MeshFramePacket
 
     --- Begins writing one frame through a staging slot.
     --- @param slot The zero-based staging slot selected by the renderer.
@@ -83,7 +91,9 @@ end
 
 local MeshFramePacketMT <const>: metatable<MeshFramePacket> = {__index = MeshFramePacket}
 
-function MeshFramePacket.create(skinning?: boolean, morphing?: boolean, lightCapacity?: integer): MeshFramePacket
+function MeshFramePacket.create(
+    skinning?: boolean, morphing?: boolean, lightCapacity?: integer, shadowCapacity?: integer
+): MeshFramePacket
     local self = setmetatable({} as MeshFramePacket, MeshFramePacketMT)
     self.slot = 0
     self.count = 0
@@ -92,8 +102,12 @@ function MeshFramePacket.create(skinning?: boolean, morphing?: boolean, lightCap
     self.blendCount = 0
     self.doubleSidedCount = 0
     self.lightCount = 0
+    self.shadowLightCount = 0
     if lightCapacity ~= nil then
         self.lights = loader.newArray("float[?]", lightCapacity * meshlightlayout.FLOATS)
+    end
+    if shadowCapacity ~= nil then
+        self.shadowLights = loader.newArray("float[?]", shadowCapacity * meshlocalshadowlayout.LIGHT_FLOATS)
     end
     self.cameraX = 0.0
     self.cameraY = 0.0
@@ -117,6 +131,7 @@ end
 function MeshFramePacket:begin(slot: integer)
     self.slot = slot
     self.lightCount = 0
+    self.shadowLightCount = 0
     self.instanceRanges:clear()
     self.boundsRanges:clear()
     self.commandRanges:clear()

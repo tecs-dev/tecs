@@ -30,10 +30,11 @@ lighting, text, UI, input, animation, audio, and debug tools together.
 then composes one full-frame 2D HUD view above them. It also combines vertex
 colors, an emissive unlit mesh, directional shadows, fog, and bloom.
 
-`shadows3d.tl` places procedural pillars and their receiving ground across all
-three stabilized directional-shadow cascades. Walking the long corridor makes
-near detail, far coverage, boundary cross-fades, and camera-motion stability
-easy to inspect. Its sky uses the repository-owned CC0 environment faces.
+`shadows3d.tl` combines three stabilized directional-shadow cascades with one
+shadowed point light and one shadowed spot light. Procedural pillars and their
+receiving ground make the point light's six atlas faces, the spot cone, cascade
+cross-fades, and camera-motion stability easy to inspect. Its sky uses the
+repository-owned CC0 environment faces.
 
 `ibl3d.tl` loads six repository-owned CC0 environment faces, generates their
 mip chain on the GPU, and compares five roughness levels across metallic and
