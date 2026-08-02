@@ -39,6 +39,11 @@ local record phases
     -- Update phases
     -------------------------------------------------------------------------------
 
+    --- Runs once at the start of a logical update for sealed platform and
+    --- external-service input. Observers run here in event sequence order.
+    record Ingress is Phase
+    end
+
     --- Runs at the very start of each frame (e.g., time updates, input polling).
     record First is Phase
     end
@@ -162,6 +167,7 @@ end
 phases.StartupGroup.children = {phases.PreStartup, phases.Startup, phases.PostStartup}
 
 phases.MainGroup.children = {
+    phases.Ingress,
     phases.First,
     phases.PreUpdate,
     phases.FixedUpdateGroup,

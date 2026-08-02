@@ -56,19 +56,10 @@ tecs.scoped(function(scope: tecs.Scope)
 end)
 ```
 
-Frame-driven code uses `readAvailable`, `readAvailableInto`, and the matching
-writer methods. Nil without a reason means an open pipe has no bytes or
-capacity right now; an empty string or zero means output EOF. These methods
-make backpressure visible instead of growing an implicit queue. Buffer and
-byte-view variants avoid constructing Lua strings.
-
-`Process:wait` is cooperative: it suspends a system until the child exits and
-blocks when called outside an update. Pipe `read` and `write` operations and
-`communicate` remain synchronous byte-transfer APIs. Use the available forms
-when a frame should continue without data, and run a complete expensive
-exchange on a worker when it must not occupy the main thread. This is a choice
-about whether missing data is normal for the operation, not a choice between
-future and coroutine APIs.
+`Process:wait`, pipe reads and writes, and `communicate` all use contextual
+waiting. They suspend a normal system without blocking SDL and block when
+called outside an update. Buffer and byte-view variants avoid constructing Lua
+strings.
 
 Use `"inherit"` for a CLI that should share the terminal, `"null"` to discard
 a stream, and `stderr = "stdout"` for one ordered transcript. A nonzero child
@@ -151,10 +142,9 @@ local record Process is Closeable
 
     --- Feeds stdin and captures stdout and stderr without pipe deadlock.
     ---
-    --- The call blocks the current Lua thread, drains both output pipes while
-    --- feeding input, closes stdin after the final byte, and returns only
-    --- after the child exits and both captured pipes reach EOF. Run it in a
-    --- worker when blocking is inappropriate.
+    --- The call drains both output pipes while feeding input, closes stdin
+    --- after the final byte, and returns after the child exits and both pipes
+    --- reach EOF. It suspends a normal system or blocks an ordinary caller.
     --- @param self The open process whose piped endpoints are consumed.
     --- @param options The caller supplies complete input and an output limit,
     ---     or omits both.
@@ -165,9 +155,9 @@ local record Process is Closeable
 
     --- Starts a caller-owned child process with streaming standard I/O.
     ---
-    --- Piped endpoints are nonblocking at their `readAvailable` and
-    --- `writeAvailable` boundaries. The process owns them, while buffers and
-    --- byte views passed to endpoint methods remain caller-owned.
+    --- Piped endpoints use contextual waiting through the ordinary Reader and
+    --- Writer methods. The process owns them, while buffers and byte views
+    --- passed to endpoint methods remain caller-owned.
     --- @param options The caller supplies the program, arguments, environment,
     ---     working directory, standard-stream modes, and optional deadline.
     --- @return Returns a caller-owned process when the platform starts it.

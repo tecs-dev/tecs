@@ -44,6 +44,11 @@ features:
       component, query, system, and engine APIs before the game runs.
     icon:
       src: /images/teal.svg
+  - title: Blocking code without blocked frames
+    details: >-
+      <a href="/cooperative-io">Direct I/O calls</a> automatically park a
+      system only when work must wait, while SDL keeps the application alive.
+    icon: ↕️
 ---
 
 ## Install
@@ -264,7 +269,6 @@ The host loads `tecs` before the entry file. A game can use these names without 
 - [`tecs.physics`](/modules/physics) - Rapier 2D, solved across a shared thread pool
 - [`tecs.platform`](/modules/platform/) - platform events, operating-system services, time, and windows
 - [`tecs.regex`](/modules/regex) - compiled regular expressions over Lua byte strings
-- [`tecs.runtime`](/modules/runtime) - process-wide polling for asynchronous work
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
 - [`tecs.ui`](/modules/ui) - retained layout, scrolling, clipping, and interaction over existing drawing components
 - [`tecs.workers`](/modules/workers) - typed background jobs

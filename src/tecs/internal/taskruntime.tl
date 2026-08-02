@@ -82,6 +82,12 @@ local RESUME <const> = {}
 local CANCEL <const> = {}
 local CYCLE <const> = {}
 
+local enum WaitMode
+    "cooperative"
+    "blocking"
+    "forbidden"
+end
+
 local activeScheduler: SchedulerImpl = nil
 
 local function currentTask(): TaskImpl<any>
@@ -602,6 +608,8 @@ local record taskruntime
     awaitCompletion: function<T>(completion: Completion<T>, operation: string): T
     run: function<T>(body: function(ScopeImpl): T...): T
     yield: function()
+    waitMode: function(): WaitMode
+    checkWait: function(operation: string): WaitMode
     checkSuspension: function(operation: string)
     active: function(): boolean
     context: function(): any
@@ -680,7 +688,7 @@ function taskruntime.awaitCompletion<T>(completion: Completion<T>, operation: st
         error("tecs: " .. operation .. " has no completion", 2)
     end
     local settled = completion
-    if taskruntime.active() then
+    if completion.status == "pending" and taskruntime.checkWait(operation) == "cooperative" then
         local gate <const> = taskruntime.newGate(function() completion:cancel() end)
         completion:onSettle(function(done: Completion<T>) gate:complete(done) end)
         local value, reason <const> = gate:wait()
@@ -688,7 +696,7 @@ function taskruntime.awaitCompletion<T>(completion: Completion<T>, operation: st
             error(reason, 2)
         end
         settled = value as Completion<T>
-    else
+    elseif completion.status == "pending" then
         settled:wait()
     end
     if settled.status == "ready" then
@@ -728,6 +736,34 @@ function taskruntime.yield()
     if tag == CANCEL then
         error(CANCEL, 0)
     end
+end
+
+-- Chooses how one unresolved finite operation waits. Callers attempt their
+-- immediate path first, so cache hits and already-buffered bytes never touch
+-- this branch.
+function taskruntime.waitMode(): WaitMode
+    local scheduler <const> = activeScheduler
+    if scheduler == nil or scheduler.current == nil then
+        return "blocking"
+    end
+    local scope <const> = scheduler.current.scope as {string: any}
+    if scope.barrier ~= nil then
+        return "forbidden"
+    end
+    return "cooperative"
+end
+
+function taskruntime.checkWait(operation: string): WaitMode
+    if type(operation) ~= "string" or operation == "" then
+        error("tecs: wait check needs an operation", 2)
+    end
+    local mode <const> = taskruntime.waitMode()
+    if mode == "forbidden" then
+        local task <const> = currentTask()
+        local barrier <const> = ((task.scope as ScopeImpl) as {string: any}).barrier as string
+        error(("tecs: %s cannot wait while %s is active"):format(operation, barrier), 2)
+    end
+    return mode
 end
 
 function taskruntime.checkSuspension(operation: string)

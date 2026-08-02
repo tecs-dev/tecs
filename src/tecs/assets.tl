@@ -1,5 +1,5 @@
 --[=[
-Reads bytes and decodes images and sounds on a worker.
+Acquires and decodes assets without blocking the SDL host.
 
 Loads return their values directly. Inside a frame system dispatched by
 `world:update`, a worker decode transparently suspends the logical update:
@@ -35,8 +35,10 @@ The loader decodes pixels but creates no GPU resource. The renderer decides
 texture residency. Audio follows the same split between decoded clips and
 voices.
 
-`newMesh` constructs immutable procedural geometry synchronously. `loadGLTF`
-decodes glTF 2.0 and GLB scenes on the worker, including images,
+Image cache misses read through SDL AsyncIO, decode in the bounded native CPU
+lane, and publish on the main thread. `newMesh` constructs immutable
+procedural geometry synchronously. `loadGLTF` decodes glTF 2.0 and GLB scenes
+in a warmed isolated Lua worker, including images,
 metallic-roughness materials, vertex colors, alpha masks, `BLEND` modes, skins,
 and node animation clips including morph weights. Both produce
 CPU-owned data that the mesh domain consumes when it becomes resident. A model
@@ -56,10 +58,11 @@ glTF images remain decoded RGBA8.
 
 ## Lifetime
 
-[`Application`](tealdoc:tecs.Application) installs and shuts down the process-wide worker, and
-[`runtime.poll`](/modules/runtime/#tecs.runtime.poll) updates it. Headless code
-must call `install` before loading and `shutdown` afterwards. A load outside a
-world update blocks and pumps its worker until the value or failure arrives.
+[`Application`](tealdoc:tecs.Application) installs and shuts down the asset
+lanes. Headless code calls `install` before model or sound loading and
+`shutdown` afterwards. A load outside a world update blocks and drives its
+private producer until the value or failure arrives; a system suspends at the
+same direct call.
 
 Release a payload after its consumer takes ownership. The final release frees
 the decoded memory.
@@ -89,6 +92,11 @@ local content <const> = require("tecs.platform.content")
 local Completion <const> = require("tecs.internal.completion")
 local task <const> = require("tecs.internal.taskruntime")
 local runtime <const> = require("tecs.internal.runtime")
+local fileasync <const> = require("tecs.internal.fileasync")
+local cpuimage <const> = require("tecs.internal.cpuimage")
+local adapter <const> = require("tecs.platform.adapter")
+local storagebackend <const> = require("tecs.platform.storagebackend")
+local time <const> = require("tecs.platform.time")
 local meshlayout <const> = require("tecs.gpu.meshlayout")
 
 local runtimePoll: function(): integer
@@ -107,52 +115,12 @@ local COMPRESSED_MAGIC <const> = "TECSBC3\0"
 local DECODER <const> = [==[
 local ffi = require("ffi")
 local mixer = require("tecs.ffi.sdl3mixer")
-local rust = require("tecs.ffi.rust")
 local loader = require("tecs.ffi.loader")
-local files = require("tecs.io.files")
 local workers = require("tecs.workers")
 local gltf = require("tecs.internal.gltf")
 
 local MIX = mixer.C
-local RUST = rust.C
-
 local self = workers.current()
-
-local function decodeImage(task)
-    local bytes = files.read(task.path, "image")
-    if bytes == nil then
-        return { id = task.id, error = "cannot decode " .. task.path }
-    end
-
-    local decoded = RUST.tecsImageDecode(
-        ffi.cast("const uint8_t *", bytes),
-        #bytes
-    )
-    if decoded == nil then
-        local reason = loader.toString(RUST.tecsRustError())
-        return {
-            id = task.id,
-            error = "cannot decode " .. task.path .. ": " .. reason,
-        }
-    end
-    local width = tonumber(RUST.tecsImageWidth(decoded))
-    local height = tonumber(RUST.tecsImageHeight(decoded))
-    return {
-        id = task.id,
-        image = tonumber(ffi.cast("uintptr_t", decoded)),
-        width = width,
-        height = height,
-        pitch = width * 4,
-    }
-end
-
-local function readBytes(task)
-    local bytes = files.read(task.path)
-    if bytes == nil then
-        return {id = task.id, error = "cannot read " .. task.path}
-    end
-    return {id = task.id, bytes = bytes}
-end
 
 local function decodeModel(task)
     local ok, result = pcall(gltf.decodeFile, task.path)
@@ -224,10 +192,8 @@ while true do
         self:send(decodeSound(task))
     elseif task.kind == "model" then
         self:send(decodeModel(task))
-    elseif task.kind == "bytes" then
-        self:send(readBytes(task))
     else
-        self:send(decodeImage(task))
+        self:send({id = task.id, error = "unknown asset CPU job " .. tostring(task.kind)})
     end
 end
 ]==]
@@ -1147,8 +1113,7 @@ end
 --- decode without exposing one completion object: see `loadImage`.
 local record Entry
     id: integer
-    --- "bytes", "image", "model" or "sound", which decides what the answer
-    --- is built into.
+    --- "model" or "sound", which decides what the answer is built into.
     kind: string
     path: string
     root: Completion<any>
@@ -1160,15 +1125,23 @@ local pending: {integer: Entry} = {}
 local byCompletion: {Completion<any>: Entry} = {}
 --- Counted rather than walked, because `waitAll` reads it in a loop.
 local pendingCount = 0
---- Tracks queued image decodes that have not answered yet, by path. A second
---- load of a path in this table joins the first rather than queueing a decode
---- of the same file beside it.
-local imagesInFlight: {string: Completion<any>} = {}
---- Tracks queued byte reads on the same terms. Separate from image decodes
---- because the same path may be requested in both representations at once.
-local bytesInFlight: {string: Completion<any>} = {}
 local nextId = 1
 local worker: workers.Worker = nil
+
+-- Image acquisition and decode do not use the Lua worker, but they are still
+-- one asset load for ownership, coalescing, shutdown, and waitAll. A root is
+-- shared only while this pipeline is in flight; publication removes it before
+-- listeners run, so a later call deliberately starts a fresh decode.
+local record ImageLoad
+    path: string
+    root: Completion<Image>
+    current: Completion<any>
+end
+
+local imageLoads <const>: {string: ImageLoad} = {}
+local imageByRoot <const>: {Completion<any>: ImageLoad} = {}
+local imagePendingCount = 0
+local imageSource: Completion.Source
 
 --- Starts the loading worker.
 ---
@@ -1211,13 +1184,6 @@ local function retire(entry: Entry)
     pending[entry.id] = nil
     byCompletion[entry.root] = nil
     pendingCount = pendingCount - 1
-
-    -- These tables describe only overlapping work. Dropping the root before
-    -- settlement lets a listener start a fresh load from its callback.
-    local shared = entry.kind == "image" and imagesInFlight or entry.kind == "bytes" and bytesInFlight or nil
-    if shared ~= nil and shared[entry.path] == entry.root then
-        shared[entry.path] = nil
-    end
 end
 
 --- Destroys what the worker sent for a decode nobody is waiting on any more.
@@ -1226,9 +1192,6 @@ end
 --- so this function frees the result instead of leaking it to a completion that has
 --- already settled "canceled".
 local function discard(result: {string: any})
-    if result.image ~= nil then
-        RUST.tecsImageDestroy(ffi.cast("TecsImage *", ffi.cast("uintptr_t", result.image)) as loader.CValue)
-    end
     if result.audio ~= nil then
         MIX.MIX_DestroyAudio(ffi.cast("MIX_Audio *", ffi.cast("uintptr_t", result.audio)) as loader.CValue)
     end
@@ -1252,11 +1215,6 @@ local function settleResult(result: {string: any}): boolean
 
     if result.error ~= nil then
         root:fail(result.error as string)
-        return true
-    end
-
-    if entry.kind == "bytes" then
-        root:complete(result.bytes as string)
         return true
     end
 
@@ -1290,29 +1248,7 @@ local function settleResult(result: {string: any}): boolean
         return true
     end
 
-    -- Ownership arrived with the address. The image stays alive until the last
-    -- caller releases it, because the pixels are what they came for.
-    local allocation = ffi.cast("TecsImage *", ffi.cast("uintptr_t", result.image)) as loader.CValue
-    local image = setmetatable(
-        {
-            path = entry.path,
-            _image = allocation,
-            pixels = RUST.tecsImagePixels(allocation) as loader.CValue,
-            width = result.width as integer,
-            height = result.height as integer,
-            pitch = result.pitch as integer,
-            format = IMAGE_RGBA8,
-            storageWidth = result.width as integer,
-            storageHeight = result.height as integer,
-            levels = 1,
-            byteCount = (result.pitch as integer) * (result.height as integer),
-            -- Zero, and counted up by each surviving subscriber below. A caller
-            -- that canceled first never receives the image.
-            _refs = 0,
-        } as Image,
-        ImageMT
-    )
-    root:complete(image)
+    root:fail("unknown asset CPU result")
     return true
 end
 
@@ -1326,7 +1262,7 @@ end
 ---     arriving after `shutdown` dropped what it belonged to.
 local function complete(result: {string: any}): boolean
     local answered = settleResult(result)
-    if pendingCount == 0 and idle ~= nil then
+    if pendingCount == 0 and imagePendingCount == 0 and idle ~= nil then
         -- Cleared before it settles, so a load started from a listener on it
         -- opens a fresh drain rather than joining one that has already answered.
         local settling = idle
@@ -1436,10 +1372,6 @@ function Loader:cancel(completion: Completion<any>)
     if entry == nil then
         return
     end
-    local shared = entry.kind == "image" and imagesInFlight or entry.kind == "bytes" and bytesInFlight or nil
-    if shared ~= nil and shared[entry.path] == completion then
-        shared[entry.path] = nil
-    end
 end
 
 local pump <const> = setmetatable(
@@ -1457,6 +1389,169 @@ local source <const> = pump as Completion.Source
 -------------------------------------------------------------------------------
 -- Loading
 -------------------------------------------------------------------------------
+
+local function forgetImage(entry: ImageLoad)
+    if imageLoads[entry.path] ~= entry then
+        return
+    end
+    imageLoads[entry.path] = nil
+    imageByRoot[entry.root as Completion<any>] = nil
+    imagePendingCount = imagePendingCount - 1
+    if pendingCount == 0 and imagePendingCount == 0 and idle ~= nil then
+        local settling <const> = idle
+        idle = nil
+        settling:complete(0)
+    end
+end
+
+local function finishImage(entry: ImageLoad, image?: Image, reason?: string)
+    forgetImage(entry)
+    local root <const> = entry.root
+    if root.status == "pending" then
+        if image ~= nil then
+            root:complete(image)
+        else
+            root:fail(reason or "image load failed")
+        end
+    elseif image ~= nil then
+        -- Every consumer gave up after native publication won the race.
+        image._refs = 1
+        image:release()
+    end
+end
+
+local function imageFromAllocation(path: string, allocation: loader.CPtr): Image
+    local width <const> = tonumber(RUST.tecsImageWidth(allocation)) as integer
+    local height <const> = tonumber(RUST.tecsImageHeight(allocation)) as integer
+    return setmetatable(
+        {
+            path = path,
+            _image = allocation,
+            pixels = RUST.tecsImagePixels(allocation) as loader.CValue,
+            width = width,
+            height = height,
+            pitch = width * 4,
+            format = IMAGE_RGBA8,
+            storageWidth = width,
+            storageHeight = height,
+            levels = 1,
+            byteCount = width * height * 4,
+            -- Consumers acquire their holds after the shared root settles.
+            _refs = 0,
+        } as Image,
+        ImageMT
+    )
+end
+
+local function beginImage(path: string): Completion<Image>
+    local root <const> = Completion.pending(imageSource) as Completion<Image>
+    -- The producer is tracked by ImageLoad. Watchers are only direct callers,
+    -- so canceling the last one can release the native stage.
+    root._watchers = 0
+    local entry: ImageLoad = {path = path, root = root}
+    imageLoads[path] = entry
+    imageByRoot[root as Completion<any>] = entry
+    imagePendingCount = imagePendingCount + 1
+
+    local read <const> = fileasync.read(path)
+    entry.current = read as Completion<any>
+    read:onSettle(function(settled: Completion<fileasync.NativeRead>)
+        if settled.status ~= "ready" then
+            finishImage(entry, nil, settled.error or "cannot read image")
+            return
+        end
+        local result <const> = settled.value
+        if root.status ~= "pending" then
+            fileasync.release(result)
+            forgetImage(entry)
+            return
+        end
+        content.note(path, "image")
+        if
+            result.length >= #COMPRESSED_MAGIC
+            and loader.toBytes(result.pointer as loader.CValue, #COMPRESSED_MAGIC) == COMPRESSED_MAGIC
+        then
+            local ok <const>, image = pcall(function(): Image
+                local bytes <const> = loader.toBytes(result.pointer as loader.CValue, result.length)
+                fileasync.release(result)
+                return imageFromBytes(bytes, path)
+            end) as (boolean, Image | string)
+            if ok then
+                local loaded <const> = image as Image
+                loaded._refs = 0
+                finishImage(entry, loaded)
+            else
+                finishImage(entry, nil, tostring(image))
+            end
+            return
+        end
+
+        local moved <const>, bytes = pcall(fileasync.takeBytes, result) as (boolean, loader.CPtr | string)
+        if not moved then
+            finishImage(entry, nil, tostring(bytes))
+            return
+        end
+        local decode <const> = cpuimage.decode(bytes as loader.CPtr)
+        entry.current = decode as Completion<any>
+        decode:onSettle(function(decoded: Completion<loader.CPtr>)
+            if decoded.status ~= "ready" then
+                finishImage(entry, nil, decoded.error or "cannot decode image")
+                return
+            end
+            local ok <const>, image = pcall(function(): Image
+                return imageFromAllocation(path, cpuimage.take(decoded.value))
+            end) as (boolean, Image | string)
+            if ok then
+                finishImage(entry, image as Image)
+            else
+                finishImage(entry, nil, tostring(image))
+            end
+        end)
+    end)
+    return root
+end
+
+local record ImageSource
+    sliceMs: number
+    defaultWaitMs: number
+    poll: function(self: ImageSource): integer
+    advance: function(self: ImageSource, ms: number): integer
+    cancel: function(self: ImageSource, completion: Completion<any>)
+end
+
+function ImageSource:poll(): integer
+    return runtime.poll()
+end
+
+function ImageSource:advance(ms: number): integer
+    for _, entry in pairs(imageLoads) do
+        local current <const> = entry.current
+        if current ~= nil and current.status == "pending" and current._source ~= nil then
+            return current._source:advance(ms)
+        end
+    end
+    return 0
+end
+
+function ImageSource:cancel(completion: Completion<any>)
+    local entry <const> = imageByRoot[completion]
+    if entry == nil then
+        return
+    end
+    local current <const> = entry.current
+    if current ~= nil and current.status == "pending" then
+        current:cancel()
+    end
+    forgetImage(entry)
+end
+
+imageSource = {
+    sliceMs = 1,
+    defaultWaitMs = 30000,
+    poll = ImageSource.poll,
+    advance = ImageSource.advance,
+    cancel = ImageSource.cancel,
+} as ImageSource as Completion.Source
 
 --- A root completion the loader owns and never hands out.
 ---
@@ -1485,81 +1580,28 @@ local function queue(kind: string, path: string): Completion<any>, integer
     return root, id
 end
 
---- Counts one more holder of the decoded pixels, and answers them.
----
---- One per surviving caller of a shared decode. It runs from that caller's
---- subscription only when the root settles ready.
-local function claim(image: Image): Image
-    image._refs = image._refs + 1
-    return image
-end
-
 local function awaitRoot<T>(root: Completion<T>, operation: string): T
-    if not task.active() then
-        root:wait()
-        if root.status == "ready" then
-            return root.value
+    local settled = root
+    if root.status == "pending" then
+        if task.checkWait(operation) == "blocking" then
+            root:wait()
+        else
+            settled = task.awaitCallback(function(resume: function(Completion<T>)): function()
+                return Completion.subscribe(root as Completion<any>, resume as function(Completion<any>))
+            end)
         end
-        if root.status == "failed" then
-            error(("tecs: %s failed: %s"):format(operation, root.error or "failed"), 3)
-        end
-        if root.status == "pending" then
-            error(("tecs: %s did not complete within its wait budget"):format(operation), 3)
-        end
-        error(("tecs: %s was canceled: %s"):format(operation, root.error or "canceled"), 3)
     end
-    local settled <const> = task.awaitCallback(function(resume: function(Completion<T>)): function()
-        return Completion.subscribe(root as Completion<any>, resume as function(Completion<any>))
-    end)
     if settled.status == "ready" then
         return settled.value
     end
     if settled.status == "failed" then
         error(("tecs: %s failed: %s"):format(operation, settled.error or "failed"), 3)
     end
+    if settled.status == "pending" then
+        error(("tecs: %s did not complete within its wait budget"):format(operation), 3)
+    end
     error(("tecs: %s was canceled: %s"):format(operation, settled.error or "canceled"), 3)
 end
-
---- Returns the one root settlement shared by overlapping image consumers.
-local function imageRoot(path: string): Completion<any>
-    content.note(path, "image")
-    local shared = imagesInFlight[path]
-    if shared == nil then
-        local root, id = queue("image", path)
-        imagesInFlight[path] = root
-        worker:send({id = id, kind = "image", path = path})
-        shared = root
-    end
-    return shared
-end
-
--- Internal callback view of one image load. This is the operation boundary the
--- Task runtime consumes directly: it adds one interest to the shared root,
--- reports one terminal outcome, and returns the matching cancellation action.
--- This private subscription is how a suspended system observes the shared
--- decode without allocating another completion object.
-local function subscribeImage(
-    path: string, listener: function(status: string, image: Image, reason: string)
-): function()
-    if type(listener) ~= "function" then
-        error("tecs: image subscription needs a listener", 3)
-    end
-    local shared <const> = imageRoot(path)
-    return Completion.subscribe(
-        shared,
-        function(settled: Completion<any>)
-            if settled.status == "ready" then
-                listener("ready", claim(settled.value as Image), nil)
-            else
-                listener(settled.status, nil, settled.error)
-            end
-        end
-    )
-end
-
--- Kept outside the typed public module record. Engine internals may adapt the
--- callback operation directly while the supported surface stays value-based.
-(assets as {string: any})._subscribeImage = subscribeImage
 
 --- Loads an image and returns its decoded pixels.
 ---
@@ -1576,14 +1618,28 @@ end
 --- @return Returns the decoded image. Inside a system, the call suspends only
 ---     while its decode is pending. A missing file or decode failure raises.
 function assets.loadImage(path: string): Image
-    return claim(awaitRoot(imageRoot(path), "image load") as Image)
+    if type(path) ~= "string" or path == "" then
+        error("tecs: image load needs a path", 2)
+    end
+    if adapter.storage() ~= storagebackend.sdl then
+        local files <const> = require("tecs.io.files")
+        local bytes <const> = files.read(path, "image")
+        if bytes == nil then
+            error("tecs: image load failed: cannot read " .. path, 2)
+        end
+        return imageFromBytes(bytes, path)
+    end
+    local root <const> = imageLoads[path] ~= nil and imageLoads[path].root or beginImage(path)
+    local image <const> = awaitRoot(root, "image load")
+    image._refs = image._refs + 1
+    return image
 end
 
 --- Reads a complete file and returns its bytes.
 ---
---- The returned string preserves embedded NUL bytes. Overlapping reads of one
---- path share the worker task. A later read after settlement reads the file
---- again.
+--- The returned string preserves embedded NUL bytes. The operation uses the
+--- common file lane; callers that need retained reuse store the returned
+--- immutable string in their own asset resource.
 ---
 --- @param path The caller supplies an absolute path or one from
 ---     [`assetPath`](/modules/io/files/#tecs.io.files.assetPath).
@@ -1592,19 +1648,17 @@ end
 --- @return Returns the complete bytes. A missing or unreadable file raises
 ---     after the worker reports the failure.
 function assets.loadString(path: string, kind?: string): string
-    content.note(path, kind or "document")
-    local shared = bytesInFlight[path]
-    if shared == nil then
-        local root, id = queue("bytes", path)
-        bytesInFlight[path] = root
-        worker:send({id = id, kind = "bytes", path = path})
-        shared = root
+    local files <const> = require("tecs.io.files")
+    local bytes <const> = files.read(path, kind)
+    if bytes == nil then
+        error("tecs: file load failed: cannot read " .. tostring(path), 2)
     end
-    return awaitRoot(shared as Completion<string>, "file load")
+    return bytes
 end
 
 function assets.loadGLTF(path: string): Model
     content.note(path, "model")
+    task.checkWait("model load")
     local root, id = queue("model", path)
     worker:send({id = id, kind = "model", path = path})
     return awaitRoot(root as Completion<Model>, "model load")
@@ -1633,6 +1687,7 @@ end
 ---     raises.
 function assets.loadSound(path: string, mode: string, streamMs: integer): Sound
     content.note(path, "sound")
+    task.checkWait("sound load")
     if not sdl3mixer.init() then
         error("tecs: cannot load " .. path, 2)
     end
@@ -1651,28 +1706,20 @@ end
 -- Draining
 -------------------------------------------------------------------------------
 
---- Takes finished loads and resumes their waiting systems.
----
---- Polls without waiting and drains everything the worker has answered.
---- `tecs.runtime.poll` calls this automatically. Game systems and plugins must
---- not call it; a specialized host that drives no application calls the
---- process runtime instead.
----
---- @return How many loads settled this call, which is zero when nothing has
----     finished and also zero when no worker exists.
-function assets.update(): integer
+local function pollAssets(): integer
     return pump:poll()
 end
 
-runtimePoll = assets.update
+runtimePoll = pollAssets
 
---- Returns the number of loads still waiting on the worker.
+--- Returns the number of asset loads still in flight.
 ---
---- @return Every load in flight in this process, not one caller's. A load every
----     caller has canceled is still counted until the worker answers for it, because
----     the address it sends still has to be taken and destroyed.
+--- @return Every image decode, model load, and sound load owned by this module,
+---     not one caller's. `loadString` uses the shared file lane directly and is
+---     not counted. A model or sound load every caller has canceled remains
+---     counted until the worker answer is taken and destroyed.
 function assets.pending(): integer
-    return pendingCount
+    return pendingCount + imagePendingCount
 end
 
 --- Blocks until every queued load has finished.
@@ -1687,13 +1734,18 @@ end
 ---     error and is not reported, so read `assets.pending` afterwards to tell the two
 ---     endings apart.
 function assets.waitAll(timeoutMs?: number)
-    if pendingCount == 0 then
+    if pendingCount == 0 and imagePendingCount == 0 then
         return
     end
-    if idle == nil then
-        idle = Completion.pending(source) as Completion<integer>
-    end
-    idle:wait(timeoutMs)
+    local deadline <const> = time.now() * 1000 + (timeoutMs or 5000)
+    repeat
+        runtime.poll()
+        if pendingCount > 0 then
+            pump:advance(1)
+        elseif imagePendingCount > 0 then
+            (imageSource as Completion.Source):advance(1)
+        end
+    until (pendingCount == 0 and imagePendingCount == 0) or time.now() * 1000 >= deadline
 end
 
 --- Stops the loading worker.
@@ -1704,6 +1756,18 @@ end
 --- [`Sound`](tealdoc:tecs.assets.Sound) that already settled still works afterwards; this
 --- frees nothing.
 function assets.shutdown()
+    local imageEntries: {ImageLoad} = {}
+    for _, entry in pairs(imageLoads) do
+        imageEntries[#imageEntries + 1] = entry
+    end
+    for index = 1, #imageEntries do
+        local entry <const> = imageEntries[index]
+        if entry.current ~= nil and entry.current.status == "pending" then
+            entry.current:cancel()
+        end
+        forgetImage(entry)
+        entry.root:abandon("the asset lanes were shut down")
+    end
     if worker == nil then
         return
     end
@@ -1712,8 +1776,6 @@ function assets.shutdown()
     runtime.unregister("assets")
     pending = {}
     byCompletion = {}
-    imagesInFlight = {}
-    bytesInFlight = {}
     pendingCount = 0
     if idle ~= nil then
         -- The drain it was waiting for will not finish, and saying so is more

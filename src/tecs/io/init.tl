@@ -12,10 +12,11 @@ directly and uses `readInto` or `writeFrom` accelerators when an endpoint
 provides them. Transform constructors take ownership of either a Tecs endpoint
 or a file and close it with the wrapper.
 
-Readers, writers, transforms, and whole-source operations run synchronously and
-return their result directly. Resumable systems do not turn every byte endpoint
-into a scheduled operation. They return nil and a reason when an endpoint
-cannot be opened, read, written, flushed, or closed:
+Readers, writers, transforms, and whole-source operations return their result
+directly. A memory operation completes inline. An unresolved file, socket, or
+process operation suspends a normal system and resumes at the call; the same
+call blocks its caller outside a world update. They return nil and a reason
+when an endpoint cannot be opened, read, written, flushed, or closed:
 
 ```teal
 tecs.scoped(function(scope: tecs.Scope)
@@ -78,19 +79,18 @@ world:addSystem({
 })
 ```
 
-An `Application` calls `tecs.runtime.poll` automatically once per host
-iteration. Game systems and update functions must not drive either pump.
-Resolution and connection block when used outside a world update. Socket
-reads, accepts, sends, and receives retain their existing nonblocking result
-outside a system, where nil or false without a reason means `WouldBlock`; an
-explicit positive timeout in `wait` or `drain` blocks that caller.
+The Application owns progress; there is no public pump to drive. Resolution,
+connection, reads, acceptance, sends, and receives all block appropriately for
+their context. A call never changes into a `WouldBlock` result merely because
+it ran outside a system. The explicit `wait` methods remain timeout and
+readiness checks rather than a second transfer API.
 
-The ready path performs the native operation immediately. Only `WouldBlock`
-registers a one-shot readiness watch with the process-wide `mio` reactor. The
-reactor never calls Lua; the application's main-thread pump drains its tokens
-and resumes the same system at the suspended call. Writes from a system wait
-for their local send queue to drain, so backpressure parks the update instead
-of blocking the SDL thread.
+The ready path performs the native operation immediately. Only a native
+`WouldBlock` arms a one-shot watch in the process-wide `mio` reactor. The
+reactor never calls Lua; the Application drains its tokens on the main thread
+and the scheduler resumes the same system. Socket writes finish when their
+bounded local queue accepts the bytes; `drain` is the explicit transport
+delivery boundary.
 
 Every address, TCP socket, listener, UDP socket, and UDP packet owns a
 resource. Close it explicitly. A GC finalizer releases an abandoned network
@@ -435,10 +435,10 @@ local record binaryIO
         peer: function(self: TCPSocket): Address, string
         --- Reads up to `maxBytes`, waiting cooperatively inside a system.
         ---
-        --- Inside a system, the call suspends at `WouldBlock` and resumes when
-        --- the socket becomes readable. Outside a system it returns nil with
-        --- no error when no bytes are ready. A successful read may contain
-        --- fewer bytes than requested.
+        --- Inside a system, the call suspends when the socket would block and
+        --- resumes when it becomes readable. Outside a system the same call
+        --- blocks its caller. A successful read may contain fewer bytes than
+        --- requested.
         --- @param maxBytes The caller supplies a ceiling from 1 to 65536 bytes
         ---     or omits it for 16384. Invalid values raise.
         --- @return Returns a fresh string of available bytes, or nil when no
@@ -449,11 +449,10 @@ local record binaryIO
         --- Reads bytes directly into reusable FFI memory.
         ---
         --- The call writes at a zero-based offset and extends the buffer
-        --- through the last byte read. Inside a system, it suspends at
-        --- `WouldBlock`; outside a system it returns nil without a reason and
-        --- leaves the logical length and bytes unchanged. Reserving the
-        --- requested range may still grow capacity. A zero count returns zero
-        --- without consuming input.
+        --- through the last byte read. It suspends a system or blocks an
+        --- ordinary caller when no bytes are ready. Reserving the requested
+        --- range may still grow capacity. A zero count returns zero without
+        --- consuming input.
         --- @param destination The caller supplies an open
         ---     [`Buffer`](tealdoc:tecs.io.Buffer).
         --- @param offset The caller supplies a zero-based destination offset
@@ -549,8 +548,7 @@ local record binaryIO
         --- Takes one client, waiting cooperatively inside a system.
         ---
         --- Inside a system, the call suspends until a client is ready. Outside
-        --- a system it returns nil with no error when nobody waits. The caller
-        --- owns the returned stream.
+        --- a system it blocks the caller. The caller owns the returned stream.
         --- @return Returns one caller-owned client, or nil when none waits or
         ---     acceptance fails.
         --- @return Returns the reason only when acceptance fails.
@@ -599,8 +597,8 @@ local record binaryIO
         isClosed: function(self: UDPSocket): boolean
         --- Sends one packet, waiting cooperatively on backpressure in a system.
         ---
-        --- Outside a system, the call returns false without a reason when the
-        --- socket would block.
+        --- The call suspends a system or blocks an ordinary caller while the
+        --- socket cannot accept the datagram.
         --- @param address The caller supplies an open address from this module.
         --- @param port The caller supplies a remote port from 1 to 65535.
         --- @param bytes The caller supplies one datagram of at most 65507 bytes.
@@ -610,8 +608,8 @@ local record binaryIO
         --- Takes one packet, waiting cooperatively inside a system.
         ---
         --- Inside a system, the call suspends until a packet is ready. Outside
-        --- a system it returns nil with no error when no packet is ready. The
-        --- packet owns its source address, which the caller closes.
+        --- a system it blocks the caller. The packet owns its source address,
+        --- which the caller closes.
         --- @return Returns one caller-owned complete packet, or nil when none
         ---     waits or reception fails.
         --- @return Returns the reason only when reception fails.
@@ -672,16 +670,6 @@ local record binaryIO
     --- @return Returns a caller-owned socket, or nil on failure.
     --- @return Returns the reason when the first return is nil.
     bind: function(port: integer, address?: Address): UDPSocket, string
-    --- Advances pending resolution and connection work without waiting.
-    ---
-    --- [`Application`](tealdoc:tecs.Application) calls this automatically once
-    --- per host iteration, including while suspended or crashed. A game system,
-    --- plugin, or update function must not call it. Prefer `tecs.runtime.poll`
-    --- in a headless program because that also drains socket readiness and
-    --- every other active service.
-    --- @return Returns how many resolution or connection operations completed
-    ---     during this call, including failures.
-    poll: function(): integer
     --- Returns the number of pending network operations and readiness watches.
     ---
     --- @return Returns zero after every operation settles or cancels.
@@ -736,6 +724,7 @@ local OperationMT <const>: metatable<Operation> = {__index = Operation}
 local started = false
 local liveObjects = 0
 local operations: {Operation} = {}
+local pollIO: function(): integer
 
 local function validPort(port: integer, allowZero: boolean, level: integer)
     local minimum <const> = allowZero and 0 or 1
@@ -884,12 +873,17 @@ function binaryIO.TCPSocket:read(maxBytes?: integer): string, string
         if read > 0 then
             return loader.toBytes(self._buffer as loader.CValue, read)
         end
-        if not task.active() then
-            return nil
-        end
-        local ready, reason <const> = netreactor.wait(self, self._handle, netreactor.stream, netreactor.readable)
-        if ready == nil then
-            return nil, reason
+        local mode <const> = task.checkWait("TCP read")
+        if mode == "cooperative" then
+            local ready, reason <const> = netreactor.wait(self, self._handle, netreactor.stream, netreactor.readable)
+            if ready == nil then
+                return nil, reason
+            end
+        else
+            local ready <const> = tonumber(C.tecsNetStreamWait(self._handle, MAX_TIMEOUT_MS)) as integer
+            if ready < 0 then
+                return nil, loader.toString(C.tecsRustError())
+            end
         end
     end
 end
@@ -921,12 +915,17 @@ function binaryIO.TCPSocket:readInto(destination: IOBuffer, offset?: integer, ma
         if read < 0 then
             return nil, loader.toString(C.tecsRustError())
         end
-        if not task.active() then
-            return nil
-        end
-        local ready, reason <const> = netreactor.wait(self, self._handle, netreactor.stream, netreactor.readable)
-        if ready == nil then
-            return nil, reason
+        local mode <const> = task.checkWait("TCP read")
+        if mode == "cooperative" then
+            local ready, reason <const> = netreactor.wait(self, self._handle, netreactor.stream, netreactor.readable)
+            if ready == nil then
+                return nil, reason
+            end
+        else
+            local ready <const> = tonumber(C.tecsNetStreamWait(self._handle, MAX_TIMEOUT_MS)) as integer
+            if ready < 0 then
+                return nil, loader.toString(C.tecsRustError())
+            end
         end
     end
 end
@@ -971,9 +970,6 @@ function binaryIO.TCPSocket:write(bytes: string): boolean, string
     if tonumber(C.tecsNetStreamWrite(self._handle, bytes, #bytes)) == 0 then
         return false, loader.toString(C.tecsRustError())
     end
-    if task.active() then
-        return drainCooperatively(self)
-    end
     return true
 end
 
@@ -998,12 +994,6 @@ function binaryIO.TCPSocket:writeFrom(source: IOBuffer, offset?: integer, count?
     end
     if tonumber(C.tecsNetStreamWrite(self._handle, source:getFFIPointer() + at, size)) == 0 then
         return nil, loader.toString(C.tecsRustError())
-    end
-    if task.active() then
-        local drained, reason <const> = drainCooperatively(self)
-        if not drained then
-            return nil, reason
-        end
     end
     return size
 end
@@ -1033,12 +1023,6 @@ function binaryIO.TCPSocket:writeView(source: types.ByteView, offset?: integer, 
     if tonumber(C.tecsNetStreamWrite(self._handle, source:getFFIPointer() + at, size)) == 0 then
         return nil, loader.toString(C.tecsRustError())
     end
-    if task.active() then
-        local drained, reason <const> = drainCooperatively(self)
-        if not drained then
-            return nil, reason
-        end
-    end
     return size
 end
 
@@ -1058,11 +1042,11 @@ function binaryIO.TCPSocket:drain(timeoutMs?: integer): boolean, string
         return false, "connection is closed"
     end
     local timeout <const> = validTimeout(timeoutMs or DEFAULT_WAIT_MS, 2)
-    if task.active() then
-        local pending, reason <const> = self:pendingWrites()
-        if pending == nil or pending == 0 or timeout == 0 then
-            return pending == 0, reason
-        end
+    local pending, reason <const> = self:pendingWrites()
+    if pending == nil or pending == 0 or timeout == 0 then
+        return pending == 0, reason
+    end
+    if task.checkWait("TCP drain") == "cooperative" then
         return drainCooperatively(self, timeout)
     end
     local status <const> = tonumber(C.tecsNetStreamDrain(self._handle, timeout)) as integer
@@ -1081,10 +1065,10 @@ function binaryIO.TCPSocket:wait(timeoutMs?: integer): boolean, string
     if immediate < 0 then
         return false, loader.toString(C.tecsRustError())
     end
-    if immediate > 0 or timeout == 0 or not task.active() then
-        if immediate > 0 or timeout == 0 then
-            return immediate > 0
-        end
+    if immediate > 0 or timeout == 0 then
+        return immediate > 0
+    end
+    if task.checkWait("TCP wait") == "blocking" then
         local status <const> = tonumber(C.tecsNetStreamWait(self._handle, timeout)) as integer
         if status < 0 then
             return false, loader.toString(C.tecsRustError())
@@ -1130,12 +1114,17 @@ function binaryIO.TCPListener:accept(): binaryIO.TCPSocket, string
             end
             return tcpSocketFrom(handle)
         end
-        if not task.active() then
-            return nil
-        end
-        local ready, reason <const> = netreactor.wait(self, self._handle, netreactor.server, netreactor.readable)
-        if ready == nil then
-            return nil, reason
+        local mode <const> = task.checkWait("TCP accept")
+        if mode == "cooperative" then
+            local ready, reason <const> = netreactor.wait(self, self._handle, netreactor.server, netreactor.readable)
+            if ready == nil then
+                return nil, reason
+            end
+        else
+            local ready <const> = tonumber(C.tecsNetServerWait(self._handle, MAX_TIMEOUT_MS)) as integer
+            if ready < 0 then
+                return nil, loader.toString(C.tecsRustError())
+            end
         end
     end
 end
@@ -1149,10 +1138,10 @@ function binaryIO.TCPListener:wait(timeoutMs?: integer): boolean, string
     if immediate < 0 then
         return false, loader.toString(C.tecsRustError())
     end
-    if immediate > 0 or timeout == 0 or not task.active() then
-        if immediate > 0 or timeout == 0 then
-            return immediate > 0
-        end
+    if immediate > 0 or timeout == 0 then
+        return immediate > 0
+    end
+    if task.checkWait("TCP accept wait") == "blocking" then
         local status <const> = tonumber(C.tecsNetServerWait(self._handle, timeout)) as integer
         if status < 0 then
             return false, loader.toString(C.tecsRustError())
@@ -1208,12 +1197,24 @@ function binaryIO.UDPSocket:send(address: binaryIO.Address, port: integer, bytes
         if status > 0 then
             return true
         end
-        if not task.active() then
-            return false
-        end
-        local ready, readyReason <const> = netreactor.wait(self, self._handle, netreactor.datagram, netreactor.writable)
-        if ready == nil then
-            return false, readyReason
+        local mode <const> = task.checkWait("UDP send")
+        if mode == "cooperative" then
+            local ready, readyReason <const> = netreactor.wait(
+                self, self._handle, netreactor.datagram, netreactor.writable
+            )
+            if ready == nil then
+                return false, readyReason
+            end
+        else
+            local sent <const> = tonumber(
+                C.tecsNetDatagramSendWait(self._handle, address._handle, port, bytes, #bytes, MAX_TIMEOUT_MS)
+            ) as integer
+            if sent < 0 then
+                return false, loader.toString(C.tecsRustError())
+            end
+            if sent > 0 then
+                return true
+            end
         end
     end
 end
@@ -1263,12 +1264,17 @@ function binaryIO.UDPSocket:receive(): binaryIO.UDPPacket, string
         if status > 0 then
             return receiveDatagram(self)
         end
-        if not task.active() then
-            return nil
-        end
-        local ready, reason <const> = netreactor.wait(self, self._handle, netreactor.datagram, netreactor.readable)
-        if ready == nil then
-            return nil, reason
+        local mode <const> = task.checkWait("UDP receive")
+        if mode == "cooperative" then
+            local ready, reason <const> = netreactor.wait(self, self._handle, netreactor.datagram, netreactor.readable)
+            if ready == nil then
+                return nil, reason
+            end
+        else
+            local ready <const> = tonumber(C.tecsNetDatagramWait(self._handle, MAX_TIMEOUT_MS)) as integer
+            if ready < 0 then
+                return nil, loader.toString(C.tecsRustError())
+            end
         end
     end
 end
@@ -1282,10 +1288,10 @@ function binaryIO.UDPSocket:wait(timeoutMs?: integer): boolean, string
     if immediate < 0 then
         return false, loader.toString(C.tecsRustError())
     end
-    if immediate > 0 or timeout == 0 or not task.active() then
-        if immediate > 0 or timeout == 0 then
-            return immediate > 0
-        end
+    if immediate > 0 or timeout == 0 then
+        return immediate > 0
+    end
+    if task.checkWait("UDP receive wait") == "blocking" then
         local status <const> = tonumber(C.tecsNetDatagramWait(self._handle, timeout)) as integer
         if status < 0 then
             return false, loader.toString(C.tecsRustError())
@@ -1390,7 +1396,7 @@ local function operation(kind: OperationKind, host: string, handle: loader.CPtr)
     source.completion = Completion.pending(source as Source) as CompletionType<any>
     operations[source.at] = source
     if source.at == 1 then
-        runtime.register("io", 40, binaryIO.poll)
+        runtime.register("io", 40, pollIO)
     end
     return source
 end
@@ -1417,6 +1423,7 @@ local function resolveCompletion(host: string): CompletionType<binaryIO.Address>
 end
 
 function binaryIO.resolve(host: string): binaryIO.Address
+    task.checkWait("address resolution")
     return task.awaitCompletion(resolveCompletion(host) as Completion<binaryIO.Address>, "address resolution")
 end
 
@@ -1438,6 +1445,7 @@ local function connectCompletion(address: binaryIO.Address, port: integer): Comp
 end
 
 function binaryIO.connect(address: binaryIO.Address, port: integer): binaryIO.TCPSocket
+    task.checkWait("TCP connection")
     return task.awaitCompletion(connectCompletion(address, port) as Completion<binaryIO.TCPSocket>, "TCP connection")
 end
 
@@ -1485,7 +1493,7 @@ function binaryIO.bind(port: integer, address?: binaryIO.Address): binaryIO.UDPS
     return socket
 end
 
-function binaryIO.poll(): integer
+pollIO = function(): integer
     local settled = 0
     local at = 1
     while at <= #operations do

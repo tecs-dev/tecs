@@ -129,7 +129,7 @@ local EMPTY_SPAN <const>: PhaseSpan = {
 }
 
 -- The list of phases for each span of flatSystems.
-local BEFORE_FIXED_PHASES <const> = {phases.First, phases.PreUpdate}
+local BEFORE_FIXED_PHASES <const> = {phases.Ingress, phases.First, phases.PreUpdate}
 local FIXED_PHASES <const> = phases.FixedUpdateGroup.children
 local AFTER_FIXED_PHASES <const> = {
     phases.Update,

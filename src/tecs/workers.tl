@@ -92,8 +92,9 @@ local record Channel is Closeable
 
     --- Serializes `value` and queues it without blocking.
     ---
-    --- The queue has no bound, so a reader that stops taking messages grows it
-    --- instead of pushing back on the writer.
+    --- Each direction accepts at most 1024 messages and 256 MiB of serialized
+    --- bytes. The call raises when either bound is full; it never blocks the
+    --- sending thread.
     ---
     --- @param value The channel copies this value before returning. A function,
     ---     userdata, cdata, a table nested past 32 levels, or a table with a key
@@ -253,7 +254,7 @@ function Channel:send(value: any)
     -- scalars; the encoder handles tables of scalars fine.
     local encoded = buffer.encode(value as string) as string
     if not C.tecsChannelPush(self.handle, encoded, #encoded) then
-        error("tecs: channel send failed", 2)
+        error("tecs: channel is closed or its bounded queue is full", 2)
     end
 end
 
@@ -283,7 +284,7 @@ end
 --- Wakes anything blocked on this channel so it can stop.
 ---
 --- Already-queued messages are still delivered: a reader drains what is there and only then
---- sees nil. A `send` after this still enqueues, and nothing will ever take it.
+--- sees nil. A `send` after this raises.
 function Channel:close(): boolean, string
     C.tecsChannelClose(self.handle)
     return true
@@ -411,8 +412,8 @@ local record Self
 
     --- Returns a result to the spawner.
     ---
-    --- @param value Subject to the same limits as `Channel:send`, and raises the same way.
-    ---     Nothing bounds the queue, so a worker outrunning its spawner grows it.
+    --- @param value Subject to the same item and byte limits as
+    ---     `Channel:send`, and raises the same way.
     send: function(self: Self, value: any)
 end
 

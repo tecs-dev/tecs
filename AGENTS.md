@@ -337,9 +337,9 @@ Use active voice. Never use an em dash. Name sections for their subject, not as 
 that narrate the same calls.
 
 An example that calls a Tecs module inside a frame or other hot loop binds that
-module to a local outside the loop. Show `local tecsIO <const> = tecs.io` and
-call `tecsIO.poll()` in the loop instead of repeatedly resolving through
-`tecs.io`.
+module to a local outside the loop. Show
+`local time <const> = tecs.platform.time` and call `time.now()` in the loop
+instead of repeatedly resolving through `tecs.platform.time`.
 
 A tag earns its place by saying what the signature cannot: units, the coordinate space, what nil
 means, what happens at a boundary, whether a returned table is the caller's to keep or a view

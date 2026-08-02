@@ -13,7 +13,6 @@ local Application = require("tecs.Application")
 local processModule = require("tecs.internal.process")
 local path = require("tecs.io.Path")
 local process = require("tecs.io.Process")
-local runtime = require("tecs.runtime")
 local sdl = require("tecs.ffi.sdl3")
 local tecsIO = require("tecs.io")
 
@@ -167,27 +166,13 @@ describe("streaming processes", function()
         child:close()
     end)
 
-    it("reports no-data separately from EOF in nonblocking reads", function()
-        local child = newProcess({ args = { "/bin/sh", "-c", "sleep 0.1; printf ready" } })
-        local bytes, reason = child.stdout:readAvailable()
-        assert.is_nil(bytes)
-        assert.is_nil(reason)
-
-        local received = ""
-        local deadline = now() + 20000
-        while now() < deadline do
-            runtime.poll()
-            bytes, reason = child.stdout:readAvailable()
-            assert.is_nil(reason)
-            if bytes == "" then
-                break
-            elseif bytes ~= nil then
-                received = received .. bytes
-            end
-        end
-
-        assert.are.equal("ready", received)
-        assert.is_true(child.stdout:isEOF())
+    it("does not expose a second nonblocking pipe API", function()
+        local child = newProcess({ args = { "/bin/echo", "one reader" } })
+        assert.is_nil(child.stdout.readAvailable)
+        assert.is_nil(child.stdout.readAvailableInto)
+        assert.is_nil(child.stdin.writeAvailable)
+        assert.is_nil(child.stdin.writeAvailableFrom)
+        assert.is_nil(child.stdin.writeAvailableView)
         child:close()
     end)
 
@@ -201,42 +186,6 @@ describe("streaming processes", function()
 
         child:close()
         destination:close()
-    end)
-
-    it("moves available pipe bytes directly between reusable buffers", function()
-        local child = newProcess({ args = { "/bin/cat" } })
-        local source = tecsIO.newBuffer("nonblocking buffer")
-        local destination = tecsIO.newBuffer()
-        local sent = 0
-        local deadline = now() + 20000
-
-        while sent < source:length() and now() < deadline do
-            local wrote, writeReason = child.stdin:writeAvailableFrom(source, sent)
-            assert.is_nil(writeReason)
-            if wrote ~= nil then
-                sent = sent + wrote
-            else
-                runtime.poll()
-            end
-        end
-        child.stdin:close()
-
-        while now() < deadline do
-            local got, readReason = child.stdout:readAvailableInto(destination, destination:length(), 64)
-            assert.is_nil(readReason)
-            if got == 0 then
-                break
-            elseif got == nil then
-                runtime.poll()
-            end
-        end
-
-        assert.are.equal(source:length(), sent)
-        assert.are.equal(source:getString(), destination:getString())
-
-        child:close()
-        destination:close()
-        source:close()
     end)
 
     it("drains output larger than an operating-system pipe", function()

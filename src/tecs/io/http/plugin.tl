@@ -43,11 +43,15 @@ had not answered yet is sent again on load rather than restored as a wait on
 a transfer that ended with the world that started it. The `Response` a game
 eventually reads is the reissued request's.
 
-The exception is a `Request` whose `body` or `into` is a
+The exception is a `Request` whose `body` is a
 `tecs.io.newHandleStream`. The caller owns that live handle, and neither
 snapshot format can reconstruct its ownership or position, so saving the world
-raises.
-Use `tecs.io.newFileStream` when a request must survive a snapshot.
+raises. Use `tecs.io.newFileStream` when a request must survive a snapshot.
+
+A successful `Response` owns a live one-shot body. Consume it and replace it
+with replayable storage before taking a snapshot that includes the response.
+An in-flight native stream and its transport backpressure are runtime state,
+not save data.
 
 Loading stops the transfers that were open before it. A load replaces the
 world in place and despawns nothing, so the entities that asked are gone
@@ -69,7 +73,6 @@ local type Options = client.Options
 local type Client = client.Client
 local type Stream = iotypes.Stream
 local type ReadableStream = iotypes.ReadableStream
-local type WritableStream = iotypes.WritableStream
 
 local record plugin
     --- What a game spawns to make a request. The fields of a `Request`,
@@ -88,12 +91,6 @@ local record plugin
         --- `tecs.io.newHandleStream` here because its live handle cannot
         --- be reconstructed.
         body: string | ReadableStream
-        --- Caller-writable. Sets where the body goes. Left out, the response
-        --- carries a replayable in-memory [`Stream`](tealdoc:tecs.io.Stream).
-        --- A snapshot rejects a
-        --- `tecs.io.newHandleStream` here because its live handle cannot
-        --- be reconstructed.
-        into: string | WritableStream
         --- Caller-writable. Sets milliseconds for this transfer, overriding
         --- the client's value.
         timeoutMs: number
@@ -116,7 +113,7 @@ local record plugin
         status: integer
         --- Engine-owned. Reports response headers with lower-cased names.
         headers: {string: string}
-        --- Engine-owned. Provides the body wherever it went.
+        --- Engine-owned. Provides a one-shot progressive response body.
         body: Stream
         --- Engine-owned. Reports the URI that actually answered, or nil when
         --- the request failed before it supplied a valid URI.
@@ -172,7 +169,7 @@ local function serializeRequest(request: Request): {string: any}
                 data.headers = copyHeaders(value as {string: string})
             elseif key == "url" and URI.isURI(value) then
                 data.url = (value as URI):toString()
-            elseif (key == "body" or key == "into") and valueType == "table" then
+            elseif key == "body" and valueType == "table" then
                 data[key] = stream._snapshot(value as Stream, ("tecs.http.Request %s"):format(key))
             elseif valueType == "number" or valueType == "string" or valueType == "boolean" then
                 data[key] = value
@@ -193,7 +190,7 @@ local function deserializeRequest(_world: World, data: {string: any}): Request
                 error(("tecs: cannot restore tecs.http.Request URL: %s"):format(reason), 0)
             end
             restored.url = parsed
-        elseif (key == "body" or key == "into") and type(value) == "table" then
+        elseif key == "body" and type(value) == "table" then
             restored[key] = stream._restore(value as {string: any}, ("tecs.http.Request %s"):format(key))
         else
             restored[key] = value

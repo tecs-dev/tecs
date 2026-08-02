@@ -6,16 +6,14 @@ local client <const> = tecs.io.http.newClient({userAgent = "mygame/1.0"})
 local response <const> = client:send({
     url = tecs.io.URI.new("https://example.com/manifest.json"),
 })
-local body <const> = response.body
-if body is tecs.io.ReadableStream then
-    print(body:readAll())
-end
+print(response.status)
+print(assert(response.body:readAll(1024 * 1024)))
 ```
 
-Inside a system, `send` returns inline when the response is ready and suspends
-that logical world update only while the transfer is pending. Outside an
-update, the same call blocks until it has the response. The process runtime
-turns every open client once per iteration, so game code never pumps a client.
+`send` returns when status and headers exist. Inside a system it suspends only
+until that boundary; outside an update it blocks its caller. The body is a
+one-shot streaming Reader backed by bounded native chunks, so a slow consumer
+applies transport backpressure instead of accumulating the full response.
 
 An HTTP error status still returns a response. DNS, connection, TLS, timeout,
 or streaming failures raise at the suspended call.
@@ -26,9 +24,9 @@ and protocol work. Both implementations resume the same direct Lua call, and
 neither parks one worker thread per waiting socket.
 
 Call `Client:close` when you no longer need its connection pool. Losing the
-last Lua reference does not cancel its requests. A headless tool calls
-[`tecs.runtime.poll`](/modules/runtime/#tecs.runtime.poll);
-[`Application`](tealdoc:tecs.Application) calls it once per frame.
+last Lua reference does not cancel its requests. An
+[`Application`](tealdoc:tecs.Application) owns progress; a direct headless call
+drives the client while it blocks.
 ]=]
 
 -- Implementation details:
@@ -62,15 +60,13 @@ local record http
     --- `url`.
     type Request = client.Request
 
-    --- `Response` describes what a completed transfer returns regardless of
-    --- status code.
+    --- `Response` describes status, headers, and a progressive response body.
     type Response = client.Response
 
     --- A `Client` owns one connection pool and its active requests.
     ---
     --- Closing the client cancels every pending request, releases the pool,
-    --- and remains safe to repeat. An application or `tecs.runtime.poll`
-    --- drives active requests rather than game code calling `poll` directly.
+    --- and remains safe to repeat. The Application drives active requests.
     interface Client is Closeable
         --- Sends one HTTP request and returns its response.
         ---
@@ -79,8 +75,8 @@ local record http
         --- suspends the world update only while the transfer is pending.
         --- @param self The open client that owns the request.
         --- @param request The caller supplies the URL and optional method,
-        ---     headers, body, destination, timeouts, and byte limit.
-        --- @return Returns the completed response.
+        ---     headers, upload body, timeouts, and byte limit.
+        --- @return Returns status, headers, and a one-shot streaming body.
         send: function(self: Client, request: Request): Response
 
         --- Returns the number of unsettled requests.

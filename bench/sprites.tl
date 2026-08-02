@@ -394,9 +394,8 @@ return tecs.newApplication({
             error("tecs: the spawner regime needs BENCH_FIELDS, BENCH_WAVE and BENCH_SPAWN of at least one", 0)
         end
 
-        -- Blocking, because the field cannot be built before the sheet knows
-        -- which layer its frames live on and there is no frame to poll from
-        -- yet. A game polls `assets.update` instead.
+        -- This startup call blocks until the field can be built. The same call
+        -- in a normal system would suspend the logical update automatically.
         if not assets.installed() then
             assets.install()
         end

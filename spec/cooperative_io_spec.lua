@@ -6,6 +6,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
 local netreactor = require("tecs.internal.netreactor")
+local runtime = require("tecs.internal.runtime")
 
 local C = sdl.C
 local tecsIO = tecs.io
@@ -54,7 +55,7 @@ end
 local function pollUntilDelivery()
     local deadline = C.SDL_GetTicks() + 2000
     repeat
-        local delivered = tecs.runtime.poll()
+        local delivered = runtime.poll()
         if delivered > 0 then
             return delivered
         end
@@ -110,12 +111,20 @@ describe("cooperative socket systems", function()
             end,
         })
 
+        local stable = world:saveSnapshot({ format = "table" })
+
         assert.is_false(world:update(1 / 60))
         assert.is_true(world._updateStalled)
         assert.are.equal(1, entered)
         assert.are.same({ "read" }, order)
         assert.are.equal(0, closed)
         assert.are.equal(1, netreactor.pending())
+        assert.has_error(function()
+            world:saveSnapshot({ format = "table" })
+        end, "tecs: cannot save a snapshot while a world update is suspended")
+        assert.has_error(function()
+            world:loadSnapshot(stable)
+        end, "tecs: cannot load a snapshot while a world update is suspended")
 
         assert.is_true(client:write("hello world"))
         assert.is_true(client:drain(2000))

@@ -13,9 +13,11 @@ use std::sync::{Mutex, MutexGuard};
 use sdl3_sys::events::{
     SDL_Event, SDL_EventType, SDL_EVENT_CLIPBOARD_UPDATE, SDL_EVENT_DID_ENTER_BACKGROUND,
     SDL_EVENT_DID_ENTER_FOREGROUND, SDL_EVENT_DROP_BEGIN, SDL_EVENT_DROP_COMPLETE,
-    SDL_EVENT_DROP_FILE, SDL_EVENT_DROP_POSITION, SDL_EVENT_DROP_TEXT, SDL_EVENT_LOW_MEMORY,
-    SDL_EVENT_TERMINATING, SDL_EVENT_TEXT_EDITING, SDL_EVENT_TEXT_EDITING_CANDIDATES,
-    SDL_EVENT_TEXT_INPUT, SDL_EVENT_WILL_ENTER_BACKGROUND, SDL_EVENT_WILL_ENTER_FOREGROUND,
+    SDL_EVENT_DROP_FILE, SDL_EVENT_DROP_POSITION, SDL_EVENT_DROP_TEXT, SDL_EVENT_FINGER_MOTION,
+    SDL_EVENT_GAMEPAD_AXIS_MOTION, SDL_EVENT_LOW_MEMORY, SDL_EVENT_MOUSE_MOTION,
+    SDL_EVENT_SENSOR_UPDATE, SDL_EVENT_TERMINATING, SDL_EVENT_TEXT_EDITING,
+    SDL_EVENT_TEXT_EDITING_CANDIDATES, SDL_EVENT_TEXT_INPUT, SDL_EVENT_WILL_ENTER_BACKGROUND,
+    SDL_EVENT_WILL_ENTER_FOREGROUND,
 };
 use sdl3_sys::filesystem::SDL_GetBasePath;
 use sdl3_sys::init::{SDL_AppResult, SDL_APP_CONTINUE, SDL_APP_FAILURE, SDL_APP_SUCCESS};
@@ -35,6 +37,8 @@ const LUA_TBOOLEAN: c_int = 1;
 const LUA_TTABLE: c_int = 5;
 const LUA_TFUNCTION: c_int = 6;
 const INITIAL_EVENTS: usize = 256;
+const MAX_EVENTS: usize = 65_536;
+const MAX_EVENT_BYTES: usize = 16 * 1024 * 1024;
 const BACKGROUND_BUDGET_NS: u64 = 250_000_000;
 const ENTRY: &str = match option_env!("TECS_ENTRY") {
     Some(value) => value,
@@ -85,8 +89,11 @@ unsafe extern "C" {
 struct EventBatch {
     events: Vec<SDL_Event>,
     arrivals: Vec<u64>,
+    sequences: Vec<u64>,
     strings: Vec<CString>,
     pointer_arrays: Vec<Box<[*const c_char]>>,
+    bytes: usize,
+    overflow: bool,
 }
 
 impl EventBatch {
@@ -94,24 +101,59 @@ impl EventBatch {
         Self {
             events: Vec::with_capacity(capacity),
             arrivals: Vec::with_capacity(capacity),
+            sequences: Vec::with_capacity(capacity),
             strings: Vec::new(),
             pointer_arrays: Vec::new(),
+            bytes: 0,
+            overflow: false,
         }
     }
 
     fn clear(&mut self) {
         self.events.clear();
         self.arrivals.clear();
+        self.sequences.clear();
         self.pointer_arrays.clear();
         self.strings.clear();
+        self.bytes = 0;
+        self.overflow = false;
+    }
+
+    fn append(&mut self, other: &mut Self) {
+        if self.overflow {
+            other.clear();
+            return;
+        }
+        if other.overflow
+            || self.events.len().saturating_add(other.events.len()) > MAX_EVENTS
+            || self.bytes.saturating_add(other.bytes) > MAX_EVENT_BYTES
+        {
+            self.overflow = true;
+            other.clear();
+            return;
+        }
+        self.bytes = self.bytes.saturating_add(other.bytes);
+        self.events.append(&mut other.events);
+        self.arrivals.append(&mut other.arrivals);
+        self.sequences.append(&mut other.sequences);
+        self.strings.append(&mut other.strings);
+        self.pointer_arrays.append(&mut other.pointer_arrays);
+        other.bytes = 0;
+        other.overflow = false;
     }
 
     unsafe fn own_string(&mut self, source: *const c_char) -> *const c_char {
         if source.is_null() {
             return ptr::null();
         }
-        self.strings
-            .push(unsafe { CStr::from_ptr(source) }.to_owned());
+        let source = unsafe { CStr::from_ptr(source) };
+        let bytes = source.to_bytes_with_nul().len();
+        if self.bytes.saturating_add(bytes) > MAX_EVENT_BYTES {
+            self.overflow = true;
+            return ptr::null();
+        }
+        self.bytes += bytes;
+        self.strings.push(source.to_owned());
         self.strings
             .last()
             .expect("the string was just inserted")
@@ -137,9 +179,16 @@ impl EventBatch {
             .as_ptr()
     }
 
-    unsafe fn push(&mut self, source: *const SDL_Event, arrival: u64) {
+    unsafe fn push(&mut self, source: *const SDL_Event, arrival: u64, sequence: u64) {
+        if self.overflow || self.events.len() >= MAX_EVENTS {
+            self.overflow = true;
+            return;
+        }
         let mut event = unsafe { *source };
         let event_type = event.event_type();
+        if unsafe { self.coalesce(&event, event_type, arrival, sequence) } {
+            return;
+        }
         match event_type {
             SDL_EVENT_TEXT_INPUT => {
                 event.text.text = unsafe { self.own_string(event.text.text) };
@@ -176,8 +225,77 @@ impl EventBatch {
             }
             _ => {}
         }
+        if self.overflow {
+            return;
+        }
         self.events.push(event);
         self.arrivals.push(arrival);
+        self.sequences.push(sequence);
+    }
+
+    /// Coalesces only adjacent high-rate state samples. An intervening event is
+    /// an ordering boundary, so button edges and other discrete input can never
+    /// move across motion. Relative mouse and touch deltas are accumulated;
+    /// absolute and axis samples keep the newest value.
+    unsafe fn coalesce(
+        &mut self,
+        incoming: &SDL_Event,
+        event_type: SDL_EventType,
+        arrival: u64,
+        sequence: u64,
+    ) -> bool {
+        let Some(previous) = self.events.last_mut() else {
+            return false;
+        };
+        if previous.event_type() != event_type {
+            return false;
+        }
+        let same_source = match event_type {
+            SDL_EVENT_MOUSE_MOTION => unsafe {
+                previous.motion.windowID == incoming.motion.windowID
+                    && previous.motion.which == incoming.motion.which
+            },
+            SDL_EVENT_FINGER_MOTION => unsafe {
+                previous.tfinger.windowID == incoming.tfinger.windowID
+                    && previous.tfinger.touchID == incoming.tfinger.touchID
+                    && previous.tfinger.fingerID == incoming.tfinger.fingerID
+            },
+            SDL_EVENT_GAMEPAD_AXIS_MOTION => unsafe {
+                previous.gaxis.which == incoming.gaxis.which
+                    && previous.gaxis.axis == incoming.gaxis.axis
+            },
+            SDL_EVENT_SENSOR_UPDATE => unsafe { previous.sensor.which == incoming.sensor.which },
+            _ => false,
+        };
+        if !same_source {
+            return false;
+        }
+        match event_type {
+            SDL_EVENT_MOUSE_MOTION => unsafe {
+                let xrel = previous.motion.xrel + incoming.motion.xrel;
+                let yrel = previous.motion.yrel + incoming.motion.yrel;
+                previous.motion = incoming.motion;
+                previous.motion.xrel = xrel;
+                previous.motion.yrel = yrel;
+            },
+            SDL_EVENT_FINGER_MOTION => unsafe {
+                let dx = previous.tfinger.dx + incoming.tfinger.dx;
+                let dy = previous.tfinger.dy + incoming.tfinger.dy;
+                previous.tfinger = incoming.tfinger;
+                previous.tfinger.dx = dx;
+                previous.tfinger.dy = dy;
+            },
+            SDL_EVENT_GAMEPAD_AXIS_MOTION => unsafe {
+                previous.gaxis = incoming.gaxis;
+            },
+            SDL_EVENT_SENSOR_UPDATE => unsafe {
+                previous.sensor = incoming.sensor;
+            },
+            _ => return false,
+        }
+        *self.arrivals.last_mut().expect("an event has an arrival") = arrival;
+        *self.sequences.last_mut().expect("an event has a sequence") = sequence;
+        true
     }
 }
 
@@ -187,7 +305,12 @@ unsafe impl Send for EventBatch {}
 
 struct Queues {
     live: EventBatch,
-    spare: EventBatch,
+    pending: EventBatch,
+    active: EventBatch,
+    active_assigned: bool,
+    active_token: u64,
+    next_token: u64,
+    next_sequence: u64,
 }
 
 struct Host {
@@ -305,12 +428,19 @@ unsafe fn call_method(
 unsafe fn push_queue(state: *mut LuaState, host: &Host) {
     let queues = lock_queues(host);
     unsafe {
-        lua_pushlightuserdata(state, queues.spare.events.as_ptr().cast_mut().cast());
+        lua_pushlightuserdata(state, queues.active.events.as_ptr().cast_mut().cast());
         lua_pushinteger(
             state,
-            i64::try_from(queues.spare.events.len()).unwrap_or(i64::MAX),
+            i64::try_from(queues.active.events.len()).unwrap_or(i64::MAX),
         );
-        lua_pushlightuserdata(state, queues.spare.arrivals.as_ptr().cast_mut().cast());
+        lua_pushlightuserdata(state, queues.active.arrivals.as_ptr().cast_mut().cast());
+        lua_pushlightuserdata(state, queues.active.sequences.as_ptr().cast_mut().cast());
+        lua_pushlightuserdata(state, (host as *const Host).cast_mut().cast());
+        lua_pushinteger(
+            state,
+            i64::try_from(queues.active_token).unwrap_or(i64::MAX),
+        );
+        lua_pushinteger(state, i64::from(queues.active.overflow));
     }
 }
 
@@ -427,7 +557,12 @@ unsafe fn initialize(
         owner: SDL_GetCurrentThreadID(),
         queues: Mutex::new(Queues {
             live: EventBatch::with_capacity(INITIAL_EVENTS),
-            spare: EventBatch::with_capacity(INITIAL_EVENTS),
+            pending: EventBatch::with_capacity(INITIAL_EVENTS),
+            active: EventBatch::with_capacity(INITIAL_EVENTS),
+            active_assigned: false,
+            active_token: 0,
+            next_token: 1,
+            next_sequence: 1,
         }),
         lua_active: AtomicI32::new(0),
         deferred: AtomicU32::new(0),
@@ -634,7 +769,9 @@ pub unsafe extern "C" fn SDL_AppEvent(
         let dispatch = transition.is_some() && apply_lifecycle(host, event_type);
         {
             let mut queues = lock_queues(host);
-            unsafe { queues.live.push(event, arrival_of(host, event)) };
+            let sequence = queues.next_sequence;
+            queues.next_sequence = sequence.wrapping_add(1).max(1);
+            unsafe { queues.live.push(event, arrival_of(host, event), sequence) };
         }
         if dispatch {
             let (bit, method) = transition.expect("the transition was present");
@@ -657,16 +794,23 @@ pub unsafe extern "C" fn SDL_AppIterate(appstate: *mut c_void) -> SDL_AppResult 
         unsafe { drain_deferred(host) };
         {
             let mut queues = lock_queues(host);
-            let spare =
-                std::mem::replace(&mut queues.spare, EventBatch::with_capacity(INITIAL_EVENTS));
-            let ready = std::mem::replace(&mut queues.live, spare);
-            queues.spare = ready;
+            let mut live =
+                std::mem::replace(&mut queues.live, EventBatch::with_capacity(INITIAL_EVENTS));
+            queues.pending.append(&mut live);
+            queues.live = live;
+            if !queues.active_assigned {
+                let mut pending = std::mem::replace(
+                    &mut queues.pending,
+                    EventBatch::with_capacity(INITIAL_EVENTS),
+                );
+                std::mem::swap(&mut queues.active, &mut pending);
+                queues.pending = pending;
+                queues.active_assigned = true;
+                queues.active_token = queues.next_token;
+                queues.next_token = queues.next_token.wrapping_add(1).max(1);
+            }
         }
-        let result = unsafe { call_method(host, c"_iterate", Some(push_queue), 3, true) };
-        {
-            let mut queues = lock_queues(host);
-            queues.spare.clear();
-        }
+        let result = unsafe { call_method(host, c"_iterate", Some(push_queue), 7, true) };
         match result {
             MethodResult::Continue => SDL_APP_CONTINUE,
             MethodResult::Stop => SDL_APP_SUCCESS,
@@ -677,6 +821,23 @@ pub unsafe extern "C" fn SDL_AppIterate(appstate: *mut c_void) -> SDL_AppResult 
         log_message("tecs: Rust panic in SDL_AppIterate");
         SDL_APP_FAILURE
     })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsHostEventBatchAcknowledge(host: *mut c_void, token: u64) -> c_int {
+    let Some(host) = (unsafe { host.cast::<Host>().as_ref() }) else {
+        return 0;
+    };
+    if SDL_GetCurrentThreadID() != host.owner {
+        return 0;
+    }
+    let mut queues = lock_queues(host);
+    if !queues.active_assigned || queues.active_token != token {
+        return 0;
+    }
+    queues.active.clear();
+    queues.active_assigned = false;
+    1
 }
 
 #[no_mangle]
@@ -696,4 +857,72 @@ pub unsafe extern "C" fn SDL_AppQuit(appstate: *mut c_void, _result: SDL_AppResu
         }
     }))
     .map_err(|_| log_message("tecs: Rust panic in SDL_AppQuit"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sdl3_sys::mouse::SDL_MouseID;
+    use sdl3_sys::video::SDL_WindowID;
+
+    fn mouse_motion(window: u32, device: u32, x: f32, dx: f32, dy: f32) -> SDL_Event {
+        let mut event = SDL_Event::default();
+        event.motion.r#type = SDL_EVENT_MOUSE_MOTION;
+        event.motion.windowID = SDL_WindowID(window);
+        event.motion.which = SDL_MouseID(device);
+        event.motion.x = x;
+        event.motion.xrel = dx;
+        event.motion.yrel = dy;
+        event
+    }
+
+    #[test]
+    fn coalesces_adjacent_motion_without_losing_relative_deltas() {
+        let mut batch = EventBatch::with_capacity(2);
+        let first = mouse_motion(7, 9, 10.0, 2.0, 3.0);
+        let second = mouse_motion(7, 9, 20.0, 4.0, 5.0);
+
+        unsafe {
+            batch.push(&first, 100, 1);
+            batch.push(&second, 200, 2);
+        }
+
+        assert_eq!(batch.events.len(), 1);
+        assert_eq!(batch.arrivals, [200]);
+        assert_eq!(batch.sequences, [2]);
+        assert_eq!(unsafe { batch.events[0].motion.x }, 20.0);
+        assert_eq!(unsafe { batch.events[0].motion.xrel }, 6.0);
+        assert_eq!(unsafe { batch.events[0].motion.yrel }, 8.0);
+    }
+
+    #[test]
+    fn keeps_motion_separate_across_an_ordering_boundary() {
+        let mut batch = EventBatch::with_capacity(3);
+        let first = mouse_motion(7, 9, 10.0, 2.0, 3.0);
+        let mut boundary = SDL_Event::default();
+        boundary.r#type = SDL_EVENT_CLIPBOARD_UPDATE.into();
+        let second = mouse_motion(7, 9, 20.0, 4.0, 5.0);
+
+        unsafe {
+            batch.push(&first, 100, 1);
+            batch.push(&boundary, 150, 2);
+            batch.push(&second, 200, 3);
+        }
+
+        assert_eq!(batch.events.len(), 3);
+        assert_eq!(batch.sequences, [1, 2, 3]);
+    }
+
+    #[test]
+    fn carries_overflow_into_the_sealed_batch() {
+        let mut pending = EventBatch::with_capacity(1);
+        pending.overflow = true;
+        let mut active = EventBatch::with_capacity(1);
+
+        active.append(&mut pending);
+
+        assert!(active.overflow);
+        assert!(!pending.overflow);
+        assert!(pending.events.is_empty());
+    }
 }

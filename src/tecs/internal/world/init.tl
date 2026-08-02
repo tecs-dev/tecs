@@ -1375,10 +1375,16 @@ function WorldImpl:getStats(fill?: types.World.Stats): types.World.Stats
 end
 
 function WorldImpl:saveSnapshot(opts?: types.World.SnapshotOptions): types.World.SnapshotOutput
+    if self._updateStalled then
+        error("tecs: cannot save a snapshot while a world update is suspended", 2)
+    end
     return snapshotModule.saveSnapshot(self, opts)
 end
 
 function WorldImpl:loadSnapshot(source: any): types.World.SnapshotPrelude
+    if self._updateStalled then
+        error("tecs: cannot load a snapshot while a world update is suspended", 2)
+    end
     local prelude = snapshotModule.loadSnapshot(self, source) as types.World.SnapshotPrelude
     self:_rebuildKeyIndex()
     return prelude

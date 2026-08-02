@@ -6,14 +6,14 @@ resume only when the SDL thread drains its client's event queue. `assets` and `p
 are module singletons, so the loop names them and calls them. A client is
 not: a game constructs it, may construct several, and may keep none of them
 anywhere the loop could reach. So the clients come to the loop instead.
-Building one registers it here, closing one takes it off, and `tecs.runtime`
-turns whatever is on the list once per poll.
+Building one registers it here, closing one takes it off, and the Application
+runtime turns whatever is on the list once per host iteration.
 
 ## Process-wide client registry
 
 The process pump has to reach the list without starting the HTTP runtime.
-`tecs.io.http` resolves the native boundary when it is required, so an
-`tecs.runtime` requiring it would make every program start HTTP machinery,
+`tecs.io.http` resolves the native boundary when it is required, so the
+internal runtime requiring it would make every program start HTTP machinery,
 including ones that never make a request. This module names no library and
 costs a table.
 
@@ -101,9 +101,8 @@ end
 
 --- Turns every open client once, and answers how many transfers settled.
 ---
---- The client registry's pump. `tecs.runtime` calls this while any client is
---- open; direct callers can drive only the clients when that distinction
---- matters.
+--- The client registry's private pump. The Application calls this while any
+--- client is open; a blocking direct request drives only its own client.
 function clients.pump(): integer
     if count == 0 then
         return 0

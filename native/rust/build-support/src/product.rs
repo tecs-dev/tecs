@@ -2960,6 +2960,9 @@ fn link_spirv_cross(
     } else {
         command.args(["-shared", "-Wl,--whole-archive"]);
     }
+    if preset.sanitize {
+        command.args(["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]);
+    }
     command.arg("-o").arg(&output).arg(anchor).args(&archives);
     if std::env::consts::OS != "macos" {
         command.arg("-Wl,--no-whole-archive");

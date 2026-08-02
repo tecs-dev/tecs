@@ -8,7 +8,6 @@ tecs.scoped(function(scope: tecs.Scope)
 
     local running = true
     local function update()
-        tecs.runtime.poll()
         local signal <const> = signals:next()
         if signal ~= nil then
             running = false

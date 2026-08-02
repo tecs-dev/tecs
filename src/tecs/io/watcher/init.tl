@@ -13,19 +13,20 @@ end
 ```
 
 An [`Application`](tealdoc:tecs.Application) with `watch` in its configuration
-installs the watcher and calls `tecs.runtime.poll` once per host iteration,
-including while the game is suspended or handling a crash. Game systems,
-plugins, and update functions do not poll. A headless program without an
-application owns the manual loop shown on `poll`.
+installs and advances the watcher. Settled changes enter a bounded queue and
+handlers run in the scheduler-owned `Ingress` phase. They never interrupt a
+half-completed phase, and a handler may use the same cooperative operations as
+an ordinary system. Game systems, plugins, and update functions do not poll.
 
 The watcher scans only paths recorded by `tecs.io.files.read` and the asset
 loaders. It waits for a changed file's
 size and modification time to settle before dispatching it. Empty, missing,
 and directory paths do not dispatch.
 
-Handlers run between frames. A handler error reaches the log and does not
-replace the current resource. Release builds report `isSupported() == false`
-and do not poll.
+Repeated queued changes to one path coalesce. `Config.capacity` bounds distinct
+pending paths; an overflow is logged and retried by a later scan instead of
+growing memory without limit. A handler error reaches the log and does not
+replace the current resource. Release builds report `isSupported() == false`.
 ]=]
 
 -- Implementation details:
@@ -105,6 +106,10 @@ local record watcher
         --- Caller-writable. Limits watched paths to this root. It defaults to
         --- the content root.
         root: string
+        --- Caller-writable. Limits settled changes waiting for the next
+        --- logical update. Defaults to 1024. Repeated changes to one path
+        --- coalesce while queued.
+        capacity: integer
     end
 
     --- `Change` describes one settled content change.
@@ -138,6 +143,10 @@ local settleCount = DEFAULT_SETTLE
 local root = ""
 local lastPoll = 0.0
 local dispatched = 0
+local capacity = 1024
+local pending: {watcher.Change} = {}
+local pendingPaths: {string: boolean} = {}
+local active: {watcher.Change} = nil
 
 --- The size and modification time of a file, or -1 for both when there is no
 --- file there right now.
@@ -192,7 +201,14 @@ function watcher.install(config?: watcher.Config)
         error("tecs: settle counts polls, so it cannot be negative", 2)
     end
     root = given.root or content.assetRoot()
+    capacity = given.capacity or 1024
+    if type(capacity) ~= "number" or capacity ~= math.floor(capacity) or capacity < 1 then
+        error("tecs: watcher capacity must be a positive integer", 2)
+    end
     entries = {}
+    pending = {}
+    pendingPaths = {}
+    active = nil
     running = true
     runtime.unregister("watcher")
     runtime.register("watcher", 60, pollRuntime)
@@ -215,6 +231,9 @@ function watcher.uninstall()
     running = false
     runtime.unregister("watcher")
     entries = {}
+    pending = {}
+    pendingPaths = {}
+    active = nil
 end
 
 --- Registers the handler for a content kind.
@@ -324,17 +343,16 @@ end
 --- Guarded, because a reload is the one operation most likely to be handed a
 --- file that is not finished being written. A handler that raises has said the
 --- file is not usable, which is the same answer as waiting for the next save.
-local function dispatch(path: string, entry: Entry): boolean
-    local handler = handlers[entry.kind]
-    if handler == nil then
+local function enqueue(path: string, entry: Entry): boolean
+    if pendingPaths[path] then
+        return true
+    end
+    if #pending >= capacity then
+        LOGGER:error("the watcher ingress queue is full; retaining '%s' for a later scan", path)
         return false
     end
-    local ok, failure = pcall(handler, {path = path, kind = entry.kind}) as (boolean, any)
-    if not ok then
-        LOGGER:error("reloading '%s' failed: %s", path, tostring(failure))
-        return false
-    end
-    LOGGER:info("reloaded '%s' as %s", path, entry.kind)
+    pending[#pending + 1] = {path = path, kind = entry.kind}
+    pendingPaths[path] = true
     return true
 end
 
@@ -366,12 +384,12 @@ function watcher.scan(): integer
             end
 
             if entry.steady >= settleCount then
-                entry.size = size
-                entry.stamp = stamp
-                entry.pendingSize = -1
-                entry.pendingStamp = -1
-                entry.steady = 0
-                if dispatch(path, entry) then
+                if enqueue(path, entry) then
+                    entry.size = size
+                    entry.stamp = stamp
+                    entry.pendingSize = -1
+                    entry.pendingStamp = -1
+                    entry.steady = 0
                     fired = fired + 1
                 end
             end
@@ -384,25 +402,11 @@ function watcher.scan(): integer
         end
     end
 
-    dispatched = dispatched + fired
     return fired
 end
 
---- Advances a manually driven headless watcher.
----
---- [`runtime.poll`](/modules/runtime/#tecs.runtime.poll) calls this while the
---- watcher is installed. Game systems, plugins, and update functions must not
---- call it. A second call in the same loop can distort `intervalSeconds` and
---- the number of matching observations counted by `Config.settle`.
----
---- A headless program normally calls `tecs.runtime.poll` once per loop after
---- `install`. Call this narrower operation when a test or tool deliberately
---- drives only the watcher. It returns immediately until `intervalSeconds`
---- has elapsed, then scans only content already recorded by file or asset
---- loading. It performs no sleeping.
----
---- @return Returns how many handlers ran during this call.
-function watcher.poll(): integer
+--- Advances the Application-owned watcher without waiting.
+local function pollWatcher(): integer
     if not running then
         return 0
     end
@@ -414,6 +418,45 @@ function watcher.poll(): integer
     return watcher.scan()
 end
 
-runtimePoll = watcher.poll
+runtimePoll = pollWatcher
+
+--- Seals queued changes for one logical update.
+function watcher._sealIngress()
+    if active ~= nil then
+        return
+    end
+    active = pending
+    pending = {}
+    pendingPaths = {}
+end
+
+--- Dispatches the sealed changes from the scheduler-owned Ingress phase.
+function watcher._dispatchIngress(): integer
+    local batch <const> = active
+    if batch == nil then
+        return 0
+    end
+    local fired = 0
+    for index = 1, #batch do
+        local change <const> = batch[index]
+        local handler <const> = handlers[change.kind]
+        if handler ~= nil then
+            local ok, failure = pcall(handler, change) as (boolean, any)
+            if ok then
+                LOGGER:info("reloaded '%s' as %s", change.path, change.kind)
+                fired = fired + 1
+            else
+                LOGGER:error("reloading '%s' failed: %s", change.path, tostring(failure))
+            end
+        end
+    end
+    dispatched = dispatched + fired
+    return fired
+end
+
+--- Releases the sealed change batch after its logical update completes.
+function watcher._finishIngress()
+    active = nil
+end
 
 return watcher

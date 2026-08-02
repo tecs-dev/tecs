@@ -449,12 +449,12 @@ describe("allocation", function()
         assert.is_true(rawequal(frames[1], frames[#frames]), "the device allocated a frame object per acquisition")
     end)
 
-    it("drains events through one handler for every iteration", function()
+    it("reuses the fold and dispatch handlers across iterations", function()
         local handlers = {}
         local drain = events.drain
-        events.drain = function(queue, count, handler, arrivals)
+        events.drain = function(queue, count, handler, arrivals, sequences, retained)
             handlers[#handlers + 1] = handler
-            return drain(queue, count, handler, arrivals)
+            return drain(queue, count, handler, arrivals, sequences, retained)
         end
         finally(function()
             events.drain = drain
@@ -464,10 +464,14 @@ describe("allocation", function()
             app:_iterate(nil, 0, nil)
         end
 
-        assert.is_true(#handlers >= 2, "the iterations drained no events")
+        assert.is_true(#handlers >= 4, "the iterations did not fold and dispatch events")
         assert.is_true(
-            rawequal(handlers[1], handlers[#handlers]),
-            "the loop allocated a closure per iteration to receive events with"
+            rawequal(handlers[1], handlers[#handlers - 1]),
+            "the loop allocated a closure per iteration to fold events with"
+        )
+        assert.is_true(
+            rawequal(handlers[2], handlers[#handlers]),
+            "the loop allocated a closure per iteration to dispatch events with"
         )
     end)
 

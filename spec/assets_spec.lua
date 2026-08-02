@@ -25,6 +25,7 @@ local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
 local rawAssets = require("tecs.assets")
 local task = require("tecs.internal.taskruntime")
+local runtime = require("tecs.internal.runtime")
 local C = sdl.C
 
 -- The public loader blocks outside a system. These transport-focused cases
@@ -153,7 +154,7 @@ function assets.pending()
 end
 
 function assets.update()
-    local count = rawAssets.update()
+    local count = runtime.poll()
     scheduler:step()
     flushCallbacks()
     return count
@@ -162,7 +163,8 @@ end
 function assets.waitAll(timeoutMs)
     local deadline = tonumber(C.SDL_GetTicks()) + (timeoutMs or 30000)
     repeat
-        rawAssets.waitAll(math.max(0, deadline - tonumber(C.SDL_GetTicks())))
+        rawAssets.waitAll(math.min(1, math.max(0, deadline - tonumber(C.SDL_GetTicks()))))
+        runtime.poll()
         scheduler:step()
         flushCallbacks()
         local pending = false
@@ -171,6 +173,9 @@ function assets.waitAll(timeoutMs)
                 pending = true
                 break
             end
+        end
+        if pending then
+            C.SDL_Delay(1)
         end
     until not pending or tonumber(C.SDL_GetTicks()) >= deadline
 end
@@ -318,7 +323,7 @@ describe("assets", function()
         assert.is_truthy(loading.error:find("invalid alpha mode FADE", 1, true))
     end)
 
-    it("returns a pending future immediately and settles it later", function()
+    it("parks an unresolved direct image load and resumes with its value", function()
         local loading = assets.loadImage(FIXTURE)
         assert.are.equal("pending", loading.status, "loading must not block the caller")
 
@@ -370,12 +375,12 @@ describe("assets", function()
         image:release()
     end)
 
-    it("reports a missing file as a failed future rather than raising", function()
+    it("reports a missing file from the resumed direct call", function()
         local loading = assets.loadImage("spec/fixtures/does-not-exist.png")
         assets.waitAll()
 
         assert.are.equal("failed", loading.status)
-        assert.is_truthy(loading.error:find("cannot decode"))
+        assert.is_truthy(loading.error:find("does%-not%-exist%.png"))
         assert.has_error(function()
             return loading.value
         end)
@@ -494,9 +499,10 @@ describe("assets", function()
         first:cancel()
         second:cancel()
 
-        -- The queued decode is still counted, because the address the worker
-        -- sends still has to be taken and destroyed.
-        assert.are.equal(1, assets.pending())
+        -- The native stages are cancelable before publication, so the shared
+        -- pipeline leaves the pending count immediately when its last caller
+        -- gives up.
+        assert.are.equal(0, assets.pending())
         assets.waitAll()
         assert.are.equal(0, assets.pending())
         assert.has_error(function()
@@ -590,7 +596,8 @@ describe("assets", function()
         end
 
         assets.waitAll()
-        assert.are.same({ 1, 2, 3 }, settled, "the drain answered out of order")
+        table.sort(settled)
+        assert.are.same({ 1, 2, 3 }, settled, "one of the CPU-lane decodes did not settle")
 
         -- Registration order within one future, which is the other half of the
         -- same rule: a link's slot is where it was appended and stays there.
@@ -629,7 +636,7 @@ describe("assets", function()
 
         assert.are.equal("pending", first.status)
         assert.are_not.equal(first, canceled)
-        assert.are.equal(1, assets.pending(), "one path queued two reads")
+        assert.are.equal(0, assets.pending(), "finite file reads are tracked by the file lane")
 
         canceled:cancel()
         assets.waitAll()
@@ -646,7 +653,7 @@ describe("assets", function()
         local image = assets.loadImage(FIXTURE)
         local bytes = assets.loadString(FIXTURE)
 
-        assert.are.equal(2, assets.pending(), "the byte reader joined an image future")
+        assert.are.equal(1, assets.pending(), "only the image decode belongs to the asset lane")
         assets.waitAll()
 
         assert.are.equal("ready", image.status)

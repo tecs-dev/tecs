@@ -161,20 +161,30 @@ outside `world:update` use the same direct-value API and block while pumping
 the producer. Private completion state may bridge a native worker queue, but
 it is not a second user-facing execution model.
 
-The producer still matches the work. TCP and UDP try their syscall first and
-use a process-wide `mio` readiness reactor only after `WouldBlock`; no worker
-thread sits waiting on a socket. One bounded Tokio service resolves names and
-establishes connections. Image and model decoding, compression, and other
-CPU-heavy or blocking library calls run on Rust-owned workers. Every path
+The producer still matches the work. TCP, UDP, and process pipes try their
+syscall first and use a process-wide `mio` readiness reactor only after
+`WouldBlock`; no worker thread sits waiting on a handle. One bounded Tokio
+service resolves names and establishes connections. Regular-file transfers
+use a bounded SDL AsyncIO queue, uncovered file operations use a separate
+bounded blocking lane, and image decoding uses a bounded CPU lane. Every path
 settles onto the same Lua-thread continuation, so that implementation split
-does not create a second game API.
+does not create a second game API or let CPU work starve I/O progress.
 
-Synchronous byte contracts remain synchronous. A `Reader`, `Writer`, file
-cursor, or transform returns what it can do on the calling Lua thread. Socket
-methods are readiness-aware because a socket can wait without consuming a
-thread; CPU-heavy transforms use workers when they must leave the frame. The
-engine unifies how a system receives the answer without forcing unlike kinds
-of native work into one implementation.
+Byte contracts are contextual. Memory Readers, Writers, buffers, and
+transforms return inline. A socket or process-pipe endpoint first uses that
+same direct call and parks only when the handle is not ready. File endpoints
+wait through SDL AsyncIO. HTTP returns at headers and exposes a bounded,
+one-shot streaming body. Outside a resumable world update these calls block
+their caller while advancing only the producer they need. There is no public
+runtime pump or nonblocking twin to keep in sync.
+
+External input is retained at logical-update boundaries. SDL callbacks append
+copied events to a bounded native queue; a new update seals one immutable
+batch, folds input once, and dispatches observers from the scheduler-owned
+`Ingress` phase. If an observer suspends, later SDL events wait for the next
+update. Watcher changes use the same bounded Ingress boundary. The scheduler
+therefore commits a phase once and extraction never observes half of an
+external batch.
 
 ## Build
 

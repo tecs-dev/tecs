@@ -132,12 +132,7 @@ local function game(world: tecs.World, app: tecs.Application)
     local instance <const> = meshes:registerModel(loaded):newInstance()
     for _, primitive in ipairs(instance.primitives) do
         world:spawn(
-            primitive.transform,
-            primitive.mesh,
-            primitive.bounds,
-            primitive.material,
-            Tint(1, 1, 1, 1),
-            Renderable3D()
+            primitive.transform, primitive.mesh, primitive.bounds, primitive.material, Tint(1, 1, 1, 1), Renderable3D()
         )
     end
     print(

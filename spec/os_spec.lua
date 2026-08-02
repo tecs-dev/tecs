@@ -3,7 +3,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local ffi = require("ffi")
 local platformOS = require("tecs.platform.os")
-local runtime = require("tecs.runtime")
+local runtime = require("tecs.internal.runtime")
 
 if ffi.os ~= "Windows" then
     ffi.cdef([[

@@ -101,21 +101,21 @@ Only operations that actually wait enter the scheduler.
 Cooperation does not make every byte operation asynchronous. The API follows
 the kind of work:
 
-| Work                                            | Behavior inside a system | Native execution            |
-| ----------------------------------------------- | ------------------------ | --------------------------- |
-| Cached asset or ready socket                    | Returns inline           | Immediate lookup or syscall |
-| DNS resolution or TCP connection                | Suspends the update      | Bounded Tokio service       |
-| Socket blocked on readiness                     | Suspends the update      | Process-wide `mio` reactor  |
-| HTTP request                                    | Suspends the update      | Reqwest and Tokio service   |
-| Asset decode or durable write                   | Suspends the update      | Worker thread               |
-| `Process:wait` or native dialog                 | Suspends the update      | Native completion bridge    |
-| `Reader`, `Writer`, transform, or file transfer | Runs synchronously       | Calling Lua thread          |
+| Work                                     | Behavior inside a system | Native execution            |
+| ---------------------------------------- | ------------------------ | --------------------------- |
+| Cached asset or ready socket             | Returns inline           | Immediate lookup or syscall |
+| DNS resolution or TCP connection         | Suspends the update      | Bounded Tokio service       |
+| Socket blocked on readiness              | Suspends the update      | Process-wide `mio` reactor  |
+| HTTP request                             | Suspends the update      | Reqwest and Tokio service   |
+| Asset decode                             | Suspends the update      | Bounded CPU lane            |
+| Regular file transfer                    | Suspends the update      | SDL AsyncIO                 |
+| `Process:wait` or native dialog          | Suspends the update      | Native completion bridge    |
+| Memory Reader, Writer, or transform      | Returns inline           | Calling Lua thread          |
+| Socket or process-pipe Reader and Writer | Suspends when not ready  | Native readiness reactor    |
 
-Use `readAvailable` and `writeAvailable` when missing pipe data is a normal
-per-frame outcome and the system should keep going. Use a direct cooperative
-call when the rest of that system cannot proceed without its answer. CPU-heavy
-transforms and blocking libraries belong on workers. These are work-semantics
-choices; users never receive a future or manually manage a coroutine.
+CPU-heavy transforms and blocking libraries belong on workers. Users never
+receive a future, poll a second nonblocking API, or manually manage a
+coroutine.
 
 Socket I/O uses the same direct form. This system does not poll, retain a
 future, or declare itself asynchronous:

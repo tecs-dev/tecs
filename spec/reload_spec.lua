@@ -367,7 +367,13 @@ describe("mcp watch", function()
 
         local _, settled = callTool({ poll = true })
         assert.are.equal(1, settled.reloaded)
-        assert.are.equal(1, settled.dispatched)
+        assert.are.equal(0, settled.dispatched)
+        assert.are.equal(0, reloaded, "the tool dispatched outside Ingress")
+
+        watcher._sealIngress()
+        assert.are.equal(1, watcher._dispatchIngress())
+        watcher._finishIngress()
+        assert.are.equal(1, watcher.dispatched())
         assert.are.equal(1, reloaded)
 
         local _, stopped = callTool({ enabled = false })

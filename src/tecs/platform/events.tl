@@ -15,20 +15,23 @@ world:observe(0, tecs.platform.events.on.keyDown, function(event: tecs.platform.
 end)
 ```
 
-The application drains platform events before `world:update`. Observers run
-outside every phase and fixed step. The application updates input state before
-it emits an event, so an observer sees the new state.
+The application seals one event batch at a logical-update boundary, folds the
+whole batch into latched input, then dispatches observers from the
+scheduler-owned `Ingress` phase before `First`. An observer may suspend; its
+batch remains unchanged and later SDL events wait for the next logical update.
+An observer therefore sees final latched input for its complete batch.
 
 SDL converts `SIGINT` and `SIGTERM` into `events.on.quit`, so an application
 uses the same normal shutdown path for a terminal interrupt and a window
 close. A headless program without an application uses
-`tecs.platform.os.newSignalListener` and drives `tecs.runtime.poll` itself.
+`tecs.platform.os.newSignalListener`; reading that listener transfers pending
+native signal flags itself.
 
 ## Borrowed records
 
-The converter reuses one wide [`Event`](tealdoc:tecs.platform.events.Event) record. `kind` determines which payload
-fields carry meaning. Read the record during the observer call, or retain an
-independent value through `events.copy`.
+The converter reuses one wide [`Event`](tealdoc:tecs.platform.events.Event)
+record. `kind` determines which payload fields carry meaning. Read the record
+during the observer call, or retain an independent value through `events.copy`.
 
 Mouse and converted touch positions use logical window coordinates.
 `timestamp` uses the platform event clock. `arrival` uses the monotonic seconds
@@ -83,6 +86,10 @@ local record Event is genericEvents.Event
     --- converted by the host from the event's platform timestamp. Nil for an
     --- event that did not come through the host queue, such as a replayed one.
     arrival: number
+    --- Read-only. Reports the host's monotonic event sequence. The value is
+    ---     stable across a suspended logical update and nil for replayed or
+    ---     synthetic records that did not pass through the native host.
+    sequence: number
 
     --- Read-only. Reports the physical key position, which is what a movement binding wants: WASD
     --- stays in the same place on every layout.
@@ -717,6 +724,7 @@ local function reset(event: Event)
     event.down = false
     event.eraser = false
     event.arrival = nil
+    event.sequence = nil
     event.finger = nil
     event.touchDevice = nil
     event.text = nil
@@ -987,8 +995,15 @@ end
 -------------------------------------------------------------------------------
 
 -- Converts and dispatches the host's SDL event queue in arrival order.
-local function drain(queue: loader.CValue, count: integer, handler: function(Event), arrivals?: loader.CValue)
-    local replay = events.source
+local function drain(
+    queue: loader.CValue,
+    count: integer,
+    handler: function(Event),
+    arrivals?: loader.CValue,
+    sequences?: loader.CValue,
+    hostOnly?: boolean
+)
+    local replay = not hostOnly and events.source or nil
     if replay ~= nil then
         replay(handler)
         return
@@ -999,11 +1014,15 @@ local function drain(queue: loader.CValue, count: integer, handler: function(Eve
     end
 
     local stamps: loader.CArray = nil
+    local order: loader.CArray = nil
     if arrivals ~= nil then
         if counterFrequency == 0.0 then
             counterFrequency = tonumber(C.SDL_GetPerformanceFrequency()) as number
         end
         stamps = ffi.cast(StampCast, arrivals) as loader.CArray
+    end
+    if sequences ~= nil then
+        order = ffi.cast(StampCast, sequences) as loader.CArray
     end
 
     local queued = ffi.cast(Cast, queue) as loader.CArray
@@ -1011,6 +1030,9 @@ local function drain(queue: loader.CValue, count: integer, handler: function(Eve
         local event = convert(queued[index] as loader.CValue)
         if stamps ~= nil then
             event.arrival = (tonumber(stamps[index]) as number) / counterFrequency
+        end
+        if order ~= nil then
+            event.sequence = tonumber(order[index]) as number
         end
         handler(event)
     end

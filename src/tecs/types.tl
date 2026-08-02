@@ -1624,7 +1624,8 @@ local record types
         ---     handle.
         --- @return The snapshot, in whichever form was asked for. Taken from the
         ---     world as it stands, so this is a point-in-time copy and later
-        ---     changes do not reach it.
+        ---     changes do not reach it. Raises while a logical world update is
+        ---     suspended, because its deferred phase is not committed state.
         saveSnapshot: function(self, opts?: SnapshotOptions): SnapshotOutput
 
         --- Restore the world from either binary or table form.
@@ -1639,7 +1640,7 @@ local record types
         --- @return What the snapshot said about itself. The prelude is read
         ---     first but handed back last, so a caller that meant to reject an
         ---     unwanted version reads it after the world has already been
-        ---     replaced.
+        ---     replaced. Raises while a logical world update is suspended.
         loadSnapshot: function(self, source: any): SnapshotPrelude
 
         --- Register named save/load callbacks for custom snapshot data.

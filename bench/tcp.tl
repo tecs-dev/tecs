@@ -73,7 +73,7 @@ local task <const> = require("tecs.internal.taskruntime")
 
 local C <const> = sdl.C
 local ioModule <const> = tecs.io
-local runtime <const> = tecs.runtime
+local runtime <const> = require("tecs.internal.runtime")
 local data <const> = tecs.data
 local time <const> = tecs.platform.time
 local now <const> = time.now
@@ -111,7 +111,7 @@ local CHUNK <const> = integerEnvironment("BENCH_TCP_CHUNK", MAX_CHUNK)
 local CHUNKS <const> = integerEnvironment("BENCH_TCP_CHUNKS", 16)
 local WARMUP <const> = integerEnvironment("BENCH_TCP_WARMUP", 120)
 local SAMPLES <const> = integerEnvironment("BENCH_TCP_SAMPLES", 600)
-local TIMEOUT_MS <const> = integerEnvironment("BENCH_TCP_TIMEOUT_MS", 2000)
+local TIMEOUT_MS <const> = integerEnvironment("BENCH_TCP_TIMEOUT_MS", 10000)
 
 if CHUNK < 1 or CHUNK > MAX_CHUNK then
     error(format("bench: BENCH_TCP_CHUNK must be from 1 to %d", MAX_CHUNK), 0)

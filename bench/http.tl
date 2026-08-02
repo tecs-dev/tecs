@@ -44,6 +44,7 @@ local buffer <const> = require("tecs.io.buffer")
 local type iotypes = require("tecs.io.types")
 local type tasks = require("tecs.internal.taskruntime")
 local task <const> = require("tecs.internal.taskruntime")
+local runtime <const> = require("tecs.internal.runtime")
 
 local tecsIO <const> = tecs.io
 local http <const> = tecs.io.http
@@ -249,6 +250,7 @@ local record Server
     pending: Buffer
     bodyOffset: integer
     bodyLength: integer
+    writing: boolean
     responded: boolean
 end
 
@@ -260,6 +262,7 @@ local function listen(): Server, integer
             return {
                 listener = listener,
                 pending = tecsIO.newBuffer(),
+                writing = false,
                 responded = false,
             }, port
         end
@@ -272,14 +275,48 @@ local function pollServer(server: Server, response: string): boolean
     if server.responded then
         return false
     end
+    if server.writing then
+        local pending <const>, pendingReason = server.connection:pendingWrites()
+        if pending == nil then
+            error(pendingReason, 0)
+        end
+        if pending > 0 then
+            return false
+        end
+        server.writing = false
+        server.responded = true
+        return true
+    end
     if server.connection == nil then
+        local listening <const>, listenReason = server.listener:wait(0)
+        if listenReason ~= nil then
+            error(listenReason, 0)
+        end
+        if not listening then
+            return false
+        end
         server.connection = server.listener:accept()
         if server.connection == nil then
             return false
         end
     end
+    local readable <const>, readyReason = server.connection:wait(0)
+    if readyReason ~= nil then
+        error(readyReason, 0)
+    end
+    if not readable then
+        return false
+    end
     local read <const>, reason = server.connection:readInto(server.pending, server.pending:length(), READ_CHUNK)
     if reason ~= nil then
+        -- The client may retire an idle keep-alive connection between
+        -- requests. Accept that only at a request boundary and let the next
+        -- poll accept the replacement connection.
+        if reason == "connection closed" and server.pending:length() == 0 and server.bodyOffset == nil then
+            server.connection:close()
+            server.connection = nil
+            return false
+        end
         error(reason, 0)
     end
     if server.bodyOffset == nil and read ~= nil then
@@ -299,9 +336,8 @@ local function pollServer(server: Server, response: string): boolean
     if not ok then
         error(writeReason, 0)
     end
-    server.connection:drain(1000)
-    server.responded = true
-    return true
+    server.writing = true
+    return false
 end
 
 local function validateRequest(server: Server): integer
@@ -312,6 +348,7 @@ local function validateRequest(server: Server): integer
     server.pending:clear()
     server.bodyOffset = nil
     server.bodyLength = nil
+    server.writing = false
     server.responded = false
     return hash
 end
@@ -372,7 +409,6 @@ local function begin()
         expectedServerHash = PAYLOAD_HASH
     elseif name == "download-writer" then
         sink = setMeta({buffer = downloadBuffer, closed = false} as BufferSink, BufferSinkMT) as BufferSink
-        request.into = sink
         expectedServerHash = crc32("")
     else
         expectedServerHash = crc32("")
@@ -394,6 +430,7 @@ local function completionResponse(): tecs.io.http.Response
 end
 
 local benchmarkFailure: string = nil
+local startRequested = false
 
 local function failBenchmark(app: tecs.Application, reason: any)
     if benchmarkFailure == nil then
@@ -417,15 +454,33 @@ return tecs.newApplication({
         if not began then
             failBenchmark(app, beginFailure)
         end
+        runtime.register(
+            "bench-http",
+            1,
+            function(): integer
+                local progressed = 0
+                local advanced <const>, advanceFailure = protect(function()
+                    pollServer(server, MODES[mode]:match("^download") ~= nil and PAYLOAD_RESPONSE or EMPTY_RESPONSE)
+                    if pendingTask ~= nil and pendingTask.status == "pending" then
+                        progressed = progressed + scheduler:step()
+                    end
+                    if startRequested then
+                        startRequested = false
+                        begin()
+                        progressed = progressed + 1
+                    end
+                end) as (boolean, any)
+                if not advanced then
+                    failBenchmark(app, advanceFailure)
+                end
+                return progressed
+            end
+        )
         world:addSystem({
             name = "bench.Http",
             phase = tecs.ecs.phases.Update,
             run = function()
                 local advanced <const>, advanceFailure = protect(function()
-                    pollServer(server, MODES[mode]:match("^download") ~= nil and PAYLOAD_RESPONSE or EMPTY_RESPONSE)
-                    if pendingTask.status == "pending" then
-                        scheduler:step()
-                    end
                     local status <const> = completionStatus()
                     if status == "pending" then
                         return
@@ -442,11 +497,20 @@ return tecs.newApplication({
                     end
                     if name == "download-buffer" then
                         local body <const> = (response.body as ReadableStream):readAll()
-                        if crc32(body) ~= PAYLOAD_HASH then
-                            error("tecs: default Buffer download hash mismatch", 0)
+                        local bodyHash <const> = crc32(body)
+                        if bodyHash ~= PAYLOAD_HASH then
+                            error(
+                                ("tecs: default Buffer download mismatch: got %d bytes/%u, expected %d/%u"):format(
+                                    #body, bodyHash, BYTES, PAYLOAD_HASH
+                                ),
+                                0
+                            )
                         end
-                    elseif name == "download-writer" and crc32(downloadBuffer:getString()) ~= PAYLOAD_HASH then
-                        error("tecs: custom Writer download hash mismatch", 0)
+                    elseif name == "download-writer" then
+                        assert((response.body as ReadableStream):transferTo(sink))
+                        if crc32(downloadBuffer:getString()) ~= PAYLOAD_HASH then
+                            error("tecs: custom Writer download hash mismatch", 0)
+                        end
                     end
                     iteration = iteration + 1
                     if iteration > WARMUP then
@@ -454,7 +518,7 @@ return tecs.newApplication({
                         samples[#samples + 1] = elapsed
                     end
                     if iteration < WARMUP + SAMPLES then
-                        begin()
+                        startRequested = true
                         return
                     end
                     mode = mode + 1
@@ -464,7 +528,7 @@ return tecs.newApplication({
                         return
                     end
                     results[mode] = {name = MODES[mode], samples = {}, bytes = BYTES}
-                    begin()
+                    startRequested = true
                 end) as (boolean, any)
                 if not advanced then
                     failBenchmark(app, advanceFailure)
@@ -475,6 +539,7 @@ return tecs.newApplication({
             name = "bench.HttpReport",
             phase = tecs.ecs.phases.Shutdown,
             run = function()
+                runtime.unregister("bench-http")
                 if benchmarkFailure == nil then
                     if #results ~= #MODES then
                         benchmarkFailure = ("completed %d of %d modes"):format(#results, #MODES)

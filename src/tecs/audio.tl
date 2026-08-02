@@ -2119,11 +2119,6 @@ end
 ---     answers.
 function Audio:update(dt?: number): integer
     self._now = self._now + (dt or 0.0)
-    -- The loader's own drain, which settles this instance's loads along with
-    -- everything else outstanding. An `Audio` outside an `Application` still
-    -- sees its clips arrive because of this call.
-    assets.update()
-
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
         if voice.sounding and not voice.paused and not self._backend.playing(voice.track) then

@@ -1076,6 +1076,47 @@ pub unsafe extern "C" fn tecsNetDatagramSend(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn tecsNetDatagramSendWait(
+    socket: *mut TecsNetDatagram,
+    address: *const TecsNetAddress,
+    port: u16,
+    data: *const u8,
+    length: usize,
+    timeout_ms: u32,
+) -> c_int {
+    if socket.is_null() || address.is_null() {
+        set_error("datagram socket or address is null");
+        return -1;
+    }
+    let data = match unsafe { bytes(data, length) } {
+        Ok(data) => data,
+        Err(error) => {
+            set_error(error);
+            return -1;
+        }
+    };
+    let destination = SocketAddr::new(unsafe { (*address).address }, port);
+    match wait_until(timeout_ms, || {
+        match unsafe { (*socket).socket.send_to(data, destination) } {
+            Ok(sent) if sent == data.len() => Ok(true),
+            Ok(sent) => Err(io::Error::other(format!(
+                "sent {sent} of {} datagram bytes",
+                data.len()
+            ))),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(false),
+            Err(error) => Err(error),
+        }
+    }) {
+        Ok(true) => 1,
+        Ok(false) => 0,
+        Err(error) => {
+            set_error(error);
+            -1
+        }
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn tecsNetDatagramReceive(
     socket: *mut TecsNetDatagram,
 ) -> *mut TecsNetPacket {

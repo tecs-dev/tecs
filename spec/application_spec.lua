@@ -23,7 +23,7 @@ local files = require("tecs.io.files")
 local tecsIO = require("tecs.io")
 local log = require("tecs.log")
 local mcp = require("tecs.io.mcp")
-local runtime = require("tecs.runtime")
+local runtime = require("tecs.internal.runtime")
 local task = require("tecs.internal.taskruntime")
 
 local FIXTURE = "spec/fixtures/split.png"
@@ -36,6 +36,19 @@ local CHECKPOINT = "spec-checkpoint.bin"
 local function build(config)
     config.window = { title = "application", width = 64, height = 64 }
     return Application.newApplication(config)
+end
+
+local function iterateEvents(app, batch)
+    local original = events.source
+    events.source = function(emit)
+        for index = 1, #batch do
+            emit(batch[index])
+        end
+    end
+    local ok, result = pcall(app._iterate, app, nil, 0, nil)
+    events.source = original
+    assert.is_true(ok, result)
+    return result
 end
 
 describe("Application", function()
@@ -329,17 +342,17 @@ describe("Application", function()
             })
             assert.is_true(app:_init())
 
-            app:_receive({ kind = "keyDown", scancode = 44, down = true })
+            iterateEvents(app, { { kind = "keyDown", scancode = 44, down = true } })
 
             assert.are.equal(1, keys)
             assert.are.equal(0, drops, "an observer was called for a kind it did not ask for")
             app:_shutdown()
         end)
 
-        it("hands the observer the record itself rather than a copy", function()
-            -- Delivery costs one field store and no copy, which is what makes
-            -- a device-rate stream affordable. The borrow rule that follows
-            -- from it is the one this vocabulary already had.
+        it("hands the observer the sealed borrowed event", function()
+            -- A replay source is copied once while its logical-update batch is
+            -- sealed. Ingress then borrows that retained record without a
+            -- second per-observer copy.
             local received
             local app = build({
                 plugin = function(world)
@@ -357,9 +370,13 @@ describe("Application", function()
                 dx = 1.0,
                 dy = 2.0,
             }
-            app:_receive(sent)
+            iterateEvents(app, { sent })
 
-            assert.is_true(rawequal(sent, received), "the event was copied on its way to the observer")
+            assert.are.equal("mouseMotion", received.kind)
+            assert.are.equal(4.0, received.x)
+            assert.are.equal(8.0, received.y)
+            assert.are.equal(1.0, received.dx)
+            assert.are.equal(2.0, received.dy)
             app:_shutdown()
         end)
 
@@ -374,10 +391,12 @@ describe("Application", function()
             })
             assert.is_true(app:_init())
 
-            app:_receive({
-                kind = "keyDown",
-                scancode = app.input:scancode("space"),
-                down = true,
+            iterateEvents(app, {
+                {
+                    kind = "keyDown",
+                    scancode = app.input:scancode("space"),
+                    down = true,
+                },
             })
 
             assert.is_true(downInHandler, "an observer saw the input state from before the event it was told about")
@@ -429,7 +448,7 @@ describe("Application", function()
             })
             assert.is_true(app:_init())
 
-            app:_receive({ kind = "keyDown", scancode = 44, down = true })
+            iterateEvents(app, { { kind = "keyDown", scancode = 44, down = true } })
 
             assert.is_truthy(app:crashed():match("observer boom"))
             app:_shutdown()
@@ -803,7 +822,7 @@ describe("Application", function()
             app:_iterate(nil, 0, nil)
             assert.is_truthy(app:crashed():match("system boom"))
 
-            app:_receive({ kind = "keyDown", scancode = 44, down = true })
+            iterateEvents(app, { { kind = "keyDown", scancode = 44, down = true } })
             assert.are.equal(0, observed, "an observer ran in a game that had stopped")
             assert.is_truthy(app:crashed():match("system boom"), "a later throw replaced the traceback")
 
@@ -814,8 +833,11 @@ describe("Application", function()
             assert.is_true(app.quitRequested, "quit stopped working after a crash")
 
             -- And the observer is delivered to again once the crash is cleared.
+            -- The host would stop after a real quit; reset this internal flag
+            -- because this assertion deliberately keeps the same fixture.
+            app.quitRequested = false
             app:clearCrash()
-            app:_receive({ kind = "keyDown", scancode = 44, down = true })
+            iterateEvents(app, { { kind = "keyDown", scancode = 44, down = true } })
             assert.are.equal(1, observed, "clearing the crash did not restore delivery")
             app:_shutdown()
         end)

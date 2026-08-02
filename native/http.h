@@ -61,7 +61,12 @@ typedef struct TecsHttpRequest {
 
 enum TecsHttpBodyKind { TECS_HTTP_BODY_NONE = 0, TECS_HTTP_BODY_INLINE = 1, TECS_HTTP_BODY_UPLOAD = 2 };
 
-enum TecsHttpEventKind { TECS_HTTP_EVENT_CHUNK = 1, TECS_HTTP_EVENT_COMPLETE = 2, TECS_HTTP_EVENT_FAILED = 3 };
+enum TecsHttpEventKind {
+    TECS_HTTP_EVENT_HEADERS = 1,
+    TECS_HTTP_EVENT_CHUNK = 2,
+    TECS_HTTP_EVENT_COMPLETE = 3,
+    TECS_HTTP_EVENT_FAILED = 4
+};
 
 enum TecsHttpUploadResult {
     TECS_HTTP_UPLOAD_CLOSED = -1,

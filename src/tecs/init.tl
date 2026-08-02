@@ -55,7 +55,6 @@ local type log = require("tecs.log")
 local type angleMath = require("tecs.math")
 local type data = require("tecs.data")
 local type regex = require("tecs.regex")
-local type runtime = require("tecs.runtime")
 local type loader = require("tecs.ffi.loader")
 local type Closeable = types.Closeable
 
@@ -473,7 +472,6 @@ local record tecs
     math: angleMath
     platform: platform
     regex: regex
-    runtime: runtime
     sequence: sequence
     ui: ui
     workers: workers
@@ -602,7 +600,6 @@ local SURFACE <const>: {string: Namespace} = {
         },
     },
     regex = {module = "tecs.regex"},
-    runtime = {module = "tecs.runtime"},
     sequence = {module = "tecs.sequence"},
     ui = {module = "tecs.ui"},
     workers = {module = "tecs.workers"},
