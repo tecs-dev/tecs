@@ -1,98 +1,15 @@
---[=[
-Internal one-shot completion state used by native and worker producers.
-
-Assets, child processes, and HTTP requests return
-[`Future`](tealdoc:tecs.Future)`<T>`. Compose their
-results without blocking a frame:
-
-```teal no-format
-local process, reason = tecs.io.Process.new({args = {"git", "status", "--porcelain"}})
-if process == nil then
-    error(reason)
-end
-
-process.finished
-    :map(function(exit: tecs.io.Process.Exit): boolean
-        return exit:succeeded()
-    end)
-    :recover(function(): boolean
-        return false
-    end)
-    :onSettle(function(succeeded: tecs.Future<boolean>)
-        print(succeeded.value)
-        process:close()
-    end)
-```
-
-## Settlement
-
-`status` starts as `"pending"` and moves once to `"ready"`, `"failed"`, or
-`"canceled"`. A process exit code or HTTP error status still produces a ready
-result because the operation returned an answer. Failure means the operation
-produced none.
-
-Reading `value` is the blocking dereference. It advances a pending future for
-its source's default wait budget, returns a ready result, and raises on failure,
-cancellation, or a budget that expires first. Successful non-nil results are
-stored directly, so reads after settlement are ordinary field reads. Use
-`status` and `error` when inspecting an outcome without raising.
-
-`map` transforms a ready value. `flatMap` starts dependent work and adopts its
-future. `recover` turns failure into a value. Canceled futures skip all three
-transforms except cancellation propagation.
-
-Listeners run in registration order. With no delivery in progress, registering
-a listener after settlement runs it before `onSettle` returns. During delivery,
-a new listener joins the current drain instead of growing the Lua stack. It may
-run after that nested `onSettle` returns, but before the outermost drain returns.
-
-## Pumping and waiting
-
-A future advances when its subsystem pumps the source.
-[`Application`](tealdoc:tecs.Application) frames do
-that automatically. `wait` pumps in blocking slices for startup, tools, and
-tests:
-
-```teal no-format
-local process, reason = tecs.io.Process.new({args = {"git", "status", "--porcelain"}})
-if process == nil then
-    error(reason)
-end
-local finished <const> = process.finished:wait(2000)
-
-if finished.status == "ready" then
-    print(finished.value.exitCode)
-end
-
-process:close()
-```
-
-Do not call `wait` or read a pending `value` from a frame. A timeout leaves the
-future pending. A listener must not wait on another pending future driven by the
-same non-reentrant source.
-
-Waiting until a subsystem has nothing outstanding is that subsystem's own drain
-rather than a join over futures a caller holds. `Future.all` reads its inputs
-once and holds each one, so it answers for a set fixed at the call and not for a
-set that work started during the wait joins.
-
-A source must settle its futures on the same thread that pumps it.
-
-Canceling releases one consumer's interest. Shared operations stop only after
-their last consumer releases the root future.
-
-## Snapshots
-
-A snapshot never stores a future because it contains runtime listeners and
-source state. A saved sequence cursor retains only its provider, entity, and
-key. Reissue and track the work under the same key after load when the wait
-must continue.
-
-So a future is not a component field. Keep it in a table beside the world,
-keyed by the entity waiting on it, and give that entity a transient marker
-instead. A snapshot writer that reaches a future walks its listener graph
-rather than refusing the component, so the save fails without naming either.
-]=]
+-- Internal one-shot completion state used by native and worker producers.
+--
+-- This module is deliberately not a public execution model. Assets, HTTP,
+-- processes, dialogs, and durable writes keep these objects behind direct
+-- value-returning calls. A call returns inline when its completion is ready,
+-- parks the current world update when it must wait inside a system, and pumps
+-- the source synchronously outside an update.
+--
+-- Sources settle on the Lua thread that polls them. Worker and native threads
+-- only copy results into queues, so no callback enters LuaJIT. The listener and
+-- transformation machinery remains useful for shared producer state, but game
+-- code never receives or stores one of these objects.
 
 -- Implementation details: Worker-backed sources copy serialized results
 -- through a channel. The pumping thread decodes those results and settles the

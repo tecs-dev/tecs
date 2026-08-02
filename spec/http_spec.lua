@@ -1115,7 +1115,7 @@ describe("http.newClient", function()
         end)
     end)
 
-    it("settles a Future canceled directly through its client", function()
+    it("settles an observed transfer canceled directly through its client", function()
         local pending = client:send({ url = url("/client-canceled") })
         assert.are.equal("pending", pending.status)
 

@@ -237,7 +237,8 @@ end
 ---
 --- The process owns every non-nil endpoint. Closing an endpoint closes only
 --- that pipe; closing the process closes all three, forcibly terminates and
---- reaps a live child, and settles `finished`. Repeated closure remains safe.
+--- reaps a live child, and completes its private wait state. Repeated closure
+--- remains safe.
 local interface Process is Closeable
     --- Read-only. Reports the operating-system process identifier.
     pid: integer

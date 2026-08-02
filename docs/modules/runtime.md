@@ -1,5 +1,5 @@
 ---
-description: "Process-wide polling for asynchronous work in applications and headless programs"
+description: "Process-wide pumping for cooperative work in applications and headless programs"
 outline: deep
 ---
 

@@ -1,5 +1,5 @@
 --[=[
-An asynchronous HTTP client driven from the SDL loop.
+A cooperative HTTP client driven from the SDL loop.
 
 Reqwest and Tokio own the sockets and background threads. `send` copies a
 request into Rust and suspends its calling system until `pump` drains the

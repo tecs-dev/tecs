@@ -540,9 +540,9 @@ bytes:close()
 -- #endregion tecs.io.WritableStream.writeBuffer
 
 -- #region tecs.io.poll
-while tecs.io.pending() > 0 do
-    tecs.io.poll()
-end
+-- Applications call this automatically. A headless host drives every active
+-- service through tecs.runtime rather than polling networking alone.
+tecs.runtime.poll()
 -- #endregion tecs.io.poll
 
 -- #region tecs.io.listen

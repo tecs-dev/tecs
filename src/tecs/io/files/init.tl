@@ -1355,7 +1355,7 @@ local function writeAtomicFuture(path: PathInput, bytes: ByteInput): Future<bool
     local backend <const> = adapter.storage()
     if backend.writeAtomic == nil or backend ~= storagebackend.sdl then
         return Future.failed(
-            ("asynchronous atomic durable writes are not supported by the %s storage backend"):format(backend.name)
+            ("background atomic durable writes are not supported by the %s storage backend"):format(backend.name)
         ) as Future<boolean>
     end
     local started <const>, reason = ensureAtomicWorker()

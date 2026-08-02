@@ -51,6 +51,14 @@ an arrival order the operating system did not preserve. Closing the last
 listener stops interception, so a later signal follows the platform's
 termination behavior again.
 
+## Native dialogs
+
+File and folder dialogs return their result directly. Inside a system they
+suspend the logical world update while the operating system owns the dialog;
+outside an update they block while pumping the native bridge. The Rust bridge
+copies the platform callback result into a queue, and Lua observes it only from
+the process runtime pump.
+
 ]=]
 -- Implementation details:
 -- Clipboard reads copy SDL allocations before freeing them. Arbitrary MIME
@@ -522,12 +530,13 @@ function platformOS.messageBox(kind: string, title: string, message: string, win
 end
 
 -------------------------------------------------------------------------------
--- Asynchronous file and folder dialogs
+-- Cooperative file and folder dialogs
 -------------------------------------------------------------------------------
 
 --- SDL retains the file-dialog callback and may enter it from a thread LuaJIT
---- did not create. The Rust dialog bridge owns that callback and copies its answer;
---- this source polls the copied result and settles futures on the main thread.
+--- did not create. The Rust dialog bridge owns that callback and copies its
+--- answer; this source polls the copied result and settles private completion
+--- state on the main thread.
 
 local record DialogEntry
     handle: loader.CPtr
@@ -637,7 +646,14 @@ local function awaitDialog(pending: Future<DialogResult>): DialogResult
     return task.awaitCompletion(pending, "native dialog")
 end
 
---- Opens a native file picker.
+--- Opens a native file picker and returns its selection.
+---
+--- Inside a system, the call suspends until the dialog closes. Outside a world
+--- update, it blocks while pumping the native bridge.
+--- @param options The caller supplies the owner window, filters, starting
+---     location, and multiple-selection flag, or omits every option.
+--- @return Returns selected paths and filter state. Cancellation returns a
+---     result with `canceled` true rather than failing.
 function platformOS.openFile(options?: DialogOptions): DialogResult
     local given = options or {} as DialogOptions
     local names, patterns, count = filterArrays(given)
@@ -647,7 +663,14 @@ function platformOS.openFile(options?: DialogOptions): DialogResult
     )
 end
 
---- Opens a native save-file picker. Returns at most one path.
+--- Opens a native save-file picker and returns at most one path.
+---
+--- Inside a system, the call suspends until the dialog closes. Outside a world
+--- update, it blocks while pumping the native bridge.
+--- @param options The caller supplies the owner window, filters, and starting
+---     location, or omits every option. The `multiple` field is ignored.
+--- @return Returns the selected path and filter state. Cancellation returns a
+---     result with `canceled` true rather than failing.
 function platformOS.saveFile(options?: DialogOptions): DialogResult
     local given = options or {} as DialogOptions
     local names, patterns, count = filterArrays(given)
@@ -655,7 +678,14 @@ function platformOS.saveFile(options?: DialogOptions): DialogResult
     return awaitDialog(trackDialog(D.tecsDialogSaveFile(window, names, patterns, count, given.defaultLocation)))
 end
 
---- Opens a native folder picker.
+--- Opens a native folder picker and returns its selection.
+---
+--- Inside a system, the call suspends until the dialog closes. Outside a world
+--- update, it blocks while pumping the native bridge.
+--- @param options The caller supplies the owner window, starting location, and
+---     multiple-selection flag, or omits every option. Filters are ignored.
+--- @return Returns selected folders. Cancellation returns a result with
+---     `canceled` true rather than failing.
 function platformOS.openFolder(options?: DialogOptions): DialogResult
     local given = options or {} as DialogOptions
     local window = given.window ~= nil and given.window.handle or nil

@@ -1,13 +1,20 @@
 --[=[
-Binary storage descriptors and synchronous transfers.
+Binary storage descriptors and synchronous byte transfers.
 
 A stream carries the recipe for opening bytes, not a cursor. Every reader and
 writer owns its position. Replayable memory and file streams can therefore
 open independent readers; a borrowed handle deliberately cannot.
 
-High-level operations synchronously pump bounded chunks through directional
-endpoints. A caller that wants asynchronous transfer runs the operation in a
-worker rather than making every stream carry scheduling state.
+Readers and writers are deliberately synchronous pull and push contracts.
+They return bytes or a write result now; making systems resumable does not turn
+every file, memory cursor, codec, or transform into a scheduled operation.
+High-level transfers synchronously pump bounded chunks through those endpoints.
+
+Use readiness-aware socket methods when progress depends on a network socket.
+They can park a system without blocking its Lua thread. Use a worker when a
+file transfer, codec, or blocking library call is expensive enough to leave the
+main thread. This split keeps the byte vocabulary small and keeps scheduling
+state out of every stream.
 ]=]
 
 local ffi <const> = require("ffi")

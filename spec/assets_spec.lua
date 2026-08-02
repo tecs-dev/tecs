@@ -1,17 +1,17 @@
--- Asynchronous asset loading.
+-- Direct, cooperatively suspended asset loading.
 --
 -- The interesting part is the hand-off: the worker decodes and returns the
 -- address of a surface, and the main thread uploads and destroys it. If that
 -- ownership were confused the symptom would be a use-after-free rather than a
 -- wrong image, so these tests load the same file repeatedly as well as once.
 --
--- The second interesting part is the count. A load answers with a future and a
--- settled future carries an `Image` whose `_refs` says how many callers hold
--- the pixels, and the cost of getting that wrong is asymmetric and invisible
--- either way: seeded too high a surface leaks with nothing to report it, and
--- seeded too low the second caller frees pixels the first is still uploading
--- from, which raises nothing at all. So the sharing cases below assert the
--- count directly rather than only its consequences.
+-- The second interesting part is the count. A completed direct load returns an
+-- `Image` whose `_refs` says how many callers hold the pixels, and the cost of
+-- getting that wrong is asymmetric and invisible either way: seeded too high
+-- a surface leaks with nothing to report it, and seeded too low the second
+-- caller frees pixels the first is still uploading from, which raises nothing
+-- at all. So the sharing cases below assert the count directly rather than only
+-- its consequences.
 
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.

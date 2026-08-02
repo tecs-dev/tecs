@@ -1,7 +1,7 @@
 --[=[
 A lexical lifetime for explicitly owned resources.
 
-`scoped` creates one scope for a synchronous callback. Calling `scope:own`
+`scoped` creates one lexical scope for a callback. Calling `scope:own`
 with an open [`Closeable`](tealdoc:tecs.Closeable) registers that value and
 returns it unchanged, so its concrete type is preserved:
 
@@ -24,9 +24,11 @@ The scope owns each registration rather than each distinct value. Registering
 one value twice closes it twice. A scope becomes inactive before cleanup starts
 and cannot be captured for later registration.
 
-The callback must not yield. LuaJIT has no hook that can unwind a suspended
-coroutine which its owner abandons, so no library function can guarantee
-cleanup for that exit path.
+Inside a system, the callback may cross a cooperative engine wait. Its owned
+resources remain live while the logical world update is parked and close when
+the callback returns, raises, or the world cancels that suspended update during
+shutdown. Do not yield through any mechanism outside the Tecs task runtime;
+the runtime cannot own or unwind an arbitrary abandoned coroutine.
 ]=]
 
 local type types = require("tecs.types")
@@ -74,10 +76,11 @@ local record scope
 
     --- Runs a callback inside a fresh resource scope.
     ---
-    --- The callback runs synchronously and must not yield. Every value it
-    --- registers closes in reverse order before this function returns or
-    --- propagates a failure. Cleanup begins by making the scope inactive, and
-    --- one failing close does not prevent the remaining closes.
+    --- The callback may suspend through a cooperative engine call inside a
+    --- system. Every value it registers closes in reverse order before this
+    --- function returns or propagates a failure. World shutdown also cancels
+    --- and unwinds a suspended system. Cleanup begins by making the scope
+    --- inactive, and one failing close does not prevent the remaining closes.
     ---
     --- @param body The callback that receives the only active [`Scope`](tealdoc:tecs.Scope)
     ---     for this invocation. Returned values are ignored, and registered

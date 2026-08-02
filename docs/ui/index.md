@@ -523,9 +523,9 @@ world:spawn(
 
 ### Load an image and preserve its aspect ratio
 
-Images remain asynchronously loaded sprites. This example fixes the height at
-64 logical pixels and lets `Intrinsic("image")` derive the width from the
-registered sprite region:
+Images load off-thread and return directly, suspending a system only when the
+decode is not ready. This example fixes the height at 64 logical pixels and
+lets `Intrinsic("image")` derive the width from the registered sprite region:
 
 ```teal
 local image <const> = tecs.assets.loadImage(
@@ -1072,7 +1072,7 @@ CSS cascade, or parallel widget renderer.
 ## Run the examples
 
 The repository demo shows layout, rectangle and circle materials, text, an
-asynchronously loaded image, nested clipping, wheel scrolling, pointer
+cooperatively loaded image, nested clipping, wheel scrolling, pointer
 capture, bubbling events, and keyboard navigation:
 
 ```bash

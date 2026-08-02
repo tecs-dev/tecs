@@ -690,8 +690,8 @@ local record assets
     --- emissive, alpha-mask, alpha-blended, and unlit materials are decoded.
     --- JOINTS_0, WEIGHTS_0, skins, inverse bind matrices, morph targets, mesh
     --- and node weights, and node animation clips are decoded. A
-    --- sparse-accessor or non-triangle input settles as failed instead of
-    --- loading incompletely. A primitive above 65,536 triangles is split into
+    --- sparse-accessor or non-triangle input raises at the direct load call
+    --- instead of loading incompletely. A primitive above 65,536 triangles is split into
     --- independently bounded and culled mesh records.
     --- Registering a
     --- model containing alpha blending requires a mesh domain created with
@@ -1143,9 +1143,9 @@ end
 
 --- One load the worker has been given and has not answered for.
 ---
---- The root future is here rather than handed out. Callers get futures derived
---- from it, which is what lets several of them share one decode without sharing
---- one object: see `loadImage`.
+--- The private root completion stays here rather than reaching callers. Each
+--- direct load subscribes independently, which lets several loads share one
+--- decode without exposing one completion object: see `loadImage`.
 local record Entry
     id: integer
     --- "bytes", "image", "model" or "sound", which decides what the answer
@@ -1387,7 +1387,7 @@ local SLICE_MS <const> = 16
 --- Milliseconds a wait spends when the caller names nothing.
 local DEFAULT_WAIT_MS <const> = 5000
 
---- What drives every future this module hands out.
+--- What drives every private loader completion.
 ---
 --- `poll` and `advance` are the same receive with a different budget, which is
 --- the whole of what a future needs from a worker channel.
@@ -1663,11 +1663,12 @@ end
 -- Draining
 -------------------------------------------------------------------------------
 
---- Takes finished loads and resumes their waiting systems. Call once per frame.
+--- Takes finished loads and resumes their waiting systems.
 ---
---- Polls, never blocks, and drains everything the worker has answered rather than one
---- result. Nothing settles without this, so a game that stops calling it has loads that
---- stay pending forever.
+--- Polls without waiting and drains everything the worker has answered.
+--- `tecs.runtime.poll` calls this automatically. Game systems and plugins must
+--- not call it; a specialized host that drives no application calls the
+--- process runtime instead.
 ---
 --- @return How many loads settled this call, which is zero when nothing has
 ---     finished and also zero when no worker exists.
@@ -1688,11 +1689,11 @@ end
 
 --- Blocks until every queued load has finished.
 ---
---- For startup and tests. A frame should poll `update` instead.
+--- This global barrier is for startup, shutdown, and tests outside a system.
+--- Applications use the process runtime during frames.
 ---
---- Not a join over futures a caller holds, and no join expresses it: this waits
---- on every load in this process, including ones a subsystem the caller has
---- never heard of started, which is what a reload or a startup path wants.
+--- It waits on every load in this process, including work a subsystem started,
+--- rather than only loads one caller initiated.
 ---
 --- @param timeoutMs Wall-clock milliseconds, defaulting to 5000. Running out is not an
 ---     error and is not reported, so read `assets.pending` afterwards to tell the two

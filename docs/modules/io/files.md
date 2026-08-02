@@ -1,5 +1,5 @@
 ---
-description: "Asset, persistent, and cache paths plus synchronous file operations"
+description: "Asset, persistent, and cache paths with direct and worker-backed file operations"
 outline: deep
 ---
 

@@ -168,6 +168,13 @@ and other CPU-heavy or blocking library calls run on Rust-owned workers. Both
 paths settle onto the same Lua-thread continuation, so that implementation
 split does not create a second game API.
 
+Synchronous byte contracts remain synchronous. A `Reader`, `Writer`, file
+cursor, or transform returns what it can do on the calling Lua thread. Socket
+methods are readiness-aware because a socket can wait without consuming a
+thread; CPU-heavy transforms use workers when they must leave the frame. The
+engine unifies how a system receives the answer without forcing unlike kinds
+of native work into one implementation.
+
 ## Build
 
 Cargo and `xtask` own the build, generated bindings, tests, and packaging.

@@ -43,8 +43,8 @@ variable phases supply the frame delta.
 ## Asynchronous work
 
 Every system is resumable. There is no second system kind, explicit hold
-boundary, callback, or completion handle. Call an asynchronous engine function and use
-its returned value directly:
+boundary, callback, or completion handle. Call a cooperative engine function
+and use its returned value directly:
 
 ```teal
 local record AssetBytes is tecs.ecs.Component
@@ -89,13 +89,31 @@ commits when the iterator closes. The same mechanism works in fixed phases:
 the fixed step resumes without replaying its earlier systems or advancing its
 clock twice.
 
-Calling the same asynchronous API outside a world update blocks until it has
+Calling the same cooperative API outside a world update blocks until it has
 the same value. This is useful during startup and in headless tools. Plugin
 authors do not choose between synchronous and asynchronous variants.
 
 One persistent coroutine belongs to the logical world update, not to every
 entity. Iterating ten thousand entities does not create ten thousand tasks.
 Only operations that actually wait enter the scheduler.
+
+Cooperation does not make every byte operation asynchronous. The API follows
+the kind of work:
+
+| Work                                            | Behavior inside a system | Native execution            |
+| ----------------------------------------------- | ------------------------ | --------------------------- |
+| Cached asset or ready socket                    | Returns inline           | Immediate lookup or syscall |
+| Socket blocked on readiness                     | Suspends the update      | Process-wide `mio` reactor  |
+| HTTP request                                    | Suspends the update      | Reqwest and Tokio service   |
+| Asset decode or durable write                   | Suspends the update      | Worker thread               |
+| `Process:wait` or native dialog                 | Suspends the update      | Native completion bridge    |
+| `Reader`, `Writer`, transform, or file transfer | Runs synchronously       | Calling Lua thread          |
+
+Use `readAvailable` and `writeAvailable` when missing pipe data is a normal
+per-frame outcome and the system should keep going. Use a direct cooperative
+call when the rest of that system cannot proceed without its answer. CPU-heavy
+transforms and blocking libraries belong on workers. These are work-semantics
+choices; users never receive a future or manually manage a coroutine.
 
 Socket I/O uses the same direct form. This system does not poll, retain a
 future, or declare itself asynchronous:

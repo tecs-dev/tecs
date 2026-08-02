@@ -1,5 +1,5 @@
 --[=[
-Asynchronous HTTP and HTTPS.
+Cooperative HTTP and HTTPS.
 
 ```teal no-format
 local client <const> = tecs.io.http.newClient({userAgent = "mygame/1.0"})
@@ -12,11 +12,18 @@ if body is tecs.io.ReadableStream then
 end
 ```
 
-The process runtime turns every open client once per iteration, so requests
-advance without game code pumping them.
+Inside a system, `send` returns inline when the response is ready and suspends
+that logical world update only while the transfer is pending. Outside an
+update, the same call blocks until it has the response. The process runtime
+turns every open client once per iteration, so game code never pumps a client.
 
 An HTTP error status still returns a response. DNS, connection, TLS, timeout,
 or streaming failures raise at the suspended call.
+
+Raw `tecs.io` sockets use the process-wide `mio` readiness reactor. HTTP
+deliberately uses Reqwest and Tokio for its connection pool, TLS, redirects,
+and protocol work. Both implementations resume the same direct Lua call, and
+neither parks one worker thread per waiting socket.
 
 Call `Client:close` when you no longer need its connection pool. Losing the
 last Lua reference does not cancel its requests. A headless tool calls
@@ -55,8 +62,8 @@ local record http
     --- `url`.
     type Request = client.Request
 
-    --- `Response` describes what a completed transfer
-    --- settles to regardless of status code.
+    --- `Response` describes what a completed transfer returns regardless of
+    --- status code.
     type Response = client.Response
 
     --- A `Client` owns one connection pool and its active requests.

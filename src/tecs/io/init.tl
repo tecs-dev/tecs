@@ -12,9 +12,10 @@ directly and uses `readInto` or `writeFrom` accelerators when an endpoint
 provides them. Transform constructors take ownership of either a Tecs endpoint
 or a file and close it with the wrapper.
 
-Whole-source operations run synchronously and return their result directly.
-They return nil and a reason when an endpoint cannot be opened, read, written,
-flushed, or closed:
+Readers, writers, transforms, and whole-source operations run synchronously and
+return their result directly. Resumable systems do not turn every byte endpoint
+into a scheduled operation. They return nil and a reason when an endpoint
+cannot be opened, read, written, flushed, or closed:
 
 ```teal
 tecs.scoped(function(scope: tecs.Scope)
@@ -78,11 +79,11 @@ world:addSystem({
 ```
 
 An `Application` calls `tecs.runtime.poll` automatically once per host
-iteration. Game systems and update functions must not drive either pump. The
-same calls block when used outside a world update, which is the direct model a
-startup path or headless tool needs. Outside a task, socket reads, accepts, and
-receives retain their nonblocking polling behavior, while an explicit positive
-timeout in `wait` or `drain` blocks that caller.
+iteration. Game systems and update functions must not drive either pump.
+Resolution and connection block when used outside a world update. Socket
+reads, accepts, sends, and receives retain their existing nonblocking result
+outside a system, where nil or false without a reason means `WouldBlock`; an
+explicit positive timeout in `wait` or `drain` blocks that caller.
 
 The ready path performs the native operation immediately. Only `WouldBlock`
 registers a one-shot readiness watch with the process-wide `mio` reactor. The
@@ -163,7 +164,7 @@ local record binaryIO
     --- operations.
     files: files
 
-    --- Read-only. `http` provides asynchronous HTTP and HTTPS clients.
+    --- Read-only. `http` provides cooperative HTTP and HTTPS clients.
     http: http
 
     --- Read-only. `mcp` provides the debug server and tool registry.
@@ -637,7 +638,7 @@ local record binaryIO
     --- Stops this module's networking instance.
     ---
     --- It refuses while an address, TCP socket, listener, UDP socket, packet or
-    --- asynchronous operation remains live.
+    --- pending resolution, connection, or readiness watch remains live.
     ---
     --- @return Returns true after shutdown or when networking never started.
     --- @return Returns the live-resource reason when shutdown refuses.
@@ -671,17 +672,17 @@ local record binaryIO
     --- @return Returns a caller-owned socket, or nil on failure.
     --- @return Returns the reason when the first return is nil.
     bind: function(port: integer, address?: Address): UDPSocket, string
-    --- Advances pending I/O in a headless loop without waiting.
+    --- Advances pending resolution and connection work without waiting.
     ---
     --- [`Application`](tealdoc:tecs.Application) calls this automatically once
     --- per host iteration, including while suspended or crashed. A game system,
-    --- plugin, or update function must not call it. Only a headless program
-    --- without an application owns a manual call, normally once per loop while
-    --- `pending()` is greater than zero.
+    --- plugin, or update function must not call it. Prefer `tecs.runtime.poll`
+    --- in a headless program because that also drains socket readiness and
+    --- every other active service.
     --- @return Returns how many resolution or connection operations completed
     ---     during this call, including failures.
     poll: function(): integer
-    --- Returns the number of pending resolution or connection operations.
+    --- Returns the number of pending network operations and readiness watches.
     ---
     --- @return Returns zero after every operation settles or cancels.
     pending: function(): integer
@@ -1506,7 +1507,7 @@ function binaryIO.shutdown(): boolean, string
         return true
     end
     if #operations > 0 then
-        return false, ("%d asynchronous network operation(s) are still pending"):format(#operations)
+        return false, ("%d network operation(s) are still pending"):format(#operations)
     end
     if liveObjects > 0 then
         return false, ("%d network object(s) are still open"):format(liveObjects)

@@ -62,9 +62,17 @@ capacity right now; an empty string or zero means output EOF. These methods
 make backpressure visible instead of growing an implicit queue. Buffer and
 byte-view variants avoid constructing Lua strings.
 
+`Process:wait` is cooperative: it suspends a system until the child exits and
+blocks when called outside an update. Pipe `read` and `write` operations and
+`communicate` remain synchronous byte-transfer APIs. Use the available forms
+when a frame should continue without data, and run a complete expensive
+exchange on a worker when it must not occupy the main thread. This is a choice
+about whether missing data is normal for the operation, not a choice between
+future and coroutine APIs.
+
 Use `"inherit"` for a CLI that should share the terminal, `"null"` to discard
 a stream, and `stderr = "stdout"` for one ordered transcript. A nonzero child
-exit still produces a ready [`Exit`](tealdoc:tecs.io.Process.Exit);
+exit still returns an [`Exit`](tealdoc:tecs.io.Process.Exit);
 `succeeded` performs the separate exit-code check. Spawn failures return nil
 and a reason. Deadlines and explicit kills set the exit's `killed` fields.
 ]=]

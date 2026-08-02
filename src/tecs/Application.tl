@@ -56,8 +56,9 @@ rather than one frame later.
 1. The application starts the input frame and drains every platform event SDL
    delivered since the previous iteration. A quit request ends the iteration
    here.
-2. `tecs.runtime.poll` settles process-wide asynchronous work: finished asset
-   loads, child processes, dialogs, generic I/O, HTTP clients, and file changes.
+2. `tecs.runtime.poll` drains process-wide completions and readiness: finished
+   asset loads, child processes, dialogs, raw sockets, HTTP clients, and file
+   changes.
 3. The debug server answers, `world:update(dt)` runs the phases, and the
    renderer records and submits one frame.
 4. The audio mixer updates, which reaps the voices it has finished with.
@@ -1024,7 +1025,7 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
         return false
     end
 
-    -- Process-wide asynchronous work settles on this Lua thread, whether or
+    -- Process-wide completions and readiness drain on this Lua thread, whether or
     -- not a world system happened to ask for it. This stays outside the
     -- suspension and crash guards: completed work is already complete, and a
     -- changed shader may be exactly what repairs a crashed run. The runtime

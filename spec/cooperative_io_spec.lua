@@ -82,6 +82,7 @@ describe("cooperative socket systems", function()
         local entered = 0
         local count
         local order = {}
+        local closed = 0
 
         world:addSystem({
             name = "CooperativeSocketRead",
@@ -89,20 +90,31 @@ describe("cooperative socket systems", function()
             run = function()
                 entered = entered + 1
                 order[#order + 1] = "read"
-                count = assert(peer:readInto(destination, 0, 11))
-                order[#order + 1] = "resumed"
+                tecs.scoped(function(scope)
+                    scope:own({
+                        close = function()
+                            closed = closed + 1
+                            return true
+                        end,
+                    })
+                    count = assert(peer:readInto(destination, 0, 11))
+                    order[#order + 1] = "resumed"
+                end)
             end,
         })
         world:addSystem({
             name = "AfterCooperativeSocketRead",
             phase = tecs.ecs.phases.Last,
-            run = function() order[#order + 1] = "after" end,
+            run = function()
+                order[#order + 1] = "after"
+            end,
         })
 
         assert.is_false(world:update(1 / 60))
         assert.is_true(world._updateStalled)
         assert.are.equal(1, entered)
         assert.are.same({ "read" }, order)
+        assert.are.equal(0, closed)
         assert.are.equal(1, netreactor.pending())
 
         assert.is_true(client:write("hello world"))
@@ -115,6 +127,7 @@ describe("cooperative socket systems", function()
         assert.are.equal(11, count)
         assert.are.equal("hello world", destination:getString())
         assert.are.same({ "read", "resumed", "after" }, order)
+        assert.are.equal(1, closed)
         assert.are.equal(0, netreactor.pending())
 
         world:shutdown()
@@ -132,7 +145,9 @@ describe("cooperative socket systems", function()
         world:addSystem({
             name = "InlineSocketRead",
             phase = tecs.ecs.phases.Update,
-            run = function() received = assert(peer:read(5)) end,
+            run = function()
+                received = assert(peer:read(5))
+            end,
         })
 
         assert.is_true(world:update(1 / 60))
@@ -153,7 +168,9 @@ describe("cooperative socket systems", function()
         world:addSystem({
             name = "TimedSocketWait",
             phase = tecs.ecs.phases.Update,
-            run = function() ready, reason = peer:wait(5) end,
+            run = function()
+                ready, reason = peer:wait(5)
+            end,
         })
 
         assert.is_false(world:update(1 / 60))
@@ -168,6 +185,38 @@ describe("cooperative socket systems", function()
         closeNetwork(address, server, client, peer)
     end)
 
+    it("unwinds a resource scope when shutdown cancels its parked system", function()
+        local address, server, client, peer = connected()
+        local world = tecs.ecs.newWorld()
+        local closed = 0
+
+        world:addSystem({
+            name = "ScopedCanceledSocketRead",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                tecs.scoped(function(scope)
+                    scope:own({
+                        close = function()
+                            closed = closed + 1
+                            return true
+                        end,
+                    })
+                    peer:read()
+                end)
+            end,
+        })
+
+        assert.is_false(world:update(1 / 60))
+        assert.are.equal(0, closed)
+        assert.are.equal(1, netreactor.pending())
+
+        world:shutdown()
+        assert.are.equal(1, closed)
+        assert.are.equal(0, netreactor.pending())
+
+        closeNetwork(address, server, client, peer)
+    end)
+
     it("cancels a parked read when its socket closes", function()
         local address, server, client, peer = connected()
         local world = tecs.ecs.newWorld()
@@ -177,7 +226,9 @@ describe("cooperative socket systems", function()
         world:addSystem({
             name = "CanceledSocketRead",
             phase = tecs.ecs.phases.Update,
-            run = function() bytes, reason = peer:read() end,
+            run = function()
+                bytes, reason = peer:read()
+            end,
         })
 
         assert.is_false(world:update(1 / 60))
@@ -203,7 +254,9 @@ describe("cooperative socket systems", function()
         world:addSystem({
             name = "CooperativeSocketAccept",
             phase = tecs.ecs.phases.Update,
-            run = function() accepted = assert(server:accept()) end,
+            run = function()
+                accepted = assert(server:accept())
+            end,
         })
 
         assert.is_false(world:update(1 / 60))
@@ -231,7 +284,9 @@ describe("cooperative socket systems", function()
         world:addSystem({
             name = "CooperativeDatagramReceive",
             phase = tecs.ecs.phases.Update,
-            run = function() packet = assert(receiver:receive()) end,
+            run = function()
+                packet = assert(receiver:receive())
+            end,
         })
 
         assert.is_false(world:update(1 / 60))
