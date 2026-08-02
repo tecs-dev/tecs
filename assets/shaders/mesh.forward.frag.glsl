@@ -14,6 +14,22 @@
 #pragma tecs variants MESH_SHADOWS=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1
 #pragma tecs variants MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1
 #pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1
+#pragma tecs variants MESH_PROBE=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_PROBE=1
+#pragma tecs variants MESH_FOG=1 MESH_PROBE=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_PROBE=1
+#pragma tecs variants MESH_DOUBLE_SIDED=1 MESH_PROBE=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_DOUBLE_SIDED=1 MESH_PROBE=1
+#pragma tecs variants MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_PROBE=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_PROBE=1
+#pragma tecs variants MESH_LIGHTS=1 MESH_PROBE=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_LIGHTS=1 MESH_PROBE=1
+#pragma tecs variants MESH_FOG=1 MESH_LIGHTS=1 MESH_PROBE=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PROBE=1
+#pragma tecs variants MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_PROBE=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_PROBE=1
+#pragma tecs variants MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_PROBE=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_DOUBLE_SIDED=1 MESH_LIGHTS=1 MESH_PROBE=1
 // Shades alpha-blended mesh surfaces after deferred composition. Meshes are
 // sorted back to front before this pass and use premultiplied alpha so one
 // pipeline handles the complete glTF BLEND contract.
@@ -59,6 +75,19 @@ layout(set = 3, binding = 3) uniform Camera {
     vec4 position;
 } camera;
 
+#ifdef MESH_PROBE
+layout(set = 3, binding = 4) uniform MeshProbe {
+    vec4 face[6];
+} probe;
+
+vec3 ambientCube(vec3 normal) {
+    vec3 squared = normal * normal;
+    return squared.x * probe.face[normal.x >= 0.0 ? 0 : 1].rgb
+        + squared.y * probe.face[normal.y >= 0.0 ? 2 : 3].rgb
+        + squared.z * probe.face[normal.z >= 0.0 ? 4 : 5].rgb;
+}
+#endif
+
 #ifdef MESH_FOG
 layout(set = 3, binding = 2) uniform MeshFog { vec4 color; } meshFog;
 #endif
@@ -92,6 +121,9 @@ void main() {
     if (surface.lit >= 0.5) {
         vec3 viewDirection = normalize(camera.position.xyz - vWorld);
         color = surface.albedo.rgb * scene.ambient.rgb * surface.orm.r * (1.0 - surface.orm.b);
+#ifdef MESH_PROBE
+        color += surface.albedo.rgb * ambientCube(surface.normal) * surface.orm.r * (1.0 - surface.orm.b);
+#endif
 #ifdef MESH_SHADOWS
         vec3 sunDirection = normalize(-meshShadow.direction.xyz);
         color += cookTorrance(surface.albedo.rgb, surface.normal, viewDirection, sunDirection,

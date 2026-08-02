@@ -11,6 +11,8 @@ cargo xtask example animated3d
 cargo xtask example morph3d
 cargo xtask fetch sponza
 cargo xtask example sponza3d
+cargo xtask fetch bistro
+cargo xtask example bistro3d
 ```
 
 `ui-demo.tl` is the complete engine showcase. It exercises the sprite renderer,
@@ -47,3 +49,12 @@ compressed in GPU memory and exercises double-sided materials, independently
 GPU-culled primitive chunks, Cook-Torrance point and spot lights, directional
 shadows, fog, and bloom. Running the example without that cache fails before
 opening a window and reports the fetch command.
+
+`bistro3d.tl` is the large-scene stress test. Its pinned CC BY 4.0 Amazon
+Lumberyard exterior is fetched through a reference-Draco preprocessing step,
+then retained as 132 MiB of ordinary glTF geometry and 91 MiB of 512px BC3
+mip chains. Large-primitive splitting turns 1,591 authored primitives into
+1,593 independently GPU-cullable chunks. The demo combines an ambient-cube
+probe, Cook-Torrance local lights, directional shadows, fog, and bloom. The
+source GLB is removed after a successful import, and running without the cache
+reports the fetch command before a window opens.

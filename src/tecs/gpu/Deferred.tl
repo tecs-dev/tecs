@@ -131,6 +131,7 @@ local SCENE_FLOATS <const> = 24
 local SCENE_BYTES <const> = SCENE_FLOATS * 4
 local MESH_SHADOW_SCENE_FLOATS <const> = 32
 local MESH_PBR_FLOATS <const> = 20
+local MESH_PROBE_FLOATS <const> = 24
 local MESH_FOG_FLOATS <const> = 4
 
 --- Floats the block a shadow draw is placed from holds: a matrix and four
@@ -313,6 +314,8 @@ local record DeferredOptions
     --- Engine-owned. Enables depth reconstruction and Cook-Torrance shading
     --- for opaque mesh surfaces.
     meshPBR: boolean
+    --- Engine-owned. Enables mesh-only ambient-cube probe shading.
+    meshProbe: boolean
     --- Engine-owned. Enables optional 3D point and spot light resources at
     --- this fixed capacity. Nil omits every related buffer and shader variant.
     meshLightCapacity: integer
@@ -456,6 +459,8 @@ local record Deferred
     --- Whether the lighting resolve decodes mesh fog markers.
     _meshFog: boolean
     _meshPBR: boolean
+    _meshProbe: boolean
+    _meshProbeUniform: loader.CArray
     _meshCameraX: number
     _meshCameraY: number
     _meshCameraZ: number
@@ -661,6 +666,12 @@ local function sceneUniform(self: Deferred, width: number, height: number): load
         end
         at = at + MESH_PBR_FLOATS
     end
+    if self._meshProbe then
+        for lane = 0, MESH_PROBE_FLOATS - 1 do
+            scene[at + lane] = self._meshProbeUniform[lane]
+        end
+        at = at + MESH_PROBE_FLOATS
+    end
     if self._meshFog then
         scene[at] = self._meshFogR
         scene[at + 1] = self._meshFogG
@@ -700,6 +711,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     local meshShadows <const> = options.meshShadowScale ~= nil
     local meshFog <const> = options.meshFog == true
     local meshPBR <const> = options.meshPBR == true
+    local meshProbe <const> = options.meshProbe == true
     local meshLights <const> = options.meshLightCapacity ~= nil
     local meshLightCapacity <const> = options.meshLightCapacity or 0
     if meshLights and (meshLightCapacity < 1 or meshLightCapacity ~= math.floor(meshLightCapacity)) then
@@ -725,6 +737,10 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self._meshShadows = meshShadows
     self._meshFog = meshFog
     self._meshPBR = meshPBR
+    self._meshProbe = meshProbe
+    if meshProbe then
+        self._meshProbeUniform = loader.newArray("float[24]")
+    end
     self._meshLights = meshLights
     self._meshLightCapacity = meshLightCapacity
     self._meshCameraX, self._meshCameraY, self._meshCameraZ = 0.0, 0.0, 0.0
@@ -771,7 +787,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self._lightScratch = loader.newArray("float[?]", MAX_LIGHTS * LIGHT_FLOATS)
     local sceneFloats <const> = (meshShadows and MESH_SHADOW_SCENE_FLOATS or SCENE_FLOATS) + (
         meshPBR and MESH_PBR_FLOATS or 0
-    ) + (meshFog and MESH_FOG_FLOATS or 0)
+    ) + (meshProbe and MESH_PROBE_FLOATS or 0) + (meshFog and MESH_FOG_FLOATS or 0)
     self._sceneBytes = sceneFloats * 4
     self._sceneUniform = loader.newArray("float[?]", sceneFloats)
     self._binUniform = loader.newArray("float[8]")
@@ -976,7 +992,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     end
 
     local lightingDefines: {string: string} = nil
-    if shadows or meshShadows or meshFog or meshPBR or meshLights then
+    if shadows or meshShadows or meshFog or meshPBR or meshProbe or meshLights then
         lightingDefines = {}
         if shadows then
             lightingDefines.SHADOWS = "1"
@@ -989,6 +1005,9 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         end
         if meshPBR then
             lightingDefines.MESH_PBR = "1"
+        end
+        if meshProbe then
+            lightingDefines.MESH_PROBE = "1"
         end
         if meshLights then
             lightingDefines.MESH_LIGHTS = "1"
@@ -1538,7 +1557,9 @@ function Deferred:rebuildPipelines()
     local meshBin: ComputePipeline = nil
     local built, reason = pcall(function(): string
         local defines: {string: string} = nil
-        if self._shadows or self._meshShadows or self._meshFog or self._meshPBR or self._meshLights then
+        if
+            self._shadows or self._meshShadows or self._meshFog or self._meshPBR or self._meshProbe or self._meshLights
+        then
             defines = {}
             if self._shadows then
                 defines.SHADOWS = "1"
@@ -1551,6 +1572,9 @@ function Deferred:rebuildPipelines()
             end
             if self._meshPBR then
                 defines.MESH_PBR = "1"
+            end
+            if self._meshProbe then
+                defines.MESH_PROBE = "1"
             end
             if self._meshLights then
                 defines.MESH_LIGHTS = "1"
@@ -1802,6 +1826,18 @@ end
 --- @param b The mesh domain supplies normalized blue.
 function Deferred:setMeshFog(r: number, g: number, b: number)
     self._meshFogR, self._meshFogG, self._meshFogB = r, g, b
+end
+
+--- Updates the six RGB faces of the mesh ambient-cube probe.
+--- @param values The mesh domain supplies six padded RGB vectors in positive
+---     X, negative X, positive Y, negative Y, positive Z, negative Z order.
+function Deferred:setMeshProbe(values: loader.CArray)
+    if not self._meshProbe then
+        return
+    end
+    for lane = 0, MESH_PROBE_FLOATS - 1 do
+        self._meshProbeUniform[lane] = values[lane]
+    end
 end
 
 --- Updates the perspective view used to reconstruct opaque mesh positions.

@@ -300,6 +300,30 @@ angles are fixed-layout FFI fields. The renderer bins enabled lights into a
 32-by-32 screen grid for every 3D view. Omitting `meshes.lights` creates no
 queries, buffers, binning dispatch, bindings, or local-light shader variants.
 
+An ambient-cube probe adds diffuse environment light without a texture sample:
+
+```teal
+meshes = {
+    probe = {
+        positiveX = {0.10, 0.12, 0.16},
+        negativeX = {0.07, 0.08, 0.11},
+        positiveY = {0.24, 0.30, 0.42}, -- sky
+        negativeY = {0.04, 0.03, 0.02}, -- ground bounce
+        positiveZ = {0.13, 0.10, 0.08},
+        negativeZ = {0.07, 0.09, 0.12},
+        intensity = 0.85,
+    },
+}
+```
+
+The six RGB faces are world-space irradiance and may exceed one. The shader
+weights them by the squared components of each mesh normal, adds the result to
+`ambientLight`, and applies ambient occlusion and the material's diffuse-metal
+split. This is diffuse probe lighting, not specular image-based lighting.
+Assign through `app.renderer.meshes.probe` to change it at runtime. Omitting
+`meshes.probe` adds no uniform data, fragment work, or shader variant to a 2D
+or ordinary 3D application.
+
 Ordinary glTF images decode to RGBA8. Unpacked mipmapped arrays accept smaller
 images by repeating their edge through the rest of the fixed layer before GPU
 mip generation, so neighboring texels never bleed into the sampled UV region.
@@ -336,6 +360,14 @@ Run `cargo xtask example sponza3d` for double-sided materials, compressed
 mipmaps, point and spot lights, shadows, fog, and bloom together. The example
 command reports the required fetch command before opening a window when its
 ignored scene cache is absent.
+
+`cargo xtask fetch bistro` downloads and verifies the pinned CC BY 4.0 Amazon
+Lumberyard exterior, decodes its older Draco stream with the reference codec,
+reconstructs two-channel normal maps, downsamples textures into 512px BC3 mip
+chains, and removes the 986 MB source after producing a roughly 227 MB ignored
+cache. Run `cargo xtask example bistro3d` to exercise 2.9 million vertices,
+8.5 million indices, 1,593 independently culled chunks, the ambient probe,
+local lights, shadows, fog, and bloom together.
 
 ## Optional mesh shadows
 

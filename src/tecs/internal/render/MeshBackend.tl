@@ -75,6 +75,16 @@ local interface MeshFogOptions
     b: number
 end
 
+local interface MeshProbeOptions
+    positiveX: {number}
+    negativeX: {number}
+    positiveY: {number}
+    negativeY: {number}
+    positiveZ: {number}
+    negativeZ: {number}
+    intensity: number
+end
+
 local record MeshRegion
     slot: integer
     firstVertex: integer
@@ -117,6 +127,7 @@ local record MeshBackendOptions
     localLights: boolean
     vertexColors: boolean
     fog: MeshFogOptions
+    probe: MeshProbeOptions
 end
 
 local record MeshMaterialData
@@ -151,6 +162,7 @@ local record MeshBackend
     type SkinRegion = SkinRegion
     type MorphRegion = MorphRegion
     type FogOptions = MeshFogOptions
+    type ProbeOptions = MeshProbeOptions
 
     capacity: integer
     vertexCapacity: integer
@@ -276,10 +288,13 @@ local record MeshBackend
     _localLights: boolean
     _vertexColors: boolean
     _fogging: boolean
+    _probing: boolean
     _mipmaps: boolean
     _textureFormat: integer
     _fog: MeshFogOptions
     _fogUniform: loader.CArray
+    _probe: MeshProbeOptions
+    _probeUniform: loader.CArray
     _cameraUniform: loader.CArray
     _shadowActive: boolean
     _doubleSidedActive: boolean
@@ -312,9 +327,9 @@ local function vertexDefines(
 end
 
 local function fragmentDefines(
-    shadows: boolean, fogging: boolean, doubleSided?: boolean, localLights?: boolean
+    shadows: boolean, fogging: boolean, doubleSided?: boolean, localLights?: boolean, probing?: boolean
 ): {string: string}
-    if not shadows and not fogging and not doubleSided and not localLights then
+    if not shadows and not fogging and not doubleSided and not localLights and not probing then
         return nil
     end
     local defines: {string: string} = {}
@@ -329,6 +344,9 @@ local function fragmentDefines(
     end
     if localLights then
         defines.MESH_LIGHTS = "1"
+    end
+    if probing then
+        defines.MESH_PROBE = "1"
     end
     return defines
 end
@@ -373,13 +391,14 @@ local function buildForward(
     vertexColors: boolean,
     fogging: boolean,
     doubleSided?: boolean,
-    localLights?: boolean
+    localLights?: boolean,
+    probing?: boolean
 ): GraphicsPipeline
     local vertex = Shader.load(
         device, "mesh.vert", {defines = vertexDefines(skinning, morphing, vertexColors, fogging)}
     )
     local fragment = Shader.load(
-        device, "mesh.forward.frag", {defines = fragmentDefines(shadows, fogging, doubleSided, localLights)}
+        device, "mesh.forward.frag", {defines = fragmentDefines(shadows, fogging, doubleSided, localLights, probing)}
     )
     local pipeline = GraphicsPipeline.create(
         device,
@@ -458,15 +477,20 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._localLights = options.localLights
     self._vertexColors = options.vertexColors
     self._fogging = options.fog ~= nil
+    self._probing = options.probe ~= nil
     self._mipmaps = options.mipmaps
     self._textureFormat = options.textureFormat
     self._fog = options.fog
+    self._probe = options.probe
     if self._transparent then
         self._cameraUniform = loader.newArray("float[4]")
     end
     if self._fogging then
         self._viewUniform = loader.newArray("float[24]")
         self._fogUniform = loader.newArray("float[4]")
+    end
+    if self._probing then
+        self._probeUniform = loader.newArray("float[24]")
     end
     self._shadowActive = false
     self._doubleSidedActive = false
@@ -764,7 +788,8 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
             self._vertexColors,
             self._fogging,
             self._doubleSided,
-            self._localLights
+            self._localLights,
+            self._probing
         )
     end
     return self
@@ -1199,6 +1224,36 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
         self._fogUniform[0], self._fogUniform[1], self._fogUniform[2], self._fogUniform[3] = fog.r, fog.g, fog.b, 0.0
         self._deferred:setMeshFog(fog.r, fog.g, fog.b)
     end
+    if self._probing then
+        local probe <const> = self._probe
+        local faces <const>: {{number}} = {
+            probe.positiveX,
+            probe.negativeX,
+            probe.positiveY,
+            probe.negativeY,
+            probe.positiveZ,
+            probe.negativeZ,
+        }
+        if probe.intensity < 0.0 then
+            error("tecs: mesh probe intensity must be non-negative", 2)
+        end
+        local uniform <const> = self._probeUniform
+        for face = 1, 6 do
+            local color <const> = faces[face]
+            if color == nil or #color < 3 then
+                error("tecs: each mesh probe face must contain red, green, and blue", 2)
+            end
+            local base <const> = (face - 1) * 4
+            for channel = 1, 3 do
+                if color[channel] < 0.0 then
+                    error("tecs: mesh probe colors must be non-negative", 2)
+                end
+                uniform[base + channel - 1] = color[channel] * probe.intensity
+            end
+            uniform[base + 3] = 0.0
+        end
+        self._deferred:setMeshProbe(uniform)
+    end
     self._blending = self._transparent and packet.blendCount > 0
     self._doubleSidedActive = self._doubleSided and packet.doubleSidedCount > 0
     self._shadowActive = self._shadows and packet.count > packet.blendCount
@@ -1552,6 +1607,9 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
         C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 2, self._fogUniform, 16)
     end
     C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 3, self._cameraUniform, 16)
+    if self._probing then
+        C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 4, self._probeUniform, 96)
+    end
     context.pass:bindIndexBuffer(self.indices.handle, RenderPass.INDEX_UINT32)
     context.pass:drawIndexedIndirect(self._blendSorted.handle, 0, self._count)
 end
@@ -1611,7 +1669,8 @@ function MeshBackend:rebuildPipeline(deferred: Deferred)
             self._vertexColors,
             self._fogging,
             self._doubleSided,
-            self._localLights
+            self._localLights,
+            self._probing
         )
         rank = ComputePipeline.load(self._device, "mesh.rank.comp", {})
         place = ComputePipeline.load(self._device, "mesh.place.comp", {})

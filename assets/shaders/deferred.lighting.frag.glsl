@@ -44,6 +44,22 @@
 #pragma tecs variants SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PBR=1
 #pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PBR=1
 #pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PBR=1
+#pragma tecs variants MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants MESH_FOG=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_FOG=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_FOG=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants MESH_LIGHTS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_LIGHTS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_LIGHTS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_LIGHTS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants MESH_FOG=1 MESH_LIGHTS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PROBE=1 MESH_PBR=1
+#pragma tecs variants SHADOWS=1 MESH_SHADOWS=1 MESH_FOG=1 MESH_LIGHTS=1 MESH_PROBE=1 MESH_PBR=1
 
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 outColor;
@@ -126,6 +142,9 @@ layout(set = 3, binding = 0) uniform Scene {
     vec4 meshCamera;
     mat4 inverseViewProjection;
 #endif
+#ifdef MESH_PROBE
+    vec4 meshProbe[6];
+#endif
 #ifdef MESH_FOG
     vec4 meshFog;
 #endif
@@ -174,6 +193,15 @@ vec3 meshWorldOf(vec2 uv, float depth) {
     vec4 clip = vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
     vec4 world = scene.inverseViewProjection * clip;
     return world.xyz / max(abs(world.w), 1e-6) * sign(world.w);
+}
+#endif
+
+#ifdef MESH_PROBE
+vec3 ambientCube(vec3 normal) {
+    vec3 squared = normal * normal;
+    return squared.x * scene.meshProbe[normal.x >= 0.0 ? 0 : 1].rgb
+        + squared.y * scene.meshProbe[normal.y >= 0.0 ? 2 : 3].rgb
+        + squared.z * scene.meshProbe[normal.z >= 0.0 ? 4 : 5].rgb;
 }
 #endif
 
@@ -301,6 +329,9 @@ void main() {
         // approximation. Metals have no diffuse lobe, so only mesh pixels
         // lose it; the established 2D material contract remains Lambertian.
         accumulated *= 1.0 - orm.b;
+#ifdef MESH_PROBE
+        accumulated += albedo.rgb * ambientCube(normal) * orm.r * (1.0 - orm.b);
+#endif
     }
 #endif
 #ifdef MESH_SHADOWS

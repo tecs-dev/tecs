@@ -591,6 +591,71 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    it("keeps ambient probes out of ordinary mesh domains and shades opted-in PBR meshes", function()
+        local without = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = { capacity = 4, vertexCapacity = 16, indexCapacity = 24 },
+        })
+        assert.is_false(without.meshes.probing)
+        assert.is_nil(without.meshes._backend._probeUniform)
+        without:destroy()
+
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 0, 0, 0 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                materialCapacity = 4,
+                probe = {
+                    positiveX = { 0, 0, 0 },
+                    negativeX = { 0, 0, 0 },
+                    positiveY = { 0, 0, 0 },
+                    negativeY = { 0, 0, 0 },
+                    positiveZ = { 0.5, 0, 0 },
+                    negativeZ = { 0, 0, 0 },
+                    intensity = 1,
+                },
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local mesh, bounds = renderer.meshes:registerMesh(triangleMesh("spec://probe-triangle"))
+        local material = renderer.meshes:registerMaterial({
+            name = "spec://probe-pbr",
+            model = renderer.meshes.MATERIAL_METALLIC_ROUGHNESS,
+            baseR = 1,
+            baseG = 1,
+            baseB = 1,
+            metallic = 0,
+            roughness = 1,
+        })
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5 }),
+            mesh,
+            bounds,
+            material,
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+
+        local pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2 - 6, SIZE / 2 + 6)
+        assert.is_true(pixel.r > 0)
+        assert.are.equal(0, pixel.g)
+        assert.are.equal(0, pixel.b)
+        assert.is_true(renderer.meshes.probing)
+        assert.is_not_nil(renderer.meshes._backend._probeUniform)
+
+        renderer.meshes.probe.intensity = -1
+        assert.has_error(function()
+            frameOnce(world, renderer)
+        end, "tecs: mesh probe intensity must be non-negative")
+        renderer.meshes.probe.intensity = 1
+        renderer:destroy()
+    end)
+
     it("requires an explicit mesh transparency lane", function()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {
             sprites = false,

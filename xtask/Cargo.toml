@@ -5,9 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+bistro-import = ["dep:draco_decoder", "dep:image_dds", "dep:sha2"]
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+draco_decoder = { workspace = true, optional = true }
 image.workspace = true
+image_dds = { workspace = true, optional = true }
 serde_json.workspace = true
+sha2 = { workspace = true, optional = true }
 tecs-build-support = { path = "../native/rust/build-support" }

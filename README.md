@@ -36,7 +36,7 @@ start a graphics stack.
   culling, texture and PBR material residency, glTF/GLB skinning and animation,
   large-primitive chunking, and independently allocated transparent,
   double-sided, directional-shadow, point/spot-light, skeletal, morph-target,
-  vertex-color, fog, mipmapped-texture, and BC3 texture lanes.
+  vertex-color, fog, ambient-probe, mipmapped-texture, and BC3 texture lanes.
 - Optional half-resolution bloom composed before transparent meshes and the
   2D forward lane, so a mixed renderer can keep its HUD crisp.
 - Input, audio, physics, assets, workers, async I/O, HTTP, file watching, and
@@ -86,6 +86,13 @@ record buffer, screen-tile lists, compute dispatch, bindings, and Cook-Torrance
 shader variants do not exist in a mesh domain that omits `lights`, and no part
 of that path enters a 2D-only renderer.
 
+The first environment-lighting lane is an ambient cube rather than a sampled
+cubemap. Six world-space irradiance colors preserve broad directional light
+without adding a texture, sampler, or shader branch to a domain that omits the
+probe. It intentionally covers only the diffuse PBR lobe. Glossy reflections,
+local reflection volumes, and authored lightmaps remain separate future lanes
+instead of making this baseline probe expensive.
+
 A mixed renderer keeps HUD work in the sprite domain. A highest,
 screen-space, unlit layer with `overlay = true` routes even fully opaque 2D
 content through the existing sorted forward lane after meshes and bloom. It
@@ -115,6 +122,8 @@ cargo xtask example animated3d # Run the CC0 animated and lit glTF hero
 cargo xtask example morph3d    # Run decoded glTF morph-weight animation
 cargo xtask fetch sponza       # Cache the pinned large lighting scene
 cargo xtask example sponza3d   # Run point and spot lights in Sponza
+cargo xtask fetch bistro       # Import the pinned large Bistro stress scene
+cargo xtask example bistro3d   # Run Bistro with probe and direct lighting
 cargo xtask bench meshshadows  # Measure the optional mesh-shadow lane
 cargo xtask bench meshskinning # Measure the optional mesh-skinning lane
 cargo xtask bench meshmorphing # Measure the optional mesh-morphing lane

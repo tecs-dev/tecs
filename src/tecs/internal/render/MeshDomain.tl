@@ -33,6 +33,9 @@ when the lane is disabled.
 A domain created with `lights` extracts point and spot lights into its own
 buffer and bins them in screen tiles for each 3D view. A domain without it
 creates no local-light buffers, compute pipeline, queries, or shader variant.
+A domain created with `probe` shades meshes from six world-space irradiance
+faces. A domain without it pushes no probe uniform and selects shader variants
+that perform no probe work.
 Mipmapped RGBA8 layers generate their chains on the GPU after upload. A domain
 using `TEXTURE_BC3` instead consumes complete chains prepared by the asset
 importer and keeps them compressed in GPU memory. This format is an explicit
@@ -208,6 +211,32 @@ end
 local record MeshFogOptions is MeshFogTuning
 end
 
+--- Controls one mesh-only ambient-cube light probe at runtime.
+---
+--- Each RGB triplet is irradiance arriving from the named world-space axis.
+--- The shader blends the six faces by the squared components of the surface
+--- normal. Values must be non-negative and may exceed one for HDR lighting.
+local interface MeshProbeTuning
+    --- Caller-writable. Sets irradiance arriving from positive world X.
+    positiveX: {number}
+    --- Caller-writable. Sets irradiance arriving from negative world X.
+    negativeX: {number}
+    --- Caller-writable. Sets irradiance arriving from positive world Y.
+    positiveY: {number}
+    --- Caller-writable. Sets irradiance arriving from negative world Y.
+    negativeY: {number}
+    --- Caller-writable. Sets irradiance arriving from positive world Z.
+    positiveZ: {number}
+    --- Caller-writable. Sets irradiance arriving from negative world Z.
+    negativeZ: {number}
+    --- Caller-writable. Scales all six faces and defaults to one.
+    intensity: number
+end
+
+--- Enables the mesh-only ambient-cube probe shader variants.
+local record MeshProbeOptions is MeshProbeTuning
+end
+
 local record MeshDomainOptions
     --- Caller-writable. Sets the maximum resident mesh-instance count and
     --- defaults to 65,536.
@@ -269,6 +298,9 @@ local record MeshDomainOptions
     --- Caller-writable. Enables linear camera-distance fog for meshes. Nil
     --- omits its shader variants and runtime work.
     fog: MeshFogOptions
+    --- Caller-writable. Enables diffuse environment lighting for meshes. Nil
+    --- omits its shader variants and runtime work.
+    probe: MeshProbeOptions
 end
 
 local type RegisteredPrimitive = Model3D.Primitive
@@ -283,6 +315,8 @@ local record MeshDomain
     type LightOptions = MeshLightOptions
     type FogOptions = MeshFogOptions
     type Fog = MeshFogTuning
+    type ProbeOptions = MeshProbeOptions
+    type Probe = MeshProbeTuning
     type RegisteredPrimitive = RegisteredPrimitive
     type Model3D = Model3D
 
@@ -359,11 +393,16 @@ local record MeshDomain
     vertexColors: boolean
     --- Read-only. Reports whether mesh fog shader variants are enabled.
     fogging: boolean
+    --- Read-only. Reports whether ambient-cube probe variants are enabled.
+    probing: boolean
     --- Caller-writable. Controls the enabled directional light and shadow map.
     --- Nil while shadows are disabled.
     shadow: MeshShadowTuning
     --- Caller-writable. Controls enabled mesh fog. Nil while fog is disabled.
     fog: MeshFogTuning
+    --- Caller-writable. Controls enabled mesh environment lighting. Nil while
+    --- the probe is disabled.
+    probe: MeshProbeTuning
     --- Engine-owned. Exposes immutable vertex storage to the opaque
     --- mesh pass. Ordinary game code should ignore it.
     vertices: Buffer
@@ -509,6 +548,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self.lightCount = 0
     self.vertexColors = options.vertexColors == true
     self.fogging = options.fog ~= nil
+    self.probing = options.probe ~= nil
     if self.shadows then
         local shadow <const> = options.shadows or {}
         self.shadow = {
@@ -533,6 +573,18 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
             r = fog.r or 0.5,
             g = fog.g or 0.6,
             b = fog.b or 0.7,
+        }
+    end
+    if self.probing then
+        local probe <const> = options.probe or {}
+        self.probe = {
+            positiveX = probe.positiveX or {0.0, 0.0, 0.0},
+            negativeX = probe.negativeX or {0.0, 0.0, 0.0},
+            positiveY = probe.positiveY or {0.0, 0.0, 0.0},
+            negativeY = probe.negativeY or {0.0, 0.0, 0.0},
+            positiveZ = probe.positiveZ or {0.0, 0.0, 0.0},
+            negativeZ = probe.negativeZ or {0.0, 0.0, 0.0},
+            intensity = probe.intensity or 1.0,
         }
     end
     self._centerXByAsset = {}
@@ -566,6 +618,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
             localLights = self.localLights,
             vertexColors = self.vertexColors,
             fog = self.fog as MeshBackend.FogOptions,
+            probe = self.probe as MeshBackend.ProbeOptions,
         }
     )
     self._backend = backend

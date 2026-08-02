@@ -237,6 +237,16 @@ release for that target compiles them:
 `zeroize`, `zerotrie`, `zerovec`, `zerovec-derive`, `zune-core`, and
 `zune-jpeg`.
 
+The opt-in Bistro importer adds the MIT-or-Apache-2.0 `draco_decoder` crate,
+which builds the Apache-2.0 reference Draco codec, and the MIT `image_dds`,
+`ddsfile`, and `bcdec_rs` crates. Their build and decoding graph also adds
+`bytemuck_derive`, `byteorder`, `codespan-reporting`, `crunchy`, `cxx`,
+`cxx-build`, `cxxbridge-cmd`, `cxxbridge-flags`, `cxxbridge-macro`,
+`enum-primitive-derive`, `half`, `link-cplusplus`, `scratch`, `strsim`,
+`termcolor`, `unicode-width`, `zerocopy`, and `zerocopy-derive`. Every entry is
+MIT, Apache-2.0, or dual licensed under both, and the installed package carries
+both complete licence texts.
+
 The official MCP SDK and Streamable HTTP server add `android_system_properties`,
 `async-trait`, `axum`, `axum-core`, `chacha20`, `chrono`, `cpufeatures`,
 `dyn-clone`, `futures`, `futures-executor`, `httpdate`, `iana-time-zone`,

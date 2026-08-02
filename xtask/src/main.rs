@@ -57,7 +57,7 @@ enum Task {
     },
     /// Fetch a pinned large example asset into the ignored local cache.
     Fetch {
-        /// Asset name. Currently supports `sponza`.
+        /// Asset name. Supports `sponza` and `bistro`.
         name: String,
     },
     /// Build the shader pack consumed by release packages.
