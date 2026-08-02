@@ -54,6 +54,7 @@ local Model3D <const> = require("tecs.gfx.Model3D")
 local MeshExtractor <const> = require("tecs.internal.render.MeshExtractor")
 local MeshBackend <const> = require("tecs.internal.render.MeshBackend")
 local MeshFramePacket <const> = require("tecs.internal.render.MeshFramePacket")
+local type DomainStats = require("tecs.internal.render.DomainStats")
 local type modeltypes = require("tecs.internal.render.modeltypes")
 local components <const> = require("tecs.components")
 
@@ -306,7 +307,7 @@ end
 
 local type RegisteredPrimitive = Model3D.Primitive
 
-local interface MeshDomain
+local interface MeshDomain is DomainStats
     type Options = MeshDomainOptions
     type MaterialOptions = MeshMaterialOptions
     type ShadowOptions = MeshShadowOptions
@@ -344,12 +345,6 @@ local interface MeshDomain
     vertexCapacity: integer
     --- Read-only. Reports the 32-bit index capacity fixed at creation.
     indexCapacity: integer
-    --- Read-only. Reports the instances resident after the last extraction.
-    count: integer
-    --- Read-only. Reports the instances the last extraction could not fit.
-    dropped: integer
-    --- Read-only. Reports the instances rewritten by the last extraction.
-    rewritten: integer
     --- Read-only. Reports meshes registered for immutable residency.
     meshCount: integer
     --- Read-only. Reports vertices registered for immutable residency.
@@ -477,7 +472,6 @@ local interface MeshDomainInternal is MeshDomain
     _rebuildPipelines: function(self, deferred: Deferred)
     _prepare: function(self, frame: Frame, camera?: Camera3D, width?: number, height?: number, upload?: boolean)
     _device: function(self): loader.CPtr
-    _extractSeconds: function(self): number
     _destroy: function(self)
 end
 
@@ -1063,7 +1057,7 @@ function MeshDomainImpl:_device(): loader.CPtr
     return self._backend:device()
 end
 
-function MeshDomainImpl:_extractSeconds(): number
+function MeshDomainImpl:extractSeconds(): number
     return self._extractor:extractSeconds()
 end
 

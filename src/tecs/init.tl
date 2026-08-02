@@ -122,6 +122,8 @@ local record gfx
     --- A world to a frame, through an extractor and a backend.
     Renderer: Renderer
     type RendererOptions = Renderer.Options
+    --- Statistics reported by both 2D and 3D rendering domains.
+    type DomainStats = Renderer.DomainStats
     type SpriteDomain = Renderer.SpriteDomain
     type SpriteOptions = Renderer.SpriteOptions
     type MeshDomain = Renderer.MeshDomain

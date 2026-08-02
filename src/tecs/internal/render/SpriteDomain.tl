@@ -18,6 +18,7 @@ local Camera2D <const> = require("tecs.gfx.Camera2D")
 local SpriteExtractor <const> = require("tecs.internal.render.SpriteExtractor")
 local SpriteBackend <const> = require("tecs.internal.render.SpriteBackend")
 local SpriteFramePacket <const> = require("tecs.internal.render.SpriteFramePacket")
+local type DomainStats = require("tecs.internal.render.DomainStats")
 local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
 
@@ -47,18 +48,12 @@ local record SpriteDomainOptions
     packImages: boolean
 end
 
-local interface SpriteDomain
+local interface SpriteDomain is DomainStats
     --- Caller-writable. Controls the 2D view. The first drawable frame centers
     --- it on the viewport.
     camera: Camera2D
     --- Read-only. Reports the instance capacity fixed at creation.
     capacity: integer
-    --- Read-only. Reports the instances resident after the last extraction.
-    count: integer
-    --- Read-only. Reports the instances the last extraction could not fit.
-    dropped: integer
-    --- Read-only. Reports the instances rewritten by the last extraction.
-    rewritten: integer
     --- Read-only. Provides the sprite image array.
     images: TextureArray
     --- Engine-owned. Exposes sprite instances to custom compute stages.
@@ -141,7 +136,6 @@ local interface SpriteDomainInternal is SpriteDomain
     _castsThisFrame: function(self): boolean
     _rebuildPipelines: function(self)
     _device: function(self): loader.CPtr
-    _extractSeconds: function(self): number
     _destroy: function(self)
 end
 
@@ -355,7 +349,7 @@ function SpriteDomainImpl:_device(): loader.CPtr
     return self._backend:device()
 end
 
-function SpriteDomainImpl:_extractSeconds(): number
+function SpriteDomainImpl:extractSeconds(): number
     return self._extractor:extractSeconds()
 end
 
