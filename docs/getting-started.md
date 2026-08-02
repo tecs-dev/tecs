@@ -364,15 +364,16 @@ mipmaps, point and spot lights, shadows, fog, and bloom together. The example
 command reports the required fetch command before opening a window when its
 ignored scene cache is absent.
 
-Sponza and Bistro install `tecs.gfx.FlyCamera3D` as an ordinary Update-phase
+Every 3D example installs `tecs.gfx.FlyCamera3D` as an ordinary Update-phase
 system. Click to enter relative mouse mode, move with WASD, change height with
 Q and E, hold Shift to sprint, press Tab to release the pointer, and press
-Escape to quit. Both set `showFps`, which refreshes a rolling FPS reading in
-the window title twice per second without enabling the sprite domain. They
-default to immediate presentation and accept `TECS_PRESENT=vsync` as an
-override. This is noclip movement with no collision or gravity, which keeps
-scene navigation independent from Rapier and preserves the rendering stress
-test.
+Escape to quit. The split-screen `scene3d` example moves its primary left
+camera and leaves its secondary right camera fixed for comparison. This is
+noclip movement with no collision or gravity, which keeps scene navigation
+independent from Rapier. Sponza and Bistro additionally set `showFps`, which
+refreshes a rolling FPS reading in the window title twice per second without
+enabling the sprite domain. They default to immediate presentation and accept
+`TECS_PRESENT=vsync` as an override.
 
 `cargo xtask fetch bistro` downloads and verifies the pinned CC BY 4.0 Amazon
 Lumberyard exterior, decodes its older Draco stream with the reference codec,

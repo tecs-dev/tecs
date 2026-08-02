@@ -13,6 +13,7 @@ local Transform3D <const> = tecs.Transform3D
 local MeshMaterial <const> = tecs.gfx.MeshMaterial
 local Tint <const> = tecs.gfx.Tint
 local Renderable3D <const> = tecs.gfx.Renderable3D
+local FlyCamera3D <const> = tecs.gfx.FlyCamera3D
 
 local FLOOR_VERTICES <const>: {number} = {
     -4,
@@ -72,6 +73,14 @@ local function game(world: tecs.World, app: tecs.Application)
     meshes.camera.z = 5.5
     meshes.camera.verticalFov = math.rad(50)
 
+    local controller <const> = FlyCamera3D.new(app.input, meshes.camera, {moveSpeed = 3, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.MorphFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number) controller:update(dt) end,
+    })
+    print("morph3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
+
     local floor, floorBounds <const> = meshes:registerMesh(assets.newMesh({
         name = "example://morph-floor",
         vertices = FLOOR_VERTICES,
@@ -117,7 +126,6 @@ local function game(world: tecs.World, app: tecs.Application)
             end,
         })
         print("morph3d: rotating six colored faces while cycling two GPU morph targets")
-        print("morph3d: escape or close the window to quit")
     end)
 end
 

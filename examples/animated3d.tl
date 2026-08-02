@@ -14,6 +14,7 @@ local MeshMaterial <const> = tecs.gfx.MeshMaterial
 local Bounds3D <const> = tecs.gfx.Bounds3D
 local Tint <const> = tecs.gfx.Tint
 local Renderable3D <const> = tecs.gfx.Renderable3D
+local FlyCamera3D <const> = tecs.gfx.FlyCamera3D
 
 local FLOOR_VERTICES <const>: {number} = {
     -5,
@@ -76,6 +77,14 @@ local function game(world: tecs.World, app: tecs.Application)
     meshes.camera.verticalFov = math.rad(46)
     meshes.camera.near = 0.1
     meshes.camera.far = 50
+
+    local controller <const> = FlyCamera3D.new(app.input, meshes.camera, {moveSpeed = 5, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.AnimatedFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number) controller:update(dt) end,
+    })
+    print("animated3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
 
     local floor, floorBounds = meshes:registerMesh(tecs.assets.newMesh({
         name = "example://animated-hero-floor",
@@ -150,7 +159,6 @@ local function game(world: tecs.World, app: tecs.Application)
             end,
         })
         print("animated3d: cycling CC0 idle, walk, and attack clips under Cook-Torrance light")
-        print("animated3d: escape or close the window to quit")
     end)
 
     assets.loadGLTF(files.assetPath("models/morph-cube.gltf")):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)

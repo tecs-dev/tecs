@@ -15,6 +15,12 @@ cargo xtask fetch bistro
 cargo xtask example bistro3d
 ```
 
+Every 3D example uses the same free-fly controls. Click its 3D view to capture
+the mouse, use WASD to move, Q and E to change height, hold Shift to sprint,
+and press Tab to release the mouse. Escape quits. In `scene3d`, the controller
+moves the primary left view while the secondary right view remains fixed for
+comparison.
+
 `ui-demo.tl` is the complete engine showcase. It exercises the sprite renderer,
 lighting, text, UI, input, animation, audio, and debug tools together.
 
@@ -53,9 +59,7 @@ BC3 mip chains and writes a derived glTF. The demo keeps those textures
 compressed in GPU memory and exercises double-sided materials, independently
 GPU-culled primitive chunks, Cook-Torrance point and spot lights, directional
 shadows, fog, and bloom. Running the example without that cache fails before
-opening a window and reports the fetch command. Click the scene to capture the
-mouse, use WASD to move, Q and E to change height, hold Shift to sprint, and
-press Tab to release the mouse. Escape quits. The window title reports rolling
+opening a window and reports the fetch command. The window title reports rolling
 FPS, and the lower bloom threshold makes bright lit surfaces visibly spread.
 Both large scenes default to immediate presentation so this number is uncapped;
 set `TECS_PRESENT=vsync` to opt back into synchronized presentation.
@@ -69,8 +73,8 @@ probe, Cook-Torrance local lights, directional shadows, fog, and bloom. The
 source GLB is removed after a successful import, and running without the cache
 reports the fetch command before a window opens.
 
-The Bistro demo uses the same free-fly controls as Sponza. It moves faster to
-cover the exterior's larger authored scale. The controller is noclip by
+The Bistro demo moves faster than Sponza to cover the exterior's larger
+authored scale. The controller is noclip by
 design, so neither scene adds render geometry to Rapier merely for navigation.
 Its title reports FPS and its bloom profile is tuned for the exterior's small
 emissive lamps and bright Cook-Torrance highlights.

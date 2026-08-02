@@ -11,6 +11,7 @@ local Transform3D <const> = tecs.Transform3D
 local MeshMaterial <const> = tecs.gfx.MeshMaterial
 local Tint <const> = tecs.gfx.Tint
 local Renderable3D <const> = tecs.gfx.Renderable3D
+local FlyCamera3D <const> = tecs.gfx.FlyCamera3D
 
 local IDENTITY <const>: {number} = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
 
@@ -28,6 +29,13 @@ local function game(world: tecs.World, app: tecs.Application)
     local meshes <const> = app.renderer.meshes
     meshes.camera.z = 3
     meshes.camera.verticalFov = math.rad(50)
+
+    local controller <const> = FlyCamera3D.new(app.input, meshes.camera, {moveSpeed = 3, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.SkinningFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number) controller:update(dt) end,
+    })
 
     local mesh, sourceBounds = meshes:registerMesh(tecs.assets.newMesh({
         name = "example://two-joint-strip",
@@ -102,7 +110,7 @@ local function game(world: tecs.World, app: tecs.Application)
     })
 
     print("skinning3d: animating one of two joints entirely in the mesh vertex stage")
-    print("skinning3d: escape or close the window to quit")
+    print("skinning3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
 end
 
 return tecs.newApplication({

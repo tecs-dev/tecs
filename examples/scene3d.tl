@@ -14,6 +14,7 @@ local Renderable3D <const> = tecs.gfx.Renderable3D
 local Transform2D <const> = tecs.Transform2D
 local Renderable2D <const> = tecs.gfx.Renderable2D
 local View <const> = tecs.gfx.View
+local FlyCamera3D <const> = tecs.gfx.FlyCamera3D
 
 local VERTICES <const>: {{number}} = {
     {-1, -1, -1},
@@ -129,6 +130,13 @@ local function game(world: tecs.World, app: tecs.Application)
     camera.near = 0.1
     camera.far = 100
 
+    local controller <const> = FlyCamera3D.new(app.input, camera, {moveSpeed = 5, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.SceneFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number) controller:update(dt) end,
+    })
+
     local sideCamera <const> = tecs.gfx.newCamera3D({
         x = 5.5,
         y = 2.5,
@@ -221,7 +229,7 @@ local function game(world: tecs.World, app: tecs.Application)
     world:spawn(Transform2D(170, 44, 1, 16, 0, 88, 10), Tint(1.0, 0.45, 0.2, 1.0), Renderable2D())
 
     print("scene3d: two 3D cameras, Cook-Torrance materials, fog, bloom, shadow, and 2D HUD")
-    print("scene3d: escape or close the window to quit")
+    print("scene3d: click the left view to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
 
     local elapsed = 0.0
     world:addSystem({

@@ -11,11 +11,20 @@ local assets <const> = tecs.assets
 local files <const> = tecs.io.files
 local Tint <const> = tecs.gfx.Tint
 local Renderable3D <const> = tecs.gfx.Renderable3D
+local FlyCamera3D <const> = tecs.gfx.FlyCamera3D
 
 local function game(world: tecs.World, app: tecs.Application)
     local meshes <const> = app.renderer.meshes
     meshes.camera.z = 2.5
     meshes.camera.verticalFov = math.rad(55)
+
+    local controller <const> = FlyCamera3D.new(app.input, meshes.camera, {moveSpeed = 3, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.GltfFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number) controller:update(dt) end,
+    })
+    print("gltf3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
 
     assets.loadGLTF(files.assetPath("models/triangle.gltf")):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)
         if loaded.status ~= "ready" then
