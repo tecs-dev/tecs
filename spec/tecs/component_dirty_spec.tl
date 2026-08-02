@@ -38,8 +38,7 @@ local function clearDirty(arch: tecs.ecs.Archetype)
 end
 
 local function findArchetype(world: tecs.World, components: {tecs.ecs.Component}): tecs.ecs.Archetype
-    -- forEachArchetype to avoid leaking a query scope (see
-    -- project_query_iter_scope_trap memory).
+    (world as internal.WorldImpl):enqueueCommit()
     local match: tecs.ecs.Archetype = nil
     world:forEachArchetype(function(arch: tecs.ecs.Archetype)
         if match ~= nil then
@@ -388,6 +387,7 @@ describe(
 
                         world:update(0)
                         world:spawn(Pos(5, 6))
+                        world:enqueueCommit()
                         assert.is_true(arch:structuralCount() > afterSpawn, "and the next placement counts again")
                     end
                 )
@@ -406,6 +406,7 @@ describe(
 
                         world:spawn(Pos(3, 3))
                         world:spawn(Pos(4, 4))
+                        world:enqueueCommit()
 
                         assert.is_true(arch:structuralDescribed(before))
                         assert.are.equal(3, arch:structuralAdded(), "the lowest row the two placements wrote")
@@ -426,6 +427,7 @@ describe(
                         local arch = inner(findArchetype(world, {Pos}))
                         local before = arch:structuralCount()
                         world:despawn(a)
+                        world:enqueueCommit()
 
                         assert.is_true(arch:structuralDescribed(before))
                         assert.are.equal(0, arch:structuralAdded(), "nothing was appended")
@@ -449,6 +451,7 @@ describe(
                         local arch = inner(findArchetype(world, {Pos}))
                         local before = arch:structuralCount()
                         world:despawn(last)
+                        world:enqueueCommit()
 
                         assert.is_true(arch:structuralCount() > before, "the run still shortened")
                         assert.is_true(arch:structuralDescribed(before))
@@ -475,6 +478,7 @@ describe(
                         for index = 1, 200 do
                             world:despawn(ids[index])
                         end
+                        world:enqueueCommit()
 
                         assert.is_false(
                             arch:structuralDescribed(before), "past the window's ceiling the rows stop being named"

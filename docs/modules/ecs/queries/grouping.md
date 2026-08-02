@@ -72,7 +72,7 @@ for key in renderables:groups() do
 end
 ```
 
-Grouped iteration opens the same deferred scope as `query:iter()`. Use a
-separate [cursor](/modules/ecs/queries/#breaking-out-early) for any traversal that may
-stop early, and close it after the loop. Nested grouped traversals need one
-cursor each.
+Grouped iteration follows the same transaction-independent rules as
+`query:iter()`. Use a separate
+[cursor](/modules/ecs/queries/#breaking-out-early) when a traversal needs an
+explicit close operation. Nested grouped cursors need one cursor each.

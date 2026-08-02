@@ -73,14 +73,14 @@ write, read through `get` and call
 
 `query:count()` sums archetype lengths without visiting entity rows.
 
-Iteration supports nesting, including two loops over the same query. Each loop
-owns a scope, and mutations drain after the outermost loop finishes.
+Iteration supports nesting, including two loops over the same query. Iterators
+own traversal state only; they do not control structural transaction lifetime.
 
 ## Structural changes
 
-Archetype iteration opens a deferred scope. Structural calls such as `spawn`,
-`despawn`, `set`, `remove`, and batch operations stage until the loop
-finishes:
+Structural calls such as `spawn`, `despawn`, component-adding `set`, `remove`,
+and batch operations always stage. Iteration continues over the committed rows
+and the pipeline publishes at its next declared barrier:
 
 ```teal
 local expiring <const> = world:newQuery({
@@ -99,14 +99,14 @@ for archetype, length, entities in expiring:iter() do
 end
 ```
 
-The drain applies despawns, spawns, and archetype moves after iterator
-exhaustion. The [mutation model](/modules/ecs/mutation-model) defines visibility and
+Iterator exhaustion does not publish those changes. The
+[mutation model](/modules/ecs/mutation-model) defines their visibility and
 ordering.
 
 ### Early exit {#breaking-out-early}
 
-`query:iter()` closes its scope only when the archetype loop reaches
-exhaustion. A loop that may `break` or return must use a cursor:
+An early `break` is safe because iteration owns no transaction scope. Use a
+cursor when code needs a closable traversal object:
 
 ```teal
 local cursor <const> = query:newCursor()
@@ -203,5 +203,6 @@ do
 end
 ```
 
-This iterator opens no deferred scope. Do not make structural changes while it
-runs.
+This iterator reads the live archetype index directly. Do not make structural
+changes while it runs; call it only where the surrounding scheduler contract
+keeps publication out of the traversal.

@@ -162,7 +162,10 @@ describe("tecs.gfx.particles", function()
     end
 
     local function newEmitter(world, effect, seed)
-        return world:spawn(Transform2D(SIZE / 2, SIZE / 2), ParticleEmitter({ effect = effect, seed = seed or 7 }))
+        local entity =
+            world:spawn(Transform2D(SIZE / 2, SIZE / 2), ParticleEmitter({ effect = effect, seed = seed or 7 }))
+        world:enqueueCommit()
+        return entity
     end
 
     ---------------------------------------------------------------------------

@@ -1355,7 +1355,7 @@ describe("http.newClient", function()
 
                 local entity = unanswered()
                 world:despawn(entity)
-                world:commit()
+                world:enqueueCommit()
 
                 assert.are.equal(0, http.plugin.clientOf(world):pending())
             end)

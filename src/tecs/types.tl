@@ -527,7 +527,7 @@ local record types
         --- An opt-in query iterator that can be closed before exhaustion.
         ---
         --- Create one with `query:newCursor()` when an archetype-level loop may
-        --- `break` or return early. Call `close()` after leaving the loop.
+        --- `break` or return early and retain explicit traversal state.
         --- Natural exhaustion closes the cursor automatically, and repeated
         --- `close()` calls are safe.
         interface Cursor is Closeable
@@ -562,7 +562,7 @@ local record types
         --- The step function `query:iter()` returns. Yields the archetype,
         --- its live row count, and its entity id column; the entity column is
         --- the archetype's own, not a copy, and is only valid until the world
-        --- next commits.
+        --- reaches its next publication barrier.
         type IterFn = function(Query, any): (Archetype, integer, {integer})
 
         --- The step function `query:groups()` returns. Yields group ids in
@@ -585,26 +585,18 @@ local record types
         ---
         --- Usage: `for archetype, length, entities in query:iter() do ... end`
         ---
-        --- @return The three values a generic `for` takes. Iteration opens a
-        ---     deferred scope on the world and closes it when the loop runs out
-        ---     of archetypes, so a `break` or an early `return` leaves the world
-        ---     deferred and every later spawn silently queues. Use
-        ---     `newCursor()` for a loop that may stop early. The `entities`
-        ---     table and the columns are the archetype's own and are valid only
-        ---     for that turn of the loop.
+        --- @return The three values a generic `for` takes. The `entities`
+        ---     table and columns are the archetype's own and remain valid only
+        ---     until the next barrier that changes that archetype.
         iter: function(self): (IterFn, Query, any)
 
         --- Create an opt-in cursor for a traversal that may stop early.
         ---
         --- Cursors allocate a small traversal object. Keep using `iter()`,
         --- `groups()`, and `group(id)` for loops that run to exhaustion.
-        --- When breaking or returning early, retain the cursor and call
-        --- `cursor:close()` to close its deferred scope and drain staged
-        --- mutations.
+        --- Closing a cursor stops that traversal; it does not commit the world.
         ---
-        --- @return A cursor the caller has to `close`, once, on every path out
-        ---     of the loop including an early return. Closing it twice is
-        ---     harmless; never closing it leaves the world deferred for good.
+        --- @return A cursor the caller may close early. Closing twice is safe.
         newCursor: function(self): Cursor
 
         --- Iterate over active group IDs in sorted order.
@@ -785,6 +777,20 @@ local record types
         --- system's name, which is what a self-removing predicate passes back
         --- to `removeSystem`.
         runIf: function(dt: number, world: World, systemName: string): boolean
+
+        --- Caller-writable. Requests a structural publication barrier before
+        --- this system's `runIf` and `run` dispatch. Defaults to false. Use it
+        --- only when this system must observe structural mutations staged by
+        --- an earlier system in the same phase.
+        commitBefore: boolean
+
+        --- Caller-writable. Requests a structural publication barrier after
+        --- this system's dispatch. Defaults to false. Use it only when a later
+        --- system in the same phase must observe this system's structural
+        --- mutations. Every phase already commits at its end. Use
+        --- `world:enqueueCommit()` from `run` instead when the dependency is
+        --- conditional at runtime.
+        commitAfter: boolean
     end
 
     --- A world owns entities, components, queries, systems, resources, events,
@@ -1006,24 +1012,6 @@ local record types
         --- Caller-writable. Stores world resources under typed keys.
         resources: Store
 
-        --- Open a defer scope. Mutations within the scope are staged and
-        --- drained on the matching `commit`. Pairs with `commit`.
-        defer: function(self)
-
-        --- Close one scope level and drain pending changes when the
-        --- outermost scope finishes.
-        commit: function(self)
-
-        --- Close every open scope and apply what they staged.
-        ---
-        --- The recovery path after something threw part way through a frame.
-        --- A throw inside `query:iter()` skips the pop that ends the loop's
-        --- scope, and a world left deferred stages every later mutation rather
-        --- than applying it, silently. This is what puts it back, and it is
-        --- safe on a healthy world: at depth zero it is the drain `commit`
-        --- already does.
-        unwind: function(self)
-
         -------------------------------------------------------------------------------
         -- Plugin methods
         -------------------------------------------------------------------------------
@@ -1051,6 +1039,19 @@ local record types
         ---
         --- @param dt The time since the last update.
         update: function(self, dt: number)
+
+        --- Requests publication of the world's staged structural mutations.
+        ---
+        --- Outside system dispatch, this publishes synchronously before the
+        --- call returns. During a system, the request is coalesced with any
+        --- other requests from that system and the pipeline publishes after
+        --- the system returns, before the next system runs. The requesting
+        --- system therefore does not observe its own structural changes.
+        ---
+        --- Do not call this from inside manual query traversal. Outside a
+        --- phase it may change archetype storage immediately; finish the
+        --- traversal first, then request publication.
+        enqueueCommit: function(self)
 
         --- Return fixed-step timing for interpolation consumers.
         ---
@@ -1084,9 +1085,9 @@ local record types
         shutdown: function(self)
 
         --- Run every system registered to `phase` (and its enabled
-        --- descendants) with the given `dt`. Unlike `update`, this does
-        --- NOT pre-commit or clear dirty bits
-        --- -- it only dispatches systems. Useful for piecewise phase
+        --- descendants) with the given `dt`. Publishes pending structural
+        --- work before dispatch and after each phase, but unlike `update`
+        --- does not clear dirty bits. Useful for piecewise phase
         --- execution (e.g. custom game loops splitting Update and
         --- Render across distinct ticks).
         ---
@@ -1098,7 +1099,9 @@ local record types
         -- Entity methods
         -------------------------------------------------------------------------------
 
-        --- Spawn a new entity with optional variadic components.
+        --- Reserve a new entity and stage its placement with optional
+        --- variadic components. The ID returns immediately; the entity becomes
+        --- alive and queryable at the next pipeline barrier.
         ---
         --- @param ... Variable number of components to add to the entity.
         --- @return The ID of the spawned entity.
@@ -1135,7 +1138,7 @@ local record types
         --- Bulk-spawn `count` entities sharing one component signature.
         --- Resolves the target archetype once at call time and defers the
         --- actual row placement and `callback` invocation until the next
-        --- commit.
+        --- pipeline barrier.
         ---
         --- Returns `(firstId, nil)` when it can allocate a contiguous ID
         --- range. In that case IDs are `firstId`, `firstId + 1`, ...,
@@ -1147,9 +1150,9 @@ local record types
         ---
         --- Returned IDs are valid immediately -- you can call
         --- `world:set`, `world:remove`, or `world:despawn` on them before
-        --- commit and the mutations are ordered correctly.
+        --- that barrier and the mutations are ordered correctly.
         ---
-        --- At commit time the target archetype's row range is claimed,
+        --- At publication the target archetype's row range is claimed,
         --- then `callback(archetype, firstRow, lastRow, count)` runs so you can
         --- write per-entity data via mutable column access
         --- (`archetype:getMut(Component)[row] = ...`).
@@ -1165,13 +1168,13 @@ local record types
         --- error on direct writes from the `callback`. For per-entity
         --- *varying* target values, call `world:set(spawnedId,
         --- SparseRel(target))` either inside the callback or any time
-        --- before commit. Use `firstId + i` only when the return was
+        --- before publication. Use `firstId + i` only when the return was
         --- contiguous; otherwise use the explicit `ids` list. The staged
         --- sparse sets drain alongside the batchSpawn placement.
         ---
         --- @param count Number of entities to spawn.
         --- @param componentTypes Array of component types defining the archetype.
-        --- @param callback Called at commit with `(archetype, firstRow, lastRow, count)`.
+        --- @param callback Called at publication with `(archetype, firstRow, lastRow, count)`.
         ---   Iterate rows with `for i = firstRow, lastRow do ... end`.
         --- @return firstId First entity ID when the allocation is contiguous, otherwise nil.
         --- @return ids Explicit entity ID list when fallback uses non-contiguous IDs, otherwise nil.
@@ -1190,7 +1193,7 @@ local record types
         ---
         --- @param ids Explicit entity IDs to spawn, in order.
         --- @param componentTypes Array of component types defining the archetype.
-        --- @param callback Called at commit with `(archetype, firstRow, lastRow, count)`.
+        --- @param callback Called at publication with `(archetype, firstRow, lastRow, count)`.
         batchSpawnAt: function(
             self,
             ids: {integer},
@@ -1204,14 +1207,14 @@ local record types
         despawn: function(self, entity: integer)
 
         --- Bulk-despawn every entity matching `query`. The actual
-        --- teardown is deferred until the next commit.
+        --- teardown is deferred until the next pipeline barrier.
         ---
         --- `query` must be a `Query` object built via `world:newQuery(...)`
         --- and reused across calls -- batch ops do not accept
         --- QueryDescriptors or raw component-type arrays. Build the
         --- query once outside your hot loop.
         ---
-        --- At commit time, events and relationship bookkeeping run as expected:
+        --- At publication, events and relationship bookkeeping run as expected:
         ---   * `OnDespawn` events fire for each despawned entity
         ---     (global observers and per-entity observers).
         ---   * Per-entity observer subscriptions are cleared after the
@@ -1357,9 +1360,11 @@ local record types
         --- reference. `get` + cdata write silently bypasses dirty
         --- tracking and leaves stale state downstream.
         ---
-        --- STAGING: an entity spawned earlier in the SAME frame is staged
-        --- until the commit drain, so getMut on it returns nil. Spawn with
-        --- final values via constructor args instead of spawn-then-mutate.
+        --- This access is immediate because it cannot change an archetype.
+        --- Side effects performed through the returned object therefore also
+        --- happen immediately. An entity spawned since the last barrier is not
+        --- live yet, so `getMut` returns nil for it. Spawn with final values or
+        --- wait for the next declared pipeline barrier.
         ---
         --- @param entity Entity ID.
         --- @param component Component type to get-and-mark-dirty.
@@ -1376,12 +1381,18 @@ local record types
 
         --- Add or update a component on an entity.
         ---
+        --- Replacing a value the entity already carries is immediate and marks
+        --- its column dirty. Adding a component is structural and becomes
+        --- visible at the next pipeline barrier.
+        ---
         --- @param entity Entity ID.
         --- @param component The component instance or scalar component type.
         --- @param value The scalar value, or nil to use the registered default.
         set: function(self, entity: integer, component: components.Component, value?: any)
 
         --- Remove a component from an entity.
+        --- The removal is structural and becomes visible at the next pipeline
+        --- barrier.
         ---
         --- @param entity Entity ID.
         --- @param component Component type to remove.
@@ -1644,7 +1655,8 @@ local record types
         --- @return The registered bundle.
         newBundle: function(self, name: string, def?: Bundle.Definition): Bundle
 
-        --- Spawn an entity using a registered bundle.
+        --- Reserve an entity using a registered bundle and stage its placement
+        --- for the next pipeline barrier.
         ---
         --- @param name The name of the bundle.
         --- @param ... Component overrides (required components must be provided).
@@ -1707,7 +1719,8 @@ local record types
         --- Read-only. Component names with default factories.
         defaulted: {string}
 
-        --- Spawn an entity using this bundle.
+        --- Reserve an entity using this bundle and stage its placement for the
+        --- next pipeline barrier.
         --- @param ... Required component instances in declaration order.
         --- @return The entity ID.
         spawn: function(self, ...: components.Component): integer

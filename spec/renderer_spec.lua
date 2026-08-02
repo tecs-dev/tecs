@@ -1285,6 +1285,7 @@ describe("ecs.Renderer", function()
                 renderer.sprites:sprite("spec://draw1"),
                 Renderable2D()
             )
+            world:enqueueCommit()
 
             for index = 1, #colors do
                 local sprite = world:getMut(entity, Sprite)
@@ -1742,11 +1743,9 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
-    -- Which leaves the question of what the failed frame costs. The row is
-    -- found inside a query cursor, and an error thrown out of one leaves the
-    -- world deferred: every spawn after it queues silently and the world is
-    -- past saving. A snapshot naming an image a later build dropped would take
-    -- the process down rather than the frame.
+    -- Which leaves the question of what the failed frame costs. A snapshot
+    -- naming an image a later build dropped must take down the frame rather
+    -- than leave the world unable to publish later work.
     it("leaves the world whole after a sprite fails to resolve", function()
         local world, renderer = newScene()
         world:spawn(
@@ -1760,15 +1759,14 @@ describe("ecs.Renderer", function()
         assert.is_false(drawn)
         assert.is_truthy(tostring(failure):find("spec://absent", 1, true))
 
-        -- A spawn that only queued would be invisible here, which is how a
-        -- scope the sync failed to pop shows itself from outside.
         local Marker = tecs.ecs.newTagComponent({ name = "AfterMissingImage" })
         world:spawn(Marker)
+        world:enqueueCommit()
         local seen = 0
         for _, length in world:newQuery({ include = { Marker } }):iter() do
             seen = seen + length
         end
-        assert.are.equal(1, seen, "the failed frame left a query scope open behind it")
+        assert.are.equal(1, seen, "the failed frame did not poison later publication")
 
         -- And it is the frame that failed, not the world: registering the
         -- image the sprite named lets the very next frame through, with the
@@ -1910,11 +1908,10 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
-    -- Stopping at capacity means leaving an archetype loop early, and leaving
-    -- one early through `iter` leaves the world deferred: every later spawn is
-    -- queued instead of applied, and nothing says so. The count above is the
-    -- same either way, so it takes a spawn after the sync to tell.
-    it("leaves the world undeferred after dropping rows", function()
+    -- Stopping at capacity must not change the transaction schedule. A system
+    -- later in the same phase stages its spawn, and the phase boundary publishes
+    -- it exactly like any other structural change.
+    it("keeps phase publication intact after dropping rows", function()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {
             ambient = { 1, 1, 1 },
@@ -1934,10 +1931,6 @@ describe("ecs.Renderer", function()
         end
         frameOnce(world, renderer)
 
-        -- Observed from inside the same update, in a phase after the sync,
-        -- because the world drains what it deferred when the update ends. A
-        -- scope the sync failed to pop is invisible from outside and defers
-        -- every system that runs after it.
         local Marker = tecs.ecs.newTagComponent({ name = "AfterCapacityDrop" })
         local seen = -1
         world:addSystem({
@@ -1953,7 +1946,12 @@ describe("ecs.Renderer", function()
         })
 
         world:update(1 / 60)
-        assert.are.equal(1, seen, "a spawn in a later phase was deferred, so the sync left a scope open")
+        assert.are.equal(0, seen, "systems do not observe structural writes from their own phase")
+        local published = 0
+        for _, length in world:newQuery({ include = { Marker } }):iter() do
+            published = published + length
+        end
+        assert.are.equal(1, published, "the phase boundary published the staged spawn")
         renderer:destroy()
     end)
 

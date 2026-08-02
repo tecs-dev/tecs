@@ -258,8 +258,7 @@ describe("exception safety", function()
         assert.is_truthy(tostring(reason):find("the instance producer threw", 1, true))
         assert.are.equal(before, passscope.openCount(), "a producer opens no pass")
 
-        world:unwind()
-        assert.are.equal(0, world._scopeDepth)
+        world:enqueueCommit()
 
         explode = false
         local frame = drawFrame(world, renderer)
@@ -272,7 +271,7 @@ describe("exception safety", function()
     -- A system that throws inside a query loop
     ---------------------------------------------------------------------------
 
-    it("closes the scope a system threw out of, so later spawns apply", function()
+    it("does not leave query iteration mutation state after a system throws", function()
         local world = tecs.ecs.newWorld()
         world:spawn(Tint(1, 0, 0, 1))
 
@@ -292,26 +291,19 @@ describe("exception safety", function()
 
         local ok = pcall(world.update, world, 1 / 60)
         assert.is_false(ok)
-        assert.is_true(world._scopeDepth > 0, "the loop's scope is what was left open")
-
-        -- The bug this covers is silence, not a crash. A world left deferred
-        -- stages every later mutation and reports nothing, so the entity below
-        -- would exist as far as the caller is concerned and be in no
-        -- archetype until something happened to drain.
-        world:unwind()
-        assert.are.equal(0, world._scopeDepth)
         local spawned = world:spawn(Tint(0, 1, 0, 1))
-        assert.is_true(world:isAlive(spawned), "the spawn was staged rather than applied")
+        assert.is_false(world:isAlive(spawned))
+        world:enqueueCommit()
+        assert.is_true(world:isAlive(spawned))
 
         -- And the next update runs a whole frame's worth of systems against an
         -- applied world, without the caller having unwound anything.
         explode = false
         world:update(1 / 60)
-        assert.are.equal(0, world._scopeDepth)
         assert.are.equal(2, query:count())
     end)
 
-    it("unwinds every scope on the next update, not one level of them", function()
+    it("recovers after a throw from nested query iteration", function()
         local world = tecs.ecs.newWorld()
         world:spawn(Tint(1, 0, 0, 1))
 
@@ -333,19 +325,16 @@ describe("exception safety", function()
         })
 
         assert.is_false(pcall(world.update, world, 1 / 60))
-        -- Two scopes, so decrementing one would leave the world deferred for
-        -- the whole of the next update and every one after it.
-        assert.is_true(world._scopeDepth >= 2)
 
         explode = false
         world:update(1 / 60)
-        assert.are.equal(0, world._scopeDepth)
 
         local spawned = world:spawn(Tint(0, 1, 0, 1))
+        world:enqueueCommit()
         assert.is_true(world:isAlive(spawned))
     end)
 
-    it("survives a cursor closed after its scope was unwound", function()
+    it("allows a cursor to close after an unrelated transaction settles", function()
         local world = tecs.ecs.newWorld()
         world:spawn(Tint(1, 0, 0, 1))
         local query = world:newQuery({ name = "spec.Stale", include = { Tint } })
@@ -354,22 +343,11 @@ describe("exception safety", function()
         for _ in cursor:iter() do
             break
         end
-        assert.is_true(world._scopeDepth > 0)
-
-        -- Recovery closes scopes, not cursors: it has no way to find the ones
-        -- a throw left holding one. So a cursor closed afterwards is giving
-        -- back a scope this world no longer has.
-        world:unwind()
-        assert.are.equal(0, world._scopeDepth)
+        world:enqueueCommit()
         cursor:close()
-        assert.are.equal(0, world._scopeDepth, "the stale close drove the depth negative")
-
-        -- A negative depth reads as "not deferred" one level too far, so the
-        -- next `defer` would apply instantly rather than stage.
-        world:defer()
         local spawned = world:spawn(Tint(0, 1, 0, 1))
-        assert.is_false(world:isAlive(spawned), "the defer did not defer")
-        world:commit()
+        assert.is_false(world:isAlive(spawned))
+        world:enqueueCommit()
         assert.is_true(world:isAlive(spawned))
     end)
 

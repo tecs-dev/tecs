@@ -53,8 +53,8 @@ Popping performs these steps:
 Popping the last state clears the auto-tag. Popping an empty stack or pushing
 an unregistered name raises.
 
-Each transition runs inside a deferred scope, so its entity mutations drain
-together.
+Each transition stages its entity mutations as one transaction and publishes
+them together before returning.
 
 ## Lifecycle policies
 

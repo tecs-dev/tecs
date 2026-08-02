@@ -26,11 +26,11 @@ describe(
                     function()
                         local target = world:spawn()
                         local follower = world:spawn(Follows(target) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
 
                         world:despawn(follower)
                         world:despawn(target)
-                        world:commit()
+                        world:enqueueCommit()
 
                         local archCountBefore = world:getStats().archetypes
 
@@ -48,9 +48,9 @@ describe(
                     "should not prune non-ephemeral empty archetypes",
                     function()
                         local e = world:spawn(Tag)
-                        world:commit()
+                        world:enqueueCommit()
                         world:despawn(e)
-                        world:commit()
+                        world:enqueueCommit()
 
                         local archCountBefore = world:getStats().archetypes
                         local pruned, _ = world:compact()
@@ -64,7 +64,7 @@ describe(
                     function()
                         local target = world:spawn()
                         local _follower = world:spawn(Follows(target) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
 
                         local pruned, _ = world:compact()
                         luassert.equals(0, pruned, "should not prune while target is alive")
@@ -78,7 +78,7 @@ describe(
                         luassert.equals(0, pruned)
                         -- World should still function
                         local e = world:spawn()
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.is_true(world:isAlive(e))
                     end
                 )
@@ -88,10 +88,10 @@ describe(
                     function()
                         local target = world:spawn()
                         local follower = world:spawn(Follows(target) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
                         world:despawn(follower)
                         world:despawn(target)
-                        world:commit()
+                        world:enqueueCommit()
 
                         local pruned1, _ = world:compact()
                         luassert.is_true(pruned1 >= 1)
@@ -107,14 +107,14 @@ describe(
                         -- Create several archetypes, then prune one in the middle
                         local t1 = world:spawn()
                         local _f1 = world:spawn(Follows(t1) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
 
                         local e2 = world:spawn(Tag)
-                        world:commit()
+                        world:enqueueCommit()
 
                         world:despawn(_f1)
                         world:despawn(t1)
-                        world:commit()
+                        world:enqueueCommit()
 
                         world:compact()
 
@@ -128,7 +128,7 @@ describe(
                     function()
                         local target = world:spawn()
                         local follower = world:spawn(Follows(target) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
 
                         local query = world:newQuery({include = {Follows}})
                         local count = 0
@@ -139,7 +139,7 @@ describe(
 
                         world:despawn(follower)
                         world:despawn(target)
-                        world:commit()
+                        world:enqueueCommit()
                         world:compact()
 
                         count = 0
@@ -151,7 +151,7 @@ describe(
                         -- New entities should be picked up by the query
                         local t2 = world:spawn()
                         local _f2 = world:spawn(Follows(t2) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
                         count = 0
                         for _ in query:iter() do
                             count = count + 1
@@ -167,21 +167,21 @@ describe(
                         -- increasing maxId.
                         local t1 = world:spawn()
                         local _f1 = world:spawn(Follows(t1) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
 
                         local index = (world as {string: any}).archetypeIndex as {string: integer}
                         local maxIdBeforeDestroy = index.maxId
 
                         world:despawn(_f1)
                         world:despawn(t1)
-                        world:commit()
+                        world:enqueueCommit()
                         local pruned, _ = world:compact()
                         luassert.is_true(pruned >= 1)
 
                         -- Spawn a new ephemeral-arch entity. Should reuse the freed id.
                         local t2 = world:spawn()
                         local _f2 = world:spawn(Follows(t2) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(
                             maxIdBeforeDestroy, index.maxId, "maxId should not advance when a freed id is reused"
@@ -201,12 +201,12 @@ describe(
                         for i = 1, 5000 do
                             ids[i] = world:spawn(Tag)
                         end
-                        world:commit()
+                        world:enqueueCommit()
 
                         for i = 11, 5000 do
                             world:despawn(ids[i])
                         end
-                        world:commit()
+                        world:enqueueCommit()
 
                         local _, compacted = world:compact()
                         luassert.is_true(compacted >= 1, "should compact at least one archetype")
@@ -224,16 +224,16 @@ describe(
                         for i = 1, 5000 do
                             ids[i] = world:spawn(Tag)
                         end
-                        world:commit()
+                        world:enqueueCommit()
 
                         for i = 11, 5000 do
                             world:despawn(ids[i])
                         end
-                        world:commit()
+                        world:enqueueCommit()
                         world:compact()
 
                         local newId = world:spawn(Tag)
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.is_true(world:isAlive(newId))
                     end
                 )
@@ -254,12 +254,12 @@ describe(
                         for i = 1, 100 do
                             dead[i] = world:spawn(Tag)
                         end
-                        world:commit()
+                        world:enqueueCommit()
 
                         for i = 1, 100 do
                             world:despawn(dead[i])
                         end
-                        world:commit()
+                        world:enqueueCommit()
                         world:compact()
 
                         for i = 1, 100 do
@@ -283,11 +283,10 @@ describe(
                 it(
                     "should error if world has pending mutations inside a defer scope",
                     function()
-                        world:defer()
                         world:spawn()
                         -- Inside defer, the spawn is staged but uncommitted.
                         luassert.has_error(function() world:compact() end, "compact requires a committed world")
-                        world:commit()
+                        world:enqueueCommit()
                     end
                 )
             end

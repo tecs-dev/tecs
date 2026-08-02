@@ -1182,7 +1182,7 @@ describe(
                         local w = tecs.ecs.newWorld()
                         local parent = w:spawn()
                         local child = w:spawn(ParentOf(parent))
-                        w:commit()
+                        w:enqueueCommit()
 
                         -- Sparse: value lives in the per-world store.
                         local stores = (w as {string: any}).relationshipStores as {tecs.ecs.Component: any}

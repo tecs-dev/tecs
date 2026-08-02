@@ -25,6 +25,11 @@ local applyPendingScalars <const> = shared.applyPendingScalars
 local bumpTransactionEpoch <const> = shared.bumpTransactionEpoch
 
 local pairs <const> = pairs
+local table_sort <const> = table.sort
+
+local function descending(a: integer, b: integer): boolean
+    return a > b
+end
 
 function WorldImpl:_truncateArchetype(arch: Archetype)
     local entities = arch.entities as {integer}
@@ -124,6 +129,8 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
     local srcEntities = srcArch.entities as {integer}
     local srcCount = srcEntities[0]
     if srcCount == 0 then
+        srcArch.pendingMoveCount = 0
+        table_clear(srcArch.pendingMoveSlots)
         return
     end
 
@@ -134,6 +141,32 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
     local epoch = self._transactionEpoch
     local archIndex = self.archetypeIndex
     local toRemove = self._swapRemoveQueue
+    local candidates = self._moveCandidateRows
+    local queuedSlots = srcArch.pendingMoveSlots
+    local queuedCount = srcArch.pendingMoveCount
+    srcArch.pendingMoveCount = 0
+
+    -- Sparse structural changes should cost proportional to the changed
+    -- entities, not to every row in their source archetype. Dense changes keep
+    -- the descending linear scan, which beats sorting once the list is large.
+    local candidateCount = 0
+    local useCandidates = queuedCount > 0 and queuedCount * 8 < srcCount
+    if useCandidates then
+        for i = 1, queuedCount do
+            local slot = queuedSlots[i]
+            queuedSlots[i] = nil
+            local es = slots[slot]
+            if es.archetypeId == srcArch.id then
+                candidateCount = candidateCount + 1
+                candidates[candidateCount] = es.row + 1
+            end
+        end
+        table_sort(candidates, descending)
+    else
+        for i = 1, queuedCount do
+            queuedSlots[i] = nil
+        end
+    end
     local srcHasScalarPending = srcArch.hasScalarPending
     local srcPendingScalarTypes = srcArch.pendingScalarTypes
     local srcPendingScalarValues = srcArch.pendingScalarValues
@@ -147,7 +180,29 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
     local dstCols: {Component: {any}} = nil
     local dstArchId = 0
 
-    for r = srcCount, 1, -1 do
+    local scanIndex = 1
+    local denseRow = srcCount
+    while true do
+        local r: integer
+        if useCandidates then
+            r = candidates[scanIndex]
+            if not r then
+                break
+            end
+            scanIndex = scanIndex + 1
+            -- Repeated sets/removes of one entity can queue its source more
+            -- than once. Sorted rows make duplicates adjacent.
+            while candidates[scanIndex] == r do
+                candidates[scanIndex] = nil
+                scanIndex = scanIndex + 1
+            end
+        else
+            if denseRow < 1 then
+                break
+            end
+            r = denseRow
+            denseRow = denseRow - 1
+        end
         local entId = srcEntities[r]
         local entSlot = IdAllocator.slotOf(entId)
         local dstArch: Archetype = nil
@@ -162,7 +217,7 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
 
         if dstArch == srcArch then
             -- Net-zero structural change (e.g. remove-then-set of the same
-            -- component in one scope): the row stays put. Apply staged
+            -- component in one transaction): the row stays put. Apply staged
             -- values in place. Routing this through the move machinery
             -- corrupts the archetype: the full-relocation branch below
             -- truncates rows including a self-moved one, and
@@ -249,6 +304,10 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
             removeCount = removeCount + 1
             toRemove[removeCount] = r
         end
+    end
+
+    if useCandidates then
+        table_clear(candidates)
     end
 
     if removeCount == 0 then
@@ -462,10 +521,6 @@ function WorldImpl:_drain()
         return
     end
 
-    -- Hold `_scopeDepth >= 1` so observer-triggered mutations stage.
-    local outerDepth = self._scopeDepth
-    self._scopeDepth = outerDepth + 1
-
     local dirtyList = self.dirtyArchetypeList
     local processed = 0
     local iterations = 0
@@ -543,13 +598,15 @@ function WorldImpl:_drain()
     end
 
     resetTransaction(self)
-    self._scopeDepth = outerDepth
 end
 
 function WorldImpl:_resetTxn()
     if self.isDirty then
         resetTransaction(self)
     end
+    self._commitRequested = false
+    self._runningSystem = false
+    self._committing = false
 end
 
 return {}

@@ -71,7 +71,7 @@ describe(
                     entities[i] = e
                     expectedValues[e] = {x = x, y = y, z = z}
                 end
-                w:commit()
+                w:enqueueCommit()
 
                 -- Verify initial values
                 for _, e in ipairs(entities) do
@@ -87,7 +87,7 @@ describe(
                 for _, e in ipairs(entities) do
                     w:despawn(e)
                 end
-                w:commit()
+                w:enqueueCommit()
 
                 -- Re-spawn entities with new values
                 local newEntities: {integer} = {}
@@ -100,7 +100,7 @@ describe(
                     newEntities[i] = e
                     newExpectedValues[e] = {x = x, y = y, z = z}
                 end
-                w:commit()
+                w:enqueueCommit()
 
                 -- Reused storage must contain only the new values.
                 for _, e in ipairs(newEntities) do
@@ -133,7 +133,7 @@ describe(
                         entities[i] = e
                         expectedValues[e] = {x = x, y = y, z = z}
                     end
-                    w:commit()
+                    w:enqueueCommit()
 
                     -- Verify values immediately after spawn
                     for _, e in ipairs(entities) do
@@ -149,7 +149,7 @@ describe(
                     for _, e in ipairs(entities) do
                         w:despawn(e)
                     end
-                    w:commit()
+                    w:enqueueCommit()
                 end
             end
         )
@@ -185,7 +185,7 @@ describe(
                     circleExpected[e] = {x = x, y = y, z = z}
                 end
 
-                w:commit()
+                w:enqueueCommit()
 
                 -- Verify text entities have correct values (not circle values!)
                 for _, e in ipairs(textEntities) do
@@ -214,7 +214,7 @@ describe(
                 for _, e in ipairs(circleEntities) do
                     w:despawn(e)
                 end
-                w:commit()
+                w:enqueueCommit()
 
                 -- Respawn with same pattern
                 local newTextEntities: {integer} = {}
@@ -237,7 +237,7 @@ describe(
                     newCircleExpected[e] = {x = x, y = y, z = z}
                 end
 
-                w:commit()
+                w:enqueueCommit()
 
                 -- New text entities must not inherit despawned values.
                 for _, e in ipairs(newTextEntities) do

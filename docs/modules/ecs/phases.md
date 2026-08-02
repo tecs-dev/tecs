@@ -163,6 +163,7 @@ world:runPhase(tecs.ecs.phases.RenderGroup, dt)
 It honors disabled state, including disabled ancestors. Re-enable a phase
 before calling it directly.
 
-Unlike `world:update`, `runPhase` neither unwinds existing deferred scopes nor
-clears dirty bits afterwards. That contract supports custom loops that run
-parts of the phase tree on separate ticks.
+Like `world:update`, `runPhase` publishes pending structural work before
+dispatch and after each phase it runs. It does not clear dirty bits afterwards;
+that contract supports custom loops that run parts of the phase tree on
+separate ticks.

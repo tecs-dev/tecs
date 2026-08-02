@@ -887,7 +887,7 @@ describe("tecs.Future", function()
 
         it("parks a program until the future settles", function()
             local loader = world:spawn(tecs.Transform2D(0, 0))
-            world:commit()
+            world:enqueueCommit()
 
             local future = Future.pending()
             Future.track(world, loader, "level1", future)
@@ -915,7 +915,7 @@ describe("tecs.Future", function()
 
         it("does not wait for a future that already settled", function()
             local loader = world:spawn(tecs.Transform2D(0, 0))
-            world:commit()
+            world:enqueueCommit()
             Future.track(world, loader, "level1", Future.settled("loaded"))
 
             local calls = 0
@@ -937,7 +937,7 @@ describe("tecs.Future", function()
 
         it("does not wait for a key nothing was tracked under", function()
             local loader = world:spawn(tecs.Transform2D(0, 0))
-            world:commit()
+            world:enqueueCommit()
 
             local calls = 0
             sequence.registerAction(world, "spec.future.after", function()
@@ -962,7 +962,7 @@ describe("tecs.Future", function()
             -- key, and a game re-issuing the work re-tracks it under the same
             -- key with no further cooperation.
             local loader = world:spawn(tecs.Transform2D(0, 0))
-            world:commit()
+            world:enqueueCommit()
 
             local first = Future.pending()
             Future.track(world, loader, "level1", first)

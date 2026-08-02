@@ -784,7 +784,7 @@ describe(
                         luassert.equals(3, sequence.activeCount(world))
 
                         world:despawn(owner)
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.equals(0, sequence.activeCount(world))
                         stepWorld(world, 6)
                         luassert.same({}, order)
@@ -1182,7 +1182,7 @@ describe(
                         luassert.is_nil(status.wakeAt)
 
                         world:spawn(Add(1) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
                         stepWorld(world, 1)
                         luassert.equals(1, calls)
                     end
@@ -1260,7 +1260,7 @@ describe(
                         luassert.equals(0, calls)
 
                         world:despawn(spawned[1])
-                        world:commit()
+                        world:enqueueCommit()
                         stepWorld(world, 2)
                         luassert.equals(1, calls)
                     end
@@ -1284,13 +1284,13 @@ describe(
                         luassert.equals(3, #spawned)
 
                         world:despawn(spawned[1])
-                        world:commit()
+                        world:enqueueCommit()
                         stepWorld(world, 2)
                         luassert.equals(0, calls, "one of three is not the wave")
 
                         world:despawn(spawned[2])
                         world:despawn(spawned[3])
-                        world:commit()
+                        world:enqueueCommit()
                         stepWorld(world, 2)
                         luassert.equals(1, calls)
                     end
@@ -1329,7 +1329,7 @@ describe(
 
                         luassert.is_true(sequence.cancel(world, handle))
                         world:spawn(Add(1) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
                         stepWorld(world, 2)
                         luassert.equals(0, calls)
                         luassert.equals(0, sequence.activeCount(world))
@@ -1352,7 +1352,7 @@ describe(
 
                         local saved = world:saveSnapshot().buffer
                         world:spawn(Add(1) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
                         stepWorld(world, 2)
                         luassert.equals(1, calls)
 
@@ -1366,7 +1366,7 @@ describe(
                         luassert.equals("spec.adds", sequence.status(world, handle).waitingQuery)
 
                         world:spawn(Add(1) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
                         stepWorld(world, 1)
                         luassert.equals(1, calls)
                     end
@@ -1397,7 +1397,7 @@ describe(
                         luassert.equals(0, calls)
 
                         world:despawn(victim)
-                        world:commit()
+                        world:enqueueCommit()
                         stepWorld(world, 1)
                         luassert.equals(1, calls)
                     end
@@ -1478,7 +1478,7 @@ describe(
                         local handle = sequence.play(world, prog, {owner = owner})
 
                         world:despawn(owner)
-                        world:commit()
+                        world:enqueueCommit()
                         stepWorld(world, 5)
 
                         luassert.equals(0, calls)
@@ -1500,7 +1500,7 @@ describe(
                 before_each(function()
                     calls = 0
                     actor = world:spawn(Transform2D(0, 0))
-                    world:commit()
+                    world:enqueueCommit()
                     sequence.registerAction(world, "spec.done", function() calls = calls + 1 end)
                     slide = uniqueName()
                     sequence.timeline(
@@ -1593,7 +1593,7 @@ describe(
                         stepWorld(world, 2)
 
                         world:despawn(actor)
-                        world:commit()
+                        world:enqueueCommit()
                         stepWorld(world, 2)
                         luassert.equals(1, calls)
                         luassert.equals("targetLost", sequence.status(world, handle).tweenOutcome)
@@ -1604,7 +1604,7 @@ describe(
                     "does not wait at all when the binding is already gone",
                     function()
                         world:despawn(actor)
-                        world:commit()
+                        world:enqueueCommit()
                         local handle = playAndWait(slide)
 
                         stepWorld(world, 1)
@@ -2591,7 +2591,7 @@ describe(
                     function()
                         local leader <const> = world:spawn(Transform2D(80, 0, 0, 1), tecs.ecs.EntityKey("spec.leader"))
                         local follower <const> = spawn()
-                        world:commit()
+                        world:enqueueCommit()
                         sequence.play(
                             world,
                             sequence.timeline(
@@ -2655,7 +2655,7 @@ describe(
                     "parks until the provider says the work is done",
                     function()
                         local actor <const> = world:spawn(tecs.Transform2D(0, 0))
-                        world:commit()
+                        world:enqueueCommit()
                         pending[actor] = true
 
                         local calls = 0
@@ -2686,7 +2686,7 @@ describe(
                     "does not wait for work that was never started",
                     function()
                         local actor <const> = world:spawn(tecs.Transform2D(0, 0))
-                        world:commit()
+                        world:enqueueCommit()
 
                         local calls = 0
                         sequence.registerAction(world, "spec.after", function() calls = calls + 1 end)
@@ -2711,7 +2711,7 @@ describe(
                     "releases a waiter whose entity died",
                     function()
                         local actor <const> = world:spawn(tecs.Transform2D(0, 0))
-                        world:commit()
+                        world:enqueueCommit()
                         pending[actor] = true
 
                         local calls = 0
@@ -2731,7 +2731,7 @@ describe(
                         stepWorld(world, 2)
                         luassert.equals(0, calls)
                         world:despawn(actor)
-                        world:commit()
+                        world:enqueueCommit()
                         stepWorld(world, 2)
                         luassert.equals(1, calls, "a dead entity must not strand a waiter")
                     end
@@ -2741,7 +2741,7 @@ describe(
                     "carries an await through a snapshot",
                     function()
                         local actor <const> = world:spawn(tecs.Transform2D(0, 0))
-                        world:commit()
+                        world:enqueueCommit()
                         pending[actor] = true
 
                         local calls = 0
@@ -2780,7 +2780,7 @@ describe(
                     "faults on an unregistered provider",
                     function()
                         local actor <const> = world:spawn(tecs.Transform2D(0, 0))
-                        world:commit()
+                        world:enqueueCommit()
                         local handle = sequence.play(
                             world,
                             sequence.define(
@@ -2862,7 +2862,7 @@ describe(
                     function()
                         local Transform2D <const> = tecs.Transform2D
                         local actor <const> = world:spawn(Transform2D(0, 0, 0, 1))
-                        world:commit()
+                        world:enqueueCommit()
 
                         local branchCalls = 0
                         sequence.registerAction(world, "spec.branchTick", function() branchCalls = branchCalls + 1 end)

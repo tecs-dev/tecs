@@ -63,25 +63,24 @@ local record Mode
     run: function(tecs.World, Ops)
 end
 
--- Execution contexts. "instant" applies at depth 0; the others stage
--- through a scope (explicit, query iteration, observer dispatch).
+-- Execution contexts all stage into one transaction. The matrix keeps the
+-- different call sites because observers and iteration exercise distinct
+-- re-entrant paths through the same mutation model.
 local modes: {Mode} = {
     {
-        name = "instant",
-        run = function(w: tecs.World, ops: Ops) ops(w) end,
-    },
-    {
-        name = "defer/commit",
-        run = function(w: tecs.World, ops: Ops) w:defer(); ops(w); w:commit() end,
+        name = "direct transaction",
+        run = function(w: tecs.World, ops: Ops) ops(w); w:enqueueCommit() end,
     },
     {
         name = "query iteration",
         run = function(w: tecs.World, ops: Ops)
             w:spawn(MatMarker)
+            w:enqueueCommit()
             local q = w:newQuery({include = {MatMarker}})
             for _arch, _len in q:iter() do
                 ops(w)
             end
+            w:enqueueCommit()
         end,
     },
     {
@@ -99,6 +98,7 @@ local modes: {Mode} = {
                 end
             )
             w:spawn(MatMarker)
+            w:enqueueCommit()
         end,
     },
 }
@@ -115,6 +115,7 @@ local function forEachMode(
         local mode = modes[i]
         local w = tecs.ecs.newWorld()
         local e = setup(w)
+        w:enqueueCommit()
         mode.run(w, function(world: tecs.World) ops(world, e) end)
         validate(w)
         verify(w, e, mode.name)
@@ -253,8 +254,10 @@ describe(
             function()
                 local w = tecs.ecs.newWorld()
                 local e = w:spawn(MatBatchTag)
+                w:enqueueCommit()
                 local q = w:newQuery({include = {MatBatchTag}})
                 w:batchSet(q, MatArmor(2))
+                w:enqueueCommit()
                 luassert.is_true(w:has(e, MatArmor))
                 luassert.equals(2, w:get(e, MatArmor).ar)
                 luassert.is_true(w:has(e, MatHealth))
@@ -268,6 +271,7 @@ describe(
             function()
                 local w = tecs.ecs.newWorld()
                 local e = w:spawn(MatBatchTag)
+                w:enqueueCommit()
                 local q = w:newQuery({include = {MatBatchTag}})
                 w:batchSet(
                     q,
@@ -279,6 +283,7 @@ describe(
                         end
                     end
                 )
+                w:enqueueCommit()
                 luassert.equals(9, w:get(e, MatArmor).ar)
                 luassert.is_true(w:has(e, MatHealth))
                 luassert.equals(100, w:get(e, MatHealth).hp)
@@ -307,6 +312,7 @@ describe(
                         end
                     end
                 )
+                w:enqueueCommit()
                 luassert.equals(50, w:get(firstId, MatHealth).hp)
                 luassert.equals(50, w:get(firstId + 1, MatHealth).hp)
                 validate(w)
@@ -314,17 +320,17 @@ describe(
         )
 
         it(
-            "bundle values win over required defaults, instant and staged",
+            "bundle values win over required defaults",
             function()
                 local w = tecs.ecs.newWorld()
                 w:newBundle("matrixReqOrder", {required = {MatArmor, MatHealth}})
 
                 local id = w:spawnBundle("matrixReqOrder", MatArmor(5), MatHealth(50))
+                w:enqueueCommit()
                 luassert.equals(50, w:get(id, MatHealth).hp)
 
-                w:defer()
                 local id2 = w:spawnBundle("matrixReqOrder", MatArmor(6), MatHealth(60))
-                w:commit()
+                w:enqueueCommit()
                 luassert.equals(60, w:get(id2, MatHealth).hp)
                 validate(w)
             end
@@ -342,6 +348,7 @@ describe(
                 w:newBundle("matrixKeyed", {required = {tecs.ecs.EntityKey, MatPos}})
 
                 local id = w:spawnBundle("matrixKeyed", tecs.ecs.EntityKey("matrixHero"), MatPos(3))
+                w:enqueueCommit()
                 luassert.equals(id, w:byKey("matrixHero"))
                 luassert.equals(3, w:get(id, MatPos).x)
 
@@ -352,15 +359,17 @@ describe(
 
                 -- Despawn releases the key for reclaiming.
                 w:despawn(id)
+                w:enqueueCommit()
                 luassert.is_nil(w:byKey("matrixHero"))
                 local id2 = w:spawnBundle("matrixKeyed", tecs.ecs.EntityKey("matrixHero"), MatPos(5))
+                w:enqueueCommit()
                 luassert.equals(id2, w:byKey("matrixHero"))
                 validate(w)
             end
         )
 
         it(
-            "emits OnSpawn with staged-entity semantics on the instant path",
+            "emits OnSpawn with staged-entity semantics",
             function()
                 local w = tecs.ecs.newWorld()
                 w:newBundle("matrixPlain", {required = {MatPos}})
@@ -382,7 +391,9 @@ describe(
                 luassert.equals(1, #seen)
                 luassert.equals(id, seen[1])
                 luassert.is_false(aliveDuring, "entity staged while OnSpawn fires")
-                luassert.is_true(w:isAlive(id), "committed after the call returns")
+                luassert.is_false(w:isAlive(id), "not published before the barrier")
+                w:enqueueCommit()
+                luassert.is_true(w:isAlive(id), "published at the barrier")
                 luassert.equals(1, w:get(id, MatPos).x)
                 luassert.equals(7, w:get(id, MatVel).dx, "observer-staged set applied")
                 validate(w)
@@ -390,7 +401,7 @@ describe(
         )
 
         it(
-            "emits OnSpawn at stage time inside a scope",
+            "emits OnSpawn at stage time",
             function()
                 local w = tecs.ecs.newWorld()
                 w:newBundle("matrixPlain2", {required = {MatPos}})
@@ -398,11 +409,10 @@ describe(
                 local seen = 0
                 w:observe(0, tecs.ecs.OnSpawn, function(_ev: tecs.ecs.OnSpawn) seen = seen + 1 end)
 
-                w:defer()
                 local id = w:spawnBundle("matrixPlain2", MatPos(2))
                 luassert.equals(1, seen, "emitted while staged")
                 luassert.is_false(w:isAlive(id), "not alive until commit")
-                w:commit()
+                w:enqueueCommit()
                 luassert.is_true(w:isAlive(id))
                 luassert.equals(2, w:get(id, MatPos).x)
                 validate(w)
@@ -415,21 +425,21 @@ describe(
     "relationship and snapshot path parity",
     function()
         it(
-            "instant set of a dense relationship instance adds the wildcard container",
+            "staged set of a dense relationship instance adds the wildcard container",
             function()
                 local w = tecs.ecs.newWorld()
                 local target = w:spawn(MatPos(1))
                 local e = w:spawn(MatPos(2))
                 w:set(e, MatLink(target))
-                luassert.is_true(w:has(e, MatLink), "container marker present on the instant path")
+                w:enqueueCommit()
+                luassert.is_true(w:has(e, MatLink), "container marker present after publication")
                 luassert.equals(target, w:getFirstRelationship(e, MatLink).target)
 
                 local w2 = tecs.ecs.newWorld()
                 local target2 = w2:spawn(MatPos(1))
                 local e2 = w2:spawn(MatPos(2))
-                w2:defer()
                 w2:set(e2, MatLink(target2))
-                w2:commit()
+                w2:enqueueCommit()
                 luassert.is_true(w2:has(e2, MatLink), "staged path agrees")
                 validate(w)
                 validate(w2)
@@ -437,23 +447,25 @@ describe(
         )
 
         it(
-            "instant despawn of a sparse relationship source cleans the store",
+            "despawn of a sparse relationship source cleans the store",
             function()
                 local w = tecs.ecs.newWorld()
                 local parent = w:spawn(MatPos(1))
                 local child = w:spawn(MatPos(2))
                 w:set(child, tecs.ecs.ChildOf(parent))
+                w:enqueueCommit()
 
-                -- The child is a source, not a target: its despawn takes the
-                -- instant path and must still drop its store entry and
-                -- reverse-index link.
+                -- The child is a source, not a target. Its despawn must still
+                -- drop its store entry and reverse-index link.
                 w:despawn(child)
+                w:enqueueCommit()
                 local sources = 0
                 w:targets(parent, tecs.ecs.ChildOf, function(_id: integer, _ctx: nil) sources = sources + 1 end, nil)
                 luassert.equals(0, sources, "reverse index cleaned")
 
                 -- The recycled slot must not inherit the phantom relationship.
                 local recycled = w:spawn(MatPos(3))
+                w:enqueueCommit()
                 luassert.is_nil(w:getFirstRelationship(recycled, tecs.ecs.ChildOf))
                 validate(w)
             end
@@ -471,9 +483,11 @@ describe(
                 w:set(a, MatVel(1))
                 local b = w:spawn(MatBatchTag)
                 w:set(b, MatLink(target))
+                w:enqueueCommit()
 
                 local q = w:newQuery({include = {MatBatchTag}})
                 w:batchSet(q, MatPos(5))
+                w:enqueueCommit()
 
                 luassert.equals(5, w:get(a, MatPos).x)
                 luassert.equals(5, w:get(b, MatPos).x)
@@ -528,9 +542,11 @@ describe(
                 local target = w:spawn(MatPos(1))
                 local src = w:spawn(MatBatchTag)
                 w:set(src, MatMark(target))
+                w:enqueueCommit()
 
                 local q = w:newQuery({include = {MatBatchTag}})
                 w:batchDespawn(q)
+                w:enqueueCommit()
                 luassert.is_false(w:isAlive(src))
 
                 local sources = 0
@@ -549,6 +565,7 @@ describe(
                 local src = w:spawn(MatPos(3))
                 w:set(src, MatMark(t1))
                 w:set(src, MatMark(t2))
+                w:enqueueCommit()
 
                 local rel = w:getFirstRelationship(src, MatMark)
                 luassert.is_not_nil(rel)

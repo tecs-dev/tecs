@@ -162,6 +162,7 @@ describe("Model3D", function()
         local instance = model:newInstance()
         local world = ecs.newWorld()
         local entity = world:spawn(ecs.Transform3D())
+        world:enqueueCommit()
         instance:bind(world, 1, entity)
         instance:play("Move", { loop = false })
 

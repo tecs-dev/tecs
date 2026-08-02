@@ -185,13 +185,12 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        world:defer()
                         local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
 
                         local rel = world:get(child, ChildOf)
                         luassert.is_nil(rel, "should not read pending sparse value inside defer")
 
-                        world:commit()
+                        world:enqueueCommit()
                         rel = world:get(child, ChildOf)
                         luassert.is_not_nil(rel, "should read sparse value after commit")
                     end
@@ -792,12 +791,11 @@ describe(
                         })
                         local target = world:spawn()
                         local e = world:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
-                        world:defer()
                         world:set(e, Follows(target) as tecs.ecs.Component)
                         world:remove(e, Follows(target) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.is_false(world:has(e, Follows), "the container marker must not survive the remove")
                         luassert.is_nil(
@@ -816,13 +814,12 @@ describe(
                         local t1 = world:spawn()
                         local t2 = world:spawn()
                         local e = world:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
-                        world:defer()
                         world:set(e, Follows(t1) as tecs.ecs.Component)
                         world:set(e, Follows(t2) as tecs.ecs.Component)
                         world:remove(e, Follows(t1) as tecs.ecs.Component)
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.is_true(world:has(e, Follows))
                         luassert.is_nil(
@@ -853,7 +850,7 @@ describe(
                         -- Survivor keeps the archetype off the whole-archetype truncate
                         -- path, so removals notify per row.
                         local e3 = world:spawn(Marker(3))
-                        world:commit()
+                        world:enqueueCommit()
 
                         -- Fires per removal during the despawn drain; the second
                         -- removal runs after e1's slot was freed, so the spawn
@@ -873,11 +870,10 @@ describe(
                             end,
                         })
 
-                        world:defer()
                         world:set(e1, Follows(target) as tecs.ecs.Component)
                         world:despawn(e1)
                         world:despawn(e2)
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.is_not_nil(recycled)
                         luassert.is_true(world:isAlive(recycled))
