@@ -546,14 +546,16 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
                 name = "mesh.skinVertices",
             }
         )
-        self._instanceSkins = Buffer.create(
-            device,
-            {
-                usage = {"storage"},
-                size = self.capacity * 4,
-                name = "mesh.instanceSkins",
-            }
-        )
+        if not self._morphing then
+            self._instanceSkins = Buffer.create(
+                device,
+                {
+                    usage = {"storage"},
+                    size = self.capacity * 4,
+                    name = "mesh.instanceSkins",
+                }
+            )
+        end
         self._jointMatrices = Buffer.create(
             device,
             {
@@ -578,7 +580,9 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
             device,
             {
                 usage = {"storage"},
-                size = self.capacity * meshlayout.MORPH_INSTANCE_BYTES,
+                size = self.capacity * (
+                    self._skinning and meshlayout.DEFORM_INSTANCE_BYTES or meshlayout.MORPH_INSTANCE_BYTES
+                ),
                 name = "mesh.instanceMorphs",
             }
         )
@@ -905,7 +909,7 @@ function MeshBackend:mapSlot(slot: integer): loader.CArray, loader.CArray, loade
     return self.instances:mapSlotAs(slot, "float *", false),
         self._bounds:mapSlotAs(slot, "float *", false),
         self.commands:mapSlotAs(slot, "SDL_GPUIndexedIndirectDrawCommand *", false),
-        self._skinning and self._instanceSkins:mapSlotAs(slot, "float *", false) or nil,
+        self._instanceSkins ~= nil and self._instanceSkins:mapSlotAs(slot, "float *", false) or nil,
         self._morphing and self._instanceMorphs:mapSlotAs(slot, "float *", false) or nil
 end
 
@@ -1161,8 +1165,10 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
         self.instances:markSlotRanges(slot, packet.instanceRanges)
         self._bounds:markSlotRanges(slot, packet.boundsRanges)
         self.commands:markSlotRanges(slot, packet.commandRanges)
-        if self._skinning then
+        if self._instanceSkins ~= nil then
             self._instanceSkins:markSlotRanges(slot, packet.skinRanges)
+        end
+        if self._skinning then
             local ranges <const> = self._jointRanges
             local source <const> = loader.bytePointer(self._jointValues as loader.CValue)
             for entry = 0, ranges.count - 1 do
@@ -1184,8 +1190,10 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
         self.instances:flushSlot(slot, frame.commandBuffer)
         self._bounds:flushSlot(slot, frame.commandBuffer)
         self.commands:flushSlot(slot, frame.commandBuffer)
-        if self._skinning then
+        if self._instanceSkins ~= nil then
             self._instanceSkins:flushSlot(slot, frame.commandBuffer)
+        end
+        if self._skinning then
             self._jointMatrices:flushSlot(slot, frame.commandBuffer)
         end
         if self._morphing then
@@ -1506,8 +1514,12 @@ function MeshBackend:recordShadowMap(context: Deferred.PassContext)
     end
     if self._skinning then
         buffers[bufferSlot] = self._skinVertices.handle
-        buffers[bufferSlot + 1] = self._instanceSkins.handle
-        buffers[bufferSlot + 2] = self._jointMatrices.handle
+        if self._morphing then
+            buffers[bufferSlot + 1] = self._jointMatrices.handle
+        else
+            buffers[bufferSlot + 1] = self._instanceSkins.handle
+            buffers[bufferSlot + 2] = self._jointMatrices.handle
+        end
     end
     context.pass:bindVertexStorageBuffers(0, buffers)
     local fragmentBuffers <const> = self._fragmentBuffers
@@ -1544,8 +1556,12 @@ function MeshBackend:recordGeometry(context: Deferred.PassContext)
     end
     if self._skinning then
         buffers[bufferSlot] = self._skinVertices.handle
-        buffers[bufferSlot + 1] = self._instanceSkins.handle
-        buffers[bufferSlot + 2] = self._jointMatrices.handle
+        if self._morphing then
+            buffers[bufferSlot + 1] = self._jointMatrices.handle
+        else
+            buffers[bufferSlot + 1] = self._instanceSkins.handle
+            buffers[bufferSlot + 2] = self._jointMatrices.handle
+        end
     end
     context.pass:bindVertexStorageBuffers(0, buffers)
     local fragmentBuffers <const> = self._fragmentBuffers
@@ -1589,8 +1605,12 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
     end
     if self._skinning then
         buffers[bufferSlot] = self._skinVertices.handle
-        buffers[bufferSlot + 1] = self._instanceSkins.handle
-        buffers[bufferSlot + 2] = self._jointMatrices.handle
+        if self._morphing then
+            buffers[bufferSlot + 1] = self._jointMatrices.handle
+        else
+            buffers[bufferSlot + 1] = self._instanceSkins.handle
+            buffers[bufferSlot + 2] = self._jointMatrices.handle
+        end
     end
     context.pass:bindVertexStorageBuffers(0, buffers)
     local fragmentBuffers <const> = self._fragmentBuffers
@@ -1724,7 +1744,9 @@ function MeshBackend:destroy()
     self.instances:destroy()
     if self._skinning then
         self._skinVertices:destroy()
-        self._instanceSkins:destroy()
+        if self._instanceSkins ~= nil then
+            self._instanceSkins:destroy()
+        end
         self._jointMatrices:destroy()
     end
     if self._morphing then

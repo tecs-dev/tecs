@@ -172,7 +172,7 @@ local function game(world: tecs.World, app: tecs.Application)
                 primitive.bounds,
                 primitive.material,
                 primitive.morph,
-                Tint(0.16, 0.72, 0.95, 1),
+                Tint(1, 1, 1, 1),
                 Renderable3D()
             )
         end
@@ -181,10 +181,16 @@ local function game(world: tecs.World, app: tecs.Application)
             instance:bind(world, index, entity)
         end
         instance:play("StretchAndTwist", {speed = 0.65})
+        local turn = 0.0
         world:addSystem({
             name = "example.AnimateMorphCompanion",
             phase = tecs.ecs.phases.Update,
-            run = function(dt: number) instance:update(dt) end,
+            run = function(dt: number)
+                turn = (turn + dt * 0.45) % (math.pi * 2)
+                placement.rotationY = math.sin(turn * 0.5)
+                placement.rotationW = math.cos(turn * 0.5)
+                instance:update(dt)
+            end,
         })
         print("animated3d: added the independently placed GPU morph companion")
     end)
@@ -200,7 +206,8 @@ return tecs.newApplication({
         indexCapacity = 4096,
         materialCapacity = 16,
         skinning = {jointCapacity = 64},
-        morphing = {vertexCapacity = 16, weightCapacity = 8},
+        morphing = {vertexCapacity = 64, weightCapacity = 8},
+        vertexColors = true,
         shadows = {
             scale = 1,
             distance = 12,

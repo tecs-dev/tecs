@@ -39,8 +39,7 @@ layout(set = 0, binding = 4 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer MorphW
 #ifdef MESH_SKINNING
 #ifdef MESH_MORPHING
 layout(set = 0, binding = 5 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer SkinVertices { float value[]; } skinVertices;
-layout(set = 0, binding = 6 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer InstanceSkins { float value[]; } instanceSkins;
-layout(set = 0, binding = 7 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer JointMatrices { float value[]; } jointMatrices;
+layout(set = 0, binding = 6 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer JointMatrices { float value[]; } jointMatrices;
 #else
 layout(set = 0, binding = 2 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer SkinVertices { float value[]; } skinVertices;
 layout(set = 0, binding = 3 + MESH_VERTEX_COLOR_BINDINGS) readonly buffer InstanceSkins { float value[]; } instanceSkins;
@@ -117,7 +116,11 @@ mat4 jointMatrix(int joint) {
 }
 
 void applySkin(inout vec3 position, inout vec3 normal, inout vec4 tangent) {
+#ifdef MESH_MORPHING
+    int skin = int(instanceMorphs.value[gl_InstanceIndex * 6 + 5]);
+#else
     int skin = int(instanceSkins.value[gl_InstanceIndex]);
+#endif
     if (skin < 0) {
         return;
     }

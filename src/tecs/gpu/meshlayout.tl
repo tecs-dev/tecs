@@ -17,6 +17,8 @@ local record meshlayout
     MORPH_VERTEX_BYTES: integer
     MORPH_INSTANCE_FLOATS: integer
     MORPH_INSTANCE_BYTES: integer
+    DEFORM_INSTANCE_FLOATS: integer
+    DEFORM_INSTANCE_BYTES: integer
     INSTANCE_FLOATS: integer
     INSTANCE_BYTES: integer
     BOUND_FLOATS: integer
@@ -44,10 +46,15 @@ meshlayout.SKIN_VERTEX_BYTES = meshlayout.SKIN_VERTEX_FLOATS * 4
 meshlayout.MORPH_VERTEX_FLOATS = 9
 meshlayout.MORPH_VERTEX_BYTES = meshlayout.MORPH_VERTEX_FLOATS * 4
 
--- first morph vertex, base vertex, vertices per target, first weight, and
+-- First morph vertex, base vertex, vertices per target, first weight, and
 -- target count. A negative first morph vertex disables deformation.
 meshlayout.MORPH_INSTANCE_FLOATS = 5
 meshlayout.MORPH_INSTANCE_BYTES = meshlayout.MORPH_INSTANCE_FLOATS * 4
+
+-- Combined morph and skin domains append the palette offset to the morph
+-- record so both lanes stay within the eight vertex-storage-buffer limit.
+meshlayout.DEFORM_INSTANCE_FLOATS = 6
+meshlayout.DEFORM_INSTANCE_BYTES = meshlayout.DEFORM_INSTANCE_FLOATS * 4
 
 -- position.xyz, rotation.xyzw, scale.xyz, mesh slot, material id and param,
 -- then opaque base color rgb from Tint.

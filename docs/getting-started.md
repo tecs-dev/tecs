@@ -502,9 +502,11 @@ node default weights, and linear, step, or cubic-spline weight animation.
 Morph deltas are immutable GPU residency. A five-float record locates each
 instance's geometry and weights, and complete weight vectors are staged only
 when registered or updated. Morphing runs before skinning when both options are
-enabled. `newMesh` and the glTF decoder conservatively enlarge bounds for
-weights from zero through one; negative or extrapolated weights require a
-larger caller-supplied `Bounds3D`.
+enabled. A domain with both options appends the skin offset to that record,
+allowing vertex colors, morphing, and skinning to coexist within the backend's
+eight vertex-storage-buffer limit. `newMesh` and the glTF decoder
+conservatively enlarge bounds for weights from zero through one; negative or
+extrapolated weights require a larger caller-supplied `Bounds3D`.
 
 Omitting `meshes.morphing` preserves the rigid and skin-only layouts and
 allocates no target, locator, weight, or morph-shader resources. Run
@@ -551,8 +553,8 @@ or clip; its default nil value preserves the authored placement and skips the
 composition. The `Bounds3D` component is still caller-owned and must enclose
 every pose. Run
 `cargo xtask example animated3d` to see a CC0 character cycle skeletal clips
-facing the camera beside an independently placed morph animation under a
-shadowed Cook-Torrance directional light, and run
+facing the camera beside an independently placed, six-color morph animation
+under a shadowed Cook-Torrance directional light, and run
 `cargo xtask bench modelanimation` for CPU sampling cost and heap growth.
 
 ## Game modules

@@ -591,7 +591,9 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self._centerYByAsset = {}
     self._centerZByAsset = {}
     self._radiusByAsset = {}
-    self._packet = MeshFramePacket.create(self.skinning, self.morphing, self.localLights and lightCapacity or nil)
+    self._packet = MeshFramePacket.create(
+        self.skinning and not self.morphing, self.morphing, self.localLights and lightCapacity or nil
+    )
 
     local backend <const> = MeshBackend.create(
         device,

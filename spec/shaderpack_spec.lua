@@ -333,10 +333,12 @@ describe("shaderpack", function()
         local skinned = pack.shaders["mesh.vert|MESH_SKINNING=1"]
         local morphed = pack.shaders["mesh.vert|MESH_MORPHING=1"]
         local combined = pack.shaders["mesh.vert|MESH_MORPHING=1,MESH_SKINNING=1"]
+        local coloredCombined = pack.shaders["mesh.vert|MESH_MORPHING=1,MESH_SKINNING=1,MESH_VERTEX_COLORS=1"]
         assert.are.equal(2, mesh.counts.readOnlyStorageBuffers)
         assert.are.equal(5, skinned.counts.readOnlyStorageBuffers)
         assert.are.equal(5, morphed.counts.readOnlyStorageBuffers)
-        assert.are.equal(8, combined.counts.readOnlyStorageBuffers)
+        assert.are.equal(7, combined.counts.readOnlyStorageBuffers)
+        assert.are.equal(8, coloredCombined.counts.readOnlyStorageBuffers)
     end)
 
     it("rejects a file that is not a pack", function()

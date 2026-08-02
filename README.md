@@ -80,7 +80,11 @@ Mesh morphing is independently optional as well. `meshes.morphing` adds an
 immutable position/normal/tangent delta buffer, a five-float per-instance
 locator, retained weight vectors, and morph shader variants. The rigid and
 skin-only layouts do not change when it is omitted. Morphing runs before
-skinning when both lanes are enabled, matching glTF deformation order.
+skinning when both lanes are enabled, matching glTF deformation order. A
+combined domain appends the skin offset to that locator instead of binding a
+second per-instance buffer, keeping vertex colors plus both deformation lanes
+inside SDL's eight-storage-buffer vertex-stage limit. Morph-only and skin-only
+domains retain their smaller metadata records.
 
 Vertex colors follow the same rule. `meshes.vertexColors = true` adds one
 separate RGBA stream and matching geometry and shadow shader variants; rigid

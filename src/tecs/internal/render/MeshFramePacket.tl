@@ -60,7 +60,7 @@ local record MeshFramePacket
     --- Dirty byte ranges in the indexed-command staging buffer.
     commandRanges: dirtyranges
     --- Dirty byte ranges in optional per-instance skin-palette offsets. Nil
-    --- when the domain did not enable skinning.
+    --- when skin offsets share combined morph metadata or skinning is absent.
     skinRanges: dirtyranges
     --- Dirty byte ranges in optional per-instance morph metadata. Nil when
     --- the domain did not enable morphing.

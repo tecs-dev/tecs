@@ -425,6 +425,45 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    it("combines vertex colors with skin and morph deformation within eight buffers", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 1, 1, 1 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                vertexColors = true,
+                skinning = { jointCapacity = 4 },
+                morphing = { vertexCapacity = 16, weightCapacity = 4 },
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.z = 2
+        local mesh, bounds =
+            renderer.meshes:registerMesh(triangleMesh("spec://colored-skinned-morphed-triangle", true, true, true))
+        local identity = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }
+        local skin = renderer.meshes:registerSkin("spec://combined-joint", identity)
+        local morph = renderer.meshes:registerMorph("spec://combined-target", { 0 })
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.5, y = -0.5 }),
+            mesh,
+            bounds,
+            components.MeshMaterial(),
+            skin,
+            morph,
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        assert.is_true(screen:getPixel(pixels, SIZE / 2 - 6, SIZE / 2 + 6).r > 0)
+        assert.is_nil(renderer.meshes._backend._instanceSkins)
+        assert.is_not_nil(renderer.meshes._backend._instanceMorphs)
+        renderer:destroy()
+    end)
+
     it("culls mesh commands from their world-space bounds on the GPU", function()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {

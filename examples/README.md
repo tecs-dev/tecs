@@ -39,11 +39,12 @@ materials, animation sampling, GPU skinning, and lighting in one scene. An
 instance-level placement turns the hero toward the camera, and the same scene
 places the two-target morph cube beside him with an independent animation.
 
-`morph3d.tl` loads an indexed 3D cube with two glTF morph targets and cycles it
-through tall tapered and low twisted silhouettes. It samples the authored
-weight animation into an instance-owned GPU vector. Geometry and clip data
-remain shared; only the changing weights belong to the instance. A directional
-light and receiving floor make both the changing volume and shadow visible.
+`morph3d.tl` loads an indexed 3D cube with two glTF morph targets and six
+face-local colors, then rotates it while cycling through tall tapered and low
+twisted silhouettes. It samples the authored weight animation into an
+instance-owned GPU vector. Geometry and clip data remain shared; only the
+changing weights belong to the instance. A directional light and receiving
+floor make the colors, changing volume, and shadow visible.
 
 `sponza3d.tl` uses the ignored large-asset cache populated by `cargo xtask
 fetch sponza`. The fetch is pinned to one Khronos glTF Sample Assets revision

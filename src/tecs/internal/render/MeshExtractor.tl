@@ -7,9 +7,10 @@ into mapped staging. The first version rewrites the resident mesh range each
 frame, matching the headless contract benchmark; retained dirty-gated runs can
 replace that policy without changing the packet or backend.
 
-Optional skin and morph columns write separate compact locator records. A
-domain that omits either feature never queries that component and owns no
-corresponding staging array.
+Optional skin and morph columns write compact locator records. A combined
+domain appends the skin offset to each morph locator so its vertex shader stays
+inside the backend's storage-buffer limit. A domain that omits either feature
+never queries that component or owns its dedicated storage.
 ]=]
 
 local ecs <const> = require("tecs.ecs")
@@ -362,8 +363,8 @@ function MeshExtractor:extract(packet: MeshFramePacket)
                     instances[base + 13] = tint.r
                     instances[base + 14] = tint.g
                     instances[base + 15] = tint.b
+                    local skinSlot = -1
                     if self._skinning then
-                        local skinSlot = -1
                         if skins ~= nil then
                             local skin = skins[row]
                             skinSlot = skin.slot as integer
@@ -381,10 +382,14 @@ function MeshExtractor:extract(packet: MeshFramePacket)
                                 skinResolved = true
                             end
                         end
-                        instanceSkins[written] = skinSlot
+                        if not self._morphing then
+                            instanceSkins[written] = skinSlot
+                        end
                     end
                     if self._morphing then
-                        local morphBase <const> = written * meshlayout.MORPH_INSTANCE_FLOATS
+                        local morphBase <const> = written * (
+                            self._skinning and meshlayout.DEFORM_INSTANCE_FLOATS or meshlayout.MORPH_INSTANCE_FLOATS
+                        )
                         local firstWeight = -1
                         local weightCount = 0
                         if morphs ~= nil then
@@ -422,6 +427,9 @@ function MeshExtractor:extract(packet: MeshFramePacket)
                         instanceMorphs[morphBase + 2] = draw.vertexCount
                         instanceMorphs[morphBase + 3] = firstWeight
                         instanceMorphs[morphBase + 4] = firstWeight >= 0 and draw.morphTargetCount or 0
+                        if self._skinning then
+                            instanceMorphs[morphBase + 5] = skinSlot
+                        end
                     end
 
                     local command = commands[written] as loader.CStruct
@@ -468,11 +476,13 @@ function MeshExtractor:extract(packet: MeshFramePacket)
         packet.instanceRanges:mark(0, written * meshlayout.INSTANCE_BYTES)
         packet.boundsRanges:mark(0, written * meshlayout.BOUND_BYTES)
         packet.commandRanges:mark(0, written * meshlayout.COMMAND_BYTES)
-        if self._skinning then
+        if self._skinning and not self._morphing then
             packet.skinRanges:mark(0, written * 4)
         end
         if self._morphing then
-            packet.morphRanges:mark(0, written * meshlayout.MORPH_INSTANCE_BYTES)
+            packet.morphRanges:mark(
+                0, written * (self._skinning and meshlayout.DEFORM_INSTANCE_BYTES or meshlayout.MORPH_INSTANCE_BYTES)
+            )
         end
     end
     packet.count = written

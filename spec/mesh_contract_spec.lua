@@ -13,6 +13,7 @@ local components = require("tecs.components")
 local Camera3D = require("tecs.gfx.Camera3D")
 local MeshExtractor = require("tecs.internal.render.MeshExtractor")
 local MeshFramePacket = require("tecs.internal.render.MeshFramePacket")
+local meshlayout = require("tecs.gpu.meshlayout")
 local frustum = require("tecs.internal.render.frustum")
 local gltf = require("tecs.internal.gltf")
 
@@ -342,7 +343,7 @@ describe("the 3D scene contract", function()
     describe("MeshExtractor", function()
         local function extractorScene(capacity, transparency, skinning, morphing, doubleSided, lightCapacity)
             local world = tecs.ecs.newWorld()
-            local packet = MeshFramePacket.create(skinning, morphing, lightCapacity)
+            local packet = MeshFramePacket.create(skinning and not morphing, morphing, lightCapacity)
             local extractor = MeshExtractor.create({
                 capacity = capacity,
                 transparency = transparency,
@@ -354,8 +355,13 @@ describe("the 3D scene contract", function()
             local instances = loader.newArray("float[?]", capacity * 16)
             local bounds = loader.newArray("float[?]", capacity * 4)
             local commands = loader.newArray("SDL_GPUIndexedIndirectDrawCommand[?]", capacity)
-            local skins = skinning and loader.newArray("float[?]", capacity) or nil
-            local morphs = morphing and loader.newArray("float[?]", capacity * 5) or nil
+            local skins = skinning and not morphing and loader.newArray("float[?]", capacity) or nil
+            local morphs = morphing
+                    and loader.newArray(
+                        "float[?]",
+                        capacity * (skinning and meshlayout.DEFORM_INSTANCE_FLOATS or meshlayout.MORPH_INSTANCE_FLOATS)
+                    )
+                or nil
             extractor:setStaging(0, instances, bounds, commands, skins, morphs)
             extractor:install(world, packet, nil)
             return world, extractor, packet, instances, bounds, commands, skins, morphs
@@ -458,6 +464,36 @@ describe("the 3D scene contract", function()
             assert.are.same({ 20, 7, 3, 12, 2 }, { morphs[0], morphs[1], morphs[2], morphs[3], morphs[4] })
             assert.are.same({ -1, 7, 3, -1, 0 }, { morphs[5], morphs[6], morphs[7], morphs[8], morphs[9] })
             assert.are.equal(40, packet.morphRanges.bytes)
+        end)
+
+        it("packs skin offsets into morph metadata when both lanes are enabled", function()
+            local world, extractor, packet, _, _, _, skins, morphs = extractorScene(1, false, true, true)
+            local meshAsset = components.meshId("procedural://combined")
+            local skinAsset = components.meshSkinId("procedural://combined-skeleton")
+            local morphAsset = components.meshMorphId("procedural://combined-weights")
+            extractor:registerMesh(meshAsset, 0, 7, 0, 3, 20, 3, 2)
+            extractor:registerSkin(skinAsset, 24)
+            extractor:registerMorph(morphAsset, 12, 2)
+            world:spawn(
+                tecs.Transform3D(),
+                components.Mesh(meshAsset, 0),
+                components.Bounds3D(),
+                components.MeshMaterial(),
+                components.MeshSkin(skinAsset),
+                components.MeshMorph(morphAsset),
+                components.Tint(),
+                components.Renderable3D()
+            )
+            world:enqueueCommit()
+
+            extractor:extract(packet)
+            assert.is_nil(skins)
+            assert.are.same(
+                { 20, 7, 3, 12, 2, 24 },
+                { morphs[0], morphs[1], morphs[2], morphs[3], morphs[4], morphs[5] }
+            )
+            assert.is_nil(packet.skinRanges)
+            assert.are.equal(24, packet.morphRanges.bytes)
         end)
 
         it("drops over capacity without leaving the world deferred", function()
