@@ -31,9 +31,7 @@ local function sphere(name: string, slices: integer, stacks: integer): tecs.asse
             local base <const> = #vertices
             vertices[base + 1], vertices[base + 2], vertices[base + 3] = x, y, z
             vertices[base + 4], vertices[base + 5], vertices[base + 6] = x, y, z
-            vertices[base + 7], vertices[base + 8], vertices[base + 9], vertices[base + 10] = -math.sin(
-                longitude
-            ),
+            vertices[base + 7], vertices[base + 8], vertices[base + 9], vertices[base + 10] = -math.sin(longitude),
                 0.0,
                 math.cos(longitude),
                 1.0

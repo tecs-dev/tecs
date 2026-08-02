@@ -16,11 +16,11 @@ sorting buffers, compute pipelines, or forward graphics pipeline.
 A domain created with `doubleSided = true` classifies opaque and masked
 materials into a second compacted command lane and draws it through a cull-none
 pipeline. A domain without that option creates none of those resources.
-A domain created with `shadows` adds one camera-centered directional shadow
-map. Its light-space center snaps to shadow texels so camera translation does
-not slide the sampling grid under stationary geometry. Opaque and masked
-meshes cast; opaque, masked, and blended meshes receive. The map, its pipeline,
-and the lighting shader variant do not exist otherwise.
+A domain created with `shadows` adds three camera-frustum directional shadow
+cascades. Each light-space center snaps to shadow texels so camera translation
+does not slide the sampling grid under stationary geometry. Opaque and masked
+meshes cast; opaque, masked, and blended meshes receive. The maps, pipeline,
+and lighting shader variant do not exist otherwise.
 A domain created with `skinning` adds separate vertex influence,
 per-instance palette-offset, and joint-matrix buffers plus skinned geometry and
 shadow shader variants. A rigid domain retains the original vertex and
@@ -127,15 +127,30 @@ local record MeshMaterialOptions
     occlusionStrength: number
 end
 
---- Controls one directional light and its mesh shadow map at runtime.
+--- Controls one directional light and its three mesh shadow cascades at runtime.
 --- The renderer reads assignments on the next frame. Rendering raises when
---- `distance` is not positive, a light color or `intensity` is negative,
---- `strength` is outside zero through one, `bias` or `softness` is negative,
+--- `distance` does not exceed the camera near plane, a light color or
+--- `intensity` is negative,
+--- `strength` is outside zero through one, `bias`, `softness`, or
+--- `depthPadding` is negative, cascade controls are outside their ranges,
 --- or the three direction fields form a zero vector.
 local interface MeshShadowTuning
-    --- Caller-writable. Sets the half extent of the camera-centered shadow
-    --- volume in world units, must be positive, and defaults to 100.
+    --- Caller-writable. Sets the maximum camera distance covered by directional
+    --- shadows in world units, must exceed the camera near plane, and defaults
+    --- to 100.
     distance: number
+    --- Caller-writable. Blends logarithmic and uniform cascade placement from
+    --- zero through one and defaults to 0.7. Larger values reserve more detail
+    --- near the camera.
+    splitLambda: number
+    --- Caller-writable. Cross-fades each cascade boundary over this fraction
+    --- of the cascade's depth range, ranges from zero through 0.5, and defaults
+    --- to 0.1.
+    splitBlend: number
+    --- Caller-writable. Extends each light-space depth range in world units to
+    --- keep off-frustum casters and receivers, must be non-negative, and
+    --- defaults to 20.
+    depthPadding: number
     --- Caller-writable. Sets the x direction light rays travel and defaults
     --- to negative 0.5.
     directionX: number
@@ -168,9 +183,9 @@ local interface MeshShadowTuning
     softness: number
 end
 
---- Configures one directional light and its mesh shadow resources.
+--- Configures one directional light and its three mesh shadow cascades.
 local record MeshShadowOptions is MeshShadowTuning
-    --- Caller-writable. Sets the shadow-map size relative to the frame and
+    --- Caller-writable. Sets every shadow-map size relative to the frame and
     --- defaults to one. It must be positive and is fixed at renderer creation.
     scale: number
 end
@@ -455,7 +470,7 @@ local interface MeshDomain is DomainStats
     environmentSize: integer
     --- Read-only. Reports whether all six environment faces were uploaded.
     environmentReady: boolean
-    --- Caller-writable. Controls the enabled directional light and shadow map.
+    --- Caller-writable. Controls the enabled directional light and shadow cascades.
     --- Nil while shadows are disabled.
     shadow: MeshShadowTuning
     --- Caller-writable. Controls enabled mesh fog. Nil while fog is disabled.
@@ -542,7 +557,7 @@ local interface MeshDomainInternal is MeshDomain
     _recordGeometry: function(self, context: Deferred.PassContext)
     _recordForward: function(self, context: Deferred.PassContext)
     _castsThisFrame: function(self): boolean
-    _recordShadowMap: function(self, context: Deferred.PassContext)
+    _recordShadowMap: function(self, context: Deferred.PassContext, cascade: integer)
     _rebuildPipelines: function(self, deferred: Deferred)
     _prepare: function(self, frame: Frame, camera?: Camera3D, width?: number, height?: number, upload?: boolean)
     _device: function(self): loader.CPtr
@@ -708,6 +723,9 @@ function MeshDomainModule._create(
         local shadow <const> = options.shadows or {}
         self.shadow = {
             distance = shadow.distance or 100.0,
+            splitLambda = shadow.splitLambda or 0.7,
+            splitBlend = shadow.splitBlend or 0.1,
+            depthPadding = shadow.depthPadding or 20.0,
             directionX = shadow.directionX or -0.5,
             directionY = shadow.directionY or -1.0,
             directionZ = shadow.directionZ or -0.5,
@@ -1015,8 +1033,8 @@ function MeshDomainImpl:_castsThisFrame(): boolean
     return self._backend:castsThisFrame()
 end
 
-function MeshDomainImpl:_recordShadowMap(context: Deferred.PassContext)
-    self._backend:recordShadowMap(context)
+function MeshDomainImpl:_recordShadowMap(context: Deferred.PassContext, cascade: integer)
+    self._backend:recordShadowMap(context, cascade)
 end
 
 function MeshDomainImpl:_rebuildPipelines(deferred: Deferred)

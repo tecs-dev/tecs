@@ -25,12 +25,12 @@ than two flags: a thing that wants to be grounded is exactly the thing that
 must not put a light-blocking silhouette in the mask, because a crowd of
 them merges under the mask's max blend into one flat mat of darkness.
 
-One different pass runs before geometry when the mesh domain enables its
-directional shadow map. Meshes compact against that light volume on the GPU,
-then the pass writes their nearest depth into a single-channel target. Opaque
-and masked geometry samples it while filling the G-buffer; blended geometry
-samples it in forward. A renderer without that option keeps the original
-targets, shader variants, and pass list.
+Three different passes run before geometry when the mesh domain enables its
+directional shadow cascades. Meshes compact against each light volume on the
+GPU, then each pass writes nearest depth into its own single-channel target.
+Opaque and masked geometry sample them while filling the G-buffer; blended
+geometry samples them in forward. A renderer without that option keeps the
+original targets, shader variants, and pass list.
 
 Composite and present are two passes rather than one because a pass writing
 the swapchain is the end of the frame: the swapchain texture belongs to the
@@ -102,6 +102,7 @@ local ComputePipeline <const> = require("tecs.gpu.ComputePipeline")
 local ComputePass <const> = require("tecs.gpu.ComputePass")
 local lightlayout <const> = require("tecs.gpu.lightlayout")
 local meshlightlayout <const> = require("tecs.gpu.meshlightlayout")
+local meshshadowlayout <const> = require("tecs.gpu.meshshadowlayout")
 
 local C <const> = sdl.C
 
@@ -124,6 +125,9 @@ local LIGHT_STRIDE <const> = lightlayout.BYTES
 local TILE_COUNT <const> = lightlayout.TILE_COUNT
 local TILE_SLOTS <const> = lightlayout.TILE_SLOTS
 local MESH_LIGHT_STRIDE <const> = meshlightlayout.BYTES
+local MESH_SHADOW_CASCADES <const> = meshshadowlayout.CASCADES
+local MESH_SHADOW_TARGETS <const>: {string} = {"meshShadowMap", "meshShadowMap1", "meshShadowMap2"}
+local MESH_SHADOW_PASSES <const>: {string} = {"meshShadows", "meshShadows1", "meshShadows2"}
 
 --- Threads per binning workgroup, matching the shader's local size.
 local BIN_GROUP <const> = 64
@@ -314,8 +318,8 @@ local record DeferredOptions
     meshShadowScale: number
     --- Engine-owned. Reports whether opaque mesh casters exist this frame.
     meshShadowActive: function(): boolean
-    --- Engine-owned. Draws mesh depth into the directional shadow map.
-    meshShadowMap: function(context: PassGraph.PassContext)
+    --- Engine-owned. Draws mesh depth into one directional shadow cascade.
+    meshShadowMap: function(context: PassGraph.PassContext, cascade: integer)
     --- Engine-owned. Enables mesh fog decoding in the lighting resolve.
     meshFog: boolean
     --- Engine-owned. Enables depth reconstruction and Cook-Torrance shading
@@ -962,14 +966,16 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     end
 
     if meshShadows then
-        graph:target({
-            -- Compatibility surface: games may add passes around this target
-            -- by name, so the string stays stable if the mesh modules move.
-            name = "meshShadowMap",
-            format = R16,
-            scale = options.meshShadowScale,
-            clear = {r = 1, g = 1, b = 1, a = 1},
-        })
+        for cascade = 1, MESH_SHADOW_CASCADES do
+            graph:target({
+                -- The first name is a compatibility surface. Later cascades
+                -- extend it without renaming the target games already know.
+                name = MESH_SHADOW_TARGETS[cascade],
+                format = R16,
+                scale = options.meshShadowScale,
+                clear = {r = 1, g = 1, b = 1, a = 1},
+            })
+        end
     end
 
     if shadows then
@@ -1059,23 +1065,26 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     end
 
     if meshShadows then
-        graph:pass({
-            -- Compatibility surface: the mesh domain contributes the draw,
-            -- while the frame-wide graph owns the target and ordering.
-            name = "meshShadows",
-            outputs = {"meshShadowMap"},
-            enabled = self._meshShadowActive,
-            execute = function(context: PassGraph.PassContext)
-                if options.meshShadowMap ~= nil then
-                    options.meshShadowMap(context)
-                end
-            end,
-        })
+        for cascade = 1, MESH_SHADOW_CASCADES do
+            local index <const> = cascade
+            graph:pass({
+                -- The first name remains the compatibility surface; every
+                -- pass owns one map so each can clear independently.
+                name = MESH_SHADOW_PASSES[index],
+                outputs = {MESH_SHADOW_TARGETS[index]},
+                enabled = self._meshShadowActive,
+                execute = function(context: PassGraph.PassContext)
+                    if options.meshShadowMap ~= nil then
+                        options.meshShadowMap(context, index)
+                    end
+                end,
+            })
+        end
     end
 
     graph:pass({
         name = "geometry",
-        inputs = meshShadows and {"meshShadowMap"} or nil,
+        inputs = meshShadows and MESH_SHADOW_TARGETS or nil,
         outputs = {"albedo", "normal", "orm", "emission"},
         -- Cleared to the far plane every frame, and less-or-equal rather than
         -- "less" so equal depths still resolve to whatever drew last. Draw
@@ -1267,7 +1276,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         -- the whole of why blended content has to arrive sorted: depth decides
         -- it against the G-buffer and cannot decide it against itself.
         name = "forward",
-        inputs = meshShadows and {"meshShadowMap"} or nil,
+        inputs = meshShadows and MESH_SHADOW_TARGETS or nil,
         outputs = multiCamera and {"forwardView"} or {"scene"},
         depth = {test = true, write = false},
         execute = function(context: PassGraph.PassContext)
@@ -1815,13 +1824,13 @@ function Deferred:castsShadows(): boolean
     return self._shadows
 end
 
---- Reports whether the graph owns the mesh directional-shadow target.
+--- Reports whether the graph owns the mesh directional-shadow targets.
 --- @return Returns true only when renderer creation enabled mesh shadows.
 function Deferred:castsMeshShadows(): boolean
     return self._meshShadows
 end
 
---- Returns the format a mesh shadow-map pipeline must write.
+--- Returns the shared format a mesh shadow-map pipeline must write.
 --- @return Returns the graph-owned single-channel normalized format.
 function Deferred:meshShadowFormat(): integer
     return self.graph:formatOf("meshShadowMap")

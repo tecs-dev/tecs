@@ -63,15 +63,16 @@ existing component value through `set` takes the same immediate path. This
 keeps the common simulation loop cheap without maintaining a second structural
 mutation implementation.
 
-Mesh shadows use one camera-centered directional map, not the 2D occluder-mask
-pipeline. Their mark, scan, compact, map, and shader resources exist only when
-the mesh domain opts in. Shadow culling reuses the ordered GPU compaction
-shape: off-camera casters inside the light volume remain, while instances
-outside that volume submit no geometry to the shadow raster pass. A surviving
-mesh still submits its complete resident index range; this is instance culling,
-not per-triangle culling inside one mesh. The camera center snaps in light
-space to the map's texel grid so movement does not slide stationary shadows
-between samples.
+Mesh shadows use three camera-frustum directional cascades, not the 2D
+occluder-mask pipeline. Their mark, scan, compact, map, and shader resources
+exist only when the mesh domain opts in. Each cascade reuses the ordered GPU
+compaction shape: off-camera casters inside its light volume remain, while
+instances outside it submit no geometry to that shadow raster pass. A
+surviving mesh still submits its complete resident index range; this is
+instance culling, not per-triangle culling inside one mesh. Every light-space
+center snaps to its map's texel grid, and adjacent cascades cross-fade, so
+movement does not slide stationary shadows between samples or expose hard
+split lines.
 
 Mesh skinning follows the same isolation rule. Rigid meshes retain the fixed
 48-byte vertex and 64-byte instance records. `meshes.skinning` adds separate

@@ -460,6 +460,9 @@ return tecs.newApplication({
         shadows = {
             scale = 1,
             distance = 40,
+            splitLambda = 0.7,
+            splitBlend = 0.1,
+            depthPadding = 20,
             directionX = -0.45,
             directionY = -1,
             directionZ = -0.3,
@@ -475,18 +478,21 @@ return tecs.newApplication({
 })
 ```
 
-`scale` fixes the map size and is creation-only. The other fields are copied
-to `app.renderer.meshes.shadow` and may change between frames. `distance` is
-the half extent of a camera-centered light volume; meshes outside it are
-removed by the same ordered GPU mark, scan, and compact shape used for camera
-culling. The light-space center snaps to the map's texel grid, so translating
-the camera does not slide the shadow samples across stationary receivers.
-Culling rejects complete mesh instances; one surviving mesh still draws its
-full resident index range. Opaque and masked materials cast and receive.
-Blended materials receive but do not cast.
+`scale` fixes all three map sizes and is creation-only. The other fields are
+copied to `app.renderer.meshes.shadow` and may change between frames.
+`distance` is the maximum camera depth that receives directional shadows.
+`splitLambda` distributes resolution between near detail and even depth
+coverage, `splitBlend` cross-fades boundaries, and `depthPadding` retains
+casters beyond each receiver slice along the light direction. Meshes outside
+each stabilized cascade volume are removed by the same ordered GPU mark, scan,
+and compact shape used for camera culling. Each light-space center snaps to its
+map's texel grid, so translating the camera does not slide shadow samples
+across stationary receivers. Culling rejects complete mesh instances; one
+surviving mesh still draws its full resident index range. Opaque and masked
+materials cast and receive. Blended materials receive but do not cast.
 
 Omitting `meshes.shadows` preserves the shadow-free mesh shaders and allocates
-no map, shadow command buffer, cull pipeline, or graphics pipeline. The 2D
+no maps, shadow command buffers, cull pipeline, or graphics pipeline. The 2D
 `shadows` application option remains a separate occluder and drop-shadow
 system.
 

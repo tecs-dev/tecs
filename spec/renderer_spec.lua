@@ -319,6 +319,8 @@ describe("ecs.Renderer", function()
         assert.is_nil(renderer.meshes._backend._instanceMorphs)
         assert.is_nil(renderer.meshes._backend._morphWeights)
         assert.is_nil(renderer.deferred.graph._targets.meshShadowMap)
+        assert.is_nil(renderer.deferred.graph._targets.meshShadowMap1)
+        assert.is_nil(renderer.deferred.graph._targets.meshShadowMap2)
 
         local source = triangleMesh("spec://triangle")
         local mesh, bounds = renderer.meshes:registerMesh(source)
@@ -1032,8 +1034,11 @@ describe("ecs.Renderer", function()
         assert.is_true(renderer.meshes.shadows)
         assert.is_not_nil(renderer.meshes._backend.shadowPipeline)
         assert.is_not_nil(renderer.meshes._backend._shadowCommands)
+        assert.are.equal(3, #renderer.meshes._backend._shadowCommands)
         assert.is_nil(renderer.meshes._backend._shadowMarkPipeline, "opaque shadows reuse the camera mark pipeline")
         assert.is_not_nil(renderer.deferred.graph._targets.meshShadowMap)
+        assert.is_not_nil(renderer.deferred.graph._targets.meshShadowMap1)
+        assert.is_not_nil(renderer.deferred.graph._targets.meshShadowMap2)
         assert.is_true(shadow.r < 80, ("the caster should block the directional light, got %d"):format(shadow.r))
         assert.is_true(lit.r > 110, ("the same receiver should remain lit outside the shadow, got %d"):format(lit.r))
         assert.is_true(lit.r - shadow.r > 40, "the Cook-Torrance light must retain visible shadow contrast")
@@ -1066,7 +1071,7 @@ describe("ecs.Renderer", function()
         end, "tecs: mesh shadow scale must be greater than 0")
     end)
 
-    it("keeps a camera-centered mesh shadow projection on its texel grid", function()
+    it("keeps cascaded mesh shadow projections on their texel grids", function()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {
             sprites = false,
@@ -1087,15 +1092,42 @@ describe("ecs.Renderer", function()
 
         frameOnce(world, renderer)
         local first = renderer.meshes._backend._shadowUniform[13]
-        renderer.meshes.camera.x = 0.1
+        renderer.meshes.camera.x = 0.001
         frameOnce(world, renderer)
         local withinTexel = renderer.meshes._backend._shadowUniform[13]
-        renderer.meshes.camera.x = 0.2
+        renderer.meshes.camera.x = 0.5
         frameOnce(world, renderer)
         local nextTexel = renderer.meshes._backend._shadowUniform[13]
 
         assert.are.equal(first, withinTexel)
         assert.are_not.equal(first, nextTexel)
+        renderer:destroy()
+    end)
+
+    it("places three practical mesh shadow splits through the covered depth", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            sprites = false,
+            meshes = {
+                shadows = {
+                    distance = 60,
+                    splitLambda = 0,
+                    splitBlend = 0.2,
+                },
+            },
+        })
+        renderer:install(world)
+        renderer.meshes.camera.near = 0.1
+        renderer.meshes.camera.far = 100
+
+        frameOnce(world, renderer)
+        local uniform = renderer.meshes._backend._shadowUniform
+        assert.is_true(math.abs(uniform[48] - 20.0666667) < 0.0001)
+        assert.is_true(math.abs(uniform[49] - 40.0333333) < 0.0001)
+        assert.is_true(math.abs(uniform[50] - 60) < 0.0001)
+        assert.is_true(math.abs(uniform[51] - 0.2) < 0.0001)
+        assert.are_not.equal(uniform[0], uniform[16])
+        assert.are_not.equal(uniform[16], uniform[32])
         renderer:destroy()
     end)
 

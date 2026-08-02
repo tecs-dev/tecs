@@ -23,8 +23,8 @@ layout(location = 2) out vec4 orm;
 layout(location = 3) out vec4 emission;
 
 #ifdef MESH_SHADOWS
-#define MESH_IMAGE_BINDING 1
-#define MESH_MATERIAL_BINDING 2
+#define MESH_IMAGE_BINDING 3
+#define MESH_MATERIAL_BINDING 4
 #include "meshshadow.glsl"
 #endif
 #include "meshmaterial.glsl"

@@ -112,7 +112,7 @@ end
 
 local RendererMT <const>: metatable<Renderer> = {__index = Renderer}
 
-local function noContribution(_context: Deferred.PassContext)
+local function noContribution(_context: Deferred.PassContext, _cascade?: integer)
 end
 
 --- Joins two already-specialized pass bodies without retaining a domain list.
@@ -211,7 +211,9 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
         contributions.dropShadows = function(context: Deferred.PassContext) sprites:_recordDropShadows(context) end
     end
     if meshes ~= nil and meshes.shadows then
-        contributions.meshShadowMap = function(context: Deferred.PassContext) meshes:_recordShadowMap(context) end
+        contributions.meshShadowMap = function(context: Deferred.PassContext, cascade: integer)
+            meshes:_recordShadowMap(context, cascade)
+        end
     end
     local spriteGeometry: PassContribution
     local spriteForward: PassContribution

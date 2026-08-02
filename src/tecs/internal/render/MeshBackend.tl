@@ -39,6 +39,7 @@ local RenderPass <const> = require("tecs.gpu.RenderPass")
 local Deferred <const> = require("tecs.gpu.Deferred")
 local MeshFramePacket <const> = require("tecs.internal.render.MeshFramePacket")
 local meshlayout <const> = require("tecs.gpu.meshlayout")
+local meshshadowlayout <const> = require("tecs.gpu.meshshadowlayout")
 local dirtyranges <const> = require("tecs.gpu.dirtyranges")
 local frustum <const> = require("tecs.internal.render.frustum")
 
@@ -48,8 +49,10 @@ local SORT_BUCKETS <const> = 256
 local MATERIAL_FLOATS <const> = 40
 local CULL_FLOATS <const> = 44
 local CULL_BYTES <const> = CULL_FLOATS * 4
-local SHADOW_FLOATS <const> = 28
-local SHADOW_BYTES <const> = SHADOW_FLOATS * 4
+local SHADOW_CASCADES <const> = meshshadowlayout.CASCADES
+local SHADOW_MATRIX_FLOATS <const> = meshshadowlayout.MATRIX_FLOATS
+local SHADOW_FLOATS <const> = meshshadowlayout.UNIFORM_FLOATS
+local SHADOW_BYTES <const> = meshshadowlayout.UNIFORM_BYTES
 local JOINT_FLOATS <const> = 16
 local JOINT_BYTES <const> = JOINT_FLOATS * 4
 
@@ -65,6 +68,9 @@ local interface MeshShadowOptions
     strength: number
     bias: number
     softness: number
+    splitLambda: number
+    splitBlend: number
+    depthPadding: number
 end
 
 local interface MeshFogOptions
@@ -231,7 +237,8 @@ local record MeshBackend
     _doubleSlots: Buffer
     _doubleBlocks: Buffer
     _doubleCommands: Buffer
-    _shadowCommands: Buffer
+    _shadowCommands: {Buffer}
+    _shadowMatrices: {loader.CArray}
     _markPipeline: ComputePipeline
     _scanPipeline: ComputePipeline
     _compactPipeline: ComputePipeline
@@ -329,6 +336,8 @@ local record MeshBackend
     _shadow: MeshShadowOptions
     _shadowScale: number
     _shadowUniform: loader.CArray
+    _shadowFrustum: loader.CArray
+    _shadowCorners: loader.CArray
 end
 
 local MeshBackendMT <const>: metatable<MeshBackend> = {__index = MeshBackend}
@@ -563,6 +572,13 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
     self._shadowScale = options.shadowScale or 1.0
     if self._shadows then
         self._shadowUniform = loader.newArray("float[?]", SHADOW_FLOATS)
+        self._shadowFrustum = loader.newArray("float[24]")
+        self._shadowCorners = loader.newArray("float[24]")
+        self._shadowMatrices = {}
+        self._shadowCommands = {}
+        for cascade = 1, SHADOW_CASCADES do
+            self._shadowMatrices[cascade] = loader.newArray("float[?]", SHADOW_MATRIX_FLOATS)
+        end
     end
     self._geometryBuffers = {}
     self._fragmentBuffers = {}
@@ -831,14 +847,16 @@ function MeshBackend.create(device: loader.CPtr, deferred: Deferred, options: Me
         )
     end
     if self._shadows then
-        self._shadowCommands = Buffer.create(
-            device,
-            {
-                usage = {"indirect", "computeWrite"},
-                size = self.capacity * meshlayout.COMMAND_BYTES,
-                name = "mesh.shadow.commands",
-            }
-        )
+        for cascade = 1, SHADOW_CASCADES do
+            self._shadowCommands[cascade] = Buffer.create(
+                device,
+                {
+                    usage = {"indirect", "computeWrite"},
+                    size = self.capacity * meshlayout.COMMAND_BYTES,
+                    name = ("mesh.shadow%d.commands"):format(cascade),
+                }
+            )
+        end
         if self._transparent or self._doubleSided then
             self._shadowMarkPipeline = ComputePipeline.load(
                 device, "mesh.mark.comp", {defines = self._transparent and {MESH_ALPHA = "1"} or nil}
@@ -1251,11 +1269,123 @@ function MeshBackend:regionOf(asset: integer): MeshRegion
     return self._regionByAsset[asset]
 end
 
+local FRUSTUM_X <const>: {number} = {-1.0, 1.0, 1.0, -1.0}
+local FRUSTUM_Y <const>: {number} = {-1.0, -1.0, 1.0, 1.0}
+
+local function unproject(matrix: loader.CArray, x: number, y: number, z: number): number, number, number
+    local wx <const> = (matrix[0] as number) * x + (matrix[4] as number) * y + (matrix[8] as number) * z + (
+        matrix[12] as number
+    )
+    local wy <const> = (matrix[1] as number) * x + (matrix[5] as number) * y + (matrix[9] as number) * z + (
+        matrix[13] as number
+    )
+    local wz <const> = (matrix[2] as number) * x + (matrix[6] as number) * y + (matrix[10] as number) * z + (
+        matrix[14] as number
+    )
+    local w <const> = (matrix[3] as number) * x + (matrix[7] as number) * y + (matrix[11] as number) * z + (
+        matrix[15] as number
+    )
+    local inverseW <const> = 1.0 / w
+    return wx * inverseW, wy * inverseW, wz * inverseW
+end
+
+local function writeCascade(
+    self: MeshBackend,
+    cascade: integer,
+    nearRatio: number,
+    farRatio: number,
+    rx: number,
+    ry: number,
+    rz: number,
+    vx: number,
+    vy: number,
+    vz: number,
+    dx: number,
+    dy: number,
+    dz: number,
+    depthPadding: number,
+    shadowWidth: integer,
+    shadowHeight: integer
+)
+    local shadowFrustum <const> = self._shadowFrustum
+    local corners <const> = self._shadowCorners
+    local cx, cy, cz = 0.0, 0.0, 0.0
+    for corner = 0, 3 do
+        local source <const> = corner * 3
+        local farSource <const> = 12 + source
+        local nearX <const>, nearY <const>, nearZ <const> = shadowFrustum[source] as number,
+            shadowFrustum[source + 1] as number,
+            shadowFrustum[source + 2] as number
+        local spanX <const> = (shadowFrustum[farSource] as number) - nearX
+        local spanY <const> = (shadowFrustum[farSource + 1] as number) - nearY
+        local spanZ <const> = (shadowFrustum[farSource + 2] as number) - nearZ
+        local at <const> = corner * 3
+        corners[at], corners[at + 1], corners[at + 2] = nearX + spanX * nearRatio,
+            nearY + spanY * nearRatio,
+            nearZ + spanZ * nearRatio
+        local farAt <const> = 12 + at
+        corners[farAt], corners[farAt + 1], corners[farAt + 2] = nearX + spanX * farRatio,
+            nearY + spanY * farRatio,
+            nearZ + spanZ * farRatio
+    end
+    for corner = 0, 7 do
+        local at <const> = corner * 3
+        cx, cy, cz = cx + (corners[at] as number), cy + (corners[at + 1] as number), cz + (corners[at + 2] as number)
+    end
+    cx, cy, cz = cx * 0.125, cy * 0.125, cz * 0.125
+
+    local radius = 0.0
+    local minDepth, maxDepth = math.huge, -math.huge
+    for corner = 0, 7 do
+        local at <const> = corner * 3
+        local x <const>, y <const>, z <const> = corners[at] as number,
+            corners[at + 1] as number,
+            corners[at + 2] as number
+        local ox <const>, oy <const>, oz <const> = x - cx, y - cy, z - cz
+        radius = math.max(radius, math.sqrt(ox * ox + oy * oy + oz * oz))
+        local depth <const> = dx * x + dy * y + dz * z
+        minDepth, maxDepth = math.min(minDepth, depth), math.max(maxDepth, depth)
+    end
+    -- A fixed quantization prevents tiny camera turns from continuously
+    -- changing the orthographic scale even after its center is texel-snapped.
+    radius = math.max(1.0 / 16.0, math.ceil(radius * 16.0) / 16.0)
+    local centerRight = rx * cx + ry * cy + rz * cz
+    local centerUp = vx * cx + vy * cy + vz * cz
+    local texelRight <const> = radius * 2.0 / shadowWidth
+    local texelUp <const> = radius * 2.0 / shadowHeight
+    centerRight = math.floor(centerRight / texelRight + 0.5) * texelRight
+    centerUp = math.floor(centerUp / texelUp + 0.5) * texelUp
+
+    local depthSpan <const> = math.max(maxDepth - minDepth + depthPadding * 2.0, 1.0 / 65535.0)
+    local centerDepth = (minDepth + maxDepth) * 0.5
+    local depthStep <const> = depthSpan / 65535.0
+    centerDepth = math.floor(centerDepth / depthStep + 0.5) * depthStep
+    minDepth = centerDepth - depthSpan * 0.5
+
+    local inverseRadius <const> = 1.0 / radius
+    local inverseDepth <const> = 1.0 / depthSpan
+    local matrix <const> = self._shadowMatrices[cascade]
+    matrix[0], matrix[4], matrix[8] = rx * inverseRadius, ry * inverseRadius, rz * inverseRadius
+    matrix[1], matrix[5], matrix[9] = vx * inverseRadius, vy * inverseRadius, vz * inverseRadius
+    matrix[2], matrix[6], matrix[10] = dx * inverseDepth, dy * inverseDepth, dz * inverseDepth
+    matrix[3], matrix[7], matrix[11] = 0.0, 0.0, 0.0
+    matrix[12], matrix[13], matrix[14], matrix[15] = -centerRight * inverseRadius,
+        -centerUp * inverseRadius,
+        -minDepth * inverseDepth,
+        1.0
+
+    local destination <const> = self._shadowUniform
+    local base <const> = (cascade - 1) * SHADOW_MATRIX_FLOATS
+    for lane = 0, SHADOW_MATRIX_FLOATS - 1 do
+        destination[base + lane] = matrix[lane]
+    end
+end
+
 local function writeShadowUniform(self: MeshBackend, packet: MeshFramePacket, frame: Frame)
     local shadow <const> = self._shadow
     local distance <const> = shadow.distance
-    if distance <= 0.0 then
-        error("tecs: mesh shadow distance must be greater than 0", 3)
+    if distance <= packet.near then
+        error("tecs: mesh shadow distance must be greater than the camera near plane", 3)
     end
     if shadow.intensity < 0.0 then
         error("tecs: mesh shadow intensity must be greater than or equal to 0", 3)
@@ -1265,6 +1395,15 @@ local function writeShadowUniform(self: MeshBackend, packet: MeshFramePacket, fr
     end
     if shadow.bias < 0.0 or shadow.softness < 0.0 then
         error("tecs: mesh shadow bias and softness must be greater than or equal to 0", 3)
+    end
+    if shadow.splitLambda < 0.0 or shadow.splitLambda > 1.0 then
+        error("tecs: mesh shadow splitLambda must be between 0 and 1", 3)
+    end
+    if shadow.splitBlend < 0.0 or shadow.splitBlend > 0.5 then
+        error("tecs: mesh shadow splitBlend must be between 0 and 0.5", 3)
+    end
+    if shadow.depthPadding < 0.0 then
+        error("tecs: mesh shadow depthPadding must be greater than or equal to 0", 3)
     end
     if shadow.r < 0.0 or shadow.g < 0.0 or shadow.b < 0.0 then
         error("tecs: mesh shadow light color must be greater than or equal to 0", 3)
@@ -1286,33 +1425,60 @@ local function writeShadowUniform(self: MeshBackend, packet: MeshFramePacket, fr
     rx, ry, rz = rx / rightLength, ry / rightLength, rz / rightLength
     local vx, vy, vz = dy * rz - dz * ry, dz * rx - dx * rz, dx * ry - dy * rx
 
-    local cx, cy, cz <const> = packet.cameraX, packet.cameraY, packet.cameraZ
-    local centerRight = rx * cx + ry * cy + rz * cz
-    local centerUp = vx * cx + vy * cy + vz * cz
-    local centerDepth = dx * cx + dy * cy + dz * cz
+    local source <const> = packet.inverseViewProjection
+    local shadowFrustum <const> = self._shadowFrustum
+    for corner = 1, 4 do
+        local at <const> = (corner - 1) * 3
+        shadowFrustum[at], shadowFrustum[at + 1], shadowFrustum[at + 2] = unproject(
+            source, FRUSTUM_X[corner], FRUSTUM_Y[corner], 0.0
+        )
+        local farAt <const> = 12 + at
+        shadowFrustum[farAt], shadowFrustum[farAt + 1], shadowFrustum[farAt + 2] = unproject(
+            source, FRUSTUM_X[corner], FRUSTUM_Y[corner], 1.0
+        )
+    end
+
     local shadowWidth <const> = math.max(1, math.floor(frame.width * self._shadowScale))
     local shadowHeight <const> = math.max(1, math.floor(frame.height * self._shadowScale))
-    local texelRight <const> = distance * 2.0 / shadowWidth
-    local texelUp <const> = distance * 2.0 / shadowHeight
-    local texelDepth <const> = distance * 2.0 / 65535.0
-    centerRight = math.floor(centerRight / texelRight + 0.5) * texelRight
-    centerUp = math.floor(centerUp / texelUp + 0.5) * texelUp
-    centerDepth = math.floor(centerDepth / texelDepth + 0.5) * texelDepth
-    local inverse <const> = 1.0 / distance
-    local depthInverse <const> = 0.5 * inverse
+    local coveredFar <const> = math.min(distance, packet.far)
+    local cameraSpan <const> = packet.far - packet.near
+    local splitNear = packet.near
     local uniform <const> = self._shadowUniform
-    uniform[0], uniform[4], uniform[8] = rx * inverse, ry * inverse, rz * inverse
-    uniform[1], uniform[5], uniform[9] = vx * inverse, vy * inverse, vz * inverse
-    uniform[2], uniform[6], uniform[10] = dx * depthInverse, dy * depthInverse, dz * depthInverse
-    uniform[3], uniform[7], uniform[11] = 0.0, 0.0, 0.0
-    uniform[12] = -centerRight * inverse
-    uniform[13] = -centerUp * inverse
-    uniform[14] = 0.5 - centerDepth * depthInverse
-    uniform[15] = 1.0
-    uniform[16], uniform[17], uniform[18], uniform[19] = dx, dy, dz, shadow.intensity
-    uniform[20], uniform[21], uniform[22], uniform[23] = shadow.r, shadow.g, shadow.b, shadow.strength
-    uniform[24], uniform[25] = shadow.bias, shadow.softness
-    uniform[26], uniform[27] = self._shadowActive and 1.0 or 0.0, 0.0
+    for cascade = 1, SHADOW_CASCADES do
+        local fraction <const> = cascade / SHADOW_CASCADES
+        local logarithmic <const> = packet.near * (coveredFar / packet.near) ^ fraction
+        local linear <const> = packet.near + (coveredFar - packet.near) * fraction
+        local splitFar <const> = linear + (logarithmic - linear) * shadow.splitLambda
+        writeCascade(
+            self,
+            cascade,
+            (splitNear - packet.near) / cameraSpan,
+            (splitFar - packet.near) / cameraSpan,
+            rx,
+            ry,
+            rz,
+            vx,
+            vy,
+            vz,
+            dx,
+            dy,
+            dz,
+            shadow.depthPadding,
+            shadowWidth,
+            shadowHeight
+        )
+        uniform[47 + cascade] = splitFar
+        splitNear = splitFar
+    end
+    uniform[51] = shadow.splitBlend
+    uniform[52], uniform[53], uniform[54], uniform[55] = packet.viewProjection[3],
+        packet.viewProjection[7],
+        packet.viewProjection[11],
+        packet.viewProjection[15]
+    uniform[56], uniform[57], uniform[58], uniform[59] = dx, dy, dz, shadow.intensity
+    uniform[60], uniform[61], uniform[62], uniform[63] = shadow.r, shadow.g, shadow.b, shadow.strength
+    uniform[64], uniform[65] = shadow.bias, shadow.softness
+    uniform[66], uniform[67] = self._shadowActive and 1.0 or 0.0, shadow.depthPadding
     self._deferred:setMeshLight(-dx, -dy, -dz, shadow.intensity, shadow.r, shadow.g, shadow.b)
 end
 
@@ -1457,51 +1623,54 @@ function MeshBackend:prepare(packet: MeshFramePacket, frame: Frame, upload?: boo
     local groups <const> = math.ceil(self._count / CULL_GROUP)
     local uniform <const> = self._cullUniform
     if self._shadowActive then
-        frustum.write(self._shadowUniform, uniform)
-        uniform[24] = self._count
-        uniform[25] = groups
-        uniform[26] = self.capacity
-        uniform[27] = 0.0
+        for cascade = 1, SHADOW_CASCADES do
+            local commands <const> = self._shadowCommands[cascade]
+            frustum.write(self._shadowMatrices[cascade], uniform)
+            uniform[24] = self._count
+            uniform[25] = groups
+            uniform[26] = self.capacity
+            uniform[27] = 0.0
 
-        local markWrites <const> = self._shadowMarkWrites
-        markWrites[1] = self._slots.handle
-        markWrites[2] = self._blocks.handle
-        markWrites[3] = self._shadowCommands.handle
-        local markReads <const> = self._shadowMarkReads
-        markReads[1] = self._bounds.handle
-        if self._transparent then
-            markReads[2] = self.instances.handle
+            local markWrites <const> = self._shadowMarkWrites
+            markWrites[1] = self._slots.handle
+            markWrites[2] = self._blocks.handle
+            markWrites[3] = commands.handle
+            local markReads <const> = self._shadowMarkReads
+            markReads[1] = self._bounds.handle
+            if self._transparent then
+                markReads[2] = self.instances.handle
+            end
+            local mark <const> = ComputePass.begin(frame.commandBuffer, markWrites, self._markPass)
+            self._markPass = mark
+            mark:bindPipeline((self._shadowMarkPipeline or self._markPipeline).handle)
+            mark:bindStorageBuffers(0, markReads)
+            C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+            mark:dispatch(groups)
+            mark:finish()
+
+            local scanWrites <const> = self._scanWrites
+            scanWrites[1] = self._blocks.handle
+            local scan <const> = ComputePass.begin(frame.commandBuffer, scanWrites, self._scanPass)
+            self._scanPass = scan
+            scan:bindPipeline(self._scanPipeline.handle)
+            C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+            scan:dispatch(1)
+            scan:finish()
+
+            local compactWrites <const> = self._shadowCompactWrites
+            compactWrites[1] = commands.handle
+            local compactReads <const> = self._shadowCompactReads
+            compactReads[1] = self._slots.handle
+            compactReads[2] = self._blocks.handle
+            compactReads[3] = self.commands.handle
+            local compact <const> = ComputePass.begin(frame.commandBuffer, compactWrites, self._compactPass)
+            self._compactPass = compact
+            compact:bindPipeline(self._compactPipeline.handle)
+            compact:bindStorageBuffers(0, compactReads)
+            C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
+            compact:dispatch(groups)
+            compact:finish()
         end
-        local mark <const> = ComputePass.begin(frame.commandBuffer, markWrites, self._markPass)
-        self._markPass = mark
-        mark:bindPipeline((self._shadowMarkPipeline or self._markPipeline).handle)
-        mark:bindStorageBuffers(0, markReads)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
-        mark:dispatch(groups)
-        mark:finish()
-
-        local scanWrites <const> = self._scanWrites
-        scanWrites[1] = self._blocks.handle
-        local scan <const> = ComputePass.begin(frame.commandBuffer, scanWrites, self._scanPass)
-        self._scanPass = scan
-        scan:bindPipeline(self._scanPipeline.handle)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
-        scan:dispatch(1)
-        scan:finish()
-
-        local compactWrites <const> = self._shadowCompactWrites
-        compactWrites[1] = self._shadowCommands.handle
-        local compactReads <const> = self._shadowCompactReads
-        compactReads[1] = self._slots.handle
-        compactReads[2] = self._blocks.handle
-        compactReads[3] = self.commands.handle
-        local compact <const> = ComputePass.begin(frame.commandBuffer, compactWrites, self._compactPass)
-        self._compactPass = compact
-        compact:bindPipeline(self._compactPipeline.handle)
-        compact:bindStorageBuffers(0, compactReads)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, uniform, 112)
-        compact:dispatch(groups)
-        compact:finish()
     end
 
     frustum.write(packet.viewProjection, uniform)
@@ -1674,17 +1843,17 @@ function MeshBackend:castsThisFrame(): boolean
     return self._shadowActive
 end
 
-function MeshBackend:recordShadowMap(context: Deferred.PassContext)
+function MeshBackend:recordShadowMap(context: Deferred.PassContext, cascade: integer)
     if not self._shadowActive then
         return
     end
     context.pass:bindPipeline(self.shadowPipeline.handle)
-    context.pass:pushVertexUniform(0, self._shadowUniform, 64)
+    context.pass:pushVertexUniform(0, self._shadowMatrices[cascade], SHADOW_MATRIX_FLOATS * 4)
     context.pass:bindVertexStorageBuffers(0, self._geometryBuffers)
     context.pass:bindFragmentStorageBuffers(0, self._fragmentBuffers)
     context.pass:bindTextures(0, self._fragmentTextures, self.sampler.handle)
     context.pass:bindIndexBuffer(self.indices.handle, RenderPass.INDEX_UINT32)
-    context.pass:drawIndexedIndirect(self._shadowCommands.handle, 0, self._count)
+    context.pass:drawIndexedIndirect(self._shadowCommands[cascade].handle, 0, self._count)
 end
 
 function MeshBackend:recordGeometry(context: Deferred.PassContext)
@@ -1697,7 +1866,7 @@ function MeshBackend:recordGeometry(context: Deferred.PassContext)
     )
     context.pass:bindVertexStorageBuffers(0, self._geometryBuffers)
     context.pass:bindFragmentStorageBuffers(0, self._fragmentBuffers)
-    context.pass:bindTextures(self._shadows and 1 or 0, self._fragmentTextures, self.sampler.handle)
+    context.pass:bindTextures(self._shadows and SHADOW_CASCADES or 0, self._fragmentTextures, self.sampler.handle)
     if self._shadows then
         C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, self._shadowUniform, SHADOW_BYTES)
     end
@@ -1720,9 +1889,11 @@ function MeshBackend:recordForward(context: Deferred.PassContext)
     context.pass:bindVertexStorageBuffers(0, self._forwardBuffers)
     context.pass:bindFragmentStorageBuffers(0, self._fragmentBuffers)
     self._deferred:bindLighting(context, 1)
-    context.pass:bindTextures(self._shadows and 1 or 0, self._forwardTextures, self.sampler.handle)
+    context.pass:bindTextures(self._shadows and SHADOW_CASCADES or 0, self._forwardTextures, self.sampler.handle)
     if self._probing then
-        context.pass:bindTextures(self._shadows and 2 or 1, self._environmentTextures, self._probeSampler)
+        context.pass:bindTextures(
+            self._shadows and SHADOW_CASCADES + 1 or 1, self._environmentTextures, self._probeSampler
+        )
     end
     if self._shadows then
         C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, self._shadowUniform, SHADOW_BYTES)
@@ -1882,7 +2053,9 @@ function MeshBackend:destroy()
         self.doubleSidedPipeline:destroy()
     end
     if self._shadows then
-        self._shadowCommands:destroy()
+        for cascade = 1, SHADOW_CASCADES do
+            self._shadowCommands[cascade]:destroy()
+        end
         if self._shadowMarkPipeline ~= nil then
             self._shadowMarkPipeline:destroy()
         end

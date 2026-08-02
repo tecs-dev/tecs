@@ -4,7 +4,7 @@
 --- of instances. Camera and light-volume culling run every frame while the
 --- extraction upload settles after warmup. Run the same scene with
 --- `BENCH_MESH_SHADOWS=0` and `BENCH_MESH_SHADOWS=1` to isolate the optional
---- shadow map, light-volume compaction, and shadow raster pass.
+--- shadow cascades, light-volume compaction, and shadow raster passes.
 
 local getenv <const> = os.getenv
 local floor <const> = math.floor
