@@ -90,6 +90,10 @@ local function game(world: tecs.World, app: tecs.Application)
         end
         local model <const> = meshes:registerModel(loaded.value)
         local instance <const> = model:newInstance()
+        local placement <const> = Transform3D(-1.7, 0, 0)
+        placement.rotationY = 1
+        placement.rotationW = 0
+        instance.transform = placement
         local entities: {integer} = {}
         for index, primitive in ipairs(instance.primitives) do
             -- Skinning can move vertices beyond the file's bind-pose sphere.
@@ -148,6 +152,42 @@ local function game(world: tecs.World, app: tecs.Application)
         print("animated3d: cycling CC0 idle, walk, and attack clips under Cook-Torrance light")
         print("animated3d: escape or close the window to quit")
     end)
+
+    assets.loadGLTF(files.assetPath("models/morph-cube.gltf")):onSettle(function(loaded: tecs.Future<tecs.assets.Model>)
+        if loaded.status ~= "ready" then
+            error(loaded.error, 0)
+        end
+        local model <const> = meshes:registerModel(loaded.value)
+        local instance <const> = model:newInstance()
+        local placement <const> = Transform3D(2.6, 1.45, 0)
+        placement.scaleX = 0.72
+        placement.scaleY = 0.72
+        placement.scaleZ = 0.72
+        instance.transform = placement
+        local entities: {integer} = {}
+        for index, primitive in ipairs(instance.primitives) do
+            entities[index] = world:spawn(
+                primitive.transform,
+                primitive.mesh,
+                primitive.bounds,
+                primitive.material,
+                primitive.morph,
+                Tint(0.16, 0.72, 0.95, 1),
+                Renderable3D()
+            )
+        end
+        world:enqueueCommit()
+        for index, entity in ipairs(entities) do
+            instance:bind(world, index, entity)
+        end
+        instance:play("StretchAndTwist", {speed = 0.65})
+        world:addSystem({
+            name = "example.AnimateMorphCompanion",
+            phase = tecs.ecs.phases.Update,
+            run = function(dt: number) instance:update(dt) end,
+        })
+        print("animated3d: added the independently placed GPU morph companion")
+    end)
 end
 
 return tecs.newApplication({
@@ -160,6 +200,7 @@ return tecs.newApplication({
         indexCapacity = 4096,
         materialCapacity = 16,
         skinning = {jointCapacity = 64},
+        morphing = {vertexCapacity = 16, weightCapacity = 8},
         shadows = {
             scale = 1,
             distance = 12,

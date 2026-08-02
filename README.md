@@ -125,9 +125,10 @@ clip data in one `Model3D`. Each `newInstance` allocates only its own reusable
 CPU pose and fixed GPU joint palettes and morph vectors, so instances can play
 different clips.
 Sampling supports linear, step, and cubic-spline channels, stages palettes
-through the existing skin upload, and writes only explicitly bound entity
-transforms. It adds no system or per-frame work to a model that is never
-sampled.
+through the existing skin upload, optionally composes caller-owned instance
+placement after the shared authored hierarchy, and writes only explicitly
+bound entity transforms. Nil placement retains the direct transform path. It
+adds no system or per-frame work to a model that is never sampled.
 
 ## Build
 

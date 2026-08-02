@@ -543,11 +543,16 @@ instance:play("Walk")
 
 Call `instance:update(dt)` from a system to advance playback, or
 `instance:sample("Walk", time)` for deterministic explicit sampling. Sampling
-reuses its tables, updates bound `Transform3D` components, and stages complete
-joint palettes without submitting a command buffer. The `Bounds3D` component
-is still caller-owned and must enclose every pose. Run
+reuses its tables, composes a caller-writable `instance.transform` after the
+authored hierarchy, updates bound `Transform3D` components, and stages complete
+joint palettes without submitting a command buffer. Assign a transform to
+place, turn, or scale the complete instance without changing its shared model
+or clip; its default nil value preserves the authored placement and skips the
+composition. The `Bounds3D` component is still caller-owned and must enclose
+every pose. Run
 `cargo xtask example animated3d` to see a CC0 character cycle skeletal clips
-under a shadowed Cook-Torrance directional light, and run
+facing the camera beside an independently placed morph animation under a
+shadowed Cook-Torrance directional light, and run
 `cargo xtask bench modelanimation` for CPU sampling cost and heap growth.
 
 ## Game modules

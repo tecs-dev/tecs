@@ -110,6 +110,10 @@ end
 local record Instance
     --- Read-only. Contains this instance's spawnable primitive bundles.
     primitives: {Primitive}
+    --- Caller-writable. Places the complete sampled model in world space, or
+    --- nil to preserve the file's authored placement without placement work.
+    --- Sampling composes this transform after the authored node hierarchy.
+    transform: ecs.Transform3D
     --- Read-only. Reports the selected one-based clip, or zero before `play`.
     animation: integer
     --- Read-only. Reports the current clip time in seconds.
@@ -458,9 +462,21 @@ local function evaluate(self: Instance, animation: integer, time: number)
             multiply(worlds, (node.parent - 1) * 16 + 1, locals, offset, worlds, offset)
         end
     end
+    local root <const> = self.transform
+    if root ~= nil then
+        pose[1], pose[2], pose[3] = root.x, root.y, root.z
+        pose[4], pose[5], pose[6], pose[7] = root.rotationX, root.rotationY, root.rotationZ, root.rotationW
+        pose[8], pose[9], pose[10] = root.scaleX, root.scaleY, root.scaleZ
+        compose(pose, 1, self._inverse, 1)
+    end
     for index, draw in ipairs(model._draws) do
         local primitive <const> = self.primitives[index]
-        writeTransform(worlds, (draw.node - 1) * 16 + 1, primitive.transform)
+        if root ~= nil then
+            multiply(self._inverse, 1, worlds, (draw.node - 1) * 16 + 1, self._temporary, 1)
+            writeTransform(self._temporary, 1, primitive.transform)
+        else
+            writeTransform(worlds, (draw.node - 1) * 16 + 1, primitive.transform)
+        end
         local entity <const> = self._entities[index]
         if entity ~= nil then
             local target <const> = self._world:getMut(entity, Transform3D)

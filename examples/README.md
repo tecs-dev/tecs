@@ -35,7 +35,9 @@ loading and clip sampling.
 `animated3d.tl` loads Robin Lamb's CC0 low-poly hero, creates an independently
 posed model instance, and cycles authored skeletal clips under a shadowed
 Cook-Torrance directional light. It demonstrates public glTF loading, PBR
-materials, animation sampling, GPU skinning, and lighting in one scene.
+materials, animation sampling, GPU skinning, and lighting in one scene. An
+instance-level placement turns the hero toward the camera, and the same scene
+places the two-target morph cube beside him with an independent animation.
 
 `morph3d.tl` loads an indexed 3D cube with two glTF morph targets and cycles it
 through tall tapered and low twisted silhouettes. It samples the authored

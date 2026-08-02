@@ -193,6 +193,32 @@ describe("Model3D", function()
         assert.near(half, math.abs(instance.primitives[1].transform.rotationW), 1e-6)
     end)
 
+    it("composes caller placement after the animated hierarchy", function()
+        local model = registered({
+            {
+                node = 1,
+                path = assets.ANIMATION_TRANSLATION,
+                width = 3,
+                interpolation = assets.ANIMATION_LINEAR,
+                times = { 0, 1 },
+                values = { 0, 0, 0, 1, 0, 0 },
+            },
+        })
+        local instance = model:newInstance()
+        local placement = ecs.Transform3D(3, 4, 5)
+        placement.rotationY = 1
+        placement.rotationW = 0
+        instance.transform = placement
+
+        instance:sample("Move", 1)
+
+        assert.near(2, instance.primitives[1].transform.x, 1e-6)
+        assert.near(4, instance.primitives[1].transform.y, 1e-6)
+        assert.near(5, instance.primitives[1].transform.z, 1e-6)
+        assert.near(1, math.abs(instance.primitives[1].transform.rotationY), 1e-6)
+        assert.near(0, instance.primitives[1].transform.rotationW, 1e-6)
+    end)
+
     it("samples cubic-spline values without allocating a new pose", function()
         local model = registered({
             {
