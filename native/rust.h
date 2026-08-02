@@ -32,6 +32,7 @@ typedef struct TecsRegex TecsRegex;
 typedef struct TecsUiTree TecsUiTree;
 typedef struct TecsUri TecsUri;
 typedef struct TecsShader TecsShader;
+typedef struct TecsModel TecsModel;
 
 typedef struct TecsShaderDefine {
     const uint8_t *name;
@@ -54,6 +55,151 @@ typedef struct TecsShaderInfo {
     uint32_t thread_count_y;
     uint32_t thread_count_z;
 } TecsShaderInfo;
+
+/* Immutable glTF import. Every pointer in the flat view remains valid until
+ * the opaque model owner is destroyed. Large geometry and image payloads are
+ * borrowed directly rather than serialized through a Lua worker channel. */
+typedef struct TecsModelMesh {
+    const uint8_t *name;
+    size_t name_length;
+    const float *vertices;
+    size_t vertex_count;
+    const float *color_vertices;
+    const uint32_t *indices;
+    size_t index_count;
+    const float *skin_vertices;
+    const float *morph_vertices;
+    size_t morph_target_count;
+    const float *morph_weights;
+    size_t morph_weight_count;
+    float center_x;
+    float center_y;
+    float center_z;
+    float radius;
+} TecsModelMesh;
+
+typedef struct TecsModelImage {
+    const uint8_t *name;
+    size_t name_length;
+    const uint8_t *bytes;
+    size_t byte_count;
+} TecsModelImage;
+
+typedef struct TecsModelMaterial {
+    const uint8_t *name;
+    size_t name_length;
+    uint32_t model;
+    uint32_t alpha_mode;
+    uint32_t base_color_image;
+    uint32_t normal_image;
+    uint32_t metallic_roughness_image;
+    uint32_t occlusion_image;
+    uint32_t emissive_image;
+    float alpha_cutoff;
+    float base_r;
+    float base_g;
+    float base_b;
+    float base_a;
+    float emissive_r;
+    float emissive_g;
+    float emissive_b;
+    float metallic;
+    float roughness;
+    float normal_scale;
+    float occlusion_strength;
+    uint8_t double_sided;
+    uint8_t _padding[3];
+} TecsModelMaterial;
+
+typedef struct TecsModelDraw {
+    uint32_t mesh;
+    uint32_t material;
+    uint32_t skin;
+    uint32_t node;
+    const float *weights;
+    size_t weight_count;
+    float x;
+    float y;
+    float z;
+    float rotation_x;
+    float rotation_y;
+    float rotation_z;
+    float rotation_w;
+    float scale_x;
+    float scale_y;
+    float scale_z;
+} TecsModelDraw;
+
+typedef struct TecsModelSkin {
+    const uint8_t *name;
+    size_t name_length;
+    const float *matrices;
+    size_t matrix_count;
+    uint32_t node;
+    const uint32_t *joints;
+    size_t joint_count;
+    const float *inverse_bind_matrices;
+    size_t inverse_bind_matrix_count;
+} TecsModelSkin;
+
+typedef struct TecsModelNode {
+    uint32_t parent;
+    float x;
+    float y;
+    float z;
+    float rotation_x;
+    float rotation_y;
+    float rotation_z;
+    float rotation_w;
+    float scale_x;
+    float scale_y;
+    float scale_z;
+    uint8_t has_matrix;
+    uint8_t _padding[3];
+    float matrix[16];
+} TecsModelNode;
+
+typedef struct TecsModelAnimation {
+    const uint8_t *name;
+    size_t name_length;
+    float duration;
+    size_t first_channel;
+    size_t channel_count;
+} TecsModelAnimation;
+
+typedef struct TecsModelAnimationChannel {
+    uint32_t node;
+    uint32_t path;
+    uint32_t interpolation;
+    uint32_t width;
+    const float *times;
+    size_t time_count;
+    const float *values;
+    size_t value_count;
+} TecsModelAnimationChannel;
+
+typedef struct TecsModelInfo {
+    const uint8_t *path;
+    size_t path_length;
+    uint8_t mipmaps;
+    uint8_t _padding[7];
+    const TecsModelMesh *meshes;
+    size_t mesh_count;
+    const TecsModelImage *images;
+    size_t image_count;
+    const TecsModelMaterial *materials;
+    size_t material_count;
+    const TecsModelDraw *draws;
+    size_t draw_count;
+    const TecsModelSkin *skins;
+    size_t skin_count;
+    const TecsModelNode *nodes;
+    size_t node_count;
+    const TecsModelAnimation *animations;
+    size_t animation_count;
+    const TecsModelAnimationChannel *channels;
+    size_t channel_count;
+} TecsModelInfo;
 
 /* Taffy-backed retained UI layout. An entity id is the tree key, so Lua keeps
  * ownership of the ECS hierarchy and Rust owns only the derived layout cache.
@@ -140,6 +286,10 @@ TecsShader *tecsShaderCompile(const uint8_t *source, size_t source_length, const
                               uint32_t stage, uint32_t target, const TecsShaderDefine *defines, size_t define_count);
 bool tecsShaderGetInfo(const TecsShader *shader, TecsShaderInfo *info);
 void tecsShaderDestroy(TecsShader *shader);
+
+TecsModel *tecsModelLoad(const uint8_t *path, size_t path_length);
+bool tecsModelGetInfo(const TecsModel *model, TecsModelInfo *info);
+void tecsModelDestroy(TecsModel *model);
 
 typedef struct TecsStringView {
     const uint8_t *data;

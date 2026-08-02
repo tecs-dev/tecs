@@ -18,8 +18,11 @@ bytes.workspace = true
 camino.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
+data-url.workspace = true
 fastnoise-lite.workspace = true
 flate2 = { workspace = true, optional = true }
+glam.workspace = true
+gltf.workspace = true
 image.workspace = true
 libc.workspace = true
 mio.workspace = true
@@ -44,6 +47,7 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
 url.workspace = true
+urlencoding.workspace = true
 axum.workspace = true
 
 [target.'cfg(unix)'.dependencies]

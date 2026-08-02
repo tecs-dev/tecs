@@ -258,7 +258,7 @@ describe("assets", function()
         assets.waitAll(2000)
 
         assert.are.equal("failed", loading.status)
-        assert.is_truthy(loading.error:find("animation 0 has no channels", 1, true))
+        assert.is_truthy(loading.error:find("missing field `channels`", 1, true), loading.error)
     end)
 
     it("decodes glTF joint attributes and its initial skin palette", function()
@@ -320,7 +320,7 @@ describe("assets", function()
         assets.waitAll(2000)
 
         assert.are.equal("failed", loading.status)
-        assert.is_truthy(loading.error:find("invalid alpha mode FADE", 1, true))
+        assert.is_truthy(loading.error:find("materials[0].alphaMode: Invalid value", 1, true), loading.error)
     end)
 
     it("parks an unresolved direct image load and resumes with its value", function()
