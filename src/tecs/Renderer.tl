@@ -38,6 +38,7 @@ local type Query = types.Query
 local type InstanceProducer = SpriteDomain.InstanceProducer
 local type ClipRegion = SpriteDomain.ClipRegion
 local type ComputeStage = SpriteDomain.ComputeStage
+local type PassContribution = function(context: Deferred.PassContext)
 
 local DEFAULT_AMBIENT <const>: {number} = {1.0, 1.0, 1.0}
 
@@ -99,6 +100,20 @@ end
 
 local RendererMT <const>: metatable<Renderer> = {__index = Renderer}
 
+local function noContribution(_context: Deferred.PassContext)
+end
+
+--- Joins two already-specialized pass bodies without retaining a domain list.
+local function composeContributions(first: PassContribution, second: PassContribution): PassContribution
+    if first == nil then
+        return second or noContribution
+    end
+    if second == nil then
+        return first
+    end
+    return function(context: Deferred.PassContext) first(context); second(context) end
+end
+
 --- Builds a renderer and its enabled rendering domains.
 --- @param device The engine supplies the GPU device that owns renderer resources.
 --- @param swapchainFormat The engine supplies the presentation texture format.
@@ -146,11 +161,11 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
         ambient = ambient,
         shadows = options.shadows,
         shadowActive = shadowActive,
-        occluders = function(_context: Deferred.PassContext) end,
-        dropShadows = function(_context: Deferred.PassContext) end,
+        occluders = noContribution,
+        dropShadows = noContribution,
         meshShadowScale = meshShadow ~= nil and (meshShadow.scale or 1.0) or nil,
         meshShadowActive = meshShadowActive,
-        meshShadowMap = function(_context: Deferred.PassContext) end,
+        meshShadowMap = noContribution,
         meshFog = meshFog ~= nil,
         meshPBR = options.meshes ~= nil,
         meshProbe = options.meshes ~= nil and options.meshes.probe ~= nil,
@@ -159,8 +174,8 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
             and (options.meshes.lights.capacity or 256) or nil,
         bloom = options.bloom,
         multiCamera = self._multiCamera,
-        geometry = function(_context: Deferred.PassContext) end,
-        forward = function(_context: Deferred.PassContext) end,
+        geometry = noContribution,
+        forward = noContribution,
     }
     local deferred = Deferred.create(device, swapchainFormat, contributions)
     self.deferred = deferred
@@ -184,73 +199,48 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
     if meshes ~= nil and meshes.shadows then
         contributions.meshShadowMap = function(context: Deferred.PassContext) meshes:_recordShadowMap(context) end
     end
-    if self._multiCamera then
-        if sprites ~= nil and meshes ~= nil then
-            contributions.geometry = function(context: Deferred.PassContext)
-                if self._drawSprites then
-                    sprites:_recordGeometry(context)
-                end
-                if self._drawMeshes then
-                    meshes:_recordGeometry(context)
-                end
-            end
-        elseif sprites ~= nil then
-            contributions.geometry = function(context: Deferred.PassContext)
+    local spriteGeometry: PassContribution
+    local spriteForward: PassContribution
+    local meshGeometry: PassContribution
+    local meshForward: PassContribution
+    if sprites ~= nil then
+        if self._multiCamera then
+            spriteGeometry = function(context: Deferred.PassContext)
                 if self._drawSprites then
                     sprites:_recordGeometry(context)
                 end
             end
-        elseif meshes ~= nil then
-            contributions.geometry = function(context: Deferred.PassContext)
-                if self._drawMeshes then
-                    meshes:_recordGeometry(context)
-                end
-            end
-        end
-        if sprites ~= nil and meshes ~= nil then
-            contributions.forward = function(context: Deferred.PassContext)
-                -- Mesh transparency is scene content; sprites land afterwards
-                -- so the peer 2D domain retains deterministic overlay semantics.
-                if self._drawMeshes then
-                    meshes:_recordForward(context)
-                end
+            spriteForward = function(context: Deferred.PassContext)
                 if self._drawSprites then
                     sprites:_recordForward(context)
                 end
             end
-        elseif sprites ~= nil then
-            contributions.forward = function(context: Deferred.PassContext)
-                if self._drawSprites then
-                    sprites:_recordForward(context)
-                end
-            end
-        elseif meshes ~= nil then
-            contributions.forward = function(context: Deferred.PassContext)
-                if self._drawMeshes then
-                    meshes:_recordForward(context)
-                end
-            end
-        end
-    else
-        if sprites ~= nil and meshes ~= nil then
-            contributions.geometry = function(context: Deferred.PassContext)
-                sprites:_recordGeometry(context)
-                meshes:_recordGeometry(context)
-            end
-            contributions.forward = function(context: Deferred.PassContext)
-                -- Mesh transparency is scene content; sprites land afterwards
-                -- so the peer 2D domain retains deterministic overlay semantics.
-                meshes:_recordForward(context)
-                sprites:_recordForward(context)
-            end
-        elseif sprites ~= nil then
-            contributions.geometry = function(context: Deferred.PassContext) sprites:_recordGeometry(context) end
-            contributions.forward = function(context: Deferred.PassContext) sprites:_recordForward(context) end
-        elseif meshes ~= nil then
-            contributions.geometry = function(context: Deferred.PassContext) meshes:_recordGeometry(context) end
-            contributions.forward = function(context: Deferred.PassContext) meshes:_recordForward(context) end
+        else
+            spriteGeometry = function(context: Deferred.PassContext) sprites:_recordGeometry(context) end
+            spriteForward = function(context: Deferred.PassContext) sprites:_recordForward(context) end
         end
     end
+    if meshes ~= nil then
+        if self._multiCamera then
+            meshGeometry = function(context: Deferred.PassContext)
+                if self._drawMeshes then
+                    meshes:_recordGeometry(context)
+                end
+            end
+            meshForward = function(context: Deferred.PassContext)
+                if self._drawMeshes then
+                    meshes:_recordForward(context)
+                end
+            end
+        else
+            meshGeometry = function(context: Deferred.PassContext) meshes:_recordGeometry(context) end
+            meshForward = function(context: Deferred.PassContext) meshes:_recordForward(context) end
+        end
+    end
+    contributions.geometry = composeContributions(spriteGeometry, meshGeometry)
+    -- Mesh transparency is scene content; sprites land afterwards so the peer
+    -- 2D domain retains deterministic overlay semantics.
+    contributions.forward = composeContributions(meshForward, spriteForward)
     return self
 end
 
@@ -359,19 +349,11 @@ function Renderer:render(frame: Frame)
         meshes:_setStaging(slot)
     end
 
-    if not self._multiCamera then
-        self._drawSprites, self._drawMeshes = sprites ~= nil, meshes ~= nil
-        if sprites ~= nil then
-            sprites:_prepare(frame)
-        end
-        if meshes ~= nil then
-            meshes:_prepare(frame)
-        end
-        self.deferred:render(frame)
-        return
+    local viewCount = 0
+    local foundViews = false
+    if self._multiCamera then
+        viewCount, foundViews = collectViews(self)
     end
-
-    local viewCount, foundViews = collectViews(self)
     if not foundViews then
         self._drawSprites, self._drawMeshes = sprites ~= nil, meshes ~= nil
         if sprites ~= nil then
