@@ -175,6 +175,10 @@ local record Application
         --- `watch`, to decide whether resuming after a gameplay crash is
         --- something this build does at all.
         debug: boolean
+        --- Caller-writable. Appends a rolling frames-per-second reading to
+        --- the window title. Defaults to false. Enabled applications own the
+        --- title after startup and refresh it twice per second.
+        showFps: boolean
         --- Caller-writable. Sets how many frames the CPU may run ahead of the
         --- GPU. The device defaults to two.
         framesInFlight: integer
@@ -422,7 +426,11 @@ local record Application
     _checkpointBytes: string
     _checkpointStaged: boolean
     _quitScancode: integer
+    _fpsTitle: string
+    _fpsStarted: number
+    _fpsFrames: integer
     _shutdownDone: boolean
+    _refreshFps: function(self: Application, at: number)
 end
 
 local ApplicationMT <const>: metatable<Application> = {__index = Application}
@@ -577,6 +585,8 @@ function Application.newApplication(config: Application.Config): Application
     self.suspended = false
     self.elapsed = 0.0
     self.frame = 0
+    self._fpsStarted = 0.0
+    self._fpsFrames = 0
     self._checkpointStaged = false
     return self
 end
@@ -902,6 +912,12 @@ function Application:_init(): boolean
         watcher.install(config.watch)
     end
 
+    if config.showFps then
+        self._fpsTitle = self.window.title
+        self._fpsStarted = time.now()
+        self._fpsFrames = 0
+    end
+
     -- Startup cost must not land in the first iteration's dt.
     time.reset()
     return true
@@ -1047,12 +1063,29 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
 
     timing.finish(FRAME, frameStart)
 
+    if self._fpsTitle ~= nil then
+        self:_refreshFps(time.now())
+    end
+
     self.frame = self.frame + 1
     local limit <const> = self._config.debugMaxFrames
     if limit ~= nil and self.frame >= limit then
         return false
     end
     return true
+end
+
+--- Updates the optional title counter at its bounded refresh rate.
+function Application:_refreshFps(at: number)
+    self._fpsFrames = self._fpsFrames + 1
+    local elapsed <const> = at - self._fpsStarted
+    if elapsed < 0.5 then
+        return
+    end
+    local fps <const> = math.floor(self._fpsFrames / elapsed + 0.5)
+    self.window:setTitle(("%s | %d FPS"):format(self._fpsTitle, fps))
+    self._fpsStarted = at
+    self._fpsFrames = 0
 end
 
 --- What a guarded frame runs, as one function rather than one per frame. Held

@@ -38,6 +38,20 @@ local function build(config)
 end
 
 describe("Application", function()
+    it("updates an opt-in FPS title at a bounded rate", function()
+        local app = build({ showFps = true })
+        assert.is_true(app:_init())
+        app._fpsStarted = 10
+        app._fpsFrames = 29
+
+        app:_refreshFps(10.5)
+
+        assert.are.equal("application | 60 FPS", app.window.title)
+        assert.are.equal(0, app._fpsFrames)
+        assert.are.equal(10.5, app._fpsStarted)
+        app:_shutdown()
+    end)
+
     it("polls the process runtime once per host iteration", function()
         local app = build({})
         assert.is_true(app:_init())

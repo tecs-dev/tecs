@@ -11,7 +11,7 @@ local function close(actual, expected)
 end
 
 local function fakeInput()
-    local codes = {w = 1, s = 2, a = 3, d = 4, q = 5, e = 6, tab = 7}
+    local codes = { w = 1, s = 2, a = 3, d = 4, q = 5, e = 6, tab = 7 }
     local state = {
         mouseDeltaX = 0,
         mouseDeltaY = 0,
@@ -56,7 +56,7 @@ describe("gfx.FlyCamera3D", function()
             rotationY = math.sin(math.pi * 0.25),
             rotationW = math.cos(math.pi * 0.25),
         })
-        local controller = FlyCamera3D.new(source, camera, {moveSpeed = 2})
+        local controller = FlyCamera3D.new(source, camera, { moveSpeed = 2 })
 
         controller:update(0.5)
 
@@ -70,7 +70,7 @@ describe("gfx.FlyCamera3D", function()
         source.click = true
         source.mouseDeltaX = 100
         local camera = Camera3D.newCamera3D()
-        local controller = FlyCamera3D.new(source, camera, {lookSensitivity = 0.01})
+        local controller = FlyCamera3D.new(source, camera, { lookSensitivity = 0.01 })
 
         controller:update(1)
         assert.is_true(controller.captured)
@@ -93,7 +93,7 @@ describe("gfx.FlyCamera3D", function()
         source.down[keys.d] = true
         source.shift = true
         local camera = Camera3D.newCamera3D()
-        local controller = FlyCamera3D.new(source, camera, {moveSpeed = 2, sprintMultiplier = 3})
+        local controller = FlyCamera3D.new(source, camera, { moveSpeed = 2, sprintMultiplier = 3 })
 
         controller:update(0.5)
 

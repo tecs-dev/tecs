@@ -83,7 +83,7 @@ return tecs.newApplication({
     window = {title = "Tecs Sponza lighting", width = 1280, height = 720},
     ambientLight = {0.08, 0.09, 0.11},
     sprites = false,
-    bloom = {scale = 0.5, threshold = 0.9, knee = 0.12, intensity = 0.35},
+    bloom = {scale = 0.5, threshold = 0.55, knee = 0.18, intensity = 0.9},
     meshes = {
         capacity = 256,
         vertexCapacity = 262144,
@@ -114,7 +114,9 @@ return tecs.newApplication({
     },
     maxEntities = 512,
     fixedMaxSteps = 240,
+    presentMode = os.getenv("TECS_PRESENT") or "immediate",
     debug = true,
+    showFps = true,
     debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
     quitOnEscape = true,
     plugin = game,

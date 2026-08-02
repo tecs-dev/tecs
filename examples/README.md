@@ -50,7 +50,10 @@ GPU-culled primitive chunks, Cook-Torrance point and spot lights, directional
 shadows, fog, and bloom. Running the example without that cache fails before
 opening a window and reports the fetch command. Click the scene to capture the
 mouse, use WASD to move, Q and E to change height, hold Shift to sprint, and
-press Tab to release the mouse. Escape quits.
+press Tab to release the mouse. Escape quits. The window title reports rolling
+FPS, and the lower bloom threshold makes bright lit surfaces visibly spread.
+Both large scenes default to immediate presentation so this number is uncapped;
+set `TECS_PRESENT=vsync` to opt back into synchronized presentation.
 
 `bistro3d.tl` is the large-scene stress test. Its pinned CC BY 4.0 Amazon
 Lumberyard exterior is fetched through a reference-Draco preprocessing step,
@@ -64,3 +67,5 @@ reports the fetch command before a window opens.
 The Bistro demo uses the same free-fly controls as Sponza. It moves faster to
 cover the exterior's larger authored scale. The controller is noclip by
 design, so neither scene adds render geometry to Rapier merely for navigation.
+Its title reports FPS and its bloom profile is tuned for the exterior's small
+emissive lamps and bright Cook-Torrance highlights.

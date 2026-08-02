@@ -230,8 +230,7 @@ function FlyCamera3D:update(dt: number)
     )
     writeOrientation(self)
 
-    local forward <const> = (source:keyDown(self._forward) and 1 or 0)
-        - (source:keyDown(self._backward) and 1 or 0)
+    local forward <const> = (source:keyDown(self._forward) and 1 or 0) - (source:keyDown(self._backward) and 1 or 0)
     local side <const> = (source:keyDown(self._right) and 1 or 0) - (source:keyDown(self._left) and 1 or 0)
     local vertical <const> = (source:keyDown(self._up) and 1 or 0) - (source:keyDown(self._down) and 1 or 0)
     if forward == 0 and side == 0 and vertical == 0 then

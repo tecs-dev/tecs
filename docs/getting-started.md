@@ -219,8 +219,10 @@ runtime fields are available on `app.renderer.meshes.fog`. Omitting
 
 Bloom extracts resolved opaque brightness, blurs it through two scaled
 targets, and adds it before transparent meshes and sprites. Omitting `bloom`
-declares no bloom targets or passes. Run `cargo xtask example scene3d` for the
-complete mixed-domain setup.
+declares no bloom targets or passes. A light component has no visible geometry
+of its own, so it blooms the bright opaque surfaces it illuminates rather than
+drawing a halo at its position. Transparent lamps and UI remain outside this
+branch. Run `cargo xtask example scene3d` for the complete mixed-domain setup.
 
 ## Multiple cameras
 
@@ -365,9 +367,12 @@ ignored scene cache is absent.
 Sponza and Bistro install `tecs.gfx.FlyCamera3D` as an ordinary Update-phase
 system. Click to enter relative mouse mode, move with WASD, change height with
 Q and E, hold Shift to sprint, press Tab to release the pointer, and press
-Escape to quit. This is noclip movement with no collision or gravity, which
-keeps scene navigation independent from Rapier and preserves the rendering
-stress test.
+Escape to quit. Both set `showFps`, which refreshes a rolling FPS reading in
+the window title twice per second without enabling the sprite domain. They
+default to immediate presentation and accept `TECS_PRESENT=vsync` as an
+override. This is noclip movement with no collision or gravity, which keeps
+scene navigation independent from Rapier and preserves the rendering stress
+test.
 
 `cargo xtask fetch bistro` downloads and verifies the pinned CC BY 4.0 Amazon
 Lumberyard exterior, decodes its older Draco stream with the reference codec,
