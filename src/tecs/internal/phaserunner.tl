@@ -71,7 +71,6 @@ local function finish(pool: PoolImpl)
 end
 
 local function runLease(_scope: taskruntime.Scope, runner: Runner): boolean
-    taskruntime.setContext(runner)
     local pool <const> = runner.pool as PoolImpl
     while pool.nextSystem <= pool.systemCount do
         local index <const> = pool.nextSystem
@@ -105,9 +104,9 @@ local function acquire(pool: PoolImpl): Runner
     } as Runner
     pool.createdCount = pool.createdCount + 1
     addActive(pool, runner)
-    runner.task = pool.scheduler:spawnReusableImmediate(function(scope: taskruntime.Scope): boolean
-        return runLease(scope, runner)
-    end)
+    runner.task = pool.scheduler:spawnReusableImmediate(
+        function(scope: taskruntime.Scope): boolean return runLease(scope, runner) end, runner
+    )
     return runner
 end
 

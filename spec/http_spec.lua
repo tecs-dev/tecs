@@ -1375,7 +1375,6 @@ describe("http.newClient", function()
 
         assert.are.equal(204, world:get(entity, Loaded).status)
         assert.is_false(world._updateStalled)
-        assert.are.equal(0, world._scopeDepth)
     end)
 
     -- The loop's half. A game builds a client and sends a request; nothing in

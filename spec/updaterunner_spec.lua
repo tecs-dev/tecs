@@ -10,7 +10,7 @@ describe("update-wide coroutine runners", function()
     it("crosses one coroutine boundary for every synchronous phase", function()
         local pool = update.new()
         local order = {}
-        local counts = {2, 0, 2}
+        local counts = { 2, 0, 2 }
 
         local complete = pool:start(#counts, counts, function(phaseIndex, systemIndex)
             order[#order + 1] = ("%d.%d"):format(phaseIndex, systemIndex)
@@ -21,7 +21,7 @@ describe("update-wide coroutine runners", function()
         end)
 
         assert.is_true(complete)
-        assert.are.same({"1.1", "1.2", "commit 1", "commit 2", "3.1", "3.2", "commit 3"}, order)
+        assert.are.same({ "1.1", "1.2", "commit 1", "commit 2", "3.1", "3.2", "commit 3" }, order)
         assert.are.equal(1, pool.createdCount)
         assert.are.equal(1, pool.peakActive)
     end)
@@ -30,7 +30,7 @@ describe("update-wide coroutine runners", function()
         local pool = update.new()
         local gate = task.newGate()
         local order = {}
-        local counts = {3, 1}
+        local counts = { 3, 1 }
 
         assert.is_false(pool:start(#counts, counts, function(phaseIndex, systemIndex)
             if phaseIndex == 1 and systemIndex == 2 then
@@ -44,12 +44,18 @@ describe("update-wide coroutine runners", function()
             order[#order + 1] = "commit " .. phaseIndex
         end))
 
-        assert.are.same({"1.1", "wait entered", "1.3"}, order)
+        assert.are.same({ "1.1", "wait entered", "1.3" }, order)
         assert.are.equal(2, pool.createdCount)
         gate:complete(true)
         assert.is_true(pool:poll())
         assert.are.same({
-            "1.1", "wait entered", "1.3", "wait resumed", "commit 1", "2.1", "commit 2",
+            "1.1",
+            "wait entered",
+            "1.3",
+            "wait resumed",
+            "commit 1",
+            "2.1",
+            "commit 2",
         }, order)
     end)
 
@@ -58,7 +64,7 @@ describe("update-wide coroutine runners", function()
         local first = task.newGate()
         local third = task.newGate()
         local order = {}
-        local counts = {4, 1}
+        local counts = { 4, 1 }
 
         pool:start(#counts, counts, function(phaseIndex, systemIndex)
             if phaseIndex == 1 and systemIndex == 1 then
@@ -76,18 +82,25 @@ describe("update-wide coroutine runners", function()
             order[#order + 1] = "commit " .. phaseIndex
         end)
 
-        assert.are.same({"first entered", "1.2", "third entered", "1.4"}, order)
+        assert.are.same({ "first entered", "1.2", "third entered", "1.4" }, order)
         assert.are.equal(3, pool.createdCount)
 
         third:complete(true)
         assert.is_false(pool:poll())
-        assert.are.same({"first entered", "1.2", "third entered", "1.4", "third resumed"}, order)
+        assert.are.same({ "first entered", "1.2", "third entered", "1.4", "third resumed" }, order)
 
         first:complete(true)
         assert.is_true(pool:poll())
         assert.are.same({
-            "first entered", "1.2", "third entered", "1.4", "third resumed", "first resumed",
-            "commit 1", "2.1", "commit 2",
+            "first entered",
+            "1.2",
+            "third entered",
+            "1.4",
+            "third resumed",
+            "first resumed",
+            "commit 1",
+            "2.1",
+            "commit 2",
         }, order)
     end)
 
@@ -95,7 +108,7 @@ describe("update-wide coroutine runners", function()
         local pool = update.new()
         local gate = task.newGate()
         local order = {}
-        local counts = {1, 1}
+        local counts = { 1, 1 }
 
         assert.is_false(pool:start(#counts, counts, function(phaseIndex)
             if phaseIndex == 1 then
@@ -108,28 +121,28 @@ describe("update-wide coroutine runners", function()
         end, function(phaseIndex)
             order[#order + 1] = "commit " .. phaseIndex
         end))
-        assert.are.same({"last entered"}, order)
+        assert.are.same({ "last entered" }, order)
         assert.are.equal(2, pool.createdCount)
 
         gate:complete(true)
         assert.is_true(pool:poll())
-        assert.are.same({"last entered", "last resumed", "commit 1", "next phase", "commit 2"}, order)
+        assert.are.same({ "last entered", "last resumed", "commit 1", "next phase", "commit 2" }, order)
     end)
 
     it("preserves phase and system context across a suspension", function()
         local pool = update.new()
         local gate = task.newGate()
         local contexts = {}
-        local counts = {1}
+        local counts = { 1 }
 
         pool:start(#counts, counts, function()
-            contexts[#contexts + 1] = {update.currentPhase(), update.currentSystem()}
+            contexts[#contexts + 1] = { update.currentPhase(), update.currentSystem() }
             gate:wait()
-            contexts[#contexts + 1] = {update.currentPhase(), update.currentSystem()}
+            contexts[#contexts + 1] = { update.currentPhase(), update.currentSystem() }
         end, function() end)
         gate:complete(true)
         assert.is_true(pool:poll())
-        assert.are.same({{1, 1}, {1, 1}}, contexts)
+        assert.are.same({ { 1, 1 }, { 1, 1 } }, contexts)
         assert.are.equal(0, update.currentPhase())
         assert.are.equal(0, update.currentSystem())
     end)
@@ -138,27 +151,34 @@ describe("update-wide coroutine runners", function()
         local pool = update.new()
         local first = task.newGate()
         local second = task.newGate()
-        local counts = {2}
+        local counts = { 2 }
         pool:start(#counts, counts, function(_, systemIndex)
-            if systemIndex == 1 then first:wait() else second:wait() end
+            if systemIndex == 1 then
+                first:wait()
+            else
+                second:wait()
+            end
         end, function() end)
         first:complete(true)
         second:complete(true)
         assert.is_true(pool:poll())
         assert.are.equal(3, pool.createdCount)
 
-        local synchronousCounts = {10, 10, 10}
+        local synchronousCounts = { 10, 10, 10 }
         assert.is_true(pool:start(#synchronousCounts, synchronousCounts, function() end, function() end))
         assert.are.equal(3, pool.createdCount)
-        assert.are.equal(3, pool.idleCount)
+        -- The primary has its own slot; only spill runners enter the idle list.
+        assert.are.equal(2, pool.idleCount)
     end)
 
     it("cancels every continuation when a resumed system fails", function()
         local failGate = task.newGate()
         local otherCanceled = false
-        local otherGate = task.newGate(function() otherCanceled = true end)
+        local otherGate = task.newGate(function()
+            otherCanceled = true
+        end)
         local pool = update.new()
-        local counts = {2}
+        local counts = { 2 }
 
         pool:start(#counts, counts, function(_, systemIndex)
             if systemIndex == 1 then
@@ -169,7 +189,9 @@ describe("update-wide coroutine runners", function()
             end
         end, function() end)
         failGate:complete(true)
-        local ok, reason = pcall(function() pool:poll() end)
+        local ok, reason = pcall(function()
+            pool:poll()
+        end)
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("update runner boom", 1, true))
         assert.is_true(otherCanceled)
@@ -180,8 +202,10 @@ describe("update-wide coroutine runners", function()
     it("rejects overlapping updates and cancels a pending one", function()
         local pool = update.new()
         local gate = task.newGate()
-        local counts = {1}
-        pool:start(#counts, counts, function() gate:wait() end, function() end)
+        local counts = { 1 }
+        pool:start(#counts, counts, function()
+            gate:wait()
+        end, function() end)
         assert.has_error(function()
             pool:start(#counts, counts, function() end, function() end)
         end)

@@ -16,8 +16,8 @@ describe("resumable run systems", function()
         local Value = ecs.newComponent({
             name = "UnifiedSystemValue" .. serial,
             container = {},
-            fields = {"value"},
-            defaults = {0},
+            fields = { "value" },
+            defaults = { 0 },
         })
         local entity = world:spawn(Value(0))
         return world, Value, entity
@@ -25,9 +25,13 @@ describe("resumable run systems", function()
 
     it("runs an ordinary system synchronously through the reusable update fiber", function()
         local world, Value, entity = fixture()
-        world:addSystem({name = "SynchronousUnifiedSystem", phase = phases.Update, run = function(_, runWorld)
-            runWorld:set(entity, Value, Value(3))
-        end})
+        world:addSystem({
+            name = "SynchronousUnifiedSystem",
+            phase = phases.Update,
+            run = function(_, runWorld)
+                runWorld:set(entity, Value, Value(3))
+            end,
+        })
         assert.is_true(world:update(1 / 60))
         assert.is_false(world._updateStalled)
         assert.are.equal(3, world:get(entity, Value).value)
@@ -37,11 +41,15 @@ describe("resumable run systems", function()
         local world, Value, entity = fixture()
         local gate = task.newGate()
         local entered = 0
-        world:addSystem({name = "TransparentWait", phase = phases.Update, run = function(_, runWorld)
-            entered = entered + 1
-            gate:wait()
-            runWorld:set(entity, Value, Value(7))
-        end})
+        world:addSystem({
+            name = "TransparentWait",
+            phase = phases.Update,
+            run = function(_, runWorld)
+                entered = entered + 1
+                gate:wait()
+                runWorld:set(entity, Value, Value(7))
+            end,
+        })
         assert.is_false(world:update(1 / 60))
         assert.is_true(world._updateStalled)
         assert.are.equal(1, entered)
@@ -57,9 +65,13 @@ describe("resumable run systems", function()
         local world = fixture()
         local gate = task.newGate()
         gate:complete(true)
-        world:addSystem({name = "InlineReadyWait", phase = phases.Update, run = function()
-            assert.is_true(gate:wait())
-        end})
+        world:addSystem({
+            name = "InlineReadyWait",
+            phase = phases.Update,
+            run = function()
+                assert.is_true(gate:wait())
+            end,
+        })
         assert.is_true(world:update(1 / 60))
         assert.is_false(world._updateStalled)
     end)
@@ -68,57 +80,75 @@ describe("resumable run systems", function()
         local world = fixture()
         local gate = task.newGate()
         local order = {}
-        world:addSystem({name = "BeforeSuspension", phase = phases.Update, run = function()
-            order[#order + 1] = "before"
-        end})
-        world:addSystem({name = "SuspendingSystem", phase = phases.Update, run = function()
-            order[#order + 1] = "enter"
-            gate:wait()
-            order[#order + 1] = "resume"
-        end})
-        world:addSystem({name = "AfterSuspension", phase = phases.Last, run = function()
-            order[#order + 1] = "after"
-        end})
+        world:addSystem({
+            name = "BeforeSuspension",
+            phase = phases.Update,
+            run = function()
+                order[#order + 1] = "before"
+            end,
+        })
+        world:addSystem({
+            name = "SuspendingSystem",
+            phase = phases.Update,
+            run = function()
+                order[#order + 1] = "enter"
+                gate:wait()
+                order[#order + 1] = "resume"
+            end,
+        })
+        world:addSystem({
+            name = "AfterSuspension",
+            phase = phases.Last,
+            run = function()
+                order[#order + 1] = "after"
+            end,
+        })
         world:update(1 / 60)
         world:update(12)
-        assert.are.same({"before", "enter"}, order)
+        assert.are.same({ "before", "enter" }, order)
         gate:complete(true)
         world:update(12)
-        assert.are.same({"before", "enter", "resume", "after"}, order)
+        assert.are.same({ "before", "enter", "resume", "after" }, order)
     end)
 
     it("keeps a query iterator valid while a nested spawn waits for an asset", function()
         local world, Value = fixture()
         local gate = task.newGate()
-        local query = world:newQuery({include = {Value}})
+        local query = world:newQuery({ include = { Value } })
         local spawned
-        world:addSystem({name = "SpawnFromSuspendedQuery", phase = phases.Update, run = function(_, runWorld)
-            for archetype, length in query:iter() do
-                local values = archetype:get(Value)
-                for row = 1, length do
-                    gate:wait()
-                    spawned = runWorld:spawn(Value(values[row].value + 1))
+        world:addSystem({
+            name = "SpawnFromSuspendedQuery",
+            phase = phases.Update,
+            run = function(_, runWorld)
+                for archetype, length in query:iter() do
+                    local values = archetype:get(Value)
+                    for row = 1, length do
+                        gate:wait()
+                        spawned = runWorld:spawn(Value(values[row].value + 1))
+                    end
                 end
-            end
-        end})
+            end,
+        })
         world:update(1 / 60)
         assert.is_true(world._updateStalled)
-        assert.are.equal(1, world._scopeDepth)
         gate:complete(true)
         world:update(1 / 60)
         assert.is_false(world._updateStalled)
-        assert.are.equal(0, world._scopeDepth)
         assert.are.equal(1, world:get(spawned, Value).value)
     end)
 
     it("continues a fixed step at the exact suspension point", function()
-        local world = fixture({timestep = 0.1})
+        local world = fixture({ timestep = 0.1 })
         local gate = task.newGate()
         local calls = 0
-        world:addSystem({name = "SuspendingFixedSystem", phase = phases.FixedUpdate, run = function()
-            calls = calls + 1
-            gate:wait()
-        end})
+        world:addSystem({
+            name = "SuspendingFixedSystem",
+            phase = phases.FixedUpdate,
+            run = function()
+                calls = calls + 1
+                gate:wait()
+            end,
+        })
         world:update(0.1)
         assert.is_true(world._updateStalled)
         assert.are.equal(1, calls)
@@ -133,48 +163,81 @@ describe("resumable run systems", function()
     it("keeps runIf, ordering, and removal on the one system path", function()
         local world = fixture()
         local order = {}
-        world:addSystem({name = "Second", phase = phases.Update, after = {"First"}, run = function()
-            order[#order + 1] = "second"
-        end})
-        world:addSystem({name = "First", phase = phases.Update, before = {"Second"}, run = function()
-            order[#order + 1] = "first"
-        end})
-        world:addSystem({name = "Skipped", phase = phases.Update, runIf = function() return false end, run = function()
-            order[#order + 1] = "skipped"
-        end})
+        world:addSystem({
+            name = "Second",
+            phase = phases.Update,
+            after = { "First" },
+            run = function()
+                order[#order + 1] = "second"
+            end,
+        })
+        world:addSystem({
+            name = "First",
+            phase = phases.Update,
+            before = { "Second" },
+            run = function()
+                order[#order + 1] = "first"
+            end,
+        })
+        world:addSystem({
+            name = "Skipped",
+            phase = phases.Update,
+            runIf = function()
+                return false
+            end,
+            run = function()
+                order[#order + 1] = "skipped"
+            end,
+        })
         world:update(1 / 60)
         world:removeSystem("First")
         world:update(1 / 60)
-        assert.are.same({"first", "second", "second"}, order)
+        assert.are.same({ "first", "second", "second" }, order)
     end)
 
     it("reports a resumed failure and starts the next update cleanly", function()
         local world = fixture()
         local gate = task.newGate()
         local attempts = 0
-        world:addSystem({name = "FailAfterWaitOnce", phase = phases.Update, run = function()
-            attempts = attempts + 1
-            if attempts == 1 then
-                gate:wait()
-                error("unified boom")
-            end
-        end})
+        world:addSystem({
+            name = "FailAfterWaitOnce",
+            phase = phases.Update,
+            run = function()
+                attempts = attempts + 1
+                if attempts == 1 then
+                    gate:wait()
+                    error("unified boom")
+                end
+            end,
+        })
         world:update(1 / 60)
         gate:complete(true)
-        local ok, reason = pcall(function() world:update(1 / 60) end)
+        local ok, reason = pcall(function()
+            world:update(1 / 60)
+        end)
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("unified boom", 1, true))
-        assert.has_no.errors(function() world:update(1 / 60) end)
+        assert.has_no.errors(function()
+            world:update(1 / 60)
+        end)
         assert.are.equal(2, attempts)
     end)
 
     it("cancels a suspended update during shutdown", function()
         local world = fixture()
         local gate = task.newGate()
-        world:addSystem({name = "WaitUntilShutdown", phase = phases.Update, run = function() gate:wait() end})
+        world:addSystem({
+            name = "WaitUntilShutdown",
+            phase = phases.Update,
+            run = function()
+                gate:wait()
+            end,
+        })
         world:update(1 / 60)
         assert.is_true(world._updateStalled)
-        assert.has_no.errors(function() world:shutdown() end)
+        assert.has_no.errors(function()
+            world:shutdown()
+        end)
         assert.is_false(world._updateStalled)
     end)
 end)

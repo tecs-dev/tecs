@@ -16,7 +16,7 @@ describe("pooled phase runners", function()
         end)
 
         assert.is_true(complete)
-        assert.are.same({1, 2, 3, 4}, order)
+        assert.are.same({ 1, 2, 3, 4 }, order)
         assert.are.equal(1, pool.createdCount)
         assert.are.equal(1, pool.peakActive)
         assert.are.equal(0, pool.activeCount)
@@ -33,30 +33,45 @@ describe("pooled phase runners", function()
                 first:wait()
                 order[#order + 1] = "first resumed"
             end,
-            function() order[#order + 1] = "second" end,
+            function()
+                order[#order + 1] = "second"
+            end,
             function()
                 order[#order + 1] = "third entered"
                 third:wait()
                 order[#order + 1] = "third resumed"
             end,
-            function() order[#order + 1] = "fourth" end,
+            function()
+                order[#order + 1] = "fourth"
+            end,
         }
 
-        assert.is_false(pool:start(#systems, function(index) systems[index]() end))
-        assert.are.same({"first entered", "second", "third entered", "fourth"}, order)
+        assert.is_false(pool:start(#systems, function(index)
+            systems[index]()
+        end))
+        assert.are.same({ "first entered", "second", "third entered", "fourth" }, order)
         assert.are.equal(3, pool.createdCount)
         assert.are.equal(2, pool.activeCount)
 
         third:complete(true)
         assert.is_false(pool:poll())
         assert.are.same({
-            "first entered", "second", "third entered", "fourth", "third resumed",
+            "first entered",
+            "second",
+            "third entered",
+            "fourth",
+            "third resumed",
         }, order)
 
         first:complete(true)
         assert.is_true(pool:poll())
         assert.are.same({
-            "first entered", "second", "third entered", "fourth", "third resumed", "first resumed",
+            "first entered",
+            "second",
+            "third entered",
+            "fourth",
+            "third resumed",
+            "first resumed",
         }, order)
     end)
 
@@ -73,21 +88,25 @@ describe("pooled phase runners", function()
                 second:wait()
                 order[#order + 1] = "leave"
             end,
-            function() order[#order + 1] = "later system" end,
+            function()
+                order[#order + 1] = "later system"
+            end,
         }
 
-        assert.is_false(pool:start(#systems, function(index) systems[index]() end))
-        assert.are.same({"enter", "later system"}, order)
+        assert.is_false(pool:start(#systems, function(index)
+            systems[index]()
+        end))
+        assert.are.same({ "enter", "later system" }, order)
         assert.are.equal(2, pool.createdCount)
 
         first:complete(true)
         assert.is_false(pool:poll())
-        assert.are.same({"enter", "later system", "middle"}, order)
+        assert.are.same({ "enter", "later system", "middle" }, order)
         assert.are.equal(2, pool.createdCount)
 
         second:complete(true)
         assert.is_true(pool:poll())
-        assert.are.same({"enter", "later system", "middle", "leave"}, order)
+        assert.are.same({ "enter", "later system", "middle", "leave" }, order)
     end)
 
     it("preserves the claimed system ordinal across suspension", function()
@@ -100,14 +119,18 @@ describe("pooled phase runners", function()
                 gate:wait()
                 ordinals[#ordinals + 1] = phase.currentSystem()
             end,
-            function() ordinals[#ordinals + 1] = phase.currentSystem() end,
+            function()
+                ordinals[#ordinals + 1] = phase.currentSystem()
+            end,
         }
 
-        pool:start(#systems, function(index) systems[index]() end)
-        assert.are.same({1, 2}, ordinals)
+        pool:start(#systems, function(index)
+            systems[index]()
+        end)
+        assert.are.same({ 1, 2 }, ordinals)
         gate:complete(true)
         assert.is_true(pool:poll())
-        assert.are.same({1, 2, 1}, ordinals)
+        assert.are.same({ 1, 2, 1 }, ordinals)
         assert.are.equal(0, phase.currentSystem())
     end)
 
@@ -116,12 +139,18 @@ describe("pooled phase runners", function()
         local first = task.newGate()
         local third = task.newGate()
         local systems = {
-            function() first:wait() end,
+            function()
+                first:wait()
+            end,
             function() end,
-            function() third:wait() end,
+            function()
+                third:wait()
+            end,
             function() end,
         }
-        pool:start(#systems, function(index) systems[index]() end)
+        pool:start(#systems, function(index)
+            systems[index]()
+        end)
         first:complete(true)
         third:complete(true)
         assert.is_true(pool:poll())
@@ -134,15 +163,23 @@ describe("pooled phase runners", function()
 
     it("cancels every pinned runner when one system fails", function()
         local canceled = false
-        local gate = task.newGate(function() canceled = true end)
+        local gate = task.newGate(function()
+            canceled = true
+        end)
         local pool = phase.new()
         local systems = {
-            function() gate:wait() end,
-            function() error("phase runner boom") end,
+            function()
+                gate:wait()
+            end,
+            function()
+                error("phase runner boom")
+            end,
         }
 
         local ok, reason = pcall(function()
-            pool:start(#systems, function(index) systems[index]() end)
+            pool:start(#systems, function(index)
+                systems[index]()
+            end)
         end)
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("phase runner boom", 1, true))
@@ -154,19 +191,27 @@ describe("pooled phase runners", function()
     it("reports a resumed failure and cancels the other continuations", function()
         local failGate = task.newGate()
         local otherCanceled = false
-        local otherGate = task.newGate(function() otherCanceled = true end)
+        local otherGate = task.newGate(function()
+            otherCanceled = true
+        end)
         local pool = phase.new()
         local systems = {
             function()
                 failGate:wait()
                 error("resumed phase runner boom")
             end,
-            function() otherGate:wait() end,
+            function()
+                otherGate:wait()
+            end,
         }
 
-        assert.is_false(pool:start(#systems, function(index) systems[index]() end))
+        assert.is_false(pool:start(#systems, function(index)
+            systems[index]()
+        end))
         failGate:complete(true)
-        local ok, reason = pcall(function() pool:poll() end)
+        local ok, reason = pcall(function()
+            pool:poll()
+        end)
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("resumed phase runner boom", 1, true))
         assert.is_true(otherCanceled)
@@ -177,8 +222,12 @@ describe("pooled phase runners", function()
     it("rejects overlapping starts and can cancel a pending phase", function()
         local pool = phase.new()
         local gate = task.newGate()
-        assert.is_false(pool:start(1, function() gate:wait() end))
-        assert.has_error(function() pool:start(0, function() end) end)
+        assert.is_false(pool:start(1, function()
+            gate:wait()
+        end))
+        assert.has_error(function()
+            pool:start(0, function() end)
+        end)
         pool:cancel("test ended")
         assert.is_false(pool.running)
         assert.are.equal(0, pool.activeCount)

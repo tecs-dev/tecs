@@ -57,26 +57,15 @@ local function game(world: tecs.World, app: tecs.Application)
         SpotLight3D(20, math.rad(18), math.rad(32), 0.75, 0.85, 1.0, 8)
     )
 
-    tecs.assets.loadGLTF(tecs.io.files.assetPath("external/sponza/Sponza.tecs.gltf")):onSettle(function(
-        loaded: tecs.Future<tecs.assets.Model>
-    )
-        if loaded.status ~= "ready" then
-            error("sponza3d: fetch the scene first with `cargo xtask fetch sponza`: " .. loaded.error, 0)
-        end
-        local instance <const> = meshes:registerModel(loaded.value):newInstance()
-        for _, primitive in ipairs(instance.primitives) do
-            world:spawn(
-                primitive.transform,
-                primitive.mesh,
-                primitive.bounds,
-                primitive.material,
-                Tint(1, 1, 1, 1),
-                Renderable3D()
-            )
-        end
-        print(("sponza3d: loaded %d cullable primitives under point and spot lights"):format(#instance.primitives))
-        print("sponza3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
-    end)
+    local loaded <const> = tecs.assets.loadGLTF(tecs.io.files.assetPath("external/sponza/Sponza.tecs.gltf"))
+    local instance <const> = meshes:registerModel(loaded):newInstance()
+    for _, primitive in ipairs(instance.primitives) do
+        world:spawn(
+            primitive.transform, primitive.mesh, primitive.bounds, primitive.material, Tint(1, 1, 1, 1), Renderable3D()
+        )
+    end
+    print(("sponza3d: loaded %d cullable primitives under point and spot lights"):format(#instance.primitives))
+    print("sponza3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
 end
 
 return tecs.newApplication({

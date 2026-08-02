@@ -1176,6 +1176,14 @@ function WorldImpl:_commit()
         return
     end
 
+    -- Phase boundaries are unconditional, but almost every boundary in a
+    -- steady-state frame has nothing to publish. Keep that overwhelmingly
+    -- common case read-only so it traces as one predictable branch.
+    if not self.isDirty and not self._rebuildKeyIndexAfterCommit then
+        self._commitRequested = false
+        return
+    end
+
     self._committing = true
     repeat
         self._commitRequested = false

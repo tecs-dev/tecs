@@ -26,6 +26,7 @@ local record TaskImpl<T>
     cancelRequested: boolean
     cancelReason: string
     reusable: boolean
+    dead: boolean
     context: any
     _onSettle: function(TaskImpl<any>)
     join: function(self: TaskImpl<T>): T
@@ -50,7 +51,9 @@ local record SchedulerImpl
     stepping: boolean
     spawn: function<T>(self: SchedulerImpl, body: function(ScopeImpl): T...): TaskImpl<T>
     spawnImmediate: function<T>(self: SchedulerImpl, body: function(ScopeImpl): T...): TaskImpl<T>
-    spawnReusableImmediate: function<T>(self: SchedulerImpl, body: function(ScopeImpl): T...): TaskImpl<T>
+    spawnReusableImmediate: function<T>(
+        self: SchedulerImpl, body: function(ScopeImpl): T..., context?: any
+    ): TaskImpl<T>
     restartImmediate: function<T>(self: SchedulerImpl, task: TaskImpl<T>): TaskImpl<T>
     step: function(self: SchedulerImpl): integer
 end
@@ -134,7 +137,9 @@ local function settle(task: TaskImpl<any>, status: string, value: any, reason?: 
     task.error = reason
     task.waitingOn = nil
     task.waitKind = nil
-    removeFromOwner(task)
+    if task.ownerScope ~= nil then
+        removeFromOwner(task)
+    end
 
     local waiter = task.waiter
     task.waiter = nil
@@ -212,8 +217,16 @@ local function runBody(task: TaskImpl<any>, body: function(ScopeImpl): any...): 
 end
 
 local function runReusable(task: TaskImpl<any>, body: function(ScopeImpl): any...)
+    local scope <const> = task.scope as ScopeImpl
     while true do
-        local ok <const>, result = pcall(runBody, task, body) as (boolean, any)
+        -- A reusable root already owns the protected cycle boundary. Calling
+        -- `runBody` through another pcall doubled that boundary on every frame.
+        local ok <const>, result = xpcall(body, caught, scope) as (boolean, any)
+        if scope.childCount == 0 then
+            scope.active = false
+        else
+            cancelChildren(scope)
+        end
         if task.cancelRequested or result == CANCEL then
             coroutine.yield(CYCLE, "canceled", nil, task.cancelReason or "task canceled")
         elseif ok then
@@ -225,7 +238,7 @@ local function runReusable(task: TaskImpl<any>, body: function(ScopeImpl): any..
 end
 
 local function newTask<T>(
-    scheduler: SchedulerImpl, owner: ScopeImpl, body: function(ScopeImpl): T..., reusable?: boolean
+    scheduler: SchedulerImpl, owner: ScopeImpl, body: function(ScopeImpl): T..., reusable?: boolean, context?: any
 ): TaskImpl<T>
     local scope <const> = setmetatable(
         {
@@ -258,7 +271,8 @@ local function newTask<T>(
             cancelRequested = false,
             cancelReason = nil,
             reusable = reusable == true,
-            context = nil,
+            dead = false,
+            context = context,
             _onSettle = nil,
         } as TaskImpl<T>,
         TASK_MT
@@ -322,24 +336,36 @@ local function resumeTask(scheduler: SchedulerImpl, task: TaskImpl<any>)
         local tag <const> = task.resumeTag
         local value <const> = task.resumeValue
         local reason <const> = task.resumeReason
-        task.resumeTag = RESUME
-        task.resumeValue = nil
-        task.resumeReason = nil
-        ok, first, second, third, fourth = coroutine.resume(task.thread, tag, value, reason)
+        if tag ~= RESUME then
+            task.resumeTag = RESUME
+        end
+        if value ~= nil then
+            task.resumeValue = nil
+        end
+        if reason ~= nil then
+            task.resumeReason = nil
+        end
+        if value == nil and reason == nil then
+            ok, first, second, third, fourth = coroutine.resume(task.thread, tag)
+        else
+            ok, first, second, third, fourth = coroutine.resume(task.thread, tag, value, reason)
+        end
     end
 
     activeScheduler = nil
     scheduler.current = nil
     if not ok then
+        task.dead = true
         if first == CANCEL then
             settle(task, "canceled", nil, task.cancelReason or "task canceled")
         else
             settle(task, "failed", nil, tostring(first))
         end
-    elseif coroutine.status(task.thread) == "dead" then
-        settle(task, "ready", first)
     elseif first == CYCLE and task.reusable then
         settle(task, second as string, third, fourth as string)
+    elseif coroutine.status(task.thread) == "dead" then
+        task.dead = true
+        settle(task, "ready", first)
     elseif first == YIELD then
         enqueue(scheduler, task)
     elseif first ~= WAIT then
@@ -368,7 +394,7 @@ function SchedulerImpl:spawnImmediate<T>(body: function(ScopeImpl): T...): TaskI
     return task
 end
 
-function SchedulerImpl:spawnReusableImmediate<T>(body: function(ScopeImpl): T...): TaskImpl<T>
+function SchedulerImpl:spawnReusableImmediate<T>(body: function(ScopeImpl): T..., context?: any): TaskImpl<T>
     if self.stepping or activeScheduler ~= nil then
         error("tecs: an immediate reusable root cannot start from another task", 2)
     end
@@ -376,7 +402,7 @@ function SchedulerImpl:spawnReusableImmediate<T>(body: function(ScopeImpl): T...
         error("tecs: spawnReusableImmediate needs a function", 2)
     end
 
-    local task <const> = newTask(self, nil, body, true)
+    local task <const> = newTask(self, nil, body, true, context)
     self.next[self.nextCount] = nil
     self.nextCount = self.nextCount - 1
     task.queued = false
@@ -397,7 +423,7 @@ function SchedulerImpl:restartImmediate<T>(task: TaskImpl<T>): TaskImpl<T>
     if task.status == "pending" then
         error("tecs: cannot restart a pending reusable root", 2)
     end
-    if coroutine.status(task.thread) == "dead" then
+    if task.dead then
         error("tecs: cannot restart a dead reusable root", 2)
     end
 
@@ -406,16 +432,8 @@ function SchedulerImpl:restartImmediate<T>(task: TaskImpl<T>): TaskImpl<T>
     task.status = "pending"
     task.value = nil
     task.error = nil
-    task.waiter = nil
-    task.waitingOn = nil
-    task.waitKind = nil
-    task.resumeTag = RESUME
-    task.resumeValue = nil
-    task.resumeReason = nil
-    task.queued = false
     task.cancelRequested = false
     task.cancelReason = nil
-    task._onSettle = nil
 
     self.stepping = true
     resumeTask(self, task as TaskImpl<any>)
@@ -590,7 +608,6 @@ local record taskruntime
     checkSuspension: function(operation: string)
     active: function(): boolean
     context: function(): any
-    setContext: function(value: any)
     enterBarrier: function(subject: string)
     leaveBarrier: function()
 end
@@ -750,10 +767,6 @@ function taskruntime.context(): any
         return nil
     end
     return scheduler.current.context
-end
-
-function taskruntime.setContext(value: any)
-    currentTask().context = value
 end
 
 function taskruntime.enterBarrier(subject: string)

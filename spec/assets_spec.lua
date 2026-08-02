@@ -30,7 +30,7 @@ local C = sdl.C
 -- The public loader blocks outside a system. These transport-focused cases
 -- need to observe work before it settles, so they run each direct call in the
 -- same private scheduler that a world update uses.
-local assets = {}
+local assets = setmetatable({}, { __index = rawAssets })
 local Future = {}
 local scheduler
 local observed = {}

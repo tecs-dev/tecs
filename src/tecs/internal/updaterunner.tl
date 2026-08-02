@@ -35,6 +35,7 @@ local record PoolImpl
     systemCounts: {integer}
     runSystem: function(integer, integer)
     commitPhase: function(integer)
+    primary: Runner
     coordinator: Runner
     start: function(
         self: PoolImpl,
@@ -71,35 +72,35 @@ local function releaseAt(pool: PoolImpl, index: integer)
     end
 
     runner.activeIndex = 0
-    runner.phaseIndex = 0
-    runner.systemIndex = 0
     runner.waitingBarrier = false
+    if runner == pool.primary then
+        return
+    end
     pool.idleCount = pool.idleCount + 1
     pool.idle[pool.idleCount] = runner
 end
 
 local function finish(pool: PoolImpl)
     pool.running = false
-    pool.phaseCount = 0
-    pool.phaseIndex = 1
-    pool.nextSystem = 1
     pool.coordinator = nil
 end
 
-local function advancePhase(pool: PoolImpl)
-    pool.commitPhase(pool.phaseIndex)
-    pool.phaseIndex = pool.phaseIndex + 1
-    pool.nextSystem = 1
-end
-
 local function runLease(_scope: taskruntime.Scope, runner: Runner): boolean
-    taskruntime.setContext(runner)
     local pool <const> = runner.pool as PoolImpl
+    local phaseCount <const> = pool.phaseCount
+    local systemCounts <const> = pool.systemCounts
+    local runSystem <const> = pool.runSystem
+    local commitPhase <const> = pool.commitPhase
 
-    while pool.phaseIndex <= pool.phaseCount do
+    -- Keep the system scan as its own inner loop. LuaJIT records that hot loop
+    -- independently; flattening both cursors makes it blacklist the reusable
+    -- runner entry and leaves the complete scan in the interpreter.
+    while pool.phaseIndex <= phaseCount do
         local phaseIndex <const> = pool.phaseIndex
-        local systemCount <const> = pool.systemCounts[phaseIndex]
-        runner.phaseIndex = phaseIndex
+        local systemCount <const> = systemCounts[phaseIndex]
+        if runner.phaseIndex ~= phaseIndex then
+            runner.phaseIndex = phaseIndex
+        end
 
         while pool.nextSystem <= systemCount do
             local systemIndex <const> = pool.nextSystem
@@ -107,14 +108,16 @@ local function runLease(_scope: taskruntime.Scope, runner: Runner): boolean
             -- at the next system when this continuation suspends.
             pool.nextSystem = systemIndex + 1
             runner.systemIndex = systemIndex
-            pool.runSystem(phaseIndex, systemIndex)
+            runSystem(phaseIndex, systemIndex)
             runner.systemIndex = 0
         end
 
         if pool.activeCount == 1 then
             -- The primary fast path crosses no internal barrier and retains
             -- the same coroutine throughout the update.
-            advancePhase(pool)
+            commitPhase(phaseIndex)
+            pool.phaseIndex = phaseIndex + 1
+            pool.nextSystem = 1
         elseif pool.coordinator ~= nil then
             -- Another runner finished the scan while this continuation was
             -- parked. Its only remaining job is to settle at the barrier.
@@ -125,7 +128,9 @@ local function runLease(_scope: taskruntime.Scope, runner: Runner): boolean
             pool.barrier:wait()
             runner.waitingBarrier = false
             pool.coordinator = nil
-            advancePhase(pool)
+            commitPhase(phaseIndex)
+            pool.phaseIndex = phaseIndex + 1
+            pool.nextSystem = 1
         end
     end
 
@@ -154,9 +159,39 @@ local function acquire(pool: PoolImpl): Runner
     } as Runner
     pool.createdCount = pool.createdCount + 1
     addActive(pool, runner)
-    runner.task = pool.scheduler:spawnReusableImmediate(function(scope: taskruntime.Scope): boolean
-        return runLease(scope, runner)
-    end)
+    runner.task = pool.scheduler:spawnReusableImmediate(
+        function(scope: taskruntime.Scope): boolean return runLease(scope, runner) end, runner
+    )
+    return runner
+end
+
+-- The no-wait path owns one distinguished runner. It avoids the generic
+-- active/idle bookkeeping entirely; only a suspension publishes it into the
+-- active set and starts acquiring spill runners.
+local function startPrimary(pool: PoolImpl): Runner
+    local runner = pool.primary
+    if runner == nil then
+        runner = {
+            pool = pool,
+            task = nil,
+            activeIndex = 1,
+            phaseIndex = 0,
+            systemIndex = 0,
+            waitingBarrier = false,
+            marker = RUNNER_MARKER,
+        } as Runner
+        pool.primary = runner
+        pool.createdCount = pool.createdCount + 1
+        pool.peakActive = math.max(pool.peakActive, 1)
+        pool.activeCount = 1
+        runner.task = pool.scheduler:spawnReusableImmediate(
+            function(scope: taskruntime.Scope): boolean return runLease(scope, runner) end, runner
+        )
+    else
+        runner.activeIndex = 1
+        pool.activeCount = 1
+        pool.scheduler:restartImmediate(runner.task)
+    end
     return runner
 end
 
@@ -230,10 +265,7 @@ local function completeIfDone(pool: PoolImpl): boolean
 end
 
 function PoolImpl:start(
-    phaseCount: integer,
-    systemCounts: {integer},
-    runSystem: function(integer, integer),
-    commitPhase: function(integer)
+    phaseCount: integer, systemCounts: {integer}, runSystem: function(integer, integer), commitPhase: function(integer)
 ): boolean
     if self.running then
         error("tecs: cannot start an update while its previous run is pending", 2)
@@ -247,6 +279,22 @@ function PoolImpl:start(
     self.runSystem = runSystem
     self.commitPhase = commitPhase
     self.coordinator = nil
+
+    local primary <const> = startPrimary(self)
+    local status <const> = primary.task.status
+    if status == "ready" then
+        primary.activeIndex = 0
+        self.activeCount = 0
+        finish(self)
+        return true
+    end
+
+    self.active[1] = primary
+    if status == "failed" then
+        fail(self, primary.task.error)
+    elseif status == "canceled" then
+        fail(self, primary.task.error or "update runner was canceled")
+    end
 
     scan(self)
     return completeIfDone(self)
@@ -313,6 +361,7 @@ function updaterunner.new(): PoolImpl
             systemCounts = nil,
             runSystem = nil,
             commitPhase = nil,
+            primary = nil,
             coordinator = nil,
         } as PoolImpl,
         POOL_MT
@@ -329,13 +378,17 @@ end
 
 function updaterunner.currentPhase(): integer
     local runner <const> = currentRunner()
-    if runner == nil then return 0 end
+    if runner == nil then
+        return 0
+    end
     return runner.phaseIndex
 end
 
 function updaterunner.currentSystem(): integer
     local runner <const> = currentRunner()
-    if runner == nil then return 0 end
+    if runner == nil then
+        return 0
+    end
     return runner.systemIndex
 end
 
