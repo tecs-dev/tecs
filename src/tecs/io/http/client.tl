@@ -9,7 +9,9 @@ A response status is still an answer rather than a transfer failure: 404
 returns a response whose `Response:ok()` is false. DNS, TLS, connection,
 timeout, and body-limit errors raise at the suspended call.
 
-Request readers feed a bounded Rust upload channel from the SDL thread.
+Request readers feed a bounded Rust upload channel from client-owned
+cooperative tasks. A composed Reader may therefore suspend on another socket,
+process, file, transform, or HTTP body without blocking the SDL pump.
 `send` returns as soon as status and headers arrive. The response body is a
 one-shot Reader whose retained native chunks apply bounded backpressure when
 the caller stops consuming it. Neither direction lets a foreign thread enter
@@ -19,6 +21,7 @@ LuaJIT or materializes the whole body.
 local ffi <const> = require("ffi")
 local loader <const> = require("tecs.ffi.loader")
 local log <const> = require("tecs.log")
+local runtime <const> = require("tecs.internal.runtime")
 local task <const> = require("tecs.internal.taskruntime")
 local buffer <const> = require("tecs.io.buffer")
 local pump <const> = require("tecs.io.pump")
@@ -32,7 +35,6 @@ loader.declare("http")
 local copy <const> = ffi.copy
 local floor <const> = math.floor
 local max <const> = math.max
-local removeAt <const> = table.remove
 
 local H <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "http")
 -- Externally configured logger name; it remains stable if this module moves.
@@ -120,6 +122,7 @@ local record client
         headers: {string: string}
         --- Caller-writable. Sets bytes to send. A stream opens one reader when
         --- this request begins and feeds it through a bounded upload queue.
+        --- The client owns cooperative work that waits on a composed reader.
         body: string | iotypes.ReadableStream
         --- Caller-writable. Overrides the client's whole-transfer timeout.
         timeoutMs: number
@@ -165,6 +168,7 @@ local record client
         bodyDone: boolean
         bodyError: string
         bodyWaiter: function()
+        uploadTask: task.Task<any>
     end
 
     --- A reqwest connection pool.
@@ -173,8 +177,8 @@ local record client
         _options: Options
         _insecure: {string: boolean}
         _byId: {integer: Transfer}
-        _uploadOrder: {Transfer}
-        _uploadCursor: integer
+        _uploadScheduler: task.Scheduler
+        _uploadSettled: integer
         _pending: integer
         _pumping: boolean
         _eventSize: loader.CArray
@@ -214,6 +218,7 @@ end
 
 local record ClientPump
     client: Client
+    close: function(self: ClientPump)
 end
 
 local ResponseMT <const>: metatable<Response> = {__index = Response}
@@ -433,28 +438,20 @@ local function parseHeaders(raw: string): {string: string}
     return headers
 end
 
-local function removeUpload(self: Client, transfer: Transfer)
-    for index = 1, #self._uploadOrder do
-        if self._uploadOrder[index] == transfer then
-            removeAt(self._uploadOrder, index)
-            if index < self._uploadCursor then
-                self._uploadCursor = self._uploadCursor - 1
-            end
-            if self._uploadCursor > #self._uploadOrder then
-                self._uploadCursor = 1
-            end
-            return
-        end
-    end
-end
-
 local function release(self: Client, transfer: Transfer)
     if self._byId[transfer.id] == nil then
         return
     end
-    removeUpload(self, transfer)
     self._byId[transfer.id] = nil
     self._pending = self._pending - 1
+end
+
+local function cancelUpload(transfer: Transfer, reason: string)
+    local upload = transfer.uploadTask
+    transfer.uploadTask = nil
+    if upload ~= nil and upload.status == "pending" and task.current() ~= upload then
+        upload:cancel(reason)
+    end
 end
 
 local function settleTransfer(transfer: Transfer, status: string, response?: Response, reason?: string)
@@ -478,6 +475,7 @@ local function closeSource(transfer: Transfer)
 end
 
 local function failTransfer(self: Client, transfer: Transfer, reason: string)
+    cancelUpload(transfer, reason or "HTTP upload failed")
     H.tecsHttpClientCancel(self._handle, transfer.id)
     release(self, transfer)
     closeSource(transfer)
@@ -535,6 +533,7 @@ local function queueChunk(self: Client, transfer: Transfer, pointer: loader.CPtr
 end
 
 local function completeTransfer(self: Client, transfer: Transfer)
+    cancelUpload(transfer, "HTTP transfer completed")
     release(self, transfer)
     closeSource(transfer)
     transfer.bodyDone = true
@@ -642,28 +641,31 @@ local function serviceUpload(self: Client, transfer: Transfer): boolean, boolean
     return false, false
 end
 
-local function serviceUploads(self: Client): integer
-    local settled = 0
-    local steps = 0
-    while #self._uploadOrder > 0 and steps < UPLOAD_STEPS do
-        if self._uploadCursor > #self._uploadOrder then
-            self._uploadCursor = 1
-        end
-        local transfer <const> = self._uploadOrder[self._uploadCursor]
-        local didSettle <const> = serviceUpload(self, transfer)
-        settled = settled + (didSettle and 1 or 0)
-        steps = steps + 1
-        if self._byId[transfer.id] == transfer and transfer.sourceReader ~= nil then
-            self._uploadCursor = self._uploadCursor + 1
-        elseif self._byId[transfer.id] == transfer then
-            removeUpload(self, transfer)
-        end
+local function runUpload(self: Client, transfer: Transfer)
+    while self._byId[transfer.id] == transfer and transfer.sourceReader ~= nil do
+        local steps = 0
+        repeat
+            local didSettle <const>, progressed <const> = serviceUpload(self, transfer)
+            if didSettle then
+                self._uploadSettled = self._uploadSettled + 1
+                return
+            end
+            if self._byId[transfer.id] ~= transfer or transfer.sourceReader == nil then
+                return
+            end
+            if not progressed then
+                break
+            end
+            steps = steps + 1
+        until steps >= UPLOAD_STEPS
+        task.yield()
     end
-    return settled
 end
 
 local function turn(self: Client, waitMs: number, forceBodyProgress?: boolean): integer
-    local settled = serviceUploads(self)
+    self._uploadSettled = 0
+    self._uploadScheduler:step()
+    local settled = self._uploadSettled
     local allowBodyProgress = forceBodyProgress == true
     if not allowBodyProgress then
         for _, transfer in pairs(self._byId) do
@@ -709,6 +711,10 @@ end
 
 function ClientPump:pump(): integer
     return drive(self.client, 0, 3)
+end
+
+function ClientPump:close()
+    self.client:close()
 end
 
 function Client:pending(): integer
@@ -925,11 +931,29 @@ local function startTransfer(self: Client, request: Request, listener: function(
             return nil
         end
         transfer.sourceScratch = scratch
-        self._uploadOrder[#self._uploadOrder + 1] = transfer
     end
 
     self._byId[id] = transfer
     self._pending = self._pending + 1
+    if bodyKind == BODY_UPLOAD then
+        local upload <const> = self._uploadScheduler:spawn(function(): boolean
+            runUpload(self, transfer)
+            return true
+        end)
+        transfer.uploadTask = upload as task.Task<any>
+        task.onSettle(
+            upload,
+            function(settled: task.Task<boolean>)
+                if transfer.uploadTask == settled as task.Task<any> then
+                    transfer.uploadTask = nil
+                end
+                if settled.status == "failed" and self._byId[transfer.id] == transfer then
+                    self._uploadSettled = self._uploadSettled + 1
+                    failTransfer(self, transfer, settled.error or "tecs: HTTP upload task failed")
+                end
+            end
+        )
+    end
     return transfer
 end
 
@@ -938,6 +962,7 @@ cancelTransfer = function(self: Client, transfer: Transfer, reason: string, noti
         return
     end
     H.tecsHttpClientCancel(self._handle, transfer.id)
+    cancelUpload(transfer, reason)
     release(self, transfer)
     closeSource(transfer)
     if transfer.headersReady then
@@ -963,6 +988,7 @@ function Client:send(request: Request): Response
         )
         while outcome == nil do
             drive(self, SLICE_MS, 3)
+            runtime.poll()
         end
         if outcome.status == "ready" then
             return outcome.response as Response
@@ -1030,6 +1056,7 @@ function Client:close()
     for index = 1, #live do
         local transfer <const> = live[index]
         H.tecsHttpClientCancel(handle, transfer.id)
+        cancelUpload(transfer, "the http client was closed")
         release(self, transfer)
         closeSource(transfer)
         if transfer.headersReady then
@@ -1041,9 +1068,9 @@ function Client:close()
         end
     end
 
+    self._uploadScheduler:step()
+
     H.tecsHttpClientDestroy(handle)
-    self._uploadOrder = {}
-    self._uploadCursor = 1
     self._pending = 0
 end
 
@@ -1126,8 +1153,8 @@ function client.newClient(options?: Options): Client
     self._options = settings
     self._insecure = insecure
     self._byId = {}
-    self._uploadOrder = {}
-    self._uploadCursor = 1
+    self._uploadScheduler = task.newScheduler()
+    self._uploadSettled = 0
     self._pending = 0
     self._pumping = false
     self._eventSize = loader.newArray("size_t[1]")

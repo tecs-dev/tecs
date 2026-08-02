@@ -87,6 +87,11 @@ local function pollDialogs(): integer
     return dialogRuntimePoll()
 end
 
+local shutdownDialogs: function()
+local function stopDialogs()
+    shutdownDialogs()
+end
+
 loader.declare("dialogs")
 
 local C <const> = sdl.C
@@ -99,6 +104,8 @@ local signalRuntimePoll: function(): integer
 local function pollSignals(): integer
     return signalRuntimePoll()
 end
+
+local shutdownSignals: function()
 
 --- Describes one preferred language and country.
 local record Locale
@@ -433,6 +440,16 @@ function SignalListenerImpl:close(): boolean, string
     return true
 end
 
+shutdownSignals = function()
+    local active: {SignalListenerImpl} = {}
+    for listener in pairs(listeners) do
+        active[#active + 1] = listener
+    end
+    for index = 1, #active do
+        active[index]:close()
+    end
+end
+
 updateSignals = function(): integer
     local mask <const> = tonumber(R.tecsSignalsPoll()) as integer
     if mask == 0 then
@@ -512,7 +529,7 @@ function platformOS.newSignalListener(selected?: {ProcessSignal}): SignalListene
     listeners[listener] = true
     listenerCount = listenerCount + 1
     if listenerCount == 1 then
-        runtime.register("signals", 5, pollSignals)
+        runtime.register("signals", 5, pollSignals, shutdownSignals)
     end
     return listener as SignalListener
 end
@@ -549,6 +566,7 @@ local record DialogSource
     defaultWaitMs: number
     poll: function(self: DialogSource): integer
     advance: function(self: DialogSource, ms: number): integer
+    cancel: function(self: DialogSource, completion: Completion<any>)
 end
 
 local DialogSourceMT <const>: metatable<DialogSource> = {__index = DialogSource}
@@ -600,6 +618,30 @@ function DialogSource:advance(ms: number): integer
     return self:poll()
 end
 
+function DialogSource:cancel(completion: Completion<any>)
+    for index = #pendingDialogs, 1, -1 do
+        local entry <const> = pendingDialogs[index]
+        if entry.completion as Completion<any> == completion then
+            table.remove(pendingDialogs, index)
+            D.tecsDialogAbandon(entry.handle)
+            if #pendingDialogs == 0 then
+                runtime.unregister("dialogs")
+            end
+            return
+        end
+    end
+end
+
+shutdownDialogs = function()
+    while #pendingDialogs > 0 do
+        local entry <const> = pendingDialogs[#pendingDialogs]
+        pendingDialogs[#pendingDialogs] = nil
+        D.tecsDialogAbandon(entry.handle)
+        entry.completion:abandon("application shutdown")
+    end
+    runtime.unregister("dialogs")
+end
+
 local dialogSource <const> = setmetatable(
     {
         sliceMs = 16,
@@ -636,7 +678,7 @@ local function trackDialog(handle: loader.CPtr): Completion<DialogResult>
     local completion = Completion.pending(dialogSource as Completion.Source) as Completion<DialogResult>
     pendingDialogs[#pendingDialogs + 1] = {handle = handle, completion = completion}
     if #pendingDialogs == 1 then
-        runtime.register("dialogs", 30, pollDialogs)
+        runtime.register("dialogs", 30, pollDialogs, stopDialogs)
     end
     -- A setup allocation can fail before SDL opens anything.
     dialogSource:poll()

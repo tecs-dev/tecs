@@ -15,14 +15,18 @@ local stackMeta <const> = getmetatable(stack) as {any: any}
 
 local record zones
     active: boolean
+    generation: integer
     version: integer
     stack: {string}
     acquire: function()
     release: function()
     push: function(?string): string
+    enter: function(string): integer
+    leave: function(integer)
 end
 
 zones.active = false
+zones.generation = 0
 zones.version = 0
 zones.stack = stack
 
@@ -50,6 +54,7 @@ end
 function zones.acquire()
     references = references + 1
     if references == 1 then
+        zones.generation = zones.generation + 1
         zones.active = true
         stackMeta.__call = realCall
     end
@@ -71,6 +76,23 @@ end
 
 function zones.push(name?: string): string
     return realCall(stack as {any}, name) as string
+end
+
+-- A generation token prevents a delayed leave from popping a zone belonging
+-- to a profiling session that started after the matching enter. This matters
+-- when the Lua stack between them belongs to a suspended coroutine.
+function zones.enter(name: string): integer
+    if not zones.active then
+        return 0
+    end
+    realCall(stack as {any}, name)
+    return zones.generation
+end
+
+function zones.leave(generation: integer)
+    if generation ~= 0 and zones.active and zones.generation == generation then
+        realCall(stack as {any}, nil)
+    end
 end
 
 return zones

@@ -1161,7 +1161,7 @@ function assets.install(luaPath?: string)
         source = DECODER,
         luaPath = luaPath or package.path,
     })
-    runtime.register("assets", 10, pollRuntime)
+    runtime.register("assets", 10, pollRuntime, nil)
 end
 
 function assets.installed(): boolean
@@ -1768,6 +1768,7 @@ function assets.shutdown()
         forgetImage(entry)
         entry.root:abandon("the asset lanes were shut down")
     end
+    cpuimage.shutdown()
     if worker == nil then
         return
     end

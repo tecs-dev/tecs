@@ -474,7 +474,8 @@ return tecs.newApplication({
                     failBenchmark(app, advanceFailure)
                 end
                 return progressed
-            end
+            end,
+            nil
         )
         world:addSystem({
             name = "bench.Http",
@@ -482,7 +483,7 @@ return tecs.newApplication({
             run = function()
                 local advanced <const>, advanceFailure = protect(function()
                     local status <const> = completionStatus()
-                    if status == "pending" then
+                    if status == "pending" or not server.responded then
                         return
                     end
                     local elapsed <const> = (time.now() - started) * 1000.0

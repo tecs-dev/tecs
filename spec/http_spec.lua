@@ -12,6 +12,7 @@ local httpClients = require("tecs.io.http.clients")
 local runtime = require("tecs.internal.runtime")
 local task = require("tecs.internal.taskruntime")
 local URI = require("tecs.io.URI")
+local stream = require("tecs.io.stream")
 
 local BODY = "the Rust HTTP runtime streamed this body\n"
 local nextPort = 47860
@@ -192,6 +193,50 @@ describe("http.newClient", function()
         end))
         assert.are.equal("ready", request.status, request.error)
         assert.are.same({ 204, "" }, request.value)
+        assert.are.equal("ready", server.status, server.error)
+        source:close()
+    end)
+
+    it("parks a composed request reader inside client-owned work", function()
+        local release = task.newGate()
+        local readInTask = false
+        local sent = false
+        local reader = {}
+        function reader:read()
+            readInTask = task.active()
+            if sent then
+                return ""
+            end
+            release:wait()
+            sent = true
+            return BODY
+        end
+        function reader:close()
+            return true
+        end
+        local source = stream._newReaderStream(reader, "text/plain", #BODY)
+        local server = startServer(scheduler, listener, function(socket, request)
+            assert.are.equal(BODY, request.body)
+            assert(socket:write(responseHead(204, "No Content", 0)))
+            assert(socket:drain(1000))
+        end)
+        local request = scheduler:spawnImmediate(function()
+            local response = client:send({ url = url("/composed"), method = "POST", body = source })
+            return response.status
+        end)
+
+        runtime.poll()
+        scheduler:step()
+        assert.is_true(readInTask)
+        assert.are.equal("pending", request.status)
+        assert.are.equal("pending", server.status)
+
+        release:complete(true)
+        assert.is_true(drive(scheduler, function()
+            return request.status ~= "pending"
+        end))
+        assert.are.equal("ready", request.status, request.error)
+        assert.are.equal(204, request.value)
         assert.are.equal("ready", server.status, server.error)
         source:close()
     end)

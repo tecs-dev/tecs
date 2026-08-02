@@ -158,7 +158,7 @@ local function track(handle: loader.CPtr, owner?: any, closeOwner?: boolean): Co
     }
     if not registered then
         registered = true
-        runtime.register(SOURCE_NAME, 25, function(): integer return source:poll() end)
+        runtime.register(SOURCE_NAME, 25, function(): integer return source:poll() end, nil)
     end
     return completion
 end

@@ -1385,6 +1385,16 @@ function Operation:cancel(completion: CompletionType<any>)
     self.handle = nil
 end
 
+local function shutdownIO()
+    while #operations > 0 do
+        local current <const> = operations[#operations]
+        removeOperation(current)
+        C.tecsNetOperationDestroy(current.handle)
+        current.handle = nil
+        current.completion:abandon("application shutdown")
+    end
+end
+
 local function operation(kind: OperationKind, host: string, handle: loader.CPtr): Operation
     local source = setmetatable({} as Operation, OperationMT)
     source.kind = kind
@@ -1396,7 +1406,7 @@ local function operation(kind: OperationKind, host: string, handle: loader.CPtr)
     source.completion = Completion.pending(source as Source) as CompletionType<any>
     operations[source.at] = source
     if source.at == 1 then
-        runtime.register("io", 40, pollIO)
+        runtime.register("io", 40, pollIO, shutdownIO)
     end
     return source
 end

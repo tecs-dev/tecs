@@ -79,6 +79,15 @@ fn pool() -> &'static CpuPool {
                         .expect("a queued CPU job owns its input");
                     let decoded = decode(&input.bytes);
                     drop(input);
+                    let request_bytes = request.bytes;
+                    {
+                        let mut counts = counts
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        counts.requests = counts.requests.saturating_sub(1);
+                        counts.bytes = counts.bytes.saturating_sub(request_bytes);
+                    }
+                    let abandoned;
                     {
                         let mut state = request
                             .state
@@ -94,14 +103,15 @@ fn pool() -> &'static CpuPool {
                                 state.status = STATUS_FAILED;
                             }
                         }
+                        abandoned = state._abandoned;
+                        // Publish completion only after every shared counter
+                        // and request field is finished. Destroy may free the
+                        // request as soon as this lock is released.
+                        request.changed.notify_all();
                     }
-                    let mut counts = counts
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    counts.requests = counts.requests.saturating_sub(1);
-                    counts.bytes = counts.bytes.saturating_sub(request.bytes);
-                    drop(counts);
-                    request.changed.notify_all();
+                    if abandoned {
+                        unsafe { drop(Box::from_raw(pointer as *mut TecsImageDecodeRequest)) };
+                    }
                 })
                 .expect("the bounded CPU worker must start");
         }

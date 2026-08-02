@@ -26,5 +26,6 @@ int tecsDialogPathCount(TecsDialog *dialog);
 const char *tecsDialogPath(TecsDialog *dialog, int index);
 const char *tecsDialogError(TecsDialog *dialog);
 void tecsDialogDestroy(TecsDialog *dialog);
+void tecsDialogAbandon(TecsDialog *dialog);
 
 #endif

@@ -1426,6 +1426,16 @@ function Application:_shutdown(): boolean
     process.shutdown()
     -- SDL owns the transfer queue, so settle or cancel it before SDL_Quit.
     fileasync.shutdown()
+    guard(
+        self,
+        "runtime shutdown",
+        function()
+            local stopped <const>, reason = runtime.shutdown()
+            if not stopped then
+                error(reason, 0)
+            end
+        end
+    )
     log.closeFile()
 
     if self.device ~= nil then

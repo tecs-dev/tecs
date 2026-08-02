@@ -287,9 +287,9 @@ local record text
 
     --- Loads and opens a source font with SDL_ttf.
     ---
-    --- The file read happens on the asset worker. The call suspends its system
-    --- until SDL_ttf has opened the bytes, selected the raster mode, and
-    --- verified the requested point size.
+    --- File acquisition follows the cooperative asset path. The call suspends
+    --- its system until SDL_ttf has opened the bytes, selected the raster mode,
+    --- and verified the requested point size.
     --- @param options The caller must set `source`. `name` defaults to that
     ---     path, `size` defaults to 48 points, and `raster` defaults to
     ---     `"sdf"`.
@@ -360,7 +360,7 @@ local function resolve(path: string): string
     return files.assetPath(path)
 end
 
---- Opens bytes only after the worker has delivered the complete source.
+--- Opens bytes only after cooperative acquisition has delivered the complete source.
 local function openFont(bytes: string, options: TTFOptions): Font
     if not ttf.init() then
         sdl.fail("TTF_Init")

@@ -123,10 +123,7 @@ function scope.scoped(name: string, body: function(Scope))
         SCOPE_MT
     )
 
-    local profiling <const> = zones.active
-    if profiling then
-        zones.push(name)
-    end
+    local zoneGeneration <const> = zones.enter(name)
 
     local ok <const>, bodyFailure = xpcall(function() body(owned) end, traceback) as (boolean, string)
 
@@ -151,9 +148,7 @@ function scope.scoped(name: string, body: function(Scope))
         end
     end
 
-    if profiling then
-        zones.push()
-    end
+    zones.leave(zoneGeneration)
 
     if not ok then
         error(appendCleanupFailures(name, bodyFailure, cleanupFailures), 0)

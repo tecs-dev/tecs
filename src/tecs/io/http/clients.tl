@@ -38,7 +38,11 @@ local record clients
         --- Advances every transfer as far as it can go without waiting, and
         --- answers how many settled.
         pump: function(self: Pumpable): integer
+        --- Closes the client and every transfer it owns.
+        close: function(self: Pumpable)
     end
+
+    shutdown: function()
 end
 
 local runtime <const> = require("tecs.internal.runtime")
@@ -46,6 +50,10 @@ local runtime <const> = require("tecs.internal.runtime")
 local runtimePoll: function(): integer
 local function pollRuntime(): integer
     return runtimePoll()
+end
+
+local function shutdownRuntime()
+    clients.shutdown()
 end
 
 local type Pumpable = clients.Pumpable
@@ -70,7 +78,7 @@ function clients.add(client: Pumpable)
     live[count] = client
     at[client] = count
     if count == 1 then
-        runtime.register("http", 50, pollRuntime)
+        runtime.register("http", 50, pollRuntime, shutdownRuntime)
     end
 end
 
@@ -97,6 +105,21 @@ end
 --- How many clients are open.
 function clients.count(): integer
     return count
+end
+
+--- Closes every open client from a stable view.
+function clients.shutdown()
+    local turns <const> = count
+    for index = 1, turns do
+        turning[index] = live[index]
+    end
+    for index = turns, 1, -1 do
+        local client <const> = turning[index]
+        turning[index] = nil
+        if at[client] ~= nil then
+            client:close()
+        end
+    end
 end
 
 --- Turns every open client once, and answers how many transfers settled.

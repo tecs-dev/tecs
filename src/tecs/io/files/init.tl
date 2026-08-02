@@ -366,6 +366,13 @@ end
 
 local atomicSource <const> = setmetatable({sliceMs = 16, defaultWaitMs = 5000} as AtomicSource, ATOMIC_SOURCE_MT)
 
+local function shutdownAtomicWorker()
+    while atomicPending > 0 and atomicWorker ~= nil do
+        atomicSource:advance(16)
+    end
+    stopAtomicWorker()
+end
+
 local function ensureAtomicWorker(): boolean, string
     if atomicWorker ~= nil then
         return true
@@ -377,7 +384,7 @@ local function ensureAtomicWorker(): boolean, string
         return false, tostring(made)
     end
     atomicWorker = made
-    runtime.register("file-writes", 40, function(): integer return atomicSource:poll() end)
+    runtime.register("file-writes", 40, function(): integer return atomicSource:poll() end, shutdownAtomicWorker)
     return true
 end
 
@@ -969,9 +976,9 @@ end
 
 --- Reads a whole file and returns its bytes, or nil when there is none there.
 ---
---- The binary string retains embedded NUL bytes. The synchronous call suits
---- small documents; use `tecs.assets.loadString` when a whole-file read should
---- run off the main thread, or its image and sound loaders for decoding.
+--- The binary string retains embedded NUL bytes. On the SDL backend the
+--- transfer uses SDL AsyncIO, suspending a system or blocking a direct caller
+--- while the same private completion advances.
 ---
 --- @param path The caller supplies an absolute path or one from `assetPath`.
 --- @param kind The caller supplies the content kind for watching, or omits it

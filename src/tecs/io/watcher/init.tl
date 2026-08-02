@@ -211,7 +211,7 @@ function watcher.install(config?: watcher.Config)
     active = nil
     running = true
     runtime.unregister("watcher")
-    runtime.register("watcher", 60, pollRuntime)
+    runtime.register("watcher", 60, pollRuntime, nil)
     dispatched = 0
     lastPoll = time.now()
     watcher.scan()

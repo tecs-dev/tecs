@@ -315,7 +315,7 @@ local function track(state: State)
     state.at = count
     live[count] = state
     if count == 1 then
-        runtime.register("processes", 20, pollRuntime)
+        runtime.register("processes", 20, pollRuntime, nil)
     end
 end
 

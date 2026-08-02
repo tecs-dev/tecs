@@ -1,5 +1,6 @@
 local tecs = require("tecs")
 local scopeModule = require("tecs.scope")
+local task = require("tecs.internal.taskruntime")
 local zones = require("tecs.internal.zones")
 local zone = require("jit.zone")
 
@@ -69,6 +70,77 @@ describe("resource scopes", function()
         assert.are.equal("profiled scope", seenBody)
         assert.are.equal("profiled scope", seenCleanup)
         assert.are.equal("outer zone", restoredOuter)
+        assert.is_nil(zone[#zone])
+    end)
+
+    it("parks its JIT zone with a suspended coroutine", function()
+        local seenCleanup
+        local scheduler = task.newScheduler()
+        local gate = task.newGate()
+
+        zones.acquire()
+        local ok, reason = pcall(function()
+            zone("host zone")
+            local rootTask = scheduler:spawnImmediate(function()
+                tecs.scoped("suspended scope", function(scope)
+                    scope:own({
+                        close = function()
+                            seenCleanup = zone[#zone]
+                        end,
+                    })
+                    gate:wait()
+                end)
+            end)
+
+            assert.are.equal("pending", rootTask.status)
+            assert.are.equal("host zone", zone[#zone])
+            gate:complete(true)
+            scheduler:step()
+            assert.are.equal("ready", rootTask.status)
+            assert.are.equal("suspended scope", seenCleanup)
+            assert.are.equal("host zone", zone[#zone])
+            zone()
+        end)
+        zones.release()
+
+        assert.is_true(ok, reason)
+        assert.is_nil(zone[#zone])
+    end)
+
+    it("does not restore parked zones into a newer profiling session", function()
+        local seenCleanup
+        local scheduler = task.newScheduler()
+        local gate = task.newGate()
+
+        zones.acquire()
+        zone("old host")
+        local rootTask = scheduler:spawnImmediate(function()
+            tecs.scoped("old suspended scope", function(scope)
+                scope:own({
+                    close = function()
+                        seenCleanup = zone[#zone]
+                    end,
+                })
+                gate:wait()
+            end)
+        end)
+        assert.are.equal("old host", zone[#zone])
+        zone()
+        zones.release()
+
+        zones.acquire()
+        local ok, reason = pcall(function()
+            zone("new host")
+            gate:complete(true)
+            scheduler:step()
+            assert.are.equal("ready", rootTask.status)
+            assert.are.equal("new host", seenCleanup)
+            assert.are.equal("new host", zone[#zone])
+            zone()
+        end)
+        zones.release()
+
+        assert.is_true(ok, reason)
         assert.is_nil(zone[#zone])
     end)
 

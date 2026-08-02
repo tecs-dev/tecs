@@ -45,6 +45,7 @@ unsafe extern "C" {
 
 struct DialogState {
     ready: bool,
+    abandoned: bool,
     cancelled: bool,
     filter: c_int,
     paths: Vec<CString>,
@@ -98,23 +99,29 @@ unsafe extern "C" fn dialog_callback(
     let Some(dialog) = (unsafe { userdata.cast::<TecsDialog>().as_ref() }) else {
         return;
     };
-    let mut state = lock(dialog);
-    state.filter = filter;
-    if file_list.is_null() {
-        state.error = Some(error_text(unsafe { SDL_GetError() }));
-    } else {
-        let mut index = 0;
-        loop {
-            let path = unsafe { *file_list.add(index) };
-            if path.is_null() {
-                break;
+    let abandoned = {
+        let mut state = lock(dialog);
+        state.filter = filter;
+        if file_list.is_null() {
+            state.error = Some(error_text(unsafe { SDL_GetError() }));
+        } else {
+            let mut index = 0;
+            loop {
+                let path = unsafe { *file_list.add(index) };
+                if path.is_null() {
+                    break;
+                }
+                state.paths.push(unsafe { CStr::from_ptr(path) }.to_owned());
+                index += 1;
             }
-            state.paths.push(unsafe { CStr::from_ptr(path) }.to_owned());
-            index += 1;
+            state.cancelled = state.paths.is_empty();
         }
-        state.cancelled = state.paths.is_empty();
+        state.ready = true;
+        state.abandoned
+    };
+    if abandoned {
+        unsafe { drop(Box::from_raw(userdata.cast::<TecsDialog>())) };
     }
-    state.ready = true;
 }
 
 unsafe fn copy_optional(value: *const c_char) -> Option<CString> {
@@ -152,6 +159,7 @@ unsafe fn create_dialog(
     Box::into_raw(Box::new(TecsDialog {
         state: Mutex::new(DialogState {
             ready: false,
+            abandoned: false,
             cancelled: false,
             filter: -1,
             paths: Vec::new(),
@@ -326,5 +334,56 @@ pub unsafe extern "C" fn tecsDialogDestroy(dialog: *mut TecsDialog) {
         let dialog = unsafe { Box::from_raw(dialog) };
         debug_assert_eq!(dialog.filter_strings.len(), dialog.filters.len());
         drop(dialog);
+    }
+}
+
+/// Releases the caller's ownership while SDL still retains its callback.
+/// The callback destroys the state after publishing its otherwise-unobserved
+/// result; a result already published is destroyed here.
+///
+/// # Safety
+///
+/// `dialog` must be null or a live dialog pointer that the caller owns.
+#[no_mangle]
+pub unsafe extern "C" fn tecsDialogAbandon(dialog: *mut TecsDialog) {
+    let Some(dialog_ref) = (unsafe { dialog.as_ref() }) else {
+        return;
+    };
+    let ready = {
+        let mut state = lock(dialog_ref);
+        if state.ready {
+            true
+        } else {
+            state.abandoned = true;
+            false
+        }
+    };
+    if ready {
+        unsafe { drop(Box::from_raw(dialog)) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn marks_a_pending_dialog_abandoned_until_completion() {
+        let dialog = unsafe { create_dialog(ptr::null(), ptr::null(), 0, ptr::null()) };
+        assert!(!dialog.is_null());
+        unsafe { tecsDialogAbandon(dialog) };
+        assert!(lock(unsafe { &*dialog }).abandoned);
+
+        lock(unsafe { &*dialog }).ready = true;
+        unsafe { tecsDialogAbandon(dialog) };
+    }
+
+    #[test]
+    fn abandon_releases_an_already_completed_dialog() {
+        let dialog = unsafe { create_dialog(ptr::null(), ptr::null(), 0, ptr::null()) };
+        assert!(!dialog.is_null());
+        lock(unsafe { &*dialog }).ready = true;
+
+        unsafe { tecsDialogAbandon(dialog) };
     }
 }

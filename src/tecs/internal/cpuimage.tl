@@ -28,6 +28,7 @@ end
 local record cpuimage
     decode: function(bytes: loader.CPtr): Completion<loader.CPtr>
     take: function(request: loader.CPtr): loader.CPtr
+    shutdown: function()
 end
 
 local entries: {Entry} = {}
@@ -82,11 +83,25 @@ function Source:cancel(completion: Completion<any>)
     for index = 1, #entries do
         local entry <const> = entries[index]
         if (entry.completion as Completion<any>) == completion then
-            entry.completion = nil
+            entries[index] = entries[#entries]
+            entries[#entries] = nil
             R.tecsImageDecodeRequestDestroy(entry.handle)
+            unregisterIfIdle()
             return
         end
     end
+end
+
+function cpuimage.shutdown()
+    while #entries > 0 do
+        local entry <const> = entries[#entries]
+        entries[#entries] = nil
+        R.tecsImageDecodeRequestDestroy(entry.handle)
+        if entry.completion ~= nil and entry.completion.status == "pending" then
+            entry.completion:abandon("application shutdown")
+        end
+    end
+    unregisterIfIdle()
 end
 
 source = {
@@ -106,7 +121,7 @@ function cpuimage.decode(bytes: loader.CPtr): Completion<loader.CPtr>
     entries[#entries + 1] = {handle = request, completion = completion}
     if not registered then
         registered = true
-        runtime.register(SOURCE_NAME, 30, function(): integer return source:poll() end)
+        runtime.register(SOURCE_NAME, 30, function(): integer return source:poll() end, nil)
     end
     return completion
 end

@@ -38,8 +38,7 @@ local image <const> = tecs.assets.loadImage("sprites/player.png")
 The context changes how Tecs waits, not what the API returns. An unresolved
 operation parks the world's reusable logical-update coroutine when called by a
 normal system. Startup, shutdown, and headless code block their caller while
-driving the same private producer. A deterministic no-wait scope rejects an
-unresolved external dependency before starting it.
+driving the same private producer.
 
 ## A suspended system keeps its place
 
@@ -109,6 +108,25 @@ end
 reader:close()
 client:close()
 ```
+
+Request bodies compose the same way. The client reads a streaming body inside
+client-owned cooperative work, so a file, socket, process pipe, transform, or
+another HTTP body may wait without blocking SDL:
+
+```teal
+local source <const> = assert(download.body:withMetadata("application/octet-stream"))
+local uploaded <const> = client:send({
+    url = assert(tecs.io.URI.new("https://example.com/uploads/one")),
+    method = "PUT",
+    body = source,
+})
+```
+
+The upload task belongs to its client rather than to the system that started
+it. This matters because `send` returns at response headers while the bounded
+upload may still be applying transport backpressure. Closing the client
+cancels and drains that work; application shutdown closes any client that was
+not closed earlier.
 
 `files.read`, `files.write`, file streams, socket operations, process pipes,
 process waits, native dialogs, asset loads, and HTTP use this contextual wait

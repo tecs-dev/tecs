@@ -9,6 +9,7 @@ local NAMES = {
     "spec.runtime.second",
     "spec.runtime.later",
     "spec.runtime.new",
+    "spec.runtime.unowned",
 }
 
 local function clear()
@@ -30,11 +31,11 @@ describe("the internal process runtime", function()
         process.register("spec.runtime.second", 20, function()
             called[#called + 1] = "second"
             return 2
-        end)
+        end, nil)
         process.register("spec.runtime.first", 10, function()
             called[#called + 1] = "first"
             return 1
-        end)
+        end, nil)
 
         assert.are.equal(3, runtime.poll())
         assert.are.same({ "first", "second" }, called)
@@ -49,13 +50,13 @@ describe("the internal process runtime", function()
             process.register("spec.runtime.new", 15, function()
                 called[#called + 1] = "new"
                 return 1
-            end)
+            end, nil)
             return 1
-        end)
+        end, nil)
         process.register("spec.runtime.later", 20, function()
             called[#called + 1] = "later"
             return 1
-        end)
+        end, nil)
 
         assert.are.equal(1, runtime.poll())
         assert.are.same({ "first" }, called)
@@ -67,12 +68,42 @@ describe("the internal process runtime", function()
     it("rejects two active sources with the same name", function()
         process.register("spec.runtime.first", 10, function()
             return 0
-        end)
+        end, nil)
 
         assert.has_error(function()
             process.register("spec.runtime.first", 20, function()
                 return 0
-            end)
+            end, nil)
         end, "tecs: runtime source spec.runtime.first is already registered")
+    end)
+
+    it("shuts active sources down in reverse pump order", function()
+        local order = {}
+        process.register("spec.runtime.first", 10, function()
+            return 0
+        end, function()
+            order[#order + 1] = "first"
+            process.unregister("spec.runtime.first")
+        end)
+        process.register("spec.runtime.second", 20, function()
+            return 0
+        end, function()
+            order[#order + 1] = "second"
+            process.unregister("spec.runtime.second")
+        end)
+
+        local ok, reason = runtime.shutdown()
+        assert.is_true(ok, reason)
+        assert.same({ "second", "first" }, order)
+    end)
+
+    it("reports an active source without a shutdown owner", function()
+        process.register("spec.runtime.unowned", 10, function()
+            return 0
+        end, nil)
+
+        local ok, reason = runtime.shutdown()
+        assert.is_false(ok)
+        assert.is_truthy(reason:find("spec.runtime.unowned", 1, true))
     end)
 end)

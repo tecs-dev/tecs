@@ -14,6 +14,9 @@ print(assert(response.body:readAll(1024 * 1024)))
 until that boundary; outside an update it blocks its caller. The body is a
 one-shot streaming Reader backed by bounded native chunks, so a slow consumer
 applies transport backpressure instead of accumulating the full response.
+Streaming request bodies run in client-owned cooperative work, so their Reader
+may itself wait on a file, socket, process, transform, or HTTP response without
+blocking the SDL pump.
 
 An HTTP error status still returns a response. DNS, connection, TLS, timeout,
 or streaming failures raise at the suspended call.
@@ -24,7 +27,8 @@ and protocol work. Both implementations resume the same direct Lua call, and
 neither parks one worker thread per waiting socket.
 
 Call `Client:close` when you no longer need its connection pool. Losing the
-last Lua reference does not cancel its requests. An
+last Lua reference does not cancel its requests. Application shutdown closes
+any remaining clients and drains their internal upload tasks. An
 [`Application`](tealdoc:tecs.Application) owns progress; a direct headless call
 drives the client while it blocks.
 ]=]

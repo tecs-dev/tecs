@@ -379,6 +379,10 @@ end
 
 -- Execute one phase's systems. Each system runs inside its own jit.zone so
 -- profiling can attribute samples. The caller owns the phase barrier.
+local activeWorlds: {internal.WorldImpl} = {}
+local activeSystemZones: {integer} = {}
+local activeWorldDepth = 0
+
 local function runGroupBody(group: FlatGroup, dt: number, world: World)
     local n = group.count
     local runs = group.runs
@@ -396,14 +400,11 @@ local function runGroupBody(group: FlatGroup, dt: number, world: World)
         worldImpl._runningSystem = true
         local runIf = runIfArr[i]
         if not runIf or runIf(dt, world, nameArr[i]) then
-            local profiling <const> = zones.active
-            if profiling then
-                zones.push(idArr[i])
-            end
+            local zoneGeneration <const> = zones.enter(idArr[i])
+            activeSystemZones[activeWorldDepth] = zoneGeneration
             runs[i](dt, world)
-            if profiling then
-                zones.push()
-            end
+            zones.leave(zoneGeneration)
+            activeSystemZones[activeWorldDepth] = nil
         end
         worldImpl._runningSystem = false
         if commitAfters[i] or worldImpl._commitRequested then
@@ -417,8 +418,6 @@ end
 -- before the system stack unwinds, so it can restore request state and retain
 -- the original traceback. A stack rather than one slot preserves nested world
 -- updates invoked by a system.
-local activeWorlds: {internal.WorldImpl} = {}
-local activeWorldDepth = 0
 local traceback <const> = debug.traceback
 
 local function phaseFailure(failure: any): string
@@ -427,9 +426,8 @@ local function phaseFailure(failure: any): string
         world._runningSystem = false
         world._commitRequested = false
     end
-    if zones.active then
-        zones.push()
-    end
+    zones.leave(activeSystemZones[activeWorldDepth] or 0)
+    activeSystemZones[activeWorldDepth] = nil
     return traceback(tostring(failure), 2)
 end
 
@@ -442,7 +440,17 @@ local function runGroup(group: FlatGroup, dt: number, world: World)
     activeWorlds[activeWorldDepth] = world as internal.WorldImpl
     local ok, failure = xpcall(runGroupBody, phaseFailure, group, dt, world) as (boolean, string)
     activeWorlds[activeWorldDepth] = nil
+    activeSystemZones[activeWorldDepth] = nil
     activeWorldDepth = activeWorldDepth - 1
+    if not ok then
+        error(failure, 0)
+    end
+end
+
+local function runProfiled(name: string, body: function(any, number, World), subject: any, dt: number, world: World)
+    local zoneGeneration <const> = zones.enter(name)
+    local ok, failure = xpcall(body, traceback, subject, dt, world) as (boolean, string)
+    zones.leave(zoneGeneration)
     if not ok then
         error(failure, 0)
     end
@@ -552,30 +560,16 @@ function PipelineImpl:update(dt: number, world: World)
         recreatePipeline(self)
     end
 
-    local profiling <const> = zones.active
-    if profiling then
-        zones.push("beforeFixed")
-    end
-    runPhaseSpan(self.beforeFixedSpan, dt, world)
-    if profiling then
-        zones.push()
+    if not zones.active then
+        runPhaseSpan(self.beforeFixedSpan, dt, world)
+        runFixedLoop(self, dt, world)
+        runPhaseSpan(self.afterFixedSpan, dt, world)
+        return
     end
 
-    if profiling then
-        zones.push("fixedLoop")
-    end
-    runFixedLoop(self, dt, world)
-    if profiling then
-        zones.push()
-    end
-
-    if profiling then
-        zones.push("afterFixed")
-    end
-    runPhaseSpan(self.afterFixedSpan, dt, world)
-    if profiling then
-        zones.push()
-    end
+    runProfiled("beforeFixed", runPhaseSpan as function(any, number, World), self.beforeFixedSpan, dt, world)
+    runProfiled("fixedLoop", runFixedLoop as function(any, number, World), self, dt, world)
+    runProfiled("afterFixed", runPhaseSpan as function(any, number, World), self.afterFixedSpan, dt, world)
 end
 
 function PipelineImpl:enablePhase(phase: Phase)

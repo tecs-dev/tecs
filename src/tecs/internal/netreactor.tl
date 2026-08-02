@@ -49,6 +49,7 @@ local record netreactor
     poll: function(): integer
     pending: function(): integer
     shutdown: function(): boolean, string
+    _shutdownRuntime: function()
 end
 
 netreactor.stream = 1
@@ -220,7 +221,7 @@ function netreactor.wait(
         deadlines = deadlines + 1
     end
     if not registered then
-        runtime.register(RUNTIME_NAME, RUNTIME_ORDER, netreactor.poll)
+        runtime.register(RUNTIME_NAME, RUNTIME_ORDER, netreactor.poll, netreactor._shutdownRuntime)
         registered = true
     end
     local readiness, waitReason <const> = gate:wait()
@@ -253,6 +254,26 @@ function netreactor.shutdown(): boolean, string
         reactor = nil
     end
     return true
+end
+
+function netreactor._shutdownRuntime()
+    local waits: {Wait} = {}
+    for _, wait in pairs(byToken) do
+        waits[#waits + 1] = wait
+    end
+    for index = 1, #waits do
+        local wait <const> = waits[index]
+        if byToken[wait.token] == wait then
+            unwatch(wait)
+            remove(wait)
+            wait.gate:fail("application shutdown")
+        end
+    end
+    unregister()
+    if reactor ~= nil then
+        C.tecsNetReactorDestroy(reactor)
+        reactor = nil
+    end
 end
 
 return netreactor

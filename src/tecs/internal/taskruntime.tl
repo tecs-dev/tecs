@@ -4,6 +4,7 @@
 -- engine calls. Games register ordinary systems and do not manage tasks.
 
 local type Completion = require("tecs.internal.completion")
+local zones <const> = require("tecs.internal.zones")
 
 local record TaskImpl<T>
     status: string
@@ -27,6 +28,9 @@ local record TaskImpl<T>
     reusable: boolean
     dead: boolean
     context: any
+    zoneNames: {string}
+    zoneCount: integer
+    zoneGeneration: integer
     _onSettle: function(TaskImpl<any>)
     join: function(self: TaskImpl<T>): T
     cancel: function(self: TaskImpl<T>, reason?: string)
@@ -133,7 +137,7 @@ local function removeFromOwner(task: TaskImpl<any>)
     task.ownerIndex = 0
 end
 
-local function settle(task: TaskImpl<any>, status: string, value: any, reason?: string)
+local function settle(task: TaskImpl<any>, status: string, value: any, reason?: string): string
     if task.status ~= "pending" then
         return
     end
@@ -142,6 +146,11 @@ local function settle(task: TaskImpl<any>, status: string, value: any, reason?: 
     task.error = reason
     task.waitingOn = nil
     task.waitKind = nil
+    for index = 1, task.zoneCount do
+        task.zoneNames[index] = nil
+    end
+    task.zoneCount = 0
+    task.zoneGeneration = 0
     if task.ownerScope ~= nil then
         removeFromOwner(task)
     end
@@ -158,8 +167,12 @@ local function settle(task: TaskImpl<any>, status: string, value: any, reason?: 
     local observer = task._onSettle
     task._onSettle = nil
     if observer ~= nil then
-        observer(task)
+        local ok <const>, failure = xpcall(observer, debug.traceback, task) as (boolean, string)
+        if not ok then
+            return failure
+        end
     end
+    return nil
 end
 
 local function caught(reason: any): any
@@ -278,6 +291,9 @@ local function newTask<T>(
             reusable = reusable == true,
             dead = false,
             context = context,
+            zoneNames = nil,
+            zoneCount = 0,
+            zoneGeneration = 0,
             _onSettle = nil,
         } as TaskImpl<T>,
         TASK_MT
@@ -325,7 +341,28 @@ function SchedulerImpl:spawn<T>(body: function(ScopeImpl): T...): TaskImpl<T>
     return newTask(self, nil, body)
 end
 
-local function resumeTask(scheduler: SchedulerImpl, task: TaskImpl<any>)
+local function resumeTask(scheduler: SchedulerImpl, task: TaskImpl<any>): string
+    local profiling = zones.active
+    local zoneBase = 0
+    local zoneGeneration = 0
+    if profiling then
+        zoneBase = #zones.stack
+        zoneGeneration = zones.generation
+    end
+    local parkedZones <const> = task.zoneCount
+    if parkedZones > 0 then
+        if profiling and task.zoneGeneration == zoneGeneration then
+            for index = 1, task.zoneCount do
+                zones.push(task.zoneNames[index])
+            end
+        end
+        for index = 1, task.zoneCount do
+            task.zoneNames[index] = nil
+        end
+        task.zoneCount = 0
+        task.zoneGeneration = 0
+    end
+
     scheduler.current = task
     activeScheduler = scheduler
 
@@ -359,23 +396,49 @@ local function resumeTask(scheduler: SchedulerImpl, task: TaskImpl<any>)
 
     activeScheduler = nil
     scheduler.current = nil
+
+    profiling = zones.active
+    if profiling then
+        local currentGeneration <const> = zones.generation
+        if currentGeneration ~= zoneGeneration then
+            zoneBase = 0
+        end
+        local count <const> = #zones.stack - zoneBase
+        if count > 0 then
+            local names = task.zoneNames
+            if names == nil then
+                names = {}
+                task.zoneNames = names
+            end
+            for index = 1, count do
+                names[index] = zones.stack[zoneBase + index]
+            end
+            for _ = 1, count do
+                zones.push()
+            end
+            task.zoneCount = count
+            task.zoneGeneration = currentGeneration
+        end
+    end
+
     if not ok then
         task.dead = true
         if first == CANCEL then
-            settle(task, "canceled", nil, task.cancelReason or "task canceled")
+            return settle(task, "canceled", nil, task.cancelReason or "task canceled")
         else
-            settle(task, "failed", nil, tostring(first))
+            return settle(task, "failed", nil, tostring(first))
         end
     elseif first == CYCLE and task.reusable then
-        settle(task, second as string, third, fourth as string)
+        return settle(task, second as string, third, fourth as string)
     elseif coroutine.status(task.thread) == "dead" then
         task.dead = true
-        settle(task, "ready", first)
+        return settle(task, "ready", first)
     elseif first == YIELD then
         enqueue(scheduler, task)
     elseif first ~= WAIT then
-        settle(task, "failed", nil, "tecs: task yielded outside the task runtime")
+        return settle(task, "failed", nil, "tecs: task yielded outside the task runtime")
     end
+    return nil
 end
 
 function SchedulerImpl:spawnImmediate<T>(body: function(ScopeImpl): T...): TaskImpl<T>
@@ -394,8 +457,11 @@ function SchedulerImpl:spawnImmediate<T>(body: function(ScopeImpl): T...): TaskI
     task.queued = false
 
     self.stepping = true
-    resumeTask(self, task as TaskImpl<any>)
+    local failure <const> = resumeTask(self, task as TaskImpl<any>)
     self.stepping = false
+    if failure ~= nil then
+        error(failure, 0)
+    end
     return task
 end
 
@@ -413,8 +479,11 @@ function SchedulerImpl:spawnReusableImmediate<T>(body: function(ScopeImpl): T...
     task.queued = false
 
     self.stepping = true
-    resumeTask(self, task as TaskImpl<any>)
+    local failure <const> = resumeTask(self, task as TaskImpl<any>)
     self.stepping = false
+    if failure ~= nil then
+        error(failure, 0)
+    end
     return task
 end
 
@@ -441,8 +510,11 @@ function SchedulerImpl:restartImmediate<T>(task: TaskImpl<T>): TaskImpl<T>
     task.cancelReason = nil
 
     self.stepping = true
-    resumeTask(self, task as TaskImpl<any>)
+    local failure <const> = resumeTask(self, task as TaskImpl<any>)
     self.stepping = false
+    if failure ~= nil then
+        error(failure, 0)
+    end
     return task
 end
 
@@ -462,16 +534,23 @@ function SchedulerImpl:step(): integer
     self.nextCount = 0
 
     local turns <const> = self.readyCount
+    local firstFailure: string
     for index = 1, turns do
         local task <const> = self.ready[index]
         self.ready[index] = nil
         task.queued = false
         if task.status == "pending" then
-            resumeTask(self, task)
+            local failure <const> = resumeTask(self, task)
+            if firstFailure == nil then
+                firstFailure = failure
+            end
         end
     end
     self.readyCount = 0
     self.stepping = false
+    if firstFailure ~= nil then
+        error(firstFailure, 0)
+    end
     return turns
 end
 
@@ -503,13 +582,17 @@ function TaskImpl:cancel(reason?: string)
 
     local scheduler <const> = self.scheduler as SchedulerImpl
     if not self.started then
-        settle(self as TaskImpl<any>, "canceled", nil, self.cancelReason)
+        local failure <const> = settle(self as TaskImpl<any>, "canceled", nil, self.cancelReason)
+        if failure ~= nil then
+            error(failure, 0)
+        end
         return
     end
     if scheduler.current == self as TaskImpl<any> then
         error(CANCEL, 0)
     end
 
+    local cancelWait: function()
     if self.waitKind == "task" then
         local awaited <const> = self.waitingOn as TaskImpl<any>
         if awaited ~= nil and awaited.waiter == self as TaskImpl<any> then
@@ -519,11 +602,8 @@ function TaskImpl:cancel(reason?: string)
         local gate <const> = self.waitingOn as GateImpl
         if gate ~= nil and gate.waiter == self as TaskImpl<any> then
             gate.waiter = nil
-            local cancelWait = gate.cancelWait
+            cancelWait = gate.cancelWait
             gate.cancelWait = nil
-            if cancelWait ~= nil then
-                cancelWait()
-            end
         end
     end
     self.waitingOn = nil
@@ -532,6 +612,12 @@ function TaskImpl:cancel(reason?: string)
     self.resumeValue = nil
     self.resumeReason = nil
     enqueue(scheduler, self as TaskImpl<any>)
+    if cancelWait ~= nil then
+        local ok <const>, failure = xpcall(cancelWait, debug.traceback) as (boolean, string)
+        if not ok then
+            error(failure, 0)
+        end
+    end
 end
 
 function GateImpl:wait(): any, string
@@ -612,6 +698,7 @@ local record taskruntime
     checkWait: function(operation: string): WaitMode
     checkSuspension: function(operation: string)
     active: function(): boolean
+    current: function(): TaskImpl<any>
     context: function(): any
     enterBarrier: function(subject: string)
     leaveBarrier: function()
@@ -775,6 +862,11 @@ end
 
 function taskruntime.active(): boolean
     return activeScheduler ~= nil and activeScheduler.current ~= nil
+end
+
+function taskruntime.current(): TaskImpl<any>
+    local scheduler <const> = activeScheduler
+    return scheduler ~= nil and scheduler.current or nil
 end
 
 -- Attaches scheduler-owned metadata to the currently executing continuation.
