@@ -21,9 +21,6 @@ function WorldImpl:_validateIntegrity()
     if self.isDirty then
         fail("isDirty on a quiet world")
     end
-    if self._scopeDepth ~= 0 then
-        fail("scopeDepth " .. self._scopeDepth .. " on a quiet world")
-    end
     if self.entityStateCount ~= 0 then
         fail("entityStateCount " .. self.entityStateCount)
     end

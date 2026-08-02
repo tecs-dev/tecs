@@ -145,7 +145,7 @@ describe(
                         local gameComponent = world:createState("game")
                         world:pushState("game")
                         local entity = world:spawn(tecs.Transform2D(0, 0))
-                        world:commit()
+                        world:enqueueCommit()
                         local stateTag = world:get(entity, gameComponent)
                         luassert.is_not_nil(stateTag)
                     end
@@ -156,7 +156,7 @@ describe(
                     function()
                         local gameComponent = world:createState("game")
                         local entity = world:spawn(tecs.Transform2D(0, 0))
-                        world:commit()
+                        world:enqueueCommit()
                         local stateTag = world:get(entity, gameComponent)
                         luassert.is_nil(stateTag)
                     end
@@ -173,10 +173,10 @@ describe(
                         world:createState("game")
                         world:pushState("game")
                         local entity = world:spawn(tecs.Transform2D(0, 0))
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.is_true(world:isAlive(entity))
                         world:popState()
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.is_false(world:isAlive(entity))
                     end
                 )
@@ -194,10 +194,10 @@ describe(
                         world:createState("paused")
                         world:pushState("game")
                         local entity = world:spawn(tecs.Transform2D(0, 0))
-                        world:commit()
+                        world:enqueueCommit()
                         -- Push paused state, game.onBlur should add Paused
                         world:pushState("paused")
-                        world:commit()
+                        world:enqueueCommit()
                         local paused = world:get(entity, tecs.ecs.Paused)
                         luassert.is_not_nil(paused)
                     end
@@ -216,12 +216,12 @@ describe(
                         world:createState("paused")
                         world:pushState("game")
                         local entity = world:spawn(tecs.Transform2D(0, 0))
-                        world:commit()
+                        world:enqueueCommit()
                         world:pushState("paused")
-                        world:commit()
+                        world:enqueueCommit()
                         -- Pop paused, game.onFocus should remove Paused
                         world:popState()
-                        world:commit()
+                        world:enqueueCommit()
                         local paused = world:get(entity, tecs.ecs.Paused)
                         luassert.is_nil(paused)
                     end

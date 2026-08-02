@@ -131,7 +131,7 @@ local function populate(world: tecs.World, count: integer)
             end
         end
     )
-    world:commit()
+    world:update(0)
 end
 
 local function percentile(samples: {number}, fraction: number): number

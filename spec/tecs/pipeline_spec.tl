@@ -3,6 +3,11 @@ local tecs <const> = require("tecs")
 local pipeline <const> = require("tecs.internal.pipeline")
 local luassert = require("luassert")
 
+local CommitRequestTag <const> = tecs.ecs.newTagComponent({
+    name = "PipelineSpecCommitRequestTag",
+    container = {},
+})
+
 local record Test
     world: tecs.World
     pipeline: tecs.ecs.Pipeline
@@ -38,11 +43,11 @@ local function createConditionalSystem(test: Test): tecs.System, function(number
     return function(_dt: number, _world: tecs.World) test.counter = test.counter + 100 end, runIf
 end
 
--- Dummy world stub. The pipeline calls world:commit() at phase boundaries,
--- so the dummy needs a commit method; tests that care about commit semantics
+-- Dummy world stub. The pipeline calls the internal barrier at phase boundaries,
+-- so the dummy needs that method; tests that care about commit semantics
 -- override it locally.
 local function makeDummyWorld(): tecs.World
-    return {commit = function(_self: tecs.World) end} as tecs.World
+    return {_commit = function(_self: tecs.World) end} as tecs.World
 end
 
 local FPS <const> = 1 / 60
@@ -336,16 +341,11 @@ describe(
         )
 
         it(
-            "does not call commit at phase-group boundaries (eager mode)",
+            "commits at phase boundaries and declared system barriers",
             function()
-                -- With eager-by-default mutation semantics, each world:set /
-                -- despawn / etc. flushes as it happens (or on query-iteration
-                -- exit via auto-defer). The pipeline no longer calls
-                -- world:commit at phase-group boundaries -- that would be a
-                -- redundant no-op fast-bail.
                 local commitCount = 0
                 test.world = {
-                    commit = function(_self: tecs.World) commitCount = commitCount + 1 end,
+                    _commit = function(_self: tecs.World) commitCount = commitCount + 1 end,
                 } as tecs.World
 
                 test.pipeline:addSystem({
@@ -355,12 +355,59 @@ describe(
                 })
 
                 test.pipeline:addSystem({
-                    phase = tecs.ecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"
+                    phase = tecs.ecs.phases.Update,
+                    run = createCounterSystem(test, "update"),
+                    name = "update_system",
+                    commitBefore = true,
+                    commitAfter = true,
                 })
 
                 test.pipeline:update(FPS, test.world)
 
-                luassert.equals(0, commitCount, "pipeline should not call world:commit under eager semantics")
+                luassert.equals(4, commitCount, "two phase ends plus the declared before/after barriers")
+            end
+        )
+
+        it(
+            "honors a system commit request before the next system",
+            function()
+                local world = tecs.ecs.newWorld()
+                local query = world:newQuery({include = {CommitRequestTag}})
+                local visibleToProducer = -1
+                local visibleToConsumer = -1
+
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    name = "commit_request_producer",
+                    run = function(_dt: number, w: tecs.World)
+                        w:spawn(CommitRequestTag)
+                        w:enqueueCommit()
+                        w:enqueueCommit()
+                        visibleToProducer = query:count()
+                    end,
+                })
+                test.pipeline:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    name = "commit_request_consumer",
+                    run = function(_dt: number, _w: tecs.World) visibleToConsumer = query:count() end,
+                })
+
+                test.pipeline:update(FPS, world)
+
+                luassert.equals(0, visibleToProducer, "the requesting system must retain its stable view")
+                luassert.equals(1, visibleToConsumer, "the next system must observe the requested barrier")
+            end
+        )
+
+        it(
+            "honors a commit request immediately outside system dispatch",
+            function()
+                local world = tecs.ecs.newWorld()
+                local entity = world:spawn(CommitRequestTag)
+
+                luassert.is_false(world:isAlive(entity))
+                world:enqueueCommit()
+                luassert.is_true(world:isAlive(entity))
             end
         )
 
@@ -369,7 +416,7 @@ describe(
             function()
                 local commitCount = 0
                 test.world = {
-                    commit = function(_self: tecs.World) commitCount = commitCount + 1 end,
+                    _commit = function(_self: tecs.World) commitCount = commitCount + 1 end,
                 } as tecs.World
 
                 test.pipeline:update(FPS, test.world)
@@ -510,7 +557,7 @@ describe(
         local steps: integer
 
         local function makeDummyWorld(): tecs.World
-            return {commit = function(_self: tecs.World) end} as tecs.World
+            return {_commit = function(_self: tecs.World) end} as tecs.World
         end
 
         local function counting(p: tecs.ecs.Pipeline): tecs.ecs.Pipeline

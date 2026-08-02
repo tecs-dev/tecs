@@ -57,12 +57,40 @@ later than `PostUpdate`.
 `world:update` clears dirty bits after the pipeline. Dirty-gated consumers must
 run in the same update as the writes they consume.
 
+## Structural barriers
+
+Systems in one phase share a structural transaction by default. The pipeline
+publishes it after the phase, so they normally see the same committed
+archetypes while the next phase sees their combined changes.
+
+Declare `commitBefore = true` when a system must consume structural output
+from an earlier system in the same phase. Declare `commitAfter = true` when a
+later system in that phase must consume this system's structural output.
+These declarations make unconditional dependencies visible in system
+configuration.
+
+Call `world:enqueueCommit()` inside a system for a conditional dependency. The
+pipeline coalesces repeated requests and publishes after the requesting system
+returns, before the next system runs. The requesting system keeps its current
+view. Outside system dispatch, the same call publishes synchronously, which is
+useful for tests and debug tooling.
+
+Prefer moving the consumer to a later phase when that is the natural frame
+dependency. Additional barriers reduce batching and make more archetype moves
+observable within one phase.
+
 ## System failures
 
 Under an application, the crash guard catches a system error, logs its
-traceback, returns frame resources, and calls `world:unwind()` to close scopes
-left by interrupted query iteration. Simulation stops while the host continues
-to drain events and serve the debug connection.
+traceback, returns frame resources, and discards structural work staged by the
+interrupted transaction. A crash never invents an undeclared publication
+barrier. Simulation stops while the host continues to drain events and serve
+the debug connection.
+
+The pipeline protects one whole non-empty phase at a time rather than wrapping
+each system separately. If a system raises, that phase guard clears its active
+commit request before the stack unwinds while retaining the original traceback.
+The next external `enqueueCommit()` is therefore synchronous as usual.
 
 The guard restores engine invariants, not game invariants. A system may have
 updated only part of a query before it threw. Development code may resume

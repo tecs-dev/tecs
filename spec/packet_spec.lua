@@ -865,7 +865,7 @@ describe("partial structural rewrites", function()
             elseif op[1] == "move" then
                 side.world:set(side.live[op[2]], Transform2D(op[3], op[4], 0, 1, 0, 4, 4))
             elseif op[1] == "tint" then
-                side.world:getMut(side.live[op[2]], Tint).a = op[3]
+                side.world:set(side.live[op[2]], Tint(1, 1, 1, op[3]))
             else
                 side.world:update(1 / 60)
             end

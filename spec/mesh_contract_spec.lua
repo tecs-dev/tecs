@@ -373,6 +373,7 @@ describe("the 3D scene contract", function()
                 components.Tint(0.2, 0.4, 0.6, 1),
                 components.Renderable3D()
             )
+            world:enqueueCommit()
 
             extractor:extract(packet)
 
@@ -420,6 +421,7 @@ describe("the 3D scene contract", function()
                 components.Tint(),
                 components.Renderable3D()
             )
+            world:enqueueCommit()
 
             extractor:extract(packet)
             assert.are.equal(12, skins[0])
@@ -450,6 +452,7 @@ describe("the 3D scene contract", function()
                 components.Tint(),
                 components.Renderable3D()
             )
+            world:enqueueCommit()
 
             extractor:extract(packet)
             assert.are.same({ 20, 7, 3, 12, 2 }, { morphs[0], morphs[1], morphs[2], morphs[3], morphs[4] })
@@ -471,6 +474,7 @@ describe("the 3D scene contract", function()
                     components.Renderable3D()
                 )
             end
+            world:enqueueCommit()
 
             extractor:extract(packet)
             assert.are.equal(1, packet.count)
@@ -478,6 +482,7 @@ describe("the 3D scene contract", function()
 
             local marker = tecs.ecs.newTagComponent({ name = "MeshExtractorAfterCapacity" })
             world:spawn(marker)
+            world:enqueueCommit()
             local found = 0
             for _, length in world:newQuery({ include = { marker } }):iter() do
                 found = found + length
@@ -499,6 +504,7 @@ describe("the 3D scene contract", function()
                 components.Tint(),
                 components.Renderable3D()
             )
+            world:enqueueCommit()
 
             extractor:extract(packet)
             assert.are.equal(1, packet.blendCount)
@@ -519,6 +525,7 @@ describe("the 3D scene contract", function()
                 components.Tint(),
                 components.Renderable3D()
             )
+            world:enqueueCommit()
 
             extractor:extract(packet)
             assert.are.equal(1, packet.doubleSidedCount)
@@ -533,6 +540,7 @@ describe("the 3D scene contract", function()
                 tecs.Transform3D.new({ x = 4, y = 5, z = 6, rotationX = -half, rotationW = half }),
                 components.SpotLight3D(12, math.rad(20), math.rad(30), 0.6, 0.7, 0.8, 5)
             )
+            world:enqueueCommit()
 
             extractor:extract(packet)
 
@@ -562,6 +570,7 @@ describe("the 3D scene contract", function()
                 components.Tint(),
                 components.Renderable3D()
             )
+            world:enqueueCommit()
             assert.has_error(function()
                 extractor:extract(packet)
             end, "tecs: no mesh is registered as 'procedural://missing'")

@@ -49,6 +49,7 @@ preserve the complete Rapier state.
 local ecs <const> = require("tecs.ecs")
 local events <const> = require("tecs.events")
 local type types = require("tecs.types")
+local type internal = require("tecs.internal.types")
 local storekeys <const> = require("tecs.internal.storekeys")
 local loader <const> = require("tecs.ffi.loader")
 local World <const> = require("tecs.physics.World")
@@ -623,7 +624,6 @@ function physics.attach(world: types.World, entity: integer, options: BodyOption
     if kind == nil then
         error(("tecs: unknown body type %q; expected static, kinematic or dynamic"):format(options.type), 2)
     end
-    world:defer()
     world:set(
         entity,
         Body(
@@ -637,7 +637,6 @@ function physics.attach(world: types.World, entity: integer, options: BodyOption
         )
     )
     world:set(entity, colliderFrom(options))
-    world:commit()
 end
 
 --- Adds another collider to a declared body. The collider is its own entity,
@@ -653,13 +652,12 @@ end
 ---     settings. Body-level fields have no effect.
 function physics.attachCollider(world: types.World, entity: integer, body: integer, options: BodyOptions)
     options = options or {}
-    if world:get(body, Body) == nil then
+    local bodyArch = (world as internal.WorldImpl):currentArchetype(body)
+    if bodyArch == nil or bodyArch.columns[Body] == nil then
         error("tecs: ColliderOf target has no Body", 2)
     end
-    world:defer()
     world:set(entity, colliderFrom(options))
     world:set(entity, ColliderOf(body))
-    world:commit()
 end
 
 --- Removes a body's declaration. Physics destroys its Rapier body during the
@@ -1158,6 +1156,7 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
         world:addSystem({
             name = "tecs.ReconcileBodies",
             phase = ecs.phases.FixedFirst,
+            commitAfter = true,
             run = function()
                 for archetype, length, entities in detachedBodies:iter() do
                     local rows = archetype:get(RigidBody)
@@ -1201,7 +1200,6 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                     createQueue,
                     function(a: PendingCreation, b: PendingCreation): boolean return a.entity < b.entity end
                 )
-                world:defer()
                 for index = 1, #createQueue do
                     local pending = createQueue[index]
                     local native = createBody(pending.entity, pending.transform, pending.body, pending.collider)
@@ -1263,13 +1261,13 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                 end
                 table_clear(shapeQueue)
                 table_clear(createdBodies)
-                world:commit()
             end,
         })
 
         world:addSystem({
             name = "tecs.HoldPausedBodies",
             phase = ecs.phases.FixedFirst,
+            commitAfter = true,
             run = function()
                 for archetype, length, entities in pausedBodies:iter() do
                     local rows = archetype:get(RigidBody)
@@ -1487,7 +1485,6 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                     return
                 end
                 simulation:restore(saved.state as string)
-                world:defer()
                 for _, length, entities in pendingBodies:iter() do
                     for row = 1, length do
                         local entity = entities[row]
@@ -1518,7 +1515,6 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                         end
                     end
                 end
-                world:commit()
             end,
         })
 

@@ -734,6 +734,11 @@ local newTableWriterImpl: function(): snapshot.Writer, function(): SnapshotTable
 -- internal -- users only see the public `saveSnapshot` / `saveSnapshotTable`
 -- functions.
 local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: SnapshotOptions)
+    -- A snapshot is an engine-owned consistency boundary. Include structural
+    -- work queued before the save instead of serializing an older committed
+    -- view with no public way for the caller to publish it.
+    (world as internal.WorldImpl):_commit()
+
     -- Fire `OnSnapshotSave` first so plugins can declare which derived
     -- entities to exclude (`ev:exclude(comp)`) and queue keyed metadata
     -- (`ev:addData(k, v)`). Excludes are merged into the filter BEFORE
@@ -1161,10 +1166,9 @@ end
 
 -- Row-major fallback for sparse-bearing archetypes. Per-entity spawnAt
 -- so setSparse fires correctly. readRow consumes buffer bytes
--- eagerly, so the whole archetype stages under one scope and drains
--- once instead of paying a full transaction per entity.
+-- eagerly, so the whole archetype stages and drains once instead of paying a
+-- transaction per entity.
 local function loadRowMajor(world: World, reader: snapshot.Reader)
-    world:defer()
     while true do
         local row = reader:readRow()
         if not row then
@@ -1175,7 +1179,7 @@ local function loadRowMajor(world: World, reader: snapshot.Reader)
             (table.unpack as function({Component}, integer, integer): Component...)(row.components, 1, row.count)
         )
     end
-    world:commit()
+    (world as internal.WorldImpl):_commit()
 end
 
 -- Forward decls for internal Reader constructors.
@@ -1218,7 +1222,7 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
         -- data from the buffer) runs at commit time, so we MUST commit
         -- after each archetype. Otherwise the next nextArchetype call
         -- decodes still-unread column bytes as bogus header values.
-        world:commit()
+        worldImpl:_commit()
     end
 
     worldImpl.autoStateComponent = savedAutoState
@@ -1286,6 +1290,7 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
     local finishEventAny = finishEvent as {string: any}
     finishEventAny.prelude = prelude
     world:emit(0, finishEvent as types.events.Event)
+    worldImpl:_commit()
     return prelude as SnapshotPrelude
 end
 

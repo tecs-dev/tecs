@@ -206,12 +206,12 @@ describe(
                     function()
                         local world = WorldImpl.new({maxEntities = 8})
                         local stale = world:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         world:clearEntities()
 
                         local fresh = world:spawn()
-                        world:commit()
+                        world:enqueueCommit()
 
                         assert.is_false(world:isAlive(stale))
                         assert.is_true(world:isAlive(fresh))

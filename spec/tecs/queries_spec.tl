@@ -836,7 +836,7 @@ describe(
             "query cursors",
             function()
                 it(
-                    "closes and drains a traversal after an early break",
+                    "closes a traversal without publishing after an early break",
                     function()
                         world:spawn(Position(1, 1))
                         world:spawn(Position(2, 2), Velocity(1, 0))
@@ -857,14 +857,14 @@ describe(
                         end
 
                         cursor:close()
-                        luassert.is_not_nil(
-                            world:get(selected, Health), "closing the cursor should drain its staged mutation"
-                        )
+                        luassert.is_nil(world:get(selected, Health))
+                        world:enqueueCommit()
+                        luassert.is_not_nil(world:get(selected, Health))
                     end
                 )
 
                 it(
-                    "closes automatically on natural exhaustion and close is idempotent",
+                    "closes automatically on natural exhaustion without owning publication",
                     function()
                         local first = world:spawn(Position(1, 1))
                         local second = world:spawn(Position(2, 2), Velocity(1, 0))
@@ -878,12 +878,16 @@ describe(
                             end
                         end
 
+                        luassert.is_nil(world:get(first, Health))
+                        luassert.is_nil(world:get(second, Health))
+                        cursor:close()
+                        cursor:close()
+                        world:enqueueCommit()
                         luassert.is_not_nil(world:get(first, Health))
                         luassert.is_not_nil(world:get(second, Health))
-                        cursor:close()
-                        cursor:close()
 
                         world:set(first, Sprite("after-close.png"))
+                        world:enqueueCommit()
                         luassert.is_not_nil(
                             world:get(first, Sprite), "repeated close must not leave or underflow the world scope"
                         )
@@ -891,7 +895,7 @@ describe(
                 )
 
                 it(
-                    "keeps nested cursor scopes independent",
+                    "keeps nested cursor traversal state independent",
                     function()
                         world:spawn(Position(1, 1))
                         world:spawn(Position(2, 2), Velocity(1, 0))
@@ -918,9 +922,9 @@ describe(
                         end
 
                         outer:close()
-                        luassert.is_not_nil(
-                            world:get(selected, Health), "closing the outer cursor should drain the pending mutation"
-                        )
+                        luassert.is_nil(world:get(selected, Health))
+                        world:enqueueCommit()
+                        luassert.is_not_nil(world:get(selected, Health))
                     end
                 )
 
@@ -942,12 +946,16 @@ describe(
                         world:set(selected, Health(100))
                         first:close()
                         luassert.is_nil(
-                            world:get(selected, Health), "the second cursor should keep the deferred scope open"
+                            world:get(selected, Health), "closing a cursor should not publish structural changes"
                         )
 
                         second:close()
+                        luassert.is_nil(
+                            world:get(selected, Health), "cursor lifetime should not own transaction lifetime"
+                        )
+                        world:enqueueCommit()
                         luassert.is_not_nil(
-                            world:get(selected, Health), "the final cursor close should drain the staged mutation"
+                            world:get(selected, Health), "the explicit internal test barrier should publish"
                         )
                     end
                 )
@@ -1490,7 +1498,7 @@ describe(
                                 end
                             end
                         )
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(1, #calls, "should fire once for a batch of 10")
                         luassert.equals(1, calls[1][1], "firstRow = 1")
@@ -1513,7 +1521,7 @@ describe(
                         })
 
                         world:spawn(Position(1, 1))
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(1, #calls, "should fire once")
                         luassert.equals(1, calls[1][1], "firstRow=1")
@@ -1537,12 +1545,12 @@ describe(
 
                         -- An existing entity without Velocity does not match yet.
                         local id = world:spawn(Position(1, 1))
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.equals(0, #calls)
 
                         -- Add Velocity: entity transitions to match query.
                         world:set(id, Velocity(1, 1))
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(1, #calls, "should fire after archetype transition")
                         luassert.equals(1, calls[1][1], "count=1 for single transition")
@@ -1572,11 +1580,11 @@ describe(
                                 end
                             end
                         )
-                        world:commit()
+                        world:enqueueCommit()
 
                         local despawnQuery = world:newQuery({include = {Position}})
                         world:batchDespawn(despawnQuery)
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(1, #calls, "should fire once for full truncate")
                         luassert.equals(1, calls[1][1], "firstRow = 1")
@@ -1599,10 +1607,10 @@ describe(
                         })
 
                         local id = world:spawn(Position(1, 1))
-                        world:commit()
+                        world:enqueueCommit()
 
                         world:despawn(id)
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(1, #calls)
                         luassert.equals(1, calls[1][1], "count=1 for single despawn")
@@ -1629,14 +1637,14 @@ describe(
                         })
 
                         local id = world:spawn(Position(1, 1))
-                        world:commit()
+                        world:enqueueCommit()
                         luassert.equals(1, #addedCalls)
                         luassert.equals(0, #removedCalls)
 
                         -- Adding Velocity creates a new archetype that still matches {Position}.
                         -- Both src and dst match -- add/remove should be suppressed.
                         world:set(id, Velocity(1, 1))
-                        world:commit()
+                        world:enqueueCommit()
 
                         luassert.equals(1, #addedCalls, "no add when transitioning within match set")
                         luassert.equals(0, #removedCalls, "no remove when transitioning within match set")
@@ -1656,7 +1664,7 @@ describe(
                                 end
                             end
                         )
-                        world:commit()
+                        world:enqueueCommit()
 
                         local calls: {{integer}} = {}
                         world:newQuery({
@@ -1725,12 +1733,11 @@ describe(
                             end,
                         })
 
-                        world:defer()
                         local ids: {integer} = {}
                         for i = 1, 3 do
                             ids[i] = world:spawn(TagA)
                         end
-                        world:commit()
+                        world:enqueueCommit()
 
                         -- Entity count: each of the three entities should appear
                         -- in arch{A,B,C} exactly once and NOT appear in arch{A}
@@ -1889,7 +1896,7 @@ describe(
                                 end
                             end,
                         })
-                        world:commit()
+                        world:enqueueCommit()
 
                         local seen: {integer: boolean} = {}
                         local count = 0

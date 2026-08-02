@@ -44,6 +44,23 @@ start a graphics stack.
 
 General post-processing and tiled maps are not yet built.
 
+## Structural mutation
+
+Tecs uses one deferred structural model. Systems in a phase stage spawns,
+despawns, additions, removals, bundles, and batches together; the scheduler
+publishes them at the phase boundary. A system can declare `commitBefore` or
+`commitAfter` when it unconditionally needs an extra boundary. A conditional
+`enqueueCommit` request made during a system is honored only after that system
+returns, before the next one runs; outside system dispatch it settles
+synchronously for tests and debug tooling. Mutation itself never switches to
+an eager path.
+
+Value access stays direct. `getMut` marks and returns a live component because
+changing its fields cannot move the entity between archetypes. Replacing an
+existing component value through `set` takes the same immediate path. This
+keeps the common simulation loop cheap without maintaining a second structural
+mutation implementation.
+
 Mesh shadows use one camera-centered directional map, not the 2D occluder-mask
 pipeline. Their mark, scan, compact, map, and shader resources exist only when
 the mesh domain opts in. Shadow culling reuses the ordered GPU compaction

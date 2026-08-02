@@ -1,5 +1,5 @@
 --[[
-Deferred mutation paths for `_scopeDepth > 0` and eager fallbacks.
+Deferred structural mutation paths.
 Writes stage into archetype queues; drain performs placement/moves.
 ]]
 
@@ -44,6 +44,27 @@ local macro markDirty!(archExpr: Expression, flagField: Expression)
             local __c = self.dirtyArchetypeCount + 1
             self.dirtyArchetypeList[__c] = $archExpr
             self.dirtyArchetypeCount = __c
+        end
+    ```
+end
+
+-- Queue a committed slot on its source archetype. Repeated mutations may add
+-- duplicates; the sparse drain sorts and coalesces them, while the dense drain
+-- ignores this list and scans once.
+local macro markMoveDirty!(archExpr: Expression, slotExpr: Expression)
+    return ```
+        do
+            local __a = $archExpr
+            local __n = __a.pendingMoveCount + 1
+            __a.pendingMoveCount = __n
+            __a.pendingMoveSlots[__n] = $slotExpr
+            __a.hasPendingMoveOut = true
+            if __a.dirtyQueuedEpoch ~= self._dirtyEpoch then
+                __a.dirtyQueuedEpoch = self._dirtyEpoch
+                local __c = self.dirtyArchetypeCount + 1
+                self.dirtyArchetypeList[__c] = __a
+                self.dirtyArchetypeCount = __c
+            end
         end
     ```
 end
@@ -135,7 +156,7 @@ local macro deferOne!(compExpr: Expression)
                 scalarCount = scalarCount + 1
                 scalarTypes[scalarCount] = ct as Component
                 scalarValues[scalarCount] = (comp as {string:any}).value
-            else
+            elseif ct.storageType ~= "tag" then
                 valCount = valCount + 1
                 vals[valCount] = comp
             end
@@ -147,8 +168,6 @@ local macro deferOne!(compExpr: Expression)
             if container then
                 if arch.columns[container] == nil then
                     arch = arch:withComponent(container, archetypeIndex)
-                    valCount = valCount + 1
-                    vals[valCount] = container
                 end
                 if (container as ComponentInternal).reverseIndex then
                     local store = world.relationshipStores[container]
@@ -185,7 +204,7 @@ local macro deferOne!(compExpr: Expression)
                             scalarCount = scalarCount + 1
                             scalarTypes[scalarCount] = rType
                             scalarValues[scalarCount] = (v as {string:any}).value
-                        else
+                        elseif (rType as ComponentInternal).storageType ~= "tag" then
                             valCount = valCount + 1
                             vals[valCount] = v
                         end
@@ -314,8 +333,6 @@ local macro deferFinish!()
         local autoState = self.autoStateComponent
         if autoState then
             arch = arch:withComponent(autoState, archetypeIndex)
-            valCount = valCount + 1
-            vals[valCount] = autoState
         end
 
         if pendingKey ~= nil then
@@ -323,11 +340,13 @@ local macro deferFinish!()
         end
 
         setPendingArch(self, slot, arch)
-        for i = 1, valCount do
-            appendPendingValue(self, arch, slot, vals[i])
+        if valCount > 0 then
+            arch:adoptPendingValues(slot, vals)
         end
-        for i = 1, scalarCount do
-            stageScalar(self, arch, slot, scalarTypes[i], scalarValues[i])
+        if scalarCount > 0 then
+            arch.pendingScalarTypes[slot] = scalarTypes
+            arch.pendingScalarValues[slot] = scalarValues
+            arch.hasScalarPending = true
         end
 
         local c = arch.pendingSpawnCount + 1
@@ -547,7 +566,7 @@ function WorldImpl:deferSetRaw(id: integer, componentType: Component, value: any
                         appendPendingValue(self, archetype, slot, value)
                     end
                     newArch.pendingWrites = newArch.pendingWrites + 1
-                    markDirty!(archetype, hasPendingMoveOut)
+                    markMoveDirty!(archetype, slot)
                     setPendingArch(self, slot, newArch)
                 end
                 setEntityState(self, slot, STATE_MUTATE)
@@ -585,7 +604,7 @@ function WorldImpl:_deferSetSlow(id: integer, componentType: Component, value: a
             local newArch = pendingArch:withComponent(componentType, self.archetypeIndex)
 
             -- Requires closure applies only when this set structurally
-            -- adds the component, matching the instant path (a value-only
+            -- adds the component, matching the ordinary set path (a value-only
             -- set never re-adds required components).
             local missing: {internal.RequireEntry}
             if newArch ~= pendingArch and ctI._hasRequires then
@@ -632,7 +651,7 @@ function WorldImpl:_deferSetSlow(id: integer, componentType: Component, value: a
                         pendingArch.pendingWrites = pendingArch.pendingWrites - 1
                         newArch.pendingWrites = newArch.pendingWrites + 1
                         -- Ensure moves pass sees this source archetype.
-                        markDirty!(srcArch, hasPendingMoveOut)
+                        markMoveDirty!(srcArch, slot)
                     end
                 end
                 if isScalar then
@@ -676,7 +695,7 @@ function WorldImpl:_deferSetSlow(id: integer, componentType: Component, value: a
 
         local newArch = startArch:withComponent(componentType, self.archetypeIndex)
         -- Requires closure applies only on a structural add, matching the
-        -- instant path.
+        -- committed path.
         local missing: {internal.RequireEntry}
         if newArch ~= startArch and ctI._hasRequires then
             newArch, missing = applyRequires(newArch, ctI, self.archetypeIndex)
@@ -706,7 +725,7 @@ function WorldImpl:_deferSetSlow(id: integer, componentType: Component, value: a
                 stageRequiredDefaults(self, missing, newArch, slot)
             end
         else
-            markDirty!(startArch, hasPendingMoveOut)
+            markMoveDirty!(startArch, slot)
             if isScalar then
                 stageScalar(self, startArch, slot, componentType, value)
             elseif not isTag then
@@ -783,7 +802,7 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
                 end
 
                 newArch.pendingWrites = newArch.pendingWrites + 1
-                markDirty!(archetype, hasPendingMoveOut)
+                markMoveDirty!(archetype, slot)
                 setEntityState(self, slot, STATE_MUTATE)
                 self.entityStateCount = self.entityStateCount + 1
                 setPendingArch(self, slot, newArch)
@@ -864,7 +883,7 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
             local srcArch = self.archetypeIndex[s.archetypeId]
             if srcArch then
                 -- Committed move: track the reservation for the move drain.
-                markDirty!(srcArch, hasPendingMoveOut)
+                markMoveDirty!(srcArch, slot)
                 if hadPendingArch then
                     prevArch.pendingWrites = prevArch.pendingWrites - 1
                 end
@@ -899,7 +918,7 @@ function WorldImpl:_deferDespawn(id: integer)
     local pendingArch = getPendingArch(self, slot)
 
     -- Never-allocated id: nothing committed and nothing staged. Match the
-    -- instant path's silent no-op instead of emitting OnDespawn for a ghost.
+    -- public path's silent no-op instead of emitting OnDespawn for a ghost.
     if not sourceArch and not pendingArch and st == 0 then
         return
     end

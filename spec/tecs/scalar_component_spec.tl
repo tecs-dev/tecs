@@ -17,10 +17,10 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn()
-                world:commit()
+                world:enqueueCommit()
 
                 world:set(e, Health, 42)
-                world:commit()
+                world:enqueueCommit()
 
                 local v = world:get(e, Health)
                 luassert.equals(42, v)
@@ -38,10 +38,10 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn()
-                world:commit()
+                world:enqueueCommit()
 
                 world:set(e, Ammo)
-                world:commit()
+                world:enqueueCommit()
 
                 luassert.equals(12, world:get(e, Ammo))
             end
@@ -58,9 +58,9 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn()
-                world:commit()
+                world:enqueueCommit()
                 world:set(e, Heat, 7)
-                world:commit()
+                world:enqueueCommit()
 
                 local q = world:newQuery({include = {Heat}})
                 local saw = false
@@ -88,11 +88,11 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn()
-                world:commit()
+                world:enqueueCommit()
 
                 world:set(e, Flag)
                 world:set(e, Label)
-                world:commit()
+                world:enqueueCommit()
 
                 luassert.equals(false, world:get(e, Flag))
                 luassert.equals("", world:get(e, Label))
@@ -109,7 +109,7 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn(Tag("hero"))
-                world:commit()
+                world:enqueueCommit()
 
                 luassert.equals("hero", world:get(e, Tag))
             end
@@ -130,7 +130,7 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn(tecs.Transform2D(1, 2), Score(99), Label("boss"))
-                world:commit()
+                world:enqueueCommit()
 
                 luassert.equals(99, world:get(e, Score))
                 luassert.equals("boss", world:get(e, Label))
@@ -151,10 +151,10 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn()
-                world:commit()
+                world:enqueueCommit()
 
                 world:set(e, Mana(50))
-                world:commit()
+                world:enqueueCommit()
 
                 luassert.equals(50, world:get(e, Mana))
             end
@@ -170,7 +170,7 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn(Title("Knight"))
-                world:commit()
+                world:enqueueCommit()
 
                 local v = world:get(e, Title)
                 luassert.equals("string", type(v))
@@ -239,16 +239,16 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn(fakeModule.Stamina(80), fakeModule.Title("hero"))
-                world:commit()
+                world:enqueueCommit()
 
                 luassert.equals(80, world:get(e, fakeModule.Stamina))
                 luassert.equals("hero", world:get(e, fakeModule.Title))
 
                 -- Default flows through `world:set` 2-arg type-only form.
                 local e2 = world:spawn()
-                world:commit()
+                world:enqueueCommit()
                 world:set(e2, fakeModule.Stamina)
-                world:commit()
+                world:enqueueCommit()
                 luassert.equals(50, world:get(e2, fakeModule.Stamina))
             end
         )
@@ -258,7 +258,7 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn(tecs.ecs.Name("Frank"))
-                world:commit()
+                world:enqueueCommit()
 
                 luassert.equals("Frank", world:get(e, tecs.ecs.Name))
             end

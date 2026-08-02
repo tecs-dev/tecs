@@ -79,7 +79,7 @@ local function makeRelationshipStoresMT(world: WorldImpl): metatable<{Component:
             })
             if store then
                 rawset(t as table, container, store)
-                -- Gate for the instant despawn path's `_targetRefCounts[id]`
+                -- Gate for the despawn path's `_targetRefCounts[id]`
                 -- lookup. Once any relationship store exists, targets may
                 -- accumulate refs; before that, the map is always empty.
                 world._hasRelationshipStores = true
@@ -115,9 +115,9 @@ function WorldImpl.new(config?: types.World.Config): World
             _stateComponents = {},
             _statePolicies = {},
             _keyIndex = {},
+            _rebuildKeyIndexAfterCommit = false,
             _transitionObserver = nil,
             _archetypeSnapshotPool = pool.newTablePool({clearOn = "release"}),
-            _scopeDepth = 0,
 
             -- Transaction staging state.
             _dirtyEpoch = 1,
@@ -137,6 +137,7 @@ function WorldImpl.new(config?: types.World.Config): World
             sparseSets = {},
             sparseSetCount = 0,
             _swapRemoveQueue = {},
+            _moveCandidateRows = {},
             batchMutations = {},
             batchMutationCount = 0,
             _valsPool = {},
@@ -145,6 +146,9 @@ function WorldImpl.new(config?: types.World.Config): World
             _sparseArraysPool = pool.newTablePool({clearOn = "release"}),
             _exclusivePool = pool.newTablePool({clearOn = "acquire"}),
             isDirty = false,
+            _commitRequested = false,
+            _runningSystem = false,
+            _committing = false,
             emptyArchetype = archetypeIndex.emptyArchetype,
         },
         WORLD_MT
@@ -320,19 +324,11 @@ function WorldImpl:set(id: integer, component: Component, value?: any)
         end
     end
 
-    if self._scopeDepth > 0 then
-        self:_deferSet(id, componentType, value)
-    else
-        self:_instantSet(id, componentType, value)
-    end
+    self:_deferSet(id, componentType, value)
 end
 
 function WorldImpl:remove(id: integer, component: Component)
-    if self._scopeDepth > 0 then
-        self:_deferRemove(id, component)
-    else
-        self:_instantRemove(id, component)
-    end
+    self:_deferRemove(id, component)
 end
 
 function WorldImpl:markComponentDirty(id: integer, component: Component)
@@ -350,24 +346,14 @@ function WorldImpl:markComponentDirty(id: integer, component: Component)
     end
 end
 
--- Raw set: invoke default set behavior without dispatcher recursion.
--- Scope-aware: routes to deferSetRaw or instantSetRaw based on current
--- scope depth. Called from component-specific callbacks that want default
--- semantics without recursing into themselves.
+-- Raw set: invoke default deferred behavior without dispatcher recursion.
+-- Component-specific callbacks use this after their framework behavior.
 function WorldImpl:setRaw(id: integer, componentType: Component, value: any)
-    if self._scopeDepth > 0 then
-        self:deferSetRaw(id, componentType, value)
-    else
-        self:instantSetRaw(id, componentType, value)
-    end
+    self:deferSetRaw(id, componentType, value)
 end
 
 function WorldImpl:removeRaw(id: integer, component: Component)
-    if self._scopeDepth > 0 then
-        self:deferRemoveRaw(id, component)
-    else
-        self:instantRemoveRaw(id, component)
-    end
+    self:deferRemoveRaw(id, component)
 end
 
 -- Read the current (staging-reconciled) component value for `id`. Returns
@@ -404,41 +390,15 @@ end
 -------------------------------------------------------------------------------
 
 function WorldImpl:spawn(...: Component): integer
-    if self._scopeDepth > 0 then
-        return self:_deferSpawn(...)
-    end
-
-    -- OnSpawn observers require the staged path: the event contract is a
-    -- staged entity (not alive until commit) whose further mutations defer.
-    -- The fallback drains before returning, so the caller still receives a
-    -- committed entity.
-    if not self:hasObservers(0, builtins.OnSpawn) then
-        local ok, id = self:_instantSpawn(...)
-        if ok then
-            return id
-        end
-    end
-    self._scopeDepth = 1
-    local sid = self:_deferSpawn(...)
-    self:_drain()
-    self._scopeDepth = 0
-    return sid
+    return self:_deferSpawn(...)
 end
 
 -- Spawn at a specific packed id. Used by snapshot loading to restore
 -- entities at their original (slot, generation). No instant fast path --
 -- the id+gen arithmetic + free-stack reconciliation lives on the staged
--- path, so we self-scope stage + drain (or stage only under a scope).
+-- path; the owning snapshot transaction publishes it.
 function WorldImpl:spawnAt(id: integer, ...: Component)
-    if self._scopeDepth > 0 then
-        self:_deferSpawnAt(id, ...)
-        return
-    end
-
-    self._scopeDepth = 1
     self:_deferSpawnAt(id, ...)
-    self:_drain()
-    self._scopeDepth = 0
 end
 
 function WorldImpl:forEachArchetype(callback: function(Archetype))
@@ -479,66 +439,35 @@ local function assertNoKeyBatch(componentTypes: {Component}, op: string)
     end
 end
 
--- Batch ops share the staging-queue machinery used by regular deferred
--- mutations. Outside a scope we self-drain; inside a scope we stage and
--- let the outer boundary drain.
+-- Batch ops join the same pending transaction as scalar structural calls.
+-- They never publish rows themselves; `commit` owns placement and observer
+-- notification for the complete transaction.
 function WorldImpl:batchSpawn(
     count: integer, componentTypes: {Component}, callback: function(Archetype, integer, integer, integer)
 ): integer | nil, {integer} | nil
     assertNoKeyBatch(componentTypes, "batchSpawn")
-    if self._scopeDepth > 0 then
-        return self:_deferBatchSpawn(count, componentTypes, callback)
-    end
-    self._scopeDepth = 1
-    local firstId, ids = self:_deferBatchSpawn(count, componentTypes, callback)
-    self:_drain()
-    self._scopeDepth = 0
-    return firstId, ids
+    return self:_deferBatchSpawn(count, componentTypes, callback)
 end
 
 function WorldImpl:batchSpawnAt(
     ids: {integer}, componentTypes: {Component}, callback: function(Archetype, integer, integer, integer)
 )
     assertNoKeyBatch(componentTypes, "batchSpawnAt")
-    if self._scopeDepth > 0 then
-        self:_deferBatchSpawnAt(ids, componentTypes, callback)
-        return
-    end
-    self._scopeDepth = 1
     self:_deferBatchSpawnAt(ids, componentTypes, callback)
-    self:_drain()
-    self._scopeDepth = 0
 end
 
 function WorldImpl:batchSpawnAtRaw(
     ids: any, count: integer, componentTypes: {Component}, callback: function(Archetype, integer, integer, integer)
 )
     local hasKey = hasKeyBatch(componentTypes)
-    if self._scopeDepth > 0 then
-        if hasKey then
-            error("batchSpawnAtRaw with Key is only supported as a self-draining snapshot load operation")
-        end
-        self:_deferBatchSpawnAtRaw(ids, count, componentTypes, callback)
-        return
-    end
-    self._scopeDepth = 1
     self:_deferBatchSpawnAtRaw(ids, count, componentTypes, callback)
-    self:_drain()
-    self._scopeDepth = 0
     if hasKey then
-        self:_rebuildKeyIndex()
+        self._rebuildKeyIndexAfterCommit = true
     end
 end
 
 function WorldImpl:despawn(id: integer)
-    if self._scopeDepth > 0 then
-        self:_deferDespawn(id)
-    elseif not self:_instantDespawn(id) then
-        self._scopeDepth = 1
-        self:_deferDespawn(id)
-        self:_drain()
-        self._scopeDepth = 0
-    end
+    self:_deferDespawn(id)
 end
 
 -- Snapshot matching archetypes from a Query object.
@@ -571,15 +500,7 @@ end
 -- Queue despawn for all archetypes matched by query.
 function WorldImpl:batchDespawn(query: Query)
     local targetArchetypes = archetypesOf(self, query)
-    local inScope = self._scopeDepth > 0
-    if not inScope then
-        self._scopeDepth = 1
-    end
     self:_deferBatchDespawn(targetArchetypes)
-    if not inScope then
-        self:_drain()
-        self._scopeDepth = 0
-    end
     -- `_deferBatchDespawn` consumes this list immediately.
     self._archetypeSnapshotPool:release(targetArchetypes as {any})
 end
@@ -608,10 +529,6 @@ function WorldImpl:batchSet(
         )
     end
 
-    local inScope = self._scopeDepth > 0
-    if not inScope then
-        self._scopeDepth = 1
-    end
     if callback then
         -- Callback form requires a component type.
         if not isContainer then
@@ -625,23 +542,11 @@ function WorldImpl:batchSet(
         -- Constant form accepts instance or tag container.
         self:_deferBatchSet(targetArchetypes, componentType, componentOrInstance)
     end
-    if not inScope then
-        self:_drain()
-        self._scopeDepth = 0
-    end
 end
 
 function WorldImpl:batchRemove(query: Query, componentType: Component)
     local targetArchetypes = archetypesOf(self, query)
-    local inScope = self._scopeDepth > 0
-    if not inScope then
-        self._scopeDepth = 1
-    end
     self:_deferBatchRemove(targetArchetypes, componentType)
-    if not inScope then
-        self:_drain()
-        self._scopeDepth = 0
-    end
 end
 
 function WorldImpl:clearEntities()
@@ -663,7 +568,6 @@ function WorldImpl:clearEntities()
     -- Keeps the arena object identity stable for captured references.
     IdAllocator.reset(self.allocator)
     self:_resetTxn()
-    self._scopeDepth = 0
 
     local archetypeIndex = self.archetypeIndex
     -- `maxId` + nil-check tolerates holes left by compact().
@@ -868,7 +772,6 @@ local function executePolicy(self: WorldImpl, action: string | StatePolicyAction
         return
     end
 
-    self:defer()
     local stateComponent = self._stateComponents[stateName]
 
     -- String shorthand: "pause", "resume", "despawn", "disable"
@@ -888,8 +791,6 @@ local function executePolicy(self: WorldImpl, action: string | StatePolicyAction
             policyAction.call(self)
         end
     end
-
-    self:commit()
 end
 
 function WorldImpl:createState(name: string, policy?: StatePolicy): Component
@@ -1247,59 +1148,41 @@ function WorldImpl:addSnapshotHandler(handler: types.World.SnapshotHandler)
 end
 
 -------------------------------------------------------------------------------
--- Phase methods
+-- Transaction and phase methods
 -------------------------------------------------------------------------------
 
--- Enter query iteration scope.
-function WorldImpl:_pushQueryScope()
-    self._scopeDepth = self._scopeDepth + 1
+function WorldImpl:enqueueCommit()
+    if self._runningSystem or self._committing then
+        self._commitRequested = true
+        return
+    end
+    self:_commit()
 end
 
--- Leave query iteration scope; drain when the outer scope closes.
---
--- Clamped at zero because a cursor opened before an `unwind` is still holding
--- a scope this world no longer has. Closing it afterwards would otherwise push
--- the depth negative and leave every later `defer` one level short of
--- deferring anything.
-function WorldImpl:_popQueryScope()
-    local depth = self._scopeDepth - 1
-    if depth < 0 then
-        depth = 0
+function WorldImpl:_commit()
+    if self._committing then
+        self._commitRequested = true
+        return
     end
-    self._scopeDepth = depth
-    if depth == 0 and self.isDirty then
-        self:_drain()
-    end
-end
 
-function WorldImpl:defer()
-    self._scopeDepth = self._scopeDepth + 1
-end
-
-function WorldImpl:commit()
-    if self._scopeDepth > 0 then
-        self._scopeDepth = self._scopeDepth - 1
-    end
-    if self._scopeDepth == 0 and self.isDirty then
-        self:_drain()
-    end
-end
-
-function WorldImpl:unwind()
-    self._scopeDepth = 0
-    if self.isDirty then
-        self:_drain()
-    end
+    self._committing = true
+    repeat
+        self._commitRequested = false
+        if self.isDirty then
+            self:_drain()
+        end
+        if self._rebuildKeyIndexAfterCommit then
+            self._rebuildKeyIndexAfterCommit = false
+            self:_rebuildKeyIndex()
+        end
+    until not self._commitRequested
+    self._committing = false
 end
 
 function WorldImpl:update(dt: number)
-    -- Unwind rather than commit one level. A system that threw inside
-    -- `query:iter()` never reached the pop that ends the loop's scope, and a
-    -- world left deferred stages every later mutation instead of applying it,
-    -- which nothing announces. At depth zero or one this is exactly the commit
-    -- it replaces; the difference is only that a frame which failed cannot
-    -- make the frames after it lie.
-    self:unwind()
+    -- Publish external input, debug, and asynchronous mutations before any
+    -- system decides whether it should run this update.
+    self:_commit()
     if self._ffiSliceId ~= 0 then
         GLOBAL_FFI_EVENTS:clearSlice(self._ffiSliceId)
     end
@@ -1310,9 +1193,8 @@ function WorldImpl:update(dt: number)
         sampleHierarchyDirty()
     end
 
-    -- Clear component-dirty bits after the pipeline finishes; systems
-    -- drained their own scopes, and the next update's leading commit
-    -- picks up anything still staged.
+    -- Clear dirty bits after the pipeline's phase barriers so every
+    -- dirty-gated consumer observes the complete update.
     for archetype in pairs(self._dirtyArchetypes) do
         archetype:clearDirtyComponents()
     end
@@ -1348,10 +1230,12 @@ function WorldImpl:registerPhase(phase: Phase)
 end
 
 function WorldImpl:startup()
+    self:_commit()
     self.pipeline:run(phases.StartupGroup, 0, self)
 end
 
 function WorldImpl:shutdown()
+    self:_commit()
     self.pipeline:run(phases.ShutdownGroup, 0, self)
     local sliceId = self._ffiSliceId
     if sliceId ~= 0 then
@@ -1361,6 +1245,7 @@ function WorldImpl:shutdown()
 end
 
 function WorldImpl:runPhase(phase: Phase, dt?: number)
+    self:_commit()
     self.pipeline:run(phase, dt or 0, self)
 end
 
@@ -1468,7 +1353,6 @@ end
 
 -- Side-effect module loads attach implementations onto `WorldImpl`.
 require("tecs.internal.world.shared")
-require("tecs.internal.world.instant")
 require("tecs.internal.world.deferred")
 require("tecs.internal.world.batch")
 require("tecs.internal.world.drain")

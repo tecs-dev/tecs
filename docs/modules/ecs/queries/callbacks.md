@@ -75,9 +75,10 @@ A one-component query reacts to that component alone. A wider descriptor can
 express a lifecycle boundary such as `{Enemy, Stunned}` or
 `{Transform2D, RigidBody}` without coordinating separate hooks.
 
-## Commit drain {#deferred-scope}
+## Transaction settle {#transaction-settle}
 
-Query callbacks run inside the commit drain. A drain applies changes in waves:
+Query callbacks run while the pipeline settles a transaction. Settle applies
+changes in waves:
 despawns first, then spawns, then archetype moves. It applies batch mutations
 and sparse relationship writes between waves.
 
@@ -95,7 +96,7 @@ A callback may stage more work. The next wave applies that work:
 A finite callback cascade settles through later waves. Tecs stops an unbounded
 cascade with an error after 64 waves.
 
-The [mutation model](/modules/ecs/mutation-model#commit-drain) defines the complete
+The [mutation model](/modules/ecs/mutation-model#settle-order) defines the complete
 ordering and visibility contract.
 
 ## Archetype-local observers

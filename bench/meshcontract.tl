@@ -119,7 +119,7 @@ world:batchSpawn(
         end
     end
 )
-world:commit()
+world:update(0)
 
 local instances <const> = loader.newArray("float[?]", COUNT * meshlayout.INSTANCE_FLOATS)
 local spheres <const> = loader.newArray("float[?]", COUNT * meshlayout.BOUND_FLOATS)

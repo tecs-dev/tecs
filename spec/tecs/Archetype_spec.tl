@@ -132,7 +132,7 @@ describe(
                             name = "PublicObsTag" .. math.random(1, 1000000),
                         })
                         w:spawn(Tag())
-                        w:commit()
+                        w:enqueueCommit()
 
                         local query = w:newQuery({include = {Tag}})
                         local observed: tecs.ecs.Archetype = nil
@@ -161,7 +161,7 @@ describe(
                         observed:addEntityObserver(observer)
 
                         w:spawn(Tag())
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.equals(1, added)
                     end
@@ -175,7 +175,7 @@ describe(
                         local Tag = tecs.ecs.newTagComponent({name = "MoveObsTag" .. math.random(1, 1000000)})
                         local e1 = w:spawn(Tag())
                         local e2 = w:spawn(Tag())
-                        w:commit()
+                        w:enqueueCommit()
 
                         local moves = 0
                         local arch = (w as WorldImpl):currentArchetype(e1)
@@ -191,7 +191,7 @@ describe(
 
                         -- Despawning e1 swap-pops e2 into its row.
                         w:despawn(e1)
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.equals(1, moves, "an observer defining only onEntityMove must hear swap-pop moves")
                     end

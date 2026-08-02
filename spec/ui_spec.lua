@@ -259,6 +259,7 @@ describe("tecs.ui", function()
         assert.are.equal(calls, renderer.sprites.camera.calls)
 
         local unrelated = world:spawn(Transform2D())
+        world:enqueueCommit()
         world:getMut(unrelated, Transform2D).x = 20
         world:update(1 / 60)
         assert.are.equal(calls, renderer.sprites.camera.calls)

@@ -64,7 +64,7 @@ describe(
                         signatureB_expected[e] = {x, y, z}
                     end
 
-                    w:commit()
+                    w:enqueueCommit()
 
                     -- Verify signature A entities
                     for _, e in ipairs(signatureA_entities) do
@@ -133,7 +133,7 @@ describe(
                     for _, e in ipairs(signatureB_entities) do
                         w:despawn(e)
                     end
-                    w:commit()
+                    w:enqueueCommit()
                 end
             end
         )
@@ -156,7 +156,7 @@ describe(
                         entities[i] = e
                         expected[e] = {x, y, z}
                     end
-                    w:commit()
+                    w:enqueueCommit()
 
                     -- Verify all entities
                     for _, e in ipairs(entities) do
@@ -172,7 +172,7 @@ describe(
                     for _, e in ipairs(entities) do
                         w:despawn(e)
                     end
-                    w:commit()
+                    w:enqueueCommit()
                 end
             end
         )
@@ -196,7 +196,7 @@ describe(
                     entities[i] = e
                     expected[e] = {x, y, z}
                 end
-                w:commit()
+                w:enqueueCommit()
 
                 -- Verify each entity has its own values (not another entity's values)
                 for idx, e in ipairs(entities) do
@@ -292,7 +292,7 @@ describe(
                 local child = w:spawn(
                     Transform2D(0, 0, 0), RelativeTransform2D(10, 20, 0), ChildOf(parent) as tecs.ecs.Component
                 )
-                w:commit()
+                w:enqueueCommit()
 
                 local seen = addDirtyProbe(w, child)
 
@@ -320,7 +320,7 @@ describe(
                 local child = w:spawn(
                     Transform2D(0, 0, 0), RelativeTransform2D(5, 0, 0), ChildOf(parent1) as tecs.ecs.Component
                 )
-                w:commit()
+                w:enqueueCommit()
 
                 w:update(1 / 60)
                 luassert.equals(105, w:get(child, Transform2D).x)
@@ -350,7 +350,7 @@ describe(
                 local relationshipChild = w:spawn(
                     Transform2D(0, 0, 0), RelativeTransform2D(7, 0, 0), ChildOf(parent1) as tecs.ecs.Component
                 )
-                w:commit()
+                w:enqueueCommit()
 
                 w:update(1 / 60)
                 luassert.equals(105, w:get(transformChild, Transform2D).x)

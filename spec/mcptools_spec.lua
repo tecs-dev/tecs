@@ -152,7 +152,7 @@ describe("mcp context", function()
         for index = 1, 3 do
             world:spawn(tecs.Transform2D(index, 0, 0, 1, 0, 1, 1))
         end
-        world:commit()
+        world:enqueueCommit()
         tools.bind(nil, world)
 
         local reported = call("context", {}).world

@@ -85,7 +85,7 @@ The definition may name each component once across `required` and `with`.
 Registration rejects duplicates, invalid `with` values, and duplicate bundle
 names.
 
-## Spawning and deferred scopes
+## Staged spawning
 
 The bundle object and the world registry call the same compiled spawn path:
 
@@ -102,11 +102,9 @@ local second <const> = world:spawnBundle(
 )
 ```
 
-Bundle spawns follow `world:spawn` timing. Outside a deferred scope, the entity
-occupies its archetype before the call returns. Inside query iteration,
-callbacks, a batch callback, or an explicit deferred scope, the world stages
-the spawn until commit. The returned ID works immediately for later staged
-operations:
+Bundle spawns follow `world:spawn` timing. They reserve an ID immediately and
+stage placement until the next pipeline barrier. The returned ID works
+immediately for later staged operations:
 
 ```teal
 for _archetype, _length in query:iter() do

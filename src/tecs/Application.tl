@@ -106,6 +106,7 @@ Methods whose names begin with an underscore belong to the host contract.
 local data <const> = require("tecs.data")
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
+local type internal = require("tecs.internal.types")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local time <const> = require("tecs.platform.time")
@@ -523,9 +524,11 @@ function Application:_recover()
 
     local world = self.world
     if world ~= nil then
-        local ok, failure = pcall(world.unwind, world) as (boolean, any)
+        local worldImpl <const> = world as internal.WorldImpl
+        local reset <const> = worldImpl._resetTxn
+        local ok, failure = pcall(reset, worldImpl) as (boolean, any)
         if not ok then
-            LOGGER:error("the world could not be unwound: %s", tostring(failure))
+            LOGGER:error("the world's pending mutations could not be discarded: %s", tostring(failure))
         end
     end
 

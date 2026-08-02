@@ -37,9 +37,8 @@ describe(
                         -- e1 lives in archetype {Shared}; e2 in archetype {Shared, Extra}.
                         local e1 = w:spawn(Shared(11))
                         local e2 = w:spawn(Shared(22), Extra(1))
-                        w:commit()
+                        w:enqueueCommit()
 
-                        w:defer()
                         -- Caches ( {Shared} archetype, Shared, its column ).
                         w:set(e1, Shared(100))
                         -- Remove of a component e2's archetype lacks; must not pair the
@@ -47,7 +46,7 @@ describe(
                         w:remove(e2, Absent)
                         -- Same-archetype value update for e2.
                         w:set(e2, Shared(200))
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.equals(100, w:get(e1, Shared).v)
                         luassert.equals(200, w:get(e2, Shared).v)
@@ -60,14 +59,13 @@ describe(
                         local w = tecs.ecs.newWorld()
                         local e1 = w:spawn(Shared(11))
                         local e2 = w:spawn(Shared(22), Extra(1))
-                        w:commit()
+                        w:enqueueCommit()
 
-                        w:defer()
                         w:set(e1, Shared(100))
                         -- Structural remove staging a move out of {Shared, Extra}.
                         w:remove(e2, Extra)
                         w:set(e2, Shared(200))
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.equals(100, w:get(e1, Shared).v)
                         luassert.equals(200, w:get(e2, Shared).v)
@@ -99,11 +97,10 @@ describe(
                     "settles after deferred spawns",
                     function()
                         local w = tecs.ecs.newWorld()
-                        w:defer()
                         for i = 1, 50 do
                             w:spawn(Shared(i))
                         end
-                        w:commit()
+                        w:enqueueCommit()
                         assertSettled(w)
                     end
                 )
@@ -113,11 +110,10 @@ describe(
                     function()
                         local w = tecs.ecs.newWorld()
                         local e = w:spawn(Shared(1))
-                        w:commit()
+                        w:enqueueCommit()
 
-                        w:defer()
                         w:set(e, Extra(2))
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.equals(2, w:get(e, Extra).e)
                         assertSettled(w)
@@ -128,11 +124,10 @@ describe(
                     "settles when a staged spawn migrates and despawns",
                     function()
                         local w = tecs.ecs.newWorld()
-                        w:defer()
                         local id = w:spawn(Shared(1))
                         w:set(id, Extra(2))
                         w:despawn(id)
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.is_false(w:isAlive(id))
                         assertSettled(w)
@@ -144,12 +139,11 @@ describe(
                     function()
                         local w = tecs.ecs.newWorld()
                         local e = w:spawn(Shared(1))
-                        w:commit()
+                        w:enqueueCommit()
 
-                        w:defer()
                         w:set(e, Extra(2))
                         w:despawn(e)
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.is_false(w:isAlive(e))
                         assertSettled(w)
@@ -160,11 +154,10 @@ describe(
                     "settles when a batch-spawned entity is removed in the same scope",
                     function()
                         local w = tecs.ecs.newWorld()
-                        w:defer()
                         local firstId = w:batchSpawn(10, {Shared}, function(_arch, _first, _last, _count) end)
                         luassert.is_not_nil(firstId)
                         w:remove(firstId as integer, Shared)
-                        w:commit()
+                        w:enqueueCommit()
                         assertSettled(w)
                     end
                 )
@@ -173,7 +166,6 @@ describe(
                     "tolerates repeated sets on a batch-staged id",
                     function()
                         local w = tecs.ecs.newWorld()
-                        w:defer()
                         local firstId = w:batchSpawn(
                             5,
                             {Shared},
@@ -189,7 +181,7 @@ describe(
                         -- branch, which has no committed source archetype.
                         w:set(id, Extra(1))
                         w:set(id, Extra(2))
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.is_true(w:isAlive(id))
                         luassert.is_not_nil(w:get(id, Shared))
@@ -202,20 +194,18 @@ describe(
                     function()
                         local w = tecs.ecs.newWorld()
                         for _ = 1, 5 do
-                            w:defer()
                             for i = 1, 20 do
                                 w:spawn(Shared(i), Extra(i))
                             end
-                            w:commit()
+                            w:enqueueCommit()
                         end
                         assertSettled(w)
 
                         -- A later move into the same archetype must still settle.
                         local e = w:spawn(Shared(0))
-                        w:commit()
-                        w:defer()
+                        w:enqueueCommit()
                         w:set(e, Extra(1))
-                        w:commit()
+                        w:enqueueCommit()
                         luassert.equals(1, w:get(e, Extra).e)
                         assertSettled(w)
                     end
@@ -234,13 +224,12 @@ describe(
                         for i = 1, 4 do
                             ids[i] = w:spawn(Shared(i))
                         end
-                        w:commit()
+                        w:enqueueCommit()
 
                         w:observe(0, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn) w:despawn(e.entity) end)
 
-                        w:defer()
                         w:despawn(ids[2])
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.is_false(w:isAlive(ids[2]))
                         luassert.is_true(w:isAlive(ids[1]))
@@ -256,11 +245,12 @@ describe(
                         local a = w:spawn(Shared(1))
                         local b = w:spawn(Shared(2))
                         local c = w:spawn(Shared(3))
-                        w:commit()
+                        w:enqueueCommit()
 
                         w:observe(0, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn) w:despawn(e.entity) end)
 
                         w:despawn(a)
+                        w:enqueueCommit()
 
                         luassert.is_false(w:isAlive(a))
                         luassert.is_true(w:isAlive(b))
@@ -276,7 +266,7 @@ describe(
                         local w = tecs.ecs.newWorld()
                         local e1 = w:spawn(Shared(1))
                         local e2 = w:spawn(Shared(2))
-                        w:commit()
+                        w:enqueueCommit()
 
                         -- Fires during the spawn phase of the drain, before the move
                         -- phase relocates e1's staged move.
@@ -294,10 +284,9 @@ describe(
                             end,
                         })
 
-                        w:defer()
                         w:set(e1, Extra(1))
                         w:spawn(Shared(9), Extra(9))
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.is_true(fired)
                         luassert.is_false(w:isAlive(e1), "the drain-staged despawn must win")
@@ -314,7 +303,7 @@ describe(
                         for i = 1, 3 do
                             ids[i] = w:spawn(Shared(i))
                         end
-                        w:commit()
+                        w:enqueueCommit()
 
                         local cascaded = false
                         w:newQuery({
@@ -330,9 +319,8 @@ describe(
                             end,
                         })
 
-                        w:defer()
                         w:despawn(ids[1])
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.is_true(cascaded)
                         luassert.is_false(w:isAlive(ids[1]))
@@ -347,7 +335,7 @@ describe(
                         local w = tecs.ecs.newWorld()
                         local e1 = w:spawn(Shared(1))
                         local s1 = w:spawn(Absent(1))
-                        w:commit()
+                        w:enqueueCommit()
 
                         local sharedQuery = w:newQuery({include = {Shared}})
                         local absentQuery = w:newQuery({include = {Absent}})
@@ -367,11 +355,10 @@ describe(
                             end,
                         })
 
-                        w:defer()
                         -- Applied in the one-shot phase; its onEntitiesAdded stages a
                         -- second batch mutation that must run in a later round.
                         w:batchSet(sharedQuery, Extra(5))
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.is_true(staged)
                         luassert.equals(5, w:get(e1, Extra).e)

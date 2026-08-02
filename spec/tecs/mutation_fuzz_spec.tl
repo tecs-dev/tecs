@@ -4,14 +4,13 @@ local luassert <const> = require("luassert")
 local WorldImpl <const> = require("tecs.internal.world")
 
 --[[
-Differential fuzz over the mutation model: the same seeded op sequence
-runs against two worlds, one applying every op on the instant path and
-one staging every op through defer/commit. After each block of ops the
+Differential fuzz over the mutation model: the same seeded operation sequence
+runs against two worlds using the same deferred transaction boundaries. After
+each block of operations the
 canonical world states must match and both worlds must pass the
 structural integrity validator.
 
-Composite ops stage several mutations in ONE scope on the staged world
-while the instant world applies them back to back; these hunt for
+Composite operations stage several mutations in one transaction; these hunt for
 staging bugs that single ops cannot reach (remove-then-set self-moves,
 despawn cancellation, staged-spawn mutation). The op universe also
 covers sparse relationships (builtin ChildOf: exclusive, reverseIndex,
@@ -23,8 +22,7 @@ fills, bundle spawns, batchSet / batchRemove / batchDespawn, TTL plus
 world:update ticks, state push/pop (auto-tagging, despawn-on-exit
 policy), clearEntities, compact, and mid-sequence snapshot save/load
 round-trips. Even seeds install an OnSpawn observer actor that mutates
-every third spawn (and forces the staged spawn regime); odd seeds keep
-the instant paths hot. A query-callback ledger asserts added minus
+every third spawn. A query-callback ledger asserts added minus
 removed equals the currently matching count per world, and each seed
 ends with a snapshot fidelity check: table and binary saves restore
 into fresh worlds with identical observable state, and a save of the
@@ -36,8 +34,7 @@ the closure so the two worlds never share a mutable value.
 
 Id parity: ops address entities by id, so both worlds must allocate
 identical ids. Row order inside an archetype is NOT part of the
-observable contract and legitimately differs between instant and staged
-execution, which reorders slot frees (despawns free in row order). The
+observable contract and may differ across transaction shapes. The
 harness therefore sorts both worlds' free stacks after every op: the
 free SET must match (asserted at checkpoints; a mismatch is a slot
 leak), while free ORDER is canonicalized so recycling stays in
@@ -313,14 +310,14 @@ local curSeed = 0
 local curStep = 0
 local curOp = ""
 
--- Apply the same ops to both worlds: instant on `wa`, one staged scope
--- on `wb`. Spawning ops return the new id from each world; slot
+-- Apply the same operation and barrier to both worlds. Spawning operations
+-- return the new id from each world; slot
 -- allocation happens at call time on both paths so the ids must match.
 local function bothWorlds(wa: tecs.World, wb: tecs.World, opsFn: OpFn): integer
     local ra = opsFn(wa)
-    wb:defer()
     local rb = opsFn(wb)
-    wb:commit()
+    wa:enqueueCommit()
+    wb:enqueueCommit()
     if ra ~= nil or rb ~= nil then
         luassert.equals(
             ra, rb, "spawned ids diverged between worlds at seed " .. curSeed .. " step " .. curStep .. " op " .. curOp
@@ -339,7 +336,7 @@ describe(
     "mutation differential fuzz",
     function()
         it(
-            "instant and staged execution converge over random op sequences",
+            "deferred execution is deterministic over random operation sequences",
             function()
                 for seedIndex = 1, FUZZ_SEEDS do
                     local seed = FUZZ_SEED_OFFSET + seedIndex
@@ -357,9 +354,8 @@ describe(
                     wb:createState("fuzzState")
 
                     -- Observer actors on even seeds: an OnSpawn observer that
-                    -- mutates a subset of spawned entities. Its presence also
-                    -- forces every spawn through the staged route, so odd seeds
-                    -- keep fuzzing the instant spawn paths. Two rules keep this
+                    -- mutates a subset of spawned entities and exercises
+                    -- re-entrant staging. Two rules keep this
                     -- deterministic: never allocate inside an observer (a spawn
                     -- fires at different points on the two paths and desyncs
                     -- ids), and decide from the ENTITY ID, never from arrival
@@ -1021,9 +1017,9 @@ describe(
                                     return out
                                 end
                                 local ra = doBatch(wa)
-                                wb:defer()
                                 local rb = doBatch(wb)
-                                wb:commit()
+                                wa:enqueueCommit()
+                                wb:enqueueCommit()
                                 for i = 1, n do
                                     luassert.equals(ra[i], rb[i], "batchSpawn ids diverged, seed " .. seed)
                                     alive[#alive + 1] = ra[i]
@@ -1062,9 +1058,9 @@ describe(
                                     )
                                 end
                                 doBatchAt(wa)
-                                wb:defer()
                                 doBatchAt(wb)
-                                wb:commit()
+                                wa:enqueueCommit()
+                                wb:enqueueCommit()
                                 for i = 1, n do
                                     alive[#alive + 1] = idsList[i]
                                 end
@@ -1198,6 +1194,8 @@ describe(
                                     wb:pushState("fuzzState")
                                     statePushed = true
                                 end
+                                wa:enqueueCommit()
+                                wb:enqueueCommit()
                             end,
                         },
                         {

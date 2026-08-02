@@ -295,7 +295,7 @@ describe(
                 end
 
                 it(
-                    "eager set then eager remove zeroes the reverse index",
+                    "set then remove zeroes the reverse index",
                     function()
                         local Follows = tecs.ecs.newRelationship({
                             name = "RevIdx_SetRemove",
@@ -305,8 +305,10 @@ describe(
                         local w = tecs.ecs.newWorld()
                         local leader = w:spawn()
                         local f = w:spawn(Follows(leader) as tecs.ecs.Component)
+                        w:enqueueCommit()
                         luassert.equals(1, count_sources(w, leader, Follows))
                         w:remove(f, Follows(leader) as tecs.ecs.Component)
+                        w:enqueueCommit()
                         luassert.equals(0, count_sources(w, leader, Follows))
                     end
                 )
@@ -322,19 +324,17 @@ describe(
                         local w = tecs.ecs.newWorld()
                         local leader = w:spawn()
                         local follower = w:spawn()
-                        w:defer()
                         w:set(follower, Follows(leader) as tecs.ecs.Component)
-                        w:commit()
+                        w:enqueueCommit()
                         luassert.equals(1, count_sources(w, leader, Follows))
-                        w:defer()
                         w:remove(follower, Follows(leader) as tecs.ecs.Component)
-                        w:commit()
+                        w:enqueueCommit()
                         luassert.equals(0, count_sources(w, leader, Follows))
                     end
                 )
 
                 it(
-                    "instant and deferred mutation sequences converge to identical state (committed entities)",
+                    "repeated deferred mutation sequences converge to identical state",
                     function()
                         local function build_world(
                             deferred: boolean
@@ -350,13 +350,8 @@ describe(
                             local function run()
                                 w:set(a, Follows(l2) as tecs.ecs.Component)
                             end
-                            if deferred then
-                                w:defer()
-                                run()
-                                w:commit()
-                            else
-                                run()
-                            end
+                            run()
+                            w:enqueueCommit()
                             return l1, l2, a, w, Follows
                         end
 
@@ -366,12 +361,12 @@ describe(
                         luassert.equals(
                             count_sources(iw, il1, iFollows),
                             count_sources(dw, dl1, dFollows),
-                            "instant vs deferred leader1 source count mismatch"
+                            "first deferred run leader1 source count mismatch"
                         )
                         luassert.equals(
                             count_sources(iw, il2, iFollows),
                             count_sources(dw, dl2, dFollows),
-                            "instant vs deferred leader2 source count mismatch"
+                            "second deferred run leader2 source count mismatch"
                         )
                         luassert.equals(0, count_sources(iw, il1, iFollows))
                         luassert.equals(1, count_sources(iw, il2, iFollows))
@@ -379,7 +374,7 @@ describe(
                 )
 
                 it(
-                    "exclusive replace on STATE_SPAWN entity in same deferred scope",
+                    "exclusive replace on a staged spawn",
                     function()
                         -- Exclusive sibling eviction runs for staged entities
                         -- before they leave STATE_SPAWN.
@@ -390,11 +385,10 @@ describe(
                         })
                         local w = tecs.ecs.newWorld()
                         local l1, l2 = w:spawn(), w:spawn()
-                        w:defer()
                         local a = w:spawn()
                         w:set(a, Follows(l1) as tecs.ecs.Component)
                         w:set(a, Follows(l2) as tecs.ecs.Component) -- reparent, same scope
-                        w:commit()
+                        w:enqueueCommit()
 
                         luassert.equals(
                             0,
@@ -444,10 +438,9 @@ describe(
                         luassert.equals(10, count_sources(w, leader, Follows))
 
                         w:remove(followers[2], Follows(leader) as tecs.ecs.Component)
-                        w:defer()
                         w:remove(followers[4], Follows(leader) as tecs.ecs.Component)
                         w:remove(followers[6], Follows(leader) as tecs.ecs.Component)
-                        w:commit()
+                        w:enqueueCommit()
                         w:despawn(followers[8])
                         luassert.equals(6, count_sources(w, leader, Follows))
                     end
@@ -471,6 +464,7 @@ describe(
                         local w = tecs.ecs.newWorld()
                         local leader = w:spawn()
                         local follower = w:spawn(Follows(leader) as tecs.ecs.Component)
+                        w:enqueueCommit()
 
                         local function count(): integer
                             local n = 0
@@ -480,6 +474,7 @@ describe(
                         luassert.equals(1, count(), "precondition: follower is linked")
 
                         w:despawn(follower)
+                        w:enqueueCommit()
                         luassert.equals(0, count(), "reverse index must be cleared by onDespawn hook")
                     end
                 )
