@@ -321,8 +321,9 @@ weights them by the squared components of each mesh normal, adds the result to
 `ambientLight`, and applies ambient occlusion and the material's diffuse-metal
 split. This is diffuse probe lighting, not specular image-based lighting.
 Assign through `app.renderer.meshes.probe` to change it at runtime. Omitting
-`meshes.probe` adds no uniform data, fragment work, or shader variant to a 2D
-or ordinary 3D application.
+`meshes.probe` adds no uniform data or fragment work and selects no probe
+pipeline in a 2D or ordinary 3D application. Prebuilt releases currently
+carry those optional variants in the shared shader pack.
 
 Ordinary glTF images decode to RGBA8. Unpacked mipmapped arrays accept smaller
 images by repeating their edge through the rest of the fixed layer before GPU

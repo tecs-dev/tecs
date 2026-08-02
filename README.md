@@ -110,6 +110,11 @@ probe. It intentionally covers only the diffuse PBR lobe. Glossy reflections,
 local reflection volumes, and authored lightmaps remain separate future lanes
 instead of making this baseline probe expensive.
 
+The probe variants are pipeline-isolated but not yet package-isolated. The
+shared shader pack carries them even when a 2D application never selects one,
+so splitting or lazily decoding shader domains remains packaging work rather
+than a steady-frame rendering cost.
+
 A mixed renderer keeps HUD work in the sprite domain. A highest,
 screen-space, unlit layer with `overlay = true` routes even fully opaque 2D
 content through the existing sorted forward lane after meshes and bloom. It
