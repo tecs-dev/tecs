@@ -47,12 +47,7 @@ local record SpriteDomainOptions
     packImages: boolean
 end
 
-local record SpriteDomain
-    type Options = SpriteDomainOptions
-    type InstanceProducer = InstanceProducer
-    type ClipRegion = ClipRegion
-    type ComputeStage = ComputeStage
-
+local interface SpriteDomain
     --- Caller-writable. Controls the 2D view. The first drawable frame centers
     --- it on the viewport.
     camera: Camera2D
@@ -70,18 +65,112 @@ local record SpriteDomain
     --- Ordinary game code should ignore it.
     instances: Buffer
 
+    --- Uploads a decoded image and returns a sprite selecting the whole image.
+    ---
+    --- The path identifies the image for this domain's lifetime. Re-registering
+    --- it returns the existing region. The call releases valid decoded pixels.
+    --- @param decoded The caller supplies a ready image that still owns its pixels.
+    --- @return Returns a fresh sprite that selects the whole image.
+    --- @return Returns the domain-owned live region that contains the image.
+    registerImage: function(self, decoded: assets.Image): components.Sprite, TextureArray.Region
+
+    --- Uploads a decoded image over the one registered under its path.
+    ---
+    --- The replacement keeps the registered layer and rectangle, so existing
+    --- sprites keep their identity. Missing pixels, an unknown path, or a size
+    --- change raises. The call releases valid decoded pixels.
+    --- @param decoded The caller supplies an image matching a registered path and size.
+    --- @return Returns a fresh sprite selecting the unchanged region.
+    --- @return Returns the domain-owned live region.
+    replaceImage: function(self, decoded: assets.Image): components.Sprite, TextureArray.Region
+
+    --- Returns the region occupied by a registered image.
+    --- @param path The caller supplies the path used during registration.
+    --- @return Returns the domain-owned live region, or nil when none matches.
+    regionOf: function(self, path: string): TextureArray.Region
+
+    --- Returns whether archetype runs have room to grow.
+    --- @return Returns the fixed creation setting.
+    reservesRuns: function(self): boolean
+
+    --- Returns a sprite for a registered image.
+    ---
+    --- UVs are fractions of the image. Omitted values select the whole image.
+    --- An unknown name raises.
+    --- @param name The caller supplies the registered image path.
+    --- @param u0 The caller supplies the left fraction or omits it for zero.
+    --- @param v0 The caller supplies the top fraction or omits it for zero.
+    --- @param u1 The caller supplies the right fraction or omits it for one.
+    --- @param v1 The caller supplies the bottom fraction or omits it for one.
+    --- @return Returns a fresh sprite mapped into the image-array region.
+    sprite: function(self, name: string, u0?: number, v0?: number, u1?: number, v1?: number): components.Sprite
+
+    --- Returns a sprite's natural size in source-image pixels.
+    --- @param sprite The caller supplies a sprite registered on this domain.
+    --- @return Returns its width, or zero when the image is unresolved.
+    --- @return Returns its height, or zero when the image is unresolved.
+    spriteSize: function(self, sprite: components.Sprite): number, number
+
+    --- Assigns a clipping rectangle in target pixels.
+    --- @param index The caller supplies an integer from 1 through 255.
+    --- @param region The caller supplies the target-pixel rectangle.
+    setClipRegion: function(self, index: integer, region: ClipRegion)
+
+    --- Stops one clip-region index from clipping.
+    --- @param index The caller supplies an integer from 1 through 255.
+    clearClipRegion: function(self, index: integer)
+
+    --- Adds a retained instance producer after archetype instances.
+    --- @param producer The caller supplies a producer destroyed with the domain.
+    addProducer: function(self, producer: InstanceProducer)
+
+    --- Adds a compute stage between staging flush and sprite culling.
+    --- @param stage The caller supplies a stage retained and destroyed by the domain.
+    addComputeStage: function(self, stage: ComputeStage)
+end
+
+local interface SpriteDomainInternal is SpriteDomain
+    _install: function(self, world: types.World)
+    _setStaging: function(self, slot: integer)
+    _center: function(self, frame: Frame)
+    _prepare: function(self, frame: Frame, camera?: Camera2D, width?: number, height?: number, upload?: boolean)
+    _recordOccluders: function(self, context: Deferred.PassContext)
+    _recordDropShadows: function(self, context: Deferred.PassContext)
+    _recordGeometry: function(self, context: Deferred.PassContext)
+    _recordForward: function(self, context: Deferred.PassContext)
+    _castsThisFrame: function(self): boolean
+    _rebuildPipelines: function(self)
+    _device: function(self): loader.CPtr
+    _extractSeconds: function(self): number
+    _destroy: function(self)
+end
+
+local record SpriteDomainImpl is SpriteDomainInternal
     _extractor: SpriteExtractor
     _backend: SpriteBackend
     _packet: SpriteFramePacket
     _centered: boolean
 end
 
-local SpriteDomainMT <const>: metatable<SpriteDomain> = {__index = SpriteDomain}
+local record SpriteDomainModule
+    type Domain = SpriteDomain
+    type Internal = SpriteDomainInternal
+    type Options = SpriteDomainOptions
+    type InstanceProducer = InstanceProducer
+    type ClipRegion = ClipRegion
+    type ComputeStage = ComputeStage
+
+    _create: function(device: loader.CPtr, deferred: Deferred, options: SpriteDomainOptions): SpriteDomainInternal
+end
+
+local SpriteDomainMT <const>: metatable<SpriteDomainImpl> = {__index = SpriteDomainImpl}
 
 --- Creates the sprite lane against a renderer-owned deferred pipeline.
-function SpriteDomain._create(device: loader.CPtr, deferred: Deferred, options: SpriteDomainOptions): SpriteDomain
+function SpriteDomainModule._create(
+    device: loader.CPtr, deferred: Deferred, options: SpriteDomainOptions
+): SpriteDomainInternal
     options = options or {}
-    local self = setmetatable({} as SpriteDomain, SpriteDomainMT)
+    local self = setmetatable({} as SpriteDomainImpl, SpriteDomainMT)
     self.capacity = options.capacity or DEFAULT_CAPACITY
     self.count = 0
     self.dropped = 0
@@ -118,7 +207,7 @@ function SpriteDomain._create(device: loader.CPtr, deferred: Deferred, options: 
 end
 
 --- Registers sprite extraction on a world.
-function SpriteDomain:_install(world: types.World)
+function SpriteDomainImpl:_install(world: types.World)
     self._extractor:install(
         world,
         self._packet,
@@ -132,12 +221,12 @@ function SpriteDomain:_install(world: types.World)
 end
 
 --- Points the next extraction at one renderer-selected staging slot.
-function SpriteDomain:_setStaging(slot: integer)
+function SpriteDomainImpl:_setStaging(slot: integer)
     self._extractor:setStaging(slot, self._backend:mapSlot(slot))
 end
 
 --- Centers the default 2D camera once the first drawable frame has a size.
-function SpriteDomain:_center(frame: Frame)
+function SpriteDomainImpl:_center(frame: Frame)
     local packet <const> = self._packet
     if self._centered or packet.count == 0 then
         return
@@ -149,39 +238,32 @@ function SpriteDomain:_center(frame: Frame)
 end
 
 --- Uploads and culls the last extracted sprite packet.
-function SpriteDomain:_prepare(frame: Frame, camera?: Camera2D, width?: number, height?: number, upload?: boolean)
+function SpriteDomainImpl:_prepare(frame: Frame, camera?: Camera2D, width?: number, height?: number, upload?: boolean)
     self._backend:prepare(self._packet, frame, camera, width, height, upload)
 end
 
-function SpriteDomain:_recordOccluders(context: Deferred.PassContext)
+function SpriteDomainImpl:_recordOccluders(context: Deferred.PassContext)
     self._backend:recordOccluders(context)
 end
 
-function SpriteDomain:_recordDropShadows(context: Deferred.PassContext)
+function SpriteDomainImpl:_recordDropShadows(context: Deferred.PassContext)
     self._backend:recordDropShadows(context)
 end
 
-function SpriteDomain:_recordGeometry(context: Deferred.PassContext)
+function SpriteDomainImpl:_recordGeometry(context: Deferred.PassContext)
     self._backend:recordGeometry(context)
 end
 
-function SpriteDomain:_recordForward(context: Deferred.PassContext)
+function SpriteDomainImpl:_recordForward(context: Deferred.PassContext)
     self._backend:recordForward(context)
 end
 
 --- Returns whether the current packet can contribute to the shadow lane.
-function SpriteDomain:_castsThisFrame(): boolean
+function SpriteDomainImpl:_castsThisFrame(): boolean
     return self._backend:castsThisFrame()
 end
 
---- Uploads a decoded image and returns a sprite selecting the whole image.
----
---- The path identifies the image for this domain's lifetime. Re-registering
---- it returns the existing region. The call releases valid decoded pixels.
---- @param decoded The caller supplies a ready image that still owns its pixels.
---- @return Returns a fresh sprite that selects the whole image.
---- @return Returns the domain-owned live region that contains the image.
-function SpriteDomain:registerImage(decoded: assets.Image): components.Sprite, TextureArray.Region
+function SpriteDomainImpl:registerImage(decoded: assets.Image): components.Sprite, TextureArray.Region
     if decoded.pixels == nil then
         error(("tecs: the pixels of '%s' have been released"):format(decoded.path), 2)
     end
@@ -195,15 +277,7 @@ function SpriteDomain:registerImage(decoded: assets.Image): components.Sprite, T
     return components.Sprite(image, region.u0, region.v0, region.u1, region.v1, region.layer), region
 end
 
---- Uploads a decoded image over the one registered under its path.
----
---- The replacement keeps the registered layer and rectangle, so existing
---- sprites keep their identity. Missing pixels, an unknown path, or a size
---- change raises. The call releases valid decoded pixels.
---- @param decoded The caller supplies an image matching a registered path and size.
---- @return Returns a fresh sprite selecting the unchanged region.
---- @return Returns the domain-owned live region.
-function SpriteDomain:replaceImage(decoded: assets.Image): components.Sprite, TextureArray.Region
+function SpriteDomainImpl:replaceImage(decoded: assets.Image): components.Sprite, TextureArray.Region
     if decoded.pixels == nil then
         error(("tecs: the pixels of '%s' have been released"):format(decoded.path), 2)
     end
@@ -225,38 +299,19 @@ function SpriteDomain:replaceImage(decoded: assets.Image): components.Sprite, Te
     return components.Sprite(image, region.u0, region.v0, region.u1, region.v1, region.layer), region
 end
 
---- Returns the region occupied by a registered image.
---- @param path The caller supplies the path used during registration.
---- @return Returns the domain-owned live region, or nil when none matches.
-function SpriteDomain:regionOf(path: string): TextureArray.Region
+function SpriteDomainImpl:regionOf(path: string): TextureArray.Region
     return self._extractor:regionOf(components.imageId(path))
 end
 
---- Returns whether archetype runs have room to grow.
---- @return Returns the fixed creation setting.
-function SpriteDomain:reservesRuns(): boolean
+function SpriteDomainImpl:reservesRuns(): boolean
     return self._extractor:reservesRuns()
 end
 
---- Returns a sprite for a registered image.
----
---- UVs are fractions of the image. Omitted values select the whole image. An
---- unknown name raises.
---- @param name The caller supplies the registered image path.
---- @param u0 The caller supplies the left fraction or omits it for zero.
---- @param v0 The caller supplies the top fraction or omits it for zero.
---- @param u1 The caller supplies the right fraction or omits it for one.
---- @param v1 The caller supplies the bottom fraction or omits it for one.
---- @return Returns a fresh sprite mapped into the image-array region.
-function SpriteDomain:sprite(name: string, u0?: number, v0?: number, u1?: number, v1?: number): components.Sprite
+function SpriteDomainImpl:sprite(name: string, u0?: number, v0?: number, u1?: number, v1?: number): components.Sprite
     return self._extractor:sprite(name, u0, v0, u1, v1)
 end
 
---- Returns a sprite's natural size in source-image pixels.
---- @param sprite The caller supplies a sprite registered on this domain.
---- @return Returns its width, or zero when the image is unresolved.
---- @return Returns its height, or zero when the image is unresolved.
-function SpriteDomain:spriteSize(sprite: components.Sprite): number, number
+function SpriteDomainImpl:spriteSize(sprite: components.Sprite): number, number
     if sprite == nil or sprite.image == 0 then
         return 0, 0
     end
@@ -276,46 +331,37 @@ function SpriteDomain:spriteSize(sprite: components.Sprite): number, number
         math.abs((sprite.v1 - sprite.v0) / spanV) * region.height
 end
 
---- Assigns a clipping rectangle in target pixels.
---- @param index The caller supplies an integer from 1 through 255.
---- @param region The caller supplies the target-pixel rectangle.
-function SpriteDomain:setClipRegion(index: integer, region: ClipRegion)
+function SpriteDomainImpl:setClipRegion(index: integer, region: ClipRegion)
     self._backend:setClipRegion(index, region)
 end
 
---- Stops one clip-region index from clipping.
---- @param index The caller supplies an integer from 1 through 255.
-function SpriteDomain:clearClipRegion(index: integer)
+function SpriteDomainImpl:clearClipRegion(index: integer)
     self._backend:clearClipRegion(index)
 end
 
---- Adds a retained instance producer after archetype instances.
---- @param producer The caller supplies a producer destroyed with the domain.
-function SpriteDomain:addProducer(producer: InstanceProducer)
+function SpriteDomainImpl:addProducer(producer: InstanceProducer)
     self._extractor:addProducer(producer)
 end
 
---- Adds a compute stage between staging flush and sprite culling.
---- @param stage The caller supplies a stage retained and destroyed by the domain.
-function SpriteDomain:addComputeStage(stage: ComputeStage)
+function SpriteDomainImpl:addComputeStage(stage: ComputeStage)
     self._backend:addComputeStage(stage)
 end
 
-function SpriteDomain:_rebuildPipelines()
+function SpriteDomainImpl:_rebuildPipelines()
     self._backend:rebuildPipelines()
 end
 
-function SpriteDomain:_device(): loader.CPtr
+function SpriteDomainImpl:_device(): loader.CPtr
     return self._backend:device()
 end
 
-function SpriteDomain:_extractSeconds(): number
+function SpriteDomainImpl:_extractSeconds(): number
     return self._extractor:extractSeconds()
 end
 
-function SpriteDomain:_destroy()
+function SpriteDomainImpl:_destroy()
     self._extractor:destroy()
     self._backend:destroy()
 end
 
-return SpriteDomain
+return SpriteDomainModule

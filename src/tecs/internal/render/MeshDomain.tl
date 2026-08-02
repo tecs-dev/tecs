@@ -306,7 +306,7 @@ end
 
 local type RegisteredPrimitive = Model3D.Primitive
 
-local record MeshDomain
+local interface MeshDomain
     type Options = MeshDomainOptions
     type MaterialOptions = MeshMaterialOptions
     type ShadowOptions = MeshShadowOptions
@@ -437,6 +437,51 @@ local record MeshDomain
     --- @return Returns resident resources that create independent instances.
     registerModel: function(self, model: assets.Model): Model3D
 
+    --- Uploads one decoded image into mesh-domain texture residency.
+    ---
+    --- Images share one linearly filtered array. Registration consumes the
+    --- caller's image hold and returns a compact integer used by material options.
+    --- Texture count is independent from triangle and instance counts.
+    --- @param image The caller supplies decoded pixels that this call consumes.
+    --- @return Returns a positive texture identity local to this domain.
+    registerTexture: function(self, image: assets.Image): integer
+
+    --- Registers one immutable mesh material and returns its ECS reference.
+    ---
+    --- Registering the same normalized name again returns the original slot.
+    --- Texture fields are integer identities returned by `registerTexture`; zero
+    --- selects the semantic fallback without consuming a texture layer.
+    --- @param options The caller supplies a stable name and optional PBR inputs.
+    --- @return Returns a material component ready to spawn.
+    registerMaterial: function(self, options: MeshMaterialOptions): components.MeshMaterial
+
+    --- Returns a component for material data already registered by name.
+    --- @param name The caller supplies the stable registered name.
+    --- @return Returns a material component carrying the resident slot.
+    material: function(self, name: string): components.MeshMaterial
+
+    --- Returns components for geometry already registered under a name.
+    --- @param name The caller supplies the registered mesh name.
+    --- @return Returns a mesh component carrying the resident slot.
+    --- @return Returns its asset-derived local bounding sphere.
+    mesh: function(self, name: string): components.Mesh, components.Bounds3D
+end
+
+local interface MeshDomainInternal is MeshDomain
+    _install: function(self, world: types.World)
+    _setStaging: function(self, slot: integer)
+    _recordGeometry: function(self, context: Deferred.PassContext)
+    _recordForward: function(self, context: Deferred.PassContext)
+    _castsThisFrame: function(self): boolean
+    _recordShadowMap: function(self, context: Deferred.PassContext)
+    _rebuildPipelines: function(self, deferred: Deferred)
+    _prepare: function(self, frame: Frame, camera?: Camera3D, width?: number, height?: number, upload?: boolean)
+    _device: function(self): loader.CPtr
+    _extractSeconds: function(self): number
+    _destroy: function(self)
+end
+
+local record MeshDomainImpl is MeshDomainInternal
     _extractor: MeshExtractor
     _backend: MeshBackend
     _packet: MeshFramePacket
@@ -447,15 +492,58 @@ local record MeshDomain
     _modelCount: integer
 end
 
-local MeshDomainMT <const>: metatable<MeshDomain> = {__index = MeshDomain}
+local record MeshDomainModule
+    type Domain = MeshDomain
+    type Internal = MeshDomainInternal
+    type Options = MeshDomainOptions
+    type MaterialOptions = MeshMaterialOptions
+    type ShadowOptions = MeshShadowOptions
+    type Shadow = MeshShadowTuning
+    type SkinningOptions = MeshSkinningOptions
+    type MorphingOptions = MeshMorphingOptions
+    type LightOptions = MeshLightOptions
+    type FogOptions = MeshFogOptions
+    type Fog = MeshFogTuning
+    type ProbeOptions = MeshProbeOptions
+    type Probe = MeshProbeTuning
+    type RegisteredPrimitive = RegisteredPrimitive
+    type Model3D = Model3D
 
-MeshDomain.MATERIAL_METALLIC_ROUGHNESS = 0
-MeshDomain.MATERIAL_UNLIT = 1
-MeshDomain.ALPHA_OPAQUE = 0
-MeshDomain.ALPHA_MASK = 1
-MeshDomain.ALPHA_BLEND = 2
-MeshDomain.TEXTURE_RGBA8 = assets.IMAGE_RGBA8
-MeshDomain.TEXTURE_BC3 = assets.IMAGE_BC3
+    MATERIAL_METALLIC_ROUGHNESS: integer
+    MATERIAL_UNLIT: integer
+    ALPHA_OPAQUE: integer
+    ALPHA_MASK: integer
+    ALPHA_BLEND: integer
+    TEXTURE_RGBA8: integer
+    TEXTURE_BC3: integer
+    _create: function(device: loader.CPtr, deferred: Deferred, options: MeshDomainOptions): MeshDomainInternal
+end
+
+local MATERIAL_METALLIC_ROUGHNESS <const> = 0
+local MATERIAL_UNLIT <const> = 1
+local ALPHA_OPAQUE <const> = 0
+local ALPHA_MASK <const> = 1
+local ALPHA_BLEND <const> = 2
+local TEXTURE_RGBA8 <const> = assets.IMAGE_RGBA8
+local TEXTURE_BC3 <const> = assets.IMAGE_BC3
+
+MeshDomainModule.MATERIAL_METALLIC_ROUGHNESS = MATERIAL_METALLIC_ROUGHNESS
+MeshDomainModule.MATERIAL_UNLIT = MATERIAL_UNLIT
+MeshDomainModule.ALPHA_OPAQUE = ALPHA_OPAQUE
+MeshDomainModule.ALPHA_MASK = ALPHA_MASK
+MeshDomainModule.ALPHA_BLEND = ALPHA_BLEND
+MeshDomainModule.TEXTURE_RGBA8 = TEXTURE_RGBA8
+MeshDomainModule.TEXTURE_BC3 = TEXTURE_BC3
+
+MeshDomainImpl.MATERIAL_METALLIC_ROUGHNESS = MATERIAL_METALLIC_ROUGHNESS
+MeshDomainImpl.MATERIAL_UNLIT = MATERIAL_UNLIT
+MeshDomainImpl.ALPHA_OPAQUE = ALPHA_OPAQUE
+MeshDomainImpl.ALPHA_MASK = ALPHA_MASK
+MeshDomainImpl.ALPHA_BLEND = ALPHA_BLEND
+MeshDomainImpl.TEXTURE_RGBA8 = TEXTURE_RGBA8
+MeshDomainImpl.TEXTURE_BC3 = TEXTURE_BC3
+
+local MeshDomainMT <const>: metatable<MeshDomainImpl> = {__index = MeshDomainImpl}
 
 local function positive(name: string, value: integer): integer
     if value < 1 or value ~= math.floor(value) then
@@ -464,7 +552,9 @@ local function positive(name: string, value: integer): integer
     return value
 end
 
-function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: MeshDomainOptions): MeshDomain
+function MeshDomainModule._create(
+    device: loader.CPtr, deferred: Deferred, options: MeshDomainOptions
+): MeshDomainInternal
     options = options or {}
     local capacity <const> = positive("mesh capacity", options.capacity or DEFAULT_CAPACITY)
     local vertexCapacity <const> = positive("mesh vertex capacity", options.vertexCapacity or DEFAULT_VERTEX_CAPACITY)
@@ -499,7 +589,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
         )
     end
 
-    local self = setmetatable({} as MeshDomain, MeshDomainMT)
+    local self = setmetatable({} as MeshDomainImpl, MeshDomainMT)
     self.capacity = capacity
     self.vertexCapacity = vertexCapacity
     self.indexCapacity = indexCapacity
@@ -518,14 +608,14 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     self.transparency = options.transparency == true
     self.doubleSided = options.doubleSided == true
     self.mipmaps = options.mipmaps == true
-    self.textureFormat = options.textureFormat or MeshDomain.TEXTURE_RGBA8
-    if self.textureFormat ~= MeshDomain.TEXTURE_RGBA8 and self.textureFormat ~= MeshDomain.TEXTURE_BC3 then
+    self.textureFormat = options.textureFormat or TEXTURE_RGBA8
+    if self.textureFormat ~= TEXTURE_RGBA8 and self.textureFormat ~= TEXTURE_BC3 then
         error("tecs: meshes.textureFormat must be a MeshDomain.TEXTURE_* constant", 2)
     end
     if self.mipmaps and options.packTextures ~= false then
         error("tecs: meshes.mipmaps requires packTextures = false", 2)
     end
-    if self.textureFormat == MeshDomain.TEXTURE_BC3 and not self.mipmaps then
+    if self.textureFormat == TEXTURE_BC3 and not self.mipmaps then
         error("tecs: meshes.TEXTURE_BC3 requires mipmaps = true", 2)
     end
     self.shadows = options.shadows ~= nil
@@ -627,14 +717,7 @@ function MeshDomain._create(device: loader.CPtr, deferred: Deferred, options: Me
     return self
 end
 
---- Uploads one decoded image into mesh-domain texture residency.
----
---- Images share one linearly filtered array. Registration consumes the
---- caller's image hold and returns a compact integer used by material options.
---- Texture count is independent from triangle and instance counts.
---- @param image The caller supplies decoded pixels that this call consumes.
---- @return Returns a positive texture identity local to this domain.
-function MeshDomain:registerTexture(image: assets.Image): integer
+function MeshDomainImpl:registerTexture(image: assets.Image): integer
     if image == nil then
         error("tecs: mesh texture image is required", 2)
     end
@@ -643,14 +726,7 @@ function MeshDomain:registerTexture(image: assets.Image): integer
     return texture
 end
 
---- Registers one immutable mesh material and returns its ECS reference.
----
---- Registering the same normalized name again returns the original slot.
---- Texture fields are integer identities returned by `registerTexture`; zero
---- selects the semantic fallback without consuming a texture layer.
---- @param options The caller supplies a stable name and optional PBR inputs.
---- @return Returns a material component ready to spawn.
-function MeshDomain:registerMaterial(options: MeshMaterialOptions): components.MeshMaterial
+function MeshDomainImpl:registerMaterial(options: MeshMaterialOptions): components.MeshMaterial
     if options == nil or options.name == nil or options.name == "" then
         error("tecs: mesh material name cannot be empty", 2)
     end
@@ -659,19 +735,15 @@ function MeshDomain:registerMaterial(options: MeshMaterialOptions): components.M
     if existing ~= nil then
         return components.MeshMaterial(asset, existing)
     end
-    local model <const> = options.model or MeshDomain.MATERIAL_METALLIC_ROUGHNESS
-    if model ~= MeshDomain.MATERIAL_METALLIC_ROUGHNESS and model ~= MeshDomain.MATERIAL_UNLIT then
+    local model <const> = options.model or MATERIAL_METALLIC_ROUGHNESS
+    if model ~= MATERIAL_METALLIC_ROUGHNESS and model ~= MATERIAL_UNLIT then
         error(("tecs: invalid mesh material model %s"):format(tostring(model)), 2)
     end
-    local alphaMode <const> = options.alphaMode or MeshDomain.ALPHA_OPAQUE
-    if
-        alphaMode ~= MeshDomain.ALPHA_OPAQUE
-        and alphaMode ~= MeshDomain.ALPHA_MASK
-        and alphaMode ~= MeshDomain.ALPHA_BLEND
-    then
+    local alphaMode <const> = options.alphaMode or ALPHA_OPAQUE
+    if alphaMode ~= ALPHA_OPAQUE and alphaMode ~= ALPHA_MASK and alphaMode ~= ALPHA_BLEND then
         error(("tecs: invalid mesh material alpha mode %s"):format(tostring(alphaMode)), 2)
     end
-    if alphaMode == MeshDomain.ALPHA_BLEND and not self.transparency then
+    if alphaMode == ALPHA_BLEND and not self.transparency then
         error("tecs: alpha-blended mesh materials require meshes.transparency = true", 2)
     end
     local doubleSided <const> = options.doubleSided == true
@@ -709,10 +781,7 @@ function MeshDomain:registerMaterial(options: MeshMaterialOptions): components.M
     return components.MeshMaterial(asset, slot)
 end
 
---- Returns a component for material data already registered by name.
---- @param name The caller supplies the stable registered name.
---- @return Returns a material component carrying the resident slot.
-function MeshDomain:material(name: string): components.MeshMaterial
+function MeshDomainImpl:material(name: string): components.MeshMaterial
     local asset <const> = components.meshMaterialId(name)
     local slot <const> = self._backend:materialSlot(asset)
     if slot == nil then
@@ -721,7 +790,7 @@ function MeshDomain:material(name: string): components.MeshMaterial
     return components.MeshMaterial(asset, slot)
 end
 
-function MeshDomain:registerModel(model: assets.Model): Model3D
+function MeshDomainImpl:registerModel(model: assets.Model): Model3D
     if model == nil then
         error("tecs: model data is required", 2)
     end
@@ -729,7 +798,7 @@ function MeshDomain:registerModel(model: assets.Model): Model3D
     local ok, reason = pcall(function()
         if not self.transparency then
             for _, material in ipairs(model.materials) do
-                if material.alphaMode == MeshDomain.ALPHA_BLEND then
+                if material.alphaMode == ALPHA_BLEND then
                     error("tecs: alpha-blended mesh materials require meshes.transparency = true", 0)
                 end
             end
@@ -816,7 +885,7 @@ function MeshDomain:registerModel(model: assets.Model): Model3D
     return registered
 end
 
-function MeshDomain:_install(world: types.World)
+function MeshDomainImpl:_install(world: types.World)
     self._extractor:install(
         world,
         self._packet,
@@ -830,36 +899,36 @@ function MeshDomain:_install(world: types.World)
     )
 end
 
-function MeshDomain:_setStaging(slot: integer)
+function MeshDomainImpl:_setStaging(slot: integer)
     self._extractor:setStaging(slot, self._backend:mapSlot(slot))
 end
 
-function MeshDomain:_recordGeometry(context: Deferred.PassContext)
+function MeshDomainImpl:_recordGeometry(context: Deferred.PassContext)
     self._backend:recordGeometry(context)
 end
 
-function MeshDomain:_recordForward(context: Deferred.PassContext)
+function MeshDomainImpl:_recordForward(context: Deferred.PassContext)
     self._backend:recordForward(context)
 end
 
-function MeshDomain:_castsThisFrame(): boolean
+function MeshDomainImpl:_castsThisFrame(): boolean
     return self._backend:castsThisFrame()
 end
 
-function MeshDomain:_recordShadowMap(context: Deferred.PassContext)
+function MeshDomainImpl:_recordShadowMap(context: Deferred.PassContext)
     self._backend:recordShadowMap(context)
 end
 
-function MeshDomain:_rebuildPipelines(deferred: Deferred)
+function MeshDomainImpl:_rebuildPipelines(deferred: Deferred)
     self._backend:rebuildPipeline(deferred)
 end
 
-function MeshDomain:_prepare(frame: Frame, camera?: Camera3D, width?: number, height?: number, upload?: boolean)
+function MeshDomainImpl:_prepare(frame: Frame, camera?: Camera3D, width?: number, height?: number, upload?: boolean)
     self._packet:setCamera(camera or self.camera, width or frame.width, height or frame.height)
     self._backend:prepare(self._packet, frame, upload)
 end
 
-function MeshDomain:registerSkin(name: string, matrices: {number}): components.MeshSkin
+function MeshDomainImpl:registerSkin(name: string, matrices: {number}): components.MeshSkin
     if not self.skinning then
         error("tecs: mesh skinning is not enabled", 2)
     end
@@ -873,7 +942,7 @@ function MeshDomain:registerSkin(name: string, matrices: {number}): components.M
     return components.MeshSkin(asset, region.firstJoint)
 end
 
-function MeshDomain:updateSkin(skin: components.MeshSkin, matrices: {number})
+function MeshDomainImpl:updateSkin(skin: components.MeshSkin, matrices: {number})
     if not self.skinning then
         error("tecs: mesh skinning is not enabled", 2)
     end
@@ -892,7 +961,7 @@ function MeshDomain:updateSkin(skin: components.MeshSkin, matrices: {number})
     self._backend:updateSkin(region, matrices)
 end
 
-function MeshDomain:registerMorph(name: string, weights: {number}): components.MeshMorph
+function MeshDomainImpl:registerMorph(name: string, weights: {number}): components.MeshMorph
     if not self.morphing then
         error("tecs: mesh morphing is not enabled", 2)
     end
@@ -906,7 +975,7 @@ function MeshDomain:registerMorph(name: string, weights: {number}): components.M
     return components.MeshMorph(asset, region.firstWeight)
 end
 
-function MeshDomain:updateMorph(morph: components.MeshMorph, weights: {number})
+function MeshDomainImpl:updateMorph(morph: components.MeshMorph, weights: {number})
     if not self.morphing then
         error("tecs: mesh morphing is not enabled", 2)
     end
@@ -934,7 +1003,7 @@ end
 --- @param mesh The caller supplies CPU geometry that this call consumes.
 --- @return Returns a mesh component ready to spawn.
 --- @return Returns its asset-derived local bounding sphere.
-function MeshDomain:registerMesh(mesh: assets.Mesh): components.Mesh, components.Bounds3D
+function MeshDomainImpl:registerMesh(mesh: assets.Mesh): components.Mesh, components.Bounds3D
     if mesh == nil then
         error("tecs: mesh data is required", 2)
     end
@@ -977,11 +1046,7 @@ function MeshDomain:registerMesh(mesh: assets.Mesh): components.Mesh, components
     return components.Mesh(asset, region.slot), components.Bounds3D(centerX, centerY, centerZ, radius)
 end
 
---- Returns components for geometry already registered under a name.
---- @param name The caller supplies the registered mesh name.
---- @return Returns a mesh component carrying the resident slot.
---- @return Returns its asset-derived local bounding sphere.
-function MeshDomain:mesh(name: string): components.Mesh, components.Bounds3D
+function MeshDomainImpl:mesh(name: string): components.Mesh, components.Bounds3D
     local asset <const> = components.meshId(name)
     local region <const> = self._backend:regionOf(asset)
     local radius <const> = self._radiusByAsset[asset]
@@ -994,16 +1059,16 @@ function MeshDomain:mesh(name: string): components.Mesh, components.Bounds3D
         )
 end
 
-function MeshDomain:_device(): loader.CPtr
+function MeshDomainImpl:_device(): loader.CPtr
     return self._backend:device()
 end
 
-function MeshDomain:_extractSeconds(): number
+function MeshDomainImpl:_extractSeconds(): number
     return self._extractor:extractSeconds()
 end
 
-function MeshDomain:_destroy()
+function MeshDomainImpl:_destroy()
     self._backend:destroy()
 end
 
-return MeshDomain
+return MeshDomainModule

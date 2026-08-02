@@ -11,6 +11,10 @@ This division is the 3D extension seam. A mesh domain can be prepared beside
 the sprite domain and contribute its own pass bodies without either domain
 branching per entity on what kind of renderer it belongs to.
 
+The public domain values expose cameras, residency operations, extension
+points, and statistics. Renderer-only lifecycle methods and the extractor,
+packet, and backend handles stay behind separately typed internal references.
+
 When both domains contribute transparent work, meshes draw first and sprites
 draw second. Their camera spaces have no universal cross-domain depth order,
 so the fixed order makes sprites deterministic overlays while each domain
@@ -31,13 +35,17 @@ local Texture <const> = require("tecs.gpu.Texture")
 local Deferred <const> = require("tecs.gpu.Deferred")
 local screenshot <const> = require("tecs.gfx.screenshot")
 
-local type SpriteDomain = require("tecs.internal.render.SpriteDomain")
-local type MeshDomain = require("tecs.internal.render.MeshDomain")
+local type SpriteDomainModule = require("tecs.internal.render.SpriteDomain")
+local type MeshDomainModule = require("tecs.internal.render.MeshDomain")
+local type SpriteDomain = SpriteDomainModule.Domain
+local type SpriteDomainInternal = SpriteDomainModule.Internal
+local type MeshDomain = MeshDomainModule.Domain
+local type MeshDomainInternal = MeshDomainModule.Internal
 local View <const> = require("tecs.gfx.View")
 local type Query = types.Query
-local type InstanceProducer = SpriteDomain.InstanceProducer
-local type ClipRegion = SpriteDomain.ClipRegion
-local type ComputeStage = SpriteDomain.ComputeStage
+local type InstanceProducer = SpriteDomainModule.InstanceProducer
+local type ClipRegion = SpriteDomainModule.ClipRegion
+local type ComputeStage = SpriteDomainModule.ComputeStage
 local type PassContribution = function(context: Deferred.PassContext)
 
 local DEFAULT_AMBIENT <const>: {number} = {1.0, 1.0, 1.0}
@@ -49,10 +57,10 @@ local record RendererOptions
     shadows: Deferred.ShadowOptions
     --- Caller-writable. Configures the 2D sprite rendering domain. False
     --- disables it; nil enables it with defaults.
-    sprites: SpriteDomain.Options | boolean
+    sprites: SpriteDomainModule.Options | boolean
     --- Caller-writable. Configures and enables the 3D mesh rendering domain.
     --- Nil leaves every mesh module and allocation out of this renderer.
-    meshes: MeshDomain.Options
+    meshes: MeshDomainModule.Options
     --- Caller-writable. Enables and configures optional bloom. Nil omits its
     --- targets, pipelines, and passes.
     bloom: Deferred.BloomOptions
@@ -66,12 +74,12 @@ end
 local record Renderer
     type Options = RendererOptions
     type SpriteDomain = SpriteDomain
-    type SpriteOptions = SpriteDomain.Options
+    type SpriteOptions = SpriteDomainModule.Options
     type SpriteInstanceProducer = InstanceProducer
     type SpriteClipRegion = ClipRegion
     type SpriteComputeStage = ComputeStage
     type MeshDomain = MeshDomain
-    type MeshOptions = MeshDomain.Options
+    type MeshOptions = MeshDomainModule.Options
     type BloomOptions = Deferred.BloomOptions
 
     --- Read-only. Provides the concrete 2D rendering lane, or nil when
@@ -96,6 +104,8 @@ local record Renderer
     _viewEntities: {integer}
     _drawSprites: boolean
     _drawMeshes: boolean
+    _sprites: SpriteDomainInternal
+    _meshes: MeshDomainInternal
 end
 
 local RendererMT <const>: metatable<Renderer> = {__index = Renderer}
@@ -140,8 +150,8 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
     if meshShadow ~= nil and (meshShadow.scale or 1.0) <= 0.0 then
         error("tecs: mesh shadow scale must be greater than 0", 2)
     end
-    local sprites: SpriteDomain = nil
-    local meshes: MeshDomain = nil
+    local sprites: SpriteDomainInternal = nil
+    local meshes: MeshDomainInternal = nil
     local shadowActive: function(): boolean
     local meshShadowActive: function(): boolean
     if self._multiCamera then
@@ -181,14 +191,16 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
     self.deferred = deferred
     if options.sprites ~= false then
         local SpriteDomainValue <const> = require("tecs.internal.render.SpriteDomain")
-        sprites = SpriteDomainValue._create(device, deferred, options.sprites as SpriteDomain.Options or {})
+        sprites = SpriteDomainValue._create(device, deferred, options.sprites as SpriteDomainModule.Options or {})
         self.sprites = sprites
+        self._sprites = sprites
         sprites:_setStaging(self._slot)
     end
     if options.meshes ~= nil then
         local MeshDomainValue <const> = require("tecs.internal.render.MeshDomain")
         meshes = MeshDomainValue._create(device, deferred, options.meshes)
         self.meshes = meshes
+        self._meshes = meshes
         meshes:_setStaging(self._slot)
     end
 
@@ -250,11 +262,11 @@ function Renderer:install(world: types.World)
     if self._multiCamera then
         self._viewQuery = world:newQuery({include = {View}})
     end
-    if self.sprites ~= nil then
-        self.sprites:_install(world)
+    if self._sprites ~= nil then
+        self._sprites:_install(world)
     end
-    if self.meshes ~= nil then
-        self.meshes:_install(world)
+    if self._meshes ~= nil then
+        self._meshes:_install(world)
     end
 end
 
@@ -298,11 +310,11 @@ end
 
 --- Rebuilds every domain pipeline from current shader sources.
 function Renderer:rebuildPipelines()
-    if self.sprites ~= nil then
-        self.sprites:_rebuildPipelines()
+    if self._sprites ~= nil then
+        self._sprites:_rebuildPipelines()
     end
-    if self.meshes ~= nil then
-        self.meshes:_rebuildPipelines(self.deferred)
+    if self._meshes ~= nil then
+        self._meshes:_rebuildPipelines(self.deferred)
     end
 end
 
@@ -322,11 +334,11 @@ end
 --- @return Returns elapsed seconds, or zero while measurement is inactive.
 function Renderer:extractSeconds(): number
     local seconds = 0.0
-    if self.sprites ~= nil then
-        seconds = seconds + self.sprites:_extractSeconds()
+    if self._sprites ~= nil then
+        seconds = seconds + self._sprites:_extractSeconds()
     end
-    if self.meshes ~= nil then
-        seconds = seconds + self.meshes:_extractSeconds()
+    if self._meshes ~= nil then
+        seconds = seconds + self._meshes:_extractSeconds()
     end
     return seconds
 end
@@ -334,7 +346,7 @@ end
 --- Prepares every domain and executes the renderer-owned frame graph.
 --- @param frame The engine supplies an open frame that it submits afterwards.
 function Renderer:render(frame: Frame)
-    local sprites <const> = self.sprites
+    local sprites <const> = self._sprites
     if sprites ~= nil then
         sprites:_center(frame)
     end
@@ -344,7 +356,7 @@ function Renderer:render(frame: Frame)
     if sprites ~= nil then
         sprites:_setStaging(slot)
     end
-    local meshes <const> = self.meshes
+    local meshes <const> = self._meshes
     if meshes ~= nil then
         meshes:_setStaging(slot)
     end
@@ -432,11 +444,11 @@ function Renderer:destroy()
         return
     end
     self._destroyed = true
-    if self.sprites ~= nil then
-        self.sprites:_destroy()
+    if self._sprites ~= nil then
+        self._sprites:_destroy()
     end
-    if self.meshes ~= nil then
-        self.meshes:_destroy()
+    if self._meshes ~= nil then
+        self._meshes:_destroy()
     end
     self.deferred:destroy()
 end
