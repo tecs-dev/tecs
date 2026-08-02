@@ -508,7 +508,10 @@ larger caller-supplied `Bounds3D`.
 
 Omitting `meshes.morphing` preserves the rigid and skin-only layouts and
 allocates no target, locator, weight, or morph-shader resources. Run
-`cargo xtask example morph3d` for the worker-to-GPU path and compare
+`cargo xtask example morph3d` for the worker-to-GPU path. The example cycles an
+indexed cube between tall tapered and low twisted targets under a directional
+light, so its silhouette, highlights, and shadow all expose the deformation.
+Compare
 `BENCH_MESH_MORPHING=0` with `=1` under
 `cargo xtask bench meshmorphing` to measure the isolated lane.
 

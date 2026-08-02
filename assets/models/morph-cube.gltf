@@ -1,0 +1,65 @@
+{
+  "asset": {
+    "generator": "Tecs morph target example",
+    "version": "2.0"
+  },
+  "buffers": [{
+    "byteLength": 408,
+    "uri": "data:application/octet-stream;base64,AACAvwAAgL8AAIC/AACAPwAAgL8AAIC/AACAPwAAgD8AAIC/AACAvwAAgD8AAIC/AACAvwAAgL8AAIA/AACAPwAAgL8AAIA/AACAPwAAgD8AAIA/AACAvwAAgD8AAIA/BAAFAAYABAAGAAcAAQAAAAMAAQADAAIAAAAEAAcAAAAHAAMABQABAAIABQACAAYAAwAHAAYAAwAGAAIAAAABAAUAAAAFAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAZmYmvwAAwD9mZiY/ZmYmPwAAwD9mZiY/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAZmYmvwAAwD9mZia/ZmYmPwAAwD9mZia/AAAAAAAAAD8AAAAAAAAAAAAAAD8AAAAAzRPUPpqZGb8AAIA/AACAP5qZGb/NE9S+AAAAAAAAAD8AAAAAAAAAAAAAAD8AAAAAAACAv5qZGb/NE9Q+zRPUvpqZGb8AAIC/AAAAAAAAgD8AAABAAABAQAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAA"
+  }],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 96},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 72},
+    {"buffer": 0, "byteOffset": 168, "byteLength": 96},
+    {"buffer": 0, "byteOffset": 264, "byteLength": 96},
+    {"buffer": 0, "byteOffset": 360, "byteLength": 16},
+    {"buffer": 0, "byteOffset": 376, "byteLength": 32}
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 8,
+      "type": "VEC3",
+      "min": [-1, -1, -1],
+      "max": [1, 1, 1]
+    },
+    {"bufferView": 1, "componentType": 5123, "count": 36, "type": "SCALAR"},
+    {"bufferView": 2, "componentType": 5126, "count": 8, "type": "VEC3"},
+    {"bufferView": 3, "componentType": 5126, "count": 8, "type": "VEC3"},
+    {
+      "bufferView": 4,
+      "componentType": 5126,
+      "count": 4,
+      "type": "SCALAR",
+      "min": [0],
+      "max": [3]
+    },
+    {"bufferView": 5, "componentType": 5126, "count": 8, "type": "SCALAR"}
+  ],
+  "meshes": [{
+    "name": "Morph cube",
+    "weights": [0, 0],
+    "primitives": [{
+      "attributes": {"POSITION": 0},
+      "indices": 1,
+      "targets": [
+        {"POSITION": 2},
+        {"POSITION": 3}
+      ]
+    }]
+  }],
+  "animations": [{
+    "name": "StretchAndTwist",
+    "samplers": [{"input": 4, "output": 5, "interpolation": "LINEAR"}],
+    "channels": [{"sampler": 0, "target": {"node": 0, "path": "weights"}}]
+  }],
+  "nodes": [{
+    "name": "Morph cube",
+    "mesh": 0,
+    "rotation": [-0.1261, 0.2146, -0.0280, 0.9679],
+    "translation": [0, -0.4, 0]
+  }],
+  "scenes": [{"nodes": [0]}],
+  "scene": 0
+}
