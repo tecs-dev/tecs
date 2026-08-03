@@ -204,9 +204,7 @@ end
 --- Registers sprite extraction on a world.
 function SpriteDomainImpl:_install(world: types.World)
     self._extractor:install(
-        world,
-        self._packet,
-        function() domainmetrics.publish(self, self._packet as domainmetrics.Frame) end
+        world, self._packet, function() domainmetrics.publish(self, self._packet as domainmetrics.Frame) end
     )
 end
 

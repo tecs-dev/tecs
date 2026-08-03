@@ -35,7 +35,9 @@ describe("rendering domains", function()
             count = 0,
             dropped = 0,
             rewritten = 0,
-            extractSeconds = function() return 0 end,
+            extractSeconds = function()
+                return 0
+            end,
         }
 
         domainmetrics.publish(target, { count = 17, dropped = 3, rewritten = 5 })
