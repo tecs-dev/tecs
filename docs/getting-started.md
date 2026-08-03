@@ -136,6 +136,9 @@ return tecs.newApplication({
         local loaded <const> = tecs.assets.loadGLTF(
             tecs.io.files.assetPath("models/glass.gltf")
         )
+        -- Decoded scalar material factors remain caller-writable until the
+        -- model is registered. This is useful for legacy converted assets.
+        loaded.materials[1].roughness = 0.35
         local instance <const> = app.renderer.meshes
             :registerModel(loaded)
             :newInstance()

@@ -1000,6 +1000,63 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    it("keeps a local mesh light fixed while the camera moves", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 0, 0, 0 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                lights = { capacity = 1 },
+            },
+        })
+        renderer:install(world)
+        local camera = renderer.meshes.camera
+        camera.z = 2
+        local mesh, bounds = renderer.meshes:registerMesh(planeMesh("spec://stationary-local-light-plane"))
+        world:spawn(
+            tecs.Transform3D(),
+            mesh,
+            bounds,
+            components.MeshMaterial(),
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+        world:spawn(tecs.Transform3D.new({ z = 1 }), components.PointLight3D(2, 1, 1, 1, 8))
+
+        local before = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
+        camera.x = 0.5
+        local matrix = camera:matrix(SIZE, SIZE)
+        local clipX = matrix[12]
+        local clipY = matrix[13]
+        local clipW = matrix[15]
+        local pixelX = math.floor((clipX / clipW * 0.5 + 0.5) * SIZE)
+        local pixelY = math.floor((0.5 - clipY / clipW * 0.5) * SIZE)
+        local afterMove = screen:getPixel(frameOnce(world, renderer), pixelX, pixelY)
+
+        camera.x = 0
+        camera.rotationY = math.sin(0.1)
+        camera.rotationW = math.cos(0.1)
+        matrix = camera:matrix(SIZE, SIZE)
+        clipX, clipY, clipW = matrix[12], matrix[13], matrix[15]
+        pixelX = math.floor((clipX / clipW * 0.5 + 0.5) * SIZE)
+        pixelY = math.floor((0.5 - clipY / clipW * 0.5) * SIZE)
+        local afterTurn = screen:getPixel(frameOnce(world, renderer), pixelX, pixelY)
+
+        assert.is_true(before.r > 100, "the stationary point light reaches its receiver")
+        assert.is_true(
+            math.abs(afterMove.r - before.r) <= 3,
+            ("camera translation changed a stationary light from %d to %d"):format(before.r, afterMove.r)
+        )
+        assert.is_true(
+            math.abs(afterTurn.r - before.r) <= 3,
+            ("camera rotation changed a stationary light from %d to %d"):format(before.r, afterTurn.r)
+        )
+        renderer:destroy()
+    end)
+
     it("casts an opt-in point-light shadow through the local atlas", function()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {
@@ -1168,6 +1225,31 @@ describe("ecs.Renderer", function()
         local pixels = frameOnce(world, renderer)
         local shadow = screen:getPixel(pixels, 27, 32)
         local lit = screen:getPixel(pixels, 18, 32)
+        local function darkestWorldX(image, cameraX)
+            local darkestX, darkest = 0, 256
+            local halfWidth = renderer.meshes.camera.z * math.tan(renderer.meshes.camera.verticalFov * 0.5)
+            for x = 8, SIZE - 9 do
+                local worldX = cameraX + ((x + 0.5) / SIZE * 2.0 - 1.0) * halfWidth
+                local red = screen:getPixel(image, x, SIZE / 2).r
+                if worldX > -0.6 and worldX < 0.2 and red < darkest then
+                    darkestX, darkest = x, red
+                end
+            end
+            return cameraX + ((darkestX + 0.5) / SIZE * 2.0 - 1.0) * halfWidth, darkest
+        end
+        local firstShadowX = darkestWorldX(pixels, 0)
+        local function redAtWorldX(image, cameraX, worldX)
+            local halfWidth = renderer.meshes.camera.z * math.tan(renderer.meshes.camera.verticalFov * 0.5)
+            local x = math.floor(((worldX - cameraX) / halfWidth * 0.5 + 0.5) * SIZE)
+            return screen:getPixel(image, x, SIZE / 2).r
+        end
+        local firstFixedShadow = redAtWorldX(pixels, 0, -0.22)
+        local firstFixedLit = redAtWorldX(pixels, 0, -0.55)
+        renderer.meshes.camera.x = 0.4
+        local movedPixels = frameOnce(world, renderer)
+        local movedShadowX = darkestWorldX(movedPixels, 0.4)
+        local movedFixedShadow = redAtWorldX(movedPixels, 0.4, -0.22)
+        local movedFixedLit = redAtWorldX(movedPixels, 0.4, -0.55)
         assert.is_true(renderer.meshes.shadows)
         assert.is_not_nil(renderer.meshes._backend.shadowPipeline)
         assert.is_not_nil(renderer.meshes._backend._shadowCommands)
@@ -1179,6 +1261,18 @@ describe("ecs.Renderer", function()
         assert.is_true(shadow.r < 80, ("the caster should block the directional light, got %d"):format(shadow.r))
         assert.is_true(lit.r > 110, ("the same receiver should remain lit outside the shadow, got %d"):format(lit.r))
         assert.is_true(lit.r - shadow.r > 40, "the Cook-Torrance light must retain visible shadow contrast")
+        assert.is_true(
+            math.abs(movedShadowX - firstShadowX) < 0.08,
+            ("camera translation moved a directional shadow from %.3f to %.3f"):format(firstShadowX, movedShadowX)
+        )
+        assert.is_true(
+            math.abs(movedFixedShadow - firstFixedShadow) <= 3,
+            ("camera translation changed fixed shadow energy from %d to %d"):format(firstFixedShadow, movedFixedShadow)
+        )
+        assert.is_true(
+            math.abs(movedFixedLit - firstFixedLit) <= 3,
+            ("camera translation changed fixed direct light from %d to %d"):format(firstFixedLit, movedFixedLit)
+        )
         renderer:destroy()
     end)
 
@@ -1238,6 +1332,83 @@ describe("ecs.Renderer", function()
 
         assert.are.equal(first, withinTexel)
         assert.are_not.equal(first, nextTexel)
+        renderer:destroy()
+    end)
+
+    it("keeps directional shadow energy fixed across a cascade boundary", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 0.2, 0.2, 0.2 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                shadows = {
+                    scale = 0.5,
+                    distance = 60,
+                    directionX = -0.5,
+                    directionY = 0,
+                    directionZ = -1,
+                    bias = 0.002,
+                    softness = 0,
+                },
+            },
+        })
+        renderer:install(world)
+        local camera = renderer.meshes.camera
+        camera.z = 7
+        camera.far = 250
+        local plane, planeBounds = renderer.meshes:registerMesh(planeMesh("spec://cascade-stability-plane"))
+        local caster, casterBounds = renderer.meshes:registerMesh(triangleMesh("spec://cascade-stability-caster"))
+        world:spawn(
+            tecs.Transform3D.new({ scaleX = 10, scaleY = 10 }),
+            plane,
+            planeBounds,
+            components.MeshMaterial(),
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+        world:spawn(
+            tecs.Transform3D.new({ x = 0, y = -0.75, z = 0.5, scaleX = 1.5, scaleY = 1.5, scaleZ = 1.5 }),
+            caster,
+            casterBounds,
+            components.MeshMaterial(),
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+
+        local function shadowRange(image, cameraZ)
+            local halfWidth = cameraZ * math.tan(camera.verticalFov * 0.5)
+            local darkest, brightest = 256, -1
+            for x = 8, SIZE - 9 do
+                local worldX = ((x + 0.5) / SIZE * 2.0 - 1.0) * halfWidth
+                if worldX > -2 and worldX < 2 then
+                    local red = screen:getPixel(image, x, SIZE / 2).r
+                    darkest = math.min(darkest, red)
+                    brightest = math.max(brightest, red)
+                end
+            end
+            return darkest, brightest
+        end
+        local farther = frameOnce(world, renderer)
+        local fartherShadow, fartherLit = shadowRange(farther, 7)
+        camera.z = 5.5
+        local nearer = frameOnce(world, renderer)
+        local nearerShadow, nearerLit = shadowRange(nearer, 5.5)
+
+        assert.is_true(
+            fartherLit - fartherShadow > 30,
+            ("the farther view resolves the caster shadow: %d to %d"):format(fartherShadow, fartherLit)
+        )
+        assert.is_true(
+            nearerLit - nearerShadow > 30,
+            ("the nearer view resolves the caster shadow: %d to %d"):format(nearerShadow, nearerLit)
+        )
+        assert.is_true(
+            math.abs(nearerShadow - fartherShadow) <= 3,
+            ("cascade selection changed fixed shadow energy from %d to %d"):format(fartherShadow, nearerShadow)
+        )
         renderer:destroy()
     end)
 

@@ -58,6 +58,14 @@ local function game(world: tecs.World, app: tecs.Application)
     )
 
     local loaded <const> = tecs.assets.loadGLTF(tecs.io.files.assetPath("external/sponza/Sponza.tecs.gltf"))
+    -- Strong colored point lights make this scene's eye-dependent specular
+    -- response resemble a moving pool of light. Its visible architecture is
+    -- predominantly masonry, cloth, and vegetation, so keep the texture's
+    -- roughness variation but present it as a rough dielectric.
+    for _, material in ipairs(loaded.materials) do
+        material.metallic = 0.0
+        material.roughness = 1.4
+    end
     local instance <const> = meshes:registerModel(loaded):newInstance()
     for _, primitive in ipairs(instance.primitives) do
         world:spawn(

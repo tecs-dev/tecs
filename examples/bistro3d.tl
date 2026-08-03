@@ -35,6 +35,32 @@ local function mixColor(
     color[3] = mix(nightB, dayB, daylight)
 end
 
+local function tuneLegacyMaterial(material: tecs.assets.ModelMaterial)
+    -- The source marks every material as a non-PBR Phong conversion and gives
+    -- concrete, foliage, glass, and metal the same metallic and roughness
+    -- factors. Classify its authored names so view-dependent highlights stay
+    -- on surfaces that plausibly have them instead of sweeping over the whole
+    -- street as the camera moves.
+    local name <const> = material.name:lower()
+    if
+        name:find("metal", 1, true)
+        or name:find("bronze", 1, true)
+        or name:find("steel", 1, true)
+        or name:find("iron", 1, true)
+        or name:find("chain", 1, true)
+        or name:find("manhole", 1, true)
+    then
+        material.metallic = 0.7
+        material.roughness = 0.48
+    elseif name:find("glass", 1, true) or name:find("wet", 1, true) then
+        material.metallic = 0.0
+        material.roughness = 0.5
+    else
+        material.metallic = 0.0
+        material.roughness = 0.75
+    end
+end
+
 local function game(world: tecs.World, app: tecs.Application)
     local meshes <const> = app.renderer.meshes
     local camera <const> = meshes.camera
@@ -129,6 +155,9 @@ local function game(world: tecs.World, app: tecs.Application)
     })
 
     local loaded <const> = tecs.assets.loadGLTF(tecs.io.files.assetPath("external/bistro/Bistro.tecs.gltf"))
+    for _, material in ipairs(loaded.materials) do
+        tuneLegacyMaterial(material)
+    end
     local instance <const> = meshes:registerModel(loaded):newInstance()
     for _, primitive in ipairs(instance.primitives) do
         world:spawn(

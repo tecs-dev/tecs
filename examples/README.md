@@ -77,6 +77,8 @@ GPU-culled primitive chunks, Cook-Torrance point and spot lights, directional
 shadows, fog, and bloom. Running the example without that cache fails before
 opening a window and reports the fetch command. The window title reports rolling
 FPS, and the lower bloom threshold makes bright lit surfaces visibly spread.
+The demo treats the scene's masonry, cloth, and vegetation as rough
+dielectrics so eye-dependent specular highlights do not resemble moving lamps.
 Both large scenes default to immediate presentation so this number is uncapped;
 set `TECS_PRESENT=vsync` to opt back into synchronized presentation.
 
@@ -86,6 +88,9 @@ then retained as 132 MiB of ordinary glTF geometry and 91 MiB of 512px BC3
 KTX2 mip chains. Large-primitive splitting turns 1,591 authored primitives into
 1,593 independently GPU-cullable chunks. The demo combines an ambient-cube
 probe, Cook-Torrance local lights, directional shadows, fog, and bloom. The
+upstream file labels every material as a non-PBR Phong conversion and assigns
+one metallic/roughness pair to the entire scene, so the demo classifies its
+named metal, wet, glass, and dielectric surfaces before GPU registration. The
 source GLB is removed after a successful import, and running without the cache
 reports the fetch command before a window opens.
 

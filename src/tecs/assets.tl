@@ -437,9 +437,11 @@ local record ModelMaterial
     emissiveG: number
     --- Read-only. Reports the emissive blue factor.
     emissiveB: number
-    --- Read-only. Reports the metallic factor.
+    --- Caller-writable until model registration. Multiplies sampled metallic.
+    --- This defaults to the decoded glTF factor.
     metallic: number
-    --- Read-only. Reports the roughness factor.
+    --- Caller-writable until model registration. Multiplies sampled roughness.
+    --- This defaults to the decoded glTF factor.
     roughness: number
     --- Read-only. Reports tangent-space normal strength.
     normalScale: number
