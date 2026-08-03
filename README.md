@@ -132,7 +132,10 @@ one opaque native owner, not serialized geometry strings; the main thread
 borrows flat vertex and index views until registration finishes. The importer
 also remaps primitives above 65,536 triangles into independently bounded
 culling commands, so one oversized source range does not turn instance culling
-into an all-or-nothing million-triangle draw.
+into an all-or-nothing million-triangle draw. Meshoptimizer improves vertex
+cache and fetch locality independently inside each command. Alpha-blended
+commands preserve authored triangle order because their result is
+order-dependent.
 
 Mesh residency is intentionally owned below the public domain. Games register
 geometry, textures, and materials through `MeshDomain` and observe compact

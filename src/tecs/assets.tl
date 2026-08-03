@@ -55,7 +55,10 @@ tangents.
 One imported primitive becomes one independently bounded GPU-culling command.
 The decoder splits a primitive above 65,536 triangles into bounded commands,
 remapping the vertices and optional color, skin, and morph streams in each
-chunk. Smaller primitives keep their authored order and representation.
+chunk. Meshoptimizer then reorders opaque and masked triangles for the vertex
+cache and remaps every vertex stream into first-use order. Alpha-blended
+triangles retain their authored order because order affects their result, but
+their vertex streams still receive the lossless fetch remap.
 
 The repository's large-scene fetch command can replace source images with
 complete BC3 mip chains. Those images remain compressed through upload and
@@ -667,8 +670,10 @@ local record assets
     --- stream. Non-triangle input and texture-coordinate transforms raise at
     --- the direct load call instead of loading incompletely. A primitive above
     --- 65,536 triangles is split into independently bounded and culled mesh
-    --- records. Registering a model containing alpha blending requires a mesh
-    --- domain created with
+    --- records. Opaque and masked records are optimized for vertex-cache and
+    --- vertex-fetch locality. Alpha-blended records preserve authored triangle
+    --- order and receive only the lossless vertex-fetch remap. Registering a
+    --- model containing alpha blending requires a mesh domain created with
     --- `transparency = true`.
     --- @param path The caller supplies a `.gltf` or `.glb` asset path.
     --- @return Returns the decoded model. The call suspends its system while
