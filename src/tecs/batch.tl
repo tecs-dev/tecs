@@ -114,9 +114,7 @@ end
 
 local function runBlocking(bodies: {function(): any}, count: integer): {any}
     local scheduler <const> = taskruntime.newScheduler()
-    local root <const> = scheduler:spawn(function(): {any}
-        return runCooperatively(bodies, count)
-    end)
+    local root <const> = scheduler:spawn(function(): {any} return runCooperatively(bodies, count) end)
 
     while root.status == "pending" do
         local settled <const> = runtime.poll()

@@ -18,6 +18,7 @@ local record TaskImpl<T>
     waiter: TaskImpl<any>
     waitingOn: any
     waitKind: string
+    waitOperation: string
     resumeTag: any
     resumeValue: any
     resumeReason: string
@@ -750,6 +751,7 @@ local record taskruntime
     onSettle: function<T>(task: TaskImpl<T>, observer: function(TaskImpl<T>))
     awaitCallback: function<T>(subscribe: function(resume: function(T)): function()): T
     awaitCompletion: function<T>(completion: Completion<T>, operation: string): T
+    describeWait: function(task: TaskImpl<any>): string
     rethrowCancellation: function(reason: any)
     run: function<T>(body: function(ScopeImpl): T...): T
     yield: function()
@@ -761,6 +763,32 @@ local record taskruntime
     context: function(): any
     enterBarrier: function(subject: string)
     leaveBarrier: function()
+end
+
+-- Follows a task to whatever it is ultimately parked on, so a joined chain
+-- reports the operation that is actually outstanding rather than the join.
+function taskruntime.describeWait(task: TaskImpl<any>): string
+    if task == nil or task.status ~= "pending" then
+        return nil
+    end
+    local visited <const>: {TaskImpl<any>: boolean} = {}
+    local current = task
+    while current ~= nil and not visited[current] do
+        visited[current] = true
+        if current.waitKind == "task" then
+            local awaited <const> = current.waitingOn as TaskImpl<any>
+            if awaited == nil or awaited.status ~= "pending" then
+                return current.waitOperation or "task join"
+            end
+            current = awaited
+        else
+            if current.waitKind == nil and not current.started then
+                return "task start"
+            end
+            return current.waitOperation or current.waitKind or "unknown wait"
+        end
+    end
+    return "unknown wait"
 end
 
 function taskruntime.rethrowCancellation(reason: any)
@@ -916,6 +944,12 @@ function taskruntime.checkWait(operation: string): WaitMode
         local task <const> = currentTask()
         local barrier <const> = ((task.scope as ScopeImpl) as {string: any}).barrier as string
         error(("tecs: %s cannot wait while %s is active"):format(operation, barrier), 2)
+    end
+    if mode == "cooperative" then
+        -- Named here rather than at the park itself, because this is the one
+        -- point every cooperative operation passes through with its own name.
+        -- A wait that never completes is otherwise anonymous.
+        activeScheduler.current.waitOperation = operation
     end
     return mode
 end

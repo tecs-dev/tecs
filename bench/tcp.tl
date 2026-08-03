@@ -271,7 +271,13 @@ local function runTasks<T>(body: function(tasks.Scope): T...): T
         if rootTask.status == "pending" then
             runtime.poll()
             if now() >= deadline then
-                error("bench: cooperative TCP tasks timed out", 0)
+                error(
+                    format(
+                        "bench: cooperative TCP tasks timed out waiting on %s",
+                        task.describeWait(rootTask as tasks.Task<any>) or "nothing"
+                    ),
+                    0
+                )
             end
         end
     end

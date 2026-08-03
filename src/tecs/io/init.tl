@@ -430,6 +430,7 @@ local record binaryIO
         _handle: loader.CPtr
         _buffer: loader.CArray
         _closed: boolean
+        _draining: boolean
 
         --- Returns whether `close` has released this connection.
         ---
@@ -736,7 +737,18 @@ local OperationMT <const>: metatable<Operation> = {__index = Operation}
 local started = false
 local liveObjects = 0
 local operations: {Operation} = {}
+
+-- Sockets whose native send queue still holds bytes the kernel has not taken.
+-- A write returns as soon as the bounded queue accepts the bytes, so without an
+-- owner draining them a writer that finishes leaves them unsent forever and the
+-- peer waits for data nobody will flush.
+local draining: {binaryIO.TCPSocket} = {}
+local drainingCount = 0
 local pollIO: function(): integer
+local ensureSource: function()
+local shutdownIO: function()
+local trackDraining: function(socket: binaryIO.TCPSocket)
+local untrackDraining: function(socket: binaryIO.TCPSocket)
 
 local function validPort(port: integer, allowZero: boolean, level: integer)
     local minimum <const> = allowZero and 0 or 1
@@ -998,6 +1010,13 @@ local function queueStreamBytes(
             end
         end
     end
+
+    -- The queue accepted every byte, but the kernel may not have taken them
+    -- all. Whatever is left is now the process pump's to finish sending.
+    local remaining <const> = tonumber(C.tecsNetStreamPendingWrites(socket._handle)) as integer
+    if remaining > 0 then
+        trackDraining(socket)
+    end
     return true
 end
 
@@ -1128,6 +1147,7 @@ function binaryIO.TCPSocket:close(): boolean, string
         return true
     end
     local canceled <const>, cancelReason = netreactor.cancel(self, "connection closed")
+    untrackDraining(self)
     self._closed = true
     destroyHandle(self._handle, C.tecsNetStreamDestroy as function(loader.CPtr))
     self._handle = nil
@@ -1366,6 +1386,51 @@ function binaryIO.UDPSocket:close(): boolean, string
     return canceled, cancelReason
 end
 
+-- Registration is tracked rather than inferred from the two registries, since
+-- either can reach one while the other already holds the source.
+local sourceRegistered = false
+
+ensureSource = function()
+    if not sourceRegistered then
+        sourceRegistered = true
+        runtime.register("io", 40, pollIO, shutdownIO)
+    end
+end
+
+local function releaseSource()
+    if sourceRegistered and #operations == 0 and drainingCount == 0 then
+        sourceRegistered = false
+        runtime.unregister("io")
+    end
+end
+
+-- Enrols a socket whose queue kept bytes, so `pollIO` finishes the send.
+trackDraining = function(socket: binaryIO.TCPSocket)
+    if socket._draining then
+        return
+    end
+    socket._draining = true
+    drainingCount = drainingCount + 1
+    draining[drainingCount] = socket
+    ensureSource()
+end
+
+untrackDraining = function(socket: binaryIO.TCPSocket)
+    if not socket._draining then
+        return
+    end
+    socket._draining = false
+    for index = 1, drainingCount do
+        if draining[index] == socket then
+            draining[index] = draining[drainingCount]
+            draining[drainingCount] = nil
+            drainingCount = drainingCount - 1
+            break
+        end
+    end
+    releaseSource()
+end
+
 local function removeOperation(operation: Operation)
     if operation.at == 0 then
         return
@@ -1379,9 +1444,7 @@ local function removeOperation(operation: Operation)
         moved.at = at
     end
     operation.at = 0
-    if #operations == 0 then
-        runtime.unregister("io")
-    end
+    releaseSource()
 end
 
 local function finish(operation: Operation, waitMs: integer): integer
@@ -1434,7 +1497,7 @@ function Operation:cancel(completion: CompletionType<any>)
     self.handle = nil
 end
 
-local function shutdownIO()
+shutdownIO = function()
     while #operations > 0 do
         local current <const> = operations[#operations]
         removeOperation(current)
@@ -1454,9 +1517,7 @@ local function operation(kind: OperationKind, host: string, handle: loader.CPtr)
     source.defaultWaitMs = DEFAULT_WAIT_MS
     source.completion = Completion.pending(source as Source) as CompletionType<any>
     operations[source.at] = source
-    if source.at == 1 then
-        runtime.register("io", 40, pollIO, shutdownIO)
-    end
+    ensureSource()
     return source
 end
 
@@ -1563,6 +1624,27 @@ pollIO = function(): integer
             at = at + 1
         end
     end
+
+    -- Reading the pending count flushes what the kernel will now take, so a
+    -- queue drains across turns whether or not anyone waits on the socket.
+    local index = 1
+    while index <= drainingCount do
+        local socket <const> = draining[index]
+        local remaining = -1
+        if not socket._closed and socket._handle ~= nil then
+            remaining = tonumber(C.tecsNetStreamPendingWrites(socket._handle)) as integer
+        end
+        if remaining > 0 then
+            index = index + 1
+        else
+            settled = settled + 1
+            socket._draining = false
+            draining[index] = draining[drainingCount]
+            draining[drainingCount] = nil
+            drainingCount = drainingCount - 1
+        end
+    end
+    releaseSource()
     return settled
 end
 
