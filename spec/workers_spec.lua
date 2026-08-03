@@ -11,6 +11,11 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local workers = require("tecs.workers")
+local tecs = require("tecs")
+local runtime = require("tecs.internal.runtime")
+local sdl = require("tecs.ffi.sdl3")
+
+local C = sdl.C
 
 -- Every worker resolves modules the same way the spec does.
 local PRELUDE = 'package.path = "build/?.lua;build/?/init.lua;" .. package.path\n'
@@ -219,5 +224,283 @@ while self:receive() ~= nil do end
         assert.are.equal(1, channel:count())
         assert.are.equal(1, channel:receive(0).fine)
         channel:destroy()
+    end)
+
+    it("reports a closed channel apart from an empty one", function()
+        local channel = workers.newChannel()
+        assert.is_false(channel:isClosed())
+
+        channel:send({ last = true })
+        channel:close()
+
+        -- Closed is not drained: what was queued before the close still
+        -- arrives, and only then does the reader see nil for good.
+        assert.is_true(channel:isClosed())
+        assert.are.equal(1, channel:count())
+        assert.is_true(channel:receive(0).last)
+        assert.is_nil(channel:receive(0))
+
+        channel:destroy()
+        assert.is_true(channel:isClosed(), "a destroyed channel can never answer again")
+    end)
+end)
+
+-- Suspending receives. These drive a world rather than the channel API,
+-- because what is under test is that a system waiting on a worker releases the
+-- SDL thread instead of blocking it.
+
+-- Waits for one message and then ends, so the spawner is parked on a result
+-- that will never come.
+local SILENT = PRELUDE .. [[
+local workers = require("tecs.workers")
+local self = workers.current()
+self:receive()
+]]
+
+-- Drives the process pump the way the Application does, once per iteration.
+local function pumpUntil(satisfied, what)
+    local deadline = C.SDL_GetTicks() + 2000
+    repeat
+        runtime.poll()
+        if satisfied() then
+            return
+        end
+        C.SDL_Delay(1)
+    until C.SDL_GetTicks() >= deadline
+    error(what)
+end
+
+local function unparked()
+    return workers.parked() == 0
+end
+
+describe("suspending worker receives", function()
+    setup(function()
+        assert(C.SDL_Init(0))
+    end)
+
+    teardown(function()
+        C.SDL_Quit()
+    end)
+
+    before_each(function()
+        assert.are.equal(0, workers.parked(), "a previous test left a receiver parked")
+        assert.is_false(runtime.registered("workers"), "a previous test left the source registered")
+    end)
+
+    it("parks the calling system and resumes at the receive", function()
+        local worker = workers.spawn({ source = ECHO })
+        local world = tecs.ecs.newWorld()
+        local order = {}
+        local answer
+
+        world:addSystem({
+            name = "WorkerReceive",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                order[#order + 1] = "receive"
+                answer = worker:receive(-1)
+                order[#order + 1] = "resumed"
+            end,
+        })
+        world:addSystem({
+            name = "AfterWorkerReceive",
+            phase = tecs.ecs.phases.Last,
+            run = function()
+                order[#order + 1] = "after"
+            end,
+        })
+
+        -- Nothing has been sent, so the receive has nothing to take and the
+        -- update suspends rather than blocking the thread inside the C pop.
+        assert.is_false(world:update(1 / 60))
+        assert.is_true(world._updateStalled)
+        assert.are.equal(1, workers.parked())
+        assert.is_true(runtime.registered("workers"), "a parked receiver holds the runtime source")
+        assert.are.same({ "receive" }, order)
+
+        worker:send({ id = 11 })
+        pumpUntil(unparked, "the worker result did not reach the pump")
+
+        assert.is_true(world:update(1 / 60))
+        assert.is_false(world._updateStalled)
+        assert.are.equal(11, answer.id)
+        assert.are.same({ "receive", "resumed", "after" }, order)
+        assert.are.equal(0, workers.parked())
+        assert.is_false(runtime.registered("workers"), "an idle facility releases the source")
+
+        world:shutdown()
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("takes a ready result inline without parking", function()
+        local worker = workers.spawn({ source = ECHO })
+        local world = tecs.ecs.newWorld()
+        local answer
+
+        worker:send({ id = 3 })
+        pumpUntil(function()
+            return worker:available() > 0
+        end, "the worker did not answer")
+
+        world:addSystem({
+            name = "InlineWorkerReceive",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                answer = worker:receive(-1)
+            end,
+        })
+
+        assert.is_true(world:update(1 / 60))
+        assert.is_false(world._updateStalled)
+        assert.are.equal(3, answer.id)
+        assert.are.equal(0, workers.parked())
+        assert.is_false(runtime.registered("workers"), "an inline result registers nothing")
+
+        world:shutdown()
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("gives up a timed receive when its deadline passes", function()
+        local worker = workers.spawn({ source = ECHO })
+        local world = tecs.ecs.newWorld()
+        local answer = "unset"
+
+        world:addSystem({
+            name = "TimedWorkerReceive",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                answer = worker:receive(5)
+            end,
+        })
+
+        assert.is_false(world:update(1 / 60))
+        assert.are.equal(1, workers.parked())
+
+        C.SDL_Delay(10)
+        pumpUntil(unparked, "the expired receive was never released")
+
+        assert.is_true(world:update(1 / 60))
+        assert.is_nil(answer)
+        assert.are.equal(0, workers.parked())
+
+        world:shutdown()
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("unwinds a resource scope when shutdown cancels a parked receive", function()
+        local worker = workers.spawn({ source = ECHO })
+        local world = tecs.ecs.newWorld()
+        local closed = 0
+
+        world:addSystem({
+            name = "CanceledWorkerReceive",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                tecs.scoped("canceled worker receive", function(scope)
+                    scope:own({
+                        close = function()
+                            closed = closed + 1
+                            return true
+                        end,
+                    })
+                    worker:receive(-1)
+                end)
+            end,
+        })
+
+        assert.is_false(world:update(1 / 60))
+        assert.are.equal(0, closed)
+        assert.are.equal(1, workers.parked())
+
+        -- Cancellation reaches the park through the gate it subscribed with,
+        -- so the receiver unsubscribes rather than being left behind.
+        world:shutdown()
+        assert.are.equal(1, closed)
+        assert.are.equal(0, workers.parked())
+        assert.is_false(runtime.registered("workers"), "shutdown leaves no producer registered")
+
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("releases a parked receive when the worker ends without answering", function()
+        local worker = workers.spawn({ source = SILENT })
+        local world = tecs.ecs.newWorld()
+        local answer = "unset"
+
+        world:addSystem({
+            name = "OrphanedWorkerReceive",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                answer = worker:receive(-1)
+            end,
+        })
+
+        assert.is_false(world:update(1 / 60))
+        assert.are.equal(1, workers.parked())
+
+        -- The worker takes this one message and its source ends, which closes
+        -- the outbox. That close is the only signal that no result is coming.
+        worker:send({ go = true })
+        pumpUntil(unparked, "the ended worker never released its receiver")
+
+        assert.is_true(world:update(1 / 60))
+        assert.is_nil(answer)
+        assert.are.equal(0, workers.parked())
+        assert.is_false(runtime.registered("workers"))
+
+        world:shutdown()
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("releases a parked receive when the worker is stopped", function()
+        local worker = workers.spawn({ source = ECHO })
+        local world = tecs.ecs.newWorld()
+        local answer = "unset"
+
+        world:addSystem({
+            name = "StoppedWorkerReceive",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                answer = worker:receive(-1)
+            end,
+        })
+
+        assert.is_false(world:update(1 / 60))
+        assert.are.equal(1, workers.parked())
+
+        assert.are.equal(0, worker:stop())
+        assert.are.equal(0, workers.parked(), "stop releases before it destroys the channels")
+        assert.is_false(runtime.registered("workers"))
+
+        assert.is_true(world:update(1 / 60))
+        assert.is_nil(answer)
+        assert.is_nil(worker:receive(-1), "a stopped worker answers nil without waiting")
+
+        world:shutdown()
+    end)
+
+    it("blocks its own caller outside a system", function()
+        local worker = workers.spawn({ source = ECHO })
+        worker:send({ id = 5 })
+
+        -- No task is running, so there is no frame to release and the native
+        -- wait is both correct and free of the pump's latency.
+        local answer = worker:receive(-1)
+        assert.are.equal(5, answer.id)
+        assert.are.equal(0, workers.parked())
+        assert.is_false(runtime.registered("workers"), "a blocking wait registers nothing")
+
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("rejects a timeout that is not a number", function()
+        local worker = workers.spawn({ source = ECHO })
+        local ok, err = pcall(function()
+            worker:receive("soon")
+        end)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(err):find("must be a number of milliseconds", 1, true))
+        assert.are.equal(0, worker:stop())
     end)
 end)

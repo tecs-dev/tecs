@@ -18,6 +18,7 @@ end
 local record runtime
     register: function(name: string, order: integer, poll: function(): integer, shutdown: Shutdown)
     unregister: function(name: string)
+    registered: function(name: string): boolean
     poll: function(): integer
     shutdown: function(): boolean, string
 end
@@ -73,6 +74,12 @@ function runtime.shutdown(): boolean, string
         return false, table.concat(failures, "\n")
     end
     return true
+end
+
+--- Reports whether a source currently holds the registry under this name. A
+--- facility that registers only while it has work uses it to prove it let go.
+function runtime.registered(name: string): boolean
+    return byName[name] ~= nil
 end
 
 function runtime.unregister(name: string)

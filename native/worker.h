@@ -22,6 +22,7 @@ uint32_t tecsChannelPop(TecsChannel *channel, void **out, int32_t timeoutMs);
 void *tecsChannelData(void *message);
 void tecsChannelFree(void *message);
 uint32_t tecsChannelCount(TecsChannel *channel);
+bool tecsChannelIsClosed(TecsChannel *channel);
 
 TecsWorker *tecsWorkerSpawn(const char *source, const char *luaPath, TecsChannel *toWorker, TecsChannel *fromWorker);
 int tecsWorkerJoin(TecsWorker *worker);

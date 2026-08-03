@@ -37,15 +37,36 @@ What can cross is therefore what `string.buffer` can encode: numbers,
 strings, booleans, and tables of those. Not functions, not userdata, and
 not cdata pointers into another state's heap.
 
+## Waiting on each side
+
+The two `receive` calls have opposite defaults, and the asymmetry is
+deliberate rather than an oversight.
+
+`Worker:receive` runs on the thread SDL drives, so it polls by default and
+never blocks that thread when asked to wait. A timeout suspends the calling
+system cooperatively and resumes it where it left off; outside a system it
+blocks the caller while the worker makes progress, which is what startup,
+shutdown, and headless tools want.
+
+`Self:receive`, the worker side, waits by default. It runs on the worker's own
+thread, where blocking costs nothing a frame can see, and an idle worker that
+polled instead would spin a core.
+
+A cooperative wait is served by the runtime pump, which runs once per frame, so
+a result costs up to one extra frame against the arrival that produced it. That
+is the same trade every other Tecs producer makes, and it buys a frame that
+keeps rendering while the worker computes.
+
 ## Polling and shutdown
 
-The spawner's `receive` polls by default, which suits a frame. Inside the
-worker it waits by default, so an idle worker does not spin. Closing the inbox
-wakes the worker and returns nil after queued messages drain.
+Closing the inbox wakes the worker and returns nil after queued messages drain.
+The worker closes its outbox when its source ends, so a spawner waiting on a
+result learns that no result is coming rather than waiting forever.
 
 `stop` closes the inbox, joins the thread, and releases both channels. Worker
 source must leave its receive loop when the inbox closes or shutdown can wait
-indefinitely.
+indefinitely. `stop` also releases every suspended `Worker:receive` on that
+worker with nil, so shutting a worker down never strands a system.
 
 Set `TECS_TRACEPROF` to print a worker's trace aborts when its inbox closes.
 Repeated `failed to allocate mcode memory` messages identify LuaJIT
@@ -59,6 +80,9 @@ machine-code allocation failures.
 local ffi <const> = require("ffi")
 local buffer <const> = require("string.buffer")
 local loader <const> = require("tecs.ffi.loader")
+local runtime <const> = require("tecs.internal.runtime")
+local task <const> = require("tecs.internal.taskruntime")
+local time <const> = require("tecs.platform.time")
 local type Closeable = require("tecs.types").Closeable
 
 loader.declare("worker")
@@ -112,6 +136,17 @@ local record Channel is Closeable
     ---     and a closed and drained channel. A sent nil also decodes to nil, so
     ---     callers cannot distinguish those cases and should not send nil.
     receive: function(self: Channel, timeoutMs?: number): any
+
+    --- Reports whether the channel is closed.
+    ---
+    --- Closed and empty is the one state that will never produce another
+    --- value, which is what separates a reader that should give up from one
+    --- that should wait. Queued messages still arrive after a close, so a
+    --- closed channel that still has a count is not yet finished.
+    ---
+    --- @return True once `close` has run on either side, whether or not
+    ---     messages remain queued. A destroyed channel also reports true.
+    isClosed: function(self: Channel): boolean
 end
 
 --- Represents a thread with its own Lua state and two message channels.
@@ -144,13 +179,24 @@ local record Worker
     --- @param value The worker applies the same limits and errors as `Channel:send`.
     send: function(self: Worker, value: any)
 
-    --- Takes a result, or nil if none is ready.
+    --- Takes a result, waiting for one when asked.
     ---
-    --- @param timeoutMs The timeout uses milliseconds. Omit it to poll and
-    ---     return immediately; a negative value blocks until something
-    ---     arrives and stalls the frame when called from the main thread.
-    --- @return Nil means the queue is empty or the worker has exited. Call
-    ---     `stop` to learn whether the worker still runs.
+    --- A ready result returns inline. A wait suspends the calling system
+    --- cooperatively and resumes it at this call, so other systems, rendering,
+    --- and input keep running; outside a system the call blocks its caller
+    --- instead. Never blocks the SDL thread from inside a system.
+    ---
+    --- A suspended wait is served by the runtime pump, which runs once per
+    --- frame, so a result can arrive up to one frame after the worker sent it.
+    ---
+    --- @param timeoutMs The timeout uses milliseconds. Omit it or pass zero to
+    ---     poll and return immediately, which is the opposite of the
+    ---     worker-side `receive`, where omission waits. A negative value waits
+    ---     until a result arrives or the worker ends, and any other value
+    ---     waits at most that long.
+    --- @return The next result, or nil. Nil covers an empty queue, an expired
+    ---     timeout, and a worker that has ended without sending one. A stopped
+    ---     worker answers nil without waiting.
     receive: function(self: Worker, timeoutMs?: number): any
 end
 
@@ -167,6 +213,16 @@ local record workers
     ---     exactly one state should hold it. Raises when the queue cannot be
     ---     created.
     newChannel: function(): Channel
+
+    --- Reports how many `Worker:receive` calls are suspended.
+    ---
+    --- A suspended receiver is a system parked on a worker result. The count
+    --- exists for tests and debug tooling that need to see the wait rather
+    --- than infer it; ordinary game code has no use for it.
+    ---
+    --- @return The number of receivers waiting across every worker. Zero once
+    ---     they have all resumed, been canceled, or had their worker stopped.
+    parked: function(): integer
 
     --- Read-only. Contains the absolute path of the loaded native library.
     path: string
@@ -281,6 +337,15 @@ function Channel:count(): integer
     return tonumber(C.tecsChannelCount(self.handle)) as integer
 end
 
+function Channel:isClosed(): boolean
+    if self.handle == nil then
+        return true
+    end
+    -- The FFI hands back a Lua boolean for a C `bool`; the generated cdef
+    -- types every return as an opaque C value.
+    return C.tecsChannelIsClosed(self.handle) as boolean
+end
+
 --- Wakes anything blocked on this channel so it can stop.
 ---
 --- Already-queued messages are still delivered: a reader drains what is there and only then
@@ -302,6 +367,162 @@ function Channel:destroy()
     C.tecsChannelDestroy(self.handle)
     self.handle = nil
 end
+
+-------------------------------------------------------------------------------
+-- Suspended receivers
+-------------------------------------------------------------------------------
+
+-- A cooperative `Worker:receive` parks here and the runtime source below
+-- advances it. Nothing native calls back into Lua: the poll runs on the Lua
+-- thread and takes results with a zero timeout, which is the same pop a game
+-- would write itself.
+
+--- One suspended `Worker:receive`.
+local record Parked
+    --- The worker whose results this receiver is waiting for.
+    worker: Worker
+
+    --- Monotonic milliseconds after which the receiver gives up, or nil to
+    --- wait until a result or the worker's end.
+    deadline: number
+
+    --- False once the receiver has been resumed or canceled, so a snapshot
+    --- taken before either still skips it.
+    active: boolean
+
+    --- Delivers the result and resumes the suspended caller.
+    resume: function(any)
+end
+
+local parked <const>: {Parked} = {}
+local parkedCount = 0
+local turning <const>: {Parked} = {}
+
+-- Registration is tracked with this flag rather than inferred from
+-- `parkedCount`, because the count is also what `releaseSource` reads and a
+-- second `runtime.register` under the same name raises.
+local sourceRegistered = false
+
+local pollParked: function(): integer
+local shutdownParked: function()
+
+-- Bounded so a runaway system reports its own mistake rather than growing the
+-- poll until the frame does.
+local MAX_PARKED <const> = 1024
+
+local function releaseSource()
+    if sourceRegistered and parkedCount == 0 then
+        sourceRegistered = false
+        runtime.unregister("workers")
+    end
+end
+
+local function retainSource()
+    if not sourceRegistered then
+        sourceRegistered = true
+        runtime.register("workers", 15, pollParked, shutdownParked)
+    end
+end
+
+local function unpark(entry: Parked)
+    if not entry.active then
+        return
+    end
+    entry.active = false
+    entry.worker = nil
+    local last <const> = parkedCount
+    for index = 1, last do
+        if parked[index] == entry then
+            parked[index] = parked[last]
+            parked[last] = nil
+            parkedCount = last - 1
+            break
+        end
+    end
+    releaseSource()
+end
+
+--- Reports the result a parked receiver should be given, and whether it is due.
+---
+--- @return The result, or nil when the receiver is due for a nil answer.
+--- @return True when the receiver should resume now.
+local function settleParked(entry: Parked): any, boolean
+    local worker <const> = entry.worker
+    if worker._joined then
+        return nil, true
+    end
+    local result <const> = worker._fromWorker:receive(0)
+    if result ~= nil then
+        return result, true
+    end
+    -- Closed and drained is the worker's end: its source returned or raised,
+    -- and no later poll can produce anything.
+    if worker._fromWorker:isClosed() then
+        return nil, true
+    end
+    if entry.deadline ~= nil and time.now() * 1000.0 >= entry.deadline then
+        return nil, true
+    end
+    return nil, false
+end
+
+--- Advances every suspended receiver once. Registered as the `workers` runtime
+--- source while at least one receiver is parked.
+---
+--- @return The number of receivers this poll resumed.
+pollParked = function(): integer
+    -- A snapshot, because resuming a receiver removes it and may park another.
+    local turns <const> = parkedCount
+    for index = 1, turns do
+        turning[index] = parked[index]
+    end
+
+    local resumed = 0
+    for index = 1, turns do
+        local entry <const> = turning[index]
+        turning[index] = nil
+        if entry.active then
+            local result <const>, due <const> = settleParked(entry)
+            if due then
+                local deliver <const> = entry.resume
+                unpark(entry)
+                deliver(result)
+                resumed = resumed + 1
+            end
+        end
+    end
+    return resumed
+end
+
+--- Resumes suspended receivers with nil, so nothing stays parked on a worker
+--- that is going away.
+---
+--- @param worker Releases only this worker's receivers. Nil releases every
+---     parked receiver, which is what application shutdown needs.
+local function releaseParked(worker: Worker)
+    local turns <const> = parkedCount
+    for index = 1, turns do
+        turning[index] = parked[index]
+    end
+    for index = 1, turns do
+        local entry <const> = turning[index]
+        turning[index] = nil
+        if entry.active and (worker == nil or entry.worker == worker) then
+            local deliver <const> = entry.resume
+            unpark(entry)
+            deliver(nil)
+        end
+    end
+end
+
+function workers.parked(): integer
+    return parkedCount
+end
+
+-- Shutdown runs after the world has already canceled its suspended systems, so
+-- this is the safety net that keeps a stranded receiver from holding the source
+-- open and failing the registry's own end-of-run check.
+shutdownParked = function() releaseParked(nil); releaseSource() end
 
 -------------------------------------------------------------------------------
 -- Workers
@@ -358,7 +579,46 @@ function Worker:send(value: any)
 end
 
 function Worker:receive(timeoutMs?: number): any
-    return self._fromWorker:receive(timeoutMs)
+    local wanted <const> = timeoutMs or 0
+    if type(wanted) ~= "number" then
+        error("tecs: a worker receive timeout must be a number of milliseconds", 2)
+    end
+    if self._joined then
+        return nil
+    end
+
+    -- Attempted before anything else, so a ready result costs no scheduler
+    -- work and a poll stays exactly what it was.
+    local ready <const> = self._fromWorker:receive(0)
+    if ready ~= nil or wanted == 0 then
+        return ready
+    end
+
+    -- Outside a task the caller owns its own thread, so the native wait is
+    -- both correct and free of the pump's frame of latency.
+    if task.checkWait("worker receive") == "blocking" then
+        return self._fromWorker:receive(wanted)
+    end
+    if self._fromWorker:isClosed() then
+        return nil
+    end
+
+    local deadline <const> = wanted > 0 and time.now() * 1000.0 + wanted or nil
+    return task.awaitCallback(function(resume: function(any)): function()
+        if parkedCount >= MAX_PARKED then
+            error("tecs: too many worker receives are waiting", 3)
+        end
+        local entry <const>: Parked = {
+            worker = self,
+            deadline = deadline,
+            active = true,
+            resume = resume,
+        }
+        parkedCount = parkedCount + 1
+        parked[parkedCount] = entry
+        retainSource()
+        return function() unpark(entry) end
+    end)
 end
 
 --- Results waiting to be taken.
@@ -378,6 +638,9 @@ end
 --- hangs the caller. This method releases both channels afterwards and drops unread results;
 --- drain them before calling this.
 ---
+--- Every suspended `Worker:receive` on this worker resumes with nil first, so
+--- stopping a worker never leaves a system parked on a thread that is gone.
+---
 --- @return The thread's exit status. Zero for a worker that ran to the end of its source,
 ---     one for a worker whose source raised, and also zero for a second call on a worker
 ---     already stopped, so the two are not distinguishable.
@@ -386,6 +649,7 @@ function Worker:stop(): integer
         return 0
     end
     self._joined = true
+    releaseParked(self)
     self._toWorker:close()
     local status = tonumber(C.tecsWorkerJoin(self._handle)) as integer
     self._handle = nil

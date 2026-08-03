@@ -277,6 +277,19 @@ copying it back across the HTTP boundary. Every path settles onto the same
 Lua-thread continuation, so that implementation split does not create a second
 game API or let CPU work starve I/O progress.
 
+A worker is the one producer a game writes itself, and it follows the same
+rule rather than an exception for user code. `Worker:receive` polls by default,
+and a wait suspends the calling system and resumes it from the process pump.
+The alternative was the blocking pop the channel already offers, which is what
+this replaced: it is correct on the worker's own thread and wrong on the one
+SDL drives, and no amount of documentation stops a system from reaching for it.
+Cooperative delivery costs up to a frame of latency per message, which is the
+same price every other producer here pays and the reason polling stays the
+default. The worker closes its outbox when its source ends, because a spawner
+parked on a result otherwise cannot tell an idle worker from one that has
+already exited, and the difference between those two is a wait that ends and a
+wait that does not.
+
 Byte contracts are contextual. Memory Readers, Writers, buffers, and
 transforms return inline. A socket or process-pipe endpoint first uses that
 same direct call and parks only when the handle is not ready. File endpoints

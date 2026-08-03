@@ -109,10 +109,31 @@ routes work according to what it needs:
 | File-backed HTTP request bodies                                  | Tokio HTTP file stream         |
 | Opens, metadata, directories, and uncovered platform calls       | Bounded blocking-I/O lane      |
 | Image decode and other expensive transformations                 | Separate bounded CPU lane      |
+| Game-supplied computation in its own Lua state                   | A `tecs.workers` worker thread |
 
 An asset miss therefore reads through SDL AsyncIO, decodes in the CPU lane,
 publishes the result on the main thread, and resumes the system. A cache hit
 does none of that work and touches no coroutine completion.
+
+A worker is the lane a game writes itself. `Worker:receive` follows the same
+rule as everything above it: a ready result returns inline, a wait suspends the
+system, and outside a system the call blocks its own caller. The pump takes
+results once per frame, so a suspended receive can resume up to one frame after
+the worker sent its answer. A caller that cannot spend that frame polls with
+`worker:receive(0)` and does its own work in the meantime.
+
+```teal
+world:addSystem({
+    name = "game.HashLevel",
+    phase = tecs.ecs.phases.Update,
+    run = function()
+        hasher:send({name = "level1", bytes = level})
+        -- Other systems, rendering, and input continue while the worker runs.
+        local answer <const> = hasher:receive(-1)
+        world:setResource(LevelHash, answer.hash)
+    end,
+})
+```
 
 ## Streams remain ordinary Readers and Writers
 
@@ -167,8 +188,8 @@ Closing the client cancels and drains that work; application shutdown closes
 any client that was not closed earlier.
 
 `files.read`, `files.write`, file streams, socket operations, process pipes,
-process waits, native dialogs, asset loads, and HTTP use this contextual wait
-rule. There is no public process pump to remember.
+process waits, native dialogs, asset loads, worker receives, and HTTP use this
+contextual wait rule. There is no public process pump to remember.
 
 ## Continuous input is a service, not a forever wait
 
@@ -177,9 +198,9 @@ platform event feed may continue forever, so the Application ingests those
 sources into bounded queues and publishes their already received values during
 `Ingress`. They do not park a world waiting for the next item.
 
-Raw listeners, datagram sockets, and process output remain owned endpoints.
-One `accept`, `receive`, or `read` is a finite call: it suspends when used in a
-system and blocks its caller elsewhere. A plugin that wants one of those
+Raw listeners, datagram sockets, process output, and worker channels remain
+owned endpoints. One `accept`, `receive`, or `read` is a finite call: it
+suspends when used in a system and blocks its caller elsewhere. A plugin that wants one of those
 endpoints to run continuously owns its lifetime and turns received values into
 bounded ECS-visible state in an `Ingress` system. Tecs does not silently create
 an unbounded background inbox.

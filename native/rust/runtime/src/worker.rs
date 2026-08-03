@@ -222,6 +222,20 @@ pub unsafe extern "C" fn tecsChannelCount(channel: *mut TecsChannel) -> u32 {
     u32::try_from(lock_channel(channel).messages.len()).unwrap_or(u32::MAX)
 }
 
+/// Reports whether the channel is closed, so a reader can tell an empty queue
+/// from one nothing will ever arrive on again.
+///
+/// # Safety
+///
+/// `channel` must be null or a live channel pointer.
+#[no_mangle]
+pub unsafe extern "C" fn tecsChannelIsClosed(channel: *mut TecsChannel) -> bool {
+    let Some(channel) = (unsafe { channel.as_ref() }) else {
+        return true;
+    };
+    lock_channel(channel).closed
+}
+
 unsafe fn set_pointer(state: *mut LuaState, name: &CStr, value: *mut c_void) {
     unsafe {
         lua_pushlightuserdata(state, value);
@@ -284,9 +298,14 @@ fn worker_entry(
                 },
             );
             lua_close(state);
+            // The spawner may be parked on a result. Closing the outbox is the
+            // only signal that no result is coming, and it must reach a worker
+            // that raised as surely as one that ran to the end.
+            tecsChannelClose(from_worker as *mut TecsChannel);
             return 1;
         }
         lua_close(state);
+        tecsChannelClose(from_worker as *mut TecsChannel);
     }
     0
 }
