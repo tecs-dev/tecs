@@ -207,6 +207,23 @@ layout(set = 2, binding = STORAGE_BINDING + 6) readonly buffer MeshLocalShadowMa
 
 #include "lighting.glsl"
 
+vec3 meshDirect(
+    bool pbr,
+    vec3 albedo,
+    vec3 normal,
+    vec3 viewDirection,
+    vec3 lightDirection,
+    vec3 radiance,
+    float roughness,
+    float metallic
+) {
+    if (!pbr) {
+        return lambertDirect(albedo, normal, lightDirection, radiance);
+    }
+    return cookTorrance(
+        albedo, normal, viewDirection, lightDirection, radiance, roughness, metallic);
+}
+
 // Above this the green channel says an occluder really covers the pixel. Below
 // it the pixel is either empty or in the halo the blur spread, and a halo that
 // counted would give every silhouette a skirt of shadow it does not cast.
@@ -319,17 +336,21 @@ void main() {
     float fog = 0.0;
     bool lit = encoded.a >= 0.5;
     bool mesh = false;
+    bool pbr = false;
 #ifdef MESH_PBR
     mesh = encoded.a > 0.1 && encoded.a < 0.9;
+    if (mesh) {
+        lit = encoded.a >= 0.30;
+        pbr = encoded.a >= 0.55;
+    }
 #endif
 #ifdef MESH_FOG
-    // Sprites use the exact endpoints. Fog-enabled meshes use two reserved
-    // middle ranges so both lit and unlit material dispatch survive the trip
-    // through the normalized G-buffer.
-    if (encoded.a > 0.1 && encoded.a < 0.9) {
-        lit = encoded.a >= 0.5;
-        fog = lit ? clamp((encoded.a - 0.50) / 0.24, 0.0, 1.0)
-                  : clamp((encoded.a - 0.25) / 0.24, 0.0, 1.0);
+    if (mesh) {
+        const float FOG_SPAN = 31.0 / 255.0;
+        float marker = pbr ? 160.0 / 255.0
+            : lit ? 96.0 / 255.0
+            : 32.0 / 255.0;
+        fog = clamp((encoded.a - marker) / FOG_SPAN, 0.0, 1.0);
     }
 #endif
 
@@ -370,7 +391,9 @@ void main() {
 #ifdef MESH_PBR
     if (mesh) {
         surfaceWorld = meshWorldOf(vUV, texture(gDepth, vUV).r);
-        viewDirection = normalize(scene.meshCamera.xyz - surfaceWorld);
+        if (pbr) {
+            viewDirection = normalize(scene.meshCamera.xyz - surfaceWorld);
+        }
     }
 #endif
     // Authored occlusion reaches indirect light only. A point light is a
@@ -378,7 +401,7 @@ void main() {
     // term; its own shadowing is handled separately below.
     vec3 accumulated = albedo.rgb * scene.ambient.rgb * orm.r;
 #ifdef MESH_PBR
-    if (mesh) {
+    if (mesh && pbr) {
         // Without an environment map the ambient term is a diffuse-only
         // approximation. Metals have no diffuse lobe, so only mesh pixels
         // lose it; the established 2D material contract remains Lambertian.
@@ -390,6 +413,11 @@ void main() {
             scene.meshEnvironmentTuning.zw);
 #endif
     }
+#ifdef MESH_PROBE
+    else if (mesh) {
+        accumulated += albedo.rgb * ambientCube(normal) * orm.r;
+    }
+#endif
 #endif
 #ifdef MESH_SHADOWS
     // ORM alpha is otherwise reserved. A shadow-enabled mesh writes its
@@ -397,7 +425,7 @@ void main() {
     // meshes leave the channel at one and therefore receive no 3D sun term.
     if (orm.a < 0.5) {
         float visibility = clamp(orm.a * 4.0, 0.0, 1.0);
-        accumulated += cookTorrance(albedo.rgb, normal, viewDirection,
+        accumulated += meshDirect(pbr, albedo.rgb, normal, viewDirection,
             normalize(scene.meshLightDirection.xyz),
             scene.meshLightColor.rgb * scene.meshLightDirection.w * visibility,
             orm.g, orm.b);
@@ -466,7 +494,7 @@ void main() {
             attenuation *= meshLocalShadowVisibility(light, surfaceWorld, normal,
                 scene.meshLocalShadowTuning.x, scene.meshLocalShadowTuning.y);
 #endif
-            accumulated += cookTorrance(albedo.rgb, normal, viewDirection, normalize(toLight),
+            accumulated += meshDirect(pbr, albedo.rgb, normal, viewDirection, normalize(toLight),
                 light.colorIntensity.rgb * light.colorIntensity.a * attenuation, orm.g, orm.b);
         }
     }

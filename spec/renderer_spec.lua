@@ -1016,14 +1016,12 @@ describe("ecs.Renderer", function()
         local camera = renderer.meshes.camera
         camera.z = 2
         local mesh, bounds = renderer.meshes:registerMesh(planeMesh("spec://stationary-local-light-plane"))
-        world:spawn(
-            tecs.Transform3D(),
-            mesh,
-            bounds,
-            components.MeshMaterial(),
-            components.Tint(1, 1, 1, 1),
-            components.Renderable3D()
-        )
+        local material = renderer.meshes:registerMaterial({
+            name = "spec://stationary-lambert",
+            model = renderer.meshes.MATERIAL_LAMBERT,
+            roughness = 0.1,
+        })
+        world:spawn(tecs.Transform3D(), mesh, bounds, material, components.Tint(1, 1, 1, 1), components.Renderable3D())
         world:spawn(tecs.Transform3D.new({ z = 1 }), components.PointLight3D(2, 1, 1, 1, 8))
 
         local before = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)

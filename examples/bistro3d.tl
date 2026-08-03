@@ -19,7 +19,6 @@ local DAYLIGHT_PER_WHEEL <const> = 0.08
 local INITIAL_CAMERA_X <const> = 9.1325
 local INITIAL_CAMERA_Y <const> = 2.6832
 local INITIAL_CAMERA_Z <const> = -26.1308
-local SHADOWED_FIXTURES <const> = 4
 
 local record FixtureProfile
     spot: boolean
@@ -36,7 +35,6 @@ local record FixtureLight
     rotationY: number
     rotationZ: number
     rotationW: number
-    distanceSquared: number
     profile: FixtureProfile
 end
 
@@ -59,7 +57,7 @@ local function mixColor(
     color[3] = mix(nightB, dayB, daylight)
 end
 
-local function tuneLegacyMaterial(material: tecs.assets.ModelMaterial)
+local function tuneLegacyMaterial(material: tecs.assets.ModelMaterial, lambert: integer)
     -- The source marks every material as a non-PBR Phong conversion and gives
     -- concrete, foliage, glass, and metal the same metallic and roughness
     -- factors. Classify its authored names so view-dependent highlights stay
@@ -80,8 +78,9 @@ local function tuneLegacyMaterial(material: tecs.assets.ModelMaterial)
         material.metallic = 0.0
         material.roughness = 0.5
     else
+        material.model = lambert
         material.metallic = 0.0
-        material.roughness = 0.75
+        material.roughness = 1.0
     end
 end
 
@@ -135,9 +134,6 @@ local function findFixtureLights(model: tecs.assets.Model): {FixtureLight}
                 end
             end
             if not duplicate then
-                local dx <const>, dy <const>, dz <const> = x - INITIAL_CAMERA_X,
-                    y - INITIAL_CAMERA_Y,
-                    z - INITIAL_CAMERA_Z
                 fixtures[#fixtures + 1] = {
                     x = x,
                     y = y,
@@ -146,15 +142,11 @@ local function findFixtureLights(model: tecs.assets.Model): {FixtureLight}
                     rotationY = draw.rotationY,
                     rotationZ = draw.rotationZ,
                     rotationW = draw.rotationW,
-                    distanceSquared = dx * dx + dy * dy + dz * dz,
                     profile = profile,
                 }
             end
         end
     end
-    table.sort(
-        fixtures, function(a: FixtureLight, b: FixtureLight): boolean return a.distanceSquared < b.distanceSquared end
-    )
     return fixtures
 end
 
@@ -248,9 +240,8 @@ local function game(world: tecs.World, app: tecs.Application)
 
     local loaded <const> = tecs.assets.loadGLTF(tecs.io.files.assetPath("external/bistro/Bistro.tecs.gltf"))
     for _, material in ipairs(loaded.materials) do
-        tuneLegacyMaterial(material)
+        tuneLegacyMaterial(material, meshes.MATERIAL_LAMBERT)
     end
-    local shadowed = 0
     local fixtures <const> = findFixtureLights(loaded)
     for _, fixture in ipairs(fixtures) do
         local profile <const> = fixture.profile
@@ -259,11 +250,6 @@ local function game(world: tecs.World, app: tecs.Application)
             local directionX <const> = -2.0 * (qw * qy + qz * qx)
             local directionY <const> = 2.0 * (qw * qx - qz * qy)
             local directionZ <const> = -1.0 + 2.0 * (qx * qx + qy * qy)
-            local flags = 0
-            if shadowed < SHADOWED_FIXTURES then
-                flags = tecs.gfx.LIGHT_CASTS_SHADOWS
-                shadowed = shadowed + 1
-            end
             spotLampEntities[#spotLampEntities + 1] = world:spawn(
                 Transform3D.new({
                     -- Move just beyond the emissive glass so the fixture does
@@ -284,7 +270,6 @@ local function game(world: tecs.World, app: tecs.Application)
                     g = profile.g,
                     b = profile.b,
                     intensity = 20,
-                    flags = flags,
                 })
             )
         else
@@ -305,11 +290,7 @@ local function game(world: tecs.World, app: tecs.Application)
             #instance.primitives, meshes.vertexCount, meshes.indexCount, meshes.materialCount, meshes.textureCount
         )
     )
-    print(
-        ("bistro3d: attached %d local lights to emissive fixtures; %d nearby spotlights cast shadows"):format(
-            #fixtures, shadowed
-        )
-    )
+    print(("bistro3d: attached %d local lights to emissive fixtures"):format(#fixtures))
     print("bistro3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
     print("bistro3d: mouse wheel blends continuously between night and day")
 end
@@ -330,10 +311,7 @@ return tecs.newApplication({
         packTextures = false,
         mipmaps = true,
         textureFormat = tecs.assets.IMAGE_BC3,
-        lights = {
-            capacity = 128,
-            shadows = {capacity = SHADOWED_FIXTURES, size = 256, bias = 0.003, softness = 1},
-        },
+        lights = {capacity = 128},
         probe = {
             positiveX = {0.10, 0.115, 0.14},
             negativeX = {0.075, 0.085, 0.11},

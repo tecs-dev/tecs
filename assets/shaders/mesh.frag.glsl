@@ -36,15 +36,20 @@ void main() {
 #endif
     albedo = vec4(surface.albedo.rgb, 1.0);
 #ifdef MESH_FOG
-    // Exact zero and one remain the sprite-domain unlit and lit markers. Mesh
-    // fog occupies the middle: the lower quarter is unlit, the upper is lit,
-    // and each carries a quantized interpolation factor for the resolve.
-    float fogMarker = surface.lit < 0.5 ? 0.25 + vFog * 0.24 : 0.50 + vFog * 0.24;
+    // Exact zero and one remain the sprite markers. Three disjoint middle
+    // ranges preserve unlit, Lambert, and PBR mesh dispatch while carrying a
+    // quantized fog factor through the normalized attachment.
+    const float FOG_SPAN = 31.0 / 255.0;
+    float modelMarker = surface.model < 0.5 ? 160.0 / 255.0
+        : surface.model < 1.5 ? 32.0 / 255.0
+        : 96.0 / 255.0;
+    float fogMarker = modelMarker + vFog * FOG_SPAN;
     normal = vec4(surface.normal * 0.5 + 0.5, fogMarker);
 #else
-    // Middle markers distinguish meshes even when fog is disabled, so the
-    // shared resolve knows when sampled depth describes a perspective surface.
-    normal = vec4(surface.normal * 0.5 + 0.5, surface.lit < 0.5 ? 0.25 : 0.50);
+    float modelMarker = surface.model < 0.5 ? 160.0 / 255.0
+        : surface.model < 1.5 ? 32.0 / 255.0
+        : 96.0 / 255.0;
+    normal = vec4(surface.normal * 0.5 + 0.5, modelMarker);
 #endif
 #ifdef MESH_SHADOWS
     // The bottom quarter of reserved ORM alpha marks a shadow-enabled mesh

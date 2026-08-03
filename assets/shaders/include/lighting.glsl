@@ -178,3 +178,7 @@ vec3 cookTorrance(
     vec3 diffuseWeight = (vec3(1.0) - fresnel) * (1.0 - metallic);
     return (diffuseWeight * albedo / PBR_PI + specular) * radiance * nDotL;
 }
+
+vec3 lambertDirect(vec3 albedo, vec3 normal, vec3 lightDirection, vec3 radiance) {
+    return albedo * radiance * max(dot(normal, lightDirection), 0.0) / PBR_PI;
+}

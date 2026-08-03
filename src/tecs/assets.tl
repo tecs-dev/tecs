@@ -406,7 +406,9 @@ end
 local record ModelMaterial
     --- Read-only. Contains the stable material name.
     name: string
-    --- Read-only. Selects metallic-roughness PBR at zero or unlit at one.
+    --- Caller-writable. Until model registration, selects metallic-roughness
+    --- PBR at zero, unlit at one, or Lambert diffuse at two. This defaults to
+    --- the decoded glTF model.
     model: integer
     --- Read-only. Selects opaque, masked, or blended rendering with a
     --- `MeshDomain.ALPHA_*` integer constant.

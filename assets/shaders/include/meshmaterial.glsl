@@ -16,6 +16,7 @@ layout(set = 2, binding = MESH_MATERIAL_BINDING) readonly buffer Materials { flo
 const int MESH_MATERIAL_FLOATS = 40;
 const int MESH_MATERIAL_METALLIC_ROUGHNESS = 0;
 const int MESH_MATERIAL_UNLIT = 1;
+const int MESH_MATERIAL_LAMBERT = 2;
 #include "meshenums.glsl"
 
 struct MeshSurface {
@@ -24,6 +25,7 @@ struct MeshSurface {
     vec3 orm;
     vec3 emission;
     float lit;
+    float model;
 };
 
 vec4 meshSampleMap(int base, int layerLane, int uvLane, vec2 sourceUV, vec4 fallback) {
@@ -88,10 +90,11 @@ MeshSurface meshMaterial(
     surface.orm = vec3(occlusion, roughness, metallic);
     surface.emission = emitted;
     surface.lit = 1.0;
+    surface.model = float(model);
     if (model == MESH_MATERIAL_UNLIT) {
         surface.orm = vec3(1.0, 1.0, 0.0);
         surface.lit = 0.0;
-    } else if (model != MESH_MATERIAL_METALLIC_ROUGHNESS) {
+    } else if (model != MESH_MATERIAL_METALLIC_ROUGHNESS && model != MESH_MATERIAL_LAMBERT) {
         surface.albedo = vec4(1.0, 0.0, 1.0, baseColor.a);
         surface.orm = vec3(1.0, 1.0, 0.0);
         surface.emission = vec3(0.0);

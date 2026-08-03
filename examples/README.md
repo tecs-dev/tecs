@@ -72,13 +72,14 @@ floor make the colors, changing volume, and shadow visible.
 fetch sponza`. The fetch is pinned to one Khronos glTF Sample Assets revision
 and retains the upstream notice. It also preprocesses source images into full
 BC3 mip chains in standard KTX2 containers and writes a derived glTF. The demo
-keeps those textures compressed in GPU memory and exercises double-sided materials, independently
-GPU-culled primitive chunks, Cook-Torrance point and spot lights, directional
-shadows, fog, and bloom. Running the example without that cache fails before
-opening a window and reports the fetch command. The window title reports rolling
-FPS, and the lower bloom threshold makes bright lit surfaces visibly spread.
-The demo treats the scene's masonry, cloth, and vegetation as rough
-dielectrics so eye-dependent specular highlights do not resemble moving lamps.
+keeps those textures compressed in GPU memory and exercises double-sided
+materials, independently GPU-culled primitive chunks, Lambert point and spot
+lights, directional shadows, fog, and bloom. Running the example without that cache fails before
+opening a window and reports the fetch command. The window title reports
+rolling FPS, and the lower bloom threshold makes bright lit surfaces visibly
+spread.
+The demo treats the scene's masonry, cloth, and vegetation as diffuse surfaces
+so its fixed lamps do not become moving eye-dependent highlights.
 Both large scenes default to immediate presentation so this number is uncapped;
 set `TECS_PRESENT=vsync` to opt back into synchronized presentation.
 
@@ -87,12 +88,13 @@ Lumberyard exterior is fetched through a reference-Draco preprocessing step,
 then retained as 132 MiB of ordinary glTF geometry and 91 MiB of 512px BC3
 KTX2 mip chains. Large-primitive splitting turns 1,591 authored primitives into
 1,593 independently GPU-cullable chunks. The demo combines an ambient-cube
-probe, Cook-Torrance local lights, directional shadows, fog, and bloom. It
+probe, Lambert local lights on matte surfaces, Cook-Torrance highlights on
+metal, wet, and glass surfaces, directional shadows, fog, and bloom. It
 derives point and authored-direction spot lights from the bounds and transforms
 of emissive street and string-light meshes, so visible fixtures illuminate
-nearby geometry. The four spot fixtures nearest the starting camera cast local
-shadows; the fixed budget keeps the large scene from paying for shadow maps at
-every decorative light. The upstream file labels every material as a non-PBR
+nearby geometry. Directional shadows ground the scene without rendering the
+complete three-million-triangle model again for every decorative fixture. The
+upstream file labels every material as a non-PBR
 Phong conversion and assigns one metallic/roughness pair to the entire scene,
 so the demo classifies its named metal, wet, glass, and dielectric surfaces
 before GPU registration. The source GLB is removed after a successful import,

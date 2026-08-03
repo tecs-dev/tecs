@@ -8,6 +8,11 @@ frame-slot rotation.
 `Renderer` creates it only when `meshes` options are present, so a 2D-only
 application loads no mesh implementation and allocates none of these buffers.
 
+Mesh materials select metallic-roughness Cook-Torrance, unlit, or Lambert
+dispatch with integer `MATERIAL_*` constants. Lambert keeps matte direct light
+independent of the viewer while sharing texture, normal, occlusion, fog,
+shadow, and local-light infrastructure with the PBR path.
+
 The backend culls world-space bounding spheres and compacts indexed commands
 on the GPU. A domain created with `transparency = true` also classifies glTF
 `BLEND` materials, compacts them separately, and stably sorts their complete
@@ -429,6 +434,8 @@ local interface MeshDomain is DomainStats
     MATERIAL_METALLIC_ROUGHNESS: integer
     --- Read-only. Selects unlit material dispatch.
     MATERIAL_UNLIT: integer
+    --- Read-only. Selects diffuse-only Lambert material dispatch.
+    MATERIAL_LAMBERT: integer
     --- Read-only. Selects an opaque material that ignores base alpha.
     ALPHA_OPAQUE: integer
     --- Read-only. Selects an opaque material that discards below `alphaCutoff`.
@@ -638,6 +645,7 @@ local record MeshDomainModule
 
     MATERIAL_METALLIC_ROUGHNESS: integer
     MATERIAL_UNLIT: integer
+    MATERIAL_LAMBERT: integer
     TEXTURE_RGBA8: integer
     TEXTURE_BC3: integer
     _create: function(device: loader.CPtr, deferred: Deferred, options: MeshDomainOptions): MeshDomainInternal
@@ -645,6 +653,7 @@ end
 
 local MATERIAL_METALLIC_ROUGHNESS <const> = 0
 local MATERIAL_UNLIT <const> = 1
+local MATERIAL_LAMBERT <const> = 2
 local ALPHA_OPAQUE <const> = meshconstants.ALPHA_OPAQUE
 local ALPHA_MASK <const> = meshconstants.ALPHA_MASK
 local ALPHA_BLEND <const> = meshconstants.ALPHA_BLEND
@@ -653,11 +662,13 @@ local TEXTURE_BC3 <const> = assets.IMAGE_BC3
 
 MeshDomainModule.MATERIAL_METALLIC_ROUGHNESS = MATERIAL_METALLIC_ROUGHNESS
 MeshDomainModule.MATERIAL_UNLIT = MATERIAL_UNLIT
+MeshDomainModule.MATERIAL_LAMBERT = MATERIAL_LAMBERT
 MeshDomainModule.TEXTURE_RGBA8 = TEXTURE_RGBA8
 MeshDomainModule.TEXTURE_BC3 = TEXTURE_BC3
 
 MeshDomainImpl.MATERIAL_METALLIC_ROUGHNESS = MATERIAL_METALLIC_ROUGHNESS
 MeshDomainImpl.MATERIAL_UNLIT = MATERIAL_UNLIT
+MeshDomainImpl.MATERIAL_LAMBERT = MATERIAL_LAMBERT
 MeshDomainImpl.ALPHA_OPAQUE = ALPHA_OPAQUE
 MeshDomainImpl.ALPHA_MASK = ALPHA_MASK
 MeshDomainImpl.ALPHA_BLEND = ALPHA_BLEND
@@ -913,7 +924,7 @@ function MeshDomainImpl:registerMaterial(options: MeshMaterialOptions): componen
         return components.MeshMaterial(asset, existing)
     end
     local model <const> = options.model or MATERIAL_METALLIC_ROUGHNESS
-    if model ~= MATERIAL_METALLIC_ROUGHNESS and model ~= MATERIAL_UNLIT then
+    if model ~= MATERIAL_METALLIC_ROUGHNESS and model ~= MATERIAL_UNLIT and model ~= MATERIAL_LAMBERT then
         error(("tecs: invalid mesh material model %s"):format(tostring(model)), 2)
     end
     local alphaMode <const> = options.alphaMode or ALPHA_OPAQUE

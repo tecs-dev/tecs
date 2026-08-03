@@ -158,6 +158,16 @@ layout(set = 2, binding = MESH_LIGHT_BINDING + 6) readonly buffer MeshLocalShado
 #endif
 #include "meshmaterial.glsl"
 
+vec3 meshDirect(
+    MeshSurface surface, vec3 viewDirection, vec3 lightDirection, vec3 radiance
+) {
+    if (surface.model > 1.5) {
+        return lambertDirect(surface.albedo.rgb, surface.normal, lightDirection, radiance);
+    }
+    return cookTorrance(surface.albedo.rgb, surface.normal, viewDirection,
+        lightDirection, radiance, surface.orm.g, surface.orm.b);
+}
+
 void main() {
 #ifdef MESH_DOUBLE_SIDED
     if (!gl_FrontFacing && !meshDoubleSided(vMaterial)) { discard; }
@@ -169,19 +179,23 @@ void main() {
     vec3 color = surface.albedo.rgb;
     if (surface.lit >= 0.5) {
         vec3 viewDirection = normalize(camera.position.xyz - vWorld);
-        color = surface.albedo.rgb * scene.ambient.rgb * surface.orm.r * (1.0 - surface.orm.b);
+        bool pbr = surface.model < 0.5;
+        color = surface.albedo.rgb * scene.ambient.rgb * surface.orm.r
+            * (pbr ? 1.0 - surface.orm.b : 1.0);
 #ifdef MESH_PROBE
-        color += surface.albedo.rgb * ambientCube(surface.normal) * surface.orm.r * (1.0 - surface.orm.b);
-        color += environmentSpecular(surface.albedo.rgb, surface.normal, viewDirection,
-            surface.orm.g, surface.orm.b, surface.orm.r,
-            probe.environmentTuning.x, probe.environmentTuning.zw);
+        color += surface.albedo.rgb * ambientCube(surface.normal) * surface.orm.r
+            * (pbr ? 1.0 - surface.orm.b : 1.0);
+        if (pbr) {
+            color += environmentSpecular(surface.albedo.rgb, surface.normal, viewDirection,
+                surface.orm.g, surface.orm.b, surface.orm.r,
+                probe.environmentTuning.x, probe.environmentTuning.zw);
+        }
 #endif
 #ifdef MESH_SHADOWS
         vec3 sunDirection = normalize(-meshShadow.direction.xyz);
-        color += cookTorrance(surface.albedo.rgb, surface.normal, viewDirection, sunDirection,
+        color += meshDirect(surface, viewDirection, sunDirection,
             meshShadow.colorStrength.rgb * meshShadow.direction.w
-                * meshShadowVisibility(vWorld, surface.normal),
-            surface.orm.g, surface.orm.b);
+                * meshShadowVisibility(vWorld, surface.normal));
 #endif
 #ifdef MESH_LIGHTS
         int tile = screenLightTileOf(gl_FragCoord.xy, scene.viewport);
@@ -197,8 +211,8 @@ void main() {
             attenuation *= meshLocalShadowVisibility(
                 light, vWorld, surface.normal, localShadow.tuning.x, localShadow.tuning.y);
 #endif
-            color += cookTorrance(surface.albedo.rgb, surface.normal, viewDirection, normalize(toLight),
-                light.colorIntensity.rgb * light.colorIntensity.a * attenuation, surface.orm.g, surface.orm.b);
+            color += meshDirect(surface, viewDirection, normalize(toLight),
+                light.colorIntensity.rgb * light.colorIntensity.a * attenuation);
         }
 #else
         int tile = lightTileOf(vWorld.xy, scene.bounds);
@@ -211,8 +225,8 @@ void main() {
             float radius = max(light.position.w, 1.0);
             float attenuation = clamp(1.0 - distance / radius, 0.0, 1.0);
             attenuation *= attenuation;
-            color += cookTorrance(surface.albedo.rgb, surface.normal, viewDirection, normalize(toLight),
-                light.color.rgb * light.color.a * attenuation, surface.orm.g, surface.orm.b);
+            color += meshDirect(surface, viewDirection, normalize(toLight),
+                light.color.rgb * light.color.a * attenuation);
         }
 #endif
     }
