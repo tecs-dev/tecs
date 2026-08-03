@@ -21,6 +21,7 @@ local record TaskImpl<T>
     resumeTag: any
     resumeValue: any
     resumeReason: string
+    resumeCancel: function()
     started: boolean
     queued: boolean
     cancelRequested: boolean
@@ -146,6 +147,7 @@ local function settle(task: TaskImpl<any>, status: string, value: any, reason?: 
     task.error = reason
     task.waitingOn = nil
     task.waitKind = nil
+    task.resumeCancel = nil
     for index = 1, task.zoneCount do
         task.zoneNames[index] = nil
     end
@@ -161,7 +163,7 @@ local function settle(task: TaskImpl<any>, status: string, value: any, reason?: 
         waiter.waitingOn = nil
         waiter.waitKind = nil
         waiter.resumeTag = RESUME
-        enqueue(task.scheduler as SchedulerImpl, waiter)
+        enqueue(waiter.scheduler as SchedulerImpl, waiter)
     end
 
     local observer = task._onSettle
@@ -378,6 +380,7 @@ local function resumeTask(scheduler: SchedulerImpl, task: TaskImpl<any>): string
         local tag <const> = task.resumeTag
         local value <const> = task.resumeValue
         local reason <const> = task.resumeReason
+        task.resumeCancel = nil
         if tag ~= RESUME then
             task.resumeTag = RESUME
         end
@@ -592,7 +595,8 @@ function TaskImpl:cancel(reason?: string)
         error(CANCEL, 0)
     end
 
-    local cancelWait: function()
+    local cancelWait = self.resumeCancel
+    self.resumeCancel = nil
     if self.waitKind == "task" then
         local awaited <const> = self.waitingOn as TaskImpl<any>
         if awaited ~= nil and awaited.waiter == self as TaskImpl<any> then
@@ -644,6 +648,7 @@ local function finishGate(gate: GateImpl, value: any, reason?: string)
     if gate.ready then
         error("tecs: readiness gate already contains a completion", 3)
     end
+    local cancelWait <const> = gate.cancelWait
     gate.cancelWait = nil
     local waiter = gate.waiter
     if waiter == nil then
@@ -658,6 +663,7 @@ local function finishGate(gate: GateImpl, value: any, reason?: string)
     waiter.resumeTag = RESUME
     waiter.resumeValue = value
     waiter.resumeReason = reason
+    waiter.resumeCancel = cancelWait
     enqueue(waiter.scheduler as SchedulerImpl, waiter)
 end
 
@@ -692,6 +698,7 @@ local record taskruntime
     onSettle: function<T>(task: TaskImpl<T>, observer: function(TaskImpl<T>))
     awaitCallback: function<T>(subscribe: function(resume: function(T)): function()): T
     awaitCompletion: function<T>(completion: Completion<T>, operation: string): T
+    rethrowCancellation: function(reason: any)
     run: function<T>(body: function(ScopeImpl): T...): T
     yield: function()
     waitMode: function(): WaitMode
@@ -702,6 +709,12 @@ local record taskruntime
     context: function(): any
     enterBarrier: function(subject: string)
     leaveBarrier: function()
+end
+
+function taskruntime.rethrowCancellation(reason: any)
+    if reason == CANCEL then
+        error(CANCEL, 0)
+    end
 end
 
 function taskruntime.newScheduler(): SchedulerImpl

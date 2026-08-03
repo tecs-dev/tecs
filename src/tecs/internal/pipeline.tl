@@ -39,9 +39,16 @@ local record PhaseSpan
     count: integer
 end
 
+local record ActiveState
+    worlds: {internal.WorldImpl}
+    systemZones: {integer}
+    depth: integer
+end
+
 -- Internal pipeline factory.
 local record pipeline
     new: function(fixedTimestep: number, fixedMaxSteps?: integer, fixedOverload?: FixedOverload): Pipeline
+    recover: function(subject: Pipeline, world: World)
 end
 
 -- Concrete state behind the public Pipeline interface.
@@ -92,6 +99,9 @@ local record PipelineImpl is Pipeline
     systemNameRegistry: {string: integer}
 
     anonymousSystemCount: integer
+
+    activeState: ActiveState
+    phaseFailure: function(any): string
 end
 
 -- The most fixed steps one update runs before the overload policy decides what
@@ -175,9 +185,24 @@ function pipeline.new(fixedTimestep: number, fixedMaxSteps?: integer, fixedOverl
             phaseGroups = {},
             systemNameRegistry = {},
             anonymousSystemCount = 0,
+            activeState = {worlds = {}, systemZones = {}, depth = 0},
+            phaseFailure = nil,
         },
         {__index = PipelineImpl}
     )
+
+    result.phaseFailure = function(failure: any): string
+        local state <const> = result.activeState
+        local depth <const> = state.depth
+        local world = state.worlds[depth]
+        if world then
+            world._runningSystem = false
+            world._commitRequested = false
+        end
+        zones.leave(state.systemZones[depth] or 0)
+        state.systemZones[depth] = nil
+        return debug.traceback(tostring(failure), 2)
+    end
 
     -- Initialize each phase.
     for i = 1, #phases.index do
@@ -379,11 +404,12 @@ end
 
 -- Execute one phase's systems. Each system runs inside its own jit.zone so
 -- profiling can attribute samples. The caller owns the phase barrier.
-local activeWorlds: {internal.WorldImpl} = {}
-local activeSystemZones: {integer} = {}
-local activeWorldDepth = 0
+--
+-- A suspended world leaves this frame live on its coroutine. Each world owns
+-- its pipeline, so the pipeline-owned stack isolates overlapping stalled
+-- worlds without a coroutine lookup in every system dispatch.
 
-local function runGroupBody(group: FlatGroup, dt: number, world: World)
+local function runGroupBody(group: FlatGroup, dt: number, world: World, state: ActiveState)
     local n = group.count
     local runs = group.runs
     local runIfArr = group.runIfs
@@ -401,10 +427,12 @@ local function runGroupBody(group: FlatGroup, dt: number, world: World)
         local runIf = runIfArr[i]
         if not runIf or runIf(dt, world, nameArr[i]) then
             local zoneGeneration <const> = zones.enter(idArr[i])
-            activeSystemZones[activeWorldDepth] = zoneGeneration
+            if zoneGeneration ~= 0 then
+                state.systemZones[state.depth] = zoneGeneration
+            end
             runs[i](dt, world)
             zones.leave(zoneGeneration)
-            activeSystemZones[activeWorldDepth] = nil
+            state.systemZones[state.depth] = nil
         end
         worldImpl._runningSystem = false
         if commitAfters[i] or worldImpl._commitRequested then
@@ -414,37 +442,42 @@ local function runGroupBody(group: FlatGroup, dt: number, world: World)
     end
 end
 
--- One protected boundary per phase, not per system. The error handler runs
--- before the system stack unwinds, so it can restore request state and retain
--- the original traceback. A stack rather than one slot preserves nested world
--- updates invoked by a system.
+-- Direct phase runs own one protected boundary. Scheduled world updates use
+-- the reusable root's existing boundary and recover the same pipeline state
+-- when that root reports failure. A stack preserves nested direct phase runs.
 local traceback <const> = debug.traceback
 
-local function phaseFailure(failure: any): string
-    local world = activeWorlds[activeWorldDepth]
-    if world then
-        world._runningSystem = false
-        world._commitRequested = false
-    end
-    zones.leave(activeSystemZones[activeWorldDepth] or 0)
-    activeSystemZones[activeWorldDepth] = nil
-    return traceback(tostring(failure), 2)
-end
-
-local function runGroup(group: FlatGroup, dt: number, world: World)
+local function runGroup(self: PipelineImpl, group: FlatGroup, dt: number, world: World)
     if group.count == 0 then
         return
     end
 
-    activeWorldDepth = activeWorldDepth + 1
-    activeWorlds[activeWorldDepth] = world as internal.WorldImpl
-    local ok, failure = xpcall(runGroupBody, phaseFailure, group, dt, world) as (boolean, string)
-    activeWorlds[activeWorldDepth] = nil
-    activeSystemZones[activeWorldDepth] = nil
-    activeWorldDepth = activeWorldDepth - 1
-    if not ok then
-        error(failure, 0)
+    local state <const> = self.activeState
+    local depth <const> = state.depth + 1
+    state.depth = depth
+    state.worlds[depth] = world as internal.WorldImpl
+    runGroupBody(group, dt, world, state)
+    state.worlds[depth] = nil
+    state.systemZones[depth] = nil
+    state.depth = depth - 1
+end
+
+function pipeline.recover(subject: Pipeline, world: World)
+    local self = subject as PipelineImpl
+    local state <const> = self.activeState
+    for depth = state.depth, 1, -1 do
+        local activeWorld = state.worlds[depth]
+        if activeWorld ~= nil then
+            activeWorld._runningSystem = false
+            activeWorld._commitRequested = false
+        end
+        state.worlds[depth] = nil
+        state.systemZones[depth] = nil
     end
+    state.depth = 0
+    local worldImpl = world as internal.WorldImpl
+    worldImpl._runningSystem = false
+    worldImpl._commitRequested = false
 end
 
 local function runProfiled(name: string, body: function(any, number, World), subject: any, dt: number, world: World)
@@ -460,11 +493,11 @@ end
 -- phase. Systems within one phase batch together and intentionally do not
 -- observe one another's structural changes unless configured with another
 -- barrier.
-local function runPhaseSpan(span: PhaseSpan, dt: number, world: World)
+local function runPhaseSpan(self: PipelineImpl, span: PhaseSpan, dt: number, world: World)
     local groups = span.groups
     local worldImpl = world as internal.WorldImpl
     for index = 1, span.count do
-        runGroup(groups[index], dt, world)
+        runGroup(self, groups[index], dt, world)
         worldImpl:_commit()
     end
 end
@@ -538,7 +571,7 @@ local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
         self.fixedStepCount = self.fixedStepCount + 1
         fixedtracking.beginStep(world)
         if hasWork then
-            runPhaseSpan(self.fixedSpan, fixedTimestep, world)
+            runPhaseSpan(self, self.fixedSpan, fixedTimestep, world)
         end
         fixedtracking.finishStep(world)
         self.fixedAccumulator = self.fixedAccumulator - fixedTimestep
@@ -561,9 +594,9 @@ function PipelineImpl:update(dt: number, world: World)
     end
 
     if not zones.active then
-        runPhaseSpan(self.beforeFixedSpan, dt, world)
+        runPhaseSpan(self, self.beforeFixedSpan, dt, world)
         runFixedLoop(self, dt, world)
-        runPhaseSpan(self.afterFixedSpan, dt, world)
+        runPhaseSpan(self, self.afterFixedSpan, dt, world)
         return
     end
 
@@ -668,7 +701,7 @@ local function runPhaseCommitted(self: PipelineImpl, phase: Phase, dt: number, w
         if self.phaseStates[phase.position] then
             local group = self.phaseGroups[phase.position]
             if group then
-                runGroup(group, dt, world)
+                runGroup(self, group, dt, world)
                 (world as internal.WorldImpl):_commit()
             end
         end
@@ -682,7 +715,7 @@ local function runPhaseCommitted(self: PipelineImpl, phase: Phase, dt: number, w
                 else
                     local group = self.phaseGroups[child.position]
                     if group then
-                        runGroup(group, dt, world)
+                        runGroup(self, group, dt, world)
                         (world as internal.WorldImpl):_commit()
                     end
                 end
@@ -696,7 +729,13 @@ function PipelineImpl:run(phase: Phase, dt: number, world: World)
         recreatePipeline(self)
     end
 
-    runPhaseCommitted(self, phase, dt, world)
+    local ok <const>, failure = xpcall(
+        runPhaseCommitted, self.phaseFailure, self, phase, dt, world
+    ) as (boolean, string)
+    if not ok then
+        pipeline.recover(self, world)
+        error(failure, 0)
+    end
 end
 
 function PipelineImpl:registerPhase(phase: Phase)

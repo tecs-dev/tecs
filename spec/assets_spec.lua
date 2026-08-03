@@ -467,6 +467,26 @@ describe("assets", function()
         assert.is_nil(image.pixels, "the last release must free")
     end)
 
+    it("claims every resumed sharer before an earlier task can release", function()
+        local first = observe(scheduler:spawnImmediate(function()
+            local image = rawAssets.loadImage(FIXTURE)
+            image:release()
+            return true
+        end))
+        local second = observe(scheduler:spawnImmediate(function()
+            local image = rawAssets.loadImage(FIXTURE)
+            assert.is_not_nil(image.pixels)
+            return image
+        end))
+
+        assets.waitAll()
+        assert.are.equal("ready", first.status, first.error)
+        assert.are.equal("ready", second.status, second.error)
+        assert.are.equal(1, second.value._refs)
+        second.value:release()
+        assert.is_nil(second.value.pixels)
+    end)
+
     it("consumes no reference for a sharer that canceled in flight", function()
         -- The count is what a caller's own link increments when it settles, so
         -- a caller that gave up first never runs one. Seeding it from anything

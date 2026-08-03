@@ -1043,7 +1043,8 @@ local record types
         --- @return Steps run, from zero.
         fixedStepCount: function(self): integer
 
-        --- Run the startup systems.
+        --- Run the startup systems. Raises when a world update is suspended,
+        --- because another phase cannot publish its half-staged transaction.
         startup: function(self)
 
         --- Run the shutdown systems.
@@ -1055,6 +1056,8 @@ local record types
         --- does not clear dirty bits. Useful for piecewise phase
         --- execution (e.g. custom game loops splitting Update and
         --- Render across distinct ticks).
+        --- Raises when a world update is suspended, because another phase
+        --- cannot publish its half-staged transaction.
         ---
         --- @param phase The phase to run.
         --- @param dt The elapsed seconds passed to its systems, or zero when omitted.

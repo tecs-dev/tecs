@@ -65,7 +65,6 @@ unsafe extern "C" {
     fn lua_insert(state: *mut LuaState, index: c_int);
     fn lua_pcall(state: *mut LuaState, arguments: c_int, results: c_int, error: c_int) -> c_int;
     fn lua_pushcclosure(state: *mut LuaState, function: LuaCFunction, captures: c_int);
-    fn lua_pushinteger(state: *mut LuaState, value: i64);
     fn lua_pushlightuserdata(state: *mut LuaState, value: *mut c_void);
     fn lua_pushstring(state: *mut LuaState, value: *const c_char);
     fn lua_pushvalue(state: *mut LuaState, index: c_int);
@@ -308,8 +307,6 @@ struct Queues {
     pending: EventBatch,
     active: EventBatch,
     active_assigned: bool,
-    active_token: u64,
-    next_token: u64,
     next_sequence: u64,
 }
 
@@ -425,23 +422,8 @@ unsafe fn call_method(
     }
 }
 
-unsafe fn push_queue(state: *mut LuaState, host: &Host) {
-    let queues = lock_queues(host);
-    unsafe {
-        lua_pushlightuserdata(state, queues.active.events.as_ptr().cast_mut().cast());
-        lua_pushinteger(
-            state,
-            i64::try_from(queues.active.events.len()).unwrap_or(i64::MAX),
-        );
-        lua_pushlightuserdata(state, queues.active.arrivals.as_ptr().cast_mut().cast());
-        lua_pushlightuserdata(state, queues.active.sequences.as_ptr().cast_mut().cast());
-        lua_pushlightuserdata(state, (host as *const Host).cast_mut().cast());
-        lua_pushinteger(
-            state,
-            i64::try_from(queues.active_token).unwrap_or(i64::MAX),
-        );
-        lua_pushinteger(state, i64::from(queues.active.overflow));
-    }
+unsafe fn push_host(state: *mut LuaState, host: &Host) {
+    unsafe { lua_pushlightuserdata(state, (host as *const Host).cast_mut().cast()) };
 }
 
 fn lifecycle(event_type: SDL_EventType) -> Option<(u32, &'static CStr)> {
@@ -560,8 +542,6 @@ unsafe fn initialize(
             pending: EventBatch::with_capacity(INITIAL_EVENTS),
             active: EventBatch::with_capacity(INITIAL_EVENTS),
             active_assigned: false,
-            active_token: 0,
-            next_token: 1,
             next_sequence: 1,
         }),
         lua_active: AtomicI32::new(0),
@@ -726,7 +706,7 @@ unsafe fn initialize(
     host.application = unsafe { luaL_ref(lua, LUA_REGISTRY_INDEX) };
     unsafe { lua_settop(lua, 0) };
     if !matches!(
-        unsafe { call_method(&host, c"_init", None, 0, true) },
+        unsafe { call_method(&host, c"_init", Some(push_host), 1, true) },
         MethodResult::Continue
     ) {
         Box::leak(host);
@@ -806,11 +786,9 @@ pub unsafe extern "C" fn SDL_AppIterate(appstate: *mut c_void) -> SDL_AppResult 
                 std::mem::swap(&mut queues.active, &mut pending);
                 queues.pending = pending;
                 queues.active_assigned = true;
-                queues.active_token = queues.next_token;
-                queues.next_token = queues.next_token.wrapping_add(1).max(1);
             }
         }
-        let result = unsafe { call_method(host, c"_iterate", Some(push_queue), 7, true) };
+        let result = unsafe { call_method(host, c"_iterate", None, 0, true) };
         match result {
             MethodResult::Continue => SDL_APP_CONTINUE,
             MethodResult::Stop => SDL_APP_SUCCESS,
@@ -824,7 +802,54 @@ pub unsafe extern "C" fn SDL_AppIterate(appstate: *mut c_void) -> SDL_AppResult 
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tecsHostEventBatchAcknowledge(host: *mut c_void, token: u64) -> c_int {
+pub unsafe extern "C" fn tecsHostEventBatchState(host: *mut c_void) -> i32 {
+    let Some(host) = (unsafe { host.cast::<Host>().as_ref() }) else {
+        return i32::MIN;
+    };
+    if SDL_GetCurrentThreadID() != host.owner {
+        return i32::MIN;
+    }
+    let queues = lock_queues(host);
+    if !queues.active_assigned {
+        return i32::MIN;
+    }
+    let count = i32::try_from(queues.active.events.len()).unwrap_or(i32::MAX - 1);
+    if queues.active.overflow {
+        -count - 1
+    } else {
+        count
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsHostEventBatchEvents(host: *mut c_void) -> *const c_void {
+    let Some(host) = (unsafe { host.cast::<Host>().as_ref() }) else {
+        return ptr::null();
+    };
+    let queues = lock_queues(host);
+    queues.active.events.as_ptr().cast()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsHostEventBatchArrivals(host: *mut c_void) -> *const u64 {
+    let Some(host) = (unsafe { host.cast::<Host>().as_ref() }) else {
+        return ptr::null();
+    };
+    let queues = lock_queues(host);
+    queues.active.arrivals.as_ptr()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsHostEventBatchSequences(host: *mut c_void) -> *const u64 {
+    let Some(host) = (unsafe { host.cast::<Host>().as_ref() }) else {
+        return ptr::null();
+    };
+    let queues = lock_queues(host);
+    queues.active.sequences.as_ptr()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsHostEventBatchAcknowledge(host: *mut c_void) -> c_int {
     let Some(host) = (unsafe { host.cast::<Host>().as_ref() }) else {
         return 0;
     };
@@ -832,7 +857,7 @@ pub unsafe extern "C" fn tecsHostEventBatchAcknowledge(host: *mut c_void, token:
         return 0;
     }
     let mut queues = lock_queues(host);
-    if !queues.active_assigned || queues.active_token != token {
+    if !queues.active_assigned {
         return 0;
     }
     queues.active.clear();

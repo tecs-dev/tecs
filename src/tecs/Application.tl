@@ -419,8 +419,7 @@ local record Application
     _eventCount: integer
     _eventArrivals: loader.CValue
     _eventSequences: loader.CValue
-    _eventHost: loader.CValue
-    _eventToken: number
+    _host: loader.CValue
     _eventOverflow: boolean
     _eventBatchOpen: boolean
     _replayEvents: {events.Event}
@@ -722,8 +721,9 @@ end
 -------------------------------------------------------------------------------
 
 --- Called once by the host before the first iteration.
-function Application:_init(): boolean
+function Application:_init(host?: loader.CValue): boolean
     local config = self._config
+    self._host = host
 
     -- First of all, so it governs what everything below has to say about
     -- itself. SDL owns the priorities, so this needs no subsystem started.
@@ -1046,8 +1046,8 @@ function Application:_finishEventBatch()
     if not self._eventBatchOpen then
         return
     end
-    if self._eventHost ~= nil and self._eventToken ~= nil then
-        if tonumber(R.tecsHostEventBatchAcknowledge(self._eventHost, self._eventToken)) == 0 then
+    if self._host ~= nil then
+        if tonumber(R.tecsHostEventBatchAcknowledge(self._host)) == 0 then
             error("tecs: the host refused the completed platform event batch", 2)
         end
     end
@@ -1055,8 +1055,6 @@ function Application:_finishEventBatch()
     self._eventCount = 0
     self._eventArrivals = nil
     self._eventSequences = nil
-    self._eventHost = nil
-    self._eventToken = nil
     self._eventOverflow = false
     self._eventBatchOpen = false
     self._replayEvents = nil
@@ -1072,12 +1070,36 @@ function Application:_iterate(
     count: integer,
     arrivals: loader.CValue,
     sequences?: loader.CValue,
-    host?: loader.CValue,
-    token?: number,
+    _host?: loader.CValue,
+    _token?: number,
     overflow?: integer
 ): boolean
     local dt = time.step()
     local frameStart = timing.begin()
+
+    local host <const> = self._host
+    if host ~= nil then
+        local state <const> = tonumber(R.tecsHostEventBatchState(host)) as integer
+        if state == -2147483648 then
+            error("tecs: the host has no platform event batch", 2)
+        end
+        if state < 0 then
+            count = -state - 1
+            overflow = 1
+        else
+            count = state
+            overflow = 0
+        end
+        if count > 0 then
+            queue = R.tecsHostEventBatchEvents(host)
+            arrivals = R.tecsHostEventBatchArrivals(host)
+            sequences = R.tecsHostEventBatchSequences(host)
+        else
+            queue = nil
+            arrivals = nil
+            sequences = nil
+        end
+    end
 
     local worldImpl <const> = self.world as {string: any}
     if not self.suspended and not worldImpl._updateStalled and not self._eventBatchOpen then
@@ -1085,8 +1107,6 @@ function Application:_iterate(
         self._eventCount = count or 0
         self._eventArrivals = arrivals
         self._eventSequences = sequences
-        self._eventHost = host
-        self._eventToken = token
         self._eventOverflow = overflow ~= nil and overflow ~= 0
         self._eventBatchOpen = true
         watcherHost._sealIngress()

@@ -996,6 +996,7 @@ function files.read(path: PathInput, kind?: string): string
         taskruntime.awaitCompletion, fileasync.read(rendered), "file read"
     ) as (boolean, fileasync.NativeRead | string)
     if not ok then
+        taskruntime.rethrowCancellation(result)
         return nil
     end
     local read <const> = result as fileasync.NativeRead
@@ -1042,6 +1043,7 @@ function files.readInto(path: PathInput, destination: IOBuffer, offset?: integer
         taskruntime.awaitCompletion, fileasync.read(rendered), "file read"
     ) as (boolean, fileasync.NativeRead | string)
     if not ok then
+        taskruntime.rethrowCancellation(result)
         return nil, tostring(result)
     end
     local read <const> = result as fileasync.NativeRead
@@ -1416,6 +1418,7 @@ writeFile = function(path: PathInput, bytes: ByteInput): boolean, string
         taskruntime.awaitCompletion, fileasync.write(rendered, pointer, length, owner, closeOwner), "file write"
     ) as (boolean, fileasync.NativeRead | string)
     if not ok then
+        taskruntime.rethrowCancellation(result)
         return false, tostring(result)
     end
     fileasync.release(result as fileasync.NativeRead)
@@ -1537,6 +1540,7 @@ function files.writeAtomic(path: PathInput, bytes: ByteInput): boolean, string
         taskruntime.awaitCompletion, pending as Completion<boolean>, "atomic write"
     ) as (boolean, any)
     if not ok then
+        taskruntime.rethrowCancellation(result)
         return false, tostring(result)
     end
     return result as boolean, nil

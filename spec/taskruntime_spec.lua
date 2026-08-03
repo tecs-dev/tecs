@@ -473,6 +473,26 @@ describe("internal task runtime", function()
         assert.is_truthy(tostring(reason):find("deadlocked", 1, true))
     end)
 
+    it("lets cleanup wrappers preserve the private cancellation unwind", function()
+        local scheduler = task.newScheduler()
+        local gate = task.newGate()
+        local running = scheduler:spawnImmediate(function()
+            local ok, reason = pcall(function()
+                gate:wait()
+            end)
+            if not ok then
+                task.rethrowCancellation(reason)
+            end
+            return "cancellation was swallowed"
+        end)
+        assert.are.equal("pending", running.status)
+
+        running:cancel("stop wrapped I/O")
+        scheduler:step()
+        assert.are.equal("canceled", running.status)
+        assert.are.equal("stop wrapped I/O", running.error)
+    end)
+
     it("rejects a nested scheduler instead of losing the current task", function()
         task.run(function()
             local nested = task.newScheduler()

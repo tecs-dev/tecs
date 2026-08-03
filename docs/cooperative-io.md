@@ -38,7 +38,10 @@ local image <const> = tecs.assets.loadImage("sprites/player.png")
 The context changes how Tecs waits, not what the API returns. An unresolved
 operation parks the world's reusable logical-update coroutine when called by a
 normal system. Startup, shutdown, and headless code block their caller while
-driving the same private producer.
+driving the same private producer. Completion-backed calls use their declared
+finite wait budgets and report failure at the direct call when a budget is
+exhausted. Socket reads wait for input or closure, and readiness methods use
+the timeout supplied by their caller.
 
 ## A suspended system keeps its place
 
@@ -87,7 +90,9 @@ does none of that work and touches no coroutine completion.
 
 A Reader may be memory-backed, a process pipe, a socket, or a progressive HTTP
 body. Its ordinary read call returns immediately when bytes are ready and waits
-appropriately when they are not.
+appropriately when they are not. Each HTTP response body has an independent
+bounded queue, so an unread body slows only its own transfer while headers and
+other bodies continue.
 
 ```teal
 local client <const> = tecs.io.http.newClient()

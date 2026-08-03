@@ -31,6 +31,7 @@ const READY_READABLE: u32 = 1;
 const READY_WRITABLE: u32 = 2;
 const READY_ERROR: u32 = 4;
 const READY_CLOSED: u32 = 8;
+const STREAM_WRITE_CAPACITY: usize = 1024 * 1024;
 
 pub struct TecsNetAddress {
     address: IpAddr,
@@ -228,6 +229,11 @@ fn flush(stream: &mut TecsNetStream) -> io::Result<()> {
     }
     if stream.sent == stream.pending.len() {
         stream.pending.clear();
+        stream.sent = 0;
+    } else if stream.sent > 0 {
+        let remaining = stream.pending.len() - stream.sent;
+        stream.pending.copy_within(stream.sent.., 0);
+        stream.pending.truncate(remaining);
         stream.sent = 0;
     }
     Ok(())
@@ -916,30 +922,36 @@ pub unsafe extern "C" fn tecsNetStreamWrite(
     stream: *mut TecsNetStream,
     data: *const u8,
     length: usize,
-) -> c_int {
+) -> i64 {
     if stream.is_null() {
         set_error("stream is null");
-        return 0;
+        return -1;
     }
     let data = match unsafe { bytes(data, length) } {
         Ok(data) => data,
         Err(error) => {
             set_error(error);
-            return 0;
+            return -1;
         }
     };
     // SAFETY: The caller supplies a live stream.
     let stream = unsafe { &mut *stream };
     if let Err(error) = flush(stream) {
         set_error(error);
+        return -1;
+    }
+    let accepted = data
+        .len()
+        .min(STREAM_WRITE_CAPACITY.saturating_sub(stream.pending.len()));
+    if accepted == 0 {
         return 0;
     }
-    stream.pending.extend_from_slice(data);
+    stream.pending.extend_from_slice(&data[..accepted]);
     if let Err(error) = flush(stream) {
         set_error(error);
-        return 0;
+        return -1;
     }
-    1
+    i64::try_from(accepted).unwrap_or(i64::MAX)
 }
 
 #[no_mangle]
@@ -1119,26 +1131,35 @@ pub unsafe extern "C" fn tecsNetDatagramSendWait(
 #[no_mangle]
 pub unsafe extern "C" fn tecsNetDatagramReceive(
     socket: *mut TecsNetDatagram,
-) -> *mut TecsNetPacket {
-    if socket.is_null() {
-        set_error("datagram socket is null");
-        return ptr::null_mut();
+    packet: *mut *mut TecsNetPacket,
+) -> c_int {
+    if socket.is_null() || packet.is_null() {
+        set_error("datagram socket or output is null");
+        return -1;
+    }
+    // SAFETY: The caller supplies writable storage for one packet pointer.
+    unsafe {
+        *packet = ptr::null_mut();
     }
     let mut bytes = vec![0_u8; 65_507];
     // SAFETY: The caller supplies a live socket.
     match unsafe { (*socket).socket.recv_from(&mut bytes) } {
         Ok((length, source)) => {
             bytes.truncate(length);
-            Box::into_raw(Box::new(TecsNetPacket {
-                address: Some(net_address(source.ip())),
-                port: source.port(),
-                bytes: bytes.into_boxed_slice(),
-            }))
+            // SAFETY: The output was validated above and receives ownership.
+            unsafe {
+                *packet = Box::into_raw(Box::new(TecsNetPacket {
+                    address: Some(net_address(source.ip())),
+                    port: source.port(),
+                    bytes: bytes.into_boxed_slice(),
+                }));
+            }
+            1
         }
-        Err(error) if error.kind() == io::ErrorKind::WouldBlock => ptr::null_mut(),
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => 0,
         Err(error) => {
             set_error(error);
-            ptr::null_mut()
+            -1
         }
     }
 }

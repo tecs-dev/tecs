@@ -233,8 +233,11 @@ The coroutine belongs to the world update, not to an entity or an I/O call.
 This keeps entity loops from creating a task per spawn and amortizes the
 coroutine and scheduler state across frames. Startup, shutdown, and calls made
 outside `world:update` use the same direct-value API and block while pumping
-the producer. Private completion state may bridge a native worker queue, but
-it is not a second user-facing execution model.
+the producer. Completion-backed calls retain a finite producer-specific wait
+budget and fail at the direct call when it expires; socket reads instead wait
+for input or closure, and readiness methods honor caller timeouts. Private
+completion state may bridge a native worker queue, but it is not a second
+user-facing execution model.
 
 Resource ownership remains lexical across those waits. Every `tecs.scoped`
 callback has a required name, keeps its registered values live while its
@@ -258,10 +261,11 @@ game API or let CPU work starve I/O progress.
 Byte contracts are contextual. Memory Readers, Writers, buffers, and
 transforms return inline. A socket or process-pipe endpoint first uses that
 same direct call and parks only when the handle is not ready. File endpoints
-wait through SDL AsyncIO. HTTP returns at headers and exposes a bounded,
-one-shot streaming body. Outside a resumable world update these calls block
-their caller while advancing only the producer they need. There is no public
-runtime pump or nonblocking twin to keep in sync.
+wait through SDL AsyncIO. HTTP returns at headers and exposes an independently
+bounded, one-shot streaming body per transfer, so abandoning one body cannot
+obstruct another request's headers or body. Outside a resumable world update
+these calls block their caller while advancing only the producer they need.
+There is no public runtime pump or nonblocking twin to keep in sync.
 
 External input is retained at logical-update boundaries. SDL callbacks append
 copied events to a bounded native queue; a new update seals one immutable

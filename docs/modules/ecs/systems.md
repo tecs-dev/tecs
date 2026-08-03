@@ -90,9 +90,12 @@ The same mechanism works in fixed phases: the fixed step resumes without
 replaying its earlier systems or advancing its clock twice.
 
 Calling the same cooperative API outside a world update, including from
-startup, shutdown, or `runPhase`, blocks while pumping its producer until it
-has the same value. This is useful during initialization and in headless tools.
-Plugin authors do not choose between synchronous and asynchronous variants.
+startup, shutdown, or `runPhase`, blocks while pumping its producer. A
+completion-backed operation stops at its documented finite wait budget and
+reports failure through that call; readiness methods honor their explicit
+timeouts, while a socket read waits for input or closure. This is useful during
+initialization and in headless tools. Plugin authors do not choose between
+synchronous and asynchronous variants.
 
 One persistent coroutine belongs to the logical world update, not to every
 entity. Iterating ten thousand entities does not create ten thousand tasks.

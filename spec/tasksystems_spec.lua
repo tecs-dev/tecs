@@ -240,4 +240,88 @@ describe("resumable run systems", function()
         end)
         assert.is_false(world._updateStalled)
     end)
+
+    it("isolates failure bookkeeping for concurrently stalled worlds", function()
+        local first = fixture()
+        local second, Value, entity = fixture()
+        local firstGate = task.newGate()
+        local secondGate = task.newGate()
+
+        first:addSystem({
+            name = "FirstWorldFailsAfterWait",
+            phase = phases.Update,
+            run = function()
+                firstGate:wait()
+                error("first world resumed failure")
+            end,
+        })
+        second:addSystem({
+            name = "SecondWorldCommitsAfterWait",
+            phase = phases.Update,
+            run = function(_, runWorld)
+                secondGate:wait()
+                runWorld:set(entity, Value, Value(11))
+            end,
+        })
+
+        assert.is_false(first:update(0))
+        assert.is_false(second:update(0))
+        assert.is_true(first._runningSystem)
+        assert.is_true(second._runningSystem)
+
+        firstGate:complete(true)
+        local ok, reason = pcall(first.update, first, 0)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(reason):find("first world resumed failure", 1, true))
+        assert.is_true(second._runningSystem)
+
+        secondGate:complete(true)
+        assert.is_true(second:update(0))
+        assert.are.equal(11, second:get(entity, Value).value)
+    end)
+
+    it("rejects direct phase dispatch while an update is suspended", function()
+        local world = fixture()
+        local gate = task.newGate()
+        world:addSystem({
+            name = "WaitAcrossDirectPhaseAttempt",
+            phase = phases.Update,
+            run = function()
+                world:spawn()
+                gate:wait()
+            end,
+        })
+
+        assert.is_false(world:update(0))
+        assert.has_error(function()
+            world:runPhase(phases.Last, 0)
+        end)
+        assert.has_error(function()
+            world:startup()
+        end)
+
+        gate:complete(true)
+        assert.is_true(world:update(0))
+    end)
+
+    it("clears commit bookkeeping when an observer raises", function()
+        local world, Value = fixture()
+        local fail = true
+        world:observe(0, ecs.OnSpawn, function()
+            if fail then
+                fail = false
+                error("observer rejected commit")
+            end
+        end)
+        local ok, reason = pcall(world.spawn, world, Value(1))
+        assert.is_false(ok)
+        assert.is_truthy(tostring(reason):find("observer rejected commit", 1, true))
+        assert.is_false(world._committing)
+
+        world:spawn(Value(2))
+        assert.has_no.errors(function()
+            world:update(0)
+        end)
+        assert.is_false(world._committing)
+    end)
 end)

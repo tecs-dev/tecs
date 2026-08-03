@@ -85,6 +85,12 @@ their context. A call never changes into a `WouldBlock` result merely because
 it ran outside a system. The explicit `wait` methods remain timeout and
 readiness checks rather than a second transfer API.
 
+One endpoint permits one suspended readiness operation at a time. Do not park
+both `read` and `drain` on one TCP socket, both `accept` and `wait` on one
+listener, or both `receive` and `wait` on one UDP socket. Use one owner to
+serialize operations on an endpoint; a second overlapping wait fails at that
+call instead of replacing the first waiter.
+
 The ready path performs the native operation immediately. Only a native
 `WouldBlock` arms a one-shot watch in the process-wide `mio` reactor. The
 reactor never calls Lua; the Application drains its tokens on the main thread
@@ -418,7 +424,8 @@ local record binaryIO
 
     --- A `TCPSocket` owns one connected TCP byte stream. Closing it may
     --- discard queued writes, so a caller drains delivery-sensitive output
-    --- first. Repeated closure remains safe.
+    --- first. Repeated closure remains safe. One owner serializes operations
+    --- because the socket permits one suspended readiness wait.
     record TCPSocket is Closeable
         _handle: loader.CPtr
         _buffer: loader.CArray
@@ -535,7 +542,8 @@ local record binaryIO
     end
 
     --- A `TCPListener` listens for TCP clients. Closing it stops listening,
-    --- leaves accepted streams open, and remains safe to repeat.
+    --- leaves accepted streams open, and remains safe to repeat. The listener
+    --- permits one suspended `accept` or `wait` call at a time.
     record TCPListener is Closeable
         --- Read-only. Networking sets `port` from the value passed to `listen`
         --- and never changes it. Zero remains zero.
@@ -585,13 +593,15 @@ local record binaryIO
     end
 
     --- A `UDPSocket` sends and receives UDP packets. Closing it releases the
-    --- socket and remains safe to repeat.
+    --- socket and remains safe to repeat. The socket permits one suspended
+    --- send, receive, or wait call at a time.
     record UDPSocket is Closeable
         --- Read-only. Networking sets `port` from the value passed to `bind`
         --- and never changes it. Zero remains zero.
         port: integer
         _handle: loader.CPtr
         _closed: boolean
+        _packetOut: loader.CArray
 
         --- Returns whether `close` has released this socket.
         ---
@@ -961,6 +971,36 @@ local function drainCooperatively(socket: binaryIO.TCPSocket, timeoutMs?: intege
     end
 end
 
+local function queueStreamBytes(
+    socket: binaryIO.TCPSocket, pointer: loader.BytePointer, count: integer
+): boolean, string
+    local offset = 0
+    while offset < count do
+        local accepted <const> = tonumber(
+            C.tecsNetStreamWrite(socket._handle, pointer + offset, count - offset)
+        ) as integer
+        if accepted < 0 then
+            return false, loader.toString(C.tecsRustError())
+        end
+        if accepted > 0 then
+            offset = offset + accepted
+        elseif task.checkWait("TCP write") == "cooperative" then
+            local ready, reason <const> = netreactor.wait(
+                socket, socket._handle, netreactor.stream, netreactor.writable
+            )
+            if ready == nil then
+                return false, reason
+            end
+        else
+            local drained <const> = tonumber(C.tecsNetStreamDrain(socket._handle, MAX_TIMEOUT_MS)) as integer
+            if drained < 0 then
+                return false, loader.toString(C.tecsRustError())
+            end
+        end
+    end
+    return true
+end
+
 function binaryIO.TCPSocket:write(bytes: string): boolean, string
     if self._closed then
         return false, "connection is closed"
@@ -969,10 +1009,7 @@ function binaryIO.TCPSocket:write(bytes: string): boolean, string
     if #bytes == 0 then
         return true
     end
-    if tonumber(C.tecsNetStreamWrite(self._handle, bytes, #bytes)) == 0 then
-        return false, loader.toString(C.tecsRustError())
-    end
-    return true
+    return queueStreamBytes(self, ffi.cast("const uint8_t *", bytes) as loader.BytePointer, #bytes)
 end
 
 function binaryIO.TCPSocket:writeFrom(source: IOBuffer, offset?: integer, count?: integer): integer, string
@@ -994,8 +1031,9 @@ function binaryIO.TCPSocket:writeFrom(source: IOBuffer, offset?: integer, count?
     if size == 0 then
         return 0
     end
-    if tonumber(C.tecsNetStreamWrite(self._handle, source:getFFIPointer() + at, size)) == 0 then
-        return nil, loader.toString(C.tecsRustError())
+    local ok <const>, reason = queueStreamBytes(self, source:getFFIPointer() + at, size)
+    if not ok then
+        return nil, reason
     end
     return size
 end
@@ -1022,8 +1060,9 @@ function binaryIO.TCPSocket:writeView(source: types.ByteView, offset?: integer, 
     if size == 0 then
         return 0
     end
-    if tonumber(C.tecsNetStreamWrite(self._handle, source:getFFIPointer() + at, size)) == 0 then
-        return nil, loader.toString(C.tecsRustError())
+    local ok <const>, reason = queueStreamBytes(self, source:getFFIPointer() + at, size)
+    if not ok then
+        return nil, reason
     end
     return size
 end
@@ -1088,12 +1127,12 @@ function binaryIO.TCPSocket:close(): boolean, string
     if self._closed then
         return true
     end
-    netreactor.cancel(self, "connection closed")
+    local canceled <const>, cancelReason = netreactor.cancel(self, "connection closed")
     self._closed = true
     destroyHandle(self._handle, C.tecsNetStreamDestroy as function(loader.CPtr))
     self._handle = nil
     closed()
-    return true
+    return canceled, cancelReason
 end
 
 function binaryIO.TCPListener:isClosed(): boolean
@@ -1161,12 +1200,12 @@ function binaryIO.TCPListener:close(): boolean, string
     if self._closed then
         return true
     end
-    netreactor.cancel(self, "server closed")
+    local canceled <const>, cancelReason = netreactor.cancel(self, "server closed")
     self._closed = true
     destroyHandle(self._handle, C.tecsNetServerDestroy as function(loader.CPtr))
     self._handle = nil
     closed()
-    return true
+    return canceled, cancelReason
 end
 
 function binaryIO.UDPSocket:isClosed(): boolean
@@ -1222,10 +1261,15 @@ function binaryIO.UDPSocket:send(address: binaryIO.Address, port: integer, bytes
 end
 
 local function receiveDatagram(socket: binaryIO.UDPSocket): binaryIO.UDPPacket, string
-    local datagram = C.tecsNetDatagramReceive(socket._handle)
-    if datagram == nil then
+    local output <const> = socket._packetOut
+    local received <const> = tonumber(C.tecsNetDatagramReceive(socket._handle, output)) as integer
+    if received < 0 then
+        return nil, loader.toString(C.tecsRustError())
+    end
+    if received == 0 then
         return nil
     end
+    local datagram <const> = output[0] as loader.CPtr
 
     local source = C.tecsNetPacketTakeAddress(datagram)
     if source == nil then
@@ -1264,7 +1308,10 @@ function binaryIO.UDPSocket:receive(): binaryIO.UDPPacket, string
             return nil, loader.toString(C.tecsRustError())
         end
         if status > 0 then
-            return receiveDatagram(self)
+            local packet <const>, reason = receiveDatagram(self)
+            if packet ~= nil or reason ~= nil then
+                return packet, reason
+            end
         end
         local mode <const> = task.checkWait("UDP receive")
         if mode == "cooperative" then
@@ -1311,12 +1358,12 @@ function binaryIO.UDPSocket:close(): boolean, string
     if self._closed then
         return true
     end
-    netreactor.cancel(self, "datagram socket closed")
+    local canceled <const>, cancelReason = netreactor.cancel(self, "datagram socket closed")
     self._closed = true
     destroyHandle(self._handle, C.tecsNetDatagramDestroy as function(loader.CPtr))
     self._handle = nil
     closed()
-    return true
+    return canceled, cancelReason
 end
 
 local function removeOperation(operation: Operation)
@@ -1501,6 +1548,7 @@ function binaryIO.bind(port: integer, address?: binaryIO.Address): binaryIO.UDPS
     socket.port = port
     socket._handle = managedHandle(handle, C.tecsNetDatagramDestroy as function(loader.CPtr))
     socket._closed = false
+    socket._packetOut = loader.newArray("TecsNetPacket *[1]")
     opened()
     return socket
 end

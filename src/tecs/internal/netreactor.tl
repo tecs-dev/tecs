@@ -45,7 +45,7 @@ local record netreactor
     wait: function(
         owner: any, handle: loader.CPtr, kind: integer, interest: integer, timeoutMs?: integer
     ): integer, string
-    cancel: function(owner: any, reason?: string)
+    cancel: function(owner: any, reason?: string): boolean, string
     poll: function(): integer
     pending: function(): integer
     shutdown: function(): boolean, string
@@ -228,16 +228,21 @@ function netreactor.wait(
     return readiness as integer, waitReason
 end
 
-function netreactor.cancel(owner: any, reason?: string)
+function netreactor.cancel(owner: any, reason?: string): boolean, string
     local wait <const> = byOwner[owner]
     if wait == nil then
-        return
+        return true
     end
+    local failure: string
     if unwatch(wait) == 0 then
-        error("tecs: canceling network readiness failed: " .. nativeReason(), 2)
+        failure = "canceling network readiness failed: " .. nativeReason()
     end
     remove(wait)
     wait.gate:fail(reason or "socket closed")
+    if failure ~= nil then
+        return false, failure
+    end
+    return true
 end
 
 function netreactor.pending(): integer

@@ -17,6 +17,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Body, Client, Method, Proxy, Url};
+use tokio::io::AsyncReadExt;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::{mpsc, Semaphore};
 use tokio::task::AbortHandle;
@@ -24,6 +25,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::ReaderStream;
 
 const EVENT_QUEUE_CAPACITY: usize = 64;
+const BODY_QUEUE_CAPACITY: usize = 16;
 const UPLOAD_QUEUE_CAPACITY: usize = 2;
 const UPLOAD_CHUNK_BYTES: usize = 512 * 1024;
 const RESPONSE_CHUNK_BYTES: usize = 64 * 1024;
@@ -144,21 +146,22 @@ impl Activity {
 }
 
 struct Shared {
-    sender: mpsc::Sender<Event>,
+    control_sender: mpsc::Sender<Event>,
     activity: Activity,
     closed: AtomicBool,
     total: Arc<Semaphore>,
     per_host_limit: usize,
     per_host: Mutex<HashMap<String, Arc<Semaphore>>>,
     uploads: Mutex<HashMap<u64, UploadSender>>,
+    bodies: Mutex<HashMap<u64, mpsc::Receiver<Event>>>,
 }
 
 impl Shared {
-    async fn send(&self, event: Event) -> bool {
+    async fn send_control(&self, event: Event) -> bool {
         if self.closed.load(Ordering::Acquire) {
             return false;
         }
-        if self.sender.send(event).await.is_err() {
+        if self.control_sender.send(event).await.is_err() {
             return false;
         }
         self.activity.notify();
@@ -196,7 +199,7 @@ struct OwnedRequest {
 
 enum OwnedBody {
     Ready(Body),
-    File(PathBuf),
+    File(PathBuf, u64),
 }
 
 struct UploadGuard {
@@ -301,7 +304,7 @@ fn client_builder(options: &TecsHttpClientOptions, insecure: bool) -> Result<Cli
         .connect_timeout(Duration::from_millis(options.connect_timeout_ms))
         .pool_max_idle_per_host(options.max_connections_per_host as usize)
         .danger_accept_invalid_certs(insecure);
-    builder = if options.max_redirects == 0 {
+    builder = if insecure || options.max_redirects == 0 {
         builder.redirect(reqwest::redirect::Policy::none())
     } else {
         builder.redirect(reqwest::redirect::Policy::limited(
@@ -446,7 +449,10 @@ unsafe fn own_request(
             if path.is_empty() {
                 return Err("request body file path is empty".to_owned());
             }
-            Some(OwnedBody::File(PathBuf::from(path)))
+            Some(OwnedBody::File(
+                PathBuf::from(path),
+                request.body_length as u64,
+            ))
         }
         _ => return Err("request body kind is not valid".to_owned()),
     };
@@ -465,17 +471,38 @@ unsafe fn own_request(
     })
 }
 
-async fn fail(shared: &Shared, id: u64, url: &Url, reason: impl ToString) {
+fn failure(id: u64, url: &Url, reason: impl ToString) -> Event {
     let message = format!("tecs: {url}: {}", reason.to_string());
-    let _ = shared
-        .send(Event::Failed {
-            id,
-            error: message.into_bytes().into_boxed_slice(),
-        })
-        .await;
+    Event::Failed {
+        id,
+        error: message.into_bytes().into_boxed_slice(),
+    }
 }
 
-async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
+async fn send_body(
+    shared: &Shared,
+    sender: &mpsc::Sender<Event>,
+    deadline: tokio::time::Instant,
+    event: Event,
+) -> bool {
+    if shared.closed.load(Ordering::Acquire)
+        || !matches!(
+            tokio::time::timeout_at(deadline, sender.send(event)).await,
+            Ok(Ok(()))
+        )
+    {
+        return false;
+    }
+    shared.activity.notify();
+    true
+}
+
+async fn perform(
+    client: Client,
+    shared: Arc<Shared>,
+    body_sender: mpsc::Sender<Event>,
+    request: OwnedRequest,
+) {
     let id = request.id;
     let _upload_guard = UploadGuard {
         shared: shared.clone(),
@@ -483,44 +510,70 @@ async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
     };
     let url = request.url.clone();
     let host = request.url.host_str().unwrap_or("").to_owned();
-    let total_permit = match shared.total.clone().acquire_owned().await {
-        Ok(permit) => permit,
-        Err(error) => {
-            fail(&shared, id, &url, error).await;
-            return;
-        }
-    };
-    let host_permit = match shared.host_semaphore(&host).acquire_owned().await {
-        Ok(permit) => permit,
-        Err(error) => {
-            fail(&shared, id, &url, error).await;
-            return;
-        }
-    };
+    let deadline = tokio::time::Instant::now() + request.timeout;
+    let total_permit =
+        match tokio::time::timeout_at(deadline, shared.total.clone().acquire_owned()).await {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(error)) => {
+                let _ = shared.send_control(failure(id, &url, error)).await;
+                return;
+            }
+            Err(_) => {
+                let _ = shared
+                    .send_control(failure(
+                        id,
+                        &url,
+                        "request timed out waiting for a connection permit",
+                    ))
+                    .await;
+                return;
+            }
+        };
+    let host_permit =
+        match tokio::time::timeout_at(deadline, shared.host_semaphore(&host).acquire_owned()).await
+        {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(error)) => {
+                let _ = shared.send_control(failure(id, &url, error)).await;
+                return;
+            }
+            Err(_) => {
+                let _ = shared
+                    .send_control(failure(
+                        id,
+                        &url,
+                        "request timed out waiting for a host connection permit",
+                    ))
+                    .await;
+                return;
+            }
+        };
+
+    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
 
     let mut builder = client
         .request(request.method, request.url)
         .headers(request.headers)
-        .timeout(request.timeout);
+        .timeout(remaining);
     if let Some(body) = request.body {
         match body {
             OwnedBody::Ready(body) => builder = builder.body(body),
-            OwnedBody::File(path) => {
+            OwnedBody::File(path, length) => {
                 let file = match tokio::fs::File::open(&path).await {
                     Ok(file) => file,
                     Err(error) => {
-                        fail(
-                            &shared,
-                            id,
-                            &url,
-                            format!("cannot open request body {}: {error}", path.display()),
-                        )
-                        .await;
+                        let _ = shared
+                            .send_control(failure(
+                                id,
+                                &url,
+                                format!("cannot open request body {}: {error}", path.display()),
+                            ))
+                            .await;
                         return;
                     }
                 };
                 builder = builder.body(Body::wrap_stream(ReaderStream::with_capacity(
-                    file,
+                    file.take(length),
                     UPLOAD_CHUNK_BYTES,
                 )));
             }
@@ -530,7 +583,7 @@ async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
     let response = match builder.send().await {
         Ok(response) => response,
         Err(error) => {
-            fail(&shared, id, &url, error).await;
+            let _ = shared.send_control(failure(id, &url, error)).await;
             return;
         }
     };
@@ -544,7 +597,7 @@ async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
     let headers = match header_bytes(response.headers()) {
         Ok(headers) => headers,
         Err(error) => {
-            fail(&shared, id, &url, error).await;
+            let _ = shared.send_control(failure(id, &url, error)).await;
             return;
         }
     };
@@ -554,18 +607,18 @@ async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
             .content_length()
             .is_some_and(|length| length > request.max_bytes)
     {
-        fail(
-            &shared,
-            id,
-            &url,
-            format!("response body exceeded {} bytes", request.max_bytes),
-        )
-        .await;
+        let _ = shared
+            .send_control(failure(
+                id,
+                &url,
+                format!("response body exceeded {} bytes", request.max_bytes),
+            ))
+            .await;
         return;
     }
 
     if !shared
-        .send(Event::Headers {
+        .send_control(Event::Headers {
             id,
             status,
             headers,
@@ -583,13 +636,17 @@ async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
             match tokio::time::timeout(stall_timeout, response.chunk()).await {
                 Ok(result) => result,
                 Err(_) => {
-                    fail(
+                    let _ = send_body(
                         &shared,
-                        id,
-                        &url,
-                        format!(
-                            "response made no progress for {} milliseconds",
-                            stall_timeout.as_millis()
+                        &body_sender,
+                        deadline,
+                        failure(
+                            id,
+                            &url,
+                            format!(
+                                "response made no progress for {} milliseconds",
+                                stall_timeout.as_millis()
+                            ),
                         ),
                     )
                     .await;
@@ -603,42 +660,56 @@ async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
             Ok(Some(chunk)) => chunk,
             Ok(None) => break,
             Err(error) => {
-                fail(&shared, id, &url, error).await;
+                let _ = send_body(&shared, &body_sender, deadline, failure(id, &url, error)).await;
                 return;
             }
         };
         received = match received.checked_add(chunk.len() as u64) {
             Some(received) => received,
             None => {
-                fail(&shared, id, &url, "response body is too large").await;
+                let _ = send_body(
+                    &shared,
+                    &body_sender,
+                    deadline,
+                    failure(id, &url, "response body is too large"),
+                )
+                .await;
                 return;
             }
         };
         if request.max_bytes != 0 && received > request.max_bytes {
-            fail(
+            let _ = send_body(
                 &shared,
-                id,
-                &url,
-                format!("response body exceeded {} bytes", request.max_bytes),
+                &body_sender,
+                deadline,
+                failure(
+                    id,
+                    &url,
+                    format!("response body exceeded {} bytes", request.max_bytes),
+                ),
             )
             .await;
             return;
         }
         for start in (0..chunk.len()).step_by(RESPONSE_CHUNK_BYTES) {
             let end = (start + RESPONSE_CHUNK_BYTES).min(chunk.len());
-            if !shared
-                .send(Event::Chunk {
+            if !send_body(
+                &shared,
+                &body_sender,
+                deadline,
+                Event::Chunk {
                     id,
                     data: chunk.slice(start..end),
-                })
-                .await
+                },
+            )
+            .await
             {
                 return;
             }
         }
     }
 
-    let _ = shared.send(Event::Complete { id }).await;
+    let _ = send_body(&shared, &body_sender, deadline, Event::Complete { id }).await;
 
     drop(host_permit);
     drop(total_permit);
@@ -705,9 +776,9 @@ pub unsafe extern "C" fn tecsHttpClientCreate(
             return ptr::null_mut();
         }
     };
-    let (sender, receiver) = mpsc::channel(EVENT_QUEUE_CAPACITY);
+    let (control_sender, receiver) = mpsc::channel(EVENT_QUEUE_CAPACITY);
     let shared = Arc::new(Shared {
-        sender,
+        control_sender,
         activity: Activity {
             generation: Mutex::new(0),
             changed: Condvar::new(),
@@ -717,6 +788,7 @@ pub unsafe extern "C" fn tecsHttpClientCreate(
         per_host_limit: options.max_connections_per_host as usize,
         per_host: Mutex::new(HashMap::new()),
         uploads: Mutex::new(HashMap::new()),
+        bodies: Mutex::new(HashMap::new()),
     });
     Box::into_raw(Box::new(TecsHttpClient {
         secure,
@@ -745,6 +817,12 @@ pub unsafe extern "C" fn tecsHttpClientDestroy(client: *mut TecsHttpClient) {
     client
         .shared
         .uploads
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+    client
+        .shared
+        .bodies
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clear();
@@ -783,6 +861,23 @@ pub unsafe extern "C" fn tecsHttpClientSend(
         }
     };
     let id = request.id;
+    let (body_sender, body_receiver) = mpsc::channel(BODY_QUEUE_CAPACITY);
+    let replaced = client
+        .shared
+        .bodies
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(id, body_receiver);
+    if replaced.is_some() {
+        client
+            .shared
+            .uploads
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&id);
+        set_error("request id already has a response body");
+        return 0;
+    }
     let http = if request.insecure {
         client.insecure.clone()
     } else {
@@ -790,8 +885,20 @@ pub unsafe extern "C" fn tecsHttpClientSend(
     };
     let shared = client.shared.clone();
     let handle = match runtime() {
-        Ok(runtime) => runtime.spawn(perform(http, shared, request)),
+        Ok(runtime) => runtime.spawn(perform(http, shared, body_sender, request)),
         Err(error) => {
+            client
+                .shared
+                .bodies
+                .lock()
+                .unwrap_or_else(|lock_error| lock_error.into_inner())
+                .remove(&id);
+            client
+                .shared
+                .uploads
+                .lock()
+                .unwrap_or_else(|lock_error| lock_error.into_inner())
+                .remove(&id);
             set_error(error);
             return 0;
         }
@@ -819,6 +926,12 @@ pub unsafe extern "C" fn tecsHttpClientCancel(client: *mut TecsHttpClient, id: u
     client
         .shared
         .uploads
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .remove(&id);
+    client
+        .shared
+        .bodies
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .remove(&id);
@@ -913,9 +1026,15 @@ fn try_next(client: &TecsHttpClient) -> Option<Event> {
         if canceled {
             continue;
         }
-        if matches!(event, Event::Complete { .. } | Event::Failed { .. }) {
+        if matches!(event, Event::Failed { .. }) {
             client
                 .handles
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&id);
+            client
+                .shared
+                .bodies
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .remove(&id);
@@ -967,6 +1086,95 @@ pub unsafe extern "C" fn tecsHttpClientNext(
         )
         .unwrap_or_else(|e| e.into_inner());
     match try_next(client) {
+        Some(event) => Box::into_raw(Box::new(TecsHttpEvent { event })),
+        None => ptr::null_mut(),
+    }
+}
+
+fn try_body_next(client: &TecsHttpClient, id: u64) -> Option<Event> {
+    let received = {
+        let mut bodies = client
+            .shared
+            .bodies
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let receiver = bodies.get_mut(&id)?;
+        match receiver.try_recv() {
+            Ok(event) => Some(Ok(event)),
+            Err(mpsc::error::TryRecvError::Empty) => None,
+            Err(mpsc::error::TryRecvError::Disconnected) => Some(Err(())),
+        }
+    }?;
+
+    let event = match received {
+        Ok(event) => event,
+        Err(()) => Event::Failed {
+            id,
+            error: b"tecs: HTTP response body ended without completion"
+                .to_vec()
+                .into_boxed_slice(),
+        },
+    };
+    if matches!(event, Event::Complete { .. } | Event::Failed { .. }) {
+        client
+            .shared
+            .bodies
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&id);
+        client
+            .handles
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&id);
+    }
+    Some(event)
+}
+
+/// Drains one response-body event for `id`, waiting for at most `wait_ms`.
+///
+/// # Safety
+///
+/// `client` must be null or a live client pointer.
+#[no_mangle]
+pub unsafe extern "C" fn tecsHttpClientBodyNext(
+    client: *mut TecsHttpClient,
+    id: u64,
+    wait_ms: u32,
+) -> *mut TecsHttpEvent {
+    if client.is_null() {
+        return ptr::null_mut();
+    }
+    // SAFETY: A non-null pointer must be a live client.
+    let client = unsafe { &*client };
+    if let Some(event) = try_body_next(client, id) {
+        return Box::into_raw(Box::new(TecsHttpEvent { event }));
+    }
+    if wait_ms == 0 {
+        return ptr::null_mut();
+    }
+
+    let generation = client
+        .shared
+        .activity
+        .generation
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let before = *generation;
+    if let Some(event) = try_body_next(client, id) {
+        return Box::into_raw(Box::new(TecsHttpEvent { event }));
+    }
+    let _guard = client
+        .shared
+        .activity
+        .changed
+        .wait_timeout_while(
+            generation,
+            Duration::from_millis(wait_ms as u64),
+            |current| *current == before && !client.shared.closed.load(Ordering::Acquire),
+        )
+        .unwrap_or_else(|error| error.into_inner());
+    match try_body_next(client, id) {
         Some(event) => Box::into_raw(Box::new(TecsHttpEvent { event })),
         None => ptr::null_mut(),
     }
@@ -1155,7 +1363,7 @@ mod tests {
         install_tls_provider();
         let (event_sender, event_receiver) = mpsc::channel(EVENT_QUEUE_CAPACITY);
         let shared = Arc::new(Shared {
-            sender: event_sender,
+            control_sender: event_sender,
             activity: Activity {
                 generation: Mutex::new(0),
                 changed: Condvar::new(),
@@ -1165,6 +1373,7 @@ mod tests {
             per_host_limit: 1,
             per_host: Mutex::new(HashMap::new()),
             uploads: Mutex::new(HashMap::new()),
+            bodies: Mutex::new(HashMap::new()),
         });
         let (upload_sender, _upload_receiver) = mpsc::channel(UPLOAD_QUEUE_CAPACITY);
         shared.uploads.lock().unwrap().insert(7, upload_sender);
@@ -1200,7 +1409,7 @@ mod tests {
     fn owns_native_file_request_paths_without_an_upload_queue() {
         let (event_sender, _event_receiver) = mpsc::channel(EVENT_QUEUE_CAPACITY);
         let shared = Arc::new(Shared {
-            sender: event_sender,
+            control_sender: event_sender,
             activity: Activity {
                 generation: Mutex::new(0),
                 changed: Condvar::new(),
@@ -1210,6 +1419,7 @@ mod tests {
             per_host_limit: 1,
             per_host: Mutex::new(HashMap::new()),
             uploads: Mutex::new(HashMap::new()),
+            bodies: Mutex::new(HashMap::new()),
         });
         let url = b"http://127.0.0.1/upload";
         let method = b"POST";
@@ -1241,8 +1451,9 @@ mod tests {
         // SAFETY: Every request slice remains live for this synchronous copy.
         let owned = unsafe { own_request(&request, &shared) }.unwrap();
         match owned.body {
-            Some(OwnedBody::File(owned_path)) => {
+            Some(OwnedBody::File(owned_path, length)) => {
                 assert_eq!(owned_path, PathBuf::from("/tmp/request-body.bin"));
+                assert_eq!(length, 17);
             }
             _ => panic!("file request did not retain its path"),
         }
@@ -1317,25 +1528,35 @@ mod tests {
         // SAFETY: The client and request remain live for the synchronous copy.
         assert_eq!(unsafe { tecsHttpClientSend(client, &request) }, 1);
 
+        // SAFETY: The client remains live until the end of the test.
+        let event = unsafe { tecsHttpClientNext(client, 1_000) };
+        assert!(!event.is_null());
+        let headers_event = match &unsafe { &*event }.event {
+            Event::Headers {
+                id,
+                status,
+                headers,
+                url,
+            } => (*id, *status, headers.to_vec(), url.to_vec()),
+            Event::Failed { error, .. } => {
+                panic!("request failed: {}", String::from_utf8_lossy(error));
+            }
+            _ => panic!("control queue returned a body event"),
+        };
+        // SAFETY: Ownership is returned exactly once.
+        unsafe { tecsHttpEventDestroy(event) };
+
         let mut body = Vec::new();
-        let mut headers_event = None;
         let mut complete = false;
         for _ in 0..10 {
             // SAFETY: The client remains live until the end of the test.
-            let event = unsafe { tecsHttpClientNext(client, 1_000) };
+            let event = unsafe { tecsHttpClientBodyNext(client, 42, 1_000) };
             if event.is_null() {
                 continue;
             }
             // SAFETY: This event is live until it is destroyed below.
             match &unsafe { &*event }.event {
-                Event::Headers {
-                    id,
-                    status,
-                    headers,
-                    url,
-                } => {
-                    headers_event = Some((*id, *status, headers.to_vec(), url.to_vec()));
-                }
+                Event::Headers { .. } => panic!("body queue returned headers"),
                 Event::Chunk { id, data } => {
                     assert_eq!(*id, 42);
                     body.extend_from_slice(data);
@@ -1361,7 +1582,7 @@ mod tests {
 
         assert_eq!(body, b"hello");
         assert!(complete);
-        let (id, status, headers, effective_url) = headers_event.expect("headers event");
+        let (id, status, headers, effective_url) = headers_event;
         assert_eq!(id, 42);
         assert_eq!(status, 200);
         assert!(headers

@@ -1,9 +1,10 @@
 /* Asynchronous HTTP over the Rust runtime.
  *
  * Rust owns reqwest, Tokio, every socket, and the threads that drive them.
- * Lua submits copied request data and drains a bounded event queue from the
- * SDL thread. No Rust worker ever calls Lua, which is the LuaJIT callback rule
- * this boundary exists to enforce.
+ * Lua submits copied request data and drains a bounded control queue plus one
+ * bounded body queue per transfer from the SDL thread. An unread body applies
+ * backpressure only to its own transfer. No Rust worker ever calls Lua, which
+ * is the LuaJIT callback rule this boundary exists to enforce.
  *
  * The cdef the FFI uses is generated from this header, so keep it in the C
  * subset LuaJIT parses.
@@ -100,10 +101,15 @@ void tecsHttpClientCancel(TecsHttpClient *client, uint64_t id);
  * finished only with an empty slice to close the body. */
 int tecsHttpClientUpload(TecsHttpClient *client, uint64_t id, const uint8_t *data, size_t length, int finished);
 
-/* Answers the next event, waiting for at most waitMs. A zero wait never
- * blocks. The event and every pointer borrowed from it stay valid until
- * tecsHttpEventDestroy(). */
+/* Answers the next response-header or pre-header failure event, waiting for at
+ * most waitMs. A zero wait never blocks. */
 TecsHttpEvent *tecsHttpClientNext(TecsHttpClient *client, uint32_t waitMs);
+
+/* Answers the next body chunk or terminal event for one transfer. Each body
+ * has an independent bounded queue, so leaving one unread cannot obstruct
+ * headers or another body. The event and every pointer borrowed from it stay
+ * valid until tecsHttpEventDestroy(). */
+TecsHttpEvent *tecsHttpClientBodyNext(TecsHttpClient *client, uint64_t id, uint32_t waitMs);
 
 uint32_t tecsHttpEventKind(const TecsHttpEvent *event);
 uint64_t tecsHttpEventId(const TecsHttpEvent *event);

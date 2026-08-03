@@ -437,11 +437,11 @@ local record ModelMaterial
     emissiveG: number
     --- Read-only. Reports the emissive blue factor.
     emissiveB: number
-    --- Caller-writable until model registration. Multiplies sampled metallic.
-    --- This defaults to the decoded glTF factor.
+    --- Caller-writable. Until model registration, this multiplies sampled
+    --- metallic and defaults to the decoded glTF factor.
     metallic: number
-    --- Caller-writable until model registration. Multiplies sampled roughness.
-    --- This defaults to the decoded glTF factor.
+    --- Caller-writable. Until model registration, this multiplies sampled
+    --- roughness and defaults to the decoded glTF factor.
     roughness: number
     --- Read-only. Reports tangent-space normal strength.
     normalScale: number
@@ -1645,18 +1645,40 @@ local function queue(kind: string, path: string): Completion<any>, integer
     return root, id
 end
 
-local function awaitRoot<T>(root: Completion<T>, operation: string): T
+local function awaitRoot<T>(root: Completion<T>, operation: string, claim?: function(T), release?: function(T)): T
     local settled = root
+    local claimed = false
     if root.status == "pending" then
         if task.checkWait(operation) == "blocking" then
             root:wait()
         else
             settled = task.awaitCallback(function(resume: function(Completion<T>)): function()
-                return Completion.subscribe(root as Completion<any>, resume as function(Completion<any>))
+                local held: T
+                local unsubscribe <const> = Completion.subscribe(
+                    root as Completion<any>,
+                    function(done: Completion<any>)
+                        if done.status == "ready" and claim ~= nil then
+                            held = done.value as T
+                            claim(held)
+                            claimed = true
+                        end
+                        resume(done as Completion<T>)
+                    end
+                )
+                return function()
+                    unsubscribe()
+                    if held ~= nil and release ~= nil then
+                        release(held)
+                        held = nil
+                    end
+                end
             end)
         end
     end
     if settled.status == "ready" then
+        if claim ~= nil and not claimed then
+            claim(settled.value)
+        end
         return settled.value
     end
     if settled.status == "failed" then
@@ -1697,9 +1719,12 @@ function assets.loadImage(path: string): Image
         return imageFromBytes(bytes, path)
     end
     local root <const> = imageLoads[path] ~= nil and imageLoads[path].root or beginImage(path)
-    local image <const> = awaitRoot(root, "image load")
-    image._refs = image._refs + 1
-    return image
+    return awaitRoot(
+        root,
+        "image load",
+        function(image: Image) image._refs = image._refs + 1 end,
+        function(image: Image) image:release() end
+    )
 end
 
 --- Reads a complete file and returns its bytes.

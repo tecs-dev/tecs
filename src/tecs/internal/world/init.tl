@@ -1170,6 +1170,19 @@ function WorldImpl:enqueueCommit()
     self:_commit()
 end
 
+local function commitBody(self: WorldImpl)
+    repeat
+        self._commitRequested = false
+        if self.isDirty then
+            self:_drain()
+        end
+        if self._rebuildKeyIndexAfterCommit then
+            self._rebuildKeyIndexAfterCommit = false
+            self:_rebuildKeyIndex()
+        end
+    until not self._commitRequested
+end
+
 function WorldImpl:_commit()
     if self._committing then
         self._commitRequested = true
@@ -1185,17 +1198,12 @@ function WorldImpl:_commit()
     end
 
     self._committing = true
-    repeat
-        self._commitRequested = false
-        if self.isDirty then
-            self:_drain()
-        end
-        if self._rebuildKeyIndexAfterCommit then
-            self._rebuildKeyIndexAfterCommit = false
-            self:_rebuildKeyIndex()
-        end
-    until not self._commitRequested
+    local ok <const>, failure = xpcall(commitBody, debug.traceback, self) as (boolean, string)
     self._committing = false
+    if not ok then
+        self._commitRequested = false
+        error(failure, 0)
+    end
 end
 
 runWorldUpdate = function(self: WorldImpl)
@@ -1245,6 +1253,7 @@ function WorldImpl:update(dt: number): boolean
     end
 
     -- The reusable fiber is ready for the next update even after failure.
+    pipeline.recover(self.pipeline, self)
     error(("tecs: world update %s: %s"):format(root.status, root.error or root.status), 2)
 end
 
@@ -1277,6 +1286,9 @@ function WorldImpl:registerPhase(phase: Phase)
 end
 
 function WorldImpl:startup()
+    if self._updateStalled then
+        error("tecs: cannot run startup while a world update is suspended", 2)
+    end
     self:_commit()
     self.pipeline:run(phases.StartupGroup, 0, self)
 end
@@ -1302,6 +1314,9 @@ function WorldImpl:shutdown()
 end
 
 function WorldImpl:runPhase(phase: Phase, dt?: number)
+    if self._updateStalled then
+        error("tecs: cannot run a phase while a world update is suspended", 2)
+    end
     self:_commit()
     self.pipeline:run(phase, dt or 0, self)
 end

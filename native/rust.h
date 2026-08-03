@@ -317,7 +317,11 @@ typedef struct TecsWindowHitRegion {
 typedef struct SDL_Window SDL_Window;
 
 const char *tecsRustError(void);
-int tecsHostEventBatchAcknowledge(void *host, uint64_t token);
+int32_t tecsHostEventBatchState(void *host);
+const void *tecsHostEventBatchEvents(void *host);
+const uint64_t *tecsHostEventBatchArrivals(void *host);
+const uint64_t *tecsHostEventBatchSequences(void *host);
+int tecsHostEventBatchAcknowledge(void *host);
 
 /* Immutable procedural noise fields. Algorithm and fractal values are private
  * discriminants selected by the tecs.math.noise binding. */
@@ -500,7 +504,9 @@ void tecsNetServerDestroy(TecsNetServer *server);
 
 TecsNetAddress *tecsNetStreamPeer(const TecsNetStream *stream);
 int64_t tecsNetStreamRead(TecsNetStream *stream, uint8_t *bytes, size_t length);
-int tecsNetStreamWrite(TecsNetStream *stream, const uint8_t *bytes, size_t length);
+/* Copies as many bytes as fit in the bounded send queue. Returns the copied
+ * count, zero for backpressure, or -1 on failure. */
+int64_t tecsNetStreamWrite(TecsNetStream *stream, const uint8_t *bytes, size_t length);
 int64_t tecsNetStreamPendingWrites(TecsNetStream *stream);
 int tecsNetStreamDrain(TecsNetStream *stream, uint32_t timeoutMs);
 int tecsNetStreamWait(TecsNetStream *stream, uint32_t timeoutMs);
@@ -511,7 +517,9 @@ int tecsNetDatagramSend(TecsNetDatagram *socket, const TecsNetAddress *address, 
                         size_t length);
 int tecsNetDatagramSendWait(TecsNetDatagram *socket, const TecsNetAddress *address, uint16_t port, const uint8_t *bytes,
                             size_t length, uint32_t timeoutMs);
-TecsNetPacket *tecsNetDatagramReceive(TecsNetDatagram *socket);
+/* Stores one owned packet and returns one, returns zero for no datagram, or
+ * returns -1 with tecsRustError() set. */
+int tecsNetDatagramReceive(TecsNetDatagram *socket, TecsNetPacket **packet);
 int tecsNetDatagramWait(TecsNetDatagram *socket, uint32_t timeoutMs);
 void tecsNetDatagramDestroy(TecsNetDatagram *socket);
 TecsNetAddress *tecsNetPacketTakeAddress(TecsNetPacket *packet);

@@ -60,6 +60,7 @@ local SAMPLES <const> = floor(tonumber(getenv("BENCH_HTTP_SAMPLES")) or 100)
 local FORCE_FAILURE <const> = getenv("BENCH_HTTP_FORCE_FAILURE") == "1"
 local COMPLETION <const> = "coroutine"
 local READ_CHUNK <const> = 64 * 1024
+local RESPONSE_CHUNK <const> = 1024 * 1024
 
 if BYTES < 1 then
     error("bench: BENCH_HTTP_BYTES must be positive", 0)
@@ -302,6 +303,7 @@ local record Server
     pending: Buffer
     bodyOffset: integer
     bodyLength: integer
+    responseOffset: integer
     writing: boolean
     responded: boolean
 end
@@ -333,6 +335,15 @@ local function pollServer(server: Server, response: string): boolean
             error(pendingReason, 0)
         end
         if pending > 0 then
+            return false
+        end
+        if server.responseOffset <= #response then
+            local finish <const> = min(#response, server.responseOffset + RESPONSE_CHUNK - 1)
+            local ok <const>, writeReason = server.connection:write(response:sub(server.responseOffset, finish))
+            if not ok then
+                error(writeReason, 0)
+            end
+            server.responseOffset = finish + 1
             return false
         end
         server.writing = false
@@ -383,10 +394,12 @@ local function pollServer(server: Server, response: string): boolean
             end
         end
         if server.bodyOffset ~= nil and server.pending:length() >= server.bodyOffset + server.bodyLength then
-            local ok <const>, writeReason = server.connection:write(response)
+            local finish <const> = min(#response, RESPONSE_CHUNK)
+            local ok <const>, writeReason = server.connection:write(response:sub(1, finish))
             if not ok then
                 error(writeReason, 0)
             end
+            server.responseOffset = finish + 1
             server.writing = true
             return false
         end
@@ -401,6 +414,7 @@ local function validateRequest(server: Server): integer
     server.pending:clear()
     server.bodyOffset = nil
     server.bodyLength = nil
+    server.responseOffset = nil
     server.writing = false
     server.responded = false
     return hash
@@ -564,19 +578,14 @@ return tecs.newApplication({
             run = function()
                 local advanced <const>, advanceFailure = protect(function()
                     local status <const> = completionStatus()
-                    if status == "pending" or not server.responded then
+                    if status == "pending" then
                         return
                     end
-                    local elapsed <const> = (time.now() - started) * 1000.0
                     if status ~= "ready" then
                         error(completionError(), 0)
                     end
                     local response <const> = completionResponse()
                     local name <const> = MODES[mode]
-                    local serverHash <const> = validateRequest(server)
-                    if serverHash ~= expectedServerHash then
-                        error(("tecs: %s upload hash mismatch"):format(name), 0)
-                    end
                     if name == "download-buffer" then
                         local body <const> = (response.body as ReadableStream):readAll()
                         local bodyHash <const> = crc32(body)
@@ -593,7 +602,17 @@ return tecs.newApplication({
                         if crc32(downloadBuffer:getString()) ~= PAYLOAD_HASH then
                             error("tecs: custom Writer download hash mismatch", 0)
                         end
+                    else
+                        assert((response.body as ReadableStream):discard())
                     end
+                    while not server.responded do
+                        task.yield()
+                    end
+                    local serverHash <const> = validateRequest(server)
+                    if serverHash ~= expectedServerHash then
+                        error(("tecs: %s upload hash mismatch"):format(name), 0)
+                    end
+                    local elapsed <const> = (time.now() - started) * 1000.0
                     iteration = iteration + 1
                     if iteration > WARMUP then
                         local samples <const> = results[mode].samples
@@ -648,7 +667,7 @@ return tecs.newApplication({
                     end
                     print(
                         "boundedness: reader upload = 2 x 512 KiB = 1 MiB; "
-                            .. "file reads = 512 KiB; download = 64 x 64 KiB = 4 MiB; every body hash validated"
+                            .. "file reads = 512 KiB; download = 16 x 64 KiB = 1 MiB; every body hash validated"
                     )
                 end
                 local cleaned <const>, cleanupFailure = protect(function()

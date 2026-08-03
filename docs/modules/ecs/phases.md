@@ -166,4 +166,5 @@ before calling it directly.
 Like `world:update`, `runPhase` publishes pending structural work before
 dispatch and after each phase it runs. It does not clear dirty bits afterwards;
 that contract supports custom loops that run parts of the phase tree on
-separate ticks.
+separate ticks. Calling it while `world:update` is suspended raises instead of
+publishing the suspended system's half-staged transaction.

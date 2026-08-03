@@ -13,9 +13,10 @@ Request readers feed a bounded Rust upload channel from client-owned
 cooperative tasks. A composed Reader may therefore suspend on another socket,
 process, file, transform, or HTTP body without blocking the SDL pump.
 `send` returns as soon as status and headers arrive. The response body is a
-one-shot Reader whose retained native chunks apply bounded backpressure when
-the caller stops consuming it. Neither direction lets a foreign thread enter
-LuaJIT or materializes the whole body.
+one-shot Reader backed by its own bounded native queue. An unread body applies
+backpressure only to its transfer, never to response headers or another body.
+Close or discard a body that will not be consumed. Neither direction lets a
+foreign thread enter LuaJIT or materializes the whole body.
 ]=]
 
 local ffi <const> = require("ffi")
@@ -61,7 +62,12 @@ local UPLOAD_BACKPRESSURE <const> = 0
 local UPLOAD_ACCEPTED <const> = 1
 local CHUNK <const> = 512 * 1024
 local UPLOAD_STEPS <const> = 16
-local MAX_BODY_BUFFER_BYTES <const> = 1024 * 1024
+
+local function checkWholeNumber(value: number, name: string, minimum: integer)
+    if type(value) ~= "number" or value ~= floor(value) or value < minimum or value > MAX_EXACT_INTEGER then
+        error(("tecs: HTTP %s must be an integer from %d through %d"):format(name, minimum, MAX_EXACT_INTEGER), 3)
+    end
+end
 
 local record client
     --- Settings copied when a client is built.
@@ -71,11 +77,11 @@ local record client
         --- Caller-writable. Sets headers sent on every request. Per-request
         --- headers override these without regard to case.
         headers: {string: string}
-        --- Caller-writable. Sets milliseconds allowed for a whole transfer.
-        --- Defaults to 30000.
+        --- Caller-writable. Sets positive milliseconds allowed for a whole
+        --- transfer. Defaults to 30000.
         timeoutMs: number
-        --- Caller-writable. Sets milliseconds allowed to establish a
-        --- connection. Defaults to 10000.
+        --- Caller-writable. Sets positive milliseconds allowed to establish
+        --- a connection. Defaults to 10000.
         connectTimeoutMs: number
         --- Caller-writable. Sets milliseconds a response may make no progress.
         --- Zero disables this timeout.
@@ -126,7 +132,8 @@ local record client
         --- a file stream is opened and read directly by the native HTTP lane.
         --- The client owns cooperative work that waits on a composed reader.
         body: string | iotypes.ReadableStream
-        --- Caller-writable. Overrides the client's whole-transfer timeout.
+        --- Caller-writable. Overrides the client's positive whole-transfer
+        --- timeout.
         timeoutMs: number
         --- Caller-writable. Overrides the client's no-progress timeout.
         stallTimeoutMs: number
@@ -143,6 +150,7 @@ local record client
         headers: {string: string}
         --- Read-only. Provides a one-shot progressive response body. Reading
         --- may suspend a system or block a direct caller until bytes arrive.
+        --- The caller must consume, discard, or close this owned stream.
         body: iotypes.Stream
         --- Read-only. Reports the effective URL after redirects.
         url: URI
@@ -162,11 +170,9 @@ local record client
         url: string
         client: Client
         headersReady: boolean
-        bodyEvents: {loader.CPtr}
-        bodyHead: integer
-        bodyTail: integer
+        bodyEvent: loader.CPtr
+        bodyReader: any
         bodyOffset: integer
-        bodyBytes: integer
         bodyDone: boolean
         bodyError: string
         bodyWaiter: function()
@@ -184,7 +190,6 @@ local record client
         _pending: integer
         _pumping: boolean
         _eventSize: loader.CArray
-        _queuedBodyBytes: integer
 
         -- Internal completion view used by the coroutine adapter.
         _subscribe: function(self: Client, request: Request, listener: function(string, Response, string)): function()
@@ -234,7 +239,8 @@ function Response:ok(): boolean
 end
 
 local cancelTransfer: function(self: Client, transfer: Transfer, reason: string, notify: boolean)
-local drive: function(self: Client, waitMs: number, level: integer, forceBodyProgress?: boolean): integer
+local drive: function(self: Client, waitMs: number, level: integer, bodyTarget?: Transfer): integer
+local pollBody: function(self: Client, transfer: Transfer): boolean
 
 local function wakeBody(transfer: Transfer)
     local waiter <const> = transfer.bodyWaiter
@@ -244,25 +250,12 @@ local function wakeBody(transfer: Transfer)
     end
 end
 
-local function releaseBodyEvent(transfer: Transfer, event: loader.CPtr)
-    H.tecsHttpEventData(event, transfer.client._eventSize)
-    local length <const> = floor(tonumber(transfer.client._eventSize[0]) or 0) as integer
-    transfer.bodyBytes = transfer.bodyBytes - length
-    transfer.client._queuedBodyBytes = transfer.client._queuedBodyBytes - length
+local function releaseBodyEvent(event: loader.CPtr)
     H.tecsHttpEventDestroy(event)
 end
 
 local function currentBodyEvent(transfer: Transfer): loader.CPtr
-    -- Never use `#bodyEvents` here. Consuming the queue punches holes at its
-    -- head, and Lua's length is intentionally undefined for a sparse table.
-    while transfer.bodyHead <= transfer.bodyTail do
-        local event <const> = transfer.bodyEvents[transfer.bodyHead]
-        if event ~= nil then
-            return event
-        end
-        transfer.bodyHead = transfer.bodyHead + 1
-    end
-    return nil
+    return transfer.bodyEvent
 end
 
 local function waitForBody(self: BodyReader): boolean, string
@@ -270,10 +263,17 @@ local function waitForBody(self: BodyReader): boolean, string
     if currentBodyEvent(transfer) ~= nil or transfer.bodyDone then
         return true
     end
+    -- The consumer is already on the Lua thread. Probe its native queue here
+    -- so a buffered run of chunks drains in one resumption instead of paying
+    -- one host frame per 64 KiB chunk.
+    pollBody(transfer.client, transfer)
+    if currentBodyEvent(transfer) ~= nil or transfer.bodyDone then
+        return true
+    end
     local mode <const> = task.checkWait("HTTP response body")
     if mode == "blocking" then
         while currentBodyEvent(transfer) == nil and not transfer.bodyDone do
-            drive(transfer.client, SLICE_MS, 3, true)
+            drive(transfer.client, SLICE_MS, 3, transfer)
         end
         return true
     end
@@ -309,7 +309,7 @@ local function readBodyPointer(self: BodyReader, count: integer): loader.BytePoi
     end
     local transfer <const> = self._transfer
     if self._release ~= nil then
-        releaseBodyEvent(transfer, self._release)
+        releaseBodyEvent(self._release)
         self._release = nil
     end
     waitForBody(self)
@@ -326,8 +326,7 @@ local function readBodyPointer(self: BodyReader, count: integer): loader.BytePoi
     local result <const> = (pointer as loader.BytePointer) + transfer.bodyOffset
     transfer.bodyOffset = transfer.bodyOffset + taking
     if transfer.bodyOffset == length then
-        transfer.bodyEvents[transfer.bodyHead] = nil
-        transfer.bodyHead = transfer.bodyHead + 1
+        transfer.bodyEvent = nil
         transfer.bodyOffset = 0
         self._release = event
     end
@@ -335,6 +334,9 @@ local function readBodyPointer(self: BodyReader, count: integer): loader.BytePoi
 end
 
 function BodyReader:read(count: integer): string, string
+    if type(count) ~= "number" or count ~= floor(count) or count < 0 then
+        error("tecs: HTTP body read count must be a non-negative integer", 2)
+    end
     local pointer <const>, length, reason = readBodyPointer(self, count)
     if pointer == nil then
         return length == 0 and "" or nil, reason
@@ -372,15 +374,12 @@ function BodyReader:close(): boolean, string
     local transfer <const> = self._transfer
     self._transfer = nil
     if self._release ~= nil then
-        releaseBodyEvent(transfer, self._release)
+        releaseBodyEvent(self._release)
         self._release = nil
     end
-    local event = currentBodyEvent(transfer)
-    while event ~= nil do
-        transfer.bodyEvents[transfer.bodyHead] = nil
-        transfer.bodyHead = transfer.bodyHead + 1
-        releaseBodyEvent(transfer, event)
-        event = currentBodyEvent(transfer)
+    if transfer.bodyEvent ~= nil then
+        releaseBodyEvent(transfer.bodyEvent)
+        transfer.bodyEvent = nil
     end
     if transfer.client._byId[transfer.id] == transfer then
         cancelTransfer(transfer.client, transfer, "response body was closed", false)
@@ -476,11 +475,25 @@ local function closeSource(transfer: Transfer)
     transfer.sourcePending = 0
 end
 
+local function discardBodyEvents(transfer: Transfer)
+    if transfer.bodyEvent ~= nil then
+        releaseBodyEvent(transfer.bodyEvent)
+        transfer.bodyEvent = nil
+    end
+    local reader <const> = transfer.bodyReader as BodyReader
+    if reader ~= nil and reader._release ~= nil then
+        releaseBodyEvent(reader._release)
+        reader._release = nil
+    end
+    transfer.bodyOffset = 0
+end
+
 local function failTransfer(self: Client, transfer: Transfer, reason: string)
     cancelUpload(transfer, reason or "HTTP upload failed")
     H.tecsHttpClientCancel(self._handle, transfer.id)
     release(self, transfer)
     closeSource(transfer)
+    discardBodyEvents(transfer)
     reason = reason or ("tecs: %s: transfer failed"):format(transfer.url)
     if transfer.headersReady then
         transfer.bodyError = reason
@@ -518,6 +531,7 @@ local function beginResponse(
     local reader <const> = setmetatable(
         {_transfer = transfer, _closed = false, _release = nil} as BodyReader, BodyReaderMT
     ) as iotypes.Reader
+    transfer.bodyReader = reader
     response.body = stream._newReaderStream(reader, response.headers["content-type"], contentLength) as Stream
     transfer.headersReady = true
     settleTransfer(transfer, "ready", response)
@@ -526,10 +540,12 @@ end
 local function queueChunk(self: Client, transfer: Transfer, pointer: loader.CPtr)
     H.tecsHttpEventData(pointer, self._eventSize)
     local length <const> = floor(tonumber(self._eventSize[0]) or 0) as integer
-    transfer.bodyTail = transfer.bodyTail + 1
-    transfer.bodyEvents[transfer.bodyTail] = pointer
-    transfer.bodyBytes = transfer.bodyBytes + length
-    self._queuedBodyBytes = self._queuedBodyBytes + length
+    if transfer.bodyEvent ~= nil then
+        H.tecsHttpEventDestroy(pointer)
+        failTransfer(self, transfer, ("tecs: %s: response body queue overflowed"):format(transfer.url))
+        return
+    end
+    transfer.bodyEvent = pointer
     transfer.transferred = transfer.transferred + length
     wakeBody(transfer)
 end
@@ -538,6 +554,7 @@ local function completeTransfer(self: Client, transfer: Transfer)
     cancelUpload(transfer, "HTTP transfer completed")
     release(self, transfer)
     closeSource(transfer)
+    discardBodyEvents(transfer)
     transfer.bodyDone = true
     wakeBody(transfer)
 end
@@ -664,36 +681,40 @@ local function runUpload(self: Client, transfer: Transfer)
     end
 end
 
-local function turn(self: Client, waitMs: number, forceBodyProgress?: boolean): integer
+pollBody = function(self: Client, transfer: Transfer): boolean
+    if transfer.bodyEvent ~= nil or transfer.bodyDone or self._byId[transfer.id] ~= transfer then
+        return false
+    end
+    local event <const> = H.tecsHttpClientBodyNext(self._handle, transfer.id, 0) as loader.CPtr
+    if event == nil then
+        return false
+    end
+    return handleEvent(self, event)
+end
+
+local function turn(self: Client, waitMs: number, bodyTarget?: Transfer): integer
     self._uploadSettled = 0
     self._uploadScheduler:step()
     local settled = self._uploadSettled
-    local allowBodyProgress = forceBodyProgress == true
-    if not allowBodyProgress then
-        for _, transfer in pairs(self._byId) do
-            if transfer.bodyWaiter ~= nil then
-                allowBodyProgress = true
-                break
-            end
-        end
-    end
-    if self._queuedBodyBytes >= MAX_BODY_BUFFER_BYTES and not allowBodyProgress then
-        return settled
-    end
     local event = H.tecsHttpClientNext(self._handle, max(0, floor(waitMs))) as loader.CPtr
     while event ~= nil do
         if handleEvent(self, event) then
             settled = settled + 1
         end
-        if self._queuedBodyBytes >= MAX_BODY_BUFFER_BYTES and not allowBodyProgress then
-            break
-        end
         event = H.tecsHttpClientNext(self._handle, 0) as loader.CPtr
+    end
+    if bodyTarget ~= nil and pollBody(self, bodyTarget) then
+        settled = settled + 1
+    end
+    for _, transfer in pairs(self._byId) do
+        if transfer ~= bodyTarget and transfer.bodyWaiter ~= nil and pollBody(self, transfer) then
+            settled = settled + 1
+        end
     end
     return settled
 end
 
-drive = function(self: Client, waitMs: number, level: integer, forceBodyProgress?: boolean): integer
+drive = function(self: Client, waitMs: number, level: integer, bodyTarget?: Transfer): integer
     if self._pumping then
         error(
             "tecs: this http client is already pumping; a listener cannot wait on or pump the client calling it", level
@@ -703,7 +724,7 @@ drive = function(self: Client, waitMs: number, level: integer, forceBodyProgress
         return 0
     end
     self._pumping = true
-    local ok, result = pcall(turn, self, waitMs, forceBodyProgress) as (boolean, any)
+    local ok, result = pcall(turn, self, waitMs, bodyTarget) as (boolean, any)
     self._pumping = false
     if not ok then
         error(result, 0)
@@ -783,6 +804,15 @@ local function startTransfer(self: Client, request: Request, listener: function(
     if request == nil or not URI.isURI(request.url) then
         error("tecs: http send needs a request with a URI from tecs.io.URI.new", 2)
     end
+    if request.timeoutMs ~= nil then
+        checkWholeNumber(request.timeoutMs, "request timeoutMs", 1)
+    end
+    if request.stallTimeoutMs ~= nil then
+        checkWholeNumber(request.stallTimeoutMs, "request stallTimeoutMs", 0)
+    end
+    if request.maxBytes ~= nil then
+        checkWholeNumber(request.maxBytes, "request maxBytes", 0)
+    end
 
     local requestURI <const> = request.url
     local url <const> = requestURI:toString()
@@ -812,11 +842,9 @@ local function startTransfer(self: Client, request: Request, listener: function(
         url = url,
         client = self,
         headersReady = false,
-        bodyEvents = {},
-        bodyHead = 1,
-        bodyTail = 0,
+        bodyEvent = nil,
+        bodyReader = nil,
         bodyOffset = 0,
-        bodyBytes = 0,
         bodyDone = false,
     }
 
@@ -980,6 +1008,7 @@ cancelTransfer = function(self: Client, transfer: Transfer, reason: string, noti
     cancelUpload(transfer, reason)
     release(self, transfer)
     closeSource(transfer)
+    discardBodyEvents(transfer)
     if transfer.headersReady then
         transfer.bodyError = reason
         transfer.bodyDone = true
@@ -1074,6 +1103,7 @@ function Client:close()
         cancelUpload(transfer, "the http client was closed")
         release(self, transfer)
         closeSource(transfer)
+        discardBodyEvents(transfer)
         if transfer.headersReady then
             transfer.bodyError = "the http client was closed"
             transfer.bodyDone = true
@@ -1109,11 +1139,19 @@ end
 function client.newClient(options?: Options): Client
     local given <const> = options or {} as Options
     local timeoutMs <const> = given.timeoutMs or DEFAULT_TIMEOUT_MS
+    local connectTimeoutMs <const> = given.connectTimeoutMs or DEFAULT_CONNECT_TIMEOUT_MS
+    local stallTimeoutMs <const> = given.stallTimeoutMs or 0
+    local maxRedirects <const> = given.maxRedirects or DEFAULT_MAX_REDIRECTS
     local maxConnections <const> = given.maxConnections or DEFAULT_MAX_CONNECTIONS
     local maxConnectionsPerHost <const> = given.maxConnectionsPerHost or DEFAULT_MAX_CONNECTIONS_PER_HOST
-    if maxConnections < 1 or maxConnectionsPerHost < 1 then
-        error("tecs: HTTP connection limits must be greater than zero", 3)
-    end
+    local maxBytes <const> = given.maxBytes or 0
+    checkWholeNumber(timeoutMs, "timeoutMs", 1)
+    checkWholeNumber(connectTimeoutMs, "connectTimeoutMs", 1)
+    checkWholeNumber(stallTimeoutMs, "stallTimeoutMs", 0)
+    checkWholeNumber(maxRedirects, "maxRedirects", 0)
+    checkWholeNumber(maxConnections, "maxConnections", 1)
+    checkWholeNumber(maxConnectionsPerHost, "maxConnectionsPerHost", 1)
+    checkWholeNumber(maxBytes, "maxBytes", 0)
     local defaultHeaders: {string: string} = nil
     if given.headers ~= nil then
         defaultHeaders = {}
@@ -1126,12 +1164,12 @@ function client.newClient(options?: Options): Client
         userAgent = given.userAgent,
         headers = defaultHeaders,
         timeoutMs = timeoutMs,
-        connectTimeoutMs = given.connectTimeoutMs or DEFAULT_CONNECT_TIMEOUT_MS,
-        stallTimeoutMs = given.stallTimeoutMs or 0,
-        maxRedirects = given.maxRedirects or DEFAULT_MAX_REDIRECTS,
+        connectTimeoutMs = connectTimeoutMs,
+        stallTimeoutMs = stallTimeoutMs,
+        maxRedirects = maxRedirects,
         maxConnections = maxConnections,
         maxConnectionsPerHost = maxConnectionsPerHost,
-        maxBytes = given.maxBytes or 0,
+        maxBytes = maxBytes,
         compressed = given.compressed ~= false,
         insecureHosts = given.insecureHosts,
         proxy = given.proxy,
@@ -1173,7 +1211,6 @@ function client.newClient(options?: Options): Client
     self._pending = 0
     self._pumping = false
     self._eventSize = loader.newArray("size_t[1]")
-    self._queuedBodyBytes = 0
     local clientPump <const> = setmetatable({client = self} as ClientPump, ClientPumpMT)
     clientPumps[self] = clientPump
     clients.add(clientPump as clients.Pumpable)

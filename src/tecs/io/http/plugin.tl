@@ -51,7 +51,7 @@ raises. Use `tecs.io.newFileStream` when a request must survive a snapshot.
 A successful `Response` owns a live one-shot body. Consume it and replace it
 with replayable storage before taking a snapshot that includes the response.
 An in-flight native stream and its transport backpressure are runtime state,
-not save data.
+not save data. Despawning the response entity closes an unread body.
 
 Loading stops the transfers that were open before it. A load replaces the
 world in place and despawns nothing, so the entities that asked are gone
@@ -114,6 +114,7 @@ local record plugin
         --- Engine-owned. Reports response headers with lower-cased names.
         headers: {string: string}
         --- Engine-owned. Provides a one-shot progressive response body.
+        --- Despawning this entity closes a body that remains unread.
         body: Stream
         --- Engine-owned. Reports the URI that actually answered, or nil when
         --- the request failed before it supplied a valid URI.
@@ -420,6 +421,10 @@ function plugin.install(world: World, options?: Options)
         0,
         ecs.OnDespawn,
         function(event: ecs.OnDespawn)
+            local response <const> = world:get(event.entity, plugin.Response)
+            if response ~= nil and response.body ~= nil then
+                response.body:close()
+            end
             local wait <const> = waiting[event.entity]
             if wait ~= nil then
                 waiting[event.entity] = nil

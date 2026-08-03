@@ -119,6 +119,18 @@ describe("http.newClient", function()
         assert.are.equal(1, httpClients.count())
     end)
 
+    it("rejects timeout and size values before the native boundary", function()
+        assert.has_error(function()
+            http.newClient({ timeoutMs = 0 })
+        end)
+        assert.has_error(function()
+            http.newClient({ maxBytes = -1 })
+        end)
+        assert.has_error(function()
+            client:send({ url = url("/invalid"), maxBytes = -1 })
+        end)
+    end)
+
     it("returns at headers and streams the body through a second wait", function()
         local releaseBody = task.newGate()
         local server = startServer(scheduler, listener, function(socket)
@@ -292,7 +304,7 @@ describe("http.newClient", function()
         assert.is_truthy(request.error:find("exceeded 8 bytes", 1, true))
     end)
 
-    it("bounds queued response bytes when the caller stops reading", function()
+    it("lets another request finish while one response body is unread", function()
         local chunk = string.rep("x", 64 * 1024)
         local total = 2 * 1024 * 1024
         local server = startServer(scheduler, listener, function(socket)
@@ -309,12 +321,22 @@ describe("http.newClient", function()
             return request.status ~= "pending"
         end))
 
-        for _ = 1, 300 do
-            runtime.poll()
-            scheduler:step()
-            sdl.C.SDL_Delay(1)
-        end
-        assert.is_true(client._queuedBodyBytes <= 1024 * 1024 + 64 * 1024)
+        local secondServer = startServer(scheduler, listener, function(socket)
+            assert(socket:write(responseHead(200, "OK", #BODY) .. BODY))
+            assert(socket:drain(1000))
+        end)
+        local second = scheduler:spawnImmediate(function()
+            local response = client:send({ url = url("/independent") })
+            local body = assert(response.body:readAll(1024))
+            response.body:close()
+            return body
+        end)
+        assert.is_true(drive(scheduler, function()
+            return second.status ~= "pending"
+        end, 3000))
+        assert.are.equal("ready", second.status, second.error)
+        assert.are.equal(BODY, second.value)
+        assert.are.equal("ready", secondServer.status, secondServer.error)
         assert.are.equal(1, client:pending())
         request.value.body:close()
         assert.are.equal(0, client:pending())
@@ -437,5 +459,37 @@ describe("http.plugin", function()
         found.body:close()
         assert.is_nil(world:get(entity, http.plugin.Request))
         assert.is_nil(world:get(entity, http.plugin.Pending))
+    end)
+
+    it("closes an unread response body when its entity despawns", function()
+        local endpoint = assert(URI.new(("http://127.0.0.1:%d/abandoned"):format(port)))
+        local total = 2 * 1024 * 1024
+        local chunk = string.rep("x", 64 * 1024)
+        startServer(scheduler, listener, function(socket)
+            assert(socket:write(responseHead(200, "OK", total)))
+            for _ = 1, total / #chunk do
+                assert(socket:write(chunk))
+            end
+            socket:drain(3000)
+        end)
+        local entity = world:spawn(http.plugin.Request({ url = endpoint }))
+
+        local found
+        for _ = 1, 3000 do
+            runtime.poll()
+            scheduler:step()
+            world:update(1 / 60)
+            found = world:get(entity, http.plugin.Response)
+            if found ~= nil then
+                break
+            end
+            sdl.C.SDL_Delay(1)
+        end
+        assert.is_not_nil(found)
+        assert.are.equal(1, http.plugin.clientOf(world):pending())
+
+        world:despawn(entity)
+        world:update(1 / 60)
+        assert.are.equal(0, http.plugin.clientOf(world):pending())
     end)
 end)
