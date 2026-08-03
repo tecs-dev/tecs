@@ -111,7 +111,11 @@ local record plugin
         --- Engine-owned. Reports the HTTP status code, or zero when the
         --- transfer never received one.
         status: integer
-        --- Engine-owned. Reports response headers with lower-cased names.
+        --- Engine-owned. Reports response headers with lower-cased names, in
+        --- the joined form `Response.headers` uses. A component is one value
+        --- per name, so a repeated `set-cookie` keeps only its first value
+        --- here; a system that needs every cookie sends its request through a
+        --- client and reads `Response:getAll`.
         headers: {string: string}
         --- Engine-owned. Provides a one-shot progressive response body.
         --- Despawning this entity closes a body that remains unread.

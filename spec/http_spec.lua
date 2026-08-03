@@ -288,6 +288,97 @@ describe("http.newClient", function()
         source:close()
     end)
 
+    it("keeps every value a repeated response header carries", function()
+        local head = table.concat({
+            "HTTP/1.1 200 OK\r\n",
+            "Content-Type: text/plain\r\n",
+            "Set-Cookie: session=abc; Path=/\r\n",
+            "Set-Cookie: theme=dark; Path=/\r\n",
+            "Vary: Accept\r\n",
+            "Vary: Origin\r\n",
+            ("Content-Length: %d\r\n"):format(#BODY),
+            "Connection: close\r\n\r\n",
+        })
+        startServer(scheduler, listener, function(socket)
+            assert(socket:write(head .. BODY))
+            assert(socket:drain(1000))
+        end)
+        local request = scheduler:spawnImmediate(function()
+            local response = client:send({ url = url("/repeated-headers") })
+            assert(response.body:readAll(1024))
+            return response
+        end)
+
+        assert.is_true(drive(scheduler, function()
+            return request.status ~= "pending"
+        end))
+        assert.are.equal("ready", request.status, request.error)
+        local response = request.value
+
+        -- Cookies cannot be comma-joined, so the map keeps the first and
+        -- `getAll` is the only correct reader.
+        assert.are.same({ "session=abc; Path=/", "theme=dark; Path=/" }, response:getAll("Set-Cookie"))
+        assert.are.equal("session=abc; Path=/", response.headers["set-cookie"])
+
+        -- Every other repeated field joins per RFC 9110.
+        assert.are.equal("Accept, Origin", response.headers["vary"])
+        assert.are.same({ "Accept", "Origin" }, response:getAll("vary"))
+
+        assert.are.same({ "text/plain" }, response:getAll("content-type"))
+        assert.are.same({}, response:getAll("x-absent"))
+        assert.has_error(function()
+            response:getAll("")
+        end)
+
+        -- The returned array belongs to the caller.
+        local taken = response:getAll("vary")
+        taken[1] = "mutated"
+        assert.are.same({ "Accept", "Origin" }, response:getAll("vary"))
+    end)
+
+    it("drains an upload task that suspends while it unwinds", function()
+        local parked = task.newGate()
+        local entered = false
+        local unwound = false
+        local reader = {}
+        function reader:read()
+            entered = true
+            local ok, reason = pcall(function()
+                return parked:wait()
+            end)
+            if ok then
+                return ""
+            end
+            -- Cleanup that suspends before the reader rethrows, which is what
+            -- a composed body does when its own resources close cooperatively.
+            task.yield()
+            unwound = true
+            task.rethrowCancellation(reason)
+            error(reason, 0)
+        end
+        function reader:close()
+            return true
+        end
+        local source = stream._newReaderStream(reader, "text/plain", #BODY)
+        local request = scheduler:spawnImmediate(function()
+            return client:send({ url = url("/unwinding-upload"), method = "POST", body = source })
+        end)
+
+        assert.is_true(drive(scheduler, function()
+            return entered
+        end))
+        assert.are.equal(1, client:pending())
+
+        client:close()
+        assert.is_true(unwound)
+        assert.are.equal(0, client:pending())
+
+        scheduler:step()
+        assert.are.equal("failed", request.status)
+        assert.is_truthy(request.error:find("canceled", 1, true))
+        source:close()
+    end)
+
     it("rejects a declared body larger than the request limit", function()
         startServer(scheduler, listener, function(socket)
             assert(socket:write(responseHead(200, "OK", #BODY) .. BODY))

@@ -9,6 +9,18 @@ A response status is still an answer rather than a transfer failure: 404
 returns a response whose `Response:ok()` is false. DNS, TLS, connection,
 timeout, and body-limit errors raise at the suspended call.
 
+A server may send one header name more than once. `Response.headers` joins
+those values with `", "`, which RFC 9110 permits for every field except
+`Set-Cookie`, and `Response:getAll` reports each value on its own, which is
+what a repeated `set-cookie` needs:
+
+```teal no-format
+local cookies <const> = response:getAll("set-cookie")
+for index = 1, #cookies do
+    print(cookies[index])
+end
+```
+
 Request readers feed a bounded Rust upload channel from client-owned
 cooperative tasks. A composed Reader may therefore suspend on another socket,
 process, file, transform, or HTTP body without blocking the SDL pump.
@@ -62,6 +74,7 @@ local UPLOAD_BACKPRESSURE <const> = 0
 local UPLOAD_ACCEPTED <const> = 1
 local CHUNK <const> = 512 * 1024
 local UPLOAD_STEPS <const> = 16
+local CLOSE_DRAIN_STEPS <const> = 64
 
 local function checkWholeNumber(value: number, name: string, minimum: integer)
     if type(value) ~= "number" or value ~= floor(value) or value < minimum or value > MAX_EXACT_INTEGER then
@@ -91,9 +104,18 @@ local record client
         maxRedirects: integer
         --- Caller-writable. Sets requests allowed to use sockets at once.
         --- Defaults to 16.
+        ---
+        --- A request holds its slot from the moment it acquires one until its
+        --- response body ends, because the socket stays open for that whole
+        --- time and this limit is what bounds open sockets. A caller that
+        --- reads a body slowly therefore keeps its slot, and a caller that
+        --- never reads one keeps it until `timeoutMs` expires. Close or
+        --- discard a body you do not intend to read, and raise this limit
+        --- rather than expecting an unread body to release its slot early.
         maxConnections: integer
         --- Caller-writable. Sets requests allowed to use sockets to one host.
-        --- Defaults to six.
+        --- Defaults to six. A request holds its host slot for as long as it
+        --- holds a `maxConnections` slot.
         maxConnectionsPerHost: integer
         --- Caller-writable. Sets maximum response-body bytes. Zero is
         --- unbounded.
@@ -144,9 +166,16 @@ local record client
 
     --- A completed HTTP response.
     record Response
+        _values: {string: {string}}
+
         --- Read-only. Reports the status after redirects.
         status: integer
         --- Read-only. Reports final response headers with lower-cased names.
+        --- A name the server sent more than once holds its values joined with
+        --- `", "`, which RFC 9110 permits for every field except `Set-Cookie`.
+        --- A repeated `set-cookie` holds only the first value here, because
+        --- joining cookies changes what they mean. `Response:getAll` reports
+        --- every value of any name.
         headers: {string: string}
         --- Read-only. Provides a one-shot progressive response body. Reading
         --- may suspend a system or block a direct caller until bytes arrive.
@@ -157,6 +186,18 @@ local record client
 
         --- Whether the status is in the 2xx range.
         ok: function(self: Response): boolean
+
+        --- Returns every value the server sent for one header name.
+        ---
+        --- This is the accessor for a repeated header, and the only correct
+        --- way to read `set-cookie`, which cannot be joined.
+        --- @param self The response to read.
+        --- @param name The caller supplies a header name, and the lookup
+        ---     ignores case.
+        --- @return Returns a new array in the order the server sent the
+        ---     values, or an empty array when the response has no such
+        ---     header. The array belongs to the caller.
+        getAll: function(self: Response, name: string): {string}
     end
 
     record Transfer
@@ -198,7 +239,8 @@ local record client
         send: function(self: Client, request: Request): Response
         --- Returns the number of unsettled transfers.
         pending: function(self: Client): integer
-        --- Stops all transfers and releases the connection pool.
+        --- Stops all transfers, drains their upload work, and releases the
+        --- connection pool.
         close: function(self: Client)
     end
 
@@ -236,6 +278,20 @@ local clientPumps <const>: {Client: ClientPump} = {}
 
 function Response:ok(): boolean
     return self.status >= 200 and self.status < 300
+end
+
+function Response:getAll(name: string): {string}
+    if type(name) ~= "string" or name == "" then
+        error("tecs: an HTTP header name must be a non-empty string", 2)
+    end
+    local copied: {string} = {}
+    local values <const> = self._values ~= nil and self._values[name:lower()] or nil
+    if values ~= nil then
+        for index = 1, #values do
+            copied[index] = values[index]
+        end
+    end
+    return copied
 end
 
 local cancelTransfer: function(self: Client, transfer: Transfer, reason: string, notify: boolean)
@@ -428,15 +484,30 @@ local function eventBytes(self: Client, event: loader.CPtr, accessor: loader.CVa
     return loader.toBytes(data, length)
 end
 
-local function parseHeaders(raw: string): {string: string}
+-- Rust preserves every repeated response header, so the parse decides what a
+-- repeat means. RFC 9110 lets a recipient join repeated field values with a
+-- comma; `Set-Cookie` is the field that rule excludes, because each cookie is
+-- its own value. Either way, every value stays in `values` for `getAll`.
+local function parseHeaders(raw: string): {string: string}, {string: {string}}
     local headers: {string: string} = {}
+    local values: {string: {string}} = {}
     for line in (raw .. "\n"):gmatch("(.-)\r?\n") do
         local name, value = line:match("^([^:]+):%s*(.-)%s*$")
         if name ~= nil then
-            headers[name:lower()] = value
+            local lowered <const> = name:lower()
+            local seen <const> = values[lowered]
+            if seen == nil then
+                values[lowered] = {value}
+                headers[lowered] = value
+            else
+                seen[#seen + 1] = value
+                if lowered ~= "set-cookie" then
+                    headers[lowered] = headers[lowered] .. ", " .. value
+                end
+            end
         end
     end
-    return headers
+    return headers, values
 end
 
 local function release(self: Client, transfer: Transfer)
@@ -452,6 +523,51 @@ local function cancelUpload(transfer: Transfer, reason: string)
     transfer.uploadTask = nil
     if upload ~= nil and upload.status == "pending" and task.current() ~= upload then
         upload:cancel(reason)
+    end
+end
+
+local function pendingUploads(uploads: {task.Task<any>}): integer
+    local count = 0
+    for index = 1, #uploads do
+        if uploads[index].status == "pending" then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- A canceled upload task unwinds through its own Reader's cleanup, and that
+-- cleanup may suspend, so one scheduler step settles it only in the simple
+-- case. Close steps until every task it canceled settles, and stops at a
+-- budget or at a step that resumes nothing, because a Reader parked on work
+-- this client cannot complete must not hold shutdown open. Whatever remains
+-- then is abandoned, and says so in the log rather than disappearing.
+local function drainUploads(self: Client, uploads: {task.Task<any>})
+    local remaining = pendingUploads(uploads)
+    for _ = 1, CLOSE_DRAIN_STEPS do
+        if remaining == 0 then
+            return
+        end
+        local stepped <const>, outcome = pcall(self._uploadScheduler.step, self._uploadScheduler) as (boolean, any)
+        if not stepped then
+            -- Either a task failed as it unwound, or this close runs inside
+            -- another task and the scheduler refuses to nest. Neither is worth
+            -- raising from close, and both are worth naming.
+            LOGGER:warn("an http upload task did not finish while its client closed: %s", tostring(outcome))
+        end
+        local left <const> = pendingUploads(uploads)
+        local resumed <const> = stepped and (outcome as integer) or 0
+        if left == remaining and resumed == 0 then
+            break
+        end
+        remaining = left
+    end
+    if remaining > 0 then
+        LOGGER:warn(
+            "the http client abandoned %d unsettled upload task(s) after %d scheduler steps",
+            remaining,
+            CLOSE_DRAIN_STEPS
+        )
     end
 end
 
@@ -509,7 +625,7 @@ local function beginResponse(
 )
     local response <const> = transfer.response
     response.status = status
-    response.headers = parseHeaders(rawHeaders)
+    response.headers, response._values = parseHeaders(rawHeaders)
     local responseURI <const>, uriFailure = URI.new(effectiveUrl ~= "" and effectiveUrl or transfer.url)
     if responseURI == nil then
         settleTransfer(
@@ -1097,8 +1213,13 @@ function Client:close()
     for _, transfer in pairs(self._byId) do
         live[#live + 1] = transfer
     end
+    local uploads: {task.Task<any>} = {}
     for index = 1, #live do
         local transfer <const> = live[index]
+        local upload <const> = transfer.uploadTask
+        if upload ~= nil then
+            uploads[#uploads + 1] = upload
+        end
         H.tecsHttpClientCancel(handle, transfer.id)
         cancelUpload(transfer, "the http client was closed")
         release(self, transfer)
@@ -1113,7 +1234,7 @@ function Client:close()
         end
     end
 
-    self._uploadScheduler:step()
+    drainUploads(self, uploads)
 
     H.tecsHttpClientDestroy(handle)
     self._pending = 0

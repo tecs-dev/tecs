@@ -303,6 +303,16 @@ obstruct another request's headers or body. Outside a resumable world update
 these calls block their caller while advancing only the producer they need.
 There is no public runtime pump or nonblocking twin to keep in sync.
 
+A transfer holds its connection slot until its body ends rather than releasing
+it once the headers arrive. The slot is what bounds open sockets, and the
+socket outlives the headers, so releasing early would leave `maxConnections`
+bounding requests in flight while a room full of slow consumers held an
+unbounded number of sockets. The cost is that a consumer-paced body occupies a
+slot for as long as it reads, and the bound on that is the transfer timeout,
+which Reqwest applies from the first connect until the body finishes. The
+option documents this so a game can raise the limit rather than discover the
+rule.
+
 External input is retained at logical-update boundaries. SDL callbacks append
 copied events to a bounded native queue; a new update seals one immutable
 batch, folds input once, and dispatches observers from the scheduler-owned

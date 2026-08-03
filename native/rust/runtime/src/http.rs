@@ -7,11 +7,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, CString};
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::ptr;
 use std::slice;
 use std::str;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -22,6 +24,7 @@ use tokio::runtime::{Builder, Runtime};
 use tokio::sync::{mpsc, Semaphore};
 use tokio::task::AbortHandle;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::Stream;
 use tokio_util::io::ReaderStream;
 
 const EVENT_QUEUE_CAPACITY: usize = 64;
@@ -175,6 +178,25 @@ impl Shared {
             .or_insert_with(|| Arc::new(Semaphore::new(self.per_host_limit)))
             .clone()
     }
+
+    /// Drops a host's semaphore once the map holds the only reference to it.
+    ///
+    /// `host_semaphore` hands out every clone under this same lock, and both a
+    /// held permit and a waiting acquisition own one. A strong count of one
+    /// therefore proves that the host has no outstanding permits and no
+    /// waiters, and that no new clone can appear before the removal completes,
+    /// so a later request rebuilds the entry with the same limit rather than
+    /// exceeding it.
+    fn prune_host(&self, host: &str) {
+        let mut semaphores = self.per_host.lock().unwrap_or_else(|e| e.into_inner());
+        let idle = semaphores.get(host).is_some_and(|semaphore| {
+            Arc::strong_count(semaphore) == 1
+                && semaphore.available_permits() == self.per_host_limit
+        });
+        if idle {
+            semaphores.remove(host);
+        }
+    }
 }
 
 pub struct TecsHttpClient {
@@ -214,6 +236,93 @@ impl Drop for UploadGuard {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .remove(&self.id);
+    }
+}
+
+/// Reports a failure for a transfer whose task stops before it settles.
+///
+/// A panic inside the transfer task unwinds without sending any event, which
+/// leaves the suspended Lua call waiting for a transfer that no longer exists
+/// and takes the Rust-side timeout down with the task. Dropping this guard
+/// while it is armed settles that transfer instead.
+///
+/// Unwinding is what runs this guard, so it covers every profile that unwinds,
+/// including the test profile. The `release` profile aborts on panic, and
+/// there the process ends rather than the transfer hanging.
+struct SettleGuard {
+    shared: Arc<Shared>,
+    id: u64,
+    url: Url,
+    armed: bool,
+}
+
+impl SettleGuard {
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for SettleGuard {
+    fn drop(&mut self) {
+        if !self.armed || self.shared.closed.load(Ordering::Acquire) {
+            return;
+        }
+        let event = failure(
+            self.id,
+            &self.url,
+            "the transfer task stopped before it settled",
+        );
+        // A panic unwinds this task, so this settlement cannot await. The
+        // bounded queue has room in the common case; a full queue hands the
+        // send to a task that can wait for one.
+        match self.shared.control_sender.try_send(event) {
+            Ok(()) => self.shared.activity.notify(),
+            Err(mpsc::error::TrySendError::Full(event)) => {
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let shared = self.shared.clone();
+                    handle.spawn(async move {
+                        let _ = shared.send_control(event).await;
+                    });
+                }
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {}
+        }
+    }
+}
+
+/// Prunes a host's semaphore when the transfer that used it finishes.
+struct HostEntry {
+    shared: Arc<Shared>,
+    host: String,
+}
+
+impl Drop for HostEntry {
+    fn drop(&mut self) {
+        self.shared.prune_host(&self.host);
+    }
+}
+
+/// Wakes the Lua thread every time Tokio takes a request-body chunk.
+///
+/// The upload channel is the request's backpressure window, and a Lua producer
+/// that fills it parks on the activity condvar. Taking a chunk frees a slot,
+/// so the producer has to learn about it here; otherwise it refills only when
+/// its wait expires, which caps a blocking-mode upload at one window per wait.
+struct UploadStream {
+    inner: ReceiverStream<UploadItem>,
+    shared: Arc<Shared>,
+}
+
+impl Stream for UploadStream {
+    type Item = UploadItem;
+
+    fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let stream = self.get_mut();
+        let polled = Pin::new(&mut stream.inner).poll_next(context);
+        if matches!(polled, Poll::Ready(Some(_))) {
+            stream.shared.activity.notify();
+        }
+        polled
     }
 }
 
@@ -431,9 +540,10 @@ unsafe fn own_request(
             if replaced.is_some() {
                 return Err("request id already has an upload body".to_owned());
             }
-            Some(OwnedBody::Ready(Body::wrap_stream(ReceiverStream::new(
-                receiver,
-            ))))
+            Some(OwnedBody::Ready(Body::wrap_stream(UploadStream {
+                inner: ReceiverStream::new(receiver),
+                shared: shared.clone(),
+            })))
         }
         BODY_FILE => {
             if request.body_length < 0 {
@@ -503,13 +613,34 @@ async fn perform(
     body_sender: mpsc::Sender<Event>,
     request: OwnedRequest,
 ) {
+    let mut guard = SettleGuard {
+        shared: shared.clone(),
+        id: request.id,
+        url: request.url.clone(),
+        armed: true,
+    };
+    run_transfer(client, shared, body_sender, request).await;
+    guard.disarm();
+}
+
+async fn run_transfer(
+    client: Client,
+    shared: Arc<Shared>,
+    body_sender: mpsc::Sender<Event>,
+    request: OwnedRequest,
+) {
     let id = request.id;
     let _upload_guard = UploadGuard {
         shared: shared.clone(),
         id,
     };
     let url = request.url.clone();
-    let host = request.url.host_str().unwrap_or("").to_owned();
+    // Declared before the permit so the permit drops first and this prune sees
+    // the semaphore idle.
+    let host_entry = HostEntry {
+        shared: shared.clone(),
+        host: request.url.host_str().unwrap_or("").to_owned(),
+    };
     let deadline = tokio::time::Instant::now() + request.timeout;
     let total_permit =
         match tokio::time::timeout_at(deadline, shared.total.clone().acquire_owned()).await {
@@ -529,25 +660,28 @@ async fn perform(
                 return;
             }
         };
-    let host_permit =
-        match tokio::time::timeout_at(deadline, shared.host_semaphore(&host).acquire_owned()).await
-        {
-            Ok(Ok(permit)) => permit,
-            Ok(Err(error)) => {
-                let _ = shared.send_control(failure(id, &url, error)).await;
-                return;
-            }
-            Err(_) => {
-                let _ = shared
-                    .send_control(failure(
-                        id,
-                        &url,
-                        "request timed out waiting for a host connection permit",
-                    ))
-                    .await;
-                return;
-            }
-        };
+    let host_permit = match tokio::time::timeout_at(
+        deadline,
+        shared.host_semaphore(&host_entry.host).acquire_owned(),
+    )
+    .await
+    {
+        Ok(Ok(permit)) => permit,
+        Ok(Err(error)) => {
+            let _ = shared.send_control(failure(id, &url, error)).await;
+            return;
+        }
+        Err(_) => {
+            let _ = shared
+                .send_control(failure(
+                    id,
+                    &url,
+                    "request timed out waiting for a host connection permit",
+                ))
+                .await;
+            return;
+        }
+    };
 
     let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
 
@@ -713,6 +847,7 @@ async fn perform(
 
     drop(host_permit);
     drop(total_permit);
+    drop(host_entry);
 }
 
 fn event_data(bytes: &[u8], length: *mut usize) -> *const u8 {
@@ -1334,6 +1469,31 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
+    use tokio_stream::StreamExt;
+
+    /// Builds the state a live client shares with its transfer tasks, plus the
+    /// control receiver the Lua thread would own.
+    fn shared_for_tests(limit: usize) -> (Arc<Shared>, mpsc::Receiver<Event>) {
+        let (control_sender, receiver) = mpsc::channel(EVENT_QUEUE_CAPACITY);
+        let shared = Arc::new(Shared {
+            control_sender,
+            activity: Activity {
+                generation: Mutex::new(0),
+                changed: Condvar::new(),
+            },
+            closed: AtomicBool::new(false),
+            total: Arc::new(Semaphore::new(limit)),
+            per_host_limit: limit,
+            per_host: Mutex::new(HashMap::new()),
+            uploads: Mutex::new(HashMap::new()),
+            bodies: Mutex::new(HashMap::new()),
+        });
+        (shared, receiver)
+    }
+
+    fn generation(shared: &Shared) -> u64 {
+        *shared.activity.generation.lock().unwrap()
+    }
 
     #[test]
     fn rejects_headers_over_the_limit() {
@@ -1356,25 +1516,116 @@ mod tests {
     }
 
     #[test]
+    fn settles_a_transfer_whose_task_panics() {
+        install_tls_provider();
+        let empty = TecsHttpSlice {
+            data: ptr::null(),
+            length: 0,
+        };
+        let options = TecsHttpClientOptions {
+            connect_timeout_ms: 1_000,
+            max_redirects: 0,
+            max_connections: 1,
+            max_connections_per_host: 1,
+            compressed: 1,
+            proxy_mode: 1,
+            proxy: empty,
+            no_proxy_set: 0,
+            no_proxy: empty,
+            proxy_credentials: empty,
+        };
+        // SAFETY: `options` and its empty slices remain live for the call.
+        let client = unsafe { tecsHttpClientCreate(&options) };
+        assert!(!client.is_null());
+        // SAFETY: The client stays live until this test destroys it.
+        let live = unsafe { &*client };
+
+        // The panic waits for its abort handle, because an event whose id has
+        // no handle reads as canceled and is dropped.
+        let (release, released) = tokio::sync::oneshot::channel::<()>();
+        let shared = live.shared.clone();
+        let url = Url::parse("http://127.0.0.1/panic").unwrap();
+        let task = runtime().unwrap().spawn(async move {
+            let _guard = SettleGuard {
+                shared,
+                id: 51,
+                url,
+                armed: true,
+            };
+            let _ = released.await;
+            panic!("the transfer task panicked");
+        });
+        live.handles.lock().unwrap().insert(51, task.abort_handle());
+        release.send(()).unwrap();
+
+        // SAFETY: The client stays live until this test destroys it.
+        let event = unsafe { tecsHttpClientNext(client, 5_000) };
+        assert!(!event.is_null());
+        // SAFETY: This event is live until it is destroyed below.
+        let settled = match &unsafe { &*event }.event {
+            Event::Failed { id, error } => (*id, String::from_utf8_lossy(error).into_owned()),
+            _ => panic!("a panicking transfer task queued the wrong event"),
+        };
+        // SAFETY: Ownership is returned exactly once.
+        unsafe { tecsHttpEventDestroy(event) };
+        // SAFETY: Ownership is returned exactly once.
+        unsafe { tecsHttpClientDestroy(client) };
+
+        assert_eq!(settled.0, 51);
+        assert!(settled.1.contains("stopped before it settled"));
+    }
+
+    #[test]
+    fn prunes_idle_host_semaphores_and_keeps_busy_ones() {
+        let (shared, _events) = shared_for_tests(1);
+        let semaphore = shared.host_semaphore("example.com");
+        let permit = semaphore.clone().try_acquire_owned().unwrap();
+
+        // A host with an outstanding permit keeps its entry, so the next
+        // request for it still waits behind the same limit.
+        shared.prune_host("example.com");
+        assert_eq!(shared.per_host.lock().unwrap().len(), 1);
+        assert!(shared
+            .host_semaphore("example.com")
+            .try_acquire_owned()
+            .is_err());
+
+        drop(permit);
+        drop(semaphore);
+        shared.prune_host("example.com");
+        assert!(shared.per_host.lock().unwrap().is_empty());
+
+        // A later request rebuilds the entry with the whole limit available.
+        let rebuilt = shared.host_semaphore("example.com");
+        assert_eq!(rebuilt.available_permits(), 1);
+        assert!(rebuilt.clone().try_acquire_owned().is_ok());
+    }
+
+    #[test]
+    fn notifies_the_lua_thread_when_tokio_drains_an_upload_chunk() {
+        let (shared, _events) = shared_for_tests(1);
+        let (sender, receiver) = mpsc::channel::<UploadItem>(UPLOAD_QUEUE_CAPACITY);
+        let mut stream = UploadStream {
+            inner: ReceiverStream::new(receiver),
+            shared: shared.clone(),
+        };
+        sender.try_send(Ok(Bytes::from_static(b"chunk"))).unwrap();
+
+        let before = generation(&shared);
+        let taken = runtime().unwrap().block_on(stream.next());
+        assert!(taken.is_some());
+        // The freed slot is what a parked Lua producer waits for, so draining
+        // the channel has to bump the activity generation on its own.
+        assert_ne!(generation(&shared), before);
+    }
+
+    #[test]
     fn upload_queue_stays_bounded_before_copying() {
         // The production constructor installs this before it builds either
         // client. This test constructs the client directly to isolate queue
         // backpressure, so it must establish the same process invariant.
         install_tls_provider();
-        let (event_sender, event_receiver) = mpsc::channel(EVENT_QUEUE_CAPACITY);
-        let shared = Arc::new(Shared {
-            control_sender: event_sender,
-            activity: Activity {
-                generation: Mutex::new(0),
-                changed: Condvar::new(),
-            },
-            closed: AtomicBool::new(false),
-            total: Arc::new(Semaphore::new(1)),
-            per_host_limit: 1,
-            per_host: Mutex::new(HashMap::new()),
-            uploads: Mutex::new(HashMap::new()),
-            bodies: Mutex::new(HashMap::new()),
-        });
+        let (shared, event_receiver) = shared_for_tests(1);
         let (upload_sender, _upload_receiver) = mpsc::channel(UPLOAD_QUEUE_CAPACITY);
         shared.uploads.lock().unwrap().insert(7, upload_sender);
 
@@ -1407,20 +1658,7 @@ mod tests {
 
     #[test]
     fn owns_native_file_request_paths_without_an_upload_queue() {
-        let (event_sender, _event_receiver) = mpsc::channel(EVENT_QUEUE_CAPACITY);
-        let shared = Arc::new(Shared {
-            control_sender: event_sender,
-            activity: Activity {
-                generation: Mutex::new(0),
-                changed: Condvar::new(),
-            },
-            closed: AtomicBool::new(false),
-            total: Arc::new(Semaphore::new(1)),
-            per_host_limit: 1,
-            per_host: Mutex::new(HashMap::new()),
-            uploads: Mutex::new(HashMap::new()),
-            bodies: Mutex::new(HashMap::new()),
-        });
+        let (shared, _event_receiver) = shared_for_tests(1);
         let url = b"http://127.0.0.1/upload";
         let method = b"POST";
         let path = b"/tmp/request-body.bin";

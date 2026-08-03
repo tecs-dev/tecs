@@ -28,11 +28,15 @@ deliberately uses Reqwest and Tokio for its connection pool, TLS, redirects,
 and protocol work. Both implementations resume the same direct Lua call, and
 neither parks one worker thread per waiting socket.
 
+A request holds one of its client's `maxConnections` slots until its response
+body ends, so close or discard a body you do not intend to read.
+
 Call `Client:close` when you no longer need its connection pool. Losing the
 last Lua reference does not cancel its requests. Application shutdown closes
-any remaining clients and drains their internal upload tasks. An
-[`Application`](tealdoc:tecs.Application) owns progress; a direct headless call
-drives the client while it blocks.
+any remaining clients and drains their internal upload tasks to settlement,
+within a bounded number of scheduler steps that it logs whenever it has to
+abandon work. An [`Application`](tealdoc:tecs.Application) owns progress; a
+direct headless call drives the client while it blocks.
 ]=]
 
 -- Implementation details:
@@ -51,7 +55,8 @@ local record http
     --- `userAgent` and `headers` set request defaults. `timeoutMs` defaults to
     --- 30000, `connectTimeoutMs` to 10000, and `stallTimeoutMs` to zero, which
     --- disables the no-progress timeout. `maxRedirects` defaults to five,
-    --- `maxConnections` to 16, and `maxConnectionsPerHost` to six. `maxBytes`
+    --- `maxConnections` to 16, and `maxConnectionsPerHost` to six; a request
+    --- holds one slot of each until its response body ends. `maxBytes`
     --- defaults to zero for no response limit. `compressed` defaults to true.
     ---
     --- `insecureHosts` disables certificate verification for named hosts and
@@ -67,6 +72,8 @@ local record http
     type Request = client.Request
 
     --- `Response` describes status, headers, and a progressive response body.
+    --- `headers` joins a repeated header's values, and `Response:getAll`
+    --- reports them one by one, which is what `set-cookie` needs.
     type Response = client.Response
 
     --- A `Client` owns one connection pool and its active requests.
