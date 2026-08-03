@@ -160,31 +160,3 @@ or is canceled.
 This preserves system and mutation order. External arrival time is still not a
 deterministic simulation input, so rollback code records or supplies immutable
 tick input and keeps unresolved I/O outside deterministic phases.
-
-## Performance shape
-
-Every finite operation attempts its ready path before consulting the scheduler.
-An ordinary synchronous system uses the same reusable world coroutine on every
-update, and a cache hit allocates no completion. Suspension adds work only at an
-actual wait: register, yield, drain one native completion, and resume.
-
-The current host measurements make the scale concrete:
-
-| Scheduler case                |   Median |
-| ----------------------------- | -------: |
-| Empty world update            | 124.9 ns |
-| One synchronous system        | 148.4 ns |
-| Already-ready contextual call | 177.4 ns |
-| One suspend and resume        | 506.8 ns |
-
-The synchronous empty-world path remains within measurement noise of the 126
-ns main baseline. A 1 MiB loopback TCP transfer measured 1.17 GiB/s, and a
-progressive HTTP body read measured 0.88 GiB/s on the same development host.
-These are runtime-path measurements, not network claims; their purpose is to
-expose scheduler, copying, and buffering overhead.
-
-The I/O queues are bounded by both item count and bytes. HTTP intake stops at a
-bounded watermark, worker channels reject overload, native Buffer ranges stay
-pinned until their transfer settles, and event batches have a hard retained
-memory limit. Backpressure is part of the behavior rather than a benchmark-only
-detail.
