@@ -46,7 +46,8 @@ local DEFAULT_PIPE_TIMEOUT_MS <const> = 30000
 local WAIT_SLICE_MS <const> = 8
 local MAX_INTEGER <const> = 9007199254740991
 local MAX_TIMEOUT_MS <const> = 2147483647
-local PIPE_TIMEOUT_REASON <const> = "the process produced no bytes within the reader's timeout"
+local PIPE_READ_TIMEOUT_REASON <const> = "the process produced no bytes within the reader's timeout"
+local PIPE_WRITE_TIMEOUT_REASON <const> = "the process took no bytes within the writer's timeout"
 
 local enum PipeKind
     "stdout"
@@ -95,6 +96,7 @@ end
 local record WriterImpl is ProcessWriter
     _state: State
     _closed: boolean
+    _timeoutMs: integer
 end
 
 local record ProcessImpl
@@ -135,6 +137,25 @@ local MAX_IDLE_WAITERS <const> = 64
 
 local source: Source
 local pollRuntime: function(): integer
+
+-- Registration is tracked with this flag rather than inferred from `count`,
+-- because the count is also what `releaseSource` reads and a second
+-- `runtime.register` under the same name raises.
+local sourceRegistered = false
+
+local function retainSource()
+    if not sourceRegistered then
+        sourceRegistered = true
+        runtime.register("processes", 20, pollRuntime, nil)
+    end
+end
+
+local function releaseSource()
+    if sourceRegistered and count == 0 then
+        sourceRegistered = false
+        runtime.unregister("processes")
+    end
+end
 
 local function integerIn(value: integer, low: integer, high: integer, what: string, level: integer): integer
     if type(value) ~= "number" or value ~= floor(value) or value < low or value > high then
@@ -216,9 +237,7 @@ local function removeLive(state: State)
         moved.at = at
     end
     state.at = 0
-    if count == 0 then
-        runtime.unregister("processes")
-    end
+    releaseSource()
 end
 
 function Exit:succeeded(): boolean
@@ -329,9 +348,7 @@ local function track(state: State)
     count = count + 1
     state.at = count
     live[count] = state
-    if count == 1 then
-        runtime.register("processes", 20, pollRuntime, nil)
-    end
+    retainSource()
 end
 
 local function closeReader(reader: ReaderImpl, eof: boolean)
@@ -461,7 +478,7 @@ function ReaderImpl:read(maxBytes: integer): string, string
         end
         deadline = deadline or time.now() * 1000.0 + self._timeoutMs
         if not waitForPipe("process pipe read", deadline) then
-            return nil, PIPE_TIMEOUT_REASON
+            return nil, PIPE_READ_TIMEOUT_REASON
         end
     end
 end
@@ -491,7 +508,7 @@ function ReaderImpl:readInto(destination: IOBuffer, offset?: integer, maxBytes?:
         end
         deadline = deadline or time.now() * 1000.0 + self._timeoutMs
         if not waitForPipe("process pipe read", deadline) then
-            return nil, PIPE_TIMEOUT_REASON
+            return nil, PIPE_READ_TIMEOUT_REASON
         end
     end
 end
@@ -503,6 +520,10 @@ end
 
 function WriterImpl:isClosed(): boolean
     return self._closed or self._state.input == nil
+end
+
+function WriterImpl:setTimeout(timeoutMs: integer)
+    self._timeoutMs = integerIn(timeoutMs, 0, MAX_TIMEOUT_MS, "process writer timeout", 2)
 end
 
 local function writeAvailablePointer(
@@ -532,15 +553,22 @@ local function writeAll(writer: WriterImpl, pointer: loader.BytePointer, length:
         return writeAvailablePointer(writer, pointer, 0)
     end
     local at = 0
+    local deadline: number
     while at < length do
         local wrote <const>, reason = writeAvailablePointer(writer, pointer + at, length - at)
         if wrote == nil then
             if reason ~= nil then
                 return nil, reason
             end
-            waitForPipe("process pipe write")
+            deadline = deadline or time.now() * 1000.0 + writer._timeoutMs
+            if not waitForPipe("process pipe write", deadline) then
+                return nil, PIPE_WRITE_TIMEOUT_REASON
+            end
         else
             at = at + wrote
+            -- The bound measures a stall rather than the whole call, so a child
+            -- that keeps taking bytes keeps a long write alive.
+            deadline = nil
         end
     end
     return length
@@ -869,7 +897,9 @@ local function newReader(state: State, kind: PipeKind): ProcessReader
 end
 
 local function newWriter(state: State): ProcessWriter
-    return setmetatable({_state = state, _closed = false} as WriterImpl, WriterMT) as ProcessWriter
+    return setmetatable(
+        {_state = state, _closed = false, _timeoutMs = DEFAULT_PIPE_TIMEOUT_MS} as WriterImpl, WriterMT
+    ) as ProcessWriter
 end
 
 local record process

@@ -173,13 +173,41 @@ end
 --- A caller-owned writer over one live child-process input pipe.
 ---
 --- `write`, `writeFrom`, and `writeView` return inline when the pipe has room
---- and otherwise wait according to the caller's execution context.
+--- and otherwise wait according to the caller's execution context, for at most
+--- the writer's timeout. They report failure and a reason when that timeout
+--- expires.
+---
+--- The timeout exists because writing standard input alone deadlocks against a
+--- child that never reads it. The input pipe holds a fixed number of bytes, so
+--- a child that leaves it full stops the writer, and a caller sending more than
+--- the pipe holds waits for room that never appears. The same stall follows a
+--- child that reads its input only after the caller drains the output it has
+--- already written, since a full output pipe stops the child. Drain both output
+--- pipes while feeding input, or call `communicate`, which does that for the
+--- whole exchange. The timeout turns the remaining cases into a reported
+--- failure rather than a system parked for the rest of the run.
 local interface ProcessWriter is Writer
     --- Returns whether this endpoint has sent EOF or been closed.
     ---
     --- @param self The process writer to inspect.
     --- @return Returns true after `close`.
     isClosed: function(self: ProcessWriter): boolean
+
+    --- Bounds how long `write`, `writeFrom`, and `writeView` wait for the child
+    --- to take bytes.
+    ---
+    --- The bound covers waiting only, so a write the pipe has room for returns
+    --- however long the writer has been idle. It starts when a call first finds
+    --- the pipe full and ends that call with its failure and a reason, and the
+    --- child taking further bytes starts it again, so it bounds one stall
+    --- rather than a whole long write. The default is 30,000 milliseconds, and
+    --- zero returns as soon as one attempt finds no room. The new bound applies
+    --- to the next call rather than to one already waiting.
+    ---
+    --- @param self The process writer to configure.
+    --- @param timeoutMs The caller supplies 0 through 2147483647 milliseconds.
+    ---     Any other value raises.
+    setTimeout: function(self: ProcessWriter, timeoutMs: integer)
 end
 
 --- A caller-owned child process and its independently closable pipes.

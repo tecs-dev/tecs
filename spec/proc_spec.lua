@@ -13,6 +13,7 @@ local Application = require("tecs.Application")
 local processModule = require("tecs.internal.process")
 local path = require("tecs.io.Path")
 local process = require("tecs.io.Process")
+local runtime = require("tecs.internal.runtime")
 local sdl = require("tecs.ffi.sdl3")
 local task = require("tecs.internal.taskruntime")
 local tecsIO = require("tecs.io")
@@ -365,6 +366,107 @@ describe("streaming processes", function()
         end)
         assert.has_error(function()
             child.stdout:setTimeout(1.5)
+        end)
+
+        child:close()
+    end)
+
+    it("ends a pipe write the child never takes", function()
+        local child = newProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
+        child.stdin:setTimeout(50)
+
+        local started = now()
+        local wrote, reason = child.stdin:write(string.rep("x", 4 * 1024 * 1024))
+
+        assert.is_false(wrote)
+        assert.is_string(reason)
+        assert.is_true(now() - started < 5000)
+        assert.is_true(child:kill(true))
+        child:wait()
+        child:close()
+    end)
+
+    it("ends a suspended pipe write at the same bound", function()
+        local child = newProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
+        child.stdin:setTimeout(50)
+        local scheduler = task.newScheduler()
+        local writing = scheduler:spawnImmediate(function()
+            local wrote, reason = child.stdin:write(string.rep("x", 4 * 1024 * 1024))
+            return { wrote = wrote, reason = reason }
+        end)
+
+        assert.are.equal("pending", writing.status)
+        for _ = 1, 5000 do
+            processModule.poll()
+            scheduler:step()
+            if writing.status ~= "pending" then
+                break
+            end
+            sdl.C.SDL_Delay(1)
+        end
+
+        assert.are.equal("ready", writing.status, writing.error)
+        assert.is_false(writing.value.wrote)
+        assert.is_string(writing.value.reason)
+        assert.is_true(child:kill(true))
+        child:wait()
+        child:close()
+    end)
+
+    it("keeps a write alive while the child keeps taking bytes", function()
+        -- The child pauses between chunks for less than the writer's timeout,
+        -- and the whole write outlasts that timeout.
+        local child = newProcess({
+            args = {
+                "/bin/sh",
+                "-c",
+                "i=0; while [ $i -lt 64 ]; do head -c 65536 > /dev/null; sleep 0.05; i=$((i + 1)); done",
+            },
+            stdout = "null",
+            stderr = "null",
+        })
+        child.stdin:setTimeout(500)
+
+        local started = now()
+        local wrote, reason = child.stdin:write(string.rep("y", 2 * 1024 * 1024))
+
+        assert.is_true(wrote, reason)
+        assert.is_true(now() - started > 500)
+        assert.is_true(child:kill(true))
+        child:wait()
+        child:close()
+    end)
+
+    it("holds the runtime source only while a child is live", function()
+        assert.is_false(runtime.registered("processes"), "a previous test left the source registered")
+
+        local first = newProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
+        assert.is_true(runtime.registered("processes"), "a live child holds the runtime source")
+
+        local second = newProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
+        assert.is_true(runtime.registered("processes"), "a second child keeps the one registration")
+
+        first:close()
+        assert.is_true(runtime.registered("processes"), "the remaining child still holds the source")
+
+        second:close()
+        assert.is_false(runtime.registered("processes"), "an idle facility releases the source")
+
+        -- The next child registers again from the released state.
+        local third = newProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
+        assert.is_true(runtime.registered("processes"))
+        third:close()
+        assert.is_false(runtime.registered("processes"))
+    end)
+
+    it("validates a writer timeout by raising", function()
+        local child = newProcess({ args = { "/bin/cat" } })
+
+        assert.has_error(function()
+            child.stdin:setTimeout(-1)
+        end)
+        assert.has_error(function()
+            child.stdin:setTimeout(1.5)
         end)
 
         child:close()
