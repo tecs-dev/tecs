@@ -299,6 +299,7 @@ Inside one of those, one level and no deeper:
 On `tecs` itself, because no one module owns them:
 
 - [`tecs.Application`](/modules/Application) - the object an entry file returns, and what the host drives
+- [`tecs.batch`](/modules/#tecs.batch) - runs several waits at one call site and returns their results in order
 - [`tecs.newApplication`](/modules/Application) - builds the application an entry file returns
 - [`tecs.scoped`](/modules/#tecs.scoped) - names, profiles, and closes one lexical resource lifetime
 - [`tecs.Transform2D`](/modules/ecs/builtins#transform) - where an entity is, and the one component every subsystem moves

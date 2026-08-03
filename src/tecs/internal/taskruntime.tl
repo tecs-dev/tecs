@@ -50,8 +50,10 @@ local record SchedulerImpl
     current: TaskImpl<any>
     ready: {TaskImpl<any>}
     next: {TaskImpl<any>}
+    deferred: {TaskImpl<any>}
     readyCount: integer
     nextCount: integer
+    deferredCount: integer
     stepping: boolean
     spawn: function<T>(self: SchedulerImpl, body: function(ScopeImpl): T...): TaskImpl<T>
     spawnImmediate: function<T>(self: SchedulerImpl, body: function(ScopeImpl): T...): TaskImpl<T>
@@ -117,6 +119,18 @@ local function enqueue(scheduler: SchedulerImpl, task: TaskImpl<any>)
     end
     scheduler.nextCount = scheduler.nextCount + 1
     scheduler.next[scheduler.nextCount] = task
+    task.queued = true
+end
+
+-- A voluntary yield hands over the rest of the step rather than the rest of
+-- one round. A step drains what it can, so requeuing a yielding task the way a
+-- completion does would spin it against its own budget until the round cap.
+local function deferTask(scheduler: SchedulerImpl, task: TaskImpl<any>)
+    if task.status ~= "pending" or task.queued then
+        return
+    end
+    scheduler.deferredCount = scheduler.deferredCount + 1
+    scheduler.deferred[scheduler.deferredCount] = task
     task.queued = true
 end
 
@@ -437,7 +451,7 @@ local function resumeTask(scheduler: SchedulerImpl, task: TaskImpl<any>): string
         task.dead = true
         return settle(task, "ready", first)
     elseif first == YIELD then
-        enqueue(scheduler, task)
+        deferTask(scheduler, task)
     elseif first ~= WAIT then
         return settle(task, "failed", nil, "tecs: task yielded outside the task runtime")
     end
@@ -521,6 +535,17 @@ function SchedulerImpl:restartImmediate<T>(task: TaskImpl<T>): TaskImpl<T>
     return task
 end
 
+-- A step drains rather than resuming a single round, so a task spawned or
+-- settled while stepping continues in the same step instead of waiting for the
+-- next one. A caller that steps once per frame therefore pays one frame for
+-- each wait rather than one for each scheduler handoff.
+--
+-- The cap bounds two tasks that complete each other without ever going idle.
+-- Reaching it leaves the remainder queued for the next step, which is where
+-- every round after the first ran before draining, so the ceiling costs
+-- latency rather than progress.
+local MAX_STEP_ROUNDS <const> = 64
+
 function SchedulerImpl:step(): integer
     if self.stepping then
         error("tecs: task scheduler is not reentrant", 2)
@@ -530,26 +555,53 @@ function SchedulerImpl:step(): integer
     end
     self.stepping = true
 
-    local ready <const> = self.ready
-    self.ready = self.next
-    self.next = ready
-    self.readyCount = self.nextCount
-    self.nextCount = 0
+    -- Tasks that yielded during the previous step run in this one.
+    local deferredCount <const> = self.deferredCount
+    if deferredCount > 0 then
+        local deferred <const> = self.deferred
+        local queue <const> = self.next
+        local queued = self.nextCount
+        for index = 1, deferredCount do
+            queued = queued + 1
+            queue[queued] = deferred[index]
+            deferred[index] = nil
+        end
+        self.nextCount = queued
+        self.deferredCount = 0
+    end
 
-    local turns <const> = self.readyCount
+    local turns = 0
+    local rounds = 0
     local firstFailure: string
-    for index = 1, turns do
-        local task <const> = self.ready[index]
-        self.ready[index] = nil
-        task.queued = false
-        if task.status == "pending" then
-            local failure <const> = resumeTask(self, task)
-            if firstFailure == nil then
-                firstFailure = failure
+    while self.nextCount > 0 and rounds < MAX_STEP_ROUNDS do
+        rounds = rounds + 1
+
+        local ready <const> = self.ready
+        self.ready = self.next
+        self.next = ready
+        self.readyCount = self.nextCount
+        self.nextCount = 0
+
+        local round <const> = self.readyCount
+        for index = 1, round do
+            local task <const> = self.ready[index]
+            self.ready[index] = nil
+            task.queued = false
+            if task.status == "pending" then
+                local failure <const> = resumeTask(self, task)
+                if firstFailure == nil then
+                    firstFailure = failure
+                end
             end
         end
+        self.readyCount = 0
+        turns = turns + round
+
+        if firstFailure ~= nil then
+            break
+        end
     end
-    self.readyCount = 0
+
     self.stepping = false
     if firstFailure ~= nil then
         error(firstFailure, 0)
@@ -723,8 +775,10 @@ function taskruntime.newScheduler(): SchedulerImpl
             current = nil,
             ready = {},
             next = {},
+            deferred = {},
             readyCount = 0,
             nextCount = 0,
+            deferredCount = 0,
             stepping = false,
         } as SchedulerImpl,
         SCHEDULER_MT

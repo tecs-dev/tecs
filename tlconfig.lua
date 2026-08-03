@@ -265,6 +265,11 @@ local PAGE_OVERRIDES = {
                 include = { "newApplication", "version" },
             },
             {
+                module = "tecs.batch",
+                public = "tecs",
+                include = { "batch" },
+            },
+            {
                 module = "tecs.scope",
                 public = "tecs",
                 include = { "Scope", "scoped" },

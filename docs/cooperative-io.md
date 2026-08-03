@@ -68,6 +68,32 @@ Deferred-only mutation is what makes this coherent. Archetypes do not publish
 structural changes while a query is suspended, and only the scheduler commits
 at phase boundaries.
 
+## Overlapping waits at one call site
+
+Because one wait parks the whole update, five calls in a row cost the sum of
+their five waits. `tecs.batch` runs its callbacks at the same time and returns
+their results in the order they were given, so the same five cost about the
+longest one:
+
+```teal
+local answers <const> = tecs.batch({
+    function(): any return client:send({url = manifest}) end,
+    function(): any return tecs.io.files.read("save.json") end,
+    function(): any return tecs.assets.loadImage("sprites/player.png") end,
+})
+```
+
+Each callback is its own cooperative task, so one that waits releases the
+others. The call suspends the system until every callback settles. The first
+callback that raises cancels the ones still running, waits for them to unwind
+their scopes, and raises that failure from `batch`.
+
+Callbacks return values for the caller to apply. Staging a spawn inside a
+callback hands out an entity identifier at the moment that callback runs, which
+makes identifiers, and the snapshots that carry them, depend on which wait
+finished first. Reading and computing inside callbacks and mutating after
+`batch` returns keeps that order fixed.
+
 ## Coroutines wait; threads and reactors do work
 
 Coroutines do not make a blocking decoder or disk syscall asynchronous. Tecs

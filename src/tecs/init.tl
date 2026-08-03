@@ -426,6 +426,26 @@ local record tecs
     ---     registered through it. Returned values are ignored.
     scoped: function(name: string, body: function(scopeModule.Scope))
 
+    --- Runs callbacks at the same time and returns their results in order.
+    ---
+    --- Each callback runs as its own cooperative task, so one that waits
+    --- releases the others and the call costs about the longest wait rather
+    --- than their sum. Inside a system the call suspends until every callback
+    --- settles, and outside one it blocks while driving the producers they
+    --- wait on. The first callback that raises cancels the rest, waits for
+    --- them to unwind their scopes, and raises that failure.
+    ---
+    --- Callbacks return values for the caller to apply. Staging world
+    --- mutations inside a callback makes entity identifiers depend on which
+    --- wait finished first, and snapshots with them.
+    ---
+    --- @param bodies The caller supplies an array of functions that take no
+    ---     arguments. An empty array returns an empty array without waiting.
+    --- @return Returns one result per callback, at the callback's index. A
+    ---     batch mixes types freely, so the caller casts each result to what
+    ---     its own callback returned.
+    batch: function(bodies: {function(): any}): {any}
+
     --- Builds the application an entry file returns.
     ---
     --- Not a function that runs until done: an entry file ends with
@@ -552,6 +572,7 @@ local SURFACE <const>: {string: Namespace} = {
     Application = {module = "tecs.Application"},
     newApplication = {module = "tecs.Application", member = "newApplication"},
     scoped = {module = "tecs.scope", member = "scoped"},
+    batch = {module = "tecs.batch", member = "batch"},
     assets = {module = "tecs.assets"},
     audio = {module = "tecs.audio"},
     physics = {module = "tecs.physics"},

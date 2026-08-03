@@ -510,3 +510,80 @@ describe("internal task runtime", function()
         end)
     end)
 end)
+
+describe("a draining step", function()
+    it("runs a task spawned during the step in that same step", function()
+        local scheduler = task.newScheduler()
+        local order = {}
+
+        local root = scheduler:spawn(function(scope)
+            order[#order + 1] = "root"
+            local child = scope:spawn(function()
+                order[#order + 1] = "child"
+                return "done"
+            end)
+            return child:join()
+        end)
+
+        -- One step covers the root, the child it spawned, and the join.
+        local turns = scheduler:step()
+
+        assert.are.equal("ready", root.status)
+        assert.are.equal("done", root.value)
+        assert.are.same({ "root", "child" }, order)
+        assert.is_true(turns >= 3)
+    end)
+
+    it("hands a yielding task the next step rather than the rest of this one", function()
+        local scheduler = task.newScheduler()
+        local turns = 0
+
+        local root = scheduler:spawn(function()
+            for _ = 1, 3 do
+                turns = turns + 1
+                task.yield()
+            end
+            return turns
+        end)
+
+        -- Each step resumes the yielding task once, so a cooperative yield
+        -- cannot spin the draining loop against its own round budget.
+        scheduler:step()
+        assert.are.equal(1, turns)
+        scheduler:step()
+        assert.are.equal(2, turns)
+        scheduler:step()
+        assert.are.equal(3, turns)
+        scheduler:step()
+        assert.are.equal("ready", root.status)
+    end)
+
+    it("stops draining at its round cap and keeps the remainder for later", function()
+        local scheduler = task.newScheduler()
+        local depth = 0
+
+        -- Every generation joins the next, so each one stays parked while its
+        -- child runs and the chain needs far more rounds than one step allows.
+        local function chain(scope)
+            depth = depth + 1
+            if depth < 200 then
+                return scope:spawn(chain):join()
+            end
+            return depth
+        end
+
+        local root = scheduler:spawn(chain)
+        scheduler:step()
+
+        assert.are.equal("pending", root.status)
+        assert.is_true(depth < 200)
+
+        repeat
+            local turns = scheduler:step()
+            assert.is_true(turns > 0)
+        until root.status ~= "pending"
+
+        assert.are.equal("ready", root.status)
+        assert.are.equal(200, depth)
+    end)
+end)

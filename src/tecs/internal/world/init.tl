@@ -1240,6 +1240,13 @@ function WorldImpl:update(dt: number): boolean
         else
             self._updateScheduler:restartImmediate(root)
         end
+
+        -- An immediate start resumes the update in place, so a task it spawned
+        -- is queued rather than running. Draining here lets concurrent work
+        -- begin its waits in the update that asked for them.
+        if root.status == "pending" then
+            self._updateScheduler:step()
+        end
     end
 
     if root.status == "pending" then
