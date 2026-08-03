@@ -283,6 +283,45 @@ describe("cooperative socket systems", function()
         address:close()
     end)
 
+    it("parks receiveInto and reuses one readiness structure per socket", function()
+        local address = tecs.io.resolve("127.0.0.1")
+        local receiver, port = bind()
+        local sender = assert(tecsIO.bind(0))
+        local world = tecs.ecs.newWorld()
+        local destination = tecsIO.newBuffer()
+        local received = {}
+
+        world:addSystem({
+            name = "CooperativeDatagramReceiveInto",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                received[#received + 1] = assert(receiver:receiveInto(destination))
+            end,
+        })
+
+        -- Two parks in a row on one socket exercise the reused wait record and
+        -- its gate: a second park would fail on stale state.
+        for round = 1, 2 do
+            assert.is_false(world:update(1 / 60))
+            assert.are.equal(1, netreactor.pending())
+            assert.is_true(sender:send(address, port, ("packet %d"):format(round)))
+            assert.are.equal(1, pollUntilDelivery())
+            assert.is_true(world:update(1 / 60))
+            assert.are.equal(("packet %d"):format(round), destination:getString())
+            assert.are.equal(0, netreactor.pending())
+            destination:clear()
+        end
+        assert.are.same({ 8, 8 }, received)
+        assert.are.equal("127.0.0.1", receiver.sourceHost)
+        assert.is_true(receiver.sourcePort > 0)
+
+        world:shutdown()
+        destination:close()
+        sender:close()
+        receiver:close()
+        address:close()
+    end)
+
     it("parks receive until a datagram reaches its socket", function()
         local address = tecsIO.resolve("127.0.0.1")
         local receiver, port = bind()

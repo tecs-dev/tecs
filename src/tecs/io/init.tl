@@ -38,6 +38,10 @@ HTTP and HTTPS live under `tecs.io.http`; the MCP debug server lives under
 Hot TCP loops can reuse a `Buffer`. `TCPSocket:readInto` lets the native
 socket fill its FFI allocation directly, and `TCPSocket:writeFrom` queues a
 buffer range without constructing an intermediate Lua string.
+`UDPSocket:receiveInto` is the datagram form: it fills a reused buffer, reports
+its sender through `sourceHost` and `sourcePort`, and allocates no packet,
+address, or payload string. `UDPSocket:source` builds an owned address from the
+recorded sender when a reply needs one.
 `Buffer:view` retains an immutable zero-copy snapshot. `writeView` on sockets,
 writers, and writable streams consumes that retained range directly, while
 `ByteView:newStream` gives it replayable stream behavior without copying
@@ -164,6 +168,7 @@ local MAX_HOST_BYTES <const> = 253
 local MAX_TIMEOUT_MS <const> = 2147483647
 local DEFAULT_WAIT_MS <const> = 5000
 local WAIT_SLICE_MS <const> = 16
+local MAX_ADDRESS_TEXT <const> = 128
 
 local record binaryIO
     --- Read-only. `files` provides path resolution and synchronous file
@@ -600,6 +605,15 @@ local record binaryIO
         --- Read-only. Networking sets `port` from the value passed to `bind`
         --- and never changes it. Zero remains zero.
         port: integer
+        --- Read-only. Networking sets `sourceHost` to the numeric address of
+        --- the sender on each successful `receiveInto` and leaves it nil until
+        --- the first one. `receive` reports its sender through the packet
+        --- instead and leaves this field alone.
+        sourceHost: string
+        --- Read-only. Networking sets `sourcePort` to the remote port of the
+        --- sender on each successful `receiveInto` and leaves it nil until the
+        --- first one.
+        sourcePort: integer
         _handle: loader.CPtr
         _closed: boolean
         _packetOut: loader.CArray
@@ -627,6 +641,39 @@ local record binaryIO
         ---     waits or reception fails.
         --- @return Returns the reason only when reception fails.
         receive: function(self: UDPSocket): UDPPacket, string
+        --- Takes one packet directly into reusable FFI memory.
+        ---
+        --- The call writes at a zero-based offset and extends the buffer
+        --- through the last byte received. It suspends a system or blocks an
+        --- ordinary caller until a datagram arrives, and it allocates no
+        --- packet, buffer, or address. A datagram longer than the requested
+        --- ceiling keeps the leading bytes and loses the remainder, which is
+        --- what the platform does. A zero-length datagram returns zero and
+        --- leaves the buffer's contents unchanged.
+        ---
+        --- Each success replaces `sourceHost` and `sourcePort`. Call `source`
+        --- for an owned [`Address`](tealdoc:tecs.io.Address) to reply to.
+        --- @param destination The caller supplies an open
+        ---     [`Buffer`](tealdoc:tecs.io.Buffer).
+        --- @param offset The caller supplies a zero-based destination offset
+        ---     or omits it for zero.
+        --- @param maxBytes The caller supplies a ceiling from 0 to 65507 bytes
+        ---     or omits it for 65507. Invalid values raise. A zero ceiling
+        ---     returns zero and consumes no datagram.
+        --- @return Returns the bytes received, or nil when reception fails.
+        --- @return Returns the reason only when reception fails.
+        receiveInto: function(
+            self: UDPSocket, destination: IOBuffer, offset?: integer, maxBytes?: integer
+        ): integer, string
+        --- Returns a newly owned address for the most recent sender.
+        ---
+        --- The caller closes the returned address. Both `receive` and
+        --- `receiveInto` record the sender, and this call allocates the address
+        --- only when a caller asks for one.
+        --- @return Returns a caller-owned address that outlives the socket, or
+        ---     nil when the socket has received no datagram or the call fails.
+        --- @return Returns the reason when the first return is nil.
+        source: function(self: UDPSocket): Address, string
         --- Waits up to `timeoutMs` for a packet.
         ---
         --- Returns false without an error on timeout. This does not consume a
@@ -738,6 +785,15 @@ local started = false
 local liveObjects = 0
 local operations: {Operation} = {}
 
+-- Shared native outputs. Every call below writes one of these and reads it back
+-- before it can yield, so one allocation per process replaces one per address,
+-- packet, or datagram.
+local textLengthOut <const> = loader.newArray("size_t[1]")
+local receivedLengthOut <const> = loader.newArray("size_t[1]")
+local sourceLengthOut <const> = loader.newArray("size_t[1]")
+local sourcePortOut <const> = loader.newArray("uint16_t[1]")
+local sourceTextOut <const> = loader.newArray("uint8_t[?]", MAX_ADDRESS_TEXT)
+
 -- Sockets whose native send queue still holds bytes the kernel has not taken.
 -- A write returns as soon as the bounded queue accepts the bytes, so without an
 -- owner draining them a writer that finishes leaves them unsent forever and the
@@ -828,11 +884,10 @@ local function destroyHandle(handle: loader.CPtr, destroy: function(loader.CPtr)
 end
 
 local function addressFrom(handle: loader.CPtr, host: string): binaryIO.Address
-    local length <const> = loader.newArray("size_t[1]")
-    local text <const> = C.tecsNetAddressText(handle, length)
+    local text <const> = C.tecsNetAddressText(handle, textLengthOut)
     local address = setmetatable({} as binaryIO.Address, AddressMT)
     address.host = host
-    address.text = text ~= nil and loader.toBytes(text, tonumber(length[0]) as integer) or host
+    address.text = text ~= nil and loader.toBytes(text, tonumber(textLengthOut[0]) as integer) or host
     address._handle = managedHandle(handle, C.tecsNetAddressDestroy as function(loader.CPtr))
     address._closed = false
     opened()
@@ -875,9 +930,8 @@ function binaryIO.TCPSocket:peer(): binaryIO.Address, string
     if handle == nil then
         return nil, loader.toString(C.tecsRustError())
     end
-    local length <const> = loader.newArray("size_t[1]")
-    local text <const> = C.tecsNetAddressText(handle, length)
-    local host <const> = text ~= nil and loader.toBytes(text, tonumber(length[0]) as integer) or ""
+    local text <const> = C.tecsNetAddressText(handle, textLengthOut)
+    local host <const> = text ~= nil and loader.toBytes(text, tonumber(textLengthOut[0]) as integer) or ""
     return addressFrom(handle, host)
 end
 
@@ -1296,12 +1350,10 @@ local function receiveDatagram(socket: binaryIO.UDPSocket): binaryIO.UDPPacket, 
         C.tecsNetPacketDestroy(datagram)
         return nil, loader.toString(C.tecsRustError())
     end
-    local addressLength <const> = loader.newArray("size_t[1]")
-    local text <const> = C.tecsNetAddressText(source, addressLength)
-    local host <const> = text ~= nil and loader.toBytes(text, tonumber(addressLength[0]) as integer) or ""
-    local bytesLength <const> = loader.newArray("size_t[1]")
-    local bytes <const> = C.tecsNetPacketBytes(datagram, bytesLength)
-    local length <const> = tonumber(bytesLength[0]) as integer
+    local text <const> = C.tecsNetAddressText(source, textLengthOut)
+    local host <const> = text ~= nil and loader.toBytes(text, tonumber(textLengthOut[0]) as integer) or ""
+    local bytes <const> = C.tecsNetPacketBytes(datagram, receivedLengthOut)
+    local length <const> = tonumber(receivedLengthOut[0]) as integer
     local payload <const> = buffer.new(length)
     if length > 0 then
         loader.copyTo(payload:getFFIPointer(), bytes, length)
@@ -1346,6 +1398,75 @@ function binaryIO.UDPSocket:receive(): binaryIO.UDPPacket, string
             end
         end
     end
+end
+
+function binaryIO.UDPSocket:receiveInto(destination: IOBuffer, offset?: integer, maxBytes?: integer): integer, string
+    if self._closed then
+        return nil, "datagram socket is closed"
+    end
+    local count <const> = maxBytes or MAX_DATAGRAM_BYTES
+    if type(count) ~= "number" or count ~= floor(count) or count < 0 or count > MAX_DATAGRAM_BYTES then
+        error(("tecs: datagram reads from 0 to %d bytes at a time"):format(MAX_DATAGRAM_BYTES), 2)
+    end
+    local at <const> = offset or 0
+    if type(at) ~= "number" or at ~= floor(at) or at < 0 then
+        error("tecs: UDPSocket:receiveInto offset must be a non-negative integer", 2)
+    end
+    if count == 0 then
+        return 0
+    end
+
+    while true do
+        local pointer <const>, previousLength <const> = buffer.prepareWrite(destination, at, count)
+        local status <const> = tonumber(
+            C.tecsNetDatagramReceiveInto(
+                self._handle,
+                pointer,
+                count,
+                receivedLengthOut,
+                sourceTextOut,
+                MAX_ADDRESS_TEXT,
+                sourceLengthOut,
+                sourcePortOut
+            )
+        ) as integer
+        if status > 0 then
+            local received <const> = tonumber(receivedLengthOut[0]) as integer
+            buffer.commitWrite(destination, at, received, previousLength)
+            self.sourceHost = loader.toBytes(sourceTextOut as loader.CValue, tonumber(sourceLengthOut[0]) as integer)
+            self.sourcePort = tonumber(sourcePortOut[0]) as integer
+            return received
+        end
+        destination:resize(previousLength)
+        if status < 0 then
+            return nil, loader.toString(C.tecsRustError())
+        end
+        local mode <const> = task.checkWait("UDP receive")
+        if mode == "cooperative" then
+            local ready, reason <const> = netreactor.wait(self, self._handle, netreactor.datagram, netreactor.readable)
+            if ready == nil then
+                return nil, reason
+            end
+        else
+            local ready <const> = tonumber(C.tecsNetDatagramWait(self._handle, MAX_TIMEOUT_MS)) as integer
+            if ready < 0 then
+                return nil, loader.toString(C.tecsRustError())
+            end
+        end
+    end
+end
+
+function binaryIO.UDPSocket:source(): binaryIO.Address, string
+    if self._closed then
+        return nil, "datagram socket is closed"
+    end
+    local handle <const> = C.tecsNetDatagramSource(self._handle)
+    if handle == nil then
+        return nil, loader.toString(C.tecsRustError())
+    end
+    local text <const> = C.tecsNetAddressText(handle, textLengthOut)
+    local host <const> = text ~= nil and loader.toBytes(text, tonumber(textLengthOut[0]) as integer) or ""
+    return addressFrom(handle, host)
 end
 
 function binaryIO.UDPSocket:wait(timeoutMs?: integer): boolean, string

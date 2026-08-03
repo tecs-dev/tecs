@@ -22,6 +22,7 @@ local record Wait
     handle: loader.CPtr
     kind: integer
     token: integer
+    generation: integer
     gate: tasks.Gate
     deadline: number
 end
@@ -33,6 +34,13 @@ local registered = false
 local deadlines = 0
 local byToken <const>: {integer: Wait} = {}
 local byOwner <const>: {any: Wait} = {}
+
+-- One reusable structure per endpoint. An endpoint permits one readiness wait
+-- at a time, so its Wait record and its Gate outlive each wait and only the
+-- cancellation closure is allocated per suspension. `remove` drops the owner
+-- reference, so a weak key lets a closed or abandoned endpoint take its entry
+-- with it.
+local parked <const>: {any: Wait} = setmetatable({} as {any: Wait}, {__mode = "k"})
 local tokenOut <const> = ffi.new("uint32_t[1]") as loader.CArray
 local readinessOut <const> = ffi.new("uint32_t[1]") as loader.CArray
 
@@ -86,6 +94,8 @@ local function remove(wait: Wait)
     end
     byToken[wait.token] = nil
     byOwner[wait.owner] = nil
+    wait.owner = nil
+    wait.handle = nil
     active = active - 1
     if wait.deadline ~= nil then
         deadlines = deadlines - 1
@@ -190,9 +200,25 @@ function netreactor.wait(
     end
 
     local token <const> = allocateToken()
-    local wait: Wait
-    local gate <const> = task.newGate(function()
-        if wait == nil or byToken[token] ~= wait then
+    local wait = parked[owner]
+    if wait == nil then
+        wait = {generation = 0, gate = task.newGate()}
+        parked[owner] = wait
+    end
+    local generation <const> = wait.generation + 1
+    wait.generation = generation
+    wait.owner = owner
+    wait.handle = handle
+    wait.kind = kind
+    wait.token = token
+    wait.deadline = timeoutMs ~= nil and time.now() + timeoutMs / 1000 or nil
+
+    local gate <const> = wait.gate
+    -- The generation is what makes reuse safe. A canceled task carries the
+    -- cancellation of the wait it parked on, so this closure refuses to touch
+    -- a later wait that reached the same structure after it settled.
+    gate:reset(function()
+        if wait.generation ~= generation or byToken[token] ~= wait then
             return
         end
         if unwatch(wait) == 0 then
@@ -202,16 +228,10 @@ function netreactor.wait(
         end
         remove(wait)
     end)
-    wait = {
-        owner = owner,
-        handle = handle,
-        kind = kind,
-        token = token,
-        gate = gate,
-        deadline = timeoutMs ~= nil and time.now() + timeoutMs / 1000 or nil,
-    }
 
     if watch(kind, handle, token, interest) == 0 then
+        wait.owner = nil
+        wait.handle = nil
         return nil, nativeReason()
     end
     byToken[token] = wait

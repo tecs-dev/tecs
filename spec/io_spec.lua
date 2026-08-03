@@ -10,9 +10,23 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
+local bufferpool = require("tecs.io.bufferpool")
 
 local C = sdl.C
 local tecsIO = tecs.io
+local CHUNK = 64 * 1024
+
+-- Takes whatever earlier work left pooled so a following acquire can only
+-- return the buffer this spec released.
+local function drainPool()
+    local taken = {}
+    for index = 1, 8 do
+        taken[index] = bufferpool.acquire(CHUNK)
+    end
+    for index = 1, 8 do
+        taken[index]:close()
+    end
+end
 
 local nextPort = 27140
 
@@ -282,6 +296,100 @@ describe("tecs.io", function()
         packet:close()
         sender:close()
         address:close()
+    end)
+
+    it("receives datagrams into a reused buffer without allocating a packet", function()
+        local address = resolved()
+        local receiver, port = bind()
+        local sender = assert(tecsIO.bind(0))
+        local destination = tecsIO.newBuffer("head")
+
+        assert.is_true(sender:send(address, port, "into a buffer"))
+        assert.is_true(receiver:wait(2000))
+        assert.are.equal(13, receiver:receiveInto(destination, 4))
+        assert.are.equal("headinto a buffer", destination:getString())
+        assert.are.equal("127.0.0.1", receiver.sourceHost)
+        assert.is_true(receiver.sourcePort > 0)
+
+        -- The recorded sender is enough to reply without receiving a packet.
+        local source = assert(receiver:source())
+        assert.are.equal("127.0.0.1", source.text)
+        assert.is_true(receiver:send(source, receiver.sourcePort, "reply"))
+        assert.is_true(sender:wait(2000))
+        destination:clear()
+        assert.are.equal(5, sender:receiveInto(destination))
+        assert.are.equal("reply", destination:getString())
+        source:close()
+
+        destination:close()
+        sender:close()
+        receiver:close()
+        address:close()
+    end)
+
+    it("validates the receiveInto range and reports a closed socket", function()
+        local socket = assert(tecsIO.bind(0))
+        local destination = tecsIO.newBuffer("kept")
+
+        assert.are.equal(0, socket:receiveInto(destination, 0, 0))
+        assert.are.equal("kept", destination:getString())
+        assert.has_error(function()
+            socket:receiveInto(destination, 0, 65508)
+        end)
+        assert.has_error(function()
+            socket:receiveInto(destination, -1)
+        end)
+        assert.are.same({ nil, "datagram socket has received no packet" }, { socket:source() })
+
+        socket:close()
+        assert.are.same({ nil, "datagram socket is closed" }, { socket:receiveInto(destination) })
+        assert.are.same({ nil, "datagram socket is closed" }, { socket:source() })
+        destination:close()
+    end)
+
+    it("refuses a pooled buffer returned twice", function()
+        drainPool()
+        local pooled = bufferpool.acquire(CHUNK)
+        bufferpool.release(pooled)
+        assert.has_error(function()
+            bufferpool.release(pooled)
+        end, "tecs: an io buffer returned to the pool twice")
+
+        -- The refusal leaves one entry, not two aliases of one buffer.
+        local first = bufferpool.acquire(CHUNK)
+        assert.are.equal(pooled, first)
+        local second = bufferpool.acquire(CHUNK)
+        assert.are_not.equal(first, second)
+        bufferpool.release(first)
+        bufferpool.release(second)
+    end)
+
+    it("returns a transfer scratch buffer to the pool when the copy raises", function()
+        drainPool()
+        local scratch = bufferpool.acquire(CHUNK)
+        bufferpool.release(scratch)
+
+        local source = {
+            read = function()
+                error("reader unwound")
+            end,
+            close = function()
+                return true
+            end,
+        }
+        local destination = {
+            write = function()
+                return true
+            end,
+            close = function()
+                return true
+            end,
+        }
+        assert.is_false(pcall(tecsIO.transfer, source, destination))
+
+        local reused = bufferpool.acquire(CHUNK)
+        assert.are.equal(scratch, reused)
+        bufferpool.release(reused)
     end)
 
     it("refuses shutdown while an owned object is open", function()

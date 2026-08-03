@@ -520,6 +520,14 @@ int tecsNetDatagramSendWait(TecsNetDatagram *socket, const TecsNetAddress *addre
 /* Stores one owned packet and returns one, returns zero for no datagram, or
  * returns -1 with tecsRustError() set. */
 int tecsNetDatagramReceive(TecsNetDatagram *socket, TecsNetPacket **packet);
+/* Copies one datagram into caller memory, writes its source text and port, and
+ * returns one, returns zero for no datagram, or returns -1 with tecsRustError()
+ * set. A datagram longer than the supplied capacity loses its remainder. */
+int tecsNetDatagramReceiveInto(TecsNetDatagram *socket, uint8_t *bytes, size_t capacity, size_t *length,
+                               uint8_t *source, size_t sourceCapacity, size_t *sourceLength, uint16_t *port);
+/* Returns one owned address for the most recent received datagram, or NULL with
+ * tecsRustError() set when the socket has received none. */
+TecsNetAddress *tecsNetDatagramSource(TecsNetDatagram *socket);
 int tecsNetDatagramWait(TecsNetDatagram *socket, uint32_t timeoutMs);
 void tecsNetDatagramDestroy(TecsNetDatagram *socket);
 TecsNetAddress *tecsNetPacketTakeAddress(TecsNetPacket *packet);

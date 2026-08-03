@@ -267,7 +267,11 @@ one diagnostic identity without taxing the ordinary path.
 
 The producer still matches the work. TCP, UDP, and process pipes try their
 syscall first and use a process-wide `mio` readiness reactor only after
-`WouldBlock`; no worker thread sits waiting on a handle. One bounded Tokio
+`WouldBlock`; no worker thread sits waiting on a handle. A caller that blocks
+instead of parking waits on the descriptor in the kernel through `poll` or
+`WSAPoll`, so a headless tool, a spec, or a startup path pays one wakeup for
+readiness rather than a retry per millisecond, and a timeout still expires when
+the caller asked it to. One bounded Tokio
 service resolves names and establishes connections. Regular-file transfers
 use a bounded SDL AsyncIO queue, uncovered file operations use a separate
 bounded blocking lane, and image decoding uses a bounded CPU lane. A file used

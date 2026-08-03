@@ -111,7 +111,7 @@ local record GateImpl
     wait: function(self: GateImpl): any, string
     complete: function(self: GateImpl, value: any)
     fail: function(self: GateImpl, reason: string)
-    reset: function(self: GateImpl)
+    reset: function(self: GateImpl, cancelWait?: function())
 end
 
 local TASK_MT <const> = {__index = TaskImpl}
@@ -843,13 +843,18 @@ function GateImpl:fail(reason: string)
     finishGate(self, nil, reason)
 end
 
-function GateImpl:reset()
+--- Returns a settled gate to its unarmed state so one owner can wait again.
+---
+--- The optional cancellation function arms the fresh wait, which is what lets
+--- a caller reuse one gate across successive waits.
+function GateImpl:reset(cancelWait?: function())
     if self.waiter ~= nil then
         error("tecs: cannot reset a readiness gate with a waiter", 2)
     end
     self.ready = false
     self.value = nil
     self.reason = nil
+    self.cancelWait = cancelWait
 end
 
 local record taskruntime

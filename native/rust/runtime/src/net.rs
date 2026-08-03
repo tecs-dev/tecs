@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_int;
+use std::fmt::{self, Write as FormatWrite};
 use std::io::{self, Read, Write};
 use std::net::{
     IpAddr, SocketAddr, TcpListener as StdTcpListener, TcpStream, UdpSocket as StdUdpSocket,
@@ -14,8 +15,12 @@ use std::ptr;
 use std::slice;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::OnceLock;
-use std::thread;
 use std::time::{Duration, Instant};
+
+#[cfg(unix)]
+use std::os::fd::{AsRawFd, RawFd};
+#[cfg(windows)]
+use std::os::windows::io::{AsRawSocket, RawSocket};
 
 use mio::event::Event;
 use mio::net::{
@@ -32,6 +37,7 @@ const READY_WRITABLE: u32 = 2;
 const READY_ERROR: u32 = 4;
 const READY_CLOSED: u32 = 8;
 const STREAM_WRITE_CAPACITY: usize = 1024 * 1024;
+const DATAGRAM_CAPACITY: usize = 65_507;
 
 pub struct TecsNetAddress {
     address: IpAddr,
@@ -96,6 +102,12 @@ pub struct TecsNetServer {
 pub struct TecsNetDatagram {
     socket: MioUdpSocket,
     reactor: usize,
+    /// Holds one maximum-size datagram so packet reception allocates only the
+    /// exact payload it hands to its caller.
+    scratch: Vec<u8>,
+    /// Records the sender of the most recent received datagram so a caller
+    /// that skipped the packet form can still address a reply.
+    source: Option<SocketAddr>,
 }
 
 pub struct TecsNetPacket {
@@ -165,16 +177,123 @@ unsafe fn unwatch(reactor: &mut TecsNetReactor, stream: &mut TecsNetStream) -> i
     Ok(())
 }
 
-fn wait_until(timeout_ms: u32, mut ready: impl FnMut() -> io::Result<bool>) -> io::Result<bool> {
+/// Names the readiness a blocking wait asks the kernel for.
+#[derive(Clone, Copy)]
+enum WaitFor {
+    Readable,
+    Writable,
+}
+
+#[cfg(unix)]
+type Descriptor = RawFd;
+#[cfg(windows)]
+type Descriptor = RawSocket;
+
+#[cfg(unix)]
+fn descriptor(source: &impl AsRawFd) -> Descriptor {
+    source.as_raw_fd()
+}
+
+#[cfg(windows)]
+fn descriptor(source: &impl AsRawSocket) -> Descriptor {
+    source.as_raw_socket()
+}
+
+/// Declares the one Winsock entry point Windows readiness waits need.
+///
+/// `windows-sys` is not a dependency of this crate, and the socket poll is
+/// three declarations, so it is written here rather than pulled in.
+#[cfg(windows)]
+mod winsock {
+    /// Mirrors `WSAPOLLFD`.
+    #[repr(C)]
+    pub struct PollDescriptor {
+        pub socket: usize,
+        pub events: i16,
+        pub revents: i16,
+    }
+
+    /// Mirrors `POLLRDNORM`.
+    pub const POLL_READABLE: i16 = 0x0100;
+    /// Mirrors `POLLWRNORM`.
+    pub const POLL_WRITABLE: i16 = 0x0010;
+
+    #[link(name = "ws2_32")]
+    extern "system" {
+        pub fn WSAPoll(descriptors: *mut PollDescriptor, count: u32, timeout: i32) -> i32;
+    }
+}
+
+/// Sleeps in the kernel until the descriptor is ready or `timeout_ms` elapses.
+///
+/// A wakeup is advisory: the caller retries its operation and waits again, so
+/// a spurious readiness report costs one syscall rather than a wrong result.
+#[cfg(unix)]
+fn wait_descriptor(target: Descriptor, wait_for: WaitFor, timeout_ms: i32) -> io::Result<()> {
+    let mut entry = libc::pollfd {
+        fd: target,
+        events: match wait_for {
+            WaitFor::Readable => libc::POLLIN,
+            WaitFor::Writable => libc::POLLOUT,
+        },
+        revents: 0,
+    };
+    // SAFETY: `poll` reads and writes the one entry this call owns.
+    let status = unsafe { libc::poll(&mut entry, 1, timeout_ms) };
+    if status < 0 {
+        let failure = io::Error::last_os_error();
+        if failure.kind() != io::ErrorKind::Interrupted {
+            return Err(failure);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn wait_descriptor(target: Descriptor, wait_for: WaitFor, timeout_ms: i32) -> io::Result<()> {
+    let mut entry = winsock::PollDescriptor {
+        socket: target as usize,
+        events: match wait_for {
+            WaitFor::Readable => winsock::POLL_READABLE,
+            WaitFor::Writable => winsock::POLL_WRITABLE,
+        },
+        revents: 0,
+    };
+    // SAFETY: `WSAPoll` reads and writes the one entry this call owns.
+    let status = unsafe { winsock::WSAPoll(&mut entry, 1, timeout_ms) };
+    if status < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Retries `ready` around kernel readiness waits until it succeeds or the
+/// timeout expires.
+///
+/// A zero timeout polls once. The caller's operation stays the authority on
+/// readiness, so this only decides when to attempt it again, and an idle wait
+/// costs no CPU.
+fn wait_until(
+    target: Descriptor,
+    wait_for: WaitFor,
+    timeout_ms: u32,
+    mut ready: impl FnMut() -> io::Result<bool>,
+) -> io::Result<bool> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms.into());
     loop {
         if ready()? {
             return Ok(true);
         }
-        if timeout_ms == 0 || Instant::now() >= deadline {
+        if timeout_ms == 0 {
             return Ok(false);
         }
-        thread::sleep(Duration::from_millis(1));
+        let now = Instant::now();
+        if now >= deadline {
+            return Ok(false);
+        }
+        let remaining = deadline.saturating_duration_since(now).as_millis();
+        let slice = i32::try_from(remaining).unwrap_or(i32::MAX).max(1);
+        wait_descriptor(target, wait_for, slice)?;
     }
 }
 
@@ -844,7 +963,10 @@ pub unsafe extern "C" fn tecsNetServerWait(server: *mut TecsNetServer, timeout_m
         return -1;
     }
     // SAFETY: The caller supplies a live server.
-    match wait_until(timeout_ms, || accept(unsafe { &mut *server })) {
+    let target = descriptor(&unsafe { &*server }.listener);
+    match wait_until(target, WaitFor::Readable, timeout_ms, || {
+        accept(unsafe { &mut *server })
+    }) {
         Ok(true) => 1,
         Ok(false) => 0,
         Err(error) => {
@@ -976,7 +1098,8 @@ pub unsafe extern "C" fn tecsNetStreamDrain(stream: *mut TecsNetStream, timeout_
         return -1;
     }
     // SAFETY: The caller supplies a live stream.
-    match wait_until(timeout_ms, || {
+    let target = descriptor(&unsafe { &*stream }.stream);
+    match wait_until(target, WaitFor::Writable, timeout_ms, || {
         let stream = unsafe { &mut *stream };
         flush(stream)?;
         Ok(stream.pending.is_empty())
@@ -998,7 +1121,8 @@ pub unsafe extern "C" fn tecsNetStreamWait(stream: *mut TecsNetStream, timeout_m
     }
     let mut byte = [0_u8; 1];
     // SAFETY: The caller supplies a live stream.
-    match wait_until(timeout_ms, || {
+    let target = descriptor(&unsafe { &*stream }.stream);
+    match wait_until(target, WaitFor::Readable, timeout_ms, || {
         match unsafe { (*stream).stream.peek(&mut byte) } {
             Ok(_) => Ok(true),
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(false),
@@ -1044,7 +1168,12 @@ pub unsafe extern "C" fn tecsNetDatagramBind(
         socket.set_nonblocking(true)?;
         Ok(MioUdpSocket::from_std(socket))
     }) {
-        Ok(socket) => Box::into_raw(Box::new(TecsNetDatagram { socket, reactor: 0 })),
+        Ok(socket) => Box::into_raw(Box::new(TecsNetDatagram {
+            socket,
+            reactor: 0,
+            scratch: Vec::new(),
+            source: None,
+        })),
         Err(error) => {
             set_error(error);
             ptr::null_mut()
@@ -1108,7 +1237,9 @@ pub unsafe extern "C" fn tecsNetDatagramSendWait(
         }
     };
     let destination = SocketAddr::new(unsafe { (*address).address }, port);
-    match wait_until(timeout_ms, || {
+    // SAFETY: The caller supplies a live socket.
+    let target = descriptor(&unsafe { &*socket }.socket);
+    match wait_until(target, WaitFor::Writable, timeout_ms, || {
         match unsafe { (*socket).socket.send_to(data, destination) } {
             Ok(sent) if sent == data.len() => Ok(true),
             Ok(sent) => Err(io::Error::other(format!(
@@ -1141,17 +1272,21 @@ pub unsafe extern "C" fn tecsNetDatagramReceive(
     unsafe {
         *packet = ptr::null_mut();
     }
-    let mut bytes = vec![0_u8; 65_507];
     // SAFETY: The caller supplies a live socket.
-    match unsafe { (*socket).socket.recv_from(&mut bytes) } {
+    let socket = unsafe { &mut *socket };
+    if socket.scratch.len() < DATAGRAM_CAPACITY {
+        socket.scratch.resize(DATAGRAM_CAPACITY, 0);
+    }
+    match socket.socket.recv_from(&mut socket.scratch) {
         Ok((length, source)) => {
-            bytes.truncate(length);
+            socket.source = Some(source);
+            let bytes = Box::<[u8]>::from(&socket.scratch[..length]);
             // SAFETY: The output was validated above and receives ownership.
             unsafe {
                 *packet = Box::into_raw(Box::new(TecsNetPacket {
                     address: Some(net_address(source.ip())),
                     port: source.port(),
-                    bytes: bytes.into_boxed_slice(),
+                    bytes,
                 }));
             }
             1
@@ -1160,6 +1295,112 @@ pub unsafe extern "C" fn tecsNetDatagramReceive(
         Err(error) => {
             set_error(error);
             -1
+        }
+    }
+}
+
+/// Writes formatted text into caller memory without allocating.
+struct TextSink<'a> {
+    target: &'a mut [u8],
+    written: usize,
+}
+
+impl FormatWrite for TextSink<'_> {
+    fn write_str(&mut self, value: &str) -> fmt::Result {
+        let bytes = value.as_bytes();
+        let finish = self.written + bytes.len();
+        if finish > self.target.len() {
+            return Err(fmt::Error);
+        }
+        self.target[self.written..finish].copy_from_slice(bytes);
+        self.written = finish;
+        Ok(())
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsNetDatagramReceiveInto(
+    socket: *mut TecsNetDatagram,
+    output: *mut u8,
+    capacity: usize,
+    length: *mut usize,
+    source: *mut u8,
+    source_capacity: usize,
+    source_length: *mut usize,
+    port: *mut u16,
+) -> c_int {
+    if socket.is_null() || length.is_null() || source_length.is_null() || port.is_null() {
+        set_error("datagram socket or output is null");
+        return -1;
+    }
+    if (output.is_null() && capacity != 0) || (source.is_null() && source_capacity != 0) {
+        set_error("datagram output buffer is null");
+        return -1;
+    }
+    // SAFETY: The caller supplies writable storage for each output.
+    unsafe {
+        *length = 0;
+        *source_length = 0;
+        *port = 0;
+    }
+    let mut nothing = [0_u8; 0];
+    // SAFETY: The caller promises a writable allocation of `capacity`.
+    let payload = if capacity == 0 {
+        &mut nothing[..]
+    } else {
+        unsafe { slice::from_raw_parts_mut(output, capacity) }
+    };
+    // SAFETY: The caller supplies a live socket.
+    let socket = unsafe { &mut *socket };
+    let (received, from) = match socket.socket.recv_from(payload) {
+        Ok(value) => value,
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => return 0,
+        Err(error) => {
+            set_error(error);
+            return -1;
+        }
+    };
+    socket.source = Some(from);
+
+    let mut unwritten = [0_u8; 0];
+    // SAFETY: The caller promises a writable allocation of `source_capacity`.
+    let text = if source_capacity == 0 {
+        &mut unwritten[..]
+    } else {
+        unsafe { slice::from_raw_parts_mut(source, source_capacity) }
+    };
+    let mut sink = TextSink {
+        target: text,
+        written: 0,
+    };
+    if write!(sink, "{}", from.ip()).is_err() {
+        set_error("datagram source address does not fit its buffer");
+        return -1;
+    }
+    let written = sink.written;
+    // SAFETY: Each output pointer was validated above.
+    unsafe {
+        *length = received;
+        *source_length = written;
+        *port = from.port();
+    }
+    1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tecsNetDatagramSource(
+    socket: *mut TecsNetDatagram,
+) -> *mut TecsNetAddress {
+    if socket.is_null() {
+        set_error("datagram socket is null");
+        return ptr::null_mut();
+    }
+    // SAFETY: The caller supplies a live socket.
+    match unsafe { &*socket }.source {
+        Some(source) => Box::into_raw(Box::new(net_address(source.ip()))),
+        None => {
+            set_error("datagram socket has received no packet");
+            ptr::null_mut()
         }
     }
 }
@@ -1175,7 +1416,8 @@ pub unsafe extern "C" fn tecsNetDatagramWait(
     }
     let mut byte = [0_u8; 1];
     // SAFETY: The caller supplies a live socket.
-    match wait_until(timeout_ms, || {
+    let target = descriptor(&unsafe { &*socket }.socket);
+    match wait_until(target, WaitFor::Readable, timeout_ms, || {
         match unsafe { (*socket).socket.peek_from(&mut byte) } {
             Ok(_) => Ok(true),
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(false),
@@ -1260,5 +1502,215 @@ pub unsafe extern "C" fn tecsNetPacketDestroy(packet: *mut TecsNetPacket) {
     if !packet.is_null() {
         // SAFETY: The caller transfers one owned packet.
         drop(unsafe { Box::from_raw(packet) });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+    use std::thread;
+
+    fn loopback() -> *mut TecsNetAddress {
+        Box::into_raw(Box::new(net_address(IpAddr::V4(Ipv4Addr::LOCALHOST))))
+    }
+
+    fn listener_port(server: *mut TecsNetServer) -> u16 {
+        // SAFETY: The test owns the server for the whole call.
+        unsafe { &*server }
+            .listener
+            .local_addr()
+            .expect("listener address")
+            .port()
+    }
+
+    fn datagram_port(socket: *mut TecsNetDatagram) -> u16 {
+        // SAFETY: The test owns the socket for the whole call.
+        unsafe { &*socket }
+            .socket
+            .local_addr()
+            .expect("datagram address")
+            .port()
+    }
+
+    #[test]
+    fn a_blocking_wait_returns_after_its_timeout() {
+        let address = loopback();
+        let server = unsafe { tecsNetListen(address, 0) };
+        assert!(!server.is_null());
+
+        let started = Instant::now();
+        let status = unsafe { tecsNetServerWait(server, 120) };
+        let elapsed = started.elapsed();
+        assert_eq!(0, status);
+        assert!(elapsed >= Duration::from_millis(110), "waited {elapsed:?}");
+        assert!(elapsed < Duration::from_millis(2000), "waited {elapsed:?}");
+
+        unsafe { tecsNetServerDestroy(server) };
+        unsafe { tecsNetAddressDestroy(address) };
+    }
+
+    #[test]
+    fn a_zero_timeout_polls_without_waiting() {
+        let address = loopback();
+        let server = unsafe { tecsNetListen(address, 0) };
+        assert!(!server.is_null());
+
+        let started = Instant::now();
+        assert_eq!(0, unsafe { tecsNetServerWait(server, 0) });
+        assert!(started.elapsed() < Duration::from_millis(50));
+
+        unsafe { tecsNetServerDestroy(server) };
+        unsafe { tecsNetAddressDestroy(address) };
+    }
+
+    #[test]
+    fn a_blocking_wait_wakes_when_its_client_arrives() {
+        let address = loopback();
+        let server = unsafe { tecsNetListen(address, 0) };
+        assert!(!server.is_null());
+        let port = listener_port(server);
+
+        let client = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(60));
+            TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("client connects")
+        });
+        let started = Instant::now();
+        let status = unsafe { tecsNetServerWait(server, 5000) };
+        let elapsed = started.elapsed();
+        assert_eq!(1, status);
+        assert!(elapsed < Duration::from_millis(2000), "waited {elapsed:?}");
+
+        let accepted = unsafe { tecsNetServerAccept(server) };
+        assert!(!accepted.is_null());
+        drop(client.join().expect("client thread"));
+
+        unsafe { tecsNetStreamDestroy(accepted) };
+        unsafe { tecsNetServerDestroy(server) };
+        unsafe { tecsNetAddressDestroy(address) };
+    }
+
+    #[test]
+    fn a_stream_drain_finishes_its_queued_bytes() {
+        let address = loopback();
+        let server = unsafe { tecsNetListen(address, 0) };
+        let port = listener_port(server);
+        let peer = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("client connects");
+        assert_eq!(1, unsafe { tecsNetServerWait(server, 2000) });
+        let accepted = unsafe { tecsNetServerAccept(server) };
+        assert!(!accepted.is_null());
+
+        let payload = b"drain me";
+        let written = unsafe { tecsNetStreamWrite(accepted, payload.as_ptr(), payload.len()) };
+        assert_eq!(payload.len() as i64, written);
+        assert_eq!(1, unsafe { tecsNetStreamDrain(accepted, 2000) });
+        assert_eq!(0, unsafe { tecsNetStreamPendingWrites(accepted) });
+
+        drop(peer);
+        unsafe { tecsNetStreamDestroy(accepted) };
+        unsafe { tecsNetServerDestroy(server) };
+        unsafe { tecsNetAddressDestroy(address) };
+    }
+
+    #[test]
+    fn a_datagram_receives_into_caller_memory() {
+        let address = loopback();
+        let receiver = unsafe { tecsNetDatagramBind(address, 0) };
+        let sender = unsafe { tecsNetDatagramBind(address, 0) };
+        assert!(!receiver.is_null() && !sender.is_null());
+        let port = datagram_port(receiver);
+        let payload = b"datagram bytes";
+
+        let mut bytes = [0_u8; 64];
+        let mut length = 0_usize;
+        let mut text = [0_u8; 64];
+        let mut text_length = 0_usize;
+        let mut source_port = 0_u16;
+
+        // Nothing has arrived, so the call reports would-block without
+        // touching its outputs.
+        assert_eq!(0, unsafe {
+            tecsNetDatagramReceiveInto(
+                receiver,
+                bytes.as_mut_ptr(),
+                bytes.len(),
+                &mut length,
+                text.as_mut_ptr(),
+                text.len(),
+                &mut text_length,
+                &mut source_port,
+            )
+        });
+        assert_eq!(0, length);
+
+        assert_eq!(1, unsafe {
+            tecsNetDatagramSend(sender, address, port, payload.as_ptr(), payload.len())
+        });
+        assert_eq!(1, unsafe { tecsNetDatagramWait(receiver, 2000) });
+        assert_eq!(1, unsafe {
+            tecsNetDatagramReceiveInto(
+                receiver,
+                bytes.as_mut_ptr(),
+                bytes.len(),
+                &mut length,
+                text.as_mut_ptr(),
+                text.len(),
+                &mut text_length,
+                &mut source_port,
+            )
+        });
+        assert_eq!(payload.len(), length);
+        assert_eq!(&payload[..], &bytes[..length]);
+        assert_eq!(
+            "127.0.0.1",
+            std::str::from_utf8(&text[..text_length]).expect("address text")
+        );
+        assert_eq!(datagram_port(sender), source_port);
+
+        let source = unsafe { tecsNetDatagramSource(receiver) };
+        assert!(!source.is_null());
+        unsafe { tecsNetAddressDestroy(source) };
+
+        unsafe { tecsNetDatagramDestroy(sender) };
+        unsafe { tecsNetDatagramDestroy(receiver) };
+        unsafe { tecsNetAddressDestroy(address) };
+    }
+
+    #[test]
+    fn a_datagram_packet_owns_exactly_its_payload() {
+        let address = loopback();
+        let receiver = unsafe { tecsNetDatagramBind(address, 0) };
+        let sender = unsafe { tecsNetDatagramBind(address, 0) };
+        let port = datagram_port(receiver);
+        let payload = b"packet";
+        assert_eq!(1, unsafe {
+            tecsNetDatagramSend(sender, address, port, payload.as_ptr(), payload.len())
+        });
+        assert_eq!(1, unsafe { tecsNetDatagramWait(receiver, 2000) });
+
+        let mut packet: *mut TecsNetPacket = ptr::null_mut();
+        assert_eq!(1, unsafe { tecsNetDatagramReceive(receiver, &mut packet) });
+        assert!(!packet.is_null());
+        // SAFETY: The receive above produced one live packet.
+        let held = unsafe { &*packet };
+        assert_eq!(payload.len(), held.bytes.len());
+        assert_eq!(&payload[..], &held.bytes[..]);
+        // SAFETY: The socket is live and keeps its reception buffer.
+        assert_eq!(DATAGRAM_CAPACITY, unsafe { &*receiver }.scratch.len());
+
+        unsafe { tecsNetPacketDestroy(packet) };
+        unsafe { tecsNetDatagramDestroy(sender) };
+        unsafe { tecsNetDatagramDestroy(receiver) };
+        unsafe { tecsNetAddressDestroy(address) };
+    }
+
+    #[test]
+    fn a_source_address_needs_a_received_datagram() {
+        let address = loopback();
+        let socket = unsafe { tecsNetDatagramBind(address, 0) };
+        assert!(unsafe { tecsNetDatagramSource(socket) }.is_null());
+
+        unsafe { tecsNetDatagramDestroy(socket) };
+        unsafe { tecsNetAddressDestroy(address) };
     }
 }

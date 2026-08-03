@@ -70,8 +70,11 @@ function pump.transfer(source: Reader | FILE, destination: Writer | FILE): integ
     return pump.transferBuffered(source, destination)
 end
 
-function pump.transferBuffered(source: Reader | FILE, destination: Writer | FILE): integer, string
-    local scratch <const> = bufferpool.acquire(CHUNK)
+-- Holds the copy loop so `transferBuffered` releases its scratch buffer on the
+-- normal path and on an unwinding one. A cooperative read raises out of this
+-- loop when its system is canceled, and a buffer lost there would leave the
+-- pool short of an entry for the rest of the process.
+local function copyThrough(source: Reader | FILE, destination: Writer | FILE, scratch: types.Buffer): integer, string
     local total = 0
     local failure: string
     while failure == nil do
@@ -99,7 +102,18 @@ function pump.transferBuffered(source: Reader | FILE, destination: Writer | FILE
             total = total + wrote
         end
     end
+    return total, failure
+end
+
+function pump.transferBuffered(source: Reader | FILE, destination: Writer | FILE): integer, string
+    local scratch <const> = bufferpool.acquire(CHUNK)
+    local ok <const>, copied, reason = pcall(copyThrough, source, destination, scratch) as (boolean, any, any)
     bufferpool.release(scratch)
+    if not ok then
+        error(copied, 0)
+    end
+    local total <const> = copied as integer
+    local failure <const> = reason as string
     return failure == nil and total or nil, failure
 end
 
