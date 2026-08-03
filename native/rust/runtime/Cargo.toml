@@ -26,6 +26,7 @@ flate2 = { workspace = true, optional = true }
 glam.workspace = true
 gltf.workspace = true
 image.workspace = true
+ktx2.workspace = true
 libc.workspace = true
 meshopt.workspace = true
 mio.workspace = true

@@ -1371,6 +1371,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ktx2"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d50be8a24c37debdf3170be6ca396d5b5b165f37f94837891adac735ca416b8"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
 name = "kurbo"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2651,6 +2660,7 @@ dependencies = [
  "glam 0.33.2",
  "gltf",
  "image",
+ "ktx2",
  "libc",
  "meshopt",
  "mio",
@@ -2688,6 +2698,7 @@ dependencies = [
  "draco_decoder",
  "image",
  "image_dds",
+ "ktx2",
  "serde_json",
  "sha2",
  "tecs-build-support",

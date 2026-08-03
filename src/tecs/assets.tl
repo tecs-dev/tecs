@@ -61,10 +61,12 @@ triangles retain their authored order because order affects their result, but
 their vertex streams still receive the lossless fetch remap.
 
 The repository's large-scene fetch command can replace source images with
-complete BC3 mip chains. Those images remain compressed through upload and
+complete BC3 mip chains in KTX2 containers. The maintained Rust parser
+validates the container before exposing its blocks. Those images remain
+compressed through upload and
 require a mesh domain created with `textureFormat = tecs.assets.IMAGE_BC3`,
-`mipmaps = true`, and `packTextures = false`. Normal `loadImage` and ordinary
-glTF images remain decoded RGBA8.
+`mipmaps = true`, and `packTextures = false`. PNG, JPEG, SVG, and ordinary glTF
+images remain decoded RGBA8.
 
 ## Lifetime
 
@@ -82,7 +84,8 @@ same image. A later load after settlement decodes again. Sound loads never
 share.
 
 `loadString` reads a complete file into a binary-safe string without
-interpreting it. Image loads accept PNG, JPEG and static SVG. SVG renders at
+interpreting it. Image loads accept PNG, JPEG, static SVG, and linear BC3 KTX2
+mip chains. SVG renders at
 its intrinsic dimensions. It uses the bundled JetBrains Mono for all text and
 ignores external image references, so installed fonts and the worker's current
 directory cannot change its pixels. `tecs.audio.decoders()` reports the sound
@@ -118,8 +121,6 @@ local MIX <const> = sdl3mixer.C
 local RUST <const> = rust.C
 local IMAGE_RGBA8 <const> = 0
 local IMAGE_BC3 <const> = 1
-local COMPRESSED_HEADER_BYTES <const> = 36
-local COMPRESSED_MAGIC <const> = "TECSBC3\0"
 
 --- Runs on the worker. Decodes to a normalized layout and returns an address.
 local DECODER <const> = [==[
@@ -254,13 +255,10 @@ local record Image
     --- report `pitch * height`.
     byteCount: integer
 
-    --- Engine-owned. Stores the decoded image allocation until the last
-    --- `release`. Ordinary game code should ignore this field.
+    --- Engine-owned. Stores the native image allocation until the last
+    --- `release`. An image imported with a model instead borrows the model's
+    --- allocation. Ordinary game code should ignore this field.
     _image: loader.CValue
-
-    --- Engine-owned. Retains imported compressed bytes while `pixels` points
-    --- into them. Ordinary game code should ignore this field.
-    _bytes: string
 
     --- Engine-owned. Counts callers holding these pixels. Ordinary game code
     --- should ignore this field. The count includes one per completed load of
@@ -732,78 +730,41 @@ function Model:release()
     end
 end
 
-local function uint32(bytes: string, offset: integer, path: string): integer
-    local a, b, c, d <const> = string.byte(bytes, offset, offset + 3)
-    if d == nil then
-        error(("cannot decode %s: truncated compressed texture header"):format(path), 0)
+local function imageFromAllocation(path: string, allocation: loader.CPtr, refs?: integer): Image
+    local owner <const> = loader.newArray("TecsImageInfo[1]")
+    if not RUST.tecsImageGetInfo(allocation, owner) then
+        RUST.tecsImageDestroy(allocation)
+        error("cannot read decoded image metadata", 0)
     end
-    return a + b * 256 + c * 65536 + d * 16777216
+    local info <const> = owner[0] as {string: any}
+    local width <const> = tonumber(info.width) as integer
+    local height <const> = tonumber(info.height) as integer
+    local format <const> = tonumber(info.format) as integer
+    return setmetatable(
+        {
+            path = path,
+            _image = allocation,
+            pixels = info.pixels as loader.CValue,
+            width = width,
+            height = height,
+            pitch = format == IMAGE_RGBA8 and width * 4 or 0,
+            format = format,
+            storageWidth = tonumber(info.storage_width) as integer,
+            storageHeight = tonumber(info.storage_height) as integer,
+            levels = tonumber(info.levels) as integer,
+            byteCount = tonumber(info.byte_count) as integer,
+            _refs = refs or 1,
+        } as Image,
+        ImageMT
+    )
 end
 
 local function imageFromBytes(bytes: string, path: string): Image
-    if #bytes >= COMPRESSED_HEADER_BYTES and bytes:sub(1, 8) == COMPRESSED_MAGIC then
-        local version <const> = uint32(bytes, 9, path)
-        local width <const> = uint32(bytes, 13, path)
-        local height <const> = uint32(bytes, 17, path)
-        local storageWidth <const> = uint32(bytes, 21, path)
-        local storageHeight <const> = uint32(bytes, 25, path)
-        local levels <const> = uint32(bytes, 29, path)
-        local byteCount <const> = uint32(bytes, 33, path)
-        if version ~= 1 then
-            error(("cannot decode %s: unsupported compressed texture version %d"):format(path, version), 0)
-        end
-        if
-            width < 1
-            or height < 1
-            or width > storageWidth
-            or height > storageHeight
-            or levels < 1
-            or byteCount ~= #bytes - COMPRESSED_HEADER_BYTES
-        then
-            error(("cannot decode %s: invalid compressed texture dimensions or length"):format(path), 0)
-        end
-        return setmetatable(
-            {
-                path = path,
-                _bytes = bytes,
-                pixels = (
-                    loader.bytePointer(ffi.cast("const uint8_t *", bytes) as loader.CValue) + COMPRESSED_HEADER_BYTES
-                ) as loader.CValue,
-                width = width,
-                height = height,
-                storageWidth = storageWidth,
-                storageHeight = storageHeight,
-                levels = levels,
-                byteCount = byteCount,
-                pitch = 0,
-                format = IMAGE_BC3,
-                _refs = 1,
-            } as Image,
-            ImageMT
-        )
-    end
     local decoded = RUST.tecsImageDecode(ffi.cast("const uint8_t *", bytes), #bytes)
     if decoded == nil then
         error(("cannot decode %s: %s"):format(path, loader.toString(RUST.tecsRustError())), 0)
     end
-    local width <const> = tonumber(RUST.tecsImageWidth(decoded)) as integer
-    return setmetatable(
-        {
-            path = path,
-            _image = decoded,
-            pixels = RUST.tecsImagePixels(decoded) as loader.CValue,
-            width = width,
-            height = tonumber(RUST.tecsImageHeight(decoded)) as integer,
-            pitch = width * 4,
-            format = IMAGE_RGBA8,
-            storageWidth = width,
-            storageHeight = tonumber(RUST.tecsImageHeight(decoded)) as integer,
-            levels = 1,
-            byteCount = width * (tonumber(RUST.tecsImageHeight(decoded)) as integer) * 4,
-            _refs = 1,
-        } as Image,
-        ImageMT
-    )
+    return imageFromAllocation(path, decoded)
 end
 
 local function modelFromWorker(result: {string: any}): Model
@@ -839,9 +800,24 @@ local function modelFromWorker(result: {string: any}): Model
         local nativeImages <const> = info.images as loader.CArray
         for index = 0, (tonumber(info.image_count) as integer) - 1 do
             local source <const> = nativeImages[index] as {string: any}
-            images[index + 1] = imageFromBytes(
-                textAt(source.bytes as loader.CValue, source.byte_count),
-                textAt(source.name as loader.CValue, source.name_length)
+            local width <const> = tonumber(source.width) as integer
+            local format <const> = tonumber(source.format) as integer
+            images[index + 1] = setmetatable(
+                {
+                    path = textAt(source.name as loader.CValue, source.name_length),
+                    _image = nil,
+                    pixels = source.pixels as loader.CValue,
+                    width = width,
+                    height = tonumber(source.height) as integer,
+                    pitch = format == IMAGE_RGBA8 and width * 4 or 0,
+                    format = format,
+                    storageWidth = tonumber(source.storage_width) as integer,
+                    storageHeight = tonumber(source.storage_height) as integer,
+                    levels = tonumber(source.levels) as integer,
+                    byteCount = tonumber(source.byte_count) as integer,
+                    _refs = 1,
+                } as Image,
+                ImageMT
             )
         end
         local nativeMeshes <const> = info.meshes as loader.CArray
@@ -1427,11 +1403,6 @@ function Image:release()
     if self._refs > 0 then
         return
     end
-    if self._image == nil then
-        self._bytes = nil
-        self.pixels = nil
-        return
-    end
     RUST.tecsImageDestroy(self._image)
     self._image = nil
     self.pixels = nil
@@ -1565,29 +1536,6 @@ local function finishImage(entry: ImageLoad, image?: Image, reason?: string)
     end
 end
 
-local function imageFromAllocation(path: string, allocation: loader.CPtr): Image
-    local width <const> = tonumber(RUST.tecsImageWidth(allocation)) as integer
-    local height <const> = tonumber(RUST.tecsImageHeight(allocation)) as integer
-    return setmetatable(
-        {
-            path = path,
-            _image = allocation,
-            pixels = RUST.tecsImagePixels(allocation) as loader.CValue,
-            width = width,
-            height = height,
-            pitch = width * 4,
-            format = IMAGE_RGBA8,
-            storageWidth = width,
-            storageHeight = height,
-            levels = 1,
-            byteCount = width * height * 4,
-            -- Consumers acquire their holds after the shared root settles.
-            _refs = 0,
-        } as Image,
-        ImageMT
-    )
-end
-
 local function beginImage(path: string): Completion<Image>
     local root <const> = Completion.pending(imageSource) as Completion<Image>
     -- The producer is tracked by ImageLoad. Watchers are only direct callers,
@@ -1612,25 +1560,6 @@ local function beginImage(path: string): Completion<Image>
             return
         end
         content.note(path, "image")
-        if
-            result.length >= #COMPRESSED_MAGIC
-            and loader.toBytes(result.pointer as loader.CValue, #COMPRESSED_MAGIC) == COMPRESSED_MAGIC
-        then
-            local ok <const>, image = pcall(function(): Image
-                local bytes <const> = loader.toBytes(result.pointer as loader.CValue, result.length)
-                fileasync.release(result)
-                return imageFromBytes(bytes, path)
-            end) as (boolean, Image | string)
-            if ok then
-                local loaded <const> = image as Image
-                loaded._refs = 0
-                finishImage(entry, loaded)
-            else
-                finishImage(entry, nil, tostring(image))
-            end
-            return
-        end
-
         local moved <const>, bytes = pcall(fileasync.takeBytes, result) as (boolean, loader.CPtr | string)
         if not moved then
             finishImage(entry, nil, tostring(bytes))
@@ -1644,7 +1573,7 @@ local function beginImage(path: string): Completion<Image>
                 return
             end
             local ok <const>, image = pcall(function(): Image
-                return imageFromAllocation(path, cpuimage.take(decoded.value))
+                return imageFromAllocation(path, cpuimage.take(decoded.value), 0)
             end) as (boolean, Image | string)
             if ok then
                 finishImage(entry, image as Image)
@@ -1756,7 +1685,9 @@ end
 --- release it frees the pixels. A load that starts after the first has settled
 --- decodes again: nothing here is a cache.
 ---
---- @param path The caller supplies a PNG, JPEG or static SVG path. The loader
+--- @param path The caller supplies a PNG, JPEG, static SVG, or linear BC3 KTX2
+---     path. KTX2 input must contain one complete mip chain for one image.
+---     The loader
 ---     renders SVG at its intrinsic width and height, uses bundled JetBrains
 ---     Mono for text, and ignores external image references. Another format
 ---     fails during decoding.

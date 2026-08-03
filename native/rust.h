@@ -34,6 +34,17 @@ typedef struct TecsUri TecsUri;
 typedef struct TecsShader TecsShader;
 typedef struct TecsModel TecsModel;
 
+typedef struct TecsImageInfo {
+    const uint8_t *pixels;
+    size_t byte_count;
+    uint32_t width;
+    uint32_t height;
+    uint32_t storage_width;
+    uint32_t storage_height;
+    uint32_t levels;
+    uint32_t format;
+} TecsImageInfo;
+
 typedef struct TecsShaderDefine {
     const uint8_t *name;
     size_t name_length;
@@ -81,8 +92,14 @@ typedef struct TecsModelMesh {
 typedef struct TecsModelImage {
     const uint8_t *name;
     size_t name_length;
-    const uint8_t *bytes;
+    const uint8_t *pixels;
     size_t byte_count;
+    uint32_t width;
+    uint32_t height;
+    uint32_t storage_width;
+    uint32_t storage_height;
+    uint32_t levels;
+    uint32_t format;
 } TecsModelImage;
 
 typedef struct TecsModelMaterial {
@@ -402,9 +419,7 @@ uint32_t tecsSignalsPoll(void);
 void tecsSignalsUninstall(void);
 
 TecsImage *tecsImageDecode(const uint8_t *bytes, size_t length);
-const uint8_t *tecsImagePixels(const TecsImage *image);
-uint32_t tecsImageWidth(const TecsImage *image);
-uint32_t tecsImageHeight(const TecsImage *image);
+bool tecsImageGetInfo(const TecsImage *image, TecsImageInfo *out);
 void tecsImageDestroy(TecsImage *image);
 
 TecsBytes *tecsImageEncodePngRgbx(const uint8_t *pixels, size_t length, uint32_t width, uint32_t height, size_t pitch);

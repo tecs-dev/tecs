@@ -161,14 +161,16 @@ The static native archive includes `clap` for CLI parsing and `clap_complete`
 for shell completion generation, FastNoise Lite for procedural fields, `gltf`
 for glTF parsing and validation, `glam` for importer transform math,
 `bevy_mikktspace` for MikkTSpace tangent generation, `image` for PNG and JPEG
-decoding and PNG encoding, `meshopt` for import-time vertex-cache and
-vertex-fetch optimization, `resvg` for static SVG rasterization, `reqwest`
+decoding and PNG encoding, `ktx2` for KTX2 parsing and validation, `meshopt`
+for import-time vertex-cache and vertex-fetch optimization, `resvg` for static
+SVG rasterization, `reqwest`
 with Rustls for HTTP, `rmcp` for the official MCP protocol and Streamable HTTP
 server, `rapier2d` for physics, `regex` for compiled regular expressions, and
 `taffy` for UI layout. `bevy_mikktspace` retains Morten S. Mikkelsen's zlib
 notice and offers its Rust implementation under MIT or Apache-2.0. The
 `meshopt` crate embeds meshoptimizer 0.25 under Arseny Kapoulkine's MIT
 license; the Rust wrapper is used under MIT.
+The pure-Rust `ktx2` parser is Apache-2.0 and adds no native runtime library.
 It also owns the host lifecycle, worker channels, logging, dialogs, Lua module
 registration, LuaJIT's machine-code arena, and the single-file payload loader.
 SDL still owns the application loop and LuaJIT still owns game execution.
@@ -206,7 +208,8 @@ release for that target compiles them:
 `icu_normalizer`, `icu_normalizer_data`, `icu_properties`,
 `icu_properties_data`, `icu_provider`, `idna`, `idna_adapter`, `image`,
 `imagesize`, `indexmap`, `inflections`, `ipnet`, `itoa`, `jni`, `jni-macros`,
-`jni-sys`, `jni-sys-macros`, `jobserver`, `js-sys`, `kurbo`, `lazy_static`,
+`jni-sys`, `jni-sys-macros`, `jobserver`, `js-sys`, `ktx2`, `kurbo`,
+`lazy_static`,
 `libc`, `libm`, `litemap`, `log`,
 `matrixmultiply`, `memchr`, `meshopt`, `miniz_oxide`, `mio`, `moxcms`, `nalgebra`,
 `nalgebra-macros`, `num-bigint`, `num-complex`, `num-derive`, `num-integer`,

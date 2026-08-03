@@ -1071,10 +1071,20 @@ local function applyIcon(handle: loader.CPtr, path: string): boolean
     if decoded == nil then
         return false
     end
-    local width <const> = tonumber(rust.C.tecsImageWidth(decoded)) as integer
-    local height <const> = tonumber(rust.C.tecsImageHeight(decoded)) as integer
+    local owner <const> = loader.newArray("TecsImageInfo[1]")
+    if not rust.C.tecsImageGetInfo(decoded, owner) then
+        rust.C.tecsImageDestroy(decoded)
+        return false
+    end
+    local info <const> = owner[0] as {string: any}
+    if tonumber(info.format) ~= 0 then
+        rust.C.tecsImageDestroy(decoded)
+        return false
+    end
+    local width <const> = tonumber(info.width) as integer
+    local height <const> = tonumber(info.height) as integer
     local surface = C.SDL_CreateSurfaceFrom(
-        width, height, C.SDL_PIXELFORMAT_ABGR8888, ffi.cast("void *", rust.C.tecsImagePixels(decoded)), width * 4
+        width, height, C.SDL_PIXELFORMAT_ABGR8888, ffi.cast("void *", info.pixels), width * 4
     )
     if surface == nil then
         rust.C.tecsImageDestroy(decoded)

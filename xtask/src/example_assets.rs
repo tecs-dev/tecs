@@ -10,6 +10,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use image::imageops::FilterType;
 use image::{DynamicImage, RgbaImage};
+use ktx2::{dfd, Format, Header, Index, LevelIndex};
 use serde_json::Value;
 #[cfg(feature = "bistro-import")]
 use sha2::{Digest, Sha256};
@@ -25,8 +26,7 @@ const BISTRO_SHA256: &str = "31f0227490c570926dd16e6650a8584a530a3bcdf651ab524f5
 const BISTRO_BYTES: u64 = 986_315_600;
 #[cfg(feature = "bistro-import")]
 const BISTRO_TEXTURE_SIZE: u32 = 512;
-const COMPRESSED_MAGIC: &[u8; 8] = b"TECSBC3\0";
-const COMPRESSED_VERSION: u32 = 1;
+const ORIGINAL_SIZE_KEY: &str = "TECSoriginalSize";
 
 pub fn fetch(root: &Path, name: &str) -> Result<()> {
     match name {
@@ -37,25 +37,24 @@ pub fn fetch(root: &Path, name: &str) -> Result<()> {
 }
 
 pub fn require_for_example(root: &Path, name: &str) -> Result<()> {
-    if name == "sponza3d"
-        && !root
-            .join("assets/external/sponza/Sponza.tecs.gltf")
-            .is_file()
-    {
+    if name == "sponza3d" && !current_large_scene_cache(root, "sponza", "Sponza.tecs.gltf") {
         bail!(
             "the sponza3d example needs its ignored scene cache; run `cargo xtask fetch sponza` first"
         );
     }
-    if name == "bistro3d"
-        && !root
-            .join("assets/external/bistro/Bistro.tecs.gltf")
-            .is_file()
-    {
+    if name == "bistro3d" && !current_large_scene_cache(root, "bistro", "Bistro.tecs.gltf") {
         bail!(
             "the bistro3d example needs its ignored scene cache; run `cargo xtask fetch bistro` first"
         );
     }
     Ok(())
+}
+
+fn current_large_scene_cache(root: &Path, directory: &str, model: &str) -> bool {
+    let cache = root.join("assets/external").join(directory);
+    cache.join(model).is_file()
+        && fs::read_to_string(cache.join("SOURCE"))
+            .is_ok_and(|source| source.lines().any(|line| line == "texture_format=BC3_KTX2"))
 }
 
 #[cfg(not(feature = "bistro-import"))]
@@ -88,7 +87,10 @@ fn fetch_bistro(root: &Path) -> Result<()> {
         .with_context(|| format!("creating {}", destination.display()))?;
     let derived = destination.join("Bistro.tecs.gltf");
     let geometry = destination.join("Bistro.bin");
-    if derived.is_file() && geometry.is_file() {
+    if derived.is_file()
+        && geometry.is_file()
+        && current_large_scene_cache(root, "bistro", "Bistro.tecs.gltf")
+    {
         let mut document: Value = serde_json::from_slice(
             &fs::read(&derived).with_context(|| format!("reading {}", derived.display()))?,
         )?;
@@ -150,7 +152,7 @@ fn fetch_bistro(root: &Path) -> Result<()> {
     fs::write(
         destination.join("SOURCE"),
         format!(
-            "yamayuski/babylon-lumberyard-bistro\nrevision={BISTRO_REVISION}\npath=Bistro_v5_2/BistroExterior.glb\nsha256={BISTRO_SHA256}\nderived=Bistro.tecs.gltf\ntexture_format=BC3\ntexture_size={BISTRO_TEXTURE_SIZE}\ncull_chunks={chunks}\nvertices={vertices}\nindices={indices}\n"
+            "yamayuski/babylon-lumberyard-bistro\nrevision={BISTRO_REVISION}\npath=Bistro_v5_2/BistroExterior.glb\nsha256={BISTRO_SHA256}\nderived=Bistro.tecs.gltf\ntexture_format=BC3_KTX2\ntexture_size={BISTRO_TEXTURE_SIZE}\ncull_chunks={chunks}\nvertices={vertices}\nindices={indices}\n"
         ),
     )?;
     fs::remove_file(&source).with_context(|| format!("removing temporary {}", source.display()))?;
@@ -198,7 +200,7 @@ fn fetch_sponza(root: &Path) -> Result<()> {
     fs::write(
         destination.join("SOURCE"),
         format!(
-            "KhronosGroup/glTF-Sample-Assets\nrevision={SPONZA_REVISION}\npath={SPONZA_MODEL_ROOT}/glTF\nderived=Sponza.tecs.gltf\ntexture_format=BC3\ntexture_size={SPONZA_TEXTURE_SIZE}\ncull_chunks={chunks}\n"
+            "KhronosGroup/glTF-Sample-Assets\nrevision={SPONZA_REVISION}\npath={SPONZA_MODEL_ROOT}/glTF\nderived=Sponza.tecs.gltf\ntexture_format=BC3_KTX2\ntexture_size={SPONZA_TEXTURE_SIZE}\ncull_chunks={chunks}\n"
         ),
     )?;
     println!(
@@ -712,7 +714,7 @@ fn preprocess_embedded_textures(
             .get(offset..offset + length)
             .with_context(|| format!("Bistro image {index} is outside buffer {buffer_index}"))?;
         source_bytes += bytes.len() as u64;
-        let relative = format!("compressed/image-{index:03}.tbc");
+        let relative = format!("compressed/image-{index:03}.ktx2");
         let target = destination.join(&relative);
         let cached = fs::read(&target).ok();
         if cached
@@ -741,7 +743,7 @@ fn preprocess_embedded_textures(
         object.insert("uri".to_owned(), Value::String(relative));
         object.insert(
             "mimeType".to_owned(),
-            Value::String("application/x-tecs-bc3".to_owned()),
+            Value::String("image/ktx2".to_owned()),
         );
     }
     Ok((compressed_bytes, source_bytes))
@@ -1016,7 +1018,7 @@ fn preprocess_textures(destination: &Path, document: &mut Value) -> Result<(u64,
         let source = destination.join(safe_relative(uri)?);
         let bytes = fs::read(&source).with_context(|| format!("reading {}", source.display()))?;
         source_bytes += bytes.len() as u64;
-        let relative = format!("compressed/image-{index:03}.tbc");
+        let relative = format!("compressed/image-{index:03}.ktx2");
         let target = destination.join(&relative);
         let cached = fs::read(&target).ok();
         if cached
@@ -1032,20 +1034,32 @@ fn preprocess_textures(destination: &Path, document: &mut Value) -> Result<(u64,
             fs::write(&target, encoded).with_context(|| format!("writing {}", target.display()))?;
         }
         image["uri"] = Value::String(relative);
-        image["mimeType"] = Value::String("application/x-tecs-bc3".to_owned());
+        image["mimeType"] = Value::String("image/ktx2".to_owned());
     }
     Ok((compressed_bytes, source_bytes))
 }
 
 fn valid_cached_texture(bytes: &[u8], storage_size: u32) -> bool {
-    if bytes.len() < 36 || &bytes[..8] != COMPRESSED_MAGIC {
+    let Ok(reader) = ktx2::Reader::new(bytes) else {
         return false;
-    }
-    let value = |offset: usize| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
-    value(8) == COMPRESSED_VERSION
-        && value(20) == storage_size
-        && value(24) == storage_size
-        && value(32) as usize == bytes.len() - 36
+    };
+    let header = reader.header();
+    header.format == Some(Format::BC3_UNORM_BLOCK)
+        && header.pixel_width == storage_size
+        && header.pixel_height == storage_size
+        && header.pixel_depth == 0
+        && header.layer_count == 0
+        && header.face_count == 1
+        && header.level_count == storage_size.ilog2() + 1
+        && header.supercompression_scheme.is_none()
+        && reader.transfer_function() == Some(ktx2::TransferFunction::Linear)
+        && reader.is_alpha_premultiplied() == Some(false)
+        && reader.levels().enumerate().all(|(index, level)| {
+            let width = (storage_size >> index).max(1);
+            let height = (storage_size >> index).max(1);
+            let expected = width.div_ceil(4) as usize * height.div_ceil(4) as usize * 16;
+            level.data.len() == expected && level.uncompressed_byte_length == expected as u64
+        })
 }
 
 fn encode_bc3_texture(
@@ -1071,9 +1085,11 @@ fn encode_bc3_texture(
         *source.get_pixel(x.min(width - 1), y.min(height - 1))
     });
     let levels = storage_width.max(storage_height).ilog2() + 1;
-    let mut payload = Vec::new();
+    let mut mip_levels = Vec::with_capacity(levels as usize);
     for level_index in 0..levels {
-        encode_bc3_level(&level, &mut payload);
+        let mut encoded = Vec::new();
+        encode_bc3_level(&level, &mut encoded);
+        mip_levels.push(encoded);
         if level_index + 1 < levels {
             level = image::imageops::resize(
                 &level,
@@ -1083,20 +1099,97 @@ fn encode_bc3_texture(
             );
         }
     }
-    let mut output = Vec::with_capacity(36 + payload.len());
-    output.extend_from_slice(COMPRESSED_MAGIC);
-    for value in [
-        COMPRESSED_VERSION,
-        width,
-        height,
-        storage_width,
-        storage_height,
-        levels,
-        payload.len() as u32,
-    ] {
-        output.extend_from_slice(&value.to_le_bytes());
+    encode_bc3_ktx2(width, height, storage_width, storage_height, &mip_levels)
+}
+
+fn push_kvd(output: &mut Vec<u8>, key: &str, value: &[u8]) {
+    let length = key.len() + 1 + value.len();
+    output.extend_from_slice(&(length as u32).to_le_bytes());
+    output.extend_from_slice(key.as_bytes());
+    output.push(0);
+    output.extend_from_slice(value);
+    while !output.len().is_multiple_of(4) {
+        output.push(0);
     }
-    output.extend_from_slice(&payload);
+}
+
+fn encode_bc3_ktx2(
+    width: u32,
+    height: u32,
+    storage_width: u32,
+    storage_height: u32,
+    levels: &[Vec<u8>],
+) -> Result<Vec<u8>> {
+    let (basic, type_size) = dfd::Basic::from_format(Format::BC3_UNORM_BLOCK)
+        .context("building the BC3 KTX2 data format descriptor")?;
+    let block = dfd::Block::Basic(basic).to_vec();
+    let mut dfd = Vec::with_capacity(4 + block.len());
+    dfd.extend_from_slice(&((4 + block.len()) as u32).to_le_bytes());
+    dfd.extend_from_slice(&block);
+
+    let mut kvd = Vec::new();
+    push_kvd(&mut kvd, "KTXwriter", b"Tecs xtask\0");
+    let mut original_size = Vec::with_capacity(8);
+    original_size.extend_from_slice(&width.to_le_bytes());
+    original_size.extend_from_slice(&height.to_le_bytes());
+    push_kvd(&mut kvd, ORIGINAL_SIZE_KEY, &original_size);
+
+    let dfd_offset = Header::LENGTH + levels.len() * LevelIndex::LENGTH;
+    let kvd_offset = dfd_offset + dfd.len();
+    let unaligned_data_offset = kvd_offset + kvd.len();
+    let data_offset = unaligned_data_offset.div_ceil(16) * 16;
+    let mut indices = vec![
+        LevelIndex {
+            byte_offset: 0,
+            byte_length: 0,
+            uncompressed_byte_length: 0,
+        };
+        levels.len()
+    ];
+    let mut next_offset = data_offset as u64;
+    // KTX2 places the smallest level first in the file while its index remains
+    // ordered from the largest logical level to the smallest.
+    for index in (0..levels.len()).rev() {
+        let length = levels[index].len() as u64;
+        indices[index] = LevelIndex {
+            byte_offset: next_offset,
+            byte_length: length,
+            uncompressed_byte_length: length,
+        };
+        next_offset += length;
+    }
+    let header = Header {
+        format: Some(Format::BC3_UNORM_BLOCK),
+        type_size,
+        pixel_width: storage_width,
+        pixel_height: storage_height,
+        pixel_depth: 0,
+        layer_count: 0,
+        face_count: 1,
+        level_count: levels.len() as u32,
+        supercompression_scheme: None,
+        index: Index {
+            dfd_byte_offset: dfd_offset as u32,
+            dfd_byte_length: dfd.len() as u32,
+            kvd_byte_offset: kvd_offset as u32,
+            kvd_byte_length: kvd.len() as u32,
+            sgd_byte_offset: 0,
+            sgd_byte_length: 0,
+        },
+    };
+    let mut output = Vec::with_capacity(next_offset as usize);
+    output.extend_from_slice(&header.as_bytes());
+    for index in indices {
+        output.extend_from_slice(&index.as_bytes());
+    }
+    output.extend_from_slice(&dfd);
+    output.extend_from_slice(&kvd);
+    output.resize(data_offset, 0);
+    for level in levels.iter().rev() {
+        output.extend_from_slice(level);
+    }
+    // Parsing here keeps malformed writer output out of persistent caches.
+    ktx2::Reader::new(output.as_slice()).context("validating encoded KTX2 texture")?;
     Ok(output)
 }
 
@@ -1374,11 +1467,22 @@ mod tests {
     fn writes_complete_bc3_mip_chains() {
         let image = DynamicImage::ImageRgba8(RgbaImage::from_pixel(2, 1, Rgba([17, 34, 51, 68])));
         let bytes = encode_bc3_texture(&image, 4, 4).unwrap();
-        assert_eq!(&bytes[..8], b"TECSBC3\0");
-        assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 2);
-        assert_eq!(u32::from_le_bytes(bytes[28..32].try_into().unwrap()), 3);
-        assert_eq!(u32::from_le_bytes(bytes[32..36].try_into().unwrap()), 48);
-        assert_eq!(bytes.len(), 84);
+        let reader = ktx2::Reader::new(bytes.as_slice()).unwrap();
+        let header = reader.header();
+        assert_eq!(header.format, Some(ktx2::Format::BC3_UNORM_BLOCK));
+        assert_eq!((header.pixel_width, header.pixel_height), (4, 4));
+        assert_eq!(header.level_count, 3);
+        assert_eq!(
+            reader.levels().map(|level| level.data.len()).sum::<usize>(),
+            48
+        );
+        let original = reader
+            .key_value_data()
+            .find(|(key, _)| *key == "TECSoriginalSize")
+            .unwrap()
+            .1;
+        assert_eq!(u32::from_le_bytes(original[0..4].try_into().unwrap()), 2);
+        assert_eq!(u32::from_le_bytes(original[4..8].try_into().unwrap()), 1);
         assert!(valid_cached_texture(&bytes, 4));
         let mut truncated = bytes;
         truncated.pop();
@@ -1389,10 +1493,18 @@ mod tests {
     fn downsamples_large_textures_without_changing_the_storage_contract() {
         let image = DynamicImage::ImageRgba8(RgbaImage::from_pixel(1024, 256, Rgba([1, 2, 3, 4])));
         let bytes = encode_bc3_texture(&image, 512, 512).unwrap();
-        assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 512);
-        assert_eq!(u32::from_le_bytes(bytes[16..20].try_into().unwrap()), 128);
-        assert_eq!(u32::from_le_bytes(bytes[20..24].try_into().unwrap()), 512);
-        assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 512);
+        let reader = ktx2::Reader::new(bytes.as_slice()).unwrap();
+        assert_eq!(
+            (reader.header().pixel_width, reader.header().pixel_height),
+            (512, 512)
+        );
+        let original = reader
+            .key_value_data()
+            .find(|(key, _)| *key == "TECSoriginalSize")
+            .unwrap()
+            .1;
+        assert_eq!(u32::from_le_bytes(original[0..4].try_into().unwrap()), 512);
+        assert_eq!(u32::from_le_bytes(original[4..8].try_into().unwrap()), 128);
         assert!(valid_cached_texture(&bytes, 512));
     }
 
@@ -1413,11 +1525,22 @@ mod tests {
         let scene = root.join("assets/external/sponza/Sponza.tecs.gltf");
         fs::create_dir_all(scene.parent().unwrap()).unwrap();
         fs::write(&scene, b"{}").unwrap();
+        assert!(require_for_example(&root, "sponza3d").is_err());
+        fs::write(
+            scene.parent().unwrap().join("SOURCE"),
+            b"texture_format=BC3_KTX2\n",
+        )
+        .unwrap();
         assert!(require_for_example(&root, "sponza3d").is_ok());
 
         let bistro = root.join("assets/external/bistro/Bistro.tecs.gltf");
         fs::create_dir_all(bistro.parent().unwrap()).unwrap();
         fs::write(&bistro, b"{}").unwrap();
+        fs::write(
+            bistro.parent().unwrap().join("SOURCE"),
+            b"texture_format=BC3_KTX2\n",
+        )
+        .unwrap();
         assert!(require_for_example(&root, "bistro3d").is_ok());
         fs::remove_dir_all(&root).unwrap();
     }

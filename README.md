@@ -37,7 +37,7 @@ start a graphics stack.
   large-primitive chunking, and independently allocated transparent,
   double-sided, directional-shadow, point/spot-light, skeletal, morph-target,
   vertex-color, fog, ambient-probe, specular-environment, mipmapped-texture,
-  BC3 texture, and screen-space ambient-occlusion lanes.
+  KTX2 BC3 texture, and screen-space ambient-occlusion lanes.
 - Optional packed-HDR bloom at a caller-selected scale, composed before
   transparent meshes and the 2D forward lane so a mixed renderer can keep its
   HUD crisp.
@@ -121,8 +121,10 @@ Sprites, transparent meshes, and direct light are not darkened by it.
 
 Mesh images follow that isolation rule too. Unpacked RGBA8 arrays can generate
 complete mip chains on the GPU. An explicitly selected BC3 array instead
-uploads importer-built chains without expanding them in GPU memory. The
-Sponza fetch command is both a pinned cache and a deterministic import step;
+uploads KTX2 mip chains without expanding them in GPU memory. KTX2 parsing and
+validation belong to the maintained Rust crate; SDL_GPU still owns upload and
+sampling. The Sponza fetch command is both a pinned cache and a deterministic
+import step;
 it leaves source and derived files ignored while retaining the upstream
 notice. The glTF crate parses and validates models in Rust on the asset worker,
 glam supplies transform math, and the maintained MikkTSpace implementation

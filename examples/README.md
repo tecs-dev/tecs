@@ -71,8 +71,8 @@ floor make the colors, changing volume, and shadow visible.
 `sponza3d.tl` uses the ignored large-asset cache populated by `cargo xtask
 fetch sponza`. The fetch is pinned to one Khronos glTF Sample Assets revision
 and retains the upstream notice. It also preprocesses source images into full
-BC3 mip chains and writes a derived glTF. The demo keeps those textures
-compressed in GPU memory and exercises double-sided materials, independently
+BC3 mip chains in standard KTX2 containers and writes a derived glTF. The demo
+keeps those textures compressed in GPU memory and exercises double-sided materials, independently
 GPU-culled primitive chunks, Cook-Torrance point and spot lights, directional
 shadows, fog, and bloom. Running the example without that cache fails before
 opening a window and reports the fetch command. The window title reports rolling
@@ -83,7 +83,7 @@ set `TECS_PRESENT=vsync` to opt back into synchronized presentation.
 `bistro3d.tl` is the large-scene stress test. Its pinned CC BY 4.0 Amazon
 Lumberyard exterior is fetched through a reference-Draco preprocessing step,
 then retained as 132 MiB of ordinary glTF geometry and 91 MiB of 512px BC3
-mip chains. Large-primitive splitting turns 1,591 authored primitives into
+KTX2 mip chains. Large-primitive splitting turns 1,591 authored primitives into
 1,593 independently GPU-cullable chunks. The demo combines an ambient-cube
 probe, Cook-Torrance local lights, directional shadows, fog, and bloom. The
 source GLB is removed after a successful import, and running without the cache
