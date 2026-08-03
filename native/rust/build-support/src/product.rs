@@ -2277,9 +2277,7 @@ fn compile_and_link(
     worker_flags.extend(force_load(rust_archive));
     worker_flags.extend(native_dependency_flags(packages)?);
     worker_flags.extend(rust_platform_flags());
-    if matches!(preset.shaders, ShaderMode::Runtime) {
-        worker_flags.extend(cpp_runtime_flags());
-    }
+    worker_flags.extend(cpp_runtime_flags());
     link_shared(
         preset,
         &worker,
@@ -2314,9 +2312,7 @@ fn compile_and_link(
     final_flags.extend(native_dependency_flags(packages)?);
     final_flags.push(rust_archive.as_os_str().to_owned());
     final_flags.extend(rust_platform_flags());
-    if matches!(preset.shaders, ShaderMode::Runtime) {
-        final_flags.extend(cpp_runtime_flags());
-    }
+    final_flags.extend(cpp_runtime_flags());
     link_executable(preset, paths, &executable, &[main_object], &final_flags)?;
     Ok(())
 }
