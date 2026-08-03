@@ -22,17 +22,15 @@ layout(set = 3, binding = 0) uniform Blur {
     vec4 step;
 } blur;
 
-// Nine taps at unit spacing, normalized. Wide enough that the softest edge is
-// several pixels and narrow enough that a shadow still has a shape.
-const float WEIGHTS[5] = float[5](0.2270270, 0.1945946, 0.1216216, 0.0540541, 0.0162162);
+#include "gaussian.glsl"
 
 void main() {
     vec4 center = texture(maskTexture, vUV);
-    float height = center.r * WEIGHTS[0];
+    float height = center.r * GAUSSIAN_WEIGHTS[0];
     for (int tap = 1; tap < 5; tap++) {
         vec2 offset = blur.step.xy * float(tap);
-        height += texture(maskTexture, vUV + offset).r * WEIGHTS[tap];
-        height += texture(maskTexture, vUV - offset).r * WEIGHTS[tap];
+        height += texture(maskTexture, vUV + offset).r * GAUSSIAN_WEIGHTS[tap];
+        height += texture(maskTexture, vUV - offset).r * GAUSSIAN_WEIGHTS[tap];
     }
     outMask = vec4(height, center.g, 0.0, 1.0);
 }

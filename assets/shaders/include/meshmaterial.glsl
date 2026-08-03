@@ -16,7 +16,7 @@ layout(set = 2, binding = MESH_MATERIAL_BINDING) readonly buffer Materials { flo
 const int MESH_MATERIAL_FLOATS = 40;
 const int MESH_MATERIAL_METALLIC_ROUGHNESS = 0;
 const int MESH_MATERIAL_UNLIT = 1;
-const int MESH_ALPHA_MASK = 1;
+#include "meshenums.glsl"
 
 struct MeshSurface {
     vec4 albedo;

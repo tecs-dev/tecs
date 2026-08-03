@@ -92,6 +92,13 @@ GPU culling, and ordered scans. Crate-specific owners stay behind flat native
 views; the public Teal API describes images, models, materials, and shaders,
 not library handles.
 
+The sprite and mesh domains publish one statistics contract and contribute to
+one aggregate extraction measurement, while their domain-specific timings,
+packets, residency, culling outputs, and draw paths remain separate. Identical
+GPU algorithms live in shader includes; a similar-looking dimensional
+algorithm stays specialized until its data and output contracts are actually
+the same.
+
 Every product build writes its exact resolved Rust graph to
 `cargo-dependencies.txt`. Packaged releases install that inventory beside the
 third-party notice. `cargo xtask check-package` verifies that every dependency

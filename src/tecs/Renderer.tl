@@ -37,7 +37,8 @@ local screenshot <const> = require("tecs.gfx.screenshot")
 
 local type SpriteDomainModule = require("tecs.internal.render.SpriteDomain")
 local type MeshDomainModule = require("tecs.internal.render.MeshDomain")
-local type DomainStats = require("tecs.internal.render.DomainStats")
+local type domainmetrics = require("tecs.internal.render.domainmetrics")
+local type DomainStats = domainmetrics.Stats
 local type SpriteDomain = SpriteDomainModule.Domain
 local type SpriteDomainInternal = SpriteDomainModule.Internal
 local type MeshDomain = MeshDomainModule.Domain

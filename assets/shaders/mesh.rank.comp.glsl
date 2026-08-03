@@ -4,9 +4,6 @@
 // visible set needs no clearing pass or CPU-visible survivor count.
 layout(local_size_x = 256) in;
 
-const uint BUCKETS = 256u;
-const uint BUCKET_NONE = 0xffffffffu;
-
 layout(set = 0, binding = 0) readonly buffer Bounds { vec4 sphere[]; } bounds;
 layout(set = 0, binding = 1) readonly buffer Commands { uint value[]; } commands;
 layout(set = 1, binding = 0) writeonly buffer Buckets { uint value[]; } buckets;
@@ -21,31 +18,27 @@ layout(set = 2, binding = 0) uniform Cull {
 
 shared uint bucketOf[256];
 
+#include "bucketrank.glsl"
+
 void main() {
     uint j = gl_GlobalInvocationID.x;
     uint t = gl_LocalInvocationID.x;
     uint groups = uint(cull.params.y);
-    uint bucket = BUCKET_NONE;
+    uint bucket = RANK_NONE;
     uint command = j * 5u;
     if (j < uint(cull.params.x) && commands.value[command + 1u] != 0u) {
         uint instance = commands.value[command + 4u];
         vec4 clip = cull.viewProjection * vec4(bounds.sphere[instance].xyz, 1.0);
         float depth = clip.w != 0.0 ? clip.z / clip.w : 1.0;
-        bucket = uint(clamp(1.0 - depth, 0.0, 0.999999) * float(BUCKETS));
+        bucket = depthBucket(depth);
     }
     bucketOf[t] = bucket;
     barrier();
 
-    uint rank = 0u;
-    for (uint k = 0u; k < t; k++) {
-        if (bucketOf[k] == bucket) { rank++; }
-    }
-    uint own = 0u;
-    for (uint k = 0u; k < BUCKETS; k++) {
-        if (bucketOf[k] == t) { own++; }
-    }
+    uint rank = rankBefore(bucket, t);
+    uint own = countBucket(t);
     counts.value[t * groups + gl_WorkGroupID.x] = own;
-    if (bucket != BUCKET_NONE) {
+    if (bucket != RANK_NONE) {
         buckets.value[j] = bucket;
         ranks.value[j] = rank;
     }

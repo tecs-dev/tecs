@@ -20,12 +20,6 @@
 // anything landed in it or not, and no clearing pass is needed.
 layout(local_size_x = 256) in;
 
-const uint BUCKETS = 256u;
-
-// A thread with no entry. No thread index equals it, so it counts towards no
-// bucket and contributes nothing to any rank.
-const uint BUCKET_NONE = 0xFFFFFFFFu;
-
 struct Instance {
     vec4 xform;   // rotation, scaleX, scaleY, depth
     vec4 origin;
@@ -54,13 +48,15 @@ layout(set = 2, binding = 0) uniform Cull {
 
 shared uint bucketOf[256];
 
+#include "bucketrank.glsl"
+
 void main() {
     uint j = gl_GlobalInvocationID.x;
     uint t = gl_LocalInvocationID.x;
     uint blocks = uint(cull.params.y);
     uint total = args.value[1];
 
-    uint bucket = BUCKET_NONE;
+    uint bucket = RANK_NONE;
     if (j < total) {
         // Depth runs zero to one with zero nearest, so the farthest instance
         // has the largest depth and has to draw first. One minus it is the
@@ -68,25 +64,19 @@ void main() {
         // than a bucket keep the order the compaction gave them, which is the
         // same tie-break the depth test already gives opaque geometry.
         float depth = instances.item[visible.index[j]].xform.w;
-        bucket = uint(clamp(1.0 - depth, 0.0, 0.999999) * float(BUCKETS));
+        bucket = depthBucket(depth);
     }
     bucketOf[t] = bucket;
     barrier();
 
     // How many earlier entries of this block share the bucket, which is this
     // entry's offset within the block's run of it.
-    uint rank = 0u;
-    for (uint k = 0u; k < t; k++) {
-        if (bucketOf[k] == bucket) { rank++; }
-    }
+    uint rank = rankBefore(bucket, t);
 
     // Bucket major, so the scan over this table walks every block of one
     // bucket before the first block of the next and the bases it produces put
     // the far buckets ahead of the near ones.
-    uint own = 0u;
-    for (uint k = 0u; k < BUCKETS; k++) {
-        if (bucketOf[k] == t) { own++; }
-    }
+    uint own = countBucket(t);
     counts.count[t * blocks + gl_WorkGroupID.x] = own;
 
     if (j < total) {

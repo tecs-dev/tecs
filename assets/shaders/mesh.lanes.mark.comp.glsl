@@ -22,7 +22,7 @@ layout(set = 2, binding = 0) uniform Cull {
     mat4 viewProjection;
 } cull;
 
-const int ALPHA_BLEND = 2;
+#include "meshenums.glsl"
 shared uint opaqueScratch[256];
 shared uint blendScratch[256];
 
@@ -49,7 +49,7 @@ void main() {
             }
         }
         int lane = int(instances.value[i * 16u + 12u]);
-        blended = (lane & 3) == ALPHA_BLEND ? visible : 0u;
+        blended = (lane & 3) == MESH_ALPHA_BLEND ? visible : 0u;
 #ifdef MESH_DOUBLE_SIDED
         if ((lane & 4) != 0) { visible = blended; }
 #endif

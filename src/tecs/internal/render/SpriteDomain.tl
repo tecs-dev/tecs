@@ -18,7 +18,8 @@ local Camera2D <const> = require("tecs.gfx.Camera2D")
 local SpriteExtractor <const> = require("tecs.internal.render.SpriteExtractor")
 local SpriteBackend <const> = require("tecs.internal.render.SpriteBackend")
 local SpriteFramePacket <const> = require("tecs.internal.render.SpriteFramePacket")
-local type DomainStats = require("tecs.internal.render.DomainStats")
+local domainmetrics <const> = require("tecs.internal.render.domainmetrics")
+local type DomainStats = domainmetrics.Stats
 local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
 
@@ -205,12 +206,7 @@ function SpriteDomainImpl:_install(world: types.World)
     self._extractor:install(
         world,
         self._packet,
-        function()
-            local packet <const> = self._packet
-            self.count = packet.count
-            self.dropped = packet.dropped
-            self.rewritten = packet.rewritten
-        end
+        function() domainmetrics.publish(self, self._packet as domainmetrics.Frame) end
     )
 end
 

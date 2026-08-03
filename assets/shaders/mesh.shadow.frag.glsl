@@ -12,7 +12,7 @@ void main() {
     // otherwise lose their shadow when the light projection reverses winding,
     // while double-sided visible shading remains a material decision.
     int alphaMode = meshAlphaMode(vMaterial);
-    if (alphaMode == 2) { discard; }
+    if (alphaMode == MESH_ALPHA_BLEND) { discard; }
     if (alphaMode == MESH_ALPHA_MASK) {
         int base = vMaterial * MESH_MATERIAL_FLOATS;
         if (meshBaseColor(vMaterial, vUV, vec4(1.0, 1.0, 1.0, vColorAlpha)).a < materials.value[base + 6]) {

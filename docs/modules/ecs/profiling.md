@@ -98,6 +98,12 @@ data from both sides of the pause.
 
 Sampling and trace reports cannot answer every performance question.
 
+Frame timing reports `extract` once per world update as the sum of every
+enabled rendering domain. `extractSprites` and `extractMeshes` attribute that
+same work to the 2D and 3D domains. The aggregate is a frame-level sample, not
+an interleaving of unrelated domain samples under one name, so its percentiles
+can be compared directly with `simulate`, `record`, and `submit`.
+
 Input latency measures the time from the oldest consumed input event to the
 submission of the frame that reacted to it. Frame averages cannot substitute
 for that measurement. A pipelined frame may improve throughput while

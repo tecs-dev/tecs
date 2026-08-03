@@ -21,13 +21,16 @@ local Camera3D <const> = require("tecs.gfx.Camera3D")
 local MeshFramePacket <const> = require("tecs.internal.render.MeshFramePacket")
 local components <const> = require("tecs.components")
 local timing <const> = require("tecs.timing")
+local renderprofile <const> = require("tecs.internal.render.renderprofile")
 local meshlayout <const> = require("tecs.gpu.meshlayout")
 local meshlightlayout <const> = require("tecs.gpu.meshlightlayout")
 local meshlocalshadowlayout <const> = require("tecs.gpu.meshlocalshadowlayout")
+local meshconstants <const> = require("tecs.internal.render.meshconstants")
 local bit <const> = require("bit")
 
-local EXTRACT <const> = timing.stage("extract")
 local Transform3D <const> = ecs.Transform3D
+local ALPHA_OPAQUE <const> = meshconstants.ALPHA_OPAQUE
+local ALPHA_BLEND <const> = meshconstants.ALPHA_BLEND
 
 local abs <const> = math.abs
 local max <const> = math.max
@@ -97,7 +100,7 @@ function MeshExtractor.create(options: MeshExtractorOptions): MeshExtractor
     self._slot = 0
     self._drawByAsset = {}
     self._materialSlotByAsset = {}
-    self._alphaModeBySlot = {[0] = 0}
+    self._alphaModeBySlot = {[0] = ALPHA_OPAQUE}
     self._doubleSidedBySlot = {[0] = false}
     self._transparency = options.transparency
     self._doubleSided = options.doubleSided
@@ -396,10 +399,10 @@ function MeshExtractor:extract(packet: MeshFramePacket)
                     instances[base + 9] = transform.scaleZ
                     instances[base + 10] = meshSlot
                     instances[base + 11] = materialSlot
-                    local alphaMode <const> = self._transparency and self._alphaModeBySlot[materialSlot] or 0
+                    local alphaMode <const> = self._transparency and self._alphaModeBySlot[materialSlot] or ALPHA_OPAQUE
                     local bothFaces <const> = self._doubleSided and self._doubleSidedBySlot[materialSlot] == true
                     instances[base + 12] = alphaMode + (bothFaces and 4 or 0)
-                    if alphaMode == 2 then
+                    if alphaMode == ALPHA_BLEND then
                         blended = blended + 1
                     elseif bothFaces then
                         doubleSided = doubleSided + 1
@@ -535,7 +538,7 @@ function MeshExtractor:extract(packet: MeshFramePacket)
     packet.blendCount = blended
     packet.doubleSidedCount = doubleSided
     syncLights(self, packet)
-    self._extractSeconds = timing.finish(EXTRACT, started)
+    self._extractSeconds = timing.finish(renderprofile.meshes, started)
 
     if missing ~= 0 then
         error(missingMeshMessage(missing), 2)

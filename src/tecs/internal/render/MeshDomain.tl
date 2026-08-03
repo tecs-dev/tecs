@@ -62,7 +62,9 @@ local Model3D <const> = require("tecs.gfx.Model3D")
 local MeshExtractor <const> = require("tecs.internal.render.MeshExtractor")
 local MeshBackend <const> = require("tecs.internal.render.MeshBackend")
 local MeshFramePacket <const> = require("tecs.internal.render.MeshFramePacket")
-local type DomainStats = require("tecs.internal.render.DomainStats")
+local domainmetrics <const> = require("tecs.internal.render.domainmetrics")
+local type DomainStats = domainmetrics.Stats
+local meshconstants <const> = require("tecs.internal.render.meshconstants")
 local type modeltypes = require("tecs.internal.render.modeltypes")
 local components <const> = require("tecs.components")
 
@@ -636,9 +638,6 @@ local record MeshDomainModule
 
     MATERIAL_METALLIC_ROUGHNESS: integer
     MATERIAL_UNLIT: integer
-    ALPHA_OPAQUE: integer
-    ALPHA_MASK: integer
-    ALPHA_BLEND: integer
     TEXTURE_RGBA8: integer
     TEXTURE_BC3: integer
     _create: function(device: loader.CPtr, deferred: Deferred, options: MeshDomainOptions): MeshDomainInternal
@@ -646,17 +645,14 @@ end
 
 local MATERIAL_METALLIC_ROUGHNESS <const> = 0
 local MATERIAL_UNLIT <const> = 1
-local ALPHA_OPAQUE <const> = 0
-local ALPHA_MASK <const> = 1
-local ALPHA_BLEND <const> = 2
+local ALPHA_OPAQUE <const> = meshconstants.ALPHA_OPAQUE
+local ALPHA_MASK <const> = meshconstants.ALPHA_MASK
+local ALPHA_BLEND <const> = meshconstants.ALPHA_BLEND
 local TEXTURE_RGBA8 <const> = assets.IMAGE_RGBA8
 local TEXTURE_BC3 <const> = assets.IMAGE_BC3
 
 MeshDomainModule.MATERIAL_METALLIC_ROUGHNESS = MATERIAL_METALLIC_ROUGHNESS
 MeshDomainModule.MATERIAL_UNLIT = MATERIAL_UNLIT
-MeshDomainModule.ALPHA_OPAQUE = ALPHA_OPAQUE
-MeshDomainModule.ALPHA_MASK = ALPHA_MASK
-MeshDomainModule.ALPHA_BLEND = ALPHA_BLEND
 MeshDomainModule.TEXTURE_RGBA8 = TEXTURE_RGBA8
 MeshDomainModule.TEXTURE_BC3 = TEXTURE_BC3
 
@@ -1072,9 +1068,7 @@ function MeshDomainImpl:_install(world: types.World)
         self._packet,
         function()
             local packet <const> = self._packet
-            self.count = packet.count
-            self.dropped = packet.dropped
-            self.rewritten = packet.rewritten
+            domainmetrics.publish(self, packet as domainmetrics.Frame)
             self.lightCount = packet.lightCount
             self.localShadowCount = packet.shadowLightCount
         end

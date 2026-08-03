@@ -40,6 +40,7 @@ local layers <const> = require("tecs.gfx.layers")
 local sheet <const> = require("tecs.gfx.sheet")
 local frametable <const> = require("tecs.gfx.frametable")
 local timing <const> = require("tecs.timing")
+local renderprofile <const> = require("tecs.internal.render.renderprofile")
 local instancelayout <const> = require("tecs.gpu.instancelayout")
 
 local type TextureArray = require("tecs.gpu.TextureArray")
@@ -48,9 +49,6 @@ local type TextureArray = require("tecs.gpu.TextureArray")
 -- part of the supported surface, because nothing outside this file has asked
 -- either question.
 local type internal = require("tecs.internal.types")
-
---- Extraction: the world-facing half of the frame.
-local EXTRACT <const> = timing.stage("extract")
 
 --- The pose every drawn row is written from, bound once rather than read
 --- off the module at each of the seven places below that name it.
@@ -1548,7 +1546,7 @@ function SpriteExtractor:extract(packet: SpriteFramePacket)
     syncLights(self, packet)
     packet:setCamera(self.camera)
 
-    self._extractSeconds = timing.finish(EXTRACT, started)
+    self._extractSeconds = timing.finish(renderprofile.sprites, started)
 end
 
 --- Registers the sync system and queries on `world`.

@@ -39,10 +39,7 @@ layout(location = 0) out vec2 vUV;
 layout(location = 1) flat out int vMaterial;
 layout(location = 2) out float vColorAlpha;
 
-vec3 rotateBy(vec4 rotation, vec3 value) {
-    vec3 twice = 2.0 * cross(rotation.xyz, value);
-    return value + rotation.w * twice + cross(rotation.xyz, twice);
-}
+#include "meshtransform.glsl"
 
 #ifdef MESH_MORPHING
 vec3 morphPosition(vec3 position) {
@@ -68,19 +65,6 @@ vec3 morphPosition(vec3 position) {
 #endif
 
 #ifdef MESH_SKINNING
-mat4 jointMatrix(int joint) {
-    int at = joint * 16;
-    return mat4(
-        jointMatrices.value[at], jointMatrices.value[at + 1],
-        jointMatrices.value[at + 2], jointMatrices.value[at + 3],
-        jointMatrices.value[at + 4], jointMatrices.value[at + 5],
-        jointMatrices.value[at + 6], jointMatrices.value[at + 7],
-        jointMatrices.value[at + 8], jointMatrices.value[at + 9],
-        jointMatrices.value[at + 10], jointMatrices.value[at + 11],
-        jointMatrices.value[at + 12], jointMatrices.value[at + 13],
-        jointMatrices.value[at + 14], jointMatrices.value[at + 15]);
-}
-
 vec3 skinPosition(vec3 position) {
 #ifdef MESH_MORPHING
     int skin = int(instanceMorphs.value[gl_InstanceIndex * 6 + 5]);

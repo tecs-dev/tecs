@@ -65,10 +65,7 @@ layout(location = 5) out vec3 vWorld;
 layout(location = 6) out float vFog;
 #endif
 
-vec3 rotateBy(vec4 rotation, vec3 value) {
-    vec3 twice = 2.0 * cross(rotation.xyz, value);
-    return value + rotation.w * twice + cross(rotation.xyz, twice);
-}
+#include "meshtransform.glsl"
 
 #ifdef MESH_MORPHING
 void applyMorph(inout vec3 position, inout vec3 normal, inout vec4 tangent) {
@@ -102,19 +99,6 @@ void applyMorph(inout vec3 position, inout vec3 normal, inout vec4 tangent) {
 #endif
 
 #ifdef MESH_SKINNING
-mat4 jointMatrix(int joint) {
-    int at = joint * 16;
-    return mat4(
-        jointMatrices.value[at], jointMatrices.value[at + 1],
-        jointMatrices.value[at + 2], jointMatrices.value[at + 3],
-        jointMatrices.value[at + 4], jointMatrices.value[at + 5],
-        jointMatrices.value[at + 6], jointMatrices.value[at + 7],
-        jointMatrices.value[at + 8], jointMatrices.value[at + 9],
-        jointMatrices.value[at + 10], jointMatrices.value[at + 11],
-        jointMatrices.value[at + 12], jointMatrices.value[at + 13],
-        jointMatrices.value[at + 14], jointMatrices.value[at + 15]);
-}
-
 void applySkin(inout vec3 position, inout vec3 normal, inout vec4 tangent) {
 #ifdef MESH_MORPHING
     int skin = int(instanceMorphs.value[gl_InstanceIndex * 6 + 5]);

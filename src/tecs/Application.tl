@@ -149,6 +149,7 @@ local watcherHost <const> = watcher as WatcherHost
 local log <const> = require("tecs.log")
 local mcp <const> = require("tecs.io.mcp")
 local timing <const> = require("tecs.timing")
+local renderprofile <const> = require("tecs.internal.render.renderprofile")
 
 local LOGGER <const> = log.get("tecs.app")
 local shaderpack <const> = require("tecs.gpu.shaderpack")
@@ -158,8 +159,8 @@ local C <const> = sdl.C
 local R <const> = rust.C
 local K <const> = sdl.K
 
--- The stages of a frame, named once. Extraction is registered by the renderer,
--- since that is where it happens.
+-- The stages of a frame, named once. Rendering-domain extraction registers its
+-- aggregate and per-domain stages together in `renderprofile`.
 local FRAME <const> = timing.stage("frame")
 local SIMULATE <const> = timing.stage("simulate")
 local ACQUIRE <const> = timing.stage("acquire")
@@ -1206,6 +1207,11 @@ local function step()
     self.world:update(simulatingDt)
 
     local t1 = timing.begin()
+    local extraction = 0.0
+    if timing.enabled then
+        extraction = self.renderer:extractSeconds()
+        timing.mark(renderprofile.total, extraction)
+    end
     local frame = self.device:beginFrame()
     -- Recorded before anything is drawn into it, because everything after this
     -- line can throw and the recovery path has no other way to reach it.
@@ -1225,7 +1231,7 @@ local function step()
         -- t1 - t0 and has to come back out: game work and extraction are
         -- separate stages, and a change that moves cost between them is
         -- invisible if they are one number.
-        timing.mark(SIMULATE, (t1 - t0) - self.renderer:extractSeconds())
+        timing.mark(SIMULATE, (t1 - t0) - extraction)
         timing.mark(ACQUIRE, t2 - t1)
         timing.mark(RECORD, t3 - t2)
         timing.mark(SUBMIT, t4 - t3)
