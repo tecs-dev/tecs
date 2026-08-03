@@ -184,9 +184,11 @@ the embedded payload and with an installed package. Crates whose selected
 licence has an additional notice retain it below or in their packaged source
 metadata.
 
-The complete Cargo package inventory is below. It is generated from the lock
-file as part of the notice audit; target-specific entries are named because a
-release for that target compiles them:
+The complete native-runtime Cargo package inventory is below. It is generated
+from the lock file as part of the notice audit; target-specific entries are
+named because a release for that target compiles them. Every product also
+installs its exact feature- and target-resolved `cargo-dependencies.txt`, and
+the package check holds every entry in that file to this notice:
 
 `adler2`, `aho-corasick`, `allocator-api2`, `anstyle`, `approx`, `arrayref`,
 `arrayvec`,

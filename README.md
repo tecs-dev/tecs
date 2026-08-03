@@ -72,6 +72,32 @@ combined sampled-image modules shaderc produces for SDL_GPU's Vulkan binding
 contract. Packaged builds compile none of this toolchain and load the generated
 shader pack instead.
 
+### Dependency ownership
+
+SDL3 is the only platform and GPU execution layer. It owns windows, events,
+input, audio devices, dialogs, storage integration, GPU resources, command
+submission, and presentation. A Rust crate must not introduce a second
+abstraction for any of those responsibilities.
+
+Maintained Rust crates own published formats and established coarse CPU
+algorithms. The `gltf`, `glam`, `bevy_mikktspace`, `meshopt`, and `ktx2` crates
+parse and prepare a complete model or texture inside a bounded asset job.
+Shaderc and SPIRV-Cross compile one complete shader only in development and
+single-file tool builds. No crate is called per entity, vertex, or draw during
+a frame.
+
+Tecs owns engine policy and hot data: the ECS and lifecycle, extraction, frame
+packets, render domains, pass graph, material dispatch, resource residency,
+GPU culling, and ordered scans. Crate-specific owners stay behind flat native
+views; the public Teal API describes images, models, materials, and shaders,
+not library handles.
+
+Every product build writes its exact resolved Rust graph to
+`cargo-dependencies.txt`. Packaged releases install that inventory beside the
+third-party notice. `cargo xtask check-package` verifies that every dependency
+is named in the notice and that compiler-only crates are absent from release
+presets.
+
 Mesh shadows use three camera-frustum directional cascades, not the 2D
 occluder-mask pipeline. Their mark, scan, compact, map, and shader resources
 exist only when the mesh domain opts in. Each cascade reuses the ordered GPU

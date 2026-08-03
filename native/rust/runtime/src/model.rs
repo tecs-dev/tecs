@@ -11,7 +11,7 @@ use gltf::mesh::Mode;
 use gltf::scene::Transform;
 use gltf::texture::{MagFilter, MinFilter, WrappingMode};
 
-use crate::{decode, set_error, TecsImage};
+use crate::{decode, set_error, TecsImage, TecsImageInfo};
 
 const MAX_CHUNK_INDICES: usize = 65_536 * 3;
 type Decomposed = ([f32; 3], [f32; 4], [f32; 3]);
@@ -40,14 +40,7 @@ pub struct TecsModelMesh {
 pub struct TecsModelImage {
     pub name: *const u8,
     pub name_length: usize,
-    pub pixels: *const u8,
-    pub byte_count: usize,
-    pub width: u32,
-    pub height: u32,
-    pub storage_width: u32,
-    pub storage_height: u32,
-    pub levels: u32,
-    pub format: u32,
+    pub image: TecsImageInfo,
 }
 
 #[repr(C)]
@@ -908,14 +901,7 @@ fn build_views(model: &mut TecsModel) {
         .map(|image| TecsModelImage {
             name: image.name.as_ptr(),
             name_length: image.name.len(),
-            pixels: image.image.pixels.as_ptr(),
-            byte_count: image.image.pixels.len(),
-            width: image.image.width,
-            height: image.image.height,
-            storage_width: image.image.storage_width,
-            storage_height: image.image.storage_height,
-            levels: image.image.levels,
-            format: image.image.format,
+            image: image.image.info(),
         })
         .collect();
     model.material_views = model

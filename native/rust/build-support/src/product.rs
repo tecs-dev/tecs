@@ -135,7 +135,11 @@ impl Paths {
         for path in [&self.cargo, &self.dependencies] {
             fs::create_dir_all(path)?;
         }
-        for path in [self.out.join("build-info.txt"), self.out.join("main.lua")] {
+        for path in [
+            self.out.join("build-info.txt"),
+            self.out.join("cargo-dependencies.txt"),
+            self.out.join("main.lua"),
+        ] {
             if path.exists() {
                 fs::remove_file(path)?;
             }
@@ -360,6 +364,10 @@ pub fn install_package(root: &Path, preset: Preset) -> Result<PathBuf> {
     fs::copy(
         paths.out.join("build-info.txt"),
         prefix.join("share/tecs/build-info.txt"),
+    )?;
+    fs::copy(
+        paths.out.join("cargo-dependencies.txt"),
+        prefix.join("share/tecs/cargo-dependencies.txt"),
     )?;
     Ok(prefix)
 }
@@ -590,7 +598,7 @@ fn build_system(root: &Path, preset: Preset, paths: &Paths) -> Result<PathBuf> {
     generate_bindings(root, paths, &packages)?;
     let rust_archive = build_rust(root, preset, paths)?;
     compile_and_link(root, preset, paths, &packages, &rust_archive)?;
-    write_build_info(preset, paths)?;
+    write_build_metadata(root, preset, paths)?;
     Ok(paths.binary.join(executable_name()))
 }
 
@@ -605,7 +613,7 @@ fn build_pinned(root: &Path, preset: Preset, paths: &Paths) -> Result<PathBuf> {
     } else {
         compile_and_link(root, preset, paths, &packages, &rust_archive)?;
     }
-    write_build_info(preset, paths)?;
+    write_build_metadata(root, preset, paths)?;
     Ok(paths.binary.join(executable_name()))
 }
 
@@ -2156,13 +2164,7 @@ fn build_rust(root: &Path, preset: Preset, paths: &Paths) -> Result<PathBuf> {
         .env("TECS_CONTENT", "../share/tecs/lua/")
         .env("TECS_ENTRY", preset.entry)
         .current_dir(root);
-    let mut features = Vec::new();
-    if preset.is_single() {
-        features.push("payload");
-    }
-    if matches!(preset.shaders, ShaderMode::Runtime) {
-        features.push("shader-compiler");
-    }
+    let features = rust_features(preset);
     if !features.is_empty() {
         command.args(["--features", &features.join(",")]);
     }
@@ -2182,6 +2184,17 @@ fn build_rust(root: &Path, preset: Preset, paths: &Paths) -> Result<PathBuf> {
         anyhow::bail!("Cargo did not produce {}", archive.display());
     }
     Ok(archive)
+}
+
+fn rust_features(preset: Preset) -> Vec<&'static str> {
+    let mut features = Vec::new();
+    if preset.is_single() {
+        features.push("payload");
+    }
+    if matches!(preset.shaders, ShaderMode::Runtime) {
+        features.push("shader-compiler");
+    }
+    features
 }
 
 fn compile_and_link(
@@ -2276,10 +2289,7 @@ fn compile_and_link(
     ];
     worker_flags.extend(force_load(rust_archive));
     worker_flags.extend(native_dependency_flags(packages)?);
-    worker_flags.extend(rust_platform_flags());
-    if matches!(preset.shaders, ShaderMode::Runtime) {
-        worker_flags.extend(cpp_runtime_flags());
-    }
+    worker_flags.extend(rust_archive_runtime_flags());
     link_shared(
         preset,
         &worker,
@@ -2313,10 +2323,7 @@ fn compile_and_link(
     ];
     final_flags.extend(native_dependency_flags(packages)?);
     final_flags.push(rust_archive.as_os_str().to_owned());
-    final_flags.extend(rust_platform_flags());
-    if matches!(preset.shaders, ShaderMode::Runtime) {
-        final_flags.extend(cpp_runtime_flags());
-    }
+    final_flags.extend(rust_archive_runtime_flags());
     link_executable(preset, paths, &executable, &[main_object], &final_flags)?;
     Ok(())
 }
@@ -2811,6 +2818,13 @@ fn cpp_runtime_flags() -> Vec<OsString> {
     }
 }
 
+fn rust_archive_runtime_flags() -> Vec<OsString> {
+    // Meshoptimizer embeds C++, independently of the optional shader compiler.
+    let mut flags = rust_platform_flags();
+    flags.extend(cpp_runtime_flags());
+    flags
+}
+
 fn sdl_macos_static_flags() -> Vec<OsString> {
     [
         "-lpthread",
@@ -2879,15 +2893,63 @@ fn executable_name() -> &'static str {
     }
 }
 
-fn write_build_info(preset: Preset, paths: &Paths) -> Result<()> {
+fn write_build_metadata(root: &Path, preset: Preset, paths: &Paths) -> Result<()> {
     fs::write(
         paths.out.join("build-info.txt"),
         format!(
-            "systemDeps={}\nsystem={}\narch={}\n",
+            "systemDeps={}\nsystem={}\narch={}\nshaderCompiler={}\n",
             matches!(preset.dependencies, DependencyMode::System),
             target_system(preset),
-            target_arch(preset)
+            target_arch(preset),
+            matches!(preset.shaders, ShaderMode::Runtime)
         ),
+    )?;
+
+    let mut command = Command::new("cargo");
+    command
+        .args([
+            "tree",
+            "--locked",
+            "--package",
+            "tecs-native",
+            "--target",
+            preset.rust_target,
+            "--edges",
+            "normal,build",
+            "--prefix",
+            "none",
+            "--format",
+            "{p}",
+        ])
+        .current_dir(root);
+    let features = rust_features(preset);
+    if !features.is_empty() {
+        command.args(["--features", &features.join(",")]);
+    }
+    apply_platform_environment(&mut command, preset);
+    let output = command
+        .output()
+        .context("running Cargo dependency inventory")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "Cargo dependency inventory exited with {}:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let source =
+        String::from_utf8(output.stdout).context("Cargo dependency inventory is not UTF-8")?;
+    let packages: BTreeSet<_> = source
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.strip_suffix(" (*)").unwrap_or(line).to_owned())
+        .collect();
+    if packages.is_empty() {
+        anyhow::bail!("Cargo dependency inventory is empty");
+    }
+    fs::write(
+        paths.out.join("cargo-dependencies.txt"),
+        format!("{}\n", packages.into_iter().collect::<Vec<_>>().join("\n")),
     )?;
     Ok(())
 }
@@ -2936,9 +2998,21 @@ mod tests {
 
     use super::{
         copy_dynamic_libraries, fetch_source_at, package_from_flags, package_link_flags,
-        preserve_engine_output, remove_shadowing_teal_outputs, remove_stale_teal_outputs, Paths,
-        LUAJIT_REVISION, SDL3_MIXER_REVISION, SDL3_REVISION, ZLIB_REVISION,
+        preserve_engine_output, remove_shadowing_teal_outputs, remove_stale_teal_outputs,
+        rust_archive_runtime_flags, Paths, LUAJIT_REVISION, SDL3_MIXER_REVISION, SDL3_REVISION,
+        ZLIB_REVISION,
     };
+
+    #[test]
+    fn rust_archive_links_the_cpp_runtime_used_by_meshoptimizer() {
+        let flags = rust_archive_runtime_flags();
+        let expected = if std::env::consts::OS == "macos" {
+            "-lc++"
+        } else {
+            "-lstdc++"
+        };
+        assert!(flags.contains(&OsString::from(expected)));
+    }
 
     #[test]
     fn packaged_library_aliases_remain_symlinks() {
@@ -3028,6 +3102,7 @@ mod tests {
             fs::write(path.join("stale"), b"stale").unwrap();
         }
         fs::write(paths.out.join("build-info.txt"), b"stale").unwrap();
+        fs::write(paths.out.join("cargo-dependencies.txt"), b"stale").unwrap();
         fs::write(paths.out.join("main.lua"), b"stale").unwrap();
 
         paths.prepare().unwrap();
@@ -3049,6 +3124,7 @@ mod tests {
         assert!(paths.cargo.join("stale").is_file());
         assert!(paths.dependencies.join("stale").is_file());
         assert!(!paths.out.join("build-info.txt").exists());
+        assert!(!paths.out.join("cargo-dependencies.txt").exists());
         assert!(!paths.out.join("main.lua").exists());
     }
 

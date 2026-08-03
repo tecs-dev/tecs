@@ -59,7 +59,14 @@ const WINDOWS_SYSTEM_LIBRARIES: &[&str] = &[
     "winmm.dll",
     "ws2_32.dll",
 ];
-const COMPILER_NAMES: &[&str] = &["shaderc", "spirvcross", "spirv-cross", "dxcompiler"];
+const COMPILER_LIBRARY_NAMES: &[&str] = &["shaderc", "spirvcross", "spirv-cross", "dxcompiler"];
+const COMPILER_CARGO_PACKAGES: &[&str] = &[
+    "shaderc",
+    "shaderc-sys",
+    "spirv-cross2",
+    "spirv-cross2-derive",
+    "spirv-cross-sys",
+];
 const LINKED_LIBRARIES: &[(&str, &str, &str)] = &[
     (r"tecs\w*", "MIT OR Apache-2.0", "the engine's own"),
     (r"cjson", "MIT", "the vendored lua-cjson"),
@@ -91,6 +98,7 @@ const REQUIRED_NOTICES: &[&str] = &[
     "share/tecs/THIRD_PARTY_NOTICES.md",
     "share/tecs/LICENSE-MIT",
     "share/tecs/LICENSE-APACHE",
+    "share/tecs/cargo-dependencies.txt",
 ];
 const GLOBAL_USAGE: &str = r#"
 local world = tecs.ecs.newWorld()
@@ -116,6 +124,44 @@ enum Platform {
     Linux,
     Macos,
     Windows,
+}
+
+fn audit_cargo_dependencies(
+    inventory: &str,
+    notices: &str,
+    allow_compiler: bool,
+    problems: &mut Vec<String>,
+    license_problems: &mut Vec<String>,
+) {
+    let mut found = BTreeSet::new();
+    for line in inventory.lines().filter(|line| !line.trim().is_empty()) {
+        let mut fields = line.split_whitespace();
+        let Some(name) = fields.next() else { continue };
+        let Some(version) = fields.next() else {
+            problems.push(format!("invalid Cargo dependency inventory entry: {line}"));
+            continue;
+        };
+        if !version.starts_with('v') {
+            problems.push(format!("invalid Cargo dependency inventory entry: {line}"));
+            continue;
+        }
+        found.insert(name);
+        if name != "tecs-native" && !notices.contains(&format!("`{name}`")) {
+            license_problems.push(format!(
+                "Cargo package {name} is absent from THIRD_PARTY_NOTICES.md"
+            ));
+        }
+        if !allow_compiler && COMPILER_CARGO_PACKAGES.contains(&name) {
+            problems.push(format!(
+                "Cargo package {name} is compiler-only and must not ship in a release"
+            ));
+        }
+    }
+    if found.is_empty() {
+        problems.push("Cargo dependency inventory is empty".to_owned());
+    } else if !found.contains("tecs-native") {
+        problems.push("Cargo dependency inventory has no tecs-native root".to_owned());
+    }
 }
 
 pub fn check(options: &Options<'_>) -> Result<()> {
@@ -163,6 +209,19 @@ pub fn check(options: &Options<'_>) -> Result<()> {
     }
 
     let mut problems = Vec::new();
+    let dependency_inventory = prefix.join("share/tecs/cargo-dependencies.txt");
+    let notices = prefix.join("share/tecs/THIRD_PARTY_NOTICES.md");
+    if dependency_inventory.is_file() && notices.is_file() {
+        audit_cargo_dependencies(
+            &fs::read_to_string(&dependency_inventory)
+                .with_context(|| format!("reading {}", dependency_inventory.display()))?,
+            &fs::read_to_string(&notices)
+                .with_context(|| format!("reading {}", notices.display()))?,
+            options.allow_compiler,
+            &mut problems,
+            &mut license_problems,
+        );
+    }
     for (binary, (rpaths, libraries)) in &inspections {
         check_licenses(binary, libraries, platform, &mut license_problems)?;
         for rpath in rpaths {
@@ -201,7 +260,7 @@ pub fn check(options: &Options<'_>) -> Result<()> {
                 .and_then(|value| value.to_str())
                 .unwrap_or_default()
                 .to_lowercase();
-            for compiler in COMPILER_NAMES {
+            for compiler in COMPILER_LIBRARY_NAMES {
                 if name.contains(compiler) {
                     problems.push(format!(
                         "{name}: a shader compiler must not ship in a release"
@@ -647,9 +706,43 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        dependency_is_reachable, is_shared_library, is_system_library, lexical_path_within,
-        library_stem, platform_from_build_info, Platform,
+        audit_cargo_dependencies, dependency_is_reachable, is_shared_library, is_system_library,
+        lexical_path_within, library_stem, platform_from_build_info, Platform,
     };
+
+    #[test]
+    fn cargo_inventory_requires_notices_and_omits_release_compilers() {
+        let inventory = "ktx2 v0.5.0\nshaderc v0.10.1\ntecs-native v0.1.0 (/source)\n";
+        let mut problems = Vec::new();
+        let mut license_problems = Vec::new();
+        audit_cargo_dependencies(
+            inventory,
+            "The package uses `ktx2`.",
+            false,
+            &mut problems,
+            &mut license_problems,
+        );
+        assert!(problems
+            .iter()
+            .any(|problem| problem.contains("shaderc") && problem.contains("compiler-only")));
+        assert_eq!(license_problems.len(), 1);
+        assert!(license_problems[0].contains("shaderc"));
+    }
+
+    #[test]
+    fn cargo_inventory_accepts_noticed_runtime_dependencies() {
+        let mut problems = Vec::new();
+        let mut license_problems = Vec::new();
+        audit_cargo_dependencies(
+            "ktx2 v0.5.0\ntecs-native v0.1.0 (/source)\n",
+            "The package uses `ktx2`.",
+            false,
+            &mut problems,
+            &mut license_problems,
+        );
+        assert!(problems.is_empty());
+        assert!(license_problems.is_empty());
+    }
 
     #[test]
     fn normalizes_shared_library_names() {

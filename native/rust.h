@@ -92,14 +92,7 @@ typedef struct TecsModelMesh {
 typedef struct TecsModelImage {
     const uint8_t *name;
     size_t name_length;
-    const uint8_t *pixels;
-    size_t byte_count;
-    uint32_t width;
-    uint32_t height;
-    uint32_t storage_width;
-    uint32_t storage_height;
-    uint32_t levels;
-    uint32_t format;
+    TecsImageInfo image;
 } TecsModelImage;
 
 typedef struct TecsModelMaterial {

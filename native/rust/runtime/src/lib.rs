@@ -67,6 +67,7 @@ pub struct TecsImage {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct TecsImageInfo {
     pixels: *const u8,
     byte_count: usize,
@@ -81,6 +82,21 @@ pub struct TecsImageInfo {
 const IMAGE_RGBA8: u32 = 0;
 const IMAGE_BC3: u32 = 1;
 const ORIGINAL_SIZE_KEY: &str = "TECSoriginalSize";
+
+impl TecsImage {
+    fn info(&self) -> TecsImageInfo {
+        TecsImageInfo {
+            pixels: self.pixels.as_ptr(),
+            byte_count: self.pixels.len(),
+            width: self.width,
+            height: self.height,
+            storage_width: self.storage_width,
+            storage_height: self.storage_height,
+            levels: self.levels,
+            format: self.format,
+        }
+    }
+}
 
 /// An owned byte buffer returned across the C ABI.
 ///
@@ -355,16 +371,7 @@ pub unsafe extern "C" fn tecsImageGetInfo(
     let (Some(image), Some(out)) = (unsafe { image.as_ref() }, unsafe { out.as_mut() }) else {
         return false;
     };
-    *out = TecsImageInfo {
-        pixels: image.pixels.as_ptr(),
-        byte_count: image.pixels.len(),
-        width: image.width,
-        height: image.height,
-        storage_width: image.storage_width,
-        storage_height: image.storage_height,
-        levels: image.levels,
-        format: image.format,
-    };
+    *out = image.info();
     true
 }
 

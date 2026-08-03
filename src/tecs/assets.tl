@@ -730,13 +730,7 @@ function Model:release()
     end
 end
 
-local function imageFromAllocation(path: string, allocation: loader.CPtr, refs?: integer): Image
-    local owner <const> = loader.newArray("TecsImageInfo[1]")
-    if not RUST.tecsImageGetInfo(allocation, owner) then
-        RUST.tecsImageDestroy(allocation)
-        error("cannot read decoded image metadata", 0)
-    end
-    local info <const> = owner[0] as {string: any}
+local function imageFromInfo(path: string, info: {string: any}, allocation: loader.CValue, refs?: integer): Image
     local width <const> = tonumber(info.width) as integer
     local height <const> = tonumber(info.height) as integer
     local format <const> = tonumber(info.format) as integer
@@ -757,6 +751,15 @@ local function imageFromAllocation(path: string, allocation: loader.CPtr, refs?:
         } as Image,
         ImageMT
     )
+end
+
+local function imageFromAllocation(path: string, allocation: loader.CPtr, refs?: integer): Image
+    local owner <const> = loader.newArray("TecsImageInfo[1]")
+    if not RUST.tecsImageGetInfo(allocation, owner) then
+        RUST.tecsImageDestroy(allocation)
+        error("cannot read decoded image metadata", 0)
+    end
+    return imageFromInfo(path, owner[0] as {string: any}, allocation, refs)
 end
 
 local function imageFromBytes(bytes: string, path: string): Image
@@ -800,24 +803,10 @@ local function modelFromWorker(result: {string: any}): Model
         local nativeImages <const> = info.images as loader.CArray
         for index = 0, (tonumber(info.image_count) as integer) - 1 do
             local source <const> = nativeImages[index] as {string: any}
-            local width <const> = tonumber(source.width) as integer
-            local format <const> = tonumber(source.format) as integer
-            images[index + 1] = setmetatable(
-                {
-                    path = textAt(source.name as loader.CValue, source.name_length),
-                    _image = nil,
-                    pixels = source.pixels as loader.CValue,
-                    width = width,
-                    height = tonumber(source.height) as integer,
-                    pitch = format == IMAGE_RGBA8 and width * 4 or 0,
-                    format = format,
-                    storageWidth = tonumber(source.storage_width) as integer,
-                    storageHeight = tonumber(source.storage_height) as integer,
-                    levels = tonumber(source.levels) as integer,
-                    byteCount = tonumber(source.byte_count) as integer,
-                    _refs = 1,
-                } as Image,
-                ImageMT
+            images[index + 1] = imageFromInfo(
+                textAt(source.name as loader.CValue, source.name_length),
+                source.image as {string: any},
+                ffi.cast("TecsImage *", nil) as loader.CValue
             )
         end
         local nativeMeshes <const> = info.meshes as loader.CArray
