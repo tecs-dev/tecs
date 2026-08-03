@@ -50,9 +50,9 @@ spirv-cross2 = { version = "0.7.1", default-features = false, features = ["msl"]
 shlex = "2.0"
 tempfile = "3.27"
 taffy = { version = "0.12.2", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout", "content_size"] }
-tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-stream = "0.1"
-tokio-util = { version = "0.7", features = ["rt"] }
+tokio-util = { version = "0.7", features = ["io", "rt"] }
 toml = "0.9"
 uuid = { version = "1.24", features = ["v4", "v7"] }
 url = "2.5"

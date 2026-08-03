@@ -292,7 +292,9 @@ local record binaryIO
     --- Creates a replayable file stream.
     ---
     --- Readers open the current path through `tecs.io.files`; writers replace
-    --- it. A descriptor keeps no open file between endpoints.
+    --- it. A descriptor keeps no open file between endpoints. HTTP uploads on
+    --- the SDL storage backend reopen the path directly on the native HTTP
+    --- lane and stream it without retaining the complete file in Lua.
     --- @param path The caller supplies the source or destination as a string
     ---     or [`Path`](tealdoc:tecs.io.Path).
     --- @param contentType The caller supplies optional media type metadata.

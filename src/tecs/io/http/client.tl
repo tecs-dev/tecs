@@ -55,10 +55,11 @@ local EVENT_FAILED <const> = 4
 local BODY_NONE <const> = 0
 local BODY_INLINE <const> = 1
 local BODY_UPLOAD <const> = 2
+local BODY_FILE <const> = 3
 local UPLOAD_CLOSED <const> = -1
 local UPLOAD_BACKPRESSURE <const> = 0
 local UPLOAD_ACCEPTED <const> = 1
-local CHUNK <const> = 256 * 1024
+local CHUNK <const> = 512 * 1024
 local UPLOAD_STEPS <const> = 16
 local MAX_BODY_BUFFER_BYTES <const> = 1024 * 1024
 
@@ -120,8 +121,9 @@ local record client
         --- A `Content-Length` must contain decimal digits and must match a
         --- body whose length is known.
         headers: {string: string}
-        --- Caller-writable. Sets bytes to send. A stream opens one reader when
-        --- this request begins and feeds it through a bounded upload queue.
+        --- Caller-writable. Sets bytes to send. A general stream opens one
+        --- reader and feeds a bounded upload queue. On the SDL storage backend,
+        --- a file stream is opened and read directly by the native HTTP lane.
         --- The client owns cooperative work that waits on a composed reader.
         body: string | iotypes.ReadableStream
         --- Caller-writable. Overrides the client's whole-transfer timeout.
@@ -797,6 +799,7 @@ local function startTransfer(self: Client, request: Request, listener: function(
         bodyText = givenBody
     end
     local borrowed = source ~= nil and stream._borrowBytes(source) or nil
+    local filePath = source ~= nil and stream._nativeFilePath(source) or nil
 
     local id <const> = nextId
     nextId = nextId + 1
@@ -827,6 +830,16 @@ local function startTransfer(self: Client, request: Request, listener: function(
     elseif borrowed ~= nil then
         bodyKind = BODY_INLINE
         bodyLength = borrowed.length
+    elseif filePath ~= nil then
+        bodyKind = BODY_FILE
+        local bodyLengthFailure: string
+        bodyLength, bodyLengthFailure = streamContentLength(source)
+        if bodyLengthFailure ~= nil or bodyLength < 0 then
+            settleTransfer(
+                transfer, "failed", nil, bodyLengthFailure or "tecs: the request body file length could not be read"
+            )
+            return nil
+        end
     elseif source ~= nil then
         bodyKind = BODY_UPLOAD
         local bodyLengthFailure: string
@@ -888,6 +901,8 @@ local function startTransfer(self: Client, request: Request, listener: function(
         setSlice(native.body as loader.CStruct, bodyText)
     elseif borrowed ~= nil then
         setPointerSlice(native.body as loader.CStruct, borrowed.pointer, borrowed.length)
+    elseif filePath ~= nil then
+        setSlice(native.body as loader.CStruct, filePath)
     else
         setSlice(native.body as loader.CStruct, nil)
     end

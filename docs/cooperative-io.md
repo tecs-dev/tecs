@@ -75,6 +75,7 @@ routes work according to what it needs:
 | Cache hits, memory Readers, URI parsing, ECS and GPU publication | Main thread                    |
 | TCP, UDP, timers, and pollable handles                           | Native `mio` readiness reactor |
 | Bulk regular-file reads and writes                               | One bounded SDL AsyncIO queue  |
+| File-backed HTTP request bodies                                  | Tokio HTTP file stream         |
 | Opens, metadata, directories, and uncovered platform calls       | Bounded blocking-I/O lane      |
 | Image decode and other expensive transformations                 | Separate bounded CPU lane      |
 
@@ -109,9 +110,12 @@ reader:close()
 client:close()
 ```
 
-Request bodies compose the same way. The client reads a streaming body inside
-client-owned cooperative work, so a file, socket, process pipe, transform, or
-another HTTP body may wait without blocking SDL:
+Request bodies compose the same way. The client reads an arbitrary streaming
+body inside client-owned cooperative work, so a socket, process pipe,
+transform, or another HTTP body may wait without blocking SDL. On the SDL
+storage backend, a file stream takes a more direct internal route: Tokio opens
+the path and feeds Reqwest in bounded chunks without retaining the complete
+file in Lua. Both paths use the same call:
 
 ```teal
 local source <const> = assert(download.body:withMetadata("application/octet-stream"))
@@ -122,11 +126,12 @@ local uploaded <const> = client:send({
 })
 ```
 
-The upload task belongs to its client rather than to the system that started
-it. This matters because `send` returns at response headers while the bounded
-upload may still be applying transport backpressure. Closing the client
-cancels and drains that work; application shutdown closes any client that was
-not closed earlier.
+The upload work belongs to its client rather than to the system that started
+it. A generic Reader uses a client-owned task; a native file body stays under
+the client's Tokio request. This matters because `send` returns at response
+headers while the bounded upload may still be applying transport backpressure.
+Closing the client cancels and drains that work; application shutdown closes
+any client that was not closed earlier.
 
 `files.read`, `files.write`, file streams, socket operations, process pipes,
 process waits, native dialogs, asset loads, and HTTP use this contextual wait

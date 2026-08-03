@@ -6,6 +6,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, CString};
+use std::path::PathBuf;
 use std::ptr;
 use std::slice;
 use std::str;
@@ -20,10 +21,11 @@ use tokio::runtime::{Builder, Runtime};
 use tokio::sync::{mpsc, Semaphore};
 use tokio::task::AbortHandle;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::io::ReaderStream;
 
 const EVENT_QUEUE_CAPACITY: usize = 64;
-const UPLOAD_QUEUE_CAPACITY: usize = 4;
-const UPLOAD_CHUNK_BYTES: usize = 256 * 1024;
+const UPLOAD_QUEUE_CAPACITY: usize = 2;
+const UPLOAD_CHUNK_BYTES: usize = 512 * 1024;
 const RESPONSE_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_HEADER_BYTES: usize = 256 * 1024;
 
@@ -34,6 +36,7 @@ const EVENT_FAILED: u32 = 4;
 const BODY_NONE: u32 = 0;
 const BODY_INLINE: u32 = 1;
 const BODY_UPLOAD: u32 = 2;
+const BODY_FILE: u32 = 3;
 const UPLOAD_CLOSED: i32 = -1;
 const UPLOAD_BACKPRESSURE: i32 = 0;
 const UPLOAD_ACCEPTED: i32 = 1;
@@ -184,11 +187,16 @@ struct OwnedRequest {
     url: Url,
     method: Method,
     headers: HeaderMap,
-    body: Option<Body>,
+    body: Option<OwnedBody>,
     timeout: Duration,
     stall_timeout: Option<Duration>,
     max_bytes: u64,
     insecure: bool,
+}
+
+enum OwnedBody {
+    Ready(Body),
+    File(PathBuf),
 }
 
 struct UploadGuard {
@@ -400,7 +408,7 @@ unsafe fn own_request(
             // SAFETY: The bytes are copied before this call returns.
             let copied =
                 Bytes::copy_from_slice(unsafe { bytes(request.body) }.map_err(str::to_owned)?);
-            Some(Body::from(copied))
+            Some(OwnedBody::Ready(Body::from(copied)))
         }
         BODY_UPLOAD => {
             if request.body_length < -1 {
@@ -420,7 +428,25 @@ unsafe fn own_request(
             if replaced.is_some() {
                 return Err("request id already has an upload body".to_owned());
             }
-            Some(Body::wrap_stream(ReceiverStream::new(receiver)))
+            Some(OwnedBody::Ready(Body::wrap_stream(ReceiverStream::new(
+                receiver,
+            ))))
+        }
+        BODY_FILE => {
+            if request.body_length < 0 {
+                return Err("file request body length must be non-negative".to_owned());
+            }
+            if !headers.contains_key(reqwest::header::CONTENT_LENGTH) {
+                let length = HeaderValue::from_str(&request.body_length.to_string())
+                    .map_err(|error| error.to_string())?;
+                headers.insert(reqwest::header::CONTENT_LENGTH, length);
+            }
+            // SAFETY: The path is copied before this boundary returns.
+            let path = unsafe { text(request.body, "request body file path") }?;
+            if path.is_empty() {
+                return Err("request body file path is empty".to_owned());
+            }
+            Some(OwnedBody::File(PathBuf::from(path)))
         }
         _ => return Err("request body kind is not valid".to_owned()),
     };
@@ -477,7 +503,28 @@ async fn perform(client: Client, shared: Arc<Shared>, request: OwnedRequest) {
         .headers(request.headers)
         .timeout(request.timeout);
     if let Some(body) = request.body {
-        builder = builder.body(body);
+        match body {
+            OwnedBody::Ready(body) => builder = builder.body(body),
+            OwnedBody::File(path) => {
+                let file = match tokio::fs::File::open(&path).await {
+                    Ok(file) => file,
+                    Err(error) => {
+                        fail(
+                            &shared,
+                            id,
+                            &url,
+                            format!("cannot open request body {}: {error}", path.display()),
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                builder = builder.body(Body::wrap_stream(ReaderStream::with_capacity(
+                    file,
+                    UPLOAD_CHUNK_BYTES,
+                )));
+            }
+        }
     }
 
     let response = match builder.send().await {
@@ -809,7 +856,7 @@ pub unsafe extern "C" fn tecsHttpClientUpload(
         return UPLOAD_CLOSED;
     }
     if length > UPLOAD_CHUNK_BYTES {
-        set_error("HTTP upload chunks cannot exceed 262144 bytes");
+        set_error("HTTP upload chunks cannot exceed 524288 bytes");
         return UPLOAD_CLOSED;
     }
     // SAFETY: Null was rejected and the caller promises a live client.
@@ -1137,7 +1184,7 @@ mod tests {
                 UPLOAD_ACCEPTED
             );
         }
-        // Four 256 KiB pieces are one MiB. The next offer encounters
+        // Two 512 KiB pieces are one MiB. The next offer encounters
         // backpressure before constructing a Bytes allocation.
         assert_eq!(UPLOAD_QUEUE_CAPACITY * UPLOAD_CHUNK_BYTES, 1024 * 1024);
         // SAFETY: The client and source still remain live.
@@ -1147,6 +1194,60 @@ mod tests {
         );
         // SAFETY: Ownership is returned exactly once.
         unsafe { tecsHttpClientDestroy(client) };
+    }
+
+    #[test]
+    fn owns_native_file_request_paths_without_an_upload_queue() {
+        let (event_sender, _event_receiver) = mpsc::channel(EVENT_QUEUE_CAPACITY);
+        let shared = Arc::new(Shared {
+            sender: event_sender,
+            activity: Activity {
+                generation: Mutex::new(0),
+                changed: Condvar::new(),
+            },
+            closed: AtomicBool::new(false),
+            total: Arc::new(Semaphore::new(1)),
+            per_host_limit: 1,
+            per_host: Mutex::new(HashMap::new()),
+            uploads: Mutex::new(HashMap::new()),
+        });
+        let url = b"http://127.0.0.1/upload";
+        let method = b"POST";
+        let path = b"/tmp/request-body.bin";
+        let request = TecsHttpRequest {
+            id: 9,
+            url: TecsHttpSlice {
+                data: url.as_ptr(),
+                length: url.len(),
+            },
+            method: TecsHttpSlice {
+                data: method.as_ptr(),
+                length: method.len(),
+            },
+            headers: ptr::null(),
+            header_count: 0,
+            body: TecsHttpSlice {
+                data: path.as_ptr(),
+                length: path.len(),
+            },
+            body_kind: BODY_FILE,
+            body_length: 17,
+            timeout_ms: 1_000,
+            stall_timeout_ms: 0,
+            max_bytes: 0,
+            insecure: 0,
+        };
+
+        // SAFETY: Every request slice remains live for this synchronous copy.
+        let owned = unsafe { own_request(&request, &shared) }.unwrap();
+        match owned.body {
+            Some(OwnedBody::File(owned_path)) => {
+                assert_eq!(owned_path, PathBuf::from("/tmp/request-body.bin"));
+            }
+            _ => panic!("file request did not retain its path"),
+        }
+        assert_eq!(owned.headers[reqwest::header::CONTENT_LENGTH], "17");
+        assert!(shared.uploads.lock().unwrap().is_empty());
     }
 
     #[test]

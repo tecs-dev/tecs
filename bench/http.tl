@@ -1,7 +1,8 @@
 --- Loopback HTTP body transport benchmark.
 ---
 --- This measures the HTTP-specific seams rather than `tecs.io.Stream` alone:
---- four request sources cross the bounded upload channel, and two response
+--- strings and buffers use retained bytes, files stream on the native HTTP
+--- lane, arbitrary readers cross the bounded upload channel, and two response
 --- destinations cross the bounded event queue. The nonblocking server drains
 --- every readable packet per turn so its own polling cadence does not cap the
 --- client. Every case sends one request at a time, validates the body hash,
@@ -12,8 +13,9 @@
 ---     cargo xtask bench http
 ---
 --- `BENCH_HTTP_BYTES`, `BENCH_HTTP_WARMUP`, and `BENCH_HTTP_SAMPLES` control
---- payload size and sample counts. Every request runs through the coroutine
---- completion path. `BENCH_HTTP_FORCE_FAILURE=1` verifies
+--- payload size and sample counts. `BENCH_HTTP_MODES` accepts a comma-separated
+--- subset of the reported mode names for focused sustained runs. Every request
+--- runs through the coroutine completion path. `BENCH_HTTP_FORCE_FAILURE=1` verifies
 --- that a guarded application error makes the benchmark process fail after cleanup.
 --- No external service or network is used.
 
@@ -170,6 +172,55 @@ function ChunkSource:transferToFile(path: string): integer, string
 end
 function ChunkSource:discard(): integer, string
     return self.buffer:newStream():discard()
+end
+
+local record GenericFileSource is ReadableStream
+    path: string
+    length: integer
+    closed: boolean
+end
+
+local GenericFileSourceMT <const>: metatable<GenericFileSource> = {__index = GenericFileSource}
+
+function GenericFileSource:contentLength(): integer | nil
+    return self.length
+end
+function GenericFileSource:contentType(): string | nil
+    return "application/octet-stream"
+end
+function GenericFileSource:isReadable(): boolean
+    return not self.closed
+end
+function GenericFileSource:isWritable(): boolean
+    return false
+end
+function GenericFileSource:isReplayable(): boolean
+    return true
+end
+function GenericFileSource:close(): boolean, string
+    self.closed = true
+    return true
+end
+function GenericFileSource:newReader(): Reader, string
+    if self.closed then
+        return nil, "stream is closed"
+    end
+    return tecsIO.files.open(self.path, "r")
+end
+function GenericFileSource:readAll(maxBytes?: integer): string, string
+    return tecsIO.newFileStream(self.path):readAll(maxBytes)
+end
+function GenericFileSource:transferToBuffer(maxBytes?: integer): Buffer, string
+    return tecsIO.newFileStream(self.path):transferToBuffer(maxBytes)
+end
+function GenericFileSource:transferTo(destination: WritableStream): integer, string
+    return tecsIO.newFileStream(self.path):transferTo(destination)
+end
+function GenericFileSource:transferToFile(path: string): integer, string
+    return tecsIO.newFileStream(self.path):transferToFile(path)
+end
+function GenericFileSource:discard(): integer, string
+    return self.length
 end
 
 local record BufferWriter is Writer
@@ -361,14 +412,37 @@ local record Result
     bytes: integer
 end
 
-local MODES <const>: {string} = {
+local ALL_MODES <const>: {string} = {
     "upload-string",
     "upload-buffer",
     "upload-file",
+    "upload-file-reader",
     "upload-reader",
     "download-buffer",
     "download-writer",
 }
+
+local selectedModes <const> = getenv("BENCH_HTTP_MODES")
+local MODES: {string} = {}
+if selectedModes == nil then
+    for index = 1, #ALL_MODES do
+        MODES[index] = ALL_MODES[index]
+    end
+else
+    local valid: {string: boolean} = {}
+    for index = 1, #ALL_MODES do
+        valid[ALL_MODES[index]] = true
+    end
+    for name in selectedModes:gmatch("[^,%s]+") do
+        if not valid[name] then
+            error("bench: unknown BENCH_HTTP_MODES entry " .. name, 0)
+        end
+        MODES[#MODES + 1] = name
+    end
+    if #MODES == 0 then
+        error("bench: BENCH_HTTP_MODES must select at least one mode", 0)
+    end
+end
 
 local results: {Result} = {}
 local server, port = listen()
@@ -405,6 +479,11 @@ local function begin()
         expectedServerHash = PAYLOAD_HASH
     elseif name == "upload-file" then
         request.body = tecsIO.newFileStream(uploadPath)
+        expectedServerHash = PAYLOAD_HASH
+    elseif name == "upload-file-reader" then
+        request.body = setMeta(
+            {path = uploadPath, length = BYTES, closed = false} as GenericFileSource, GenericFileSourceMT
+        ) as GenericFileSource
         expectedServerHash = PAYLOAD_HASH
     elseif name == "upload-reader" then
         request.body = setMeta({buffer = uploadBuffer, closed = false} as ChunkSource, ChunkSourceMT) as ChunkSource
@@ -568,8 +647,8 @@ return tecs.newApplication({
                         print(("%-20s %8.3f %8.3f %8.1f"):format(result.name, p50, p95, throughput))
                     end
                     print(
-                        "boundedness: upload = 4 x 256 KiB = 1 MiB; "
-                            .. "download = 64 x 64 KiB = 4 MiB; every body hash validated"
+                        "boundedness: reader upload = 2 x 512 KiB = 1 MiB; "
+                            .. "file reads = 512 KiB; download = 64 x 64 KiB = 4 MiB; every body hash validated"
                     )
                 end
                 local cleaned <const>, cleanupFailure = protect(function()

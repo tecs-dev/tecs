@@ -59,7 +59,12 @@ typedef struct TecsHttpRequest {
     int insecure;
 } TecsHttpRequest;
 
-enum TecsHttpBodyKind { TECS_HTTP_BODY_NONE = 0, TECS_HTTP_BODY_INLINE = 1, TECS_HTTP_BODY_UPLOAD = 2 };
+enum TecsHttpBodyKind {
+    TECS_HTTP_BODY_NONE = 0,
+    TECS_HTTP_BODY_INLINE = 1,
+    TECS_HTTP_BODY_UPLOAD = 2,
+    TECS_HTTP_BODY_FILE = 3
+};
 
 enum TecsHttpEventKind {
     TECS_HTTP_EVENT_HEADERS = 1,
@@ -90,7 +95,7 @@ int tecsHttpClientSend(TecsHttpClient *client, const TecsHttpRequest *request);
  * discard; events still in the Rust queue are discarded when polled. */
 void tecsHttpClientCancel(TecsHttpClient *client, uint64_t id);
 
-/* Offers one copied request-body chunk of at most 65536 bytes to the bounded
+/* Offers one copied request-body chunk of at most 524288 bytes to the bounded
  * upload queue. A full queue returns BACKPRESSURE without copying. Set
  * finished only with an empty slice to close the body. */
 int tecsHttpClientUpload(TecsHttpClient *client, uint64_t id, const uint8_t *data, size_t length, int finished);

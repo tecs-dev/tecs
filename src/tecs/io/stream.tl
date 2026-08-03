@@ -361,6 +361,22 @@ local function borrowedBytes(source: ReadableStream): BorrowedBytes
     return nil
 end
 
+local function nativeFilePath(source: ReadableStream): string
+    if source == nil or not source:isReadable() then
+        return nil
+    end
+    local backing <const> = metadataBacking(source)
+    if getmetatable(backing as any) ~= (FileStreamMT as any) or (backing as FileStream)._closed then
+        return nil
+    end
+    local adapter <const> = require("tecs.platform.adapter")
+    local storagebackend <const> = require("tecs.platform.storagebackend")
+    if adapter.storage() ~= storagebackend.sdl then
+        return nil
+    end
+    return (backing as FileStream)._path
+end
+
 local function snapshotMetadata(source: Stream): string, integer, boolean
     local contentTypeValue <const> = source:contentType()
     local replayableValue <const> = source:isReplayable()
@@ -1734,6 +1750,7 @@ local record stream
     ): T
     _check: function<T is Stream>(value: T, what: string, level: integer): T
     _borrowBytes: function(source: ReadableStream): BorrowedBytes
+    _nativeFilePath: function(source: ReadableStream): string
     _snapshot: function(source: Stream, what: string): {string: any}
     _restore: function(saved: {string: any}, what: string): Stream
     _newReaderStream: function(reader: Reader, contentType?: string, contentLength?: integer): ReadableStream
@@ -1770,6 +1787,7 @@ return {
     withMetadata = withMetadata,
     _check = checkedStream,
     _borrowBytes = borrowedBytes,
+    _nativeFilePath = nativeFilePath,
     _snapshot = snapshotStream,
     _restore = restoreStream,
     _newReaderStream = newReaderStream,

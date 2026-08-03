@@ -213,9 +213,12 @@ syscall first and use a process-wide `mio` readiness reactor only after
 `WouldBlock`; no worker thread sits waiting on a handle. One bounded Tokio
 service resolves names and establishes connections. Regular-file transfers
 use a bounded SDL AsyncIO queue, uncovered file operations use a separate
-bounded blocking lane, and image decoding uses a bounded CPU lane. Every path
-settles onto the same Lua-thread continuation, so that implementation split
-does not create a second game API or let CPU work starve I/O progress.
+bounded blocking lane, and image decoding uses a bounded CPU lane. A file used
+as an HTTP request body is already owned by Tokio's transport lifetime, so that
+path opens and streams the file there instead of loading it into Lua and then
+copying it back across the HTTP boundary. Every path settles onto the same
+Lua-thread continuation, so that implementation split does not create a second
+game API or let CPU work starve I/O progress.
 
 Byte contracts are contextual. Memory Readers, Writers, buffers, and
 transforms return inline. A socket or process-pipe endpoint first uses that

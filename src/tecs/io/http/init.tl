@@ -14,9 +14,11 @@ print(assert(response.body:readAll(1024 * 1024)))
 until that boundary; outside an update it blocks its caller. The body is a
 one-shot streaming Reader backed by bounded native chunks, so a slow consumer
 applies transport backpressure instead of accumulating the full response.
-Streaming request bodies run in client-owned cooperative work, so their Reader
-may itself wait on a file, socket, process, transform, or HTTP response without
-blocking the SDL pump.
+Arbitrary streaming request bodies run in client-owned cooperative work, so
+their Reader may itself wait on a socket, process, transform, or HTTP response
+without blocking the SDL pump. On the SDL storage backend, a file stream is
+opened and read directly by Tokio instead. It stays bounded without retaining
+the complete file or crossing Lua for every chunk.
 
 An HTTP error status still returns a response. DNS, connection, TLS, timeout,
 or streaming failures raise at the suspended call.
