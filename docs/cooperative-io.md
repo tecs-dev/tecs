@@ -9,7 +9,7 @@ Tecs uses one style for finite work: call the operation and use its result. A
 game does not choose between a callback, Future, Task, async suffix, or await
 keyword.
 
-<img src="/images/cooperative-io.png" alt="One ordered system call either returns inline or parks while a bounded native lane makes progress, then resumes before one phase commit" />
+<img src="/images/cooperative-io.svg" alt="A direct system call returns inline when ready or parks the logical update while mio, SDL AsyncIO, Tokio, or a bounded CPU lane makes progress; both paths continue the same system before later systems run and the phase commits once" />
 
 ```teal
 world:addSystem({

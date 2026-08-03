@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1920" viewBox="0 0 1200 1920" role="img" aria-labelledby="title description">
+  <title id="title">How cooperative I/O executes inside a Tecs system</title>
+  <desc id="description">A direct engine call first tries its ready path. Ready work returns inline. Work that must wait parks the reusable world update coroutine while a bounded native reactor or worker makes progress. Tecs then resumes the same system and commits the phase once after later systems run in order.</desc>
+
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#071426"/>
+      <stop offset="1" stop-color="#030914"/>
+    </linearGradient>
+    <linearGradient id="cyanPanel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#102b43"/>
+      <stop offset="1" stop-color="#0a1729"/>
+    </linearGradient>
+    <linearGradient id="greenPanel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#123528"/>
+      <stop offset="1" stop-color="#091c1a"/>
+    </linearGradient>
+    <linearGradient id="orangePanel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3a2813"/>
+      <stop offset="1" stop-color="#1c140d"/>
+    </linearGradient>
+    <linearGradient id="purplePanel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#282348"/>
+      <stop offset="1" stop-color="#141326"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000814" flood-opacity="0.65"/>
+    </filter>
+    <marker id="arrowCyan" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#48d7ff"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#69e69b"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#ffb84d"/>
+    </marker>
+    <style>
+      .title { font: 700 44px Inter, ui-sans-serif, system-ui, sans-serif; fill: #f3f8ff; }
+      .subtitle { font: 400 22px Inter, ui-sans-serif, system-ui, sans-serif; fill: #aabbd1; }
+      .section { font: 700 17px Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: 2px; fill: #48d7ff; }
+      .heading { font: 700 25px Inter, ui-sans-serif, system-ui, sans-serif; fill: #f3f8ff; }
+      .body { font: 400 19px Inter, ui-sans-serif, system-ui, sans-serif; fill: #bfd0e4; }
+      .small { font: 400 16px Inter, ui-sans-serif, system-ui, sans-serif; fill: #91a6bf; }
+      .code { font: 500 22px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #dff7ff; }
+      .badge { font: 700 15px Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: 1px; }
+      .laneTitle { font: 700 19px Inter, ui-sans-serif, system-ui, sans-serif; fill: #f3f8ff; }
+      .laneBody { font: 400 16px Inter, ui-sans-serif, system-ui, sans-serif; fill: #aebfd4; }
+      .line { fill: none; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="1920" rx="32" fill="url(#background)"/>
+  <circle cx="1050" cy="115" r="230" fill="#123b5a" opacity="0.16"/>
+  <circle cx="120" cy="1610" r="260" fill="#173d31" opacity="0.12"/>
+
+  <text class="title" x="600" y="78" text-anchor="middle">One call. Two execution paths.</text>
+  <text class="subtitle" x="600" y="116" text-anchor="middle">Your system stays imperative; Tecs changes only how it waits.</text>
+
+  <!-- Direct call -->
+  <rect x="150" y="158" width="900" height="132" rx="20" fill="url(#cyanPanel)" stroke="#347da6" stroke-width="2" filter="url(#shadow)"/>
+  <text class="section" x="190" y="193">SYSTEM N · UPDATE PHASE · LUA MAIN THREAD</text>
+  <text class="code" x="190" y="241">local image = tecs.assets.loadImage(path)</text>
+  <text class="small" x="190" y="271">Same direct call and return type whether the value is cached or must be produced.</text>
+
+  <path class="line" d="M 600 290 L 600 340" stroke="#48d7ff" marker-end="url(#arrowCyan)"/>
+
+  <!-- Ready decision -->
+  <rect x="325" y="348" width="550" height="104" rx="52" fill="#0b1d31" stroke="#48d7ff" stroke-width="3"/>
+  <text class="heading" x="600" y="390" text-anchor="middle">Can the operation finish now?</text>
+  <text class="small" x="600" y="421" text-anchor="middle">Cache lookup, memory access, or immediate syscall first</text>
+
+  <!-- Ready branch -->
+  <path class="line" d="M 325 400 L 205 400 L 205 500" stroke="#69e69b" marker-end="url(#arrowGreen)"/>
+  <rect x="80" y="380" width="86" height="36" rx="18" fill="#183b2b" stroke="#69e69b"/>
+  <text class="badge" x="123" y="404" text-anchor="middle" fill="#86efae">READY</text>
+  <rect x="70" y="508" width="420" height="146" rx="18" fill="url(#greenPanel)" stroke="#4dbd78" stroke-width="2"/>
+  <text class="heading" x="105" y="550">Return inline</text>
+  <text class="body" x="105" y="585">No yield · no completion · no task</text>
+  <text class="small" x="105" y="620">Examples: cached asset, memory Reader,</text>
+  <text class="small" x="105" y="643">URI parsing, already-ready socket.</text>
+
+  <!-- Wait branch -->
+  <path class="line" d="M 875 400 L 995 400 L 995 500" stroke="#ffb84d" marker-end="url(#arrowOrange)"/>
+  <rect x="1034" y="380" width="96" height="36" rx="18" fill="#442d10" stroke="#ffb84d"/>
+  <text class="badge" x="1082" y="404" text-anchor="middle" fill="#ffd07a">WAIT</text>
+  <rect x="710" y="508" width="420" height="146" rx="18" fill="url(#orangePanel)" stroke="#d78d24" stroke-width="2"/>
+  <text class="heading" x="745" y="550">Park this logical update</text>
+  <text class="body" x="745" y="585">Register one private completion</text>
+  <text class="small" x="745" y="620">The reusable world coroutine preserves</text>
+  <text class="small" x="745" y="643">locals, query state, and owned resources.</text>
+
+  <!-- Host remains alive -->
+  <path class="line" d="M 920 654 L 920 704" stroke="#ffb84d" marker-end="url(#arrowOrange)"/>
+  <rect x="650" y="712" width="480" height="112" rx="18" fill="#141b27" stroke="#5e6d80" stroke-width="2" stroke-dasharray="8 8"/>
+  <text class="section" x="685" y="748" fill="#aebfd4">SDL HOST KEEPS RUNNING</text>
+  <text class="body" x="685" y="781">Pump events and native queues</text>
+  <text class="small" x="685" y="808">Render only the last completed world state</text>
+
+  <!-- Native lane section -->
+  <path class="line" d="M 890 824 L 890 866 L 600 866 L 600 912" stroke="#ffb84d" marker-end="url(#arrowOrange)"/>
+  <text class="section" x="600" y="900" text-anchor="middle">THE PRODUCER MATCHES THE WORK</text>
+
+  <rect x="55" y="930" width="255" height="208" rx="18" fill="url(#purplePanel)" stroke="#9684e8" stroke-width="2"/>
+  <circle cx="100" cy="978" r="22" fill="#5d519c"/>
+  <path d="M 87 978 H 113 M 100 965 V 991" stroke="#d1c8ff" stroke-width="3" stroke-linecap="round"/>
+  <text class="laneTitle" x="135" y="984">mio reactor</text>
+  <text class="laneBody" x="85" y="1025">TCP · UDP · process pipes</text>
+  <text class="laneBody" x="85" y="1054">Armed only after WouldBlock.</text>
+  <text class="laneBody" x="85" y="1083">No worker thread waits on</text>
+  <text class="laneBody" x="85" y="1106">a pollable handle.</text>
+
+  <rect x="335" y="930" width="255" height="208" rx="18" fill="url(#cyanPanel)" stroke="#3da2d3" stroke-width="2"/>
+  <circle cx="380" cy="978" r="22" fill="#215f80"/>
+  <path d="M 368 970 H 392 V 988 H 368 Z M 374 964 V 970" fill="none" stroke="#bceeff" stroke-width="3"/>
+  <text class="laneTitle" x="415" y="984">SDL AsyncIO</text>
+  <text class="laneBody" x="365" y="1025">Bulk regular-file transfer</text>
+  <text class="laneBody" x="365" y="1054">One bounded queue acquires</text>
+  <text class="laneBody" x="365" y="1083">bytes without blocking the</text>
+  <text class="laneBody" x="365" y="1106">SDL host.</text>
+
+  <rect x="615" y="930" width="255" height="208" rx="18" fill="url(#orangePanel)" stroke="#d78d24" stroke-width="2"/>
+  <circle cx="660" cy="978" r="22" fill="#7d5118"/>
+  <path d="M 649 985 C 649 969 671 969 671 985 M 653 970 L 660 961 L 667 970" fill="none" stroke="#ffe0a3" stroke-width="3" stroke-linecap="round"/>
+  <text class="laneTitle" x="695" y="984">Tokio service</text>
+  <text class="laneBody" x="645" y="1025">DNS · connect · HTTP</text>
+  <text class="laneBody" x="645" y="1054">Bounded transport and file</text>
+  <text class="laneBody" x="645" y="1083">body streaming with network</text>
+  <text class="laneBody" x="645" y="1106">backpressure.</text>
+
+  <rect x="895" y="930" width="255" height="208" rx="18" fill="url(#greenPanel)" stroke="#4dbd78" stroke-width="2"/>
+  <circle cx="940" cy="978" r="22" fill="#296c48"/>
+  <path d="M 928 978 H 952 M 940 966 V 990 M 931 969 L 949 987 M 949 969 L 931 987" stroke="#c5f9d8" stroke-width="2.5" stroke-linecap="round"/>
+  <text class="laneTitle" x="975" y="984">CPU lane</text>
+  <text class="laneBody" x="925" y="1025">Image decode · transforms</text>
+  <text class="laneBody" x="925" y="1054">Bounded workers isolate real</text>
+  <text class="laneBody" x="925" y="1083">CPU or blocking work from</text>
+  <text class="laneBody" x="925" y="1106">readiness progress.</text>
+
+  <!-- Fan in -->
+  <path class="line" d="M 182 1138 L 182 1180 L 600 1180" stroke="#9684e8"/>
+  <path class="line" d="M 462 1138 L 462 1180" stroke="#48d7ff"/>
+  <path class="line" d="M 742 1138 L 742 1180" stroke="#ffb84d"/>
+  <path class="line" d="M 1022 1138 L 1022 1180 L 600 1180 L 600 1226" stroke="#69e69b" marker-end="url(#arrowGreen)"/>
+
+  <rect x="260" y="1234" width="680" height="116" rx="18" fill="#0d2336" stroke="#48d7ff" stroke-width="2" filter="url(#shadow)"/>
+  <text class="heading" x="600" y="1278" text-anchor="middle">Queue readiness or a result to the Lua thread</text>
+  <text class="body" x="600" y="1314" text-anchor="middle">Resume the same coroutine; retry or complete the original call</text>
+
+  <!-- Ready path joins resume path -->
+  <path class="line" d="M 280 654 L 280 1400 L 380 1400" stroke="#69e69b"/>
+  <path class="line" d="M 600 1350 L 600 1386" stroke="#48d7ff" marker-end="url(#arrowCyan)"/>
+
+  <rect x="380" y="1394" width="440" height="112" rx="56" fill="#123126" stroke="#69e69b" stroke-width="3"/>
+  <text class="heading" x="600" y="1438" text-anchor="middle">Continue System N</text>
+  <text class="small" x="600" y="1471" text-anchor="middle">The call returns its ordinary value</text>
+
+  <path class="line" d="M 600 1506 L 600 1552" stroke="#48d7ff" marker-end="url(#arrowCyan)"/>
+  <rect x="245" y="1560" width="710" height="94" rx="18" fill="#101c2b" stroke="#49708f" stroke-width="2"/>
+  <text class="heading" x="600" y="1600" text-anchor="middle">Run later systems in declared order</text>
+  <text class="small" x="600" y="1632" text-anchor="middle">No system overtakes the one that waited</text>
+
+  <path class="line" d="M 600 1654 L 600 1700" stroke="#48d7ff" marker-end="url(#arrowCyan)"/>
+  <rect x="245" y="1708" width="710" height="94" rx="18" fill="url(#cyanPanel)" stroke="#48d7ff" stroke-width="3" filter="url(#shadow)"/>
+  <text class="heading" x="600" y="1748" text-anchor="middle">Commit the completed phase once</text>
+  <text class="small" x="600" y="1780" text-anchor="middle">Extraction and rendering see only completed world state</text>
+
+  <rect x="190" y="1830" width="820" height="58" rx="29" fill="#111b29" stroke="#52657c" stroke-width="2"/>
+  <text class="small" x="600" y="1866" text-anchor="middle">Outside world:update, the same call blocks its caller while advancing only the producer it needs.</text>
+</svg>
