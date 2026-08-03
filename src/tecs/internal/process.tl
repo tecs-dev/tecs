@@ -42,9 +42,11 @@ local DEFAULT_READ_BYTES <const> = 16 * 1024
 local MAX_READ_BYTES <const> = 64 * 1024
 local DEFAULT_MAX_OUTPUT_BYTES <const> = 256 * 1024 * 1024
 local DEFAULT_WAIT_MS <const> = 30000
+local DEFAULT_PIPE_TIMEOUT_MS <const> = 30000
 local WAIT_SLICE_MS <const> = 8
 local MAX_INTEGER <const> = 9007199254740991
 local MAX_TIMEOUT_MS <const> = 2147483647
+local PIPE_TIMEOUT_REASON <const> = "the process produced no bytes within the reader's timeout"
 
 local enum PipeKind
     "stdout"
@@ -87,6 +89,7 @@ local record ReaderImpl is ProcessReader
     _eof: boolean
     _scratch: loader.CArray
     _capacity: integer
+    _timeoutMs: integer
 end
 
 local record WriterImpl is ProcessWriter
@@ -113,13 +116,22 @@ local live <const>: {State} = {}
 local count = 0
 local exitOut <const> = loader.newArray("int[1]")
 
+-- One parked pipe operation. A parked read wakes on every process poll and
+-- parks again until its pipe produces bytes, so the readiness gate and its
+-- cancellation closure are built once and recycled rather than rebuilt per
+-- wake, which would allocate once per parked pipe per frame.
 local record PipeWaiter
     active: boolean
-    resume: function(boolean)
+    gate: task.Gate
+    cancel: function()
 end
 
 local pipeWaiters: {PipeWaiter} = {}
+local pipeWaiterCount = 0
+local idleWaiters: {PipeWaiter} = {}
+local idleWaiterCount = 0
 local MAX_PIPE_WAITERS <const> = 1024
+local MAX_IDLE_WAITERS <const> = 64
 
 local source: Source
 local pollRuntime: function(): integer
@@ -265,13 +277,16 @@ local function pollAll(): integer
         end
         index = index - 1
     end
-    local waiters <const> = pipeWaiters
-    pipeWaiters = {}
-    for waiterIndex = 1, #waiters do
-        local waiter <const> = waiters[waiterIndex]
+    -- Completing a gate only queues its task, so no parked operation runs
+    -- before this loop ends and none of them can append here while it does.
+    local waiting <const> = pipeWaiterCount
+    pipeWaiterCount = 0
+    for waiterIndex = 1, waiting do
+        local waiter <const> = pipeWaiters[waiterIndex]
+        pipeWaiters[waiterIndex] = nil
         if waiter.active then
             waiter.active = false
-            waiter.resume(true)
+            waiter.gate:complete(true)
         end
     end
     return settled
@@ -333,20 +348,56 @@ local function closeReader(reader: ReaderImpl, eof: boolean)
     destroyWhenReleased(reader._state)
 end
 
-local function waitForPipe(what: string)
+local function releaseWaiter(waiter: PipeWaiter)
+    if idleWaiterCount >= MAX_IDLE_WAITERS then
+        return
+    end
+    idleWaiterCount = idleWaiterCount + 1
+    idleWaiters[idleWaiterCount] = waiter
+end
+
+local function acquireWaiter(): PipeWaiter
+    if idleWaiterCount > 0 then
+        local waiter <const> = idleWaiters[idleWaiterCount]
+        idleWaiters[idleWaiterCount] = nil
+        idleWaiterCount = idleWaiterCount - 1
+        -- Completing a gate consumes its cancellation, so arm this one again.
+        waiter.gate:reset(waiter.cancel)
+        return waiter
+    end
+    local waiter: PipeWaiter = {active = false, gate = nil, cancel = nil}
+    waiter.cancel = function() waiter.active = false end
+    waiter.gate = task.newGate(waiter.cancel)
+    return waiter
+end
+
+-- Waits for the next process poll and answers whether the caller may wait
+-- again. `deadline` is a millisecond reading of the `time.now` clock, and an
+-- absent deadline waits without a bound.
+local function waitForPipe(what: string, deadline?: number): boolean
     local mode <const> = task.checkWait(what)
     if mode == "blocking" then
         source:advance(1)
-        return
+        return deadline == nil or time.now() * 1000.0 < deadline
     end
-    task.awaitCallback(function(resume: function(boolean)): function()
-        if #pipeWaiters >= MAX_PIPE_WAITERS then
-            error("tecs: too many process pipe operations are waiting", 3)
-        end
-        local waiter <const>: PipeWaiter = {active = true, resume = resume}
-        pipeWaiters[#pipeWaiters + 1] = waiter
-        return function() waiter.active = false end
-    end)
+    if pipeWaiterCount >= MAX_PIPE_WAITERS then
+        error("tecs: too many process pipe operations are waiting", 3)
+    end
+    local waiter <const> = acquireWaiter()
+    waiter.active = true
+    pipeWaiterCount = pipeWaiterCount + 1
+    pipeWaiters[pipeWaiterCount] = waiter
+    local _ <const>, reason = waiter.gate:wait()
+    -- The resumed call owns the waiter until here. A poll that returned it
+    -- earlier could hand this gate to another parked read while the runtime
+    -- still holds this one's cancellation, and canceling this call would then
+    -- silence the wrong reader. A canceled call unwinds instead of arriving,
+    -- so its waiter is collected rather than recycled.
+    releaseWaiter(waiter)
+    if reason ~= nil then
+        error(reason, 3)
+    end
+    return deadline == nil or time.now() * 1000.0 < deadline
 end
 
 function ReaderImpl:isClosed(): boolean
@@ -355,6 +406,10 @@ end
 
 function ReaderImpl:isEOF(): boolean
     return self._eof
+end
+
+function ReaderImpl:setTimeout(timeoutMs: integer)
+    self._timeoutMs = integerIn(timeoutMs, 0, MAX_TIMEOUT_MS, "process reader timeout", 2)
 end
 
 local function available(reader: ReaderImpl, output: loader.BytePointer, countValue: integer): integer, string
@@ -398,12 +453,16 @@ end
 
 function ReaderImpl:read(maxBytes: integer): string, string
     local wanted <const> = min(math.max(1, maxBytes), MAX_READ_BYTES)
+    local deadline: number
     while true do
         local bytes <const>, reason = self:_readAvailable(wanted)
         if bytes ~= nil or reason ~= nil then
             return bytes, reason
         end
-        waitForPipe("process pipe read")
+        deadline = deadline or time.now() * 1000.0 + self._timeoutMs
+        if not waitForPipe("process pipe read", deadline) then
+            return nil, PIPE_TIMEOUT_REASON
+        end
     end
 end
 
@@ -424,12 +483,16 @@ function ReaderImpl:_readAvailableInto(destination: IOBuffer, offset?: integer, 
 end
 
 function ReaderImpl:readInto(destination: IOBuffer, offset?: integer, maxBytes?: integer): integer, string
+    local deadline: number
     while true do
         local got <const>, reason = self:_readAvailableInto(destination, offset, maxBytes)
         if got ~= nil or reason ~= nil then
             return got, reason
         end
-        waitForPipe("process pipe read")
+        deadline = deadline or time.now() * 1000.0 + self._timeoutMs
+        if not waitForPipe("process pipe read", deadline) then
+            return nil, PIPE_TIMEOUT_REASON
+        end
     end
 end
 
@@ -524,8 +587,36 @@ function ProcessImpl:isRunning(): boolean
     return self._state.running
 end
 
+-- The exit completion belongs to the process for the whole of its life, and
+-- several callers may wait on one child. A waiter therefore subscribes rather
+-- than awaiting the producer completion directly: a subscription takes its own
+-- hold and cancellation releases only that hold, so a canceled wait cannot
+-- settle the completion the exit still has to land in.
 function ProcessImpl:wait(): ProcessExit
-    return task.awaitCompletion(self._finished as Completion<ProcessExit>, "process wait")
+    local finished <const> = self._finished as Completion<ProcessExit>
+    local settled = finished
+    if finished.status == "pending" then
+        if task.checkWait("process wait") == "blocking" then
+            finished:wait()
+        else
+            settled = task.awaitCallback(function(resume: function(Completion<ProcessExit>)): function()
+                return Completion.subscribe(
+                    finished as Completion<any>,
+                    function(done: Completion<any>) resume(done as Completion<ProcessExit>) end
+                )
+            end)
+        end
+    end
+    if settled.status == "ready" then
+        return settled.value
+    end
+    if settled.status == "failed" then
+        error(("tecs: process wait failed: %s"):format(settled.error or "failed"), 2)
+    end
+    if settled.status == "pending" then
+        error("tecs: process wait did not complete within its wait budget", 2)
+    end
+    error(("tecs: process wait was canceled: %s"):format(settled.error or "canceled"), 2)
 end
 
 function ProcessImpl:kill(force?: boolean): boolean, string
@@ -771,6 +862,7 @@ local function newReader(state: State, kind: PipeKind): ProcessReader
             _eof = false,
             _scratch = nil,
             _capacity = 0,
+            _timeoutMs = DEFAULT_PIPE_TIMEOUT_MS,
         } as ReaderImpl,
         ReaderMT
     ) as ProcessReader

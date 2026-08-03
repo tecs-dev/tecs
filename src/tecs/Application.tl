@@ -715,7 +715,10 @@ function Application:readCheckpoint(): string
     if path == nil then
         return nil
     end
-    return files.read(path, "checkpoint")
+    -- The reason is deliberately dropped: an absent checkpoint is the ordinary
+    -- first-run answer rather than a failure this call reports.
+    local bytes <const> = files.read(path, "checkpoint")
+    return bytes
 end
 
 --- Returns the checkpoint path, or nil when the config names none.

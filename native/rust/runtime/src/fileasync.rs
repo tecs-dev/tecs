@@ -206,10 +206,15 @@ unsafe fn path(path: *const u8, length: usize) -> Result<CString, CString> {
     CString::new(bytes).map_err(|_| cstring("file path contains a NUL byte"))
 }
 
-fn finish(runtime: &mut AsyncRuntime, pointer: usize) {
+/// Settles a request that has no outstanding SDL outcome left, and reports
+/// whether the caller now owns its memory. A request the caller destroyed while
+/// it was pending is abandoned rather than freed, because SDL and the open lane
+/// still hold its address as userdata; this transition is the first moment
+/// neither can reach it again.
+fn finish(runtime: &mut AsyncRuntime, pointer: usize) -> bool {
     let request = unsafe { &mut *(pointer as *mut TecsAsyncFileRequest) };
     if request.outcomes != 0 || request.status != STATUS_PENDING {
-        return;
+        return false;
     }
     request.status = if request.failure.is_some() {
         STATUS_FAILED
@@ -222,6 +227,14 @@ fn finish(runtime: &mut AsyncRuntime, pointer: usize) {
     runtime.requests = runtime.requests.saturating_sub(1);
     runtime.bytes = runtime.bytes.saturating_sub(request.accounted);
     request.accounted = 0;
+    request.abandoned
+}
+
+/// Settles a request and frees it when nobody is left to read its outcome.
+fn reap(runtime: &mut AsyncRuntime, pointer: usize) {
+    if finish(runtime, pointer) {
+        unsafe { destroy_now(pointer as *mut TecsAsyncFileRequest) };
+    }
 }
 
 fn queue_close(
@@ -259,7 +272,7 @@ fn handle_open(runtime: &mut AsyncRuntime, opened: OpenResult) {
         if !file.is_null() {
             queue_close(runtime, request, file, request.flush);
         }
-        finish(runtime, opened.request);
+        reap(runtime, opened.request);
         return;
     }
 
@@ -270,7 +283,7 @@ fn handle_open(runtime: &mut AsyncRuntime, opened: OpenResult) {
             // There is no synchronous SDL close. Queue creation failure is a
             // process-level fault; retaining this rare handle is safer than
             // inventing a close call SDL does not provide.
-            finish(runtime, opened.request);
+            reap(runtime, opened.request);
             return;
         }
     };
@@ -281,13 +294,13 @@ fn handle_open(runtime: &mut AsyncRuntime, opened: OpenResult) {
             let Ok(length) = usize::try_from(opened.size) else {
                 request.failure = Some(cstring("file size does not fit this platform"));
                 queue_close(runtime, request, file, false);
-                finish(runtime, opened.request);
+                reap(runtime, opened.request);
                 return;
             };
             if length > MAX_REQUEST_BYTES || runtime.bytes.saturating_add(length) > MAX_BYTES {
                 request.failure = Some(cstring("asynchronous file byte limit exceeded"));
                 queue_close(runtime, request, file, false);
-                finish(runtime, opened.request);
+                reap(runtime, opened.request);
                 return;
             }
             runtime.bytes += length;
@@ -335,7 +348,7 @@ fn handle_open(runtime: &mut AsyncRuntime, opened: OpenResult) {
             queue_close(runtime, request, file, request.flush);
         }
     }
-    finish(runtime, opened.request);
+    reap(runtime, opened.request);
 }
 
 fn handle_outcome(runtime: &mut AsyncRuntime, outcome: &SDL_AsyncIOOutcome) {
@@ -362,7 +375,7 @@ fn handle_outcome(runtime: &mut AsyncRuntime, outcome: &SDL_AsyncIOOutcome) {
         request.failure = Some(cstring("asynchronous file write was incomplete"));
     }
     request.outcomes = request.outcomes.saturating_sub(1);
-    finish(runtime, pointer);
+    reap(runtime, pointer);
 }
 
 fn drain_open(runtime: &mut AsyncRuntime) -> u32 {
@@ -589,6 +602,9 @@ unsafe fn destroy_now(request: *mut TecsAsyncFileRequest) {
     }
 }
 
+/// Releases a request. A pending request is abandoned instead: SDL still owns
+/// its address, so this side frees it when the last outcome arrives and the
+/// caller must not read it again.
 #[no_mangle]
 pub unsafe extern "C" fn tecsAsyncFileDestroy(request: *mut TecsAsyncFileRequest) {
     let Some(request_ref) = (unsafe { request.as_mut() }) else {
@@ -618,10 +634,16 @@ pub extern "C" fn tecsAsyncFileShutdown() {
         }
         let active: Vec<usize> = runtime.active.drain().collect();
         for pointer in active {
-            let request = unsafe { &mut *(pointer as *mut TecsAsyncFileRequest) };
-            request.status = STATUS_CANCELED;
-            request.canceled = true;
-            request.outcomes = 0;
+            let abandoned = {
+                let request = unsafe { &mut *(pointer as *mut TecsAsyncFileRequest) };
+                request.status = STATUS_CANCELED;
+                request.canceled = true;
+                request.outcomes = 0;
+                request.abandoned
+            };
+            if abandoned {
+                unsafe { destroy_now(pointer as *mut TecsAsyncFileRequest) };
+            }
         }
         runtime.requests = 0;
         runtime.bytes = 0;

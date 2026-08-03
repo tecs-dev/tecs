@@ -8,7 +8,7 @@ about as long as the slowest one rather than as long as all three:
 ```teal
 local pages <const> = tecs.batch({
     function(): string return client:send({url = manifest}).body:readAll(1 << 20) end,
-    function(): string return tecs.io.files.read("save.json") end,
+    function(): string return (tecs.io.files.read("save.json")) end,
     function(): tecs.assets.Image return tecs.assets.loadImage("sprites/player.png") end,
 })
 ```

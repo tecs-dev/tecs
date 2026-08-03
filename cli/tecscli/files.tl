@@ -111,7 +111,8 @@ function files.read(path: string): string
     if not tecs.io.files.isFile(path) then
         return nil
     end
-    return tecs.io.files.read(path)
+    local bytes <const> = tecs.io.files.read(path)
+    return bytes
 end
 
 --- Writes `bytes` to `path`, creating the directory it goes in.

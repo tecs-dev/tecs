@@ -61,6 +61,13 @@ waiting. They suspend a normal system without blocking SDL and block when
 called outside an update. Buffer and byte-view variants avoid constructing Lua
 strings.
 
+A pipe read waits at most the reader's timeout, thirty seconds by default and
+`Reader:setTimeout` to change it, and then returns nil and a reason. Reading
+one pipe at a time deadlocks against a child that writes to both: the pipe the
+caller ignores fills, the child stops, and the pipe the caller reads never
+produces another byte. `communicate` drains both and is the form to reach for
+whenever a child writes standard error at all.
+
 Use `"inherit"` for a CLI that should share the terminal, `"null"` to discard
 a stream, and `stderr = "stdout"` for one ordered transcript. A nonzero child
 exit still returns an [`Exit`](tealdoc:tecs.io.Process.Exit);

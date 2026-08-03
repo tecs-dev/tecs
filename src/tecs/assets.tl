@@ -1714,9 +1714,9 @@ function assets.loadImage(path: string): Image
     end
     if adapter.storage() ~= storagebackend.sdl then
         local files <const> = require("tecs.io.files")
-        local bytes <const> = files.read(path, "image")
+        local bytes <const>, reason = files.read(path, "image")
         if bytes == nil then
-            error("tecs: image load failed: cannot read " .. path, 2)
+            error("tecs: image load failed: " .. tostring(reason), 2)
         end
         return imageFromBytes(bytes, path)
     end
@@ -1740,12 +1740,12 @@ end
 --- @param kind The caller supplies the content kind used by file watching, or
 ---     omits it to record a document.
 --- @return Returns the complete bytes. A missing or unreadable file raises
----     after the worker reports the failure.
+---     with the platform's own reason behind the path it could not read.
 function assets.loadString(path: string, kind?: string): string
     local files <const> = require("tecs.io.files")
-    local bytes <const> = files.read(path, kind)
+    local bytes <const>, reason = files.read(path, kind)
     if bytes == nil then
-        error("tecs: file load failed: cannot read " .. tostring(path), 2)
+        error("tecs: file load failed: " .. tostring(reason), 2)
     end
     return bytes
 end

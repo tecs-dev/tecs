@@ -689,6 +689,10 @@ describe("assets", function()
 
         assert.are.equal("failed", loading.status)
         assert.is_truthy(loading.error:find("cannot read", 1, true))
+        assert.is_truthy(loading.error:find("spec/fixtures/does-not-exist.data", 1, true), loading.error)
+        -- The platform's own detail reaches the raise rather than stopping at
+        -- the file module.
+        assert.is_truthy(loading.error:find("cannot open file", 1, true), loading.error)
         assert.has_error(function()
             return loading.value
         end)

@@ -22,6 +22,7 @@ local assets = require("tecs.assets")
 local workers = require("tecs.workers")
 local runtime = require("tecs.internal.runtime")
 local task = require("tecs.internal.taskruntime")
+local fileasync = require("tecs.internal.fileasync")
 
 local C = sdl.C
 
@@ -554,6 +555,80 @@ describe("io.files", function()
             destination:close()
         end)
 
+        it("frees a native read destroyed before it settled", function()
+            -- The adapter never destroys a pending request, so this drives the
+            -- native boundary directly: SDL still owns the address, so the
+            -- free belongs to whichever side sees the last outcome. Each round
+            -- holds a megabyte of read buffer, and the rounds together leak far
+            -- past the threshold when that free is dropped.
+            local R = require("tecs.ffi.rust").C
+            local ALLOWED_GROWTH = 32 * 1024 * 1024
+            local ROUNDS = 96
+            local target = at("abandoned.bin")
+            assert.is_true(files.write(target, ("a"):rep(1024 * 1024)))
+
+            local before = settled()
+            for _ = 1, ROUNDS do
+                local handle
+                for _ = 1, 5000 do
+                    handle = R.tecsAsyncFileRead(target, #target)
+                    if handle ~= nil then
+                        break
+                    end
+                    R.tecsAsyncFilePoll()
+                    C.SDL_Delay(1)
+                end
+                assert.is_true(handle ~= nil, "the native file queue stopped accepting reads")
+                R.tecsAsyncFileDestroy(handle)
+                -- One round produces the open result, the read outcome, and
+                -- the close outcome, and a wait returns as soon as it handles
+                -- any of them.
+                for _ = 1, 3 do
+                    R.tecsAsyncFileWait(50)
+                end
+            end
+            for _ = 1, 3 do
+                R.tecsAsyncFileWait(50)
+            end
+
+            local grew = settled() - before
+            assert.is_true(
+                grew < ALLOWED_GROWTH,
+                ("abandoning %d one-megabyte reads grew the process by %.0f MB"):format(ROUNDS, grew / 1048576)
+            )
+            assert.are.equal(1024 * 1024, #assert(files.read(target)))
+        end)
+
+        it("releases a native read whose waiter canceled", function()
+            assert.is_true(files.write(at("canceled-read.bin"), "canceled bytes"))
+            assert.are.equal(0, fileasync.pending())
+
+            local scheduler = task.newScheduler()
+            local reading = scheduler:spawnImmediate(function()
+                return files.read(at("canceled-read.bin"))
+            end)
+            assert.are.equal("pending", reading.status)
+            assert.are.equal(1, fileasync.pending())
+
+            reading:cancel("spec cancellation")
+            scheduler:step()
+            assert.are.equal("canceled", reading.status)
+            -- SDL owns the transfer until it reports an outcome, so the entry
+            -- outlives the waiter and only its settlement may free the handle.
+            assert.are.equal(1, fileasync.pending())
+
+            for _ = 1, 5000 do
+                runtime.poll()
+                if fileasync.pending() == 0 then
+                    break
+                end
+                C.SDL_Delay(1)
+            end
+
+            assert.are.equal(0, fileasync.pending())
+            assert.are.equal("canceled bytes", files.read(at("canceled-read.bin")))
+        end)
+
         it("atomically writes copied bytes on a worker", function()
             local source = buffer.new("before")
             local scheduler = task.newScheduler()
@@ -705,6 +780,15 @@ describe("io.files", function()
             local nextLine = assert(files.lines(at("one-empty-line.txt")))
             assert.are.equal("", nextLine())
             assert.is_nil(nextLine())
+        end)
+
+        it("names the path and the platform detail when a read fails", function()
+            local bytes, reason = files.read(at("absent.bin"))
+
+            assert.is_nil(bytes)
+            assert.is_string(reason)
+            assert.is_true(reason:find(at("absent.bin"), 1, true) ~= nil)
+            assert.is_true(#reason > #("cannot read " .. at("absent.bin")), reason)
         end)
 
         it("reports a file it cannot read before returning an iterator", function()

@@ -131,7 +131,17 @@ end
 --- A caller-owned reader over one live child-process output pipe.
 ---
 --- `read` and `readInto` return ready bytes inline and otherwise wait according
---- to the caller's execution context.
+--- to the caller's execution context, for at most the reader's timeout. They
+--- return nil and a reason when that timeout expires.
+---
+--- The timeout exists because reading one pipe at a time deadlocks against a
+--- child that writes to both. A child whose standard-error pipe fills stops
+--- running, so it writes no further standard output, and a caller looping on
+--- standard output alone waits for bytes that never arrive while the pipe it
+--- is not reading holds the child still. Read both pipes, or call
+--- `communicate`, which drains both while it feeds standard input. The timeout
+--- turns the remaining cases into a reported failure rather than a system
+--- parked for the rest of the run.
 local interface ProcessReader is Reader
     --- Returns whether this endpoint has been closed.
     ---
@@ -144,6 +154,20 @@ local interface ProcessReader is Reader
     --- @param self The process reader to inspect.
     --- @return Returns true after end of file.
     isEOF: function(self: ProcessReader): boolean
+
+    --- Bounds how long `read` and `readInto` wait for the child to send bytes.
+    ---
+    --- The bound covers waiting only, so a read that already has bytes returns
+    --- them however long the reader has been idle. It starts when a call first
+    --- finds the pipe empty and ends that call with nil and a reason. The
+    --- default is 30,000 milliseconds, and zero returns as soon as one attempt
+    --- finds no bytes. The new bound applies to the next call rather than to
+    --- one already waiting.
+    ---
+    --- @param self The process reader to configure.
+    --- @param timeoutMs The caller supplies 0 through 2147483647 milliseconds.
+    ---     Any other value raises.
+    setTimeout: function(self: ProcessReader, timeoutMs: integer)
 end
 
 --- A caller-owned writer over one live child-process input pipe.

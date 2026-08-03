@@ -974,6 +974,19 @@ function files.createTemporaryDirectory(options?: TemporaryOptions): TemporaryPa
     return createTemporary(options, true)
 end
 
+local READ_FAILURE_PREFIX <const> = "tecs: file read failed: "
+
+-- Names the path in every read failure and keeps the platform's own detail
+-- behind it. `awaitCompletion` raises the operational reason with a prefix
+-- that would otherwise land in the middle of the composed sentence.
+local function readFailure(rendered: string, raised: any): string
+    local detail <const> = tostring(raised)
+    if detail:sub(1, #READ_FAILURE_PREFIX) == READ_FAILURE_PREFIX then
+        return ("cannot read %s: %s"):format(rendered, detail:sub(#READ_FAILURE_PREFIX + 1))
+    end
+    return ("cannot read %s: %s"):format(rendered, detail)
+end
+
 --- Reads a whole file and returns its bytes, or nil when there is none there.
 ---
 --- The binary string retains embedded NUL bytes. On the SDL backend the
@@ -984,11 +997,17 @@ end
 --- @param kind The caller supplies the content kind for watching, or omits it
 ---     to record a document.
 --- @return Returns the file bytes, or nil when the platform cannot read them.
-function files.read(path: PathInput, kind?: string): string
+--- @return Returns the failure reason when the first return is nil. The reason
+---     names the path, and on the SDL backend it carries the operating
+---     system's own detail behind it.
+function files.read(path: PathInput, kind?: string): string, string
     local rendered <const> = required(path, "read")
     local backend <const> = adapter.storage()
     if backend ~= storagebackend.sdl then
         local bytes <const> = content.read(rendered, kind)
+        if bytes == nil then
+            return nil, ("cannot read %s"):format(rendered)
+        end
         return bytes
     end
     taskruntime.checkWait("file read")
@@ -997,7 +1016,7 @@ function files.read(path: PathInput, kind?: string): string
     ) as (boolean, fileasync.NativeRead | string)
     if not ok then
         taskruntime.rethrowCancellation(result)
-        return nil
+        return nil, readFailure(rendered, result)
     end
     local read <const> = result as fileasync.NativeRead
     local bytes <const> = read.length == 0 and "" or loader.toBytes(read.pointer as loader.CValue, read.length)
@@ -1031,9 +1050,9 @@ function files.readInto(path: PathInput, destination: IOBuffer, offset?: integer
     end
     local backend <const> = adapter.storage()
     if backend ~= storagebackend.sdl then
-        local bytes <const> = files.read(rendered, kind)
+        local bytes <const>, reason = files.read(rendered, kind)
         if bytes == nil then
-            return nil, ("cannot read %s"):format(rendered)
+            return nil, reason
         end
         destination:setString(bytes, offset)
         return #bytes
@@ -1044,7 +1063,7 @@ function files.readInto(path: PathInput, destination: IOBuffer, offset?: integer
     ) as (boolean, fileasync.NativeRead | string)
     if not ok then
         taskruntime.rethrowCancellation(result)
-        return nil, tostring(result)
+        return nil, readFailure(rendered, result)
     end
     local read <const> = result as fileasync.NativeRead
     local count <const> = read.length
@@ -1073,9 +1092,9 @@ end
 --- @return Returns the failure reason when the first return is nil.
 function files.lines(path: PathInput): LineIterator, string
     local rendered <const> = required(path, "lines")
-    local bytes <const> = files.read(rendered)
+    local bytes <const>, reason = files.read(rendered)
     if bytes == nil then
-        return nil, ("cannot read %s"):format(rendered)
+        return nil, reason
     end
     local at = 1
     local length <const> = #bytes
@@ -1115,9 +1134,9 @@ end
 --- @return Returns the read or compiler reason when the first return is nil.
 function files.load(path: PathInput, environment?: {string: any}): function(...: any): any..., string
     local rendered <const> = required(path, "load")
-    local bytes <const> = files.read(rendered)
+    local bytes <const>, readReason = files.read(rendered)
     if bytes == nil then
-        return nil, ("cannot read %s"):format(rendered)
+        return nil, readReason
     end
     local chunk <const>, reason = loadstring(bytes, "@" .. rendered)
     if chunk ~= nil and environment ~= nil then
@@ -1139,9 +1158,15 @@ local function bufferedFile(backend: storagebackend.Backend, path: string, mode:
     -- functions rather than bypassing them through the native SDL queue.
     local nativeAsync <const> = backend == storagebackend.sdl and backend.open ~= nil
     if mode == "r" or mode == "r+" then
-        initial = nativeAsync and files.read(path) or backend.read(path)
+        local readReason: string
+        if nativeAsync then
+            initial, readReason = files.read(path)
+        else
+            initial = backend.read(path)
+            readReason = ("cannot read %s"):format(path)
+        end
         if initial == nil then
-            return nil, ("cannot read %s"):format(path)
+            return nil, readReason
         end
     elseif mode == "w" or mode == "w+" then
         local ok: boolean

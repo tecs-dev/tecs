@@ -14,6 +14,7 @@ local processModule = require("tecs.internal.process")
 local path = require("tecs.io.Path")
 local process = require("tecs.io.Process")
 local sdl = require("tecs.ffi.sdl3")
+local task = require("tecs.internal.taskruntime")
 local tecsIO = require("tecs.io")
 
 ffi.cdef([[
@@ -268,6 +269,105 @@ describe("streaming processes", function()
         for _, child in ipairs(children) do
             child:close()
         end
+    end)
+
+    it("keeps the exit for a later wait after one waiter is canceled", function()
+        local child = newProcess({ args = { "/bin/sh", "-c", "sleep 0.1; exit 7" } })
+        local scheduler = task.newScheduler()
+        local waiting = scheduler:spawnImmediate(function()
+            return child:wait()
+        end)
+
+        assert.are.equal("pending", waiting.status)
+        waiting:cancel("spec cancellation")
+        scheduler:step()
+        assert.are.equal("canceled", waiting.status)
+
+        local exit = child:wait()
+        assert.are.equal(7, exit.exitCode)
+        assert.is_false(exit.killed)
+        child:close()
+    end)
+
+    it("delivers the exit to a second waiter when the first is canceled", function()
+        local child = newProcess({ args = { "/bin/sh", "-c", "sleep 0.1; exit 5" } })
+        local scheduler = task.newScheduler()
+        local first = scheduler:spawnImmediate(function()
+            return child:wait()
+        end)
+        local second = scheduler:spawnImmediate(function()
+            return child:wait()
+        end)
+
+        first:cancel("spec cancellation")
+        for _ = 1, 5000 do
+            processModule.poll()
+            scheduler:step()
+            if second.status ~= "pending" then
+                break
+            end
+            sdl.C.SDL_Delay(1)
+        end
+
+        assert.are.equal("canceled", first.status)
+        assert.are.equal("ready", second.status, second.error)
+        assert.are.equal(5, second.value.exitCode)
+        child:close()
+    end)
+
+    it("ends a pipe read the child never satisfies", function()
+        local child = newProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
+        child.stdout:setTimeout(50)
+
+        local started = now()
+        local bytes, reason = child.stdout:read(16)
+
+        assert.is_nil(bytes)
+        assert.is_string(reason)
+        assert.is_true(now() - started < 5000)
+        assert.is_true(child:kill(true))
+        child:wait()
+        child:close()
+    end)
+
+    it("ends a suspended pipe read at the same bound", function()
+        local child = newProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
+        child.stdout:setTimeout(50)
+        local scheduler = task.newScheduler()
+        local reading = scheduler:spawnImmediate(function()
+            local bytes, reason = child.stdout:read(16)
+            return { bytes = bytes, reason = reason }
+        end)
+
+        assert.are.equal("pending", reading.status)
+        for _ = 1, 5000 do
+            processModule.poll()
+            scheduler:step()
+            if reading.status ~= "pending" then
+                break
+            end
+            sdl.C.SDL_Delay(1)
+        end
+
+        assert.are.equal("ready", reading.status, reading.error)
+        assert.is_nil(reading.value.bytes)
+        assert.is_string(reading.value.reason)
+        assert.is_true(child:kill(true))
+        child:wait()
+        child:close()
+    end)
+
+    it("validates a reader timeout by raising", function()
+        local child = newProcess({ args = { "/bin/echo", "bounded" } })
+
+        assert.has_error(function()
+            child.stdout:setTimeout(-1)
+        end)
+        assert.has_error(function()
+            child.stdout:setTimeout(1.5)
+        end)
+
+        child:close()
     end)
 
     it("closing a process closes its endpoints and makes its exit available", function()

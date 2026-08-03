@@ -44,6 +44,7 @@ local record fileasync
     ): Completion<NativeRead>
     release: function(read: NativeRead)
     takeBytes: function(read: NativeRead): loader.CPtr
+    pending: function(): integer
     shutdown: function()
 end
 
@@ -83,8 +84,8 @@ local function settle(): integer
             settled = settled + 1
             local completion <const> = entry.completion
             if completion == nil then
-                -- Native kept the abandoned request alive until SDL stopped
-                -- referencing its userdata.
+                -- The waiter canceled. Nothing reads the outcome, so release
+                -- the request now that it has one.
                 R.tecsAsyncFileDestroy(entry.handle)
             elseif status == STATUS_READY then
                 completion:complete({
@@ -121,10 +122,15 @@ function FileSource:cancel(completion: Completion<any>)
     for index = 1, #entries do
         local entry <const> = entries[index]
         if (entry.completion as Completion<any>) == completion then
+            -- The native request keeps running: SDL cannot be told to forget a
+            -- transfer already queued, a read still owns its destination
+            -- buffer, and a write still borrows the caller bytes this entry
+            -- retains. Dropping the waiter is therefore the whole of
+            -- cancellation, and `settle` releases the owner and destroys the
+            -- handle once the request reaches a terminal status. That is the
+            -- only point at which destroying it is safe, so this entry stays
+            -- listed and no other path may free it.
             entry.completion = nil
-            -- Native retains an abandoned request until SDL and the open lane
-            -- can no longer reference it.
-            R.tecsAsyncFileDestroy(entry.handle)
             return
         end
     end
@@ -194,6 +200,12 @@ function fileasync.takeBytes(read: NativeRead): loader.CPtr
     read.pointer = nil
     read.length = 0
     return bytes
+end
+
+-- Counts the native requests this module still has to settle, including the
+-- ones whose waiter canceled and whose handle it has yet to release.
+function fileasync.pending(): integer
+    return #entries
 end
 
 function fileasync.shutdown()
