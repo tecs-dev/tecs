@@ -417,6 +417,117 @@ describe("internal task runtime", function()
         assert.are.equal("canceled", rootTask.status)
     end)
 
+    it("leaves a retained completion to its other consumer when one is canceled", function()
+        -- A producer that keeps its completion for a resource lifetime, which
+        -- is what a process does with its exit.
+        local shared = Completion.pending()
+        shared:retain()
+        local scheduler = task.newScheduler()
+        local first = scheduler:spawn(function()
+            return task.awaitCompletion(shared, "exit")
+        end)
+        local second = scheduler:spawn(function()
+            return task.awaitCompletion(shared, "exit")
+        end)
+
+        scheduler:step()
+        scheduler:step()
+        assert.are.equal("pending", first.status)
+        assert.are.equal("pending", second.status)
+
+        first:cancel("entity despawned")
+        assert.are.equal("pending", shared.status)
+        scheduler:step()
+        assert.are.equal("canceled", first.status)
+
+        shared:complete("exit 0")
+        scheduler:step()
+        assert.are.equal("ready", second.status)
+        assert.are.equal("exit 0", second.value)
+    end)
+
+    it("keeps a retained completion pending after every consumer gives up", function()
+        local shared = Completion.pending()
+        shared:retain()
+        local scheduler = task.newScheduler()
+        local waiter = scheduler:spawn(function()
+            return task.awaitCompletion(shared, "exit")
+        end)
+
+        scheduler:step()
+        waiter:cancel("entity despawned")
+        scheduler:step()
+
+        assert.are.equal("canceled", waiter.status)
+        assert.are.equal("pending", shared.status)
+        shared:complete("exit 0")
+        assert.are.equal("ready", shared.status)
+        assert.are.equal("exit 0", shared.value)
+    end)
+
+    it("releases only its own hold when its wait budget expires", function()
+        local canceled = 0
+        local shared = Completion.pending({
+            sliceMs = 1,
+            defaultWaitMs = 4,
+            poll = function()
+                return 0
+            end,
+            advance = function()
+                return 0
+            end,
+            cancel = function()
+                canceled = canceled + 1
+            end,
+        })
+        local delivered
+        shared:subscribe(function(settled)
+            delivered = settled.value
+        end)
+
+        local ok, reason = pcall(task.awaitCompletion, shared, "decode")
+
+        assert.is_false(ok)
+        assert.is_truthy(tostring(reason):find("wait budget", 1, true))
+        assert.are.equal("pending", shared.status)
+        assert.are.equal(0, canceled, "the consumer that stayed keeps the producer working")
+
+        shared:complete("decoded")
+        assert.are.equal("decoded", delivered)
+    end)
+
+    it("settles and frees a single-consumer completion", function()
+        local canceled = 0
+        local completion = Completion.pending({
+            sliceMs = 1,
+            defaultWaitMs = 4,
+            poll = function()
+                return 0
+            end,
+            advance = function()
+                return 0
+            end,
+            cancel = function()
+                canceled = canceled + 1
+            end,
+        })
+        local scheduler = task.newScheduler()
+        local rootTask = scheduler:spawn(function()
+            return task.awaitCompletion(completion, "decode")
+        end)
+
+        scheduler:step()
+        assert.are.equal(1, completion._watchers, "the wait holds the completion alone")
+
+        completion:complete("decoded")
+        scheduler:step()
+
+        assert.are.equal("ready", rootTask.status)
+        assert.are.equal("decoded", rootTask.value)
+        assert.are.equal(0, canceled)
+        assert.is_nil(completion._listeners, "settlement frees the suspended closure")
+    end)
+
     it("awaits a callback subscription without creating a completion", function()
         local resume
         local canceled = 0
@@ -459,9 +570,8 @@ describe("internal task runtime", function()
 
     it("detaches an internal completion listener when its consumer cancels", function()
         local root = Completion.pending()
-        root._watchers = 0
         local called = false
-        local cancel = Completion.subscribe(root, function()
+        local cancel = root:subscribe(function()
             called = true
         end)
 
@@ -475,9 +585,8 @@ describe("internal task runtime", function()
 
     it("keeps shared completion work until its last consumer cancels", function()
         local root = Completion.pending()
-        root._watchers = 0
-        local cancelFirst = Completion.subscribe(root, function() end)
-        local cancelSecond = Completion.subscribe(root, function() end)
+        local cancelFirst = root:subscribe(function() end)
+        local cancelSecond = root:subscribe(function() end)
 
         cancelFirst()
         assert.are.equal("pending", root.status)

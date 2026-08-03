@@ -616,35 +616,12 @@ function ProcessImpl:isRunning(): boolean
 end
 
 -- The exit completion belongs to the process for the whole of its life, and
--- several callers may wait on one child. A waiter therefore subscribes rather
--- than awaiting the producer completion directly: a subscription takes its own
--- hold and cancellation releases only that hold, so a canceled wait cannot
--- settle the completion the exit still has to land in.
+-- several callers may wait on one child. `newProcess` retains it for the
+-- process, so each wait holds one subscription above that and a wait that gives
+-- up releases only its own hold, leaving the completion the exit still has to
+-- land in pending for every other caller.
 function ProcessImpl:wait(): ProcessExit
-    local finished <const> = self._finished as Completion<ProcessExit>
-    local settled = finished
-    if finished.status == "pending" then
-        if task.checkWait("process wait") == "blocking" then
-            finished:wait()
-        else
-            settled = task.awaitCallback(function(resume: function(Completion<ProcessExit>)): function()
-                return Completion.subscribe(
-                    finished as Completion<any>,
-                    function(done: Completion<any>) resume(done as Completion<ProcessExit>) end
-                )
-            end)
-        end
-    end
-    if settled.status == "ready" then
-        return settled.value
-    end
-    if settled.status == "failed" then
-        error(("tecs: process wait failed: %s"):format(settled.error or "failed"), 2)
-    end
-    if settled.status == "pending" then
-        error("tecs: process wait did not complete within its wait budget", 2)
-    end
-    error(("tecs: process wait was canceled: %s"):format(settled.error or "canceled"), 2)
+    return task.awaitCompletion(self._finished as Completion<ProcessExit>, "process wait")
 end
 
 function ProcessImpl:kill(force?: boolean): boolean, string
@@ -1002,6 +979,9 @@ function process.new(options: ProcessOptions): Process, string
         at = 0,
     }
     state.finished = Completion.pending(source) as ExitCompletion
+    -- The child owns its exit for as long as it runs, so the process holds this
+    -- completion itself and no waiter that gives up can settle it.
+    state.finished:retain()
 
     local value <const> = setmetatable(
         {

@@ -4,6 +4,14 @@
 -- A pending call parks its system through taskruntime, while the same call
 -- outside a system advances its source synchronously. Completion exists only
 -- to connect producers to those two consumers.
+--
+-- `_watchers` counts holds, and a hold is what keeps the producer working. A
+-- fresh completion carries none: a consumer takes one through `subscribe` and
+-- releases it through the function that returns, and a producer that retains
+-- its completion beyond one consumer takes one through `retain`. Cancellation
+-- releases exactly one hold, and reaches the source only when the last hold
+-- goes. So a consumer that gives up can never settle a completion another
+-- consumer, or the producer itself, still holds.
 
 local log <const> = require("tecs.log")
 local time <const> = require("tecs.platform.time")
@@ -43,10 +51,11 @@ local record Completion<T>
     fail: function(self: Completion<T>, reason: string)
     abandon: function(self: Completion<T>, reason: string)
     cancel: function(self: Completion<T>)
+    retain: function(self: Completion<T>)
+    subscribe: function(self: Completion<T>, listener: function(completion: Completion<T>)): function()
 
     pending: function<U>(source?: Source): Completion<U>
     failed: function<U>(reason: string): Completion<U>
-    subscribe: function<U>(completion: Completion<U>, listener: function(completion: Completion<U>)): function()
 end
 
 local CompletionMT <const>: metatable<Completion<any>> = {__index = Completion}
@@ -121,12 +130,15 @@ local function newCompletion(source: Completion.Source): Completion<any>
             _listeners = nil,
             _listenerCount = 0,
             _delivered = 0,
-            _watchers = 1,
+            _watchers = 0,
         } as Completion<any>,
         CompletionMT
     )
 end
 
+-- A fresh completion holds nothing. Its consumers take their own holds through
+-- `subscribe`, so the producer stops when the last of them releases, and a
+-- producer that outlives one consumer keeps its own hold through `retain`.
 function Completion.pending<U>(source?: Completion.Source): Completion<U>
     return newCompletion(source) as Completion<U>
 end
@@ -170,21 +182,24 @@ end
 
 -- Subscriptions are consumer views over a shared producer completion. They add
 -- no second completion allocation, and cancellation releases exactly one hold.
-function Completion.subscribe<U>(completion: Completion<U>, listener: function(completion: Completion<U>)): function()
-    if completion == nil or type(listener) ~= "function" then
-        error("tecs: completion subscription needs a completion and listener", 2)
+-- A method rather than a module function, so a consumer that holds a completion
+-- takes its hold without requiring this module and the load order it carries.
+function Completion:subscribe(listener: function(completion: Completion<T>)): function()
+    if type(listener) ~= "function" then
+        error("tecs: completion subscription needs a listener", 2)
     end
+    local completion <const> = self as Completion<any>
     completion._watchers = completion._watchers + 1
     local active = true
     local at: integer
     at = listen(
-        completion as Completion<any>,
+        completion,
         function(settled: Completion<any>)
             if not active then
                 return
             end
             active = false
-            listener(settled as Completion<U>)
+            listener(settled as Completion<T>)
         end
     )
     return function()
@@ -192,7 +207,7 @@ function Completion.subscribe<U>(completion: Completion<U>, listener: function(c
             return
         end
         active = false
-        unlisten(completion as Completion<any>, at)
+        unlisten(completion, at)
         completion:cancel()
     end
 end
@@ -231,6 +246,19 @@ function Completion:wait(timeoutMs?: number): Completion<T>
     return self
 end
 
+--- Takes a hold for a producer that retains this completion.
+---
+--- A process keeps its exit completion for the whole of the child's life, so
+--- every consumer wait is one hold above this one and a consumer that gives up
+--- releases only its own. A producer that hands its completion to consumers and
+--- keeps nothing takes no hold, and the last consumer to leave stops its work.
+function Completion:retain()
+    self._watchers = self._watchers + 1
+end
+
+-- Releases one hold, and settles this completion once the last one goes. A
+-- completion nothing holds cancels outright, which is how an owner that never
+-- took a hold stops work it alone started.
 function Completion:cancel()
     if self.status ~= "pending" then
         return

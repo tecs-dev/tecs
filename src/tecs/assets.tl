@@ -1530,10 +1530,10 @@ local function finishImage(entry: ImageLoad, image?: Image, reason?: string)
 end
 
 local function beginImage(path: string): Completion<Image>
+    -- The producer is tracked by ImageLoad and takes no hold of its own, so the
+    -- holds on this completion are direct callers and canceling the last one
+    -- releases the native stage.
     local root <const> = Completion.pending(imageSource) as Completion<Image>
-    -- The producer is tracked by ImageLoad. Watchers are only direct callers,
-    -- so canceling the last one can release the native stage.
-    root._watchers = 0
     local entry: ImageLoad = {path = path, root = root}
     imageLoads[path] = entry
     imageByRoot[root as Completion<any>] = entry
@@ -1622,13 +1622,10 @@ imageSource = {
 
 --- A root completion the loader owns and never hands out.
 ---
---- `Completion.pending` starts with one watcher, which is right when its caller
---- owns the operation. The loader owns only the producer side. Each direct load
---- adds its own subscription, so this removes the producer's initial hold.
+--- The loader owns only the producer side and takes no hold. Each direct load
+--- adds its own subscription, so the last load to leave stops the work.
 local function newRoot(): Completion<any>
-    local root = Completion.pending(source) as Completion<any>
-    root._watchers = 0
-    return root
+    return Completion.pending(source) as Completion<any>
 end
 
 --- Registers a load, and answers the completion it will settle and the id the
@@ -1656,17 +1653,14 @@ local function awaitRoot<T>(root: Completion<T>, operation: string, claim?: func
         else
             settled = task.awaitCallback(function(resume: function(Completion<T>)): function()
                 local held: T
-                local unsubscribe <const> = Completion.subscribe(
-                    root as Completion<any>,
-                    function(done: Completion<any>)
-                        if done.status == "ready" and claim ~= nil then
-                            held = done.value as T
-                            claim(held)
-                            claimed = true
-                        end
-                        resume(done as Completion<T>)
+                local unsubscribe <const> = (root as Completion<any>):subscribe(function(done: Completion<any>)
+                    if done.status == "ready" and claim ~= nil then
+                        held = done.value as T
+                        claim(held)
+                        claimed = true
                     end
-                )
+                    resume(done as Completion<T>)
+                end)
                 return function()
                     unsubscribe()
                     if held ~= nil and release ~= nil then

@@ -25,6 +25,9 @@
 -- end settles as canceled, which propagates nothing, and the private CANCEL
 -- sentinel remains the only value that unwinds a task without failing it.
 
+-- Type-only, and it stays that way. A wait holds its completion through the
+-- completion's own method, so the ECS core this module sits under loads no
+-- logging or platform module before a game names one.
 local type Completion = require("tecs.internal.completion")
 local zones <const> = require("tecs.internal.zones")
 
@@ -982,36 +985,42 @@ function taskruntime.awaitCallback<T>(subscribe: function(resume: function(T)): 
 end
 
 --- Bridges an internal producer completion to the direct-return API model.
+---
+--- The wait takes its own subscription hold for as long as it runs, so a
+--- canceled task and an expired wait budget each release that one hold and
+--- nothing else. A completion the producer retains, or one a second consumer
+--- still holds, therefore keeps running for whoever is left, and reaches its
+--- source to stop only when this call held the last hold on it.
 function taskruntime.awaitCompletion<T>(completion: Completion<T>, operation: string): T
     if completion == nil then
         error("tecs: " .. operation .. " has no completion", 2)
     end
     local settled = completion
     if completion.status == "pending" and taskruntime.checkWait(operation) == "cooperative" then
-        local gate <const> = taskruntime.newGate(function() completion:cancel() end)
-        completion:onSettle(function(done: Completion<T>) gate:complete(done) end)
+        local release: function()
+        local gate <const> = taskruntime.newGate(function() release() end)
+        release = completion:subscribe(function(done: Completion<T>) gate:complete(done) end)
         local value, reason <const> = gate:wait()
         if reason ~= nil then
             error(reason, 2)
         end
         settled = value as Completion<T>
     elseif completion.status == "pending" then
+        local release <const> = completion:subscribe(function() end)
         settled:wait()
+        if settled.status == "pending" then
+            -- The blocking wait gives up here, and releasing this hold is what
+            -- stops a producer no caller can reach again. It settles the
+            -- completion only when this call held the last hold on it.
+            release()
+            error(("tecs: %s did not complete within its wait budget"):format(operation), 2)
+        end
     end
     if settled.status == "ready" then
         return settled.value
     end
     if settled.status == "failed" then
         error(("tecs: %s failed: %s"):format(operation, settled.error or "failed"), 2)
-    end
-    if settled.status == "pending" then
-        -- The blocking wait gives up here and nothing else holds this
-        -- completion, so releasing the hold is what stops the producer instead
-        -- of leaving work running that no caller can reach again. Cancellation
-        -- reaches the source only when this was its last consumer, so a
-        -- completion another caller still watches keeps running for that one.
-        settled:cancel()
-        error(("tecs: %s did not complete within its wait budget"):format(operation), 2)
     end
     error(("tecs: %s was canceled: %s"):format(operation, settled.error or "canceled"), 2)
 end
