@@ -159,11 +159,13 @@ Vulkan headers (Apache-2.0).
 
 The static native archive includes `clap` for CLI parsing and `clap_complete`
 for shell completion generation, FastNoise Lite for procedural fields, `gltf`
-for glTF parsing and validation, `glam` for importer transform math, `image`
-for PNG and JPEG decoding and PNG encoding, `resvg` for static SVG
-rasterization, `reqwest` with Rustls for HTTP, `rmcp` for the official MCP
-protocol and Streamable HTTP server, `rapier2d` for physics, `regex` for
-compiled regular expressions, and `taffy` for UI layout.
+for glTF parsing and validation, `glam` for importer transform math,
+`bevy_mikktspace` for MikkTSpace tangent generation, `image` for PNG and JPEG
+decoding and PNG encoding, `resvg` for static SVG rasterization, `reqwest` with
+Rustls for HTTP, `rmcp` for the official MCP protocol and Streamable HTTP
+server, `rapier2d` for physics, `regex` for compiled regular expressions, and
+`taffy` for UI layout. `bevy_mikktspace` retains Morten S. Mikkelsen's zlib
+notice and offers its Rust implementation under MIT or Apache-2.0.
 It also owns the host lifecycle, worker channels, logging, dialogs, Lua module
 registration, LuaJIT's machine-code arena, and the single-file payload loader.
 SDL still owns the application loop and LuaJIT still owns game execution.
@@ -183,7 +185,7 @@ release for that target compiles them:
 
 `adler2`, `aho-corasick`, `allocator-api2`, `anstyle`, `approx`, `arrayref`,
 `arrayvec`,
-`async-compression`, `atomic-waker`, `autocfg`, `base64`, `bincode`,
+`async-compression`, `atomic-waker`, `autocfg`, `base64`, `bevy_mikktspace`, `bincode`,
 `bitflags`, `block-buffer`, `bumpalo`, `bytemuck`, `byteorder-lite`, `bytes`,
 `camino`, `cc`, `cfg-if`,
 `clap`, `clap_builder`, `clap_complete`, `clap_derive`, `clap_lex`, `cmake`, `combine`,

@@ -285,55 +285,114 @@ fn generate_normals(positions: &[Vec3], indices: &[u32], name: &str) -> Result<V
         .collect()
 }
 
-fn generate_tangents(
+struct TangentGeometry<'a> {
+    positions: &'a [Vec3],
+    normals: &'a [Vec3],
+    uvs: &'a [[f32; 2]],
+    indices: &'a [u32],
+    corners: Vec<Option<[f32; 4]>>,
+}
+
+impl TangentGeometry<'_> {
+    fn source(&self, face: usize, vertex: usize) -> usize {
+        self.indices[face * 3 + vertex] as usize
+    }
+}
+
+impl bevy_mikktspace::Geometry for TangentGeometry<'_> {
+    fn num_faces(&self) -> usize {
+        self.indices.len() / 3
+    }
+
+    fn num_vertices_of_face(&self, _face: usize) -> usize {
+        3
+    }
+
+    fn position(&self, face: usize, vertex: usize) -> [f32; 3] {
+        self.positions[self.source(face, vertex)].to_array()
+    }
+
+    fn normal(&self, face: usize, vertex: usize) -> [f32; 3] {
+        self.normals[self.source(face, vertex)].to_array()
+    }
+
+    fn tex_coord(&self, face: usize, vertex: usize) -> [f32; 2] {
+        self.uvs[self.source(face, vertex)]
+    }
+
+    fn set_tangent(
+        &mut self,
+        tangent: Option<bevy_mikktspace::TangentSpace>,
+        face: usize,
+        vertex: usize,
+    ) {
+        self.corners[face * 3 + vertex] = tangent.map(|value| value.tangent_encoded());
+    }
+}
+
+fn orthogonal_tangent(normal: Vec3) -> [f32; 4] {
+    let tangent = if normal.x.abs() < 0.9 {
+        Vec3::new(0.0, normal.z, -normal.y).normalize()
+    } else {
+        Vec3::new(-normal.y, normal.x, 0.0).normalize()
+    };
+    [tangent.x, tangent.y, tangent.z, 1.0]
+}
+
+fn generate_tangent_corners(
     positions: &[Vec3],
     normals: &[Vec3],
     uvs: &[[f32; 2]],
     indices: &[u32],
-) -> Vec<[f32; 4]> {
-    let mut tangents = vec![Vec3::ZERO; positions.len()];
-    let mut bitangents = vec![Vec3::ZERO; positions.len()];
-    for triangle in indices.chunks_exact(3) {
-        let a = triangle[0] as usize;
-        let b = triangle[1] as usize;
-        let c = triangle[2] as usize;
-        let edge1 = positions[b] - positions[a];
-        let edge2 = positions[c] - positions[a];
-        let du1 = uvs[b][0] - uvs[a][0];
-        let dv1 = uvs[b][1] - uvs[a][1];
-        let du2 = uvs[c][0] - uvs[a][0];
-        let dv2 = uvs[c][1] - uvs[a][1];
-        let determinant = du1 * dv2 - dv1 * du2;
-        if determinant.abs() > 1.0e-20 {
-            let tangent = (edge1 * dv2 - edge2 * dv1) / determinant;
-            let bitangent = (edge2 * du1 - edge1 * du2) / determinant;
-            for vertex in [a, b, c] {
-                tangents[vertex] += tangent;
-                bitangents[vertex] += bitangent;
-            }
-        }
-    }
-    normals
-        .iter()
+) -> Result<Vec<[f32; 4]>, String> {
+    let mut geometry = TangentGeometry {
+        positions,
+        normals,
+        uvs,
+        indices,
+        corners: vec![None; indices.len()],
+    };
+    bevy_mikktspace::generate_tangents(&mut geometry)
+        .map_err(|error| format!("MikkTSpace tangent generation failed: {error}"))?;
+    Ok(geometry
+        .corners
+        .into_iter()
         .enumerate()
-        .map(|(index, normal)| {
-            let mut tangent = tangents[index] - *normal * normal.dot(tangents[index]);
-            if tangent.length_squared() <= 1.0e-20 {
-                tangent = if normal.x.abs() < 0.9 {
-                    Vec3::new(0.0, normal.z, -normal.y)
-                } else {
-                    Vec3::new(1.0, 0.0, 0.0)
-                };
-            }
-            tangent = tangent.normalize();
-            let handedness = if normal.cross(tangent).dot(bitangents[index]) < 0.0 {
-                -1.0
-            } else {
-                1.0
-            };
-            [tangent.x, tangent.y, tangent.z, handedness]
+        .map(|(corner, tangent)| {
+            tangent.unwrap_or_else(|| orthogonal_tangent(normals[indices[corner] as usize]))
         })
-        .collect()
+        .collect())
+}
+
+struct TangentRemap {
+    source_vertices: Vec<usize>,
+    tangents: Vec<[f32; 4]>,
+    indices: Vec<u32>,
+}
+
+fn remap_tangent_corners(indices: &[u32], corners: &[[f32; 4]]) -> TangentRemap {
+    let mut remap = HashMap::new();
+    let mut source_vertices = Vec::new();
+    let mut tangents = Vec::new();
+    let mut remapped_indices = Vec::with_capacity(indices.len());
+    for (&source, tangent) in indices.iter().zip(corners) {
+        let key = (
+            source,
+            tangent.map(|value| if value == 0.0 { 0 } else { value.to_bits() }),
+        );
+        let next = source_vertices.len() as u32;
+        let index = *remap.entry(key).or_insert_with(|| {
+            source_vertices.push(source as usize);
+            tangents.push(*tangent);
+            next
+        });
+        remapped_indices.push(index);
+    }
+    TangentRemap {
+        source_vertices,
+        tangents,
+        indices: remapped_indices,
+    }
 }
 
 fn decode_primitive(
@@ -399,37 +458,85 @@ fn decode_primitive(
         uvs.iter().flat_map(|value| *value),
         &format!("{name} TEXCOORD_0"),
     )?;
+    let source_vertex_count = positions.len();
     let has_uvs = primitive.get(&gltf::Semantic::TexCoords(0)).is_some();
-    let tangents: Vec<[f32; 4]> = match reader.read_tangents() {
-        Some(values) => values.collect(),
-        None if has_uvs => generate_tangents(&positions, &normals, &uvs, &indices),
-        None => normals
-            .iter()
-            .map(|normal| {
-                let tangent = if normal.x.abs() < 0.9 {
-                    Vec3::new(0.0, normal.z, -normal.y).normalize()
-                } else {
-                    Vec3::X
-                };
-                [tangent.x, tangent.y, tangent.z, 1.0]
-            })
-            .collect(),
-    };
-    if tangents.len() != positions.len() {
+    let authored_tangents = reader
+        .read_tangents()
+        .map(Iterator::collect::<Vec<[f32; 4]>>);
+    if authored_tangents
+        .as_ref()
+        .is_some_and(|values| values.len() != source_vertex_count)
+    {
         return Err(format!("{name} TANGENT count does not match POSITION"));
     }
+    let (positions, normals, uvs, tangents, indices, source_vertices) =
+        if let Some(tangents) = authored_tangents {
+            (
+                positions,
+                normals,
+                uvs,
+                tangents,
+                indices,
+                (0..source_vertex_count).collect::<Vec<_>>(),
+            )
+        } else if has_uvs {
+            let corners = generate_tangent_corners(&positions, &normals, &uvs, &indices)
+                .map_err(|error| format!("{name} {error}"))?;
+            let remapped = remap_tangent_corners(&indices, &corners);
+            (
+                remapped
+                    .source_vertices
+                    .iter()
+                    .map(|&source| positions[source])
+                    .collect(),
+                remapped
+                    .source_vertices
+                    .iter()
+                    .map(|&source| normals[source])
+                    .collect(),
+                remapped
+                    .source_vertices
+                    .iter()
+                    .map(|&source| uvs[source])
+                    .collect(),
+                remapped.tangents,
+                remapped.indices,
+                remapped.source_vertices,
+            )
+        } else {
+            let tangents = normals
+                .iter()
+                .map(|normal| orthogonal_tangent(*normal))
+                .collect();
+            (
+                positions,
+                normals,
+                uvs,
+                tangents,
+                indices,
+                (0..source_vertex_count).collect::<Vec<_>>(),
+            )
+        };
     finite(
         tangents.iter().flat_map(|value| *value),
         &format!("{name} TANGENT"),
     )?;
 
-    let colors: Vec<f32> = match reader.read_colors(0) {
-        Some(values) => values.into_rgba_f32().flatten().collect(),
+    let source_colors: Vec<[f32; 4]> = match reader.read_colors(0) {
+        Some(values) => values.into_rgba_f32().collect(),
         None => Vec::new(),
     };
-    if !colors.is_empty() && colors.len() != positions.len() * 4 {
+    if !source_colors.is_empty() && source_colors.len() != source_vertex_count {
         return Err(format!("{name} COLOR_0 count does not match POSITION"));
     }
+    let colors: Vec<f32> = if source_colors.is_empty() {
+        Vec::new()
+    } else {
+        source_vertices
+            .iter()
+            .flat_map(|&source| source_colors[source])
+            .collect()
+    };
     finite(colors.iter().copied(), &format!("{name} COLOR_0"))?;
 
     let joints = reader
@@ -446,12 +553,12 @@ fn decode_primitive(
     let mut skin = Vec::new();
     let mut max_joint = -1;
     if let (Some(joints), Some(weights)) = (joints, weights) {
-        if joints.len() != positions.len() || weights.len() != positions.len() {
+        if joints.len() != source_vertex_count || weights.len() != source_vertex_count {
             return Err(format!(
                 "{name} skin attribute count does not match POSITION"
             ));
         }
-        skin.reserve(positions.len() * 8);
+        let mut source_skin = Vec::with_capacity(source_vertex_count);
         for (vertex, (joints, weights)) in joints.into_iter().zip(weights).enumerate() {
             let total: f32 = weights.iter().sum();
             if !total.is_finite() || total <= 1.0e-20 || weights.iter().any(|weight| *weight < 0.0)
@@ -460,11 +567,19 @@ fn decode_primitive(
                     "{name} has invalid joint weights at vertex {vertex}"
                 ));
             }
-            skin.extend(joints.map(|joint| {
+            let joints = joints.map(|joint| {
                 max_joint = max_joint.max(i32::from(joint));
                 f32::from(joint)
-            }));
-            skin.extend(weights.map(|weight| weight / total));
+            });
+            let weights = weights.map(|weight| weight / total);
+            source_skin.push([
+                joints[0], joints[1], joints[2], joints[3], weights[0], weights[1], weights[2],
+                weights[3],
+            ]);
+        }
+        skin.reserve(positions.len() * 8);
+        for &source in &source_vertices {
+            skin.extend(source_skin[source]);
         }
     }
 
@@ -492,7 +607,7 @@ fn decode_primitive(
             ("TANGENT", tangents_delta.as_ref().map(Vec::len)),
         ] {
             if let Some(length) = length {
-                if length != positions.len() {
+                if length != source_vertex_count {
                     return Err(format!(
                         "{name} morph {label} count does not match POSITION"
                     ));
@@ -502,23 +617,23 @@ fn decode_primitive(
         decoded_targets.push((positions_delta, normals_delta, tangents_delta));
     }
     for target in &decoded_targets {
-        for vertex in 0..positions.len() {
-            let position = target.0.as_ref().map_or([0.0; 3], |values| values[vertex]);
-            let normal = target.1.as_ref().map_or([0.0; 3], |values| values[vertex]);
-            let tangent = target.2.as_ref().map_or([0.0; 3], |values| values[vertex]);
+        for &source in &source_vertices {
+            let position = target.0.as_ref().map_or([0.0; 3], |values| values[source]);
+            let normal = target.1.as_ref().map_or([0.0; 3], |values| values[source]);
+            let tangent = target.2.as_ref().map_or([0.0; 3], |values| values[source]);
             morph.extend(position);
             morph.extend(normal);
             morph.extend(tangent);
         }
     }
-    for vertex in 0..positions.len() {
+    for &source in &source_vertices {
         let displacement: f32 = decoded_targets
             .iter()
             .map(|target| {
                 target
                     .0
                     .as_ref()
-                    .map_or(Vec3::ZERO, |values| Vec3::from_array(values[vertex]))
+                    .map_or(Vec3::ZERO, |values| Vec3::from_array(values[source]))
                     .length()
             })
             .sum();
@@ -1433,6 +1548,48 @@ mod tests {
 
     fn vertex(x: f32, y: f32) -> [f32; 12] {
         [x, y, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+    }
+
+    #[test]
+    fn generates_standard_tangents_for_an_indexed_quad() {
+        let positions = [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        ];
+        let normals = [Vec3::Z; 4];
+        let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let indices = [0, 1, 2, 0, 2, 3];
+
+        let corners = generate_tangent_corners(&positions, &normals, &uvs, &indices).unwrap();
+
+        assert_eq!(corners.len(), indices.len());
+        for tangent in corners {
+            assert!((tangent[0] - 1.0).abs() < 1.0e-6);
+            assert!(tangent[1].abs() < 1.0e-6);
+            assert!(tangent[2].abs() < 1.0e-6);
+            assert!((tangent[3].abs() - 1.0).abs() < 1.0e-6);
+        }
+    }
+
+    #[test]
+    fn splits_vertices_at_tangent_discontinuities() {
+        let indices = [0, 1, 2, 0, 2, 3];
+        let corners = [
+            [1.0, 0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0, 1.0],
+            [-1.0, 0.0, 0.0, -1.0],
+            [-1.0, 0.0, 0.0, -1.0],
+            [-1.0, 0.0, 0.0, -1.0],
+        ];
+
+        let remapped = remap_tangent_corners(&indices, &corners);
+
+        assert_eq!(remapped.source_vertices, vec![0, 1, 2, 0, 2, 3]);
+        assert_eq!(remapped.indices, vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(remapped.tangents, corners);
     }
 
     #[test]
