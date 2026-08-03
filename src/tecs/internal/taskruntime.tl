@@ -2,12 +2,46 @@
 --
 -- This stays internal because suspension is an implementation detail of direct
 -- engine calls. Games register ordinary systems and do not manage tasks.
+--
+-- Child failures reach their owner
+-- --------------------------------
+--
+-- A child spawned into a scope reports its failure to the task that owns the
+-- scope, at whatever that task is parked on, rather than waiting for a join
+-- that may never happen. An owner parked on an unrelated wait the child was
+-- supposed to satisfy therefore raises the child's failure instead of parking
+-- forever.
+--
+-- One exception keeps a collecting owner in charge of its own order: an owner
+-- parked on a task join is already reading children, so a sibling failure
+-- waits for the join that reads it. `tecs.batch` relies on that, because it
+-- joins its callbacks in the order the caller gave them.
+--
+-- A failure never reaches an owner twice. A child with a joiner attached wakes
+-- that joiner and propagates nothing; a child without one interrupts the owner
+-- and nothing later reports the same failure again.
+--
+-- Cancellation stays separate from failure. A child canceled at normal scope
+-- end settles as canceled, which propagates nothing, and the private CANCEL
+-- sentinel remains the only value that unwinds a task without failing it.
 
 local type Completion = require("tecs.internal.completion")
 local zones <const> = require("tecs.internal.zones")
 
+-- `debug.traceback` returns a message that is not a string unchanged, which is
+-- what keeps the private cancellation sentinel a sentinel instead of a
+-- stringified table. Teal's definition types the message as a string, so it is
+-- bound here at the type this file relies on.
+local traceback <const> = debug.traceback as function(message: any, level?: number): any
+
+-- A task result is one value: the body's first return, which is what `T` binds
+-- to in every `function(ScopeImpl): T...` below. A body may return more, and
+-- the rest are discarded rather than carried. `settle` runs for every task, and
+-- carrying a tuple would cost an allocation there for something no caller in
+-- this tree returns.
 local record TaskImpl<T>
     status: string
+    -- The body's first return value, once `status` is "ready".
     value: T
     error: string
     thread: thread
@@ -18,6 +52,9 @@ local record TaskImpl<T>
     waiter: TaskImpl<any>
     waitingOn: any
     waitKind: string
+    -- The name of the operation this task is parked in, set by `checkWait` and
+    -- cleared wherever `waitKind` is, so a stalled task never reports the name
+    -- of an operation that already finished.
     waitOperation: string
     resumeTag: any
     resumeValue: any
@@ -89,6 +126,7 @@ local YIELD <const> = {}
 local RESUME <const> = {}
 local CANCEL <const> = {}
 local CYCLE <const> = {}
+local FAIL <const> = {}
 
 local enum WaitMode
     "cooperative"
@@ -153,6 +191,47 @@ local function removeFromOwner(task: TaskImpl<any>)
     task.ownerIndex = 0
 end
 
+-- Delivers a child failure to the task that owns its scope, at whatever that
+-- task is parked on. Returns a cancellation-hook failure to the caller rather
+-- than raising it, because this runs while the child is settling.
+--
+-- An owner parked on a task join reads children itself and keeps the order it
+-- reads them in, so a sibling failure waits for the join instead.
+local function interruptOwner(owner: TaskImpl<any>, reason: string): string
+    if owner == nil or owner.status ~= "pending" or not owner.started then
+        return nil
+    end
+    if owner.cancelRequested or owner.resumeTag == FAIL or owner.waitKind == "task" then
+        return nil
+    end
+
+    local cancelWait = owner.resumeCancel
+    owner.resumeCancel = nil
+    if owner.waitKind == "gate" then
+        local gate <const> = owner.waitingOn as GateImpl
+        if gate ~= nil and gate.waiter == owner then
+            gate.waiter = nil
+            cancelWait = gate.cancelWait
+            gate.cancelWait = nil
+        end
+    end
+    owner.waitingOn = nil
+    owner.waitKind = nil
+    owner.waitOperation = nil
+    owner.resumeTag = FAIL
+    owner.resumeValue = nil
+    owner.resumeReason = ("tecs: a task started by this one failed: %s"):format(reason or "task failed")
+    enqueue(owner.scheduler as SchedulerImpl, owner)
+
+    if cancelWait ~= nil then
+        local ok <const>, failure = xpcall(cancelWait, debug.traceback) as (boolean, string)
+        if not ok then
+            return failure
+        end
+    end
+    return nil
+end
+
 local function settle(task: TaskImpl<any>, status: string, value: any, reason?: string): string
     if task.status ~= "pending" then
         return
@@ -162,13 +241,15 @@ local function settle(task: TaskImpl<any>, status: string, value: any, reason?: 
     task.error = reason
     task.waitingOn = nil
     task.waitKind = nil
+    task.waitOperation = nil
     task.resumeCancel = nil
     for index = 1, task.zoneCount do
         task.zoneNames[index] = nil
     end
     task.zoneCount = 0
     task.zoneGeneration = 0
-    if task.ownerScope ~= nil then
+    local ownerScope <const> = task.ownerScope as ScopeImpl
+    if ownerScope ~= nil then
         removeFromOwner(task)
     end
 
@@ -177,8 +258,14 @@ local function settle(task: TaskImpl<any>, status: string, value: any, reason?: 
     if waiter ~= nil then
         waiter.waitingOn = nil
         waiter.waitKind = nil
+        waiter.waitOperation = nil
         waiter.resumeTag = RESUME
         enqueue(waiter.scheduler as SchedulerImpl, waiter)
+    end
+
+    local propagated: string
+    if status == "failed" and waiter == nil and ownerScope ~= nil and ownerScope.active then
+        propagated = interruptOwner(ownerScope.owner, reason)
     end
 
     local observer = task._onSettle
@@ -189,20 +276,29 @@ local function settle(task: TaskImpl<any>, status: string, value: any, reason?: 
             return failure
         end
     end
-    return nil
+    return propagated
 end
 
+-- One traceback per failure. A failure raised inside a phase, a commit, or a
+-- child task already carries the frames of the line that raised it, and a
+-- second capture at the task boundary only names this file.
 local function caught(reason: any): any
     if reason == CANCEL then
         return reason
     end
-    return debug.traceback(tostring(reason), 2)
+    if type(reason) == "string" and (reason as string):find("\nstack traceback:", 1, true) ~= nil then
+        return reason
+    end
+    return traceback(reason, 2)
 end
 
 local function park(): any, string
     local tag <const>, value, reason = coroutine.yield(WAIT)
     if tag == CANCEL then
         error(CANCEL, 0)
+    end
+    if tag == FAIL then
+        error(reason, 0)
     end
     return value, reason as string
 end
@@ -236,8 +332,20 @@ local function cancelChildren(scope: ScopeImpl)
     end
 end
 
+-- A barrier belongs to the call that opened it, so leaving that call by a raise
+-- ends it too. The reusable root makes this load bearing rather than tidy: its
+-- scope outlives the invocation, and a barrier left behind would reject every
+-- wait in every later update.
+local function clearBarrier(scope: ScopeImpl)
+    local state <const> = scope as {string: any}
+    if state.barrier ~= nil then
+        state.barrier = nil
+    end
+end
+
 local function runBody(task: TaskImpl<any>, body: function(ScopeImpl): any...): any
     local ok <const>, result = xpcall(body, caught, task.scope as ScopeImpl)
+    clearBarrier(task.scope as ScopeImpl)
     cancelChildren(task.scope as ScopeImpl)
     -- Cancellation is sticky. User code may use pcall for ordinary cleanup,
     -- but catching the private unwind signal cannot turn a canceled task into
@@ -257,6 +365,7 @@ local function runReusable(task: TaskImpl<any>, body: function(ScopeImpl): any..
         -- A reusable root already owns the protected cycle boundary. Calling
         -- `runBody` through another pcall doubled that boundary on every frame.
         local ok <const>, result = xpcall(body, caught, scope) as (boolean, any)
+        clearBarrier(scope)
         if scope.childCount == 0 then
             scope.active = false
         else
@@ -521,6 +630,7 @@ function SchedulerImpl:restartImmediate<T>(task: TaskImpl<T>): TaskImpl<T>
 
     local scope <const> = task.scope as ScopeImpl
     scope.active = true
+    clearBarrier(scope)
     task.status = "pending"
     task.value = nil
     task.error = nil
@@ -665,6 +775,7 @@ function TaskImpl:cancel(reason?: string)
     end
     self.waitingOn = nil
     self.waitKind = nil
+    self.waitOperation = nil
     self.resumeTag = CANCEL
     self.resumeValue = nil
     self.resumeReason = nil
@@ -713,6 +824,7 @@ local function finishGate(gate: GateImpl, value: any, reason?: string)
     gate.waiter = nil
     waiter.waitingOn = nil
     waiter.waitKind = nil
+    waiter.waitOperation = nil
     waiter.resumeTag = RESUME
     waiter.resumeValue = value
     waiter.resumeReason = reason
@@ -888,6 +1000,12 @@ function taskruntime.awaitCompletion<T>(completion: Completion<T>, operation: st
         error(("tecs: %s failed: %s"):format(operation, settled.error or "failed"), 2)
     end
     if settled.status == "pending" then
+        -- The blocking wait gives up here and nothing else holds this
+        -- completion, so releasing the hold is what stops the producer instead
+        -- of leaving work running that no caller can reach again. Cancellation
+        -- reaches the source only when this was its last consumer, so a
+        -- completion another caller still watches keeps running for that one.
+        settled:cancel()
         error(("tecs: %s did not complete within its wait budget"):format(operation), 2)
     end
     error(("tecs: %s was canceled: %s"):format(operation, settled.error or "canceled"), 2)
@@ -914,9 +1032,12 @@ end
 function taskruntime.yield()
     local task <const> = currentTask()
     checkCanSuspend(task, "task.yield")
-    local tag <const> = coroutine.yield(YIELD)
+    local tag <const>, _value <const>, reason <const> = coroutine.yield(YIELD)
     if tag == CANCEL then
         error(CANCEL, 0)
+    end
+    if tag == FAIL then
+        error(reason, 0)
     end
 end
 
@@ -948,7 +1069,10 @@ function taskruntime.checkWait(operation: string): WaitMode
     if mode == "cooperative" then
         -- Named here rather than at the park itself, because this is the one
         -- point every cooperative operation passes through with its own name.
-        -- A wait that never completes is otherwise anonymous.
+        -- A wait that never completes is otherwise anonymous. Callers that park
+        -- in a loop pass through here before each park, so clearing the name
+        -- with the wait costs no accuracy and stops a finished operation from
+        -- being reported as what a later park is stuck in.
         activeScheduler.current.waitOperation = operation
     end
     return mode

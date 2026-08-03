@@ -7,6 +7,12 @@ local EMPTY <const> = require("tecs.utils.pool").EMPTY
 
 local table_new <const> = require("table.new") as function(integer, integer): {any}
 
+-- `debug.traceback` returns a message that is not a string unchanged, which is
+-- how the task runtime's private unwind sentinel survives a phase boundary.
+-- Teal's definition types the message as a string, so it is bound here at the
+-- type this file relies on.
+local traceback <const> = debug.traceback as function(message: any, level?: number): any
+
 local type World = types.World
 local type System = types.System
 local type Pipeline = types.Pipeline
@@ -101,7 +107,7 @@ local record PipelineImpl is Pipeline
     anonymousSystemCount: integer
 
     activeState: ActiveState
-    phaseFailure: function(any): string
+    phaseFailure: function(any): any
 end
 
 -- The most fixed steps one update runs before the overload policy decides what
@@ -191,7 +197,7 @@ function pipeline.new(fixedTimestep: number, fixedMaxSteps?: integer, fixedOverl
         {__index = PipelineImpl}
     )
 
-    result.phaseFailure = function(failure: any): string
+    result.phaseFailure = function(failure: any): any
         local state <const> = result.activeState
         local depth <const> = state.depth
         local world = state.worlds[depth]
@@ -201,7 +207,10 @@ function pipeline.new(fixedTimestep: number, fixedMaxSteps?: integer, fixedOverl
         end
         zones.leave(state.systemZones[depth] or 0)
         state.systemZones[depth] = nil
-        return debug.traceback(tostring(failure), 2)
+        -- A failure the task runtime raises to unwind a phase is a private
+        -- sentinel rather than a message, and `traceback` returns it unchanged,
+        -- so it survives instead of reaching a reader as a table address.
+        return traceback(failure, 2)
     end
 
     -- Initialize each phase.
@@ -445,8 +454,6 @@ end
 -- Direct phase runs own one protected boundary. Scheduled world updates use
 -- the reusable root's existing boundary and recover the same pipeline state
 -- when that root reports failure. A stack preserves nested direct phase runs.
-local traceback <const> = debug.traceback
-
 local function runGroup(self: PipelineImpl, group: FlatGroup, dt: number, world: World)
     if group.count == 0 then
         return
@@ -729,9 +736,7 @@ function PipelineImpl:run(phase: Phase, dt: number, world: World)
         recreatePipeline(self)
     end
 
-    local ok <const>, failure = xpcall(
-        runPhaseCommitted, self.phaseFailure, self, phase, dt, world
-    ) as (boolean, string)
+    local ok <const>, failure = xpcall(runPhaseCommitted, self.phaseFailure, self, phase, dt, world) as (boolean, any)
     if not ok then
         pipeline.recover(self, world)
         error(failure, 0)

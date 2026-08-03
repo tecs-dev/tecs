@@ -85,8 +85,10 @@ local answers <const> = tecs.batch({
 
 Each callback is its own cooperative task, so one that waits releases the
 others. The call suspends the system until every callback settles. The first
-callback that raises cancels the ones still running, waits for them to unwind
-their scopes, and raises that failure from `batch`.
+callback that raises, in the order the callbacks were given, cancels the ones
+still running, waits for them to unwind their scopes, and raises that failure
+from `batch`. Each callback reports once: a later callback that failed earlier
+in time raises when `batch` reaches it.
 
 Callbacks return values for the caller to apply. Staging a spawn inside a
 callback hands out an entity identifier at the moment that callback runs, which

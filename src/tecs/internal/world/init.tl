@@ -107,6 +107,7 @@ function WorldImpl.new(config?: types.World.Config): World
             _ffiSliceId = GLOBAL_FFI_EVENTS:acquireSlice(),
             _eventPool = pool.newTablePool({clearOn = "acquire", maxSize = 32}),
             _updateStalled = false,
+            _stalledUpdates = 0,
             _updateScheduler = taskruntime.newScheduler(),
             _updateTask = nil,
             _updateBody = nil,
@@ -1228,6 +1229,35 @@ runWorldUpdate = function(self: WorldImpl)
     table_clear(self._dirtyArchetypes)
 end
 
+-- Consecutive suspended updates before the world says what it is waiting on.
+-- Five seconds at 60Hz: past every ordinary asset load and network round trip,
+-- and well inside the time a person spends deciding the process has hung.
+local STALL_REPORT_UPDATES <const> = 300
+
+-- How often it repeats afterwards, so a wait that changes is visible and one
+-- that does not costs one line a minute rather than one a frame.
+local STALL_REPEAT_UPDATES <const> = 3600
+
+-- Names what a suspended update is ultimately parked on. Reached only from the
+-- reporting branch, which is also why `tecs.log` is required here rather than
+-- at the top: this module loads with the ECS, and logging is SDL's, so a
+-- headless tool that only wants worlds and queries would be made to find SDL.
+local function reportStall(root: tasks.Task<any>, updates: integer)
+    local log <const> = require("tecs.log")
+    -- At error priority rather than warn, because warn sits under where SDL
+    -- leaves a custom category: a stalled world looks like a hung process, and
+    -- the developer has to hear about it without knowing to turn a category up.
+    -- "tecs.world" is a logger name, which is configuration a developer filters
+    -- on rather than an identifier this tree can rename.
+    log.get("tecs.world"):error(
+        "World update has been suspended for %d consecutive updates, waiting on %s. "
+            .. "Nothing has completed that wait, so the update cannot finish and no "
+            .. "later update starts.",
+        updates,
+        taskruntime.describeWait(root) or "an unknown wait"
+    )
+end
+
 function WorldImpl:update(dt: number): boolean
     local root = self._updateTask as tasks.Task<any>
     if self._updateStalled then
@@ -1251,10 +1281,19 @@ function WorldImpl:update(dt: number): boolean
 
     if root.status == "pending" then
         self._updateStalled = true
+        local stalled <const> = self._stalledUpdates + 1
+        self._stalledUpdates = stalled
+        if
+            stalled == STALL_REPORT_UPDATES
+            or (stalled > STALL_REPORT_UPDATES and (stalled - STALL_REPORT_UPDATES) % STALL_REPEAT_UPDATES == 0)
+        then
+            reportStall(root, stalled)
+        end
         return false
     end
 
     self._updateStalled = false
+    self._stalledUpdates = 0
     if root.status == "ready" then
         return true
     end
@@ -1311,6 +1350,7 @@ function WorldImpl:shutdown()
         end
     end
     self._updateStalled = false
+    self._stalledUpdates = 0
     self:_commit()
     self.pipeline:run(phases.ShutdownGroup, 0, self)
     local sliceId = self._ffiSliceId

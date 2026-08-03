@@ -150,6 +150,32 @@ describe("tecs.batch", function()
         assert.is_nil(siblingFinished)
     end)
 
+    it("reports a callback that failed while another was still waiting, once", function()
+        local driver = newDriver()
+        local failure, results
+        local world = worldRunning(function()
+            local ok, reason = pcall(tecs.batch, {
+                function()
+                    return driver.wait("slow", 4)
+                end,
+                function()
+                    -- Fails while the caller is parked on the first callback's
+                    -- join, which is the park the runtime leaves alone.
+                    error("late callback failure", 0)
+                end,
+            })
+            failure = not ok and tostring(reason) or nil
+            results = ok and reason or nil
+        end)
+
+        driver.run(world)
+
+        assert.is_nil(results)
+        assert.is_string(failure)
+        assert.is_truthy(failure:find("late callback failure", 1, true))
+        assert.is_nil(failure:find("a task started by this one failed", 1, true))
+    end)
+
     it("closes a scope a canceled callback owns", function()
         local driver = newDriver()
         local closed = false

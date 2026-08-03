@@ -92,10 +92,17 @@ replaying its earlier systems or advancing its clock twice.
 Calling the same cooperative API outside a world update, including from
 startup, shutdown, or `runPhase`, blocks while pumping its producer. A
 completion-backed operation stops at its documented finite wait budget and
-reports failure through that call; readiness methods honor their explicit
-timeouts, while a socket read waits for input or closure. This is useful during
-initialization and in headless tools. Plugin authors do not choose between
-synchronous and asynchronous variants.
+reports failure through that call; giving up also releases that caller's hold
+on the producer, so the work stops rather than running on with nothing left to
+deliver to. Readiness methods honor their explicit timeouts, while a socket
+read waits for input or closure. This is useful during initialization and in
+headless tools. Plugin authors do not choose between synchronous and
+asynchronous variants.
+
+A wait nothing ever completes suspends the update indefinitely, which looks
+from outside like a hung process. After five seconds of suspended updates the
+world says what it is parked on through the `tecs.world` logger, at error
+priority, and repeats about once a minute while the wait lasts.
 
 One persistent coroutine belongs to the logical world update, not to every
 entity. Iterating ten thousand entities does not create ten thousand tasks.

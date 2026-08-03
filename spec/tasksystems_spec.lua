@@ -223,6 +223,97 @@ describe("resumable run systems", function()
         assert.are.equal(2, attempts)
     end)
 
+    it("fails the update when a task a system started fails", function()
+        local world, Value, entity = fixture()
+        -- Nothing else completes this gate. The task the system started was
+        -- what would have, so its failure has to end the update rather than
+        -- leave the world parked for the rest of the process.
+        local gate = task.newGate()
+        local attempts = 0
+        world:addSystem({
+            name = "WaitsOnAFailingTask",
+            phase = phases.Update,
+            run = function(_, runWorld)
+                attempts = attempts + 1
+                if attempts == 1 then
+                    task.current().scope:spawn(function()
+                        error("producer failed")
+                    end)
+                    gate:wait()
+                end
+                runWorld:set(entity, Value, Value(4))
+            end,
+        })
+
+        local ok, reason = pcall(world.update, world, 1 / 60)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(reason):find("producer failed", 1, true))
+        assert.is_truthy(tostring(reason):find("stack traceback:", 1, true))
+        assert.is_false(world._updateStalled)
+
+        -- The reusable fiber is still the same one, and the next update runs a
+        -- whole frame's worth of systems on it.
+        assert.is_true(world:update(1 / 60))
+        assert.are.equal(2, attempts)
+        assert.are.equal(4, world:get(entity, Value).value)
+    end)
+
+    it("names what a stalled update waits on once, then periodically", function()
+        local world = fixture()
+        local gate = task.newGate()
+        world:addSystem({
+            name = "StallsForever",
+            phase = phases.Update,
+            run = function()
+                gate:wait()
+            end,
+        })
+
+        local reports = {}
+        local logger = require("tecs.log").get("tecs.world")
+        local ownError = rawget(logger, "error")
+        logger.error = function(_, message, updates, waiting)
+            reports[#reports + 1] = { message = message, updates = updates, waiting = waiting }
+        end
+
+        -- Restores the inherited method when nothing owned one.
+        local finally = function()
+            logger.error = ownError
+        end
+        local ok, reason = pcall(function()
+            for _ = 1, 299 do
+                assert.is_false(world:update(1 / 60))
+            end
+            assert.are.equal(0, #reports, "an ordinary wait is not a stall")
+
+            assert.is_false(world:update(1 / 60))
+            assert.are.equal(1, #reports)
+            assert.are.equal(300, reports[1].updates)
+            assert.are.equal("gate", reports[1].waiting)
+
+            for _ = 1, 3599 do
+                world:update(1 / 60)
+            end
+            assert.are.equal(1, #reports, "it reports periodically rather than every frame")
+            world:update(1 / 60)
+            assert.are.equal(2, #reports)
+            assert.are.equal(3900, reports[2].updates)
+        end)
+        finally()
+        assert(ok, reason)
+
+        gate:complete(true)
+        assert.is_true(world:update(1 / 60))
+    end)
+
+    it("passes a private failure through the phase handler unchanged", function()
+        local world = fixture()
+        -- The task runtime unwinds a phase with a private sentinel rather than
+        -- a message. Stringifying one would reach a reader as a table address.
+        local sentinel = {}
+        assert.are.equal(sentinel, world.pipeline.phaseFailure(sentinel))
+    end)
+
     it("cancels a suspended update during shutdown", function()
         local world = fixture()
         local gate = task.newGate()

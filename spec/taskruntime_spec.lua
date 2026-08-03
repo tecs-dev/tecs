@@ -256,6 +256,113 @@ describe("internal task runtime", function()
         end)
     end)
 
+    it("ends a suspension barrier the body left by raising", function()
+        local scheduler = task.newScheduler()
+        local gate = task.newGate()
+        gate:complete(3)
+        local raise = true
+        local reusable = scheduler:spawnReusableImmediate(function()
+            if raise then
+                task.enterBarrier("query iteration")
+                error("raised inside the barrier")
+            end
+            return gate:wait()
+        end)
+        assert.are.equal("failed", reusable.status)
+
+        -- The scope outlives the invocation, so a barrier left behind would
+        -- reject every wait in every later one.
+        raise = false
+        scheduler:restartImmediate(reusable)
+        assert.are.equal("ready", reusable.status)
+        assert.are.equal(3, reusable.value)
+    end)
+
+    it("ends a suspension barrier the body returned inside", function()
+        local scheduler = task.newScheduler()
+        local gate = task.newGate()
+        gate:complete(5)
+        local hold = true
+        local reusable = scheduler:spawnReusableImmediate(function()
+            if hold then
+                task.enterBarrier("snapshot restore")
+                return 1
+            end
+            return gate:wait()
+        end)
+        assert.are.equal("ready", reusable.status)
+
+        hold = false
+        scheduler:restartImmediate(reusable)
+        assert.are.equal("ready", reusable.status)
+        assert.are.equal(5, reusable.value)
+    end)
+
+    it("keeps one traceback on a failure that already carries one", function()
+        local scheduler = task.newScheduler()
+        local rootTask = scheduler:spawnImmediate(function()
+            local ok, failure = xpcall(function()
+                error("inner boom")
+            end, debug.traceback)
+            assert.is_false(ok)
+            error(failure, 0)
+        end)
+
+        assert.are.equal("failed", rootTask.status)
+        assert.is_truthy(rootTask.error:find("inner boom", 1, true))
+        local _, tracebacks = rootTask.error:gsub("stack traceback:", "")
+        assert.are.equal(1, tracebacks)
+    end)
+
+    it("names the operation a parked task is in, and drops the name with it", function()
+        local scheduler = task.newScheduler()
+        local named = task.newGate()
+        local unnamed = task.newGate()
+        local rootTask = scheduler:spawn(function()
+            task.checkWait("spec operation")
+            named:wait()
+            return unnamed:wait()
+        end)
+
+        scheduler:step()
+        assert.are.equal("spec operation", task.describeWait(rootTask))
+
+        -- The next park has no name of its own, so it must not inherit one
+        -- from the operation that already finished.
+        named:complete(1)
+        scheduler:step()
+        assert.are.equal("gate", task.describeWait(rootTask))
+
+        unnamed:complete(2)
+        scheduler:step()
+        assert.are.equal("ready", rootTask.status)
+        assert.is_nil(task.describeWait(rootTask))
+    end)
+
+    it("cancels the producer it abandons at its wait budget", function()
+        local canceled = false
+        local completion = Completion.pending({
+            sliceMs = 1,
+            defaultWaitMs = 4,
+            poll = function()
+                return 0
+            end,
+            advance = function()
+                return 0
+            end,
+            cancel = function()
+                canceled = true
+            end,
+        })
+
+        local ok, reason = pcall(task.awaitCompletion, completion, "decode")
+
+        assert.is_false(ok)
+        assert.is_truthy(tostring(reason):find("wait budget", 1, true))
+        assert.is_true(canceled, "the abandoned producer was told to stop")
+        assert.are.equal("canceled", completion.status)
+    end)
+
     it("returns operational failure through the direct call shape", function()
         local gate = task.newGate()
         gate:fail("connection reset")
@@ -405,6 +512,104 @@ describe("internal task runtime", function()
 
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("decode failed", 1, true))
+    end)
+
+    it("raises a child failure at an owner parked on an unrelated wait", function()
+        local scheduler = task.newScheduler()
+        -- Nothing else ever completes this gate. The child was what would
+        -- have, which is why its failure has to reach the owner here rather
+        -- than at a join the owner never gets to.
+        local unrelated = task.newGate()
+        local rootTask = scheduler:spawn(function(scope)
+            scope:spawn(function()
+                task.yield()
+                error("writer failed", 0)
+            end)
+            return unrelated:wait()
+        end)
+
+        while rootTask.status == "pending" and scheduler:step() > 0 do
+        end
+
+        assert.are.equal("failed", rootTask.status)
+        assert.is_truthy(rootTask.error:find("writer failed", 1, true))
+        assert.is_nil(unrelated.waiter, "the abandoned wait released its gate")
+    end)
+
+    it("keeps a sibling failure for the join while the owner collects children", function()
+        local scheduler = task.newScheduler()
+        local slowGate = task.newGate()
+        local order = {}
+        local failing
+        local rootTask = scheduler:spawn(function(scope)
+            local slow = scope:spawn(function()
+                return slowGate:wait()
+            end)
+            failing = scope:spawn(function()
+                task.yield()
+                error("sibling failed", 0)
+            end)
+            order[#order + 1] = "join slow"
+            order[#order + 1] = slow:join()
+            order[#order + 1] = "join failing"
+            return failing:join()
+        end)
+
+        -- The sibling fails here, while the owner is parked on another join.
+        local turns = 0
+        while (failing == nil or failing.status == "pending") and turns < 20 do
+            turns = turns + 1
+            scheduler:step()
+        end
+
+        assert.are.equal("failed", failing.status)
+        assert.are.equal("pending", rootTask.status)
+        assert.are.same({ "join slow" }, order)
+
+        slowGate:complete("slow value")
+        while rootTask.status == "pending" and scheduler:step() > 0 do
+        end
+
+        assert.are.equal("failed", rootTask.status)
+        assert.are.same({ "join slow", "slow value", "join failing" }, order)
+        assert.is_truthy(rootTask.error:find("sibling failed", 1, true))
+        -- Read once, at the join, rather than also delivered to the park.
+        assert.is_nil(rootTask.error:find("a task started by this one failed", 1, true))
+    end)
+
+    it("reports a joined child failure once rather than also at the park", function()
+        local scheduler = task.newScheduler()
+        local rootTask = scheduler:spawn(function(scope)
+            local child = scope:spawn(function()
+                task.yield()
+                error("decode failed", 0)
+            end)
+            return child:join()
+        end)
+
+        while rootTask.status == "pending" and scheduler:step() > 0 do
+        end
+
+        assert.are.equal("failed", rootTask.status)
+        assert.is_nil(rootTask.error:find("a task started by this one failed", 1, true))
+        local _, tracebacks = rootTask.error:gsub("stack traceback:", "")
+        assert.are.equal(1, tracebacks)
+    end)
+
+    it("keeps the first value a task body returns and discards the rest", function()
+        local scheduler = task.newScheduler()
+        local rootTask = scheduler:spawnImmediate(function()
+            return "first", "second"
+        end)
+
+        assert.are.equal("ready", rootTask.status)
+        assert.are.equal("first", rootTask.value)
+        assert.are.equal(
+            "first",
+            task.run(function()
+                return "first", "second"
+            end)
+        )
     end)
 
     it("cancels and drains an unfinished child when its scope ends", function()

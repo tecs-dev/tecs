@@ -21,10 +21,13 @@ it blocks while driving the producers the callbacks wait on.
 ## Failure and cancellation
 
 The first callback that raises cancels the callbacks still running, waits for
-them to unwind their scopes, and raises that failure from `batch`. Later
-callbacks that had already succeeded are discarded with it. A callback that
-wants a failure to be a value rather than an outcome returns `nil, reason`
-itself, or catches the failure and returns a result the caller can inspect.
+them to unwind their scopes, and raises that failure from `batch`. First means
+first in the order the callbacks were given, because `batch` reads their
+results in that order: a later callback that failed earlier in time raises once
+`batch` reaches it. Callbacks that had already succeeded are discarded with it.
+A callback that wants a failure to be a value rather than an outcome returns
+`nil, reason` itself, or catches the failure and returns a result the caller
+can inspect.
 
 Canceling the calling system, which world shutdown does, cancels every callback
 the same way.
@@ -55,16 +58,18 @@ local record batch
     ---
     --- Inside a system the call suspends until every callback settles, and
     --- outside one it blocks while driving the producers they wait on. The
-    --- first callback that raises cancels the rest, waits for them to unwind,
-    --- and raises that failure. Callbacks return values for the caller to
+    --- first callback that raises, in the order the callbacks were given,
+    --- cancels the rest, waits for them to unwind, and raises that failure.
+    --- Each callback reports once. Callbacks return values for the caller to
     --- apply; staging world mutations inside them makes entity identifiers
     --- depend on completion order.
     ---
     --- @param bodies The caller supplies an array of functions that take no
     ---     arguments. An empty array returns an empty array without waiting.
-    --- @return Returns one result per callback, at the callback's index. A
-    ---     batch mixes types freely, so the caller casts each result to what
-    ---     its own callback returned.
+    --- @return Returns one result per callback, at the callback's index, and
+    ---     that result is the callback's first return value. A batch mixes
+    ---     types freely, so the caller casts each result to what its own
+    ---     callback returned.
     batch: function(bodies: {function(): any}): {any}
 end
 
@@ -72,6 +77,11 @@ end
 -- sibling settles on a later turn rather than inside `cancel`. Waiting for
 -- each one keeps the promise that `batch` returns nothing while a callback of
 -- its own is still running.
+--
+-- Joining is also what keeps a callback's failure from reaching this caller
+-- twice. The task runtime hands a child failure to the owning task at whatever
+-- it is parked on, except while that task is parked on a join, which is every
+-- park below. So each callback is read exactly once, here or above.
 local function settleRemaining(tasks: {Task<any>}, count: integer)
     for index = 1, count do
         local child <const> = tasks[index]

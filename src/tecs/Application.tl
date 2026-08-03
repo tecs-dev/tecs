@@ -464,7 +464,14 @@ local ApplicationMT <const>: metatable<Application> = {__index = Application}
 local emitting: Application = nil
 local emittingEvent: events.Event = nil
 
+-- A failure that already carries a traceback keeps that one. The task runtime
+-- captures it at the line the game raised on, and a second capture here would
+-- name only the frames between this guard and `world:update`, which is the
+-- part nobody needs.
 local function traceback(err: any): string
+    if type(err) == "string" and (err as string):find("\nstack traceback:", 1, true) ~= nil then
+        return err as string
+    end
     return debug.traceback(tostring(err), 2)
 end
 

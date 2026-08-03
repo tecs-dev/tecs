@@ -438,6 +438,32 @@ describe("Application", function()
             assert.is_true(app:_shutdown())
         end)
 
+        it("records one traceback for a system that throws, not two", function()
+            -- The task runtime captures the traceback at the line the system
+            -- raised on. A second capture at the guard names only the frames
+            -- between the guard and `world:update`, and buries the first.
+            local app = build({
+                plugin = function(world)
+                    world:addSystem({
+                        name = "spec.ThrowsOnce",
+                        phase = phases.Update,
+                        run = function()
+                            error("update boom")
+                        end,
+                    })
+                end,
+            })
+            assert.is_true(app:_init())
+
+            app:_iterate(nil, 0, nil)
+
+            local crashed = app:crashed()
+            assert.is_truthy(crashed:match("update boom"))
+            local _, tracebacks = crashed:gsub("stack traceback:", "")
+            assert.are.equal(1, tracebacks)
+            app:_shutdown()
+        end)
+
         it("survives an observer that throws", function()
             local app = build({
                 plugin = function(world)

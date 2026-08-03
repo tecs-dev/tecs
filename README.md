@@ -239,6 +239,25 @@ for input or closure, and readiness methods honor caller timeouts. Private
 completion state may bridge a native worker queue, but it is not a second
 user-facing execution model.
 
+A task that fails reports to whoever owns it, not to whoever eventually asks.
+Waiting for a join meant a failed producer was invisible to a parent parked on
+the wait that producer was supposed to satisfy, and the program hung with
+nothing to read; the failure was there the whole time with no one holding it.
+So a child failure is delivered to the owning task at whatever it is parked on.
+The one exception is an owner already parked on a join, because it is reading
+its children itself and a second delivery would report the same failure twice
+and cut across the order it reads them in. `tecs.batch` is that owner: it joins
+callbacks in the order the caller gave them, and its first failure still
+cancels the rest, waits for them to unwind, and raises. Cancellation stays a
+separate outcome from failure, so ending a scope normally still unwinds its
+children without failing anything.
+
+A world update that stays suspended says so. `world:update` counts consecutive
+suspended updates and, after about five seconds of them, logs what the update
+is ultimately parked on and repeats about once a minute. A wait nothing
+completes is indistinguishable from a hung process otherwise, and the runtime
+already knows the answer.
+
 Resource ownership remains lexical across those waits. Every `tecs.scoped`
 callback has a required name, keeps its registered values live while its
 system is parked, and closes them in reverse order when it unwinds. The same

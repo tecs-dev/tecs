@@ -357,6 +357,10 @@ local record internal
         -- True while a suspending phase holds one logical world update across
         -- several host frames. Internal application timing reads this only.
         _updateStalled: boolean
+        -- Consecutive updates that found the same one suspended. Drives the
+        -- watchdog that names what a world has been parked on, and resets to
+        -- zero on the update that finishes.
+        _stalledUpdates: integer
         -- One reusable coroutine owns the complete logical update. These are
         -- internal Task-runtime values kept opaque here to avoid coupling the
         -- ECS type graph to its scheduler implementation.
