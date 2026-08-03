@@ -52,7 +52,7 @@ thread_local! {
         RefCell::new(CString::new("no error").expect("static string has no NUL"));
 }
 
-/// An owned, tightly packed RGBA8 image.
+/// An owned, upload-ready RGBA8 image or compressed mip chain.
 ///
 /// This is opaque across the C ABI. Its pixel pointer remains valid until
 /// `tecsImageDestroy` releases the image.
@@ -60,7 +60,27 @@ pub struct TecsImage {
     pixels: Box<[u8]>,
     width: u32,
     height: u32,
+    storage_width: u32,
+    storage_height: u32,
+    levels: u32,
+    format: u32,
 }
+
+#[repr(C)]
+pub struct TecsImageInfo {
+    pixels: *const u8,
+    byte_count: usize,
+    width: u32,
+    height: u32,
+    storage_width: u32,
+    storage_height: u32,
+    levels: u32,
+    format: u32,
+}
+
+const IMAGE_RGBA8: u32 = 0;
+const IMAGE_BC3: u32 = 1;
+const ORIGINAL_SIZE_KEY: &str = "TECSoriginalSize";
 
 /// An owned byte buffer returned across the C ABI.
 ///
@@ -84,6 +104,10 @@ fn decode_raster(bytes: &[u8]) -> Result<TecsImage, image::ImageError> {
         pixels: image.into_raw().into_boxed_slice(),
         width,
         height,
+        storage_width: width,
+        storage_height: height,
+        levels: 1,
+        format: IMAGE_RGBA8,
     })
 }
 
@@ -133,10 +157,91 @@ fn decode_svg(bytes: &[u8]) -> Result<TecsImage, String> {
         pixels: pixels.into_boxed_slice(),
         width: size.width(),
         height: size.height(),
+        storage_width: size.width(),
+        storage_height: size.height(),
+        levels: 1,
+        format: IMAGE_RGBA8,
+    })
+}
+
+fn decode_ktx2(bytes: &[u8]) -> Result<TecsImage, String> {
+    let reader =
+        ktx2::Reader::new(bytes).map_err(|error| format!("invalid KTX2 texture: {error}"))?;
+    let header = reader.header();
+    if header.format != Some(ktx2::Format::BC3_UNORM_BLOCK) {
+        return Err("KTX2 texture is not linear BC3".to_owned());
+    }
+    if header.pixel_depth != 0 || header.layer_count != 0 || header.face_count != 1 {
+        return Err("KTX2 texture must contain one two-dimensional image".to_owned());
+    }
+    if header.supercompression_scheme.is_some() {
+        return Err("KTX2 supercompression is not supported".to_owned());
+    }
+    if reader.transfer_function() != Some(ktx2::TransferFunction::Linear) {
+        return Err("KTX2 BC3 texture must use a linear transfer function".to_owned());
+    }
+    if reader.is_alpha_premultiplied() != Some(false) {
+        return Err("KTX2 BC3 texture must use straight alpha".to_owned());
+    }
+    let storage_width = header.pixel_width;
+    let storage_height = header.pixel_height;
+    if storage_width == 0 || storage_height == 0 {
+        return Err("KTX2 texture dimensions must be greater than zero".to_owned());
+    }
+    let expected_levels = storage_width.max(storage_height).ilog2() + 1;
+    if header.level_count != expected_levels {
+        return Err(format!(
+            "KTX2 BC3 texture has {} mip levels, expected {expected_levels}",
+            header.level_count
+        ));
+    }
+    let mut width = storage_width;
+    let mut height = storage_height;
+    if let Some((_, value)) = reader
+        .key_value_data()
+        .find(|(key, _)| *key == ORIGINAL_SIZE_KEY)
+    {
+        if value.len() != 8 {
+            return Err("KTX2 original-size metadata must contain two integers".to_owned());
+        }
+        width = u32::from_le_bytes(value[0..4].try_into().unwrap());
+        height = u32::from_le_bytes(value[4..8].try_into().unwrap());
+    }
+    if width == 0 || height == 0 || width > storage_width || height > storage_height {
+        return Err("KTX2 original dimensions are outside its storage image".to_owned());
+    }
+
+    let mut pixels = Vec::new();
+    for (index, level) in reader.levels().enumerate() {
+        let level_width = (storage_width >> index).max(1);
+        let level_height = (storage_height >> index).max(1);
+        let expected = (level_width.div_ceil(4) as usize)
+            .checked_mul(level_height.div_ceil(4) as usize)
+            .and_then(|blocks| blocks.checked_mul(16))
+            .ok_or_else(|| "KTX2 BC3 mip chain is too large".to_owned())?;
+        if level.data.len() != expected || level.uncompressed_byte_length != expected as u64 {
+            return Err(format!(
+                "KTX2 BC3 mip {index} has {} bytes, expected {expected}",
+                level.data.len()
+            ));
+        }
+        pixels.extend_from_slice(level.data);
+    }
+    Ok(TecsImage {
+        pixels: pixels.into_boxed_slice(),
+        width,
+        height,
+        storage_width,
+        storage_height,
+        levels: header.level_count,
+        format: IMAGE_BC3,
     })
 }
 
 fn decode(bytes: &[u8]) -> Result<TecsImage, String> {
+    if bytes.starts_with(&ktx2::MAGIC) {
+        return decode_ktx2(bytes);
+    }
     match decode_raster(bytes) {
         Ok(image) => Ok(image),
         Err(raster_error) => decode_svg(bytes).map_err(|svg_error| {
@@ -236,50 +341,31 @@ pub unsafe extern "C" fn tecsImageDecode(bytes: *const u8, length: usize) -> *mu
     }
 }
 
-/// Borrows an image's pixel allocation.
+/// Borrows one complete image description from its native allocation.
 ///
 /// # Safety
 ///
-/// `image` must be null or a live pointer returned by `tecsImageDecode`.
+/// `image` must be a live pointer returned by `tecsImageDecode`. `out` must
+/// address writable storage for one `TecsImageInfo`.
 #[no_mangle]
-pub unsafe extern "C" fn tecsImagePixels(image: *const TecsImage) -> *const u8 {
-    if image.is_null() {
-        return ptr::null();
-    }
-    // SAFETY: A non-null pointer must have come from `tecsImageDecode` and
-    // remain owned by the caller.
-    let image = unsafe { &*image };
-    image.pixels.as_ptr()
-}
-
-/// Returns an image's width.
-///
-/// # Safety
-///
-/// `image` must be null or a live pointer returned by `tecsImageDecode`.
-#[no_mangle]
-pub unsafe extern "C" fn tecsImageWidth(image: *const TecsImage) -> u32 {
-    if image.is_null() {
-        return 0;
-    }
-    // SAFETY: See `tecsImagePixels`.
-    let image = unsafe { &*image };
-    image.width
-}
-
-/// Returns an image's height.
-///
-/// # Safety
-///
-/// `image` must be null or a live pointer returned by `tecsImageDecode`.
-#[no_mangle]
-pub unsafe extern "C" fn tecsImageHeight(image: *const TecsImage) -> u32 {
-    if image.is_null() {
-        return 0;
-    }
-    // SAFETY: See `tecsImagePixels`.
-    let image = unsafe { &*image };
-    image.height
+pub unsafe extern "C" fn tecsImageGetInfo(
+    image: *const TecsImage,
+    out: *mut TecsImageInfo,
+) -> bool {
+    let (Some(image), Some(out)) = (unsafe { image.as_ref() }, unsafe { out.as_mut() }) else {
+        return false;
+    };
+    *out = TecsImageInfo {
+        pixels: image.pixels.as_ptr(),
+        byte_count: image.pixels.len(),
+        width: image.width,
+        height: image.height,
+        storage_width: image.storage_width,
+        storage_height: image.storage_height,
+        levels: image.levels,
+        format: image.format,
+    };
+    true
 }
 
 /// Releases an image and its pixels.

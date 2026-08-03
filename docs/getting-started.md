@@ -440,8 +440,9 @@ return tecs.newApplication({
 
 `cargo xtask fetch sponza` downloads a pinned Khronos scene, retains its
 upstream notice, and writes `Sponza.tecs.gltf` plus complete BC3 mip chains in
-the ignored `assets/external` cache. BC3 uses one quarter of RGBA8 texture
-memory including equivalent mip chains. Creation raises if the selected GPU
+standard KTX2 containers under the ignored `assets/external` cache. BC3 uses
+one quarter of RGBA8 texture memory including equivalent mip chains. Creation
+raises if the selected GPU
 cannot sample BC3 arrays; it never silently decodes into a larger fallback.
 The format option uses an integer constant and affects only the mesh array.
 
@@ -471,9 +472,9 @@ enabling the sprite domain. They default to immediate presentation and accept
 
 `cargo xtask fetch bistro` downloads and verifies the pinned CC BY 4.0 Amazon
 Lumberyard exterior, decodes its older Draco stream with the reference codec,
-reconstructs two-channel normal maps, downsamples textures into 512px BC3 mip
-chains, and removes the 986 MB source after producing a roughly 227 MB ignored
-cache. Run `cargo xtask example bistro3d` to exercise 2.9 million vertices,
+reconstructs two-channel normal maps, downsamples textures into 512px BC3 KTX2
+mip chains, and removes the 986 MB source after producing a roughly 227 MB
+ignored cache. Run `cargo xtask example bistro3d` to exercise 2.9 million vertices,
 8.5 million indices, 1,593 independently culled chunks, the ambient probe,
 local lights, shadows, fog, and bloom together.
 

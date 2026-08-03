@@ -28,6 +28,7 @@ glam = "0.33.2"
 gltf = { version = "1.4.1", default-features = false, features = ["import", "utils", "names", "extensions", "KHR_materials_unlit", "KHR_texture_transform"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 image_dds = { version = "0.7.2", default-features = false, features = ["ddsfile", "image"] }
+ktx2 = "0.5.0"
 libc = "0.2"
 meshopt = "0.6.2"
 mio = { version = "1", features = ["net", "os-poll"] }
