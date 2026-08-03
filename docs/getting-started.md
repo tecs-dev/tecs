@@ -604,6 +604,11 @@ node default weights, and linear, step, or cubic-spline weight animation.
 `registerModel` gives every `newInstance` private reusable weight vectors; spawn
 `primitive.morph` beside each morphed primitive.
 
+When a glTF primitive has texture coordinates but no authored tangents, the
+importer generates MikkTSpace tangents. It splits vertices at tangent
+discontinuities and remaps color, skin, and morph data with them, so normal-map
+seams remain correct without requiring an offline repair step.
+
 Morph deltas are immutable GPU residency. A five-float record locates each
 instance's geometry and weights, and complete weight vectors are staged only
 when registered or updated. Morphing runs before skinning when both options are

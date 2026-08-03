@@ -47,6 +47,11 @@ worker channel. Both produce CPU-owned data that the mesh domain consumes when
 it becomes resident. A model with a `BLEND` material requires a mesh domain
 created with `transparency = true`.
 
+Primitives without authored tangents use MikkTSpace tangent generation.
+Tangent discontinuities split vertices while color, skin, and morph streams
+follow the split, preserving normal-map seams without changing authored
+tangents.
+
 One imported primitive becomes one independently bounded GPU-culling command.
 The decoder splits a primitive above 65,536 triangles into bounded commands,
 remapping the vertices and optional color, skin, and morph streams in each
@@ -657,7 +662,9 @@ local record assets
     --- emissive, alpha-mask, alpha-blended, and unlit materials are decoded.
     --- JOINTS_0, WEIGHTS_0, skins, inverse bind matrices, sparse accessors,
     --- morph targets, mesh and node weights, and node animation clips are
-    --- decoded. Non-triangle input and texture-coordinate transforms raise at
+    --- decoded. Missing tangents are generated with MikkTSpace, splitting
+    --- vertices at tangent discontinuities and remapping every optional vertex
+    --- stream. Non-triangle input and texture-coordinate transforms raise at
     --- the direct load call instead of loading incompletely. A primitive above
     --- 65,536 triangles is split into independently bounded and culled mesh
     --- records. Registering a model containing alpha blending requires a mesh
