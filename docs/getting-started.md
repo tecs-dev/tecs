@@ -449,7 +449,10 @@ Every authored glTF primitive becomes an independent bounded culling command.
 The worker additionally splits any primitive above 65,536 triangles, remaps
 only the vertices that each chunk references, and preserves color, skin, and
 morph streams. This keeps a million-triangle source primitive from becoming
-one all-or-nothing frustum test. Small primitives take the existing path.
+one all-or-nothing frustum test. Meshoptimizer then improves vertex-cache and
+vertex-fetch locality inside each command, remapping every optional vertex
+stream together. Alpha-blended commands retain authored triangle order and use
+only the lossless fetch remap.
 Run `cargo xtask example sponza3d` for double-sided materials, compressed
 mipmaps, point and spot lights, shadows, fog, and bloom together. The example
 command reports the required fetch command before opening a window when its

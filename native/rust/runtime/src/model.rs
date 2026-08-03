@@ -764,6 +764,49 @@ fn split_mesh_at(source: MeshData, maximum_indices: usize) -> Vec<MeshData> {
     chunks
 }
 
+fn remap_float_stream<const WIDTH: usize>(
+    values: &[f32],
+    vertex_count: usize,
+    remap: &[u32],
+) -> Vec<f32>
+where
+    [f32; WIDTH]: Default + bytemuck::Pod,
+{
+    let rows: &[[f32; WIDTH]] = bytemuck::cast_slice(values);
+    let remapped: Vec<[f32; WIDTH]> = meshopt::remap_vertex_buffer(rows, vertex_count, remap);
+    bytemuck::cast_vec(remapped)
+}
+
+fn remap_mesh_vertices(mesh: &mut MeshData, vertex_count: usize, remap: &[u32]) {
+    mesh.vertices = remap_float_stream::<12>(&mesh.vertices, vertex_count, remap);
+    if !mesh.colors.is_empty() {
+        mesh.colors = remap_float_stream::<4>(&mesh.colors, vertex_count, remap);
+    }
+    if !mesh.skin.is_empty() {
+        mesh.skin = remap_float_stream::<8>(&mesh.skin, vertex_count, remap);
+    }
+    if !mesh.morph.is_empty() {
+        let source = std::mem::take(&mut mesh.morph);
+        let target_width = remap.len() * 9;
+        mesh.morph = Vec::with_capacity(vertex_count * mesh.morph_target_count * 9);
+        for target in source.chunks_exact(target_width) {
+            mesh.morph
+                .extend(remap_float_stream::<9>(target, vertex_count, remap));
+        }
+    }
+}
+
+fn optimize_mesh(mesh: &mut MeshData, preserve_triangle_order: bool) {
+    let vertex_count = mesh.vertices.len() / 12;
+    if !preserve_triangle_order {
+        mesh.indices = meshopt::optimize_vertex_cache(&mesh.indices, vertex_count);
+    }
+    let remap = meshopt::optimize_vertex_fetch_remap(&mesh.indices, vertex_count);
+    debug_assert_eq!(remap.len(), vertex_count);
+    mesh.indices = meshopt::remap_index_buffer(Some(&mesh.indices), vertex_count, &remap);
+    remap_mesh_vertices(mesh, remap.len(), &remap);
+}
+
 fn node_local(node: &gltf::Node<'_>) -> Mat4 {
     match node.transform() {
         Transform::Matrix { matrix } => Mat4::from_cols_array_2d(&matrix),
@@ -923,7 +966,10 @@ fn build_views(model: &mut TecsModel) {
         .collect();
 }
 
-fn import(path: &Path) -> Result<TecsModel, String> {
+fn import_with_geometry_optimization(
+    path: &Path,
+    optimize_geometry: bool,
+) -> Result<TecsModel, String> {
     let path_text = path.to_string_lossy().into_owned();
     let gltf =
         gltf::Gltf::open(path).map_err(|error| format!("cannot decode {path_text}: {error}"))?;
@@ -1082,7 +1128,12 @@ fn import(path: &Path) -> Result<TecsModel, String> {
                 mesh.index(),
                 primitive.index()
             );
-            for chunk in split_mesh(decode_primitive(&primitive, &buffers, name, &weights)?) {
+            let preserve_triangle_order =
+                primitive.material().alpha_mode() == gltf::material::AlphaMode::Blend;
+            for mut chunk in split_mesh(decode_primitive(&primitive, &buffers, name, &weights)?) {
+                if optimize_geometry {
+                    optimize_mesh(&mut chunk, preserve_triangle_order);
+                }
                 mesh_data.push(chunk);
                 by_mesh[mesh.index()].push(mesh_data.len() as u32);
             }
@@ -1467,6 +1518,10 @@ fn import(path: &Path) -> Result<TecsModel, String> {
     Ok(model)
 }
 
+fn import(path: &Path) -> Result<TecsModel, String> {
+    import_with_geometry_optimization(path, true)
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn tecsModelLoad(path: *const u8, path_length: usize) -> *mut TecsModel {
     if path.is_null() && path_length != 0 {
@@ -1545,9 +1600,279 @@ pub unsafe extern "C" fn tecsModelDestroy(model: *mut TecsModel) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::mem::size_of;
+    use std::time::Instant;
+
+    struct ModelMetrics {
+        vertices: usize,
+        indices: usize,
+        geometry_bytes: usize,
+        vertices_transformed: u64,
+        bytes_fetched: u64,
+    }
+
+    fn model_metrics(model: &TecsModel) -> ModelMetrics {
+        let mut result = ModelMetrics {
+            vertices: 0,
+            indices: 0,
+            geometry_bytes: 0,
+            vertices_transformed: 0,
+            bytes_fetched: 0,
+        };
+        for mesh in &model.mesh_data {
+            let vertex_count = mesh.vertices.len() / 12;
+            let cache = meshopt::analyze_vertex_cache(&mesh.indices, vertex_count, 16, 32, 256);
+            let mut fetched = u64::from(
+                meshopt::analyze_vertex_fetch(&mesh.indices, vertex_count, 12 * size_of::<f32>())
+                    .bytes_fetched,
+            );
+            if !mesh.colors.is_empty() {
+                fetched += u64::from(
+                    meshopt::analyze_vertex_fetch(
+                        &mesh.indices,
+                        vertex_count,
+                        4 * size_of::<f32>(),
+                    )
+                    .bytes_fetched,
+                );
+            }
+            if !mesh.skin.is_empty() {
+                fetched += u64::from(
+                    meshopt::analyze_vertex_fetch(
+                        &mesh.indices,
+                        vertex_count,
+                        8 * size_of::<f32>(),
+                    )
+                    .bytes_fetched,
+                );
+            }
+            for _ in 0..mesh.morph_target_count {
+                fetched += u64::from(
+                    meshopt::analyze_vertex_fetch(
+                        &mesh.indices,
+                        vertex_count,
+                        9 * size_of::<f32>(),
+                    )
+                    .bytes_fetched,
+                );
+            }
+            result.vertices += vertex_count;
+            result.indices += mesh.indices.len();
+            result.geometry_bytes += mesh.vertices.len() * size_of::<f32>()
+                + mesh.colors.len() * size_of::<f32>()
+                + mesh.skin.len() * size_of::<f32>()
+                + mesh.morph.len() * size_of::<f32>()
+                + mesh.indices.len() * size_of::<u32>();
+            result.vertices_transformed += u64::from(cache.vertices_transformed);
+            result.bytes_fetched += fetched;
+        }
+        result
+    }
 
     fn vertex(x: f32, y: f32) -> [f32; 12] {
         [x, y, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+    }
+
+    fn vertex_identity(mesh: &MeshData, vertex: usize) -> Vec<u32> {
+        let mut identity: Vec<u32> = mesh.vertices[vertex * 12..vertex * 12 + 12]
+            .iter()
+            .map(|value| value.to_bits())
+            .collect();
+        if !mesh.colors.is_empty() {
+            identity.extend(
+                mesh.colors[vertex * 4..vertex * 4 + 4]
+                    .iter()
+                    .map(|value| value.to_bits()),
+            );
+        }
+        if !mesh.skin.is_empty() {
+            identity.extend(
+                mesh.skin[vertex * 8..vertex * 8 + 8]
+                    .iter()
+                    .map(|value| value.to_bits()),
+            );
+        }
+        let vertex_count = mesh.vertices.len() / 12;
+        for target in 0..mesh.morph_target_count {
+            let at = (target * vertex_count + vertex) * 9;
+            identity.extend(mesh.morph[at..at + 9].iter().map(|value| value.to_bits()));
+        }
+        identity
+    }
+
+    fn expanded_corners(mesh: &MeshData) -> Vec<Vec<u32>> {
+        mesh.indices
+            .iter()
+            .map(|index| vertex_identity(mesh, *index as usize))
+            .collect()
+    }
+
+    fn sorted_triangles(mesh: &MeshData) -> Vec<Vec<u32>> {
+        let mut triangles: Vec<Vec<u32>> = expanded_corners(mesh)
+            .chunks_exact(3)
+            .map(|triangle| triangle.iter().flatten().copied().collect())
+            .collect();
+        triangles.sort_unstable();
+        triangles
+    }
+
+    fn mesh_with_all_streams() -> MeshData {
+        let mut vertices = Vec::new();
+        for value in [
+            vertex(0.0, 0.0),
+            vertex(1.0, 0.0),
+            vertex(1.0, 1.0),
+            vertex(0.0, 0.0),
+            vertex(1.0, 1.0),
+            vertex(0.0, 1.0),
+        ] {
+            vertices.extend(value);
+        }
+        let source = [0usize, 1, 2, 0, 2, 3];
+        let mut colors = Vec::new();
+        let mut skin = Vec::new();
+        let mut morph = Vec::new();
+        for &value in &source {
+            colors.extend([value as f32, 0.25, 0.5, 1.0]);
+            skin.extend([value as f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
+            morph.extend([value as f32 * 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        }
+        MeshData {
+            name: "fixture://all-streams".to_owned(),
+            vertices,
+            colors,
+            indices: vec![3, 4, 5, 0, 1, 2],
+            skin,
+            morph,
+            morph_weights: vec![0.0],
+            morph_target_count: 1,
+            center: Vec3::splat(0.5),
+            radius: 1.0,
+            material: 1,
+            max_joint: 3,
+        }
+    }
+
+    #[test]
+    fn remaps_every_vertex_stream_during_fetch_optimization() {
+        let mut mesh = mesh_with_all_streams();
+        let expected = expanded_corners(&mesh);
+
+        optimize_mesh(&mut mesh, true);
+
+        assert_eq!(mesh.vertices.len() / 12, 6);
+        assert_eq!(mesh.colors.len(), 6 * 4);
+        assert_eq!(mesh.skin.len(), 6 * 8);
+        assert_eq!(mesh.morph.len(), 6 * 9);
+        assert_eq!(expanded_corners(&mesh), expected);
+    }
+
+    #[test]
+    fn improves_cache_and_fetch_metrics_without_changing_topology() {
+        let side = 17usize;
+        let mut vertices = Vec::new();
+        for y in 0..side {
+            for x in 0..side {
+                vertices.extend(vertex(x as f32, y as f32));
+            }
+        }
+        let mut ordered = Vec::new();
+        for y in 0..side - 1 {
+            for x in 0..side - 1 {
+                let at = (y * side + x) as u32;
+                ordered.push([at, at + 1, at + side as u32]);
+                ordered.push([at + 1, at + side as u32 + 1, at + side as u32]);
+            }
+        }
+        let mut indices = Vec::with_capacity(ordered.len() * 3);
+        let mut front = 0;
+        let mut back = ordered.len();
+        while front < back {
+            indices.extend(ordered[front]);
+            front += 1;
+            if front < back {
+                back -= 1;
+                indices.extend(ordered[back]);
+            }
+        }
+        let mut mesh = MeshData {
+            name: "fixture://cache-grid".to_owned(),
+            vertices,
+            colors: Vec::new(),
+            indices,
+            skin: Vec::new(),
+            morph: Vec::new(),
+            morph_weights: Vec::new(),
+            morph_target_count: 0,
+            center: Vec3::splat(8.0),
+            radius: 12.0,
+            material: 1,
+            max_joint: -1,
+        };
+        let expected = sorted_triangles(&mesh);
+        let before_cache = meshopt::analyze_vertex_cache(&mesh.indices, side * side, 16, 32, 256);
+        let before_fetch =
+            meshopt::analyze_vertex_fetch(&mesh.indices, side * side, 12 * size_of::<f32>());
+
+        optimize_mesh(&mut mesh, false);
+
+        let vertex_count = mesh.vertices.len() / 12;
+        let after_cache = meshopt::analyze_vertex_cache(&mesh.indices, vertex_count, 16, 32, 256);
+        let after_fetch =
+            meshopt::analyze_vertex_fetch(&mesh.indices, vertex_count, 12 * size_of::<f32>());
+        assert_eq!(sorted_triangles(&mesh), expected);
+        assert!(after_cache.vertices_transformed < before_cache.vertices_transformed);
+        assert!(after_cache.acmr < before_cache.acmr);
+        assert!(after_fetch.bytes_fetched <= before_fetch.bytes_fetched);
+    }
+
+    #[test]
+    fn preserves_blended_triangle_order_while_optimizing_fetch() {
+        let mut mesh = mesh_with_all_streams();
+        let expected = expanded_corners(&mesh);
+
+        optimize_mesh(&mut mesh, true);
+
+        assert_eq!(expanded_corners(&mesh), expected);
+    }
+
+    #[test]
+    #[ignore = "set TECS_MODEL_BENCH to report a cached large-scene import"]
+    fn reports_large_scene_geometry_optimization() {
+        let path = std::env::var_os("TECS_MODEL_BENCH")
+            .map(PathBuf::from)
+            .expect("TECS_MODEL_BENCH must name a glTF or GLB model");
+        let started = Instant::now();
+        let baseline = import_with_geometry_optimization(&path, false).unwrap();
+        let baseline_time = started.elapsed();
+        let baseline_metrics = model_metrics(&baseline);
+        drop(baseline);
+
+        let started = Instant::now();
+        let optimized = import_with_geometry_optimization(&path, true).unwrap();
+        let optimized_time = started.elapsed();
+        let optimized_metrics = model_metrics(&optimized);
+
+        println!(
+            "model={} baseline_ms={} optimized_ms={} baseline_vertices={} optimized_vertices={} indices={} baseline_bytes={} optimized_bytes={} baseline_transforms={} optimized_transforms={} baseline_fetch_bytes={} optimized_fetch_bytes={}",
+            path.display(),
+            baseline_time.as_millis(),
+            optimized_time.as_millis(),
+            baseline_metrics.vertices,
+            optimized_metrics.vertices,
+            optimized_metrics.indices,
+            baseline_metrics.geometry_bytes,
+            optimized_metrics.geometry_bytes,
+            baseline_metrics.vertices_transformed,
+            optimized_metrics.vertices_transformed,
+            baseline_metrics.bytes_fetched,
+            optimized_metrics.bytes_fetched,
+        );
+        assert_eq!(optimized_metrics.indices, baseline_metrics.indices);
+        assert!(optimized_metrics.vertices <= baseline_metrics.vertices);
+        assert!(optimized_metrics.geometry_bytes <= baseline_metrics.geometry_bytes);
+        assert!(optimized_metrics.vertices_transformed <= baseline_metrics.vertices_transformed);
+        assert!(optimized_metrics.bytes_fetched <= baseline_metrics.bytes_fetched);
     }
 
     #[test]
