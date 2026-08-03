@@ -87,11 +87,16 @@ Lumberyard exterior is fetched through a reference-Draco preprocessing step,
 then retained as 132 MiB of ordinary glTF geometry and 91 MiB of 512px BC3
 KTX2 mip chains. Large-primitive splitting turns 1,591 authored primitives into
 1,593 independently GPU-cullable chunks. The demo combines an ambient-cube
-probe, Cook-Torrance local lights, directional shadows, fog, and bloom. The
-upstream file labels every material as a non-PBR Phong conversion and assigns
-one metallic/roughness pair to the entire scene, so the demo classifies its
-named metal, wet, glass, and dielectric surfaces before GPU registration. The
-source GLB is removed after a successful import, and running without the cache
+probe, Cook-Torrance local lights, directional shadows, fog, and bloom. It
+derives point and authored-direction spot lights from the bounds and transforms
+of emissive street and string-light meshes, so visible fixtures illuminate
+nearby geometry. The four spot fixtures nearest the starting camera cast local
+shadows; the fixed budget keeps the large scene from paying for shadow maps at
+every decorative light. The upstream file labels every material as a non-PBR
+Phong conversion and assigns one metallic/roughness pair to the entire scene,
+so the demo classifies its named metal, wet, glass, and dielectric surfaces
+before GPU registration. The source GLB is removed after a successful import,
+and running without the cache
 reports the fetch command before a window opens.
 
 The Bistro demo moves faster than Sponza to cover the exterior's larger

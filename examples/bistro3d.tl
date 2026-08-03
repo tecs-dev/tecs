@@ -9,12 +9,36 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs <const> = require("tecs")
 local Transform3D <const> = tecs.Transform3D
 local PointLight3D <const> = tecs.gfx.PointLight3D
+local SpotLight3D <const> = tecs.gfx.SpotLight3D
 local FlyCamera3D <const> = tecs.gfx.FlyCamera3D
 local Tint <const> = tecs.gfx.Tint
 local Renderable3D <const> = tecs.gfx.Renderable3D
 
 local INITIAL_DAYLIGHT <const> = 0.55
 local DAYLIGHT_PER_WHEEL <const> = 0.08
+local INITIAL_CAMERA_X <const> = 9.1325
+local INITIAL_CAMERA_Y <const> = 2.6832
+local INITIAL_CAMERA_Z <const> = -26.1308
+local SHADOWED_FIXTURES <const> = 4
+
+local record FixtureProfile
+    spot: boolean
+    r: number
+    g: number
+    b: number
+end
+
+local record FixtureLight
+    x: number
+    y: number
+    z: number
+    rotationX: number
+    rotationY: number
+    rotationZ: number
+    rotationW: number
+    distanceSquared: number
+    profile: FixtureProfile
+end
 
 local function mix(from: number, to: number, amount: number): number
     return from + (to - from) * amount
@@ -61,15 +85,88 @@ local function tuneLegacyMaterial(material: tecs.assets.ModelMaterial)
     end
 end
 
+local function fixtureProfile(name: string): FixtureProfile
+    if name:find("Emissive_StreetLight", 1, true) or name:find("Spotlight_Glass_Emissive", 1, true) then
+        return {spot = true, r = 1.0, g = 0.62, b = 0.25}
+    end
+    if not name:find("Paris_StringLights_01_", 1, true) or not name:find("_Emissive", 1, true) then
+        return nil
+    end
+    if name:find("Blue", 1, true) then
+        return {spot = false, r = 0.28, g = 0.48, b = 1.0}
+    elseif name:find("Pink", 1, true) then
+        return {spot = false, r = 1.0, g = 0.28, b = 0.52}
+    elseif name:find("Red", 1, true) then
+        return {spot = false, r = 1.0, g = 0.18, b = 0.12}
+    elseif name:find("Green", 1, true) then
+        return {spot = false, r = 0.2, g = 1.0, b = 0.32}
+    elseif name:find("Orange", 1, true) then
+        return {spot = false, r = 1.0, g = 0.42, b = 0.12}
+    end
+    return {spot = false, r = 1.0, g = 0.78, b = 0.48}
+end
+
+local function fixturePosition(draw: tecs.assets.ModelDraw, mesh: tecs.assets.Mesh): number, number, number
+    local x <const> = mesh.centerX * draw.scaleX
+    local y <const> = mesh.centerY * draw.scaleY
+    local z <const> = mesh.centerZ * draw.scaleZ
+    local qx, qy, qz, qw <const> = draw.rotationX, draw.rotationY, draw.rotationZ, draw.rotationW
+    local tx <const> = 2.0 * (qy * z - qz * y)
+    local ty <const> = 2.0 * (qz * x - qx * z)
+    local tz <const> = 2.0 * (qx * y - qy * x)
+    return draw.x + x + qw * tx + qy * tz - qz * ty,
+        draw.y + y + qw * ty + qz * tx - qx * tz,
+        draw.z + z + qw * tz + qx * ty - qy * tx
+end
+
+local function findFixtureLights(model: tecs.assets.Model): {FixtureLight}
+    local fixtures: {FixtureLight} = {}
+    for _, draw in ipairs(model.draws) do
+        local material <const> = model.materials[draw.material]
+        local profile <const> = material ~= nil and fixtureProfile(material.name) or nil
+        if profile ~= nil then
+            local x, y, z <const> = fixturePosition(draw, model.meshes[draw.mesh])
+            local duplicate = false
+            for _, fixture in ipairs(fixtures) do
+                local dx <const>, dy <const>, dz <const> = fixture.x - x, fixture.y - y, fixture.z - z
+                if dx * dx + dy * dy + dz * dz < 0.25 then
+                    duplicate = true
+                    break
+                end
+            end
+            if not duplicate then
+                local dx <const>, dy <const>, dz <const> = x - INITIAL_CAMERA_X,
+                    y - INITIAL_CAMERA_Y,
+                    z - INITIAL_CAMERA_Z
+                fixtures[#fixtures + 1] = {
+                    x = x,
+                    y = y,
+                    z = z,
+                    rotationX = draw.rotationX,
+                    rotationY = draw.rotationY,
+                    rotationZ = draw.rotationZ,
+                    rotationW = draw.rotationW,
+                    distanceSquared = dx * dx + dy * dy + dz * dz,
+                    profile = profile,
+                }
+            end
+        end
+    end
+    table.sort(
+        fixtures, function(a: FixtureLight, b: FixtureLight): boolean return a.distanceSquared < b.distanceSquared end
+    )
+    return fixtures
+end
+
 local function game(world: tecs.World, app: tecs.Application)
     local meshes <const> = app.renderer.meshes
     local camera <const> = meshes.camera
 
     -- Use the authored exterior camera. Its quaternion turns Tecs' negative-Z
     -- camera forward toward the street's positive-Z extent.
-    camera.x = 9.1325
-    camera.y = 2.6832
-    camera.z = -26.1308
+    camera.x = INITIAL_CAMERA_X
+    camera.y = INITIAL_CAMERA_Y
+    camera.z = INITIAL_CAMERA_Z
     camera.rotationX = 0.005614
     camera.rotationY = -0.986264
     camera.rotationZ = -0.034287
@@ -85,18 +182,8 @@ local function game(world: tecs.World, app: tecs.Application)
         run = function(dt: number) controller:update(dt) end,
     })
 
-    local lamps <const>: {{number}} = {
-        {3.5, 4.0, -5.0, 1.0, 0.45, 0.16},
-        {9.0, 3.5, 4.5, 1.0, 0.34, 0.12},
-        {-7.0, 4.0, 12.0, 0.28, 0.48, 1.0},
-        {16.0, 4.5, 18.0, 1.0, 0.55, 0.22},
-    }
-    local lampEntities: {integer} = {}
-    for _, lamp in ipairs(lamps) do
-        lampEntities[#lampEntities + 1] = world:spawn(
-            Transform3D.new({x = lamp[1], y = lamp[2], z = lamp[3]}), PointLight3D(12, lamp[4], lamp[5], lamp[6], 4)
-        )
-    end
+    local pointLampEntities: {integer} = {}
+    local spotLampEntities: {integer} = {}
 
     local daylight = INITIAL_DAYLIGHT
     local appliedDaylight = -1.0
@@ -129,10 +216,15 @@ local function game(world: tecs.World, app: tecs.Application)
         fog.g = mix(0.04, 0.42, daylight)
         fog.b = mix(0.08, 0.55, daylight)
 
-        for _, entity in ipairs(lampEntities) do
+        for _, entity in ipairs(pointLampEntities) do
             local light <const> = world:getMut(entity, PointLight3D)
-            light.radius = mix(14, 9, daylight)
-            light.intensity = mix(10, 1.5, daylight)
+            light.radius = mix(8, 5, daylight)
+            light.intensity = mix(5, 0.2, daylight)
+        end
+        for _, entity in ipairs(spotLampEntities) do
+            local light <const> = world:getMut(entity, SpotLight3D)
+            light.radius = mix(16, 10, daylight)
+            light.intensity = mix(20, 1.0, daylight)
         end
         appliedDaylight = daylight
     end
@@ -158,6 +250,50 @@ local function game(world: tecs.World, app: tecs.Application)
     for _, material in ipairs(loaded.materials) do
         tuneLegacyMaterial(material)
     end
+    local shadowed = 0
+    local fixtures <const> = findFixtureLights(loaded)
+    for _, fixture in ipairs(fixtures) do
+        local profile <const> = fixture.profile
+        if profile.spot then
+            local qx, qy, qz, qw <const> = fixture.rotationX, fixture.rotationY, fixture.rotationZ, fixture.rotationW
+            local directionX <const> = -2.0 * (qw * qy + qz * qx)
+            local directionY <const> = 2.0 * (qw * qx - qz * qy)
+            local directionZ <const> = -1.0 + 2.0 * (qx * qx + qy * qy)
+            local flags = 0
+            if shadowed < SHADOWED_FIXTURES then
+                flags = tecs.gfx.LIGHT_CASTS_SHADOWS
+                shadowed = shadowed + 1
+            end
+            spotLampEntities[#spotLampEntities + 1] = world:spawn(
+                Transform3D.new({
+                    -- Move just beyond the emissive glass so the fixture does
+                    -- not shadow its own complete cone.
+                    x = fixture.x + directionX * 0.2,
+                    y = fixture.y + directionY * 0.2,
+                    z = fixture.z + directionZ * 0.2,
+                    rotationX = qx,
+                    rotationY = qy,
+                    rotationZ = qz,
+                    rotationW = qw,
+                }),
+                SpotLight3D.new({
+                    radius = 16,
+                    innerAngle = math.rad(48),
+                    outerAngle = math.rad(72),
+                    r = profile.r,
+                    g = profile.g,
+                    b = profile.b,
+                    intensity = 20,
+                    flags = flags,
+                })
+            )
+        else
+            pointLampEntities[#pointLampEntities + 1] = world:spawn(
+                Transform3D.new({x = fixture.x, y = fixture.y, z = fixture.z}),
+                PointLight3D(8, profile.r, profile.g, profile.b, 5)
+            )
+        end
+    end
     local instance <const> = meshes:registerModel(loaded):newInstance()
     for _, primitive in ipairs(instance.primitives) do
         world:spawn(
@@ -167,6 +303,11 @@ local function game(world: tecs.World, app: tecs.Application)
     print(
         ("bistro3d: loaded %d GPU-cullable chunks, %d vertices, %d indices, %d materials, and %d textures"):format(
             #instance.primitives, meshes.vertexCount, meshes.indexCount, meshes.materialCount, meshes.textureCount
+        )
+    )
+    print(
+        ("bistro3d: attached %d local lights to emissive fixtures; %d nearby spotlights cast shadows"):format(
+            #fixtures, shadowed
         )
     )
     print("bistro3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
@@ -189,7 +330,10 @@ return tecs.newApplication({
         packTextures = false,
         mipmaps = true,
         textureFormat = tecs.assets.IMAGE_BC3,
-        lights = {capacity = 4},
+        lights = {
+            capacity = 128,
+            shadows = {capacity = SHADOWED_FIXTURES, size = 256, bias = 0.003, softness = 1},
+        },
         probe = {
             positiveX = {0.10, 0.115, 0.14},
             negativeX = {0.075, 0.085, 0.11},
@@ -214,7 +358,7 @@ return tecs.newApplication({
             softness = 1.0,
         },
     },
-    maxEntities = 1700,
+    maxEntities = 1824,
     framesInFlight = 2,
     fixedMaxSteps = 240,
     presentMode = os.getenv("TECS_PRESENT") or "immediate",
