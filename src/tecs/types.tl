@@ -524,41 +524,6 @@ local record types
             groupBy: function(archetype: Archetype): integer
         end
 
-        --- An opt-in query iterator that can be closed before exhaustion.
-        ---
-        --- Create one with `query:newCursor()` when an archetype-level loop may
-        --- `break` or return early and retain explicit traversal state.
-        --- Natural exhaustion closes the cursor automatically, and repeated
-        --- `close()` calls are safe.
-        interface Cursor is Closeable
-            --- The step function `cursor:iter()` returns. Yields the
-            --- archetype, its live row count, and its entity id column; the
-            --- entity column is the archetype's own, not a copy.
-            type IterFn = function(Cursor, any): (Archetype, integer, {integer})
-
-            --- The step function `cursor:groups()` returns. Yields group ids
-            --- in ascending order.
-            type GroupsIterFn = function(Cursor, any): integer
-
-            --- The step function `cursor:group(id)` returns, with the same
-            --- three values as `IterFn` narrowed to one group.
-            type GroupIterFn = function(Cursor, any): (Archetype, integer, {integer})
-
-            --- Iterate over every active archetype matched by the query.
-            iter: function(self): (IterFn, Cursor, any)
-
-            --- Iterate over active group IDs in sorted order.
-            groups: function(self): (GroupsIterFn, Cursor, any)
-
-            --- Iterate over active archetypes in one group.
-            ---
-            --- @param groupId The group to traverse.
-            --- @return The cursor's grouped step function.
-            --- @return This cursor.
-            --- @return The iterator's initial control value.
-            group: function(self, groupId: integer): (GroupIterFn, Cursor, any)
-        end
-
         --- The step function `query:iter()` returns. Yields the archetype,
         --- its live row count, and its entity id column; the entity column is
         --- the archetype's own, not a copy, and is only valid until the world
@@ -589,15 +554,6 @@ local record types
         ---     table and columns are the archetype's own and remain valid only
         ---     until the next barrier that changes that archetype.
         iter: function(self): (IterFn, Query, any)
-
-        --- Create an opt-in cursor for a traversal that may stop early.
-        ---
-        --- Cursors allocate a small traversal object. Keep using `iter()`,
-        --- `groups()`, and `group(id)` for loops that run to exhaustion.
-        --- Closing a cursor stops that traversal; it does not commit the world.
-        ---
-        --- @return A cursor the caller may close early. Closing twice is safe.
-        newCursor: function(self): Cursor
 
         --- Iterate over active group IDs in sorted order.
         --- Only available when groupBy is specified.

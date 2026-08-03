@@ -288,11 +288,7 @@ mcp.register({
         local rows: {any} = {}
         local total = 0
 
-        -- A cursor rather than iter, because this stops at the limit and
-        -- leaving an archetype loop early through iter leaves the world
-        -- deferred, which silently queues every later spawn.
-        local cursor = query:newCursor()
-        for archetype, length in cursor:iter() do
+        for archetype, length in query:iter() do
             total = total + length
             for row = 1, length do
                 if #rows < limit then
@@ -308,7 +304,6 @@ mcp.register({
                 end
             end
         end
-        cursor:close()
 
         return {
             matched = total,

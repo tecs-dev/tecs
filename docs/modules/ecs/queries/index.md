@@ -1,5 +1,5 @@
 ---
-description: "Creating and iterating queries with include, exclude, includeAny, temp, cursors, and deferred mutations"
+description: "Creating and iterating queries with include, exclude, includeAny, temp, and deferred mutations"
 outline: deep
 ---
 
@@ -105,29 +105,21 @@ ordering.
 
 ### Early exit {#breaking-out-early}
 
-An early `break` is safe because iteration owns no transaction scope. Use a
-cursor when code needs a closable traversal object:
+An early `break` or `return` is safe because iteration owns no transaction
+scope or resource that needs cleanup:
 
 ```teal
-local cursor <const> = query:newCursor()
-
-for archetype, _length, entities in cursor:iter() do
+for archetype, _length, entities in query:iter() do
     if matchesSelection(archetype) then
         selected = entities[1]
         break
     end
 end
-
-cursor:close()
 ```
 
-`cursor:close()` tolerates repeated calls and natural exhaustion. Call it
-immediately before returning from inside the loop. Cursors also support
-`groups()` and `group(id)`, but each cursor owns one traversal and rejects a
-second.
-
-Breaking only the inner row loop leaves the archetype iterator running, so it
-does not require a cursor.
+The same rule applies to `groups()` and `group(id)`. Nested and interleaved
+loops keep independent traversal state, including multiple loops over the same
+query.
 
 ## Persistent and temporary queries
 

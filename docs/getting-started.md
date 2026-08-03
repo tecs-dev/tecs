@@ -114,8 +114,8 @@ Keep three rules visible when writing systems:
 
 - Create persistent queries during plugin setup.
 - Read columns with `get` and mark written columns with `getMut`.
-- Run `query:iter()` to exhaustion. Use `query:newCursor()` and close it when a
-  loop may stop early.
+- Break or return from `query:iter()` freely; iteration owns no transaction
+  scope or resource that needs cleanup.
 
 The [mutation model](/modules/ecs/mutation-model) covers deferred changes and dirty
 tracking.

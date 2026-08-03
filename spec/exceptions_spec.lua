@@ -334,23 +334,6 @@ describe("exception safety", function()
         assert.is_true(world:isAlive(spawned))
     end)
 
-    it("allows a cursor to close after an unrelated transaction settles", function()
-        local world = tecs.ecs.newWorld()
-        world:spawn(Tint(1, 0, 0, 1))
-        local query = world:newQuery({ name = "spec.Stale", include = { Tint } })
-
-        local cursor = query:newCursor()
-        for _ in cursor:iter() do
-            break
-        end
-        world:enqueueCommit()
-        cursor:close()
-        local spawned = world:spawn(Tint(0, 1, 0, 1))
-        assert.is_false(world:isAlive(spawned))
-        world:enqueueCommit()
-        assert.is_true(world:isAlive(spawned))
-    end)
-
     ---------------------------------------------------------------------------
     -- The staging slot a throw would have left the next extraction writing into
     ---------------------------------------------------------------------------

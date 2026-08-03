@@ -83,11 +83,11 @@ Lua stack frame. Events and process-wide I/O continue to pump, and the
 application may render the last completed frame. The next system and phase do
 not run early.
 
-The coroutine preserves query iterators and locals. Tecs already defers world
-mutations while a query is open, so a spawn after a wait remains ordered and
-commits when the iterator closes. The same mechanism works in fixed phases:
-the fixed step resumes without replaying its earlier systems or advancing its
-clock twice.
+The coroutine preserves query iterators and locals. Structural mutations stay
+staged while the system is suspended because the system has not returned, so
+a spawn after a wait remains ordered and commits at the next declared barrier.
+The same mechanism works in fixed phases: the fixed step resumes without
+replaying its earlier systems or advancing its clock twice.
 
 Calling the same cooperative API outside a world update, including from
 startup, shutdown, or `runPhase`, blocks while pumping its producer until it

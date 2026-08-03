@@ -319,8 +319,8 @@ local record SpriteExtractor
     --- second time answers with the layer it already has.
     _regionByImage: {integer: TextureArray.Region}
     --- Image name index a row asked for that nothing is registered under, or
-    --- nil. Held rather than raised where it is found, because that point is
-    --- inside a query iteration: see `syncInstances`.
+    --- nil. Held so `syncInstances` can finish its extraction batch before it
+    --- reports the error.
     _missingImage: integer
 end
 
@@ -551,12 +551,9 @@ local function writeRows(
                 local image <const> = sprite.image as integer
                 local resolved <const> = self._slotByImage[image]
                 if resolved == nil then
-                    -- Reported after the loop rather than raised here. This
-                    -- runs inside a query iteration, and an error thrown out
-                    -- of one leaves the world deferred, which silently queues
-                    -- every spawn made after it: the frame would take the
-                    -- world down with it instead of only itself. The row is
-                    -- written against layer zero and the slot is left
+                    -- Reported after the loop rather than raised here so the
+                    -- current extraction batch finishes consistently. The row
+                    -- is written against layer zero and the slot is left
                     -- unresolved, so a name registered later still resolves.
                     self._missingImage = image
                     layer = 0
@@ -1447,9 +1444,9 @@ local function syncInstances(self: SpriteExtractor, packet: SpriteFramePacket)
     -- A Sprite naming an image nothing registered is still an error: every
     -- layer that exists holds some other picture, so drawing one of those
     -- instead would turn a broken asset into an art bug nobody traces back.
-    -- Raised here rather than where it is found, so it is only this frame's
-    -- error: the loop above has finished and the world is whole, and a caller
-    -- that catches this can register the image and draw again.
+    -- Raised here rather than where it is found, after the extraction loop has
+    -- finished consistently, so a caller can register the image and draw
+    -- again.
     local missing <const> = self._missingImage
     if missing ~= nil then
         self._missingImage = nil

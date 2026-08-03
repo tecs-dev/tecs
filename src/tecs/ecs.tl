@@ -96,9 +96,6 @@ local record ecs
     type FFIRelationshipOptions<R is Relationship> = types.components.FFIRelationshipOptions<R>
     --- `QueryDescriptor` configures a query.
     type QueryDescriptor = types.Query.Descriptor
-    --- `QueryCursor` controls an explicitly closed query
-    --- traversal.
-    type QueryCursor = types.Query.Cursor
     --- `Archetype` stores contiguous component columns.
     type Archetype = types.Archetype
     --- `ArchetypeEntityObserver` receives entity changes

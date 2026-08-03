@@ -148,13 +148,11 @@ changes transaction ordering or visibility.
 
 ## Query iteration
 
-Query iteration does not own transaction lifetime. `query:iter()`, grouped
-iteration, and cursors read committed archetypes while structural calls stage
-for a later pipeline barrier. Breaking or returning early cannot leave the
-world in a special mutation mode.
-
-Use `query:newCursor()` only when code needs an explicitly closable traversal
-object. `cursor:close()` stops that traversal and does not publish mutations.
+Query iteration does not own transaction lifetime. `query:iter()` and grouped
+iteration read committed archetypes while structural calls stage for a later
+pipeline barrier. Breaking, returning, raising, or suspending a coroutine
+cannot leave the world in a special mutation mode and requires no iterator
+cleanup.
 
 Columns and entity arrays are live archetype storage. They remain valid until a
 later publication changes that archetype. Outside a system,

@@ -73,6 +73,5 @@ end
 ```
 
 Grouped iteration follows the same transaction-independent rules as
-`query:iter()`. Use a separate
-[cursor](/modules/ecs/queries/#breaking-out-early) when a traversal needs an
-explicit close operation. Nested grouped cursors need one cursor each.
+`query:iter()`. Breaking or returning early needs no cleanup, and nested
+grouped loops keep independent traversal state.

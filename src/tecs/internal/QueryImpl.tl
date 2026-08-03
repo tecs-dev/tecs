@@ -14,7 +14,6 @@ local STRING_BUFFER <const> = StringBuffer.new()
 local type ArchetypeEntityObserver = types.ArchetypeEntityObserver
 local type QueryDescriptor = types.Query.Descriptor
 local type Query = types.Query
-local type QueryCursor = types.Query.Cursor
 local type Archetype = types.Archetype
 local type ArchetypeInternal = internal.ArchetypeInternal
 local type ComponentInternal = internal.ComponentInternal
@@ -55,16 +54,7 @@ local record QueryImpl is Query, ArchetypeEntityObserver
     _groupBy: function(Archetype): integer
 end
 
-local record QueryCursorImpl is QueryCursor
-    _query: QueryImpl
-    _open: boolean
-    _closed: boolean
-    _prepared: boolean
-    _selectedGroup: {Archetype}
-end
-
 local QUERY_MT <const>: metatable<QueryImpl> = {__index = QueryImpl}
-local QUERY_CURSOR_MT <const>: metatable<QueryCursorImpl> = {__index = QueryCursorImpl}
 
 -------------------------------------------------------------------------------
 -- Iteration
@@ -112,150 +102,6 @@ local function groupedIterStep(self: QueryImpl, var: any): (Archetype, integer, 
         gi = gi + 1
         ai = 1
     end
-end
-
-local function openCursor(self: QueryCursorImpl): boolean
-    if self._closed then
-        return false
-    end
-    if not self._open then
-        self._open = true
-    end
-    return true
-end
-
-function QueryCursorImpl:close(): boolean, string
-    if self._closed then
-        return true
-    end
-    self._closed = true
-    if self._open then
-        self._open = false
-    end
-    return true
-end
-
-local function cursorIterStep(self: QueryCursorImpl, var: any): (Archetype, integer, any)
-    if not openCursor(self) then
-        return
-    end
-
-    local query = self._query
-    local idx: integer
-    if var == nil then
-        idx = 1
-    else
-        idx = query._activeIndices[var as Archetype] + 1
-    end
-
-    local archetype = query._activeItems[idx]
-    if not archetype then
-        self:close()
-        return
-    end
-    return archetype, archetype.entities[0] as integer, archetype.entities
-end
-
-local function cursorGroupedIterStep(self: QueryCursorImpl, var: any): (Archetype, integer, any)
-    if not openCursor(self) then
-        return
-    end
-
-    local query = self._query
-    local groupList = query._activeGroupList
-    local groupItems = query._activeGroupItems
-    local gi, ai: integer, integer
-    if var == nil then
-        gi, ai = 1, 1
-    else
-        local arch = var as Archetype
-        local groupId = query._archetypeGroups[arch]
-        gi = query._activeGroupListIndices[groupId]
-        ai = query._activeGroupIndices[groupId][arch] + 1
-    end
-
-    while gi <= #groupList do
-        local items = groupItems[groupList[gi]]
-        if items and ai <= #items then
-            local archetype = items[ai]
-            return archetype, archetype.entities[0] as integer, archetype.entities
-        end
-        gi = gi + 1
-        ai = 1
-    end
-    self:close()
-end
-
-local function cursorGroupsStep(self: QueryCursorImpl, prev: any): integer
-    if not openCursor(self) then
-        return
-    end
-
-    local query = self._query
-    local i: integer
-    if prev == nil then
-        i = 1
-    else
-        i = query._activeGroupListIndices[prev as integer] + 1
-    end
-    local list = query._activeGroupList
-    if i <= #list then
-        return list[i]
-    end
-    self:close()
-    return nil
-end
-
-local function cursorGroupStep(self: QueryCursorImpl, prev: any): (Archetype, integer, {integer})
-    if not openCursor(self) then
-        return
-    end
-
-    local items = self._selectedGroup
-    local i: integer
-    if prev == nil then
-        i = 1
-    else
-        local query = self._query
-        local arch = prev as Archetype
-        local groupId = query._archetypeGroups[arch]
-        i = query._activeGroupIndices[groupId][arch] + 1
-    end
-    if items and i <= #items then
-        local archetype = items[i]
-        return archetype, archetype.entities[0] as integer, archetype.entities as {integer}
-    end
-    self:close()
-end
-
-local function prepareCursor(self: QueryCursorImpl)
-    if self._closed then
-        error("query cursor is closed")
-    end
-    if self._prepared then
-        error("query cursor already has a traversal")
-    end
-    self._prepared = true
-end
-
-function QueryCursorImpl:iter(): (QueryCursor.IterFn, QueryCursor, any)
-    prepareCursor(self)
-    if self._query._archetypeGroups then
-        return cursorGroupedIterStep as QueryCursor.IterFn, self, nil
-    else
-        return cursorIterStep as QueryCursor.IterFn, self, nil
-    end
-end
-
-function QueryCursorImpl:groups(): (QueryCursor.GroupsIterFn, QueryCursor, any)
-    prepareCursor(self)
-    return cursorGroupsStep, self, nil
-end
-
-function QueryCursorImpl:group(groupId: integer): (QueryCursor.GroupIterFn, QueryCursor, any)
-    prepareCursor(self)
-    self._selectedGroup = self._query._activeGroupItems[groupId]
-    return cursorGroupStep, self, nil
 end
 
 -------------------------------------------------------------------------------
@@ -334,19 +180,6 @@ function QueryImpl:iter(): (Query.IterFn, Query, any)
     else
         return simpleIterStep as Query.IterFn, self, nil
     end
-end
-
-function QueryImpl:newCursor(): QueryCursor
-    local cursor: QueryCursorImpl = setmetatable(
-        {
-            _query = self,
-            _open = false,
-            _closed = false,
-            _prepared = false,
-        },
-        QUERY_CURSOR_MT
-    )
-    return cursor
 end
 
 function QueryImpl:getGroup(archetype: Archetype): integer

@@ -366,9 +366,8 @@ The rules that prevent the most common defect class:
   `world:markComponentDirty(id, Component)` or the GPU never re-syncs.
 - Dirty bits clear at the end of each `world:update`.
 - `world:batchSpawn` skips FFI defaults; set every field in the callback.
-- Keep `query:iter()` for loops that run to exhaustion. If an archetype-level query loop may `break` or return
-  early, use `query:newCursor()` and call `cursor:close()` after the loop or immediately before returning. Leaving
-  one early through `iter` leaves the world deferred, which silently queues every later spawn.
+- Query iteration owns no mutation scope or resource. A loop may `break`, return, raise or suspend without
+  cleanup; structural mutations remain staged until the pipeline's next declared barrier.
 
 ### Code Style
 
