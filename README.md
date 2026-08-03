@@ -294,6 +294,23 @@ parked on a result otherwise cannot tell an idle worker from one that has
 already exited, and the difference between those two is a wait that ends and a
 wait that does not.
 
+`Worker:call` sends a request and returns its answer, which is what most worker
+code was writing by hand out of a send and a receive. Doing it by hand is wrong
+as soon as anything else uses the channel: a channel is a stream, so the next
+message is not necessarily the answer to the last request, and two calls in
+flight at once cannot tell their replies apart at all. The alternative was a
+second channel pair per call, which is a native queue per outstanding request
+and still leaves ordinary messages sharing a stream with replies. So a call
+numbers its request instead, and every read path routes what it takes to the
+reader that asked for it: a reply to the call that issued it, anything else to
+the queue `receive` reads. A canceled call drops its number on the way out, and
+the reply that arrives afterwards is discarded rather than kept for whoever
+calls next, on the same reasoning the asset loader destroys a decode nobody
+awaits: answering one caller with another caller's work is worse than answering
+nobody. What this does not buy is concurrency inside one worker, which serves
+its requests in order; several calls at once means several workers, and
+`tecs.batch` is what runs them.
+
 Byte contracts are contextual. Memory Readers, Writers, buffers, and
 transforms return inline. A socket or process-pipe endpoint first uses that
 same direct call and parks only when the handle is not ready. File endpoints

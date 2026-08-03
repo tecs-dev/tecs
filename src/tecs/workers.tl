@@ -21,6 +21,26 @@ local answer <const> = worker:receive(1000)
 worker:stop()
 ```
 
+A worker that answers requests rather than streaming results is a call
+server, and `Worker:call` reads as an ordinary function call on this side
+while `Self:serve` runs the loop on the other:
+
+```teal
+local worker <const> = tecs.workers.spawn({source = [[
+    local tecs <const> = require("tecs")
+    tecs.workers.current():serve(function(job)
+        return {name = job.name, hash = tecs.data.fnv1a64(job.bytes)}
+    end)
+]]})
+
+local answer <const> = worker:call({name = "level1", bytes = "..."})
+worker:stop()
+```
+
+A channel is a stream, so `call` numbers each request and takes the reply
+that carries the same number. Messages the worker sends outside a call stay
+queued for `receive`, and a reply nobody awaits any more is discarded.
+
 The worker's source writes a require line because it is a separate state
 with a separate global table, which is the one place in a game that does.
 
@@ -55,7 +75,24 @@ polled instead would spin a core.
 A cooperative wait is served by the runtime pump, which runs once per frame, so
 a result costs up to one extra frame against the arrival that produced it. That
 is the same trade every other Tecs producer makes, and it buys a frame that
-keeps rendering while the worker computes.
+keeps rendering while the worker computes. `Worker:call` pays the same frame,
+and outside a system it blocks its caller and pays none of it.
+
+## Several calls at once
+
+One wait parks the whole logical update, so two calls written in a row cost the
+sum of both. `tecs.batch` runs them at the same time and returns their results
+in the order the callbacks were given, whatever order the replies arrive in:
+
+```teal
+local answers <const> = tecs.batch({
+    function(): any return hashers[1]:call({name = "level1", bytes = first}) end,
+    function(): any return hashers[2]:call({name = "level2", bytes = second}) end,
+})
+```
+
+One worker serves its own requests one at a time, so overlapping the waits buys
+time when the calls go to different workers and buys none when they do not.
 
 ## Polling and shutdown
 
@@ -174,6 +211,32 @@ local record Worker
     --- game code should ignore this field.
     _joined: boolean
 
+    --- Engine-owned. Numbers the next request `call` issues on this worker.
+    --- Ordinary game code should ignore this field.
+    _nextCallId: integer
+
+    --- Engine-owned. Holds the identifier of every call this worker has issued
+    --- and not yet answered, which is what tells a reply somebody awaits from
+    --- one nobody does. Ordinary game code should ignore this field.
+    _pendingIds: {integer: boolean}
+
+    --- Engine-owned. Holds replies taken off the channel before the call that
+    --- issued them read one. Ordinary game code should ignore this field.
+    _replies: {integer: any}
+
+    --- Engine-owned. Buffers messages that answer no call until an ordinary
+    --- `receive` takes one. Ordinary game code should ignore this field.
+    _inbox: {any}
+
+    --- Engine-owned. Indexes the oldest buffered message in `_inbox`.
+    --- Ordinary game code should ignore this field.
+    _inboxFirst: integer
+
+    --- Engine-owned. Indexes the newest buffered message in `_inbox`, and sits
+    --- below `_inboxFirst` when nothing is buffered. Ordinary game code should
+    --- ignore this field.
+    _inboxLast: integer
+
     --- Queues a value for the worker and refreshes `pending`.
     ---
     --- @param value The worker applies the same limits and errors as `Channel:send`.
@@ -198,6 +261,39 @@ local record Worker
     ---     timeout, and a worker that has ended without sending one. A stopped
     ---     worker answers nil without waiting.
     receive: function(self: Worker, timeoutMs?: number): any
+
+    --- Sends a request, waits for its answer, and returns it.
+    ---
+    --- The call reads as an ordinary function call: the worker runs the
+    --- request and the reply arrives at this line. A channel is a stream, so
+    --- each call carries an identifier and takes only the reply that carries
+    --- the same one. Messages the worker sends outside a call stay queued for
+    --- `receive` and are never consumed here.
+    ---
+    --- A wait suspends the calling system cooperatively and resumes it at this
+    --- call, so other systems, rendering, and input keep running; outside a
+    --- system the call blocks its own caller instead. A suspended call is
+    --- served by the runtime pump, which runs once per frame, so a reply can
+    --- arrive up to one frame after the worker sent it. Several calls placed
+    --- in `tecs.batch` run at the same time and their results come back in
+    --- argument order.
+    ---
+    --- Both halves cross as serialized bytes, exactly as `send` does, so a
+    --- request and a reply carry numbers, strings, booleans, and tables of
+    --- those. A live handle, a socket, a file, or cdata cannot cross, and a
+    --- worker that returns one has its call fail rather than its thread.
+    ---
+    --- The worker answers with [`Self:serve`](tealdoc:tecs.workers.Self),
+    --- which is the loop that reads a request and sends its handler's result
+    --- back under the same identifier.
+    ---
+    --- @param value The request the worker receives, under the same limits and
+    ---     errors as `Worker:send`.
+    --- @return The value the worker's handler returned for this request.
+    ---     Raises the worker's own reason when its handler failed, and raises
+    ---     when the worker ended, was stopped, or had already been stopped,
+    ---     because no reply can follow any of those.
+    call: function(self: Worker, value: any): any
 end
 
 local record workers
@@ -214,11 +310,11 @@ local record workers
     ---     created.
     newChannel: function(): Channel
 
-    --- Reports how many `Worker:receive` calls are suspended.
+    --- Reports how many `Worker:receive` and `Worker:call` waits are suspended.
     ---
-    --- A suspended receiver is a system parked on a worker result. The count
-    --- exists for tests and debug tooling that need to see the wait rather
-    --- than infer it; ordinary game code has no use for it.
+    --- A suspended receiver is a system parked on a worker result or a call
+    --- reply. The count exists for tests and debug tooling that need to see
+    --- the wait rather than infer it; ordinary game code has no use for it.
     ---
     --- @return The number of receivers waiting across every worker. Zero once
     ---     they have all resumed, been canceled, or had their worker stopped.
@@ -300,18 +396,25 @@ local function unsendable(value: any, path: string, depth: integer): string
     return nil
 end
 
+--- Encodes a value already known to be sendable and queues it.
+---
+--- Split out so a caller that has run `unsendable` over its own payload does
+--- not pay for a second walk of the same tables when it wraps that payload.
+local function pushEncoded(channel: Channel, value: any)
+    -- The cast is to satisfy the buffer type declaration, which names only
+    -- scalars; the encoder handles tables of scalars fine.
+    local encoded <const> = buffer.encode(value as string) as string
+    if not C.tecsChannelPush(channel.handle, encoded, #encoded) then
+        error("tecs: channel is closed or its bounded queue is full", 3)
+    end
+end
+
 function Channel:send(value: any)
     local rejected = unsendable(value, "value", 0)
     if rejected ~= nil then
         error(("tecs: cannot send to a worker: %s"):format(rejected), 2)
     end
-
-    -- The cast is to satisfy the buffer type declaration, which names only
-    -- scalars; the encoder handles tables of scalars fine.
-    local encoded = buffer.encode(value as string) as string
-    if not C.tecsChannelPush(self.handle, encoded, #encoded) then
-        error("tecs: channel is closed or its bounded queue is full", 2)
-    end
+    pushEncoded(self, value)
 end
 
 function Channel:receive(timeoutMs?: number): any
@@ -369,15 +472,107 @@ function Channel:destroy()
 end
 
 -------------------------------------------------------------------------------
+-- Message routing
+-------------------------------------------------------------------------------
+
+-- A channel is a stream, so a reply has to name the request it answers. Both
+-- states agree on this one key, in both directions, and it is a compatibility
+-- surface rather than an identifier: a worker body written against `serve`
+-- carries it in every request it reads and every reply it sends, so renaming it
+-- silently stops matching answers to callers.
+local CALL_ID <const> = "__tecsCallId"
+
+--- Reports the call a message belongs to, or nil when it belongs to none.
+---
+--- @param message Reads a request on the worker's side and a reply on the
+---     spawner's, since both carry the same key.
+--- @return The identifier, or nil for an ordinary `send` message.
+local function callIdOf(message: any): integer
+    if type(message) ~= "table" then
+        return nil
+    end
+    local id <const> = (message as {string: any})[CALL_ID]
+    if type(id) ~= "number" then
+        return nil
+    end
+    return id as integer
+end
+
+--- Takes the oldest buffered ordinary message, or nil when none is buffered.
+local function takeInbox(worker: Worker): any
+    local first <const> = worker._inboxFirst
+    if first > worker._inboxLast then
+        return nil
+    end
+    local message <const> = worker._inbox[first]
+    worker._inbox[first] = nil
+    if first == worker._inboxLast then
+        worker._inboxFirst = 1
+        worker._inboxLast = 0
+    else
+        worker._inboxFirst = first + 1
+    end
+    return message
+end
+
+--- Takes the reply this call is owed, or nil when none has arrived.
+local function takeReply(worker: Worker, id: integer): {string: any}
+    local reply <const> = worker._replies[id] as {string: any}
+    if reply ~= nil then
+        worker._replies[id] = nil
+    end
+    return reply
+end
+
+--- Forgets a call, so a reply that arrives for it later is discarded.
+local function forgetCall(worker: Worker, id: integer)
+    worker._pendingIds[id] = nil
+    worker._replies[id] = nil
+end
+
+--- Takes one message off the worker's channel and files it where its reader
+--- looks for it.
+---
+--- Every read path routes through this, so a reply never hides an ordinary
+--- message behind it and an ordinary message never sits in front of a reply.
+---
+--- @param timeoutMs Reaches the channel unchanged: zero polls, and a negative
+---     value waits until a message arrives or the channel closes and drains.
+--- @return True when a message was taken, whichever kind it was.
+local function routeOne(worker: Worker, timeoutMs: number): boolean
+    local message <const> = worker._fromWorker:receive(timeoutMs)
+    if message == nil then
+        return false
+    end
+
+    local id <const> = callIdOf(message)
+    if id == nil then
+        local last <const> = worker._inboxLast + 1
+        worker._inbox[last] = message
+        worker._inboxLast = last
+        return true
+    end
+
+    -- A reply whose call is no longer pending is one nobody awaits: its caller
+    -- was canceled and dropped the identifier on the way out, so the answer is
+    -- discarded by that identifier rather than handed to whoever calls next.
+    if worker._pendingIds[id] then
+        worker._pendingIds[id] = nil
+        worker._replies[id] = message
+    end
+    return true
+end
+
+-------------------------------------------------------------------------------
 -- Suspended receivers
 -------------------------------------------------------------------------------
 
--- A cooperative `Worker:receive` parks here and the runtime source below
--- advances it. Nothing native calls back into Lua: the poll runs on the Lua
--- thread and takes results with a zero timeout, which is the same pop a game
--- would write itself.
+-- A cooperative `Worker:receive` or `Worker:call` parks here and the runtime
+-- source below advances it. Nothing native calls back into Lua: the poll runs
+-- on the Lua thread and takes results with a zero timeout, which is the same
+-- pop a game would write itself.
 
---- One suspended `Worker:receive`.
+--- One suspended `Worker:receive` or `Worker:call`.
 local record Parked
     --- The worker whose results this receiver is waiting for.
     worker: Worker
@@ -385,6 +580,11 @@ local record Parked
     --- Monotonic milliseconds after which the receiver gives up, or nil to
     --- wait until a result or the worker's end.
     deadline: number
+
+    --- The call whose reply this receiver is owed, or nil when it is an
+    --- ordinary `receive` waiting for any message the worker did not send in
+    --- answer to a call.
+    callId: integer
 
     --- False once the receiver has been resumed or canceled, so a snapshot
     --- taken before either still skips it.
@@ -451,13 +651,40 @@ local function settleParked(entry: Parked): any, boolean
     if worker._joined then
         return nil, true
     end
-    local result <const> = worker._fromWorker:receive(0)
-    if result ~= nil then
-        return result, true
+
+    local callId <const> = entry.callId
+    if callId ~= nil then
+        local reply = takeReply(worker, callId)
+        local routed = false
+        if reply == nil then
+            routed = routeOne(worker, 0)
+            reply = takeReply(worker, callId)
+        end
+        if reply ~= nil then
+            return reply, true
+        end
+        -- A turn that routed a message for somebody else says nothing about
+        -- whether more are queued, so only an empty turn may read the close.
+        if not routed and worker._fromWorker:isClosed() then
+            return nil, true
+        end
+        return nil, false
+    end
+
+    -- Buffered first, so a reply routed ahead of an ordinary message does not
+    -- leave that message behind it.
+    local message = takeInbox(worker)
+    if message ~= nil then
+        return message, true
+    end
+    local routed <const> = routeOne(worker, 0)
+    message = takeInbox(worker)
+    if message ~= nil then
+        return message, true
     end
     -- Closed and drained is the worker's end: its source returned or raised,
     -- and no later poll can produce anything.
-    if worker._fromWorker:isClosed() then
+    if not routed and worker._fromWorker:isClosed() then
         return nil, true
     end
     if entry.deadline ~= nil and time.now() * 1000.0 >= entry.deadline then
@@ -515,6 +742,46 @@ local function releaseParked(worker: Worker)
     end
 end
 
+--- Suspends the calling system until its message or its reply is due.
+---
+--- Both waits park the same way, and the only difference is what the poll
+--- looks for on their behalf.
+---
+--- @param callId Names the call awaiting a reply, or nil for an ordinary
+---     receive, which takes the next message that answers no call.
+--- @param deadline Monotonic milliseconds after which the receiver gives up,
+---     or nil to wait until the worker answers or ends.
+--- @return The message, the reply, or nil when the wait produced neither.
+local function parkFor(worker: Worker, callId: integer, deadline: number): any
+    return task.awaitCallback(function(resume: function(any)): function()
+        if parkedCount >= MAX_PARKED then
+            if callId ~= nil then
+                forgetCall(worker, callId)
+            end
+            error("tecs: too many worker receives are waiting", 3)
+        end
+        local entry <const>: Parked = {
+            worker = worker,
+            deadline = deadline,
+            callId = callId,
+            active = true,
+            resume = resume,
+        }
+        parkedCount = parkedCount + 1
+        parked[parkedCount] = entry
+        retainSource()
+        -- Cancellation reaches here, and a canceled call has to drop its
+        -- identifier so the reply it can no longer take is discarded rather
+        -- than settling whichever call runs next.
+        return function()
+            unpark(entry)
+            if callId ~= nil then
+                forgetCall(worker, callId)
+            end
+        end
+    end)
+end
+
 function workers.parked(): integer
     return parkedCount
 end
@@ -570,6 +837,12 @@ function workers.spawn(options: SpawnOptions): Worker
     self._fromWorker = fromWorker
     self._joined = false
     self.pending = 0
+    self._nextCallId = 1
+    self._pendingIds = {}
+    self._replies = {}
+    self._inbox = {}
+    self._inboxFirst = 1
+    self._inboxLast = 0
     return self
 end
 
@@ -588,8 +861,13 @@ function Worker:receive(timeoutMs?: number): any
     end
 
     -- Attempted before anything else, so a ready result costs no scheduler
-    -- work and a poll stays exactly what it was.
-    local ready <const> = self._fromWorker:receive(0)
+    -- work and a poll stays exactly what it was. Buffered messages come first,
+    -- then whatever routing turns up, and a reply routed on the way is filed
+    -- for its own caller rather than answered here.
+    local ready = takeInbox(self)
+    while ready == nil and routeOne(self, 0) do
+        ready = takeInbox(self)
+    end
     if ready ~= nil or wanted == 0 then
         return ready
     end
@@ -597,36 +875,83 @@ function Worker:receive(timeoutMs?: number): any
     -- Outside a task the caller owns its own thread, so the native wait is
     -- both correct and free of the pump's frame of latency.
     if task.checkWait("worker receive") == "blocking" then
-        return self._fromWorker:receive(wanted)
+        local expiry <const> = wanted > 0 and time.now() * 1000.0 + wanted or nil
+        while true do
+            local remaining: number = FOREVER
+            if expiry ~= nil then
+                remaining = expiry - time.now() * 1000.0
+                if remaining <= 0 then
+                    return nil
+                end
+            end
+            if not routeOne(self, remaining) then
+                return nil
+            end
+            local message <const> = takeInbox(self)
+            if message ~= nil then
+                return message
+            end
+        end
     end
     if self._fromWorker:isClosed() then
         return nil
     end
 
     local deadline <const> = wanted > 0 and time.now() * 1000.0 + wanted or nil
-    return task.awaitCallback(function(resume: function(any)): function()
-        if parkedCount >= MAX_PARKED then
-            error("tecs: too many worker receives are waiting", 3)
+    return parkFor(self, nil, deadline)
+end
+
+function Worker:call(value: any): any
+    if self._joined then
+        error("tecs: cannot call a worker that has been stopped", 2)
+    end
+    local rejected <const> = unsendable(value, "value", 0)
+    if rejected ~= nil then
+        error(("tecs: cannot send to a worker: %s"):format(rejected), 2)
+    end
+
+    local id <const> = self._nextCallId
+    self._nextCallId = id + 1
+    local request <const>: {string: any} = {value = value}
+    request[CALL_ID] = id
+    pushEncoded(self._toWorker, request)
+    self.pending = self._toWorker:count()
+    -- Registered after the push and before anything routes: routing runs on
+    -- this thread, and no Lua runs between these two lines.
+    self._pendingIds[id] = true
+
+    local reply = takeReply(self, id)
+    while reply == nil and routeOne(self, 0) do
+        reply = takeReply(self, id)
+    end
+
+    if reply == nil and task.checkWait("worker call") == "blocking" then
+        while reply == nil and routeOne(self, FOREVER) do
+            reply = takeReply(self, id)
         end
-        local entry <const>: Parked = {
-            worker = self,
-            deadline = deadline,
-            active = true,
-            resume = resume,
-        }
-        parkedCount = parkedCount + 1
-        parked[parkedCount] = entry
-        retainSource()
-        return function() unpark(entry) end
-    end)
+    elseif reply == nil then
+        reply = parkFor(self, id, nil) as {string: any}
+    end
+
+    if reply == nil then
+        forgetCall(self, id)
+        error("tecs: the worker ended before it answered this call", 2)
+    end
+    local failure <const> = reply.error as string
+    if failure ~= nil then
+        error(("tecs: a worker call failed: %s"):format(failure), 2)
+    end
+    return reply.result
 end
 
 --- Results waiting to be taken.
 ---
 --- @return A count that is stale as soon as it is read; the worker may push more at any
----     moment.
+---     moment. Counts messages already routed into this worker's buffer along
+---     with everything still on the channel, so a call reply the worker has
+---     sent and nothing has routed yet is counted until a read files it away.
 function Worker:available(): integer
-    return self._fromWorker:count()
+    return self._fromWorker:count() + (self._inboxLast - self._inboxFirst + 1)
 end
 
 --- Closes the worker's inbox and waits for it to finish.
@@ -655,6 +980,20 @@ function Worker:stop(): integer
     self._handle = nil
     self._toWorker:destroy()
     self._fromWorker:destroy()
+
+    -- Nothing can answer an outstanding call now, and nothing can read a
+    -- buffered message, so the correlation state goes with the channels.
+    for index = self._inboxFirst, self._inboxLast do
+        self._inbox[index] = nil
+    end
+    self._inboxFirst = 1
+    self._inboxLast = 0
+    for id in pairs(self._pendingIds) do
+        self._pendingIds[id] = nil
+    end
+    for id in pairs(self._replies) do
+        self._replies[id] = nil
+    end
     return status
 end
 
@@ -679,6 +1018,35 @@ local record Self
     --- @param value Subject to the same item and byte limits as
     ---     `Channel:send`, and raises the same way.
     send: function(self: Self, value: any)
+
+    --- Answers `Worker:call` requests until the inbox closes.
+    ---
+    --- This is the worker side of a call: it reads a request, runs `handler`,
+    --- and sends what the handler returned back under the identifier the
+    --- request arrived with, which is what lets the spawner match a reply to
+    --- the call that is waiting for it.
+    ---
+    --- Every message reaches `handler`, so a worker that also receives
+    --- ordinary `Worker:send` messages serves both from one loop. A message
+    --- that is not a call request takes no reply, and the handler's return
+    --- value for one is discarded; answer those with `send` instead.
+    ---
+    --- A handler that raises does not end the worker. Its reason crosses back
+    --- and `Worker:call` raises it at the call site, and the loop reads the
+    --- next request.
+    ---
+    --- ```teal
+    --- local tecs <const> = require("tecs")
+    --- tecs.workers.current():serve(function(job: any): any
+    ---     return {hash = tecs.data.fnv1a64(job.bytes)}
+    --- end)
+    --- ```
+    ---
+    --- @param handler The worker runs this once per message and sends its
+    ---     first return value back as the reply. A return value that cannot be
+    ---     serialized reaches the caller as a failure rather than raising on
+    ---     this thread. Nil raises.
+    serve: function(self: Self, handler: function(any): any)
 end
 
 --- Watches this state's trace aborts when `TECS_TRACEPROF` is set, so the
@@ -732,7 +1100,27 @@ function workers.current(): Self
     local results = Channel.wrap(ffi.cast("void *", outbox) as loader.CPtr)
     local reportTraces = watchTraces()
 
-    return {
+    local self: Self = nil
+
+    --- Sends what a handler produced back under the identifier its request
+    --- carried, or the reason it could not be produced.
+    local function answer(id: integer, ok: boolean, result: any)
+        local reply <const>: {string: any} = {}
+        reply[CALL_ID] = id
+        if not ok then
+            reply.error = tostring(result)
+        else
+            local rejected <const> = unsendable(result, "result", 0)
+            if rejected ~= nil then
+                reply.error = ("a call result cannot cross: %s"):format(rejected)
+            else
+                reply.result = result
+            end
+        end
+        pushEncoded(results, reply)
+    end
+
+    self = {
         receive = function(_self: Self, timeoutMs?: number): any
             local value = incoming:receive(timeoutMs or FOREVER)
             -- A wait with no timeout returns nil only when the inbox closes,
@@ -746,7 +1134,28 @@ function workers.current(): Self
             return value
         end,
         send = function(_self: Self, value: any) results:send(value) end,
+        serve = function(_self: Self, handler: function(any): any)
+            if type(handler) ~= "function" then
+                error("tecs: serve needs a handler", 2)
+            end
+            while true do
+                local message <const> = self:receive()
+                if message == nil then
+                    return
+                end
+                local id <const> = callIdOf(message)
+                if id == nil then
+                    handler(message)
+                else
+                    -- A handler that raises fails its own call and nothing
+                    -- else: the reason crosses back, and the loop reads on.
+                    local ok <const>, result <const> = pcall(handler, (message as {string: any}).value)
+                    answer(id, ok, result)
+                end
+            end
+        end,
     }
+    return self
 end
 
 return workers

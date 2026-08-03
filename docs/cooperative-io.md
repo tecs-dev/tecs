@@ -135,6 +135,32 @@ world:addSystem({
 })
 ```
 
+`Worker:call` is the same wait with the request attached, for a worker that
+answers rather than streams. It sends a request and returns the reply to that
+request, so the two lines above become one:
+
+```teal
+local answer <const> = hasher:call({name = "level1", bytes = level})
+```
+
+A channel is a stream, so the pairing is not free: each call carries an
+identifier, takes only the reply that carries the same one, and leaves
+everything else queued for `receive`. A canceled call drops its identifier, and
+the reply that arrives for it afterwards is discarded rather than handed to the
+next caller. The worker answers from `Self:serve`, which reads a request, runs
+a handler, and sends the result back under that identifier; a handler that
+raises fails its own call rather than the worker.
+
+The waiting rule is unchanged, and so is its cost. A suspended call resumes up
+to one frame after the worker replied, and outside a system the call blocks its
+own caller and pays none of that frame. Both halves cross as serialized bytes,
+so a request and a reply carry numbers, strings, booleans, and tables of those,
+and never a live handle, a socket, or cdata. Two calls written in a row cost
+the sum of both waits; `tecs.batch` overlaps them and returns their results in
+argument order whatever order the replies arrive in. One worker still serves
+its own requests one at a time, so overlapping the waits is worth it when the
+calls go to different workers.
+
 ## Streams remain ordinary Readers and Writers
 
 A Reader may be memory-backed, a process pipe, a socket, or a progressive HTTP
@@ -188,8 +214,8 @@ Closing the client cancels and drains that work; application shutdown closes
 any client that was not closed earlier.
 
 `files.read`, `files.write`, file streams, socket operations, process pipes,
-process waits, native dialogs, asset loads, worker receives, and HTTP use this
-contextual wait rule. There is no public process pump to remember.
+process waits, native dialogs, asset loads, worker receives, worker calls, and
+HTTP use this contextual wait rule. There is no public process pump to remember.
 
 ## Continuous input is a service, not a forever wait
 

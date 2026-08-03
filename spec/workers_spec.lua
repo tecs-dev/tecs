@@ -504,3 +504,259 @@ describe("suspending worker receives", function()
         assert.are.equal(0, worker:stop())
     end)
 end)
+
+-- Request and response. A channel is a stream, so what these pin down is the
+-- correlation on top of it: a reply reaches the call that issued it, an
+-- ordinary message is never eaten by one, and an answer nobody awaits any more
+-- goes nowhere.
+
+-- Answers calls, and answers them slowly when asked so a caller is certain to
+-- park rather than finding its reply already waiting. An ordinary `send`
+-- message reaches the same handler, and `note` is what makes it send one back
+-- outside any call.
+local CALLS = PRELUDE
+    .. [[
+local workers = require("tecs.workers")
+local time = require("tecs.platform.time")
+local self = workers.current()
+self:serve(function(job)
+    if job.note ~= nil then
+        self:send({ note = job.note })
+    end
+    if job.delayMs ~= nil then
+        time.delay(job.delayMs)
+    end
+    if job.fail ~= nil then
+        error(job.fail, 0)
+    end
+    return { name = job.name, doubled = (job.value or 0) * 2 }
+end)
+]]
+
+describe("worker calls", function()
+    setup(function()
+        assert(C.SDL_Init(0))
+    end)
+
+    teardown(function()
+        C.SDL_Quit()
+    end)
+
+    before_each(function()
+        assert.are.equal(0, workers.parked(), "a previous test left a caller parked")
+        assert.is_false(runtime.registered("workers"), "a previous test left the source registered")
+    end)
+
+    it("returns the worker's answer at the call site", function()
+        local worker = workers.spawn({ source = CALLS })
+
+        local answer = worker:call({ name = "one", value = 21 })
+        assert.are.equal("one", answer.name)
+        assert.are.equal(42, answer.doubled)
+
+        -- A second call takes its own reply rather than anything left over.
+        assert.are.equal(4, worker:call({ name = "two", value = 2 }).doubled)
+        assert.are.equal(0, workers.parked())
+        assert.is_false(runtime.registered("workers"), "a blocking call registers nothing")
+
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("parks the calling system and resumes at the call", function()
+        local worker = workers.spawn({ source = CALLS })
+        local world = tecs.ecs.newWorld()
+        local answer
+
+        world:addSystem({
+            name = "WorkerCall",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                answer = worker:call({ name = "slow", value = 5, delayMs = 30 })
+            end,
+        })
+
+        assert.is_false(world:update(1 / 60))
+        assert.is_true(world._updateStalled)
+        assert.are.equal(1, workers.parked())
+        assert.is_true(runtime.registered("workers"), "a parked caller holds the runtime source")
+
+        pumpUntil(unparked, "the worker reply did not reach the pump")
+
+        assert.is_true(world:update(1 / 60))
+        assert.are.equal(10, answer.doubled)
+        assert.are.equal(0, workers.parked())
+        assert.is_false(runtime.registered("workers"), "an idle facility releases the source")
+
+        world:shutdown()
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("settles concurrent calls out of order and returns them in argument order", function()
+        -- One worker answers its requests one at a time, so overlapping calls
+        -- need two workers to settle in an order the caller did not write.
+        local slow = workers.spawn({ source = CALLS })
+        local fast = workers.spawn({ source = CALLS })
+        local settled = {}
+
+        local answers = tecs.batch({
+            function()
+                local answer = slow:call({ name = "slow", value = 1, delayMs = 60 })
+                settled[#settled + 1] = "slow"
+                return answer
+            end,
+            function()
+                local answer = fast:call({ name = "fast", value = 2 })
+                settled[#settled + 1] = "fast"
+                return answer
+            end,
+        })
+
+        assert.are.same({ "fast", "slow" }, settled, "the batch should not have serialized the calls")
+        assert.are.equal("slow", answers[1].name, "results come back in argument order")
+        assert.are.equal("fast", answers[2].name)
+        assert.are.equal(0, workers.parked())
+        assert.is_false(runtime.registered("workers"))
+
+        assert.are.equal(0, slow:stop())
+        assert.are.equal(0, fast:stop())
+    end)
+
+    it("raises the worker's reason at the call site", function()
+        local worker = workers.spawn({ source = CALLS })
+
+        local ok, err = pcall(function()
+            return worker:call({ name = "gone", fail = "no such level: gone" })
+        end)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(err):find("no such level: gone", 1, true))
+
+        -- A failed handler fails its own call and nothing else.
+        assert.are.equal(6, worker:call({ name = "next", value = 3 }).doubled)
+        assert.are.equal(0, worker:available(), "a failed call leaves nothing for receive")
+
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("keeps ordinary messages out of the replies", function()
+        local worker = workers.spawn({ source = CALLS })
+
+        -- The worker sends this before it answers, so the reply arrives behind
+        -- an ordinary message and the call must step over it rather than take
+        -- it, and `receive` must still find it afterwards.
+        local answer = worker:call({ name = "one", value = 1, note = "progress" })
+        assert.are.equal("one", answer.name)
+        assert.are.equal("progress", worker:receive(2000).note)
+
+        -- The other direction: an ordinary send takes no reply, and a call
+        -- placed after it is not answered by what that send produced.
+        worker:send({ note = "hello" })
+        assert.are.equal(8, worker:call({ name = "two", value = 4 }).doubled)
+        assert.are.equal("hello", worker:receive(2000).note, "an ordinary message survives a call")
+
+        assert.are.equal(0, worker:available())
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("discards a reply whose caller was canceled", function()
+        local worker = workers.spawn({ source = CALLS })
+        local world = tecs.ecs.newWorld()
+
+        world:addSystem({
+            name = "AbandonedWorkerCall",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                worker:call({ name = "abandoned", value = 1, delayMs = 60 })
+            end,
+        })
+
+        assert.is_false(world:update(1 / 60))
+        assert.are.equal(1, workers.parked())
+
+        world:shutdown()
+        assert.are.equal(0, workers.parked())
+        assert.is_false(runtime.registered("workers"), "shutdown leaves no producer registered")
+
+        -- The abandoned reply arrives now. It answers a call that no longer
+        -- exists, so it is discarded by its identifier rather than handed to
+        -- the next caller or left in front of `receive`.
+        C.SDL_Delay(120)
+        local answer = worker:call({ name = "kept", value = 7 })
+        assert.are.equal("kept", answer.name)
+        assert.are.equal(14, answer.doubled)
+        assert.are.equal(0, worker:available(), "a discarded reply is not left for receive")
+
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("unwinds a resource scope when shutdown cancels a parked call", function()
+        local worker = workers.spawn({ source = CALLS })
+        local world = tecs.ecs.newWorld()
+        local closed = 0
+
+        world:addSystem({
+            name = "CanceledWorkerCall",
+            phase = tecs.ecs.phases.Update,
+            run = function()
+                tecs.scoped("canceled worker call", function(scope)
+                    scope:own({
+                        close = function()
+                            closed = closed + 1
+                            return true
+                        end,
+                    })
+                    worker:call({ name = "never read", delayMs = 60 })
+                end)
+            end,
+        })
+
+        assert.is_false(world:update(1 / 60))
+        assert.are.equal(0, closed)
+        assert.are.equal(1, workers.parked())
+
+        world:shutdown()
+        assert.are.equal(1, closed)
+        assert.are.equal(0, workers.parked())
+        assert.is_false(runtime.registered("workers"), "shutdown leaves no producer registered")
+
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("raises when the worker ends without answering", function()
+        -- The source takes one message and returns, which closes its outbox.
+        local worker = workers.spawn({ source = SILENT })
+
+        local ok, err = pcall(function()
+            return worker:call({ name = "unanswered" })
+        end)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(err):find("ended before it answered", 1, true))
+        assert.are.equal(0, workers.parked())
+
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("gives up a blocking receive at its deadline while calls share the channel", function()
+        -- The worker answers calls and sends nothing on its own, so a timed
+        -- receive routing that same channel must still return at its deadline
+        -- rather than waiting for a message that is not coming.
+        local worker = workers.spawn({ source = CALLS })
+        assert.are.equal(2, worker:call({ name = "one", value = 1 }).doubled)
+
+        local started = C.SDL_GetTicks()
+        assert.is_nil(worker:receive(20))
+        assert.is_true(tonumber(C.SDL_GetTicks() - started) >= 10, "the receive gave up before its deadline")
+
+        assert.are.equal(0, worker:stop())
+    end)
+
+    it("refuses a call on a stopped worker", function()
+        local worker = workers.spawn({ source = CALLS })
+        assert.are.equal(0, worker:stop())
+
+        local ok, err = pcall(function()
+            return worker:call({ name = "too late" })
+        end)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(err):find("has been stopped", 1, true))
+    end)
+end)
