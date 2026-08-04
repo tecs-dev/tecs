@@ -69,6 +69,25 @@ local count = 0
 --- and a walk over the live list would then skip one or turn one twice.
 local turning <const>: {Pumpable} = {}
 
+-- Registration is tracked with this flag rather than inferred from `count`,
+-- because the count is also what `releaseSource` reads and a second
+-- `runtime.register` under the same name raises.
+local sourceRegistered = false
+
+local function retainSource()
+    if not sourceRegistered then
+        sourceRegistered = true
+        runtime.register("http", 50, pollRuntime, shutdownRuntime)
+    end
+end
+
+local function releaseSource()
+    if sourceRegistered and count == 0 then
+        sourceRegistered = false
+        runtime.unregister("http")
+    end
+end
+
 --- Adds a client to the list the loop turns. Adding one twice does nothing.
 function clients.add(client: Pumpable)
     if client == nil or at[client] ~= nil then
@@ -77,9 +96,7 @@ function clients.add(client: Pumpable)
     count = count + 1
     live[count] = client
     at[client] = count
-    if count == 1 then
-        runtime.register("http", 50, pollRuntime, shutdownRuntime)
-    end
+    retainSource()
 end
 
 --- Takes a client off it. What `Client:close` calls, and the only thing that
@@ -97,9 +114,7 @@ function clients.remove(client: Pumpable)
     live[count] = nil
     at[client] = nil
     count = count - 1
-    if count == 0 then
-        runtime.unregister("http")
-    end
+    releaseSource()
 end
 
 --- How many clients are open.
@@ -120,6 +135,9 @@ function clients.shutdown()
             client:close()
         end
     end
+    -- A client whose close does not reach `remove` still leaves the source
+    -- released, so `runtime.shutdown` finds no source holding an empty list.
+    releaseSource()
 end
 
 --- Turns every open client once, and answers how many transfers settled.

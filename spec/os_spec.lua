@@ -76,6 +76,32 @@ describe("platform.os", function()
         end, 'tecs: unknown process signal "unknown"')
     end)
 
+    it("holds the runtime source once while any signal listener is open", function()
+        assert.is_false(runtime.registered("signals"), "a previous test left the source registered")
+
+        local first = ownSignals({ "interrupt" })
+        assert.is_true(runtime.registered("signals"), "an open listener holds the runtime source")
+
+        local second = ownSignals({ "terminate" })
+        assert.is_true(runtime.registered("signals"), "a second listener keeps the one registration")
+
+        first:close()
+        assert.is_true(runtime.registered("signals"), "the remaining listener still holds the source")
+
+        second:close()
+        assert.is_false(runtime.registered("signals"), "an idle facility releases the source")
+
+        -- Closing twice neither raises nor disturbs the released state.
+        second:close()
+        assert.is_false(runtime.registered("signals"))
+
+        -- The next listener registers again from the released state.
+        local third = ownSignals()
+        assert.is_true(runtime.registered("signals"))
+        third:close()
+        assert.is_false(runtime.registered("signals"))
+    end)
+
     if ffi.os ~= "Windows" then
         it("delivers selected process signals through the runtime pump", function()
             local signals = ownSignals({ "hangup", "terminate" })

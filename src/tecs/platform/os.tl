@@ -394,6 +394,25 @@ local listeners <const>: {SignalListenerImpl: boolean} = {}
 local listenerCount = 0
 local updateSignals: function(): integer
 
+-- Registration is tracked with this flag rather than inferred from
+-- `listenerCount`, because the count is also what `releaseSignalSource` reads
+-- and a second `runtime.register` under the same name raises.
+local signalSourceRegistered = false
+
+local function retainSignalSource()
+    if not signalSourceRegistered then
+        signalSourceRegistered = true
+        runtime.register("signals", 5, pollSignals, shutdownSignals)
+    end
+end
+
+local function releaseSignalSource()
+    if signalSourceRegistered and listenerCount == 0 then
+        signalSourceRegistered = false
+        runtime.unregister("signals")
+    end
+end
+
 function SignalListenerImpl:isClosed(): boolean
     return self._closed
 end
@@ -433,8 +452,8 @@ function SignalListenerImpl:close(): boolean, string
     self._closed = true
     listeners[self] = nil
     listenerCount = listenerCount - 1
+    releaseSignalSource()
     if listenerCount == 0 then
-        runtime.unregister("signals")
         R.tecsSignalsUninstall()
     end
     return true
@@ -528,9 +547,7 @@ function platformOS.newSignalListener(selected?: {ProcessSignal}): SignalListene
     )
     listeners[listener] = true
     listenerCount = listenerCount + 1
-    if listenerCount == 1 then
-        runtime.register("signals", 5, pollSignals, shutdownSignals)
-    end
+    retainSignalSource()
     return listener as SignalListener
 end
 
@@ -572,6 +589,27 @@ end
 local DialogSourceMT <const>: metatable<DialogSource> = {__index = DialogSource}
 local pendingDialogs: {DialogEntry} = {}
 
+-- One reason holds this source: a dialog is still open. Every one of the four
+-- sites that starts or drains a dialog goes through these helpers rather than
+-- inferring registration from `#pendingDialogs`, because the length is also
+-- what `releaseDialogSource` reads and a second `runtime.register` under the
+-- same name raises.
+local dialogSourceRegistered = false
+
+local function retainDialogSource()
+    if not dialogSourceRegistered then
+        dialogSourceRegistered = true
+        runtime.register("dialogs", 30, pollDialogs, stopDialogs)
+    end
+end
+
+local function releaseDialogSource()
+    if dialogSourceRegistered and #pendingDialogs == 0 then
+        dialogSourceRegistered = false
+        runtime.unregister("dialogs")
+    end
+end
+
 local function finishDialog(entry: DialogEntry)
     local handle = entry.handle
     local errorPointer = D.tecsDialogError(handle)
@@ -603,9 +641,7 @@ function DialogSource:poll(): integer
             settled = settled + 1
         end
     end
-    if #pendingDialogs == 0 then
-        runtime.unregister("dialogs")
-    end
+    releaseDialogSource()
     return settled
 end
 
@@ -624,9 +660,7 @@ function DialogSource:cancel(completion: Completion<any>)
         if entry.completion as Completion<any> == completion then
             table.remove(pendingDialogs, index)
             D.tecsDialogAbandon(entry.handle)
-            if #pendingDialogs == 0 then
-                runtime.unregister("dialogs")
-            end
+            releaseDialogSource()
             return
         end
     end
@@ -639,7 +673,7 @@ shutdownDialogs = function()
         D.tecsDialogAbandon(entry.handle)
         entry.completion:abandon("application shutdown")
     end
-    runtime.unregister("dialogs")
+    releaseDialogSource()
 end
 
 local dialogSource <const> = setmetatable(
@@ -677,9 +711,7 @@ local function trackDialog(handle: loader.CPtr): Completion<DialogResult>
     end
     local completion = Completion.pending(dialogSource as Completion.Source) as Completion<DialogResult>
     pendingDialogs[#pendingDialogs + 1] = {handle = handle, completion = completion}
-    if #pendingDialogs == 1 then
-        runtime.register("dialogs", 30, pollDialogs, stopDialogs)
-    end
+    retainDialogSource()
     -- A setup allocation can fail before SDL opens anything.
     dialogSource:poll()
     return completion

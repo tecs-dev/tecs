@@ -584,3 +584,51 @@ describe("http.plugin", function()
         assert.are.equal(0, http.plugin.clientOf(world):pending())
     end)
 end)
+
+describe("the http client registry", function()
+    setup(function()
+        assert(sdl.C.SDL_Init(0))
+    end)
+
+    teardown(function()
+        sdl.C.SDL_Quit()
+    end)
+
+    it("holds the runtime source once while any client is open", function()
+        assert.is_false(runtime.registered("http"), "a previous test left the source registered")
+
+        local first = http.newClient()
+        assert.is_true(runtime.registered("http"), "an open client holds the runtime source")
+
+        local second = http.newClient()
+        assert.is_true(runtime.registered("http"), "a second client keeps the one registration")
+        assert.are.equal(2, httpClients.count())
+
+        first:close()
+        assert.is_true(runtime.registered("http"), "the remaining client still holds the source")
+
+        second:close()
+        assert.is_false(runtime.registered("http"), "an idle registry releases the source")
+
+        -- The next client registers again from the released state.
+        local third = http.newClient()
+        assert.is_true(runtime.registered("http"))
+        third:close()
+        assert.is_false(runtime.registered("http"))
+    end)
+
+    it("releases the runtime source when the registry shuts every client down", function()
+        assert.is_false(runtime.registered("http"), "a previous test left the source registered")
+
+        local client = http.newClient()
+        assert.is_true(runtime.registered("http"))
+
+        httpClients.shutdown()
+        assert.are.equal(0, httpClients.count())
+        assert.is_false(runtime.registered("http"), "shutdown leaves no source for runtime.shutdown to find")
+
+        -- Closing an already-closed client neither raises nor re-registers.
+        client:close()
+        assert.is_false(runtime.registered("http"))
+    end)
+end)
