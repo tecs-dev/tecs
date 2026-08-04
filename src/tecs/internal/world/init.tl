@@ -42,6 +42,7 @@ local type Event = types.events.Event
 local type Phase = types.Phase
 local type Plugin = types.Plugin
 local type StatePolicyAction = types.StatePolicy.Action
+local type DirtyArchetypes = internal.DirtyArchetypes
 
 -- Cached ctypes for the epoch-stamped transaction state arrays.
 -- Allocated once per World at construction, sized to `maxSlotCount+1`
@@ -58,6 +59,45 @@ local WorldImpl = internal.WorldImpl
 local WORLD_MT <const>: metatable<WorldImpl> = {__index = WorldImpl}
 
 local runWorldUpdate: function(WorldImpl)
+
+-- Starts the dirty-archetype epoch over on 32-bit wrap. Every archetype's
+-- stamp is zeroed so the returned epoch of 1 compares unequal to it. A
+-- window per update puts this two years apart at 60Hz, so it is a call off
+-- the update path rather than eight lines on it.
+local function restartDirtyEpoch(self: WorldImpl): integer
+    local index = self.archetypeIndex
+    for i = 1, index.maxId do
+        local arch = index[i]
+        if arch then
+            arch.componentDirtyEpoch = 0
+        end
+    end
+    return 1
+end
+
+-- Ends the current dirty-archetype window. Emptying the list is the count
+-- alone, and the epoch bump makes every archetype's stamp stale without
+-- writing to one.
+local function resetDirtyArchetypes(self: WorldImpl)
+    local dirty = self._dirtyArchetypes
+    dirty.count = 0
+    local epoch = dirty.epoch + 1
+    if epoch > 0xFFFFFFFF then
+        epoch = restartDirtyEpoch(self)
+    end
+    dirty.epoch = epoch
+end
+
+-- Drops the references past the live count. The list is contiguous, so the
+-- first empty slot ends the tail a wider window left behind.
+local function releaseDirtyArchetypeTail(dirty: DirtyArchetypes)
+    local list = dirty.list
+    local i = dirty.count + 1
+    while list[i] ~= nil do
+        list[i] = nil
+        i = i + 1
+    end
+end
 
 -- Per-world relationshipStores map with lazy store creation.
 local function makeRelationshipStoresMT(world: WorldImpl): metatable<{Component: RelationshipStore}>
@@ -95,7 +135,7 @@ end
 
 function WorldImpl.new(config?: types.World.Config): World
     config = config or {}
-    local dirtyArchetypes: {Archetype: boolean} = {}
+    local dirtyArchetypes: internal.DirtyArchetypes = {list = {}, count = 0, epoch = 1}
     local allocator = IdAllocator.new(config.maxEntities)
     local archetypeIndex = ArchetypeIndex.new(dirtyArchetypes)
     local maxSlotCount = allocator.maxSlotCount
@@ -423,11 +463,20 @@ function WorldImpl:forEachArchetype(callback: function(Archetype))
     end
 end
 
+--- Walks the archetypes whose columns changed since the last clear, in the
+--- order they first went dirty.
 function WorldImpl:dirtyArchetypes(): function(): Archetype
-    local set = self._dirtyArchetypes
-    local nextFn, t = pairs(set)
-    local key: Archetype = nil
-    return function(): Archetype local k, _ = nextFn(t, key); key = k; return k end
+    local dirty = self._dirtyArchetypes
+    local list = dirty.list
+    local count = dirty.count
+    local i = 0
+    return function(): Archetype
+        i = i + 1
+        if i > count then
+            return nil
+        end
+        return list[i]
+    end
 end
 
 local function hasKeyBatch(componentTypes: {Component}): boolean
@@ -607,7 +656,8 @@ function WorldImpl:clearEntities()
         sparsePool:release(list)
     end
     self.sparseSetCount = 0
-    table_clear(self._dirtyArchetypes)
+    resetDirtyArchetypes(self)
+    releaseDirtyArchetypeTail(self._dirtyArchetypes)
 end
 
 function WorldImpl:compact(): integer, integer
@@ -672,6 +722,11 @@ function WorldImpl:compact(): integer, integer
             self.lastColumn = nil
         end
     end
+
+    -- The dirty list keeps the references past its live count, so a wide
+    -- frame leaves archetypes reachable through slots nothing reads.
+    -- Compaction is where a world asks for that memory back.
+    releaseDirtyArchetypeTail(self._dirtyArchetypes)
 
     -- Phase 3: shrink over-allocated survivors.
     for i = 1, index.maxId do
@@ -1224,17 +1279,29 @@ runWorldUpdate = function(self: WorldImpl)
     -- Clear dirty bits after the pipeline's phase barriers so every
     -- dirty-gated consumer observes the complete update.
     --
-    -- An update that published nothing reaches this with an empty set, which is
-    -- every update of a world whose systems only read. Entering the loop header
-    -- to find that out costs more than the emptiness test: LuaJIT records the
-    -- loop, leaves it before the body runs, and abandons the recording, which it
-    -- retries for as long as the world stays clean. `next` keeps the recorder
-    -- away from a loop that has nothing to trace.
-    if next(self._dirtyArchetypes) ~= nil then
-        for archetype in pairs(self._dirtyArchetypes) do
-            archetype:clearDirtyComponents()
+    -- An update that published nothing reaches this with an empty list, which
+    -- is every update of a world whose systems only read. The count answers
+    -- that in one compare, and it also keeps the recorder away from a loop
+    -- that has nothing to trace: LuaJIT records a loop it leaves before the
+    -- body runs, abandons the recording, and retries it for as long as the
+    -- world stays clean.
+    local dirty = self._dirtyArchetypes
+    local dirtyCount = dirty.count
+    if dirtyCount > 0 then
+        local list = dirty.list
+        for i = 1, dirtyCount do
+            list[i]:clearDirtyComponents()
         end
-        table_clear(self._dirtyArchetypes)
+        -- Written here rather than called, for the reason the mark sites
+        -- give: this runs once per update of every world that changed
+        -- anything, and the call is a measurable share of an update that
+        -- dirties one archetype.
+        dirty.count = 0
+        local epoch = dirty.epoch + 1
+        if epoch > 0xFFFFFFFF then
+            epoch = restartDirtyEpoch(self)
+        end
+        dirty.epoch = epoch
     end
 end
 

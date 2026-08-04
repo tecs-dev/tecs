@@ -23,6 +23,7 @@ local type ComponentInternal = internal.ComponentInternal
 local type MovePlan = internal.MovePlan
 local type ArchetypeIndexInternal = internal.ArchetypeIndexInternal
 local type ArchetypeInternal = internal.ArchetypeInternal
+local type DirtyArchetypes = internal.DirtyArchetypes
 
 -- The auto-incrementing ID for archetypes.
 local AUTO_ID = 0
@@ -88,7 +89,12 @@ local record Archetype is ArchetypeInternal
     -- the archetype carries none. Built once at construction.
     _relInstancesByContainer: {Component: {Component}}
 
-    _dirtySet: {Archetype: boolean}
+    _dirtySet: DirtyArchetypes
+    -- Stamp naming the dirty-list window this archetype was last appended
+    -- to. It equals `_dirtySet.epoch` exactly while the archetype sits in
+    -- `_dirtySet.list`, so it is both the dedupe test and the membership
+    -- answer, and a reset invalidates it without writing here.
+    componentDirtyEpoch: integer
     _fixedTracking: boolean
 
     movePlansOut: {ArchetypeInternal: any}
@@ -191,6 +197,16 @@ function Archetype:get<T is Component>(component: T): {T}
     return rawget(self.columns, component) as {T}
 end
 
+-- Three sites below append the archetype to the world's dirty list so the
+-- frame-end clear visits it: `getMut`, `markStructural` and
+-- `markComponentDirty`. Each writes the append rather than calling one
+-- function that holds it, because each already sits behind a per-frame gate
+-- and an update runs the sequence once per archetype per changed column,
+-- which is where the call itself measures.
+--
+-- The stamp compare is the whole membership test: an archetype already on
+-- the list this window costs one integer read and no store.
+
 -- The first mutable access sets the dirty bit; repeated calls are O(1)
 -- no-ops after the membership check.
 --
@@ -207,7 +223,14 @@ function Archetype:getMut<T is Component>(component: T): {T}
         local idx = self.columnIndexByComponent[component]
         if idx and not self._componentDirty:get(idx) then
             self._componentDirty:set(idx)
-            self._dirtySet[self] = true
+            local queue = self._dirtySet
+            local epoch = queue.epoch
+            if self.componentDirtyEpoch ~= epoch then
+                self.componentDirtyEpoch = epoch
+                local queued = queue.count + 1
+                queue.count = queued
+                queue.list[queued] = self
+            end
         end
         if (component as ComponentInternal).valueCounted then
             self._valueCount = self._valueCount + 1
@@ -397,7 +420,14 @@ local function markStructural(self: Archetype)
     end
     self._allDirty = true
     if self.columnsCount > 0 then
-        self._dirtySet[self] = true
+        local queue = self._dirtySet
+        local epoch = queue.epoch
+        if self.componentDirtyEpoch ~= epoch then
+            self.componentDirtyEpoch = epoch
+            local queued = queue.count + 1
+            queue.count = queued
+            queue.list[queued] = self
+        end
     end
 end
 
@@ -882,7 +912,14 @@ function Archetype:markComponentDirty(component: Component)
     end
     if not self._componentDirty:get(idx) then
         self._componentDirty:set(idx)
-        self._dirtySet[self] = true
+        local queue = self._dirtySet
+        local epoch = queue.epoch
+        if self.componentDirtyEpoch ~= epoch then
+            self.componentDirtyEpoch = epoch
+            local queued = queue.count + 1
+            queue.count = queued
+            queue.list[queued] = self
+        end
     end
     -- Per call, for the reason `getMut` gives.
     if (component as ComponentInternal).valueCounted then
@@ -976,7 +1013,7 @@ end
 
 -- Construct an archetype for a sorted component list.
 function Archetype.new(
-    components: {Component}, dirtySet: {Archetype: boolean}, relationshipStoreGetter?: function(Component): any
+    components: {Component}, dirtySet: DirtyArchetypes, relationshipStoreGetter?: function(Component): any
 ): Archetype
     AUTO_ID = AUTO_ID + 1
     local columnsCount = #components
@@ -1105,9 +1142,10 @@ function Archetype.new(
         _touchedAll = false,
         _relInstancesByContainer = relInstancesByContainer,
         _componentDirty = Bitset.new(columnsCount + 1),
-        _dirtySet = dirtySet as {Archetype: boolean},
+        _dirtySet = dirtySet,
         _fixedTracking = fixedtracking.enabled(dirtySet as table),
         dirtyQueuedEpoch = 0,
+        componentDirtyEpoch = 0,
     }
 
     for i = 1, columnsCount do

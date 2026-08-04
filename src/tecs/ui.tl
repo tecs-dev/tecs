@@ -1705,7 +1705,10 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 -- when an empty ephemeral archetype is destroyed and leaves
                 -- the dirty set. Value changes cost a walk over dirty
                 -- archetypes, not a walk over every UI archetype.
-                for archetype in pairs(worldImpl._dirtyArchetypes) do
+                local dirty <const> = worldImpl._dirtyArchetypes
+                local dirtyList <const> = dirty.list
+                for dirtyIndex = 1, dirty.count do
+                    local archetype <const> = dirtyList[dirtyIndex]
                     local columns = archetype.columns
                     if columns[Style] then
                         local styleDirty = archetype:isComponentDirty(Style)
@@ -2343,7 +2346,10 @@ function ui.plugin(provider: any, overrides?: Overrides): function(World)
                 -- protects, not part of deciding whether to do it.
                 local geometryDirty = install.geometryDirty
                 if not geometryDirty then
-                    for archetype in pairs(worldImpl._dirtyArchetypes) do
+                    local dirty <const> = worldImpl._dirtyArchetypes
+                    local dirtyList <const> = dirty.list
+                    for dirtyIndex = 1, dirty.count do
+                        local archetype <const> = dirtyList[dirtyIndex]
                         if archetype.columns[Style] or archetype.columns[Scrollbar] then
                             geometryDirty = archetype:isComponentDirty(Transform2D)
                                 or archetype:isComponentDirty(ChildOf)

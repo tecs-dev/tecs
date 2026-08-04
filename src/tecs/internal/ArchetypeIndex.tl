@@ -10,12 +10,13 @@ local Bitset <const> = require("tecs.utils.Bitset")
 local type Archetype = internal.ArchetypeInternal
 local type Component = types.components.Component
 local type CompiledQueryMasks = internal.CompiledQueryMasks
+local type DirtyArchetypes = internal.DirtyArchetypes
 
 local COMPARE_BY_ID <const> = function(a: Component, b: Component): boolean return a.componentId < b.componentId end
 
 local record ArchetypeIndex is internal.ArchetypeIndexInternal
     componentIndex: {Component: {Archetype: boolean}}
-    dirtySet: {Archetype: boolean}
+    dirtySet: DirtyArchetypes
     emptyArchetype: Archetype
     relationshipStoreGetter: function(Component): any
     onNewArchetype: function(Archetype)
@@ -24,7 +25,7 @@ local record ArchetypeIndex is internal.ArchetypeIndexInternal
     freeIds: {integer}
     freeIdCount: integer
 
-    new: function(dirtySet?: {Archetype: boolean}): ArchetypeIndex
+    new: function(dirtySet?: DirtyArchetypes): ArchetypeIndex
     getOrCreate: function(self, components: {Component}): Archetype
     findMatching: function(self, include: {Component}, masks: CompiledQueryMasks): {Archetype}
     getArchetypesWithComponent: function(self, component: Component): {Archetype: boolean} | nil
@@ -33,7 +34,7 @@ end
 
 local ARCHETYPE_INDEX_MT <const>: metatable<ArchetypeIndex> = {__index = ArchetypeIndex}
 
-function ArchetypeIndex.new(dirtySet?: {Archetype: boolean}): ArchetypeIndex
+function ArchetypeIndex.new(dirtySet?: DirtyArchetypes): ArchetypeIndex
     local self: ArchetypeIndex = setmetatable(
         {
             componentIndex = {},
@@ -286,9 +287,24 @@ function ArchetypeIndex:destroy(archetype: Archetype)
     self.freeIds[fc] = destroyedId
     self.freeIdCount = fc
 
+    -- Only a stamped archetype is on the dirty list, so an archetype that
+    -- went dirty in an earlier window costs the compare alone. The scan is
+    -- bounded by the live count, and destruction happens in
+    -- `world:compact`, which is not a per-frame call. The vacated tail slot
+    -- keeps its reference: `world:compact` releases the whole tail once it
+    -- has destroyed everything it collected.
     local dirtySet = self.dirtySet
-    if dirtySet then
-        dirtySet[archetype] = nil
+    if dirtySet and archetype.componentDirtyEpoch == dirtySet.epoch then
+        archetype.componentDirtyEpoch = 0
+        local list = dirtySet.list
+        local count = dirtySet.count
+        for i = 1, count do
+            if list[i] == archetype then
+                list[i] = list[count]
+                dirtySet.count = count - 1
+                break
+            end
+        end
     end
 
     -- Raw table access bypasses Teal's strict nil-field checks.

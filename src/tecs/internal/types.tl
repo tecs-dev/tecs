@@ -68,6 +68,23 @@ local record internal
         writeColumn: boolean
     end
 
+    --- Archetypes whose component columns changed since the last clear.
+    ---
+    --- Membership is an append to `list` guarded by a per-archetype stamp:
+    --- an archetype belongs when its `componentDirtyEpoch` equals `epoch`,
+    --- so marking is O(1) with no hashing. Resetting sets `count` to 0 and
+    --- bumps `epoch`, which renders every stamp stale without touching one.
+    ---
+    --- Slots past `count` keep whatever the last window left there.
+    --- Archetypes outlive the frames that dirty them, so those references
+    --- pin nothing that would otherwise be collected, and `WorldImpl:compact`
+    --- is where the tail is released.
+    record DirtyArchetypes
+        list: {ArchetypeInternal}
+        count: integer
+        epoch: integer
+    end
+
     --- Archetype interface extended with framework-internal layout,
     --- observer, drain, and graph fields. Public `types.Archetype`
     --- exposes only the supported surface (id, entities,
@@ -132,7 +149,14 @@ local record internal
         hasPendingMoveOut: boolean
         pendingMoveSlots: {integer}
         pendingMoveCount: integer
+        -- Names the drain wave this archetype's staged mutations are queued
+        -- for, in `world.dirtyArchetypeList`.
         dirtyQueuedEpoch: integer
+        -- Names the frame-length window this archetype's changed columns are
+        -- queued for, in `world._dirtyArchetypes`. The two are separate
+        -- lifetimes: staged mutations empty at every drain, and dirty columns
+        -- stand until the end of the update.
+        componentDirtyEpoch: integer
         pendingBundleDrains: {any}
         pendingBundleDrainCount: integer
         batchSpawnQueue: {any}
@@ -174,7 +198,7 @@ local record internal
 
     interface ArchetypeIndexInternal is {ArchetypeInternal}
         componentIndex: {Component: {ArchetypeInternal: boolean}}
-        dirtySet: {ArchetypeInternal: boolean}
+        dirtySet: DirtyArchetypes
         emptyArchetype: ArchetypeInternal
         relationshipStoreGetter: function(Component): any
         onNewArchetype: function(ArchetypeInternal)
@@ -378,7 +402,7 @@ local record internal
         _slots: {integer: EntitySlot}
         archetypeIndex: ArchetypeIndexInternal
         _bundles: {string: Bundle}
-        _dirtyArchetypes: {ArchetypeInternal: boolean}
+        _dirtyArchetypes: DirtyArchetypes
         -- Builtin hierarchy sampler, run after every system and before dirty
         -- bits clear so writes later than PostUpdate survive into its gate.
         _sampleHierarchyDirty: function()
@@ -395,10 +419,16 @@ local record internal
         _archetypeSnapshotPool: pool.TablePool
 
         -- ----- Staging / drain state -----
-        -- Dirty-archetype dedupe uses an epoch + per-archetype marker
+        -- Archetypes holding staged mutations a drain wave has to visit.
+        -- Dedupe uses an epoch plus a per-archetype marker
         -- (`arch.dirtyQueuedEpoch`) instead of a hashset. Bumping
         -- `_dirtyEpoch` on reset is O(1) and renders every archetype's
         -- marker stale without touching them.
+        --
+        -- This is a separate list from `_dirtyArchetypes`, which holds
+        -- archetypes whose columns changed. A drain empties this one and
+        -- leaves that one alone, and a value write fills that one without
+        -- staging anything here.
         _dirtyEpoch: integer
         dirtyArchetypeList: {ArchetypeInternal}
         dirtyArchetypeCount: integer

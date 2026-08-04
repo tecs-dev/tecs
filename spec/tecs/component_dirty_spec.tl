@@ -22,6 +22,9 @@ local Vel = tecs.ecs.newComponent({
     fields = {"dx", "dy"},
 })
 local Tag = tecs.ecs.newTagComponent({name = "ComponentDirtySpecTag"})
+-- Dense relationship, so a dead target leaves an ephemeral archetype for
+-- `world:compact` to destroy.
+local Follows = tecs.ecs.newRelationship({name = "ComponentDirtySpecFollows", reverseIndex = true})
 
 -- A consumer opts a component into `valueCount` by setting this on it, which is
 -- what extraction does for the columns a row is drawn from.
@@ -353,6 +356,72 @@ describe(
                             count = count + 1
                         end
                         assert.equals(0, count, "dirty-archetype set should be empty after world:update")
+                    end
+                )
+
+                it(
+                    "lists an archetype once however many of its columns go dirty",
+                    function()
+                        local world = tecs.ecs.newWorld()
+                        world:spawn(Pos(1, 2), Vel(0, 0))
+                        local arch = findArchetype(world, {Pos, Vel})
+                        arch:getMut(Pos)
+                        arch:getMut(Vel)
+                        arch:markComponentDirty(Pos)
+
+                        local seen = 0
+                        for a in world:dirtyArchetypes() do
+                            if a == arch then
+                                seen = seen + 1
+                            end
+                        end
+                        assert.equals(1, seen, "an archetype should appear once however often it is marked")
+                    end
+                )
+
+                it(
+                    "walks the archetypes in the order they first went dirty",
+                    function()
+                        local world = tecs.ecs.newWorld()
+                        world:spawn(Pos(1, 2))
+                        world:spawn(Vel(0, 0))
+                        world:update(0)
+
+                        local posArch = findArchetype(world, {Pos})
+                        local velArch = findArchetype(world, {Vel})
+                        velArch:getMut(Vel)
+                        posArch:getMut(Pos)
+
+                        local order: {tecs.ecs.Archetype} = {}
+                        for a in world:dirtyArchetypes() do
+                            order[#order + 1] = a
+                        end
+                        assert.equals(2, #order)
+                        assert.is_true(order[1] == velArch, "the first archetype marked should be walked first")
+                        assert.is_true(order[2] == posArch, "the second archetype marked should be walked second")
+                    end
+                )
+
+                it(
+                    "drops an archetype world:compact destroyed",
+                    function()
+                        local world = tecs.ecs.newWorld()
+                        local target = world:spawn()
+                        local follower = world:spawn(Follows(target) as tecs.ecs.Component)
+                        world:enqueueCommit()
+                        world:despawn(follower)
+                        world:despawn(target)
+                        world:enqueueCommit()
+
+                        local pruned = world:compact()
+                        assert.is_true(pruned >= 1, "the ephemeral archetype should be pruned")
+
+                        for a in world:dirtyArchetypes() do
+                            assert.is_not_nil(
+                                (a as internal.ArchetypeInternal).columns,
+                                "a destroyed archetype must not survive in the dirty walk"
+                            )
+                        end
                     end
                 )
             end

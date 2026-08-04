@@ -640,11 +640,14 @@ function builtins.plugin(w: types.World)
 
         local wImpl <const> = w as internal.WorldImpl
         local function hierarchyStateDirty(): boolean
-            -- The set is walked directly rather than through
+            -- The list is walked directly rather than through
             -- `world:dirtyArchetypes`, which builds an iterator closure over
             -- its own upvalues per call. This runs twice a frame on every
-            -- world, and `pairs` over the set costs nothing.
-            for arch in pairs(wImpl._dirtyArchetypes) do
+            -- world, and the walk itself is a counted loop over an array.
+            local dirty <const> = wImpl._dirtyArchetypes
+            local list <const> = dirty.list
+            for i = 1, dirty.count do
+                local arch <const> = list[i]
                 local cols = arch.columns
                 if cols[Transform2D] or cols[RelativeTransform2D] or cols[ChildOf] then
                     return true
