@@ -872,6 +872,15 @@ function Application:_init(host?: loader.CValue): boolean
         -- nameable without the game being told to say so.
         local mcpWorld = require("tecs.io.mcp.world")
         mcpWorld.bind(self.world)
+
+        -- The command registry, required here rather than at the top so an
+        -- application that opens no server never loads the commands. Every
+        -- session with a server has the whole command surface, because an agent
+        -- that has to ask the game to install its own tools has already lost
+        -- the frame it was debugging.
+        local debugapi = require("tecs.debug")
+        debugapi.ensure(self.world)
+
         self.mcp = mcp.listen(config.mcpPort)
         self.window:setTitle(("%s [MCP :%d]"):format(self.window.title, self.mcp.port))
 

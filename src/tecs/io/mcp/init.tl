@@ -81,6 +81,11 @@ local record mcp
         --- Caller-writable. This JSON Schema describes the arguments and is
         --- sent verbatim in the tool list.
         inputSchema: {string: any}
+        --- Caller-writable. This JSON Schema describes the structured content
+        --- the handler returns, so an agent knows the shape of an answer
+        --- before it makes the call. Optional; omitting it advertises no
+        --- output schema rather than an empty one.
+        outputSchema: {string: any}
         --- Caller-writable. This handler runs synchronously inside `poll`.
         --- Required; its absence raises at registration rather than at call
         --- time.
@@ -113,6 +118,10 @@ local record mcp
         --- Engine-owned. Stores the last encoded tool registry. Ordinary game
         --- code should ignore this field.
         _toolsJSON: string
+        --- Engine-owned. Stores the registry revision `_toolsJSON` was encoded
+        --- from, which is what `poll` compares to decide whether to publish
+        --- again. Ordinary game code should ignore this field.
+        _toolsRevision: integer
         --- Engine-owned. Reports whether `destroy` has stopped the server.
         --- Ordinary game code should ignore this field.
         _destroyed: boolean
@@ -123,6 +132,12 @@ local ServerMT <const>: metatable<mcp.Server> = {__index = mcp.Server}
 
 local tools <const>: {string: mcp.Tool} = {}
 local order <const>: {string} = {}
+
+--- Counts calls to `register`, including the ones that replace a name.
+---
+--- A server publishes its tool list when this number moves past the one it
+--- last published, so a frame that registered nothing encodes nothing.
+local revision: integer = 0
 
 --- Traceback of a gameplay crash, once one has happened.
 ---
@@ -155,7 +170,9 @@ end
 --- client sees is first-registration order rather than last.
 ---
 --- @param tool Stored by reference and never copied, so mutating the table
----     afterwards changes what the server dispatches and reports. `name` and
+---     afterwards changes what the server dispatches. Registration is what
+---     publishes the tool list, so mutating a registered table in place does
+---     not change what a connected agent is told.
 ---     The call requires `name` and `handler` and raises when either is absent;
 ---     the rest may be nil.
 function mcp.register(tool: mcp.Tool)
@@ -166,6 +183,7 @@ function mcp.register(tool: mcp.Tool)
         order[#order + 1] = tool.name
     end
     tools[tool.name] = tool
+    revision = revision + 1
 end
 
 --- Returns every registered tool in registration order.
@@ -186,7 +204,7 @@ end
 local function describe(): {any}
     local list: {any} = {}
     for _, tool in ipairs(mcp.tools()) do
-        list[#list + 1] = {
+        local entry <const>: {string: any} = {
             name = tool.name,
             description = tool.description or "",
             inputSchema = tool.inputSchema or {type = "object", properties = data.empty_array},
@@ -198,6 +216,12 @@ local function describe(): {any}
                 whenCrashedHint = tool.whenCrashed == true,
             },
         }
+        -- A tool that declares no output schema advertises none, so the key
+        -- stays off the wire entry rather than carrying an empty default.
+        if tool.outputSchema ~= nil then
+            entry.outputSchema = tool.outputSchema
+        end
+        list[#list + 1] = entry
     end
     -- An empty list has to say so, or it encodes as an object and a client
     -- parsing it strictly rejects the response.
@@ -317,6 +341,7 @@ end
 function mcp.listen(port?: integer): mcp.Server
     local self = setmetatable({} as mcp.Server, ServerMT)
     self.port = port or 7100
+    self._toolsRevision = revision
     self._toolsJSON = data.encodeJSON(describe())
     self._transport = transport.listen(self.port, self._toolsJSON)
     self._destroyed = false
@@ -331,13 +356,13 @@ function mcp.Server:poll(): boolean
     if self._destroyed then
         return false
     end
-    -- Tool tables are stored by reference, so a caller may mutate one without
-    -- going back through `register`. Comparing the encoded registry preserves
-    -- that contract for the Rust-side list.
-    local toolsJSON <const> = data.encodeJSON(describe())
-    if self._toolsJSON ~= toolsJSON then
-        self._transport:setTools(toolsJSON)
-        self._toolsJSON = toolsJSON
+    -- Registration is what publishes a change, so mutating a registered tool
+    -- table in place changes nothing the Rust side reports. Comparing the
+    -- revision keeps the encode out of every frame that registered nothing.
+    if self._toolsRevision ~= revision then
+        self._toolsRevision = revision
+        self._toolsJSON = data.encodeJSON(describe())
+        self._transport:setTools(self._toolsJSON)
     end
     return self._transport:poll(function(request: transport.Request)
         local tool <const> = tools[request.name]

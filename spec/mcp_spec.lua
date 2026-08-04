@@ -16,7 +16,31 @@ local mcp = require("tecs.io.mcp")
 local sandbox = require("tecs.io.mcp.sandbox")
 
 local C = sdl.C
-local PORT = 7411
+
+-- Searched for rather than fixed. A checkout is not the only one on the
+-- machine: this repository is worked in through several git worktrees, and two
+-- suites running at once would both want one hardcoded number. `spec/io_spec`
+-- and `spec/http_spec` scan for the same reason.
+local FIRST_PORT = 7411
+local port = nil
+
+--- Starts the server on the first port that accepts it, and remembers which.
+---
+--- `mcp.listen` raises on a taken port rather than answering with a reason,
+--- deliberately: a moved server is one a debugger cannot find. So the scan is a
+--- pcall.
+local function listenSomewhere()
+    local failures = {}
+    for candidate = FIRST_PORT, FIRST_PORT + 20 do
+        local started, serverOrReason = pcall(mcp.listen, candidate)
+        if started then
+            port = candidate
+            return serverOrReason
+        end
+        failures[#failures + 1] = ("%d (%s)"):format(candidate, tostring(serverOrReason))
+    end
+    error("no loopback TCP port available: " .. table.concat(failures, ", "))
+end
 
 local function rpc(method, params, id)
     return mcp.dispatch(cjson.encode({
@@ -46,6 +70,19 @@ describe("mcp protocol", function()
                 error("deliberate")
             end,
         })
+        mcp.register({
+            name = "spec_shaped",
+            description = "Declares the shape of its answer.",
+            readOnly = true,
+            inputSchema = { type = "object" },
+            outputSchema = {
+                type = "object",
+                properties = { count = { type = "integer" } },
+            },
+            handler = function()
+                return { count = 1 }
+            end,
+        })
     end)
     teardown(function()
         C.SDL_Quit()
@@ -72,6 +109,19 @@ describe("mcp protocol", function()
         for _, tool in ipairs(mcp.tools()) do
             assert.is_not_nil(listed[tool.name], tool.name .. " must be listed")
         end
+    end)
+
+    it("advertises an output schema only for the tools that declare one", function()
+        -- An agent should learn the shape of an answer before calling, and a
+        -- tool that promises nothing must not appear to promise an empty
+        -- object.
+        local listed = {}
+        for _, tool in ipairs(cjson.decode(rpc("tools/list")).result.tools) do
+            listed[tool.name] = tool
+        end
+        assert.are.equal("object", listed.spec_shaped.outputSchema.type)
+        assert.are.equal("integer", listed.spec_shaped.outputSchema.properties.count.type)
+        assert.is_nil(listed.spec_echo.outputSchema)
     end)
 
     it("calls a tool and returns structured content", function()
@@ -247,7 +297,7 @@ describe("mcp over a socket", function()
     setup(function()
         assert(C.SDL_Init(0))
         assert(tecsIO.init())
-        server = mcp.listen(PORT)
+        server = listenSomewhere()
     end)
 
     teardown(function()
@@ -260,7 +310,7 @@ describe("mcp over a socket", function()
 
     local function connect()
         local address = tecsIO.resolve("127.0.0.1")
-        local connected = tecsIO.connect(address, PORT)
+        local connected = tecsIO.connect(address, port)
         address:close()
         return connected
     end

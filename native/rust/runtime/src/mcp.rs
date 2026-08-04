@@ -43,6 +43,8 @@ struct LuaTool {
     #[serde(default = "empty_schema")]
     input_schema: JsonObject,
     #[serde(default)]
+    output_schema: Option<JsonObject>,
+    #[serde(default)]
     annotations: LuaAnnotations,
 }
 
@@ -88,13 +90,19 @@ fn decode_tools(bytes: &[u8]) -> Result<Vec<Tool>, String> {
                 "whenCrashedHint".to_owned(),
                 Value::Bool(source.annotations.when_crashed_hint),
             );
-            Tool::new(source.name, source.description, source.input_schema)
+            let tool = Tool::new(source.name, source.description, source.input_schema)
                 .with_annotations(
                     ToolAnnotations::new()
                         .read_only(source.annotations.read_only_hint)
                         .destructive(source.annotations.destructive_hint),
                 )
-                .with_meta(meta)
+                .with_meta(meta);
+            // A tool that declares no output schema keeps `outputSchema` off
+            // the wire, which serde skips for `None`.
+            match source.output_schema {
+                Some(schema) => tool.with_raw_output_schema(Arc::new(schema)),
+                None => tool,
+            }
         })
         .collect())
 }

@@ -175,10 +175,19 @@ fn collect(
     description: &FormatDescription,
 ) -> Result<BTreeMap<String, Vec<String>>> {
     let mut command = Command::new("git");
-    command
-        .args(["-C"])
-        .arg(root)
-        .args(["ls-files", "-z", "--"]);
+    command.args(["-C"]).arg(root).args([
+        "ls-files",
+        "-z",
+        // Tracked files and the untracked ones that are not ignored. Without
+        // `--others` a file that has never been committed is invisible here, so
+        // a check over it passes by finding nothing, which reads as formatted
+        // and is the opposite of what it means. A new file is exactly the one
+        // most likely to need formatting.
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+    ]);
     command.args(paths);
     let output = command.output().context("running git ls-files")?;
     if !output.status.success() {

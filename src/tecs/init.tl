@@ -54,6 +54,10 @@ local type log = require("tecs.log")
 -- project type-check warn. The public name and required module are still math.
 local type angleMath = require("tecs.math")
 local type data = require("tecs.data")
+-- `debug` is the standard library global, so a module binding both this and
+-- Lua's own binds this one as `debugapi`. The public name and required module
+-- are still debug.
+local type debugapi = require("tecs.debug")
 local type regex = require("tecs.regex")
 local type loader = require("tecs.ffi.loader")
 local type Closeable = types.Closeable
@@ -472,6 +476,7 @@ local record tecs
     audio: audio
     physics: physics
     data: data
+    debug: debugapi
     events: events
     input: input
     gfx: gfx
@@ -556,6 +561,7 @@ local SURFACE <const>: {string: Namespace} = {
             utf8 = {module = "tecs.data.utf8"},
         },
     },
+    debug = {module = "tecs.debug"},
     events = {module = "tecs.events"},
     input = {module = "tecs.input"},
     gfx = {
