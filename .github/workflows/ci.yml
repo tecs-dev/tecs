@@ -28,6 +28,8 @@ jobs:
 
     engine:
         runs-on: macos-15
+        env:
+            TECS_EXPECT_GPU_DRIVER: metal
         steps:
             - uses: actions/checkout@v4
             - run: brew update
@@ -36,6 +38,26 @@ jobs:
             - run: cargo xtask format-check
             - run: cargo xtask test
             - run: cargo xtask test-package --preset macos-arm64
+
+    engine-vulkan:
+        runs-on: ubuntu-latest
+        env:
+            LIBGL_ALWAYS_SOFTWARE: "1"
+            SDL_GPU_DRIVER: vulkan
+            TECS_EXPECT_GPU_DRIVER: vulkan
+        steps:
+            - uses: actions/checkout@v4
+            - run: |
+                  sudo apt-get update
+                  sudo apt-get install -y \
+                    build-essential cmake ninja-build pkg-config luajit xvfb \
+                    libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
+                    libgbm-dev libpulse-dev libudev-dev libvulkan-dev \
+                    libwayland-dev libx11-dev libxcursor-dev libxext-dev \
+                    libxfixes-dev libxi-dev libxkbcommon-dev libxrandr-dev \
+                    mesa-vulkan-drivers wayland-protocols
+            - run: cargo xtask dev-tools
+            - run: xvfb-run -a cargo xtask test --preset linux-x64
 
     docs:
         runs-on: macos-15

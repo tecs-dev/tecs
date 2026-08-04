@@ -10,8 +10,9 @@ duplicating geometry, materials, textures, morph deltas, or clips.
 local loaded <const> = tecs.assets.loadGLTF("models/hero.gltf")
 local model <const> = app.renderer.meshes:registerModel(loaded)
 local instance <const> = model:newInstance()
+local entities: {integer} = {}
 for index, primitive in ipairs(instance.primitives) do
-    local entity <const> = world:spawn(
+    entities[index] = world:spawn(
         primitive.transform,
         primitive.mesh,
         primitive.bounds,
@@ -21,6 +22,9 @@ for index, primitive in ipairs(instance.primitives) do
         tecs.gfx.Tint(1, 1, 1, 1),
         tecs.gfx.Renderable3D()
     )
+end
+world:enqueueCommit()
+for index, entity in ipairs(entities) do
     instance:bind(world, index, entity)
 end
 instance:play("Walk")

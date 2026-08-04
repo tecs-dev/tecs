@@ -17,9 +17,6 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
 local loader = require("tecs.ffi.loader")
-local newWindow = require("tecs.platform.window").newWindow
-local Device = require("tecs.gpu.Device")
-local Texture = require("tecs.gpu.Texture")
 local Renderer = require("tecs.Renderer")
 local assets = require("tecs.assets")
 local components = require("tecs.components")
@@ -28,6 +25,7 @@ local log = require("tecs.log")
 local particles = require("tecs.gfx.particles")
 local sheet = require("tecs.gfx.sheet")
 local materials = require("tecs.gpu.materials")
+local renderSupport = require("spec.support.render")
 
 local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
@@ -57,7 +55,7 @@ local function effectName()
 end
 
 describe("tecs.gfx.particles", function()
-    local window, device, screen
+    local context, device, screen
 
     it("constructs each authoring value", function()
         assert.is_function(particles.newEffect)
@@ -66,25 +64,15 @@ describe("tecs.gfx.particles", function()
     end)
 
     setup(function()
-        assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = newWindow({ title = "particles", width = SIZE, height = SIZE })
-        device = Device.create(window, { debug = true })
-        screen = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
+        context = renderSupport.open({ title = "particles", width = SIZE, format = FORMAT })
+        device = context.device
+        screen = context.target
         assets.install()
     end)
 
     teardown(function()
         assets.shutdown()
-        if screen then
-            screen:destroy()
-        end
-        if device then
-            device:destroy()
-        end
-        if window then
-            window:destroy()
-        end
-        C.SDL_Quit()
+        renderSupport.close(context)
     end)
 
     -- A world with a renderer, and the particle pool only when asked for.

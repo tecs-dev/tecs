@@ -93,8 +93,9 @@ local function game(world: tecs.World, app: tecs.Application)
     local instance <const> = model:newInstance()
     local placement <const> = Transform3D()
     instance.transform = placement
+    local entities: {integer} = {}
     for index, primitive in ipairs(instance.primitives) do
-        local entity <const> = world:spawn(
+        entities[index] = world:spawn(
             primitive.transform,
             primitive.mesh,
             primitive.bounds,
@@ -103,6 +104,9 @@ local function game(world: tecs.World, app: tecs.Application)
             Tint(1, 1, 1, 1),
             Renderable3D()
         )
+    end
+    world:enqueueCommit()
+    for index, entity in ipairs(entities) do
         instance:bind(world, index, entity)
     end
     instance:play("StretchAndTwist", {speed = 0.65})

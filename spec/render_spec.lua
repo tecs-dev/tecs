@@ -14,13 +14,11 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local loader = require("tecs.ffi.loader")
-local newWindow = require("tecs.platform.window").newWindow
-local Device = require("tecs.gpu.Device")
 local Shader = require("tecs.gpu.Shader")
 local Buffer = require("tecs.gpu.Buffer")
 local GraphicsPipeline = require("tecs.gpu.GraphicsPipeline")
 local RenderPass = require("tecs.gpu.RenderPass")
-local Texture = require("tecs.gpu.Texture")
+local renderSupport = require("spec.support.render")
 
 local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
@@ -36,26 +34,16 @@ void main() {
 ]]
 
 describe("gpu rendering", function()
-    local window, device, target
+    local context, device, target
 
     setup(function()
-        assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = newWindow({ title = "spec", width = SIZE, height = SIZE })
-        device = Device.create(window, { debug = true })
-        target = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
+        context = renderSupport.open({ title = "spec", width = SIZE, format = FORMAT })
+        device = context.device
+        target = context.target
     end)
 
     teardown(function()
-        if target then
-            target:destroy()
-        end
-        if device then
-            device:destroy()
-        end
-        if window then
-            window:destroy()
-        end
-        C.SDL_Quit()
+        renderSupport.close(context)
     end)
 
     -- Renders one triangle with the given shaders and returns the pixel buffer.

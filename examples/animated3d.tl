@@ -108,15 +108,15 @@ local function game(world: tecs.World, app: tecs.Application)
     placement.rotationY = 1
     placement.rotationW = 0
     instance.transform = placement
+    local entities: {integer} = {}
     for index, primitive in ipairs(instance.primitives) do
         -- Skinning can move vertices beyond the file's bind-pose sphere.
         -- The example owns a conservative bound that covers every clip.
         local animatedBounds <const> = Bounds3D(
             primitive.bounds.centerX, primitive.bounds.centerY, primitive.bounds.centerZ, primitive.bounds.radius + 1.5
         )
-        local entity: integer
         if primitive.skin ~= nil then
-            entity = world:spawn(
+            entities[index] = world:spawn(
                 primitive.transform,
                 primitive.mesh,
                 animatedBounds,
@@ -126,7 +126,7 @@ local function game(world: tecs.World, app: tecs.Application)
                 Renderable3D()
             )
         else
-            entity = world:spawn(
+            entities[index] = world:spawn(
                 primitive.transform,
                 primitive.mesh,
                 animatedBounds,
@@ -135,6 +135,9 @@ local function game(world: tecs.World, app: tecs.Application)
                 Renderable3D()
             )
         end
+    end
+    world:enqueueCommit()
+    for index, entity in ipairs(entities) do
         instance:bind(world, index, entity)
     end
     local clip = 1
@@ -163,8 +166,9 @@ local function game(world: tecs.World, app: tecs.Application)
     morphPlacement.scaleY = 0.72
     morphPlacement.scaleZ = 0.72
     morphInstance.transform = morphPlacement
+    local morphEntities: {integer} = {}
     for index, primitive in ipairs(morphInstance.primitives) do
-        local entity <const> = world:spawn(
+        morphEntities[index] = world:spawn(
             primitive.transform,
             primitive.mesh,
             primitive.bounds,
@@ -173,6 +177,9 @@ local function game(world: tecs.World, app: tecs.Application)
             Tint(1, 1, 1, 1),
             Renderable3D()
         )
+    end
+    world:enqueueCommit()
+    for index, entity in ipairs(morphEntities) do
         morphInstance:bind(world, index, entity)
     end
     morphInstance:play("StretchAndTwist", {speed = 0.65})

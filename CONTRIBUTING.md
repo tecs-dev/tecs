@@ -38,6 +38,10 @@ together, or set `TECS_ALLOW_VERSION_DRIFT=1` while working on that update.
   generated FFI layouts against the C compiler, then runs the Lua and Teal
   spec suites, so this one command is the canonical test gate.
 - Add tests for new features, bug fixes, or edge cases when reasonable.
+- Add `spec/examples/<name>_spec.lua` with every top-level
+  `examples/<name>.tl`. `cargo xtask test` compiles and runs the actual example
+  through a deterministic GPU contract and rejects examples or contracts that
+  do not have a matching file.
 - **Update the generated reference for any user-facing change.** Module
   introductions and examples live in long Teal doc comments; declaration
   docblocks carry symbol contracts. Markdown under `docs/` carries guides that

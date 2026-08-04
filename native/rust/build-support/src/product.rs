@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -236,9 +236,18 @@ pub fn test(root: &Path, preset: Preset) -> Result<()> {
         .current_dir(root);
     run(&mut rust, "Rust workspace tests")?;
 
-    build(root, preset)?;
-    let paths = Paths::new(root, preset);
-    check_product_abi(root, preset, &paths)?;
+    // GPU specs compile deliberately small inline shaders. Keep the selected
+    // platform and dependency mode, but give the test product the compiler
+    // that a packaged release intentionally omits. `test-package` verifies the
+    // compiler-free release separately.
+    let test_preset = Preset {
+        shaders: ShaderMode::Runtime,
+        ..preset
+    };
+    build(root, test_preset)?;
+    let paths = Paths::new(root, test_preset);
+    stage_example_contracts(root, &paths)?;
+    check_product_abi(root, test_preset, &paths)?;
     for arguments in [
         ["--pattern", "headless_spec"],
         ["--exclude-pattern", "headless_spec"],
@@ -246,7 +255,55 @@ pub fn test(root: &Path, preset: Preset) -> Result<()> {
         let mut command = Command::new(root.join("vendor/bin/busted"));
         command.args(arguments).current_dir(root);
         apply_development_environment(&mut command, &paths);
+        command.env("TECS_EXAMPLES", paths.out.join("examples"));
         run(&mut command, "Busted spec suite")?;
+    }
+    Ok(())
+}
+
+/// Compiles every runnable example and requires one ordinary spec beside the
+/// renderer suite. The two directories are the catalog; there is no manifest
+/// that can drift from either one.
+fn stage_example_contracts(root: &Path, paths: &Paths) -> Result<()> {
+    let examples = root.join("examples");
+    let contracts = root.join("spec/examples");
+    let mut example_names = BTreeSet::new();
+    for entry in fs::read_dir(&examples)? {
+        let path = entry?.path();
+        if path.is_file() && path.extension().and_then(OsStr::to_str) == Some("tl") {
+            let name = path
+                .file_stem()
+                .and_then(OsStr::to_str)
+                .context("example has a non-UTF-8 name")?;
+            example_names.insert(name.to_owned());
+            let contract = contracts.join(format!("{name}_spec.lua"));
+            if !contract.is_file() {
+                anyhow::bail!(
+                    "example {name:?} has no render contract at {}",
+                    contract.display()
+                );
+            }
+            compile_teal_file(root, paths, &path, &format!("examples/{name}.lua"))?;
+        }
+    }
+
+    if contracts.is_dir() {
+        for entry in fs::read_dir(&contracts)? {
+            let path = entry?.path();
+            let Some(name) = path
+                .file_name()
+                .and_then(OsStr::to_str)
+                .and_then(|name| name.strip_suffix("_spec.lua"))
+            else {
+                continue;
+            };
+            if !example_names.contains(name) {
+                anyhow::bail!(
+                    "example render contract {} has no examples/{name}.tl",
+                    path.display()
+                );
+            }
+        }
     }
     Ok(())
 }
