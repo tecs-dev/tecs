@@ -256,6 +256,39 @@ describe("the engine's own debug commands", function()
         end)
     end)
 
+    describe("layers", function()
+        -- The layer table is per-process configuration in plain Lua, so these
+        -- two answer in a session with no renderer at all. That is the whole
+        -- distinction being pinned: the rest of the Render section needs a
+        -- graphics stack and these do not.
+        it("lists every layer without a renderer", function()
+            local answer = ok("layers_list", {})
+            assert.is_true(answer.max >= 1)
+            assert.are.equal(answer.max, #answer.layers)
+        end)
+
+        it("reports one layer", function()
+            local answer = ok("layers_info", { layer = 1 })
+            assert.are.equal(1, answer.layer)
+            assert.is_string(answer.sort)
+        end)
+
+        it("refuses a layer outside the table", function()
+            assert.is_truthy(failureOf("layers_info", { layer = 999 }):find("at most"))
+        end)
+    end)
+
+    describe("the renderer-backed commands", function()
+        -- A headless session has no renderer, and every one of these has to say
+        -- so in a word an agent can match on rather than raising something it
+        -- has to read.
+        it("reports a headless session rather than failing obscurely", function()
+            for _, name in ipairs({ "camera_info", "render_info" }) do
+                assert.is_truthy(failureOf(name, {}):find("no_renderer"), name .. " did not report no_renderer")
+            end
+        end)
+    end)
+
     describe("discovery", function()
         it("describes every command the engine registered", function()
             for _, name in ipairs(debugapi.of(world).names) do

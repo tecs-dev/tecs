@@ -880,6 +880,7 @@ function Application:_init(host?: loader.CValue): boolean
         -- the frame it was debugging.
         local debugapi = require("tecs.debug")
         debugapi.ensure(self.world)
+        debugapi.bindRenderer(self.world, self.renderer)
 
         self.mcp = mcp.listen(config.mcpPort)
         self.window:setTitle(("%s [MCP :%d]"):format(self.window.title, self.mcp.port))

@@ -68,10 +68,12 @@ that needs both binds this one as `debugapi`.
 ]=]
 
 local type types = require("tecs.types")
+local type Renderer = require("tecs.Renderer")
 local storekeys <const> = require("tecs.internal.storekeys")
 local registry <const> = require("tecs.debug.internal.registry")
 local type debugtypes = require("tecs.debug.internal.types")
 local type cmdargs = require("tecs.debug.internal.cmdargs")
+local rendercmds <const> = require("tecs.debug.internal.cmd.render")
 local enginecmds <const> = require("tecs.debug.internal.cmd.engine")
 local capturecmds <const> = require("tecs.debug.internal.cmd.capture")
 local physicscmds <const> = require("tecs.debug.internal.cmd.physics")
@@ -103,9 +105,16 @@ local record debugapi
     ensure: function(world: types.World): Registry
     of: function(world: types.World): Registry
     register: function(world: types.World, command: Command)
+    bindRenderer: function(world: types.World, renderer: Renderer)
 end
 
 debugapi.SECTIONS = registry.SECTIONS
+
+-- The renderer drawing each world, weakly keyed so a world that goes away takes
+-- its entry with it. A renderer is not a world resource: it is created by the
+-- application around the device, and one may draw a world it was never
+-- installed into.
+local bound <const>: {types.World: Renderer} = setmetatable({}, {__mode = "k"})
 
 -- The store key names a world's command registry. The string is a stable name
 -- tools look the registry up by, independent of the Lua module path.
@@ -113,6 +122,7 @@ local registryKey <const> = storekeys.newKey("tecs.debug", nil as registry.Regis
 
 --- The command groups the engine registers, in the order they are presented.
 local GROUPS <const>: {function(debugtypes.Env): {debugtypes.Command}} = {
+    rendercmds.commands,
     enginecmds.commands,
     capturecmds.commands,
     physicscmds.commands,
@@ -141,7 +151,10 @@ function debugapi.ensure(world: types.World): registry.Registry
     end
 
     local built <const> = registry.new(world)
-    local env <const>: debugtypes.Env = {world = world}
+    local env <const>: debugtypes.Env = {
+        world = world,
+        renderer = function(): Renderer return bound[world] end,
+    }
     for _, group in ipairs(GROUPS) do
         for _, command in ipairs(group(env)) do
             built:add(command)
@@ -149,6 +162,17 @@ function debugapi.ensure(world: types.World): registry.Registry
     end
     world.resources[registryKey] = built
     return built
+end
+
+--- Tells the commands which renderer draws this world.
+---
+--- Commands that read or draw through the renderer answer with a failure until
+--- something calls this, since a world alone does not name one.
+---
+--- @param world The caller supplies the world the renderer draws.
+--- @param renderer The caller supplies the renderer, or nil to unbind.
+function debugapi.bindRenderer(world: types.World, renderer: Renderer)
+    bound[world] = renderer
 end
 
 --- Registers a game's own command and projects it onto the debug server.

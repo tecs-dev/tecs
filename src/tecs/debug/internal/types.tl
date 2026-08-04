@@ -7,6 +7,10 @@
 
 local type types = require("tecs.types")
 local type cmdargs = require("tecs.debug.internal.cmdargs")
+-- Type only, and it has to stay that way. Requiring the renderer for real would
+-- reach the FFI as this module loads, and a headless session declares commands
+-- without a graphics stack behind them.
+local type Renderer = require("tecs.Renderer")
 
 local record debugtypes
     --- Reports what one command did.
@@ -133,6 +137,15 @@ local record debugtypes
     record Env
         --- Read-only. Reports the world the commands read and write.
         world: types.World
+
+        --- Read-only. Answers with the renderer drawing this world, or nil
+        --- where nothing bound one.
+        ---
+        --- A function rather than a field because a renderer is bound after the
+        --- commands are built: an application opens its window and creates its
+        --- device well after the world exists, and a headless session never
+        --- binds one at all.
+        renderer: function(): Renderer
     end
 end
 
