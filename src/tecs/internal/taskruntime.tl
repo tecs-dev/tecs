@@ -84,6 +84,15 @@ local record ScopeImpl
     active: boolean
     children: {TaskImpl<any>}
     childCount: integer
+    -- The subject of the suspension barrier `enterBarrier` opened, or nil when
+    -- no barrier is active. A barrier belongs to the call that opened it, so
+    -- every path that leaves that call clears it, on a raise as well as a
+    -- normal return. The reusable root makes that load bearing rather than
+    -- tidy: its scope outlives one invocation, and a barrier left behind would
+    -- reject every wait in every later update. Each of those clears reads this
+    -- field first, because leaving it set is rare and a read is cheaper than a
+    -- store on a path every world update runs.
+    barrier: string
     spawn: function<T>(self: ScopeImpl, body: function(ScopeImpl): T...): TaskImpl<T>
 end
 
@@ -149,7 +158,7 @@ end
 
 local function checkCanSuspend(task: TaskImpl<any>, operation: string)
     local scope <const> = task.scope as ScopeImpl
-    local barrier <const> = (scope as {string: any}).barrier
+    local barrier <const> = scope.barrier
     if barrier ~= nil then
         error(("tecs: %s cannot suspend while %s is active"):format(operation, barrier), 3)
     end
@@ -335,21 +344,13 @@ local function cancelChildren(scope: ScopeImpl)
     end
 end
 
--- A barrier belongs to the call that opened it, so leaving that call by a raise
--- ends it too. The reusable root makes this load bearing rather than tidy: its
--- scope outlives the invocation, and a barrier left behind would reject every
--- wait in every later update.
-local function clearBarrier(scope: ScopeImpl)
-    local state <const> = scope as {string: any}
-    if state.barrier ~= nil then
-        state.barrier = nil
-    end
-end
-
 local function runBody(task: TaskImpl<any>, body: function(ScopeImpl): any...): any
-    local ok <const>, result = xpcall(body, caught, task.scope as ScopeImpl)
-    clearBarrier(task.scope as ScopeImpl)
-    cancelChildren(task.scope as ScopeImpl)
+    local scope <const> = task.scope as ScopeImpl
+    local ok <const>, result = xpcall(body, caught, scope)
+    if scope.barrier ~= nil then
+        scope.barrier = nil
+    end
+    cancelChildren(scope)
     -- Cancellation is sticky. User code may use pcall for ordinary cleanup,
     -- but catching the private unwind signal cannot turn a canceled task into
     -- a successful one.
@@ -368,7 +369,9 @@ local function runReusable(task: TaskImpl<any>, body: function(ScopeImpl): any..
         -- A reusable root already owns the protected cycle boundary. Calling
         -- `runBody` through another pcall doubled that boundary on every frame.
         local ok <const>, result = xpcall(body, caught, scope) as (boolean, any)
-        clearBarrier(scope)
+        if scope.barrier ~= nil then
+            scope.barrier = nil
+        end
         if scope.childCount == 0 then
             scope.active = false
         else
@@ -633,7 +636,9 @@ function SchedulerImpl:restartImmediate<T>(task: TaskImpl<T>): TaskImpl<T>
 
     local scope <const> = task.scope as ScopeImpl
     scope.active = true
-    clearBarrier(scope)
+    if scope.barrier ~= nil then
+        scope.barrier = nil
+    end
     task.status = "pending"
     task.value = nil
     task.error = nil
@@ -1063,7 +1068,7 @@ function taskruntime.waitMode(): WaitMode
     if scheduler == nil or scheduler.current == nil then
         return "blocking"
     end
-    local scope <const> = scheduler.current.scope as {string: any}
+    local scope <const> = scheduler.current.scope as ScopeImpl
     if scope.barrier ~= nil then
         return "forbidden"
     end
@@ -1077,7 +1082,7 @@ function taskruntime.checkWait(operation: string): WaitMode
     local mode <const> = taskruntime.waitMode()
     if mode == "forbidden" then
         local task <const> = currentTask()
-        local barrier <const> = ((task.scope as ScopeImpl) as {string: any}).barrier as string
+        local barrier <const> = (task.scope as ScopeImpl).barrier
         error(("tecs: %s cannot wait while %s is active"):format(operation, barrier), 2)
     end
     if mode == "cooperative" then
@@ -1124,7 +1129,7 @@ function taskruntime.enterBarrier(subject: string)
     if type(subject) ~= "string" or subject == "" then
         error("tecs: suspension barrier needs a subject", 2)
     end
-    local scope <const> = task.scope as {string: any}
+    local scope <const> = task.scope as ScopeImpl
     if scope.barrier ~= nil then
         error("tecs: suspension barriers cannot nest", 2)
     end
@@ -1133,7 +1138,7 @@ end
 
 function taskruntime.leaveBarrier()
     local task <const> = currentTask()
-    local scope <const> = task.scope as {string: any}
+    local scope <const> = task.scope as ScopeImpl
     if scope.barrier == nil then
         error("tecs: no suspension barrier is active", 2)
     end

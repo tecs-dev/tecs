@@ -1223,10 +1223,19 @@ runWorldUpdate = function(self: WorldImpl)
 
     -- Clear dirty bits after the pipeline's phase barriers so every
     -- dirty-gated consumer observes the complete update.
-    for archetype in pairs(self._dirtyArchetypes) do
-        archetype:clearDirtyComponents()
+    --
+    -- An update that published nothing reaches this with an empty set, which is
+    -- every update of a world whose systems only read. Entering the loop header
+    -- to find that out costs more than the emptiness test: LuaJIT records the
+    -- loop, leaves it before the body runs, and abandons the recording, which it
+    -- retries for as long as the world stays clean. `next` keeps the recorder
+    -- away from a loop that has nothing to trace.
+    if next(self._dirtyArchetypes) ~= nil then
+        for archetype in pairs(self._dirtyArchetypes) do
+            archetype:clearDirtyComponents()
+        end
+        table_clear(self._dirtyArchetypes)
     end
-    table_clear(self._dirtyArchetypes)
 end
 
 -- Consecutive suspended updates before the world says what it is waiting on.
@@ -1283,17 +1292,23 @@ function WorldImpl:update(dt: number): boolean
         self._updateStalled = true
         local stalled <const> = self._stalledUpdates + 1
         self._stalledUpdates = stalled
-        if
-            stalled == STALL_REPORT_UPDATES
-            or (stalled > STALL_REPORT_UPDATES and (stalled - STALL_REPORT_UPDATES) % STALL_REPEAT_UPDATES == 0)
-        then
-            reportStall(root, stalled)
+        -- One comparison decides the ordinary suspended update, and the pair of
+        -- tests that pick the first report from the repeats sits behind it.
+        if stalled >= STALL_REPORT_UPDATES then
+            if stalled == STALL_REPORT_UPDATES or (stalled - STALL_REPORT_UPDATES) % STALL_REPEAT_UPDATES == 0 then
+                reportStall(root, stalled)
+            end
         end
         return false
     end
 
-    self._updateStalled = false
-    self._stalledUpdates = 0
+    -- An update that never suspends leaves both fields alone. They are already
+    -- clear, so reading one is cheaper than storing two on the path every frame
+    -- of a running game takes.
+    if self._updateStalled then
+        self._updateStalled = false
+        self._stalledUpdates = 0
+    end
     if root.status == "ready" then
         return true
     end
