@@ -1207,10 +1207,27 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
     local savedAutoState = worldImpl.autoStateComponent
     worldImpl.autoStateComponent = nil
 
+    -- The archetype loop is where the two sweeps below get their conditions
+    -- cheaply: `restoredCount` against the watermark says whether the restored
+    -- slot space has a hole in it, and `restoredKey` says whether any restored
+    -- column holds a key to index.
+    local restoredCount = 0
+    local restoredKey = false
+    local Key <const> = builtins.Key as Component
+
     while true do
         local componentTypes, _columnIndices, entityCount, mode = reader:nextArchetype()
         if not componentTypes then
             break
+        end
+        restoredCount = restoredCount + entityCount
+        if not restoredKey then
+            for i = 1, #componentTypes do
+                if componentTypes[i] == Key then
+                    restoredKey = true
+                    break
+                end
+            end
         end
 
         if mode == 0 then
@@ -1237,9 +1254,21 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
     -- Rebuild the free stack: slots that were dead at save time sit below
     -- the watermark but in no archetype. Without this sweep they are
     -- stranded and fresh spawns exhaust the id space early.
-    IdAllocator.rebuildFreeStack(allocator)
+    --
+    -- A restore that filled every slot below the watermark left no such hole.
+    -- Each restored entity holds one slot in `[1, nextFreshSlot - 1]`, so a
+    -- count equal to that range's size accounts for all of it, and
+    -- `clearEntities` emptied the free stack that no restore pushes to. The
+    -- sweep would walk the whole range and find nothing.
+    if restoredCount ~= allocator.nextFreshSlot - 1 then
+        IdAllocator.rebuildFreeStack(allocator)
+    end
 
-    do
+    -- Rebuild the key index from the restored `Key` columns: a batched restore
+    -- writes those columns without claiming each key. A snapshot that restored
+    -- no `Key` has none to claim, and `clearEntities` already emptied the
+    -- index, so the walk would rebuild the empty table it starts from.
+    if restoredKey then
         local rebuildKeyIndex = (world as {string: any})._rebuildKeyIndex as function(any)
         if rebuildKeyIndex then
             rebuildKeyIndex(world)

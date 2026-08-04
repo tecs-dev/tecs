@@ -75,6 +75,11 @@ local record IdAllocator
     freeStack: {integer: integer} -- C.CData: uint32_t[maxSlotCount]
     freeCount: integer -- number of slots currently on the stack
 
+    -- Upper bound on every generation this allocator has written to a slot.
+    -- Every writer raises it, so `reset` reads one field where a scan of the
+    -- slot prefix would otherwise find the same maximum.
+    maxGeneration: integer
+
     new: function(maxSlotCount?: integer): IdAllocator
     allocSlot: function(allocator: IdAllocator): integer
     allocContiguousSlots: function(allocator: IdAllocator, count: integer): integer
@@ -153,6 +158,7 @@ function IdAllocator.new(maxSlotCount?: integer): IdAllocator
         nextFreshSlot = 1, -- slot 0 reserved as null
         freeStack = C.new(UINT32_ARRAY_T, n),
         freeCount = 0,
+        maxGeneration = 0,
     } as IdAllocator
 end
 
@@ -208,6 +214,9 @@ function IdAllocator.freeSlot(allocator: IdAllocator, slot: integer)
         g = 0
     end
     s.generation = g
+    if g > allocator.maxGeneration then
+        allocator.maxGeneration = g
+    end
     local freeCount = allocator.freeCount
     allocator.freeStack[freeCount] = slot
     allocator.freeCount = freeCount + 1
@@ -246,25 +255,19 @@ function IdAllocator.unfree(allocator: IdAllocator, slot: integer)
 end
 
 function IdAllocator.reset(allocator: IdAllocator)
-    -- Full wipe for clearEntities. Invalidate every touched slot by
-    -- raising every generation past the prefix maximum, then clear
-    -- placement metadata. The uniform value keeps the recycled prefix
-    -- single-generation, so contiguous batch handles only need to check
-    -- the range ends against each other.
+    -- Full wipe for clearEntities. Invalidate every touched slot by raising
+    -- every generation past `maxGeneration`, which bounds every generation
+    -- the allocator has written, then clear placement metadata in the same
+    -- pass. The uniform value keeps the recycled prefix single-generation, so
+    -- contiguous batch handles only need to check the range ends against each
+    -- other.
+    local newGen = allocator.maxGeneration + 1
+    if newGen >= GEN_COUNT then
+        newGen = 0
+    end
     local usedLimit = allocator.nextFreshSlot - 1
     if usedLimit > 0 then
         local slots = allocator.slots
-        local maxGen = 0
-        for slot = 1, usedLimit do
-            local g = slots[slot].generation
-            if g > maxGen then
-                maxGen = g
-            end
-        end
-        local newGen = maxGen + 1
-        if newGen >= GEN_COUNT then
-            newGen = 0
-        end
         for slot = 1, usedLimit do
             local s = slots[slot]
             s.archetypeId = 0
@@ -272,6 +275,7 @@ function IdAllocator.reset(allocator: IdAllocator)
             s.generation = newGen
         end
     end
+    allocator.maxGeneration = newGen
     allocator.nextFreshSlot = 1
     allocator.freeCount = 0
 end

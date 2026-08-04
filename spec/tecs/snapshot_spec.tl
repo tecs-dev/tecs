@@ -535,6 +535,101 @@ describe(
         )
 
         it(
+            "reclaims trailing dead slots after a load",
+            function()
+                -- The watermark the snapshot carries sits above every entity it
+                -- holds, so the dead tail is a hole the sweep has to find.
+                local world = tecs.ecs.newWorld()
+                local ids: {integer} = {}
+                for i = 1, 6 do
+                    ids[i] = world:spawn(PositionComp(i, i))
+                end
+                world:enqueueCommit()
+                for i = 4, 6 do
+                    world:despawn(ids[i])
+                end
+                world:enqueueCommit()
+
+                local buffer = saveBinarySnapshot(world)
+                world:loadSnapshot(buffer)
+
+                local fresh = world:spawn(PositionComp(99, 99))
+                world:enqueueCommit()
+                luassert.is_true(
+                    fresh % 2 ^ 22 <= ids[6] % 2 ^ 22, "a spawn after the load must reuse a slot dead at save time"
+                )
+                for i = 1, 3 do
+                    luassert.is_true(world:isAlive(ids[i]), "restored entity " .. i .. " stays alive")
+                end
+            end
+        )
+
+        it(
+            "spawns past the watermark after a load that fills every slot",
+            function()
+                -- Every saved slot is live, so the load leaves no hole and the
+                -- next spawn has nothing to recycle.
+                local world = tecs.ecs.newWorld()
+                local ids: {integer} = {}
+                local maxSlot = 0
+                for i = 1, 6 do
+                    ids[i] = world:spawn(PositionComp(i, i))
+                    local slot = ids[i] % 2 ^ 22
+                    if slot > maxSlot then
+                        maxSlot = slot
+                    end
+                end
+                world:enqueueCommit()
+
+                local buffer = saveBinarySnapshot(world)
+                world:loadSnapshot(buffer)
+
+                local fresh = world:spawn(PositionComp(99, 99))
+                world:enqueueCommit()
+                luassert.is_true(fresh % 2 ^ 22 > maxSlot, "a dense load leaves no slot to recycle")
+                for i = 1, 6 do
+                    luassert.is_true(world:isAlive(ids[i]), "restored entity " .. i .. " stays alive")
+                    luassert.equals(i, world:get(ids[i], PositionComp).x)
+                end
+                luassert.is_true(world:isAlive(fresh))
+            end
+        )
+
+        it(
+            "reclaims the slots a filtered save left out",
+            function()
+                -- A filtered save writes a watermark that covers entities it
+                -- dropped, so their slots are holes the load has to reclaim.
+                local world = tecs.ecs.newWorld()
+                local keeper = world:spawn(PositionComp(1, 1), HealthComp(10))
+                local skipper = world:spawn(PositionComp(2, 2))
+                local lastKeeper = world:spawn(PositionComp(3, 3), HealthComp(30))
+                world:enqueueCommit()
+
+                local snap = saveTableSnapshot(
+                    world,
+                    {
+                        filterQuery = {include = {PositionComp, HealthComp}},
+                    }
+                )
+                world:loadSnapshot(snap)
+
+                luassert.is_true(world:isAlive(keeper))
+                luassert.is_true(world:isAlive(lastKeeper))
+                luassert.is_false(world:isAlive(skipper))
+
+                local fresh = world:spawn(PositionComp(99, 99))
+                world:enqueueCommit()
+                luassert.equals(
+                    skipper % 2 ^ 22, fresh % 2 ^ 22, "the filtered-out slot must be reusable after the load"
+                )
+                luassert.not_equal(skipper, fresh, "the reused slot must hand back a fresh handle")
+                luassert.is_true(world:isAlive(keeper), "reuse must not disturb a restored entity")
+                luassert.is_true(world:isAlive(lastKeeper))
+            end
+        )
+
+        it(
             "round-trips through a LuaJIT string.buffer",
             function()
                 local buffer = require("string.buffer")
@@ -1093,6 +1188,66 @@ describe(
                 world:loadSnapshot(bytes)
                 luassert.equals(player, world:byKey("player"))
                 luassert.equals(player, world:requireKey("player"))
+            end
+        )
+
+        it(
+            "rebuilds every Key a batched binary load restores",
+            function()
+                -- One archetype restores several keys through the column-major
+                -- path, which writes the Key column without claiming each key.
+                local world = tecs.ecs.newWorld()
+                local first = world:spawn(tecs.ecs.EntityKey("first"), PositionComp(1, 1))
+                local second = world:spawn(tecs.ecs.EntityKey("second"), PositionComp(2, 2))
+                local third = world:spawn(tecs.ecs.EntityKey("third"), PositionComp(3, 3))
+                world:enqueueCommit()
+
+                local bytes = tostring(saveBinarySnapshot(world))
+                world:clearEntities()
+
+                world:loadSnapshot(bytes)
+                luassert.equals(first, world:byKey("first"))
+                luassert.equals(second, world:byKey("second"))
+                luassert.equals(third, world:byKey("third"))
+            end
+        )
+
+        it(
+            "drops keys the world held when a snapshot restores none",
+            function()
+                -- The load replaces the world, so a key the loaded snapshot
+                -- does not carry must not survive it.
+                local world = tecs.ecs.newWorld()
+                world:spawn(PositionComp(1, 1))
+                world:enqueueCommit()
+                local keyless = tostring(saveBinarySnapshot(world))
+
+                world:clearEntities()
+                world:spawn(tecs.ecs.EntityKey("stale"), PositionComp(2, 2))
+                world:enqueueCommit()
+                luassert.is_not_nil(world:byKey("stale"))
+
+                world:loadSnapshot(keyless)
+                luassert.is_nil(world:byKey("stale"), "a keyless snapshot must leave no key claimed")
+                luassert.has_error(function() world:requireKey("stale") end)
+            end
+        )
+
+        it(
+            "replaces a held key with the one a snapshot restores",
+            function()
+                local world = tecs.ecs.newWorld()
+                local saved = world:spawn(tecs.ecs.EntityKey("player"), PositionComp(1, 1))
+                world:enqueueCommit()
+                local bytes = tostring(saveBinarySnapshot(world))
+
+                world:clearEntities()
+                world:spawn(tecs.ecs.EntityKey("other"), PositionComp(2, 2))
+                world:enqueueCommit()
+
+                world:loadSnapshot(bytes)
+                luassert.equals(saved, world:byKey("player"))
+                luassert.is_nil(world:byKey("other"), "a key the snapshot does not carry must not survive the load")
             end
         )
 

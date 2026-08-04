@@ -1529,9 +1529,9 @@ function WorldImpl:loadSnapshot(source: any): types.World.SnapshotPrelude
     if self._updateStalled then
         error("tecs: cannot load a snapshot while a world update is suspended", 2)
     end
-    local prelude = snapshotModule.loadSnapshot(self, source) as types.World.SnapshotPrelude
-    self:_rebuildKeyIndex()
-    return prelude
+    -- The load rebuilds the key index itself, before the data section and the
+    -- events that read it, so a second rebuild here would repeat that walk.
+    return snapshotModule.loadSnapshot(self, source) as types.World.SnapshotPrelude
 end
 
 function WorldImpl:_rebuildKeyIndex()

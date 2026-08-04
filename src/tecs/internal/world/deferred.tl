@@ -466,6 +466,12 @@ function WorldImpl:_deferSpawnAt(id: integer, ...: Component)
         IdAllocator.unfree(allocator, slot)
     end
     (allocator.slots as {integer: EntitySlot})[slot].generation = generation
+    -- A staked generation comes from the caller's id, so it can outrun every
+    -- generation the allocator issued. `reset` reads the bound rather than
+    -- scanning for it.
+    if generation > allocator.maxGeneration then
+        allocator.maxGeneration = generation
+    end
     deferSpawn(self, slot, id, ...)
 end
 

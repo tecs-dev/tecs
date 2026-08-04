@@ -218,6 +218,75 @@ describe(
                         assert.not_equals(stale, fresh)
                     end
                 )
+
+                it(
+                    "raises the generation past one a spawnAt staked",
+                    function()
+                        -- `spawnAt` writes the caller's generation into the slot,
+                        -- so the wipe has to clear that one as well as the ones
+                        -- the allocator issued.
+                        local world = WorldImpl.new({maxEntities = 8})
+                        -- Encoding matches IdAllocator.encodeId, which is a
+                        -- macroexp and so has no runtime function to call.
+                        local stale = 1 + 1 * 2 ^ 22
+                        world:spawnAt(stale)
+                        world:enqueueCommit()
+
+                        world:clearEntities()
+
+                        local fresh = world:spawn()
+                        world:enqueueCommit()
+
+                        assert.equals(1, fresh % 2 ^ 22)
+                        assert.not_equals(stale, fresh)
+                        assert.is_false(world:isAlive(stale))
+                        assert.is_true(world:isAlive(fresh))
+                    end
+                )
+
+                it(
+                    "raises the generation past one a batched spawnAt staked",
+                    function()
+                        local world = WorldImpl.new({maxEntities = 8})
+                        local stale = 1 + 1 * 2 ^ 22
+                        world:batchSpawnAt({stale}, {}, function() end)
+                        world:enqueueCommit()
+
+                        world:clearEntities()
+
+                        local fresh = world:spawn()
+                        world:enqueueCommit()
+
+                        assert.equals(1, fresh % 2 ^ 22)
+                        assert.not_equals(stale, fresh)
+                        assert.is_false(world:isAlive(stale))
+                        assert.is_true(world:isAlive(fresh))
+                    end
+                )
+
+                it(
+                    "raises the generation past one a despawn bumped",
+                    function()
+                        local world = WorldImpl.new({maxEntities = 8})
+                        local first = world:spawn()
+                        world:enqueueCommit()
+                        world:despawn(first)
+                        world:enqueueCommit()
+                        local second = world:spawn()
+                        world:enqueueCommit()
+
+                        world:clearEntities()
+
+                        local fresh = world:spawn()
+                        world:enqueueCommit()
+
+                        assert.is_false(world:isAlive(first))
+                        assert.is_false(world:isAlive(second))
+                        assert.is_true(world:isAlive(fresh))
+                        assert.not_equals(first, fresh)
+                        assert.not_equals(second, fresh)
+                    end
+                )
             end
         )
     end

@@ -85,6 +85,11 @@ local function stakePendingSpawnAt(
     local epoch = self._transactionEpoch
     local archId = archetype.id
     local stateCount = self.entityStateCount
+    -- Staked generations come from the caller's ids, so they can outrun every
+    -- generation the allocator issued. `IdAllocator.reset` reads the bound
+    -- rather than scanning the slot prefix for it; carry it in a local and
+    -- store once for the whole range.
+    local maxGeneration = arena.maxGeneration
     for i = 0, count - 1 do
         local id = readId(i)
         local slot = IdAllocator.slotOf(id)
@@ -95,7 +100,11 @@ local function stakePendingSpawnAt(
             -- later allocSlot would alias the revived entity.
             IdAllocator.unfree(arena, slot)
         end
-        slots[slot].generation = IdAllocator.generationOfWithSlot(id, slot)
+        local generation = IdAllocator.generationOfWithSlot(id, slot)
+        slots[slot].generation = generation
+        if generation > maxGeneration then
+            maxGeneration = generation
+        end
         if slotStamp[slot] ~= epoch then
             slotStamp[slot] = epoch
             pendingArr[slot] = archId
@@ -109,6 +118,7 @@ local function stakePendingSpawnAt(
             end
         end
     end
+    arena.maxGeneration = maxGeneration
     self.entityStateCount = stateCount
 end
 
