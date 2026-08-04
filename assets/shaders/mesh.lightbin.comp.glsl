@@ -41,7 +41,12 @@ bool reachesTile(vec4 positionRadius, vec2 tileMinimum, vec2 tileMaximum) {
     float safeW = clip.w - varyingW;
     float extentX = (radius * length(rowX) * clip.w + abs(clip.x) * varyingW) / (clip.w * safeW);
     float extentY = (radius * length(rowY) * clip.w + abs(clip.y) * varyingW) / (clip.w * safeW);
-    vec2 center = clip.xy / clip.w * 0.5 + 0.5;
+    // SPIR-V fragment coordinates start at the framebuffer's top left, while
+    // clip +Y points up. The tile reader uses gl_FragCoord in that top-left
+    // space, so flip projected Y here before assigning the light to tiles.
+    // Centered lights concealed this disagreement because 0.5 is its own
+    // vertical mirror.
+    vec2 center = vec2(clip.x, -clip.y) / clip.w * 0.5 + 0.5;
     vec2 extent = vec2(extentX, extentY) * 0.5;
     vec2 nearest = clamp(center, tileMinimum, tileMaximum);
     vec2 outside = abs(center - nearest);

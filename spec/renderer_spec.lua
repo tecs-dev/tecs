@@ -1044,6 +1044,55 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    it("bins off-center local lights in framebuffer coordinates", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 0, 0, 0 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                lights = { capacity = 1 },
+            },
+        })
+        renderer:install(world)
+        local camera = renderer.meshes.camera
+        camera.z = 4
+        local mesh, bounds = renderer.meshes:registerMesh(planeMesh("spec://off-center-local-light-plane"))
+        local material = renderer.meshes:registerMaterial({
+            name = "spec://off-center-lambert",
+            model = renderer.meshes.MATERIAL_LAMBERT,
+        })
+        world:spawn(tecs.Transform3D(), mesh, bounds, material, components.Tint(), components.Renderable3D())
+        world:spawn(tecs.Transform3D.new({ y = 0.8, z = 0.3 }), components.PointLight3D(0.7, 1, 1, 1, 20))
+
+        local function redAtReceiver(pixels)
+            local matrix = camera:matrix(SIZE, SIZE)
+            local x, y, z = 0, 0.8, 0
+            local clipX = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]
+            local clipY = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13]
+            local clipW = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15]
+            local pixelX = math.floor((clipX / clipW * 0.5 + 0.5) * SIZE)
+            local pixelY = math.floor((0.5 - clipY / clipW * 0.5) * SIZE)
+            return screen:getPixel(pixels, pixelX, pixelY).r
+        end
+
+        local before = redAtReceiver(frameOnce(world, renderer))
+        camera.y = 0.4
+        local after = redAtReceiver(frameOnce(world, renderer))
+        assert.is_true(
+            before > 100,
+            ("the off-center light missed its receiver before camera motion: %d"):format(before)
+        )
+        assert.is_true(after > 100, ("the off-center light missed its receiver after camera motion: %d"):format(after))
+        assert.is_true(
+            math.abs(after - before) <= 3,
+            ("camera motion changed a stationary off-center light from %d to %d"):format(before, after)
+        )
+        renderer:destroy()
+    end)
+
     it("casts an opt-in point-light shadow through the local atlas", function()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {
