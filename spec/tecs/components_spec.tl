@@ -1223,6 +1223,46 @@ describe(
                         luassert.equals(1, b.n)
                     end
                 )
+
+                it(
+                    "stores an FFI component whose name is not a C identifier",
+                    function()
+                        local record Dotted is tecs.ecs.Component
+                            x: number
+                            y: number
+                        end
+
+                        -- A component name is an externally typed string, so it
+                        -- carries punctuation a C typedef rejects. Two names that
+                        -- differ only in punctuation must stay separate structs.
+                        local suffix <const> = tostring(math.random(1, 1000000))
+                        local dotted: Dotted = tecs.ecs.newFFIComponent({
+                            name = "spec.DottedFFI" .. suffix,
+                            container = {} as Dotted,
+                            fields = {
+                                {"x", "double"},
+                                {"y", "double"},
+                            },
+                        })
+                        local underscored: Dotted = tecs.ecs.newFFIComponent({
+                            name = "spec_DottedFFI" .. suffix,
+                            container = {} as Dotted,
+                            fields = {
+                                {"x", "double"},
+                                {"y", "double"},
+                            },
+                        })
+
+                        local world <const> = tecs.ecs.newWorld()
+                        local entity <const> = world:spawn(dotted(1.5, 2.5), underscored(3.5, 4.5))
+                        world:update(0)
+
+                        luassert.equals(1.5, world:get(entity, dotted).x)
+                        luassert.equals(2.5, world:get(entity, dotted).y)
+                        luassert.equals(3.5, world:get(entity, underscored).x)
+                        luassert.equals(4.5, world:get(entity, underscored).y)
+                    end
+                )
             end
         )
     end

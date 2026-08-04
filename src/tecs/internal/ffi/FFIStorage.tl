@@ -88,6 +88,8 @@ local record RuntimeRegistry
     structCounter: integer
     structRegistry: {string: StructRegistryEntry}
     arrayTypeCache: {string: any}
+    structIdentifiers: {string: string}
+    usedIdentifiers: {string: boolean}
 end
 
 local CAny <const> = C as {string: any}
@@ -98,11 +100,44 @@ if not runtimeRegistry then
         structCounter = 0,
         structRegistry = {},
         arrayTypeCache = {},
+        structIdentifiers = {},
+        usedIdentifiers = {},
     }
     CAny[RUNTIME_REGISTRY_KEY] = runtimeRegistry
 end
 local structRegistry <const> = runtimeRegistry.structRegistry
 local arrayTypeCache <const> = runtimeRegistry.arrayTypeCache
+local structIdentifiers <const> = runtimeRegistry.structIdentifiers
+local usedIdentifiers <const> = runtimeRegistry.usedIdentifiers
+
+-- A component name is an externally typed string a game and a snapshot both
+-- carry, so it holds whatever punctuation its author chose. C accepts none of
+-- that in a typedef, and this name reaches `cdef`, `metatype`, `sizeof`, and
+-- two `typeof` calls, so each name maps once to an identifier C accepts. The
+-- mapping is memoized and kept distinct per name, which keeps two components
+-- that differ only in punctuation from sharing one struct and one metatype.
+local function structIdentifier(name: string): string
+    local existing <const> = structIdentifiers[name]
+    if existing ~= nil then
+        return existing
+    end
+
+    local base = name:gsub("[^%w_]", "_")
+    if base:match("^%d") then
+        base = "_" .. base
+    end
+
+    local identifier = base
+    local suffix = 2
+    while usedIdentifiers[identifier] do
+        identifier = base .. "_" .. suffix
+        suffix = suffix + 1
+    end
+
+    usedIdentifiers[identifier] = true
+    structIdentifiers[name] = identifier
+    return identifier
+end
 
 local record StorageMeta
     capacity: integer
@@ -179,7 +214,8 @@ local function serializeArrayField(src: any, fieldInfo: FieldInfo): {any}
     return out
 end
 
-function FFIStorage.defineStruct(name: string, fields: {{string, string}}): any, integer
+function FFIStorage.defineStruct(requestedName: string, fields: {{string, string}}): any, integer
+    local name <const> = structIdentifier(requestedName)
     local cdef = generateStructDef(name, fields)
     local entry = structRegistry[name]
     if entry then
@@ -216,11 +252,12 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
     -- Default nil keeps `C.new`.
     local columnAllocator: function(integer, string): (any, any) = nil
 
-    local structName = def.name
-    if not structName then
+    local requestedName = def.name
+    if not requestedName then
         runtimeRegistry.structCounter = runtimeRegistry.structCounter + 1
-        structName = "FFIComponent" .. runtimeRegistry.structCounter
+        requestedName = "FFIComponent" .. runtimeRegistry.structCounter
     end
+    local structName <const> = structIdentifier(requestedName)
 
     local cdef, fieldNames = generateStructDef(structName, def.fields as {{string, string}})
     local nFields <const> = #fieldNames

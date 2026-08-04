@@ -145,12 +145,20 @@ local function requireBuffer(output: tecs.ecs.SnapshotOutput): StringBuffer
     return output.buffer
 end
 
-local function measure(name: string, bytes: integer, run: function())
+-- `prepare` restores whatever the measured call consumes. It runs outside the
+-- timed window so refilling a drained buffer is not charged to the operation.
+local function measure(name: string, bytes: integer, run: function(), prepare?: function())
     for _ = 1, WARMUP do
+        if prepare then
+            prepare()
+        end
         run()
     end
     local samples: {number} = {}
     for sample = 1, SAMPLES do
+        if prepare then
+            prepare()
+        end
         local started <const> = now()
         run()
         samples[sample] = now() - started
@@ -180,13 +188,17 @@ local bytes <const> = #preparedBuffer:tostring()
 measure("save", bytes, function() saveWorld:saveSnapshot({buffer = reusable}) end)
 
 local loadWorld <const> = tecs.ecs.newWorld({maxEntities = COUNT + 64})
+local payload <const> = preparedBuffer:tostring()
+local source <const> = StringBufferModule.new()
 measure(
     "load",
     bytes,
     function()
-        loadWorld:loadSnapshot(reusable)
+        loadWorld:loadSnapshot(source)
         if loadWorld:getStats().entities ~= COUNT then
             error("bench: snapshot load restored the wrong entity count", 0)
         end
-    end
+    end,
+    -- A load consumes its buffer, so each timed read starts from a full one.
+    function() source:set(payload) end
 )
