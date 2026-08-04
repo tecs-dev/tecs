@@ -1312,6 +1312,77 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    it("keeps an off-center directional shadow fixed as the camera moves", function()
+        local world = tecs.ecs.newWorld()
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
+            ambient = { 0.05, 0.05, 0.05 },
+            sprites = false,
+            meshes = {
+                capacity = 4,
+                vertexCapacity = 16,
+                indexCapacity = 24,
+                shadows = {
+                    distance = 4,
+                    directionX = -0.5,
+                    directionY = 0,
+                    directionZ = -1,
+                    bias = 0.002,
+                    softness = 0,
+                },
+            },
+        })
+        renderer:install(world)
+        local camera = renderer.meshes.camera
+        camera.z = 2
+        local plane, planeBounds = renderer.meshes:registerMesh(planeMesh("spec://off-center-shadow-plane"))
+        local caster, casterBounds = renderer.meshes:registerMesh(triangleMesh("spec://off-center-shadow-caster"))
+        local material = renderer.meshes:registerMaterial({
+            name = "spec://off-center-shadow-lambert",
+            model = renderer.meshes.MATERIAL_LAMBERT,
+        })
+        world:spawn(
+            tecs.Transform3D(),
+            plane,
+            planeBounds,
+            material,
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+        world:spawn(
+            tecs.Transform3D.new({ x = -0.2, y = 0.3, z = 0.5, scaleX = 0.4, scaleY = 0.4, scaleZ = 0.4 }),
+            caster,
+            casterBounds,
+            material,
+            components.Tint(1, 1, 1, 1),
+            components.Renderable3D()
+        )
+
+        local function redAtReceiver(pixels)
+            local matrix = camera:matrix(SIZE, SIZE)
+            local x, y, z = -0.3, 0.45, 0
+            local clipX = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]
+            local clipY = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13]
+            local clipW = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15]
+            local pixelX = math.floor((clipX / clipW * 0.5 + 0.5) * SIZE)
+            local pixelY = math.floor((0.5 - clipY / clipW * 0.5) * SIZE)
+            return screen:getPixel(pixels, pixelX, pixelY).r
+        end
+
+        local before = redAtReceiver(frameOnce(world, renderer))
+        camera.y = 0.4
+        local after = redAtReceiver(frameOnce(world, renderer))
+        assert.is_true(
+            before < 80,
+            ("the off-center caster missed its receiver before camera motion: %d"):format(before)
+        )
+        assert.is_true(after < 80, ("the off-center caster missed its receiver after camera motion: %d"):format(after))
+        assert.is_true(
+            math.abs(after - before) <= 3,
+            ("camera motion changed a fixed off-center shadow from %d to %d"):format(before, after)
+        )
+        renderer:destroy()
+    end)
+
     it("keeps renderer-owned 2D shadow predicates live after construction", function()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, { shadows = {} })

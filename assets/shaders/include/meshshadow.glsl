@@ -34,7 +34,12 @@ vec2 meshShadowTexel(int cascade) {
 float meshShadowCascade(int cascade, vec3 world, vec3 normal) {
     vec4 projected = meshShadow.viewProjection[cascade] * vec4(world, 1.0);
     vec3 shadow = projected.xyz / projected.w;
-    vec2 uv = shadow.xy * 0.5 + 0.5;
+    // Shadow rendering uses the framebuffer's top-left origin. Clip +Y points
+    // up, so sampling the resulting texture must invert Y just as opaque
+    // depth reconstruction does. Without this, receivers consult a vertically
+    // mirrored part of a camera-fitted cascade and its apparent illumination
+    // moves as the camera moves.
+    vec2 uv = vec2(shadow.x * 0.5 + 0.5, 0.5 - shadow.y * 0.5);
     if (shadow.z < 0.0 || shadow.z > 1.0
             || any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
         return 1.0;
