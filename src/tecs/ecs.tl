@@ -109,6 +109,8 @@ local record ecs
     type Phase = types.Phase
     --- `SystemConfig` configures a system.
     type SystemConfig = types.SystemConfig
+    --- `SystemInfo` reports one registered system.
+    type SystemInfo = types.SystemInfo
     --- `DoubleArray` names an FFI array of doubles.
     type DoubleArray = types.DoubleArray
     --- `Bundle` names a reusable component collection.

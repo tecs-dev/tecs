@@ -70,6 +70,54 @@ describe(
         )
 
         describe(
+            "listStates",
+            function()
+                it("reports an empty stack as an empty list", function() luassert.same({}, world:listStates()) end)
+
+                it(
+                    "reports the whole stack bottom-first, ending at the top",
+                    function()
+                        world:createState("game")
+                        world:createState("paused")
+                        world:pushState("game")
+                        world:pushState("paused")
+
+                        luassert.same({"game", "paused"}, world:listStates())
+                        luassert.is_equal(world:peekState(), world:listStates()[2])
+
+                        world:popState()
+                        luassert.same({"game"}, world:listStates())
+                    end
+                )
+
+                it(
+                    "answers with a copy rather than a view onto the stack",
+                    function()
+                        world:createState("game")
+                        world:pushState("game")
+
+                        local taken <const> = world:listStates()
+                        world:popState()
+
+                        luassert.same({"game"}, taken, "a list already handed out must not follow a later pop")
+                        luassert.same({}, world:listStates())
+                    end
+                )
+
+                it(
+                    "reports only the states that were pushed",
+                    function()
+                        world:createState("game")
+                        world:createState("neverPushed")
+                        world:pushState("game")
+
+                        luassert.same({"game"}, world:listStates())
+                    end
+                )
+            end
+        )
+
+        describe(
             "State events",
             function()
                 it(

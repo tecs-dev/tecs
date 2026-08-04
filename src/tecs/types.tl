@@ -684,6 +684,25 @@ local record types
         --- @param systemName The name of the system to remove.
         removeSystem: function(self, systemName: string)
 
+        --- Reports every system the pipeline holds.
+        ---
+        --- @return A fresh list the caller owns, ordered by phase in the order
+        ---     the lifecycle reaches each phase, and within a phase in the order
+        ---     the systems run.
+        listSystems: function(self): {SystemInfo}
+
+        --- Enables or disables one system, leaving it registered either way.
+        ---
+        --- @param systemName The name the system is registered under, which
+        ---     `listSystems` reports.
+        --- @param enabled True lets the system run again, and false skips it
+        ---     from the next update until something enables it.
+        --- @return True once the system carries that state, including when it
+        ---     already did.
+        --- @return The reason no system carries that name, when the first return
+        ---     is false.
+        setSystemEnabled: function(self, systemName: string, enabled: boolean): boolean, string
+
         --- Enable a phase.
         --- @param phase The phase to enable.
         enablePhase: function(self, phase: Phase)
@@ -750,6 +769,42 @@ local record types
         --- `world:enqueueCommit()` from `run` instead when the dependency is
         --- conditional at runtime.
         commitAfter: boolean
+    end
+
+    --- Reports one registered system, as `world:listSystems` carries it.
+    ---
+    --- A game reads this to draw a system overlay, to write a toggle beside a
+    --- cheat menu, or to assert in a test that a plugin registered what it
+    --- claimed, so it is a public answer rather than something a debugger
+    --- reaches past the world for.
+    interface SystemInfo
+        --- Read-only. Names the system, which is the `name` its
+        --- [`SystemConfig`](/modules/ecs/#tecs.ecs.SystemConfig) carried, or the
+        --- synthetic `_anonymousSystemN` the pipeline assigns an unnamed one.
+        --- Either name selects the system in `world:setSystemEnabled`, and a
+        --- synthetic one changes whenever registration order changes.
+        name: string
+
+        --- Read-only. Names the [`Phase`](/modules/ecs/#tecs.ecs.Phase) the
+        --- system runs in, and reads `"Unknown"` for a custom phase registered
+        --- without a name.
+        phase: string
+
+        --- Read-only. Counts from one, and reports where the system sits among
+        --- the systems of its own phase in the order they run, which is
+        --- registration order after `before` and `after` are applied.
+        position: integer
+
+        --- Read-only. Reports whether the system runs at all. A disabled system
+        --- stays registered and keeps its name, its position and its ordering
+        --- constraints, and runs nothing until `world:setSystemEnabled` enables
+        --- it again.
+        enabled: boolean
+
+        --- Read-only. Reports whether the system declares a `runIf` of its own.
+        --- That gate is evaluated per dispatch and this listing does not call
+        --- it, so an enabled system with one may still skip any given frame.
+        hasRunIf: boolean
     end
 
     --- A world owns entities, components, queries, systems, resources, events,
@@ -993,6 +1048,42 @@ local record types
         ---
         --- @param systemName The name of the system to remove.
         removeSystem: function(self, systemName: string)
+
+        --- Reports every system this world runs.
+        ---
+        --- Read it to draw a system overlay, to check what a plugin registered,
+        --- or to find the name to hand `setSystemEnabled`. A system a plugin
+        --- added without a name reports the synthetic name the pipeline gave it.
+        ---
+        --- @return A fresh list the caller owns, ordered by phase in the order
+        ---     the lifecycle reaches each phase, and within a phase in the order
+        ---     the systems run. Each row is a copy taken at the call, so it does
+        ---     not follow a later enable or disable.
+        listSystems: function(self): {SystemInfo}
+
+        --- Enables or disables one system, leaving it registered either way.
+        ---
+        --- A disabled system keeps its name, its position and its ordering
+        --- constraints, and stops running from the next `world:update`. Enabling
+        --- it restores the `runIf` it declared for itself, so a gated system
+        --- comes back gated rather than unconditional. Disabling a system that
+        --- is already disabled changes nothing and reports success.
+        ---
+        --- Use `removeSystem` instead when the system is never to run again;
+        --- this is the pause a debugger, a cheat menu or a test wants, and the
+        --- system is one call away from running again.
+        ---
+        --- @param systemName The name the system is registered under, which
+        ---     `listSystems` reports. A name no system carries is an
+        ---     operational outcome rather than a programmer error, because the
+        ---     name usually comes from a person or an agent.
+        --- @param enabled True lets the system run again, and false skips it
+        ---     until something enables it.
+        --- @return True once the system carries that state, including when it
+        ---     already did.
+        --- @return The reason no system carries that name, when the first return
+        ---     is false.
+        setSystemEnabled: function(self, systemName: string, enabled: boolean): boolean, string
 
         --- Updates or resumes one logical world update.
         ---
@@ -1431,6 +1522,19 @@ local record types
         ---
         --- @return The name of the top state, or nil if the stack is empty.
         peekState: function(self): string
+
+        --- Reports the names on the state stack, bottom-first.
+        ---
+        --- The last name is the one `peekState` answers with. Read the whole
+        --- stack to tell a pause pushed over play from a pause that is all
+        --- there is, which is what a save prompt, a back button and a debugger
+        --- each need and what the top name alone cannot say. States the world
+        --- created and never pushed are not on the stack and are not reported.
+        ---
+        --- @return A fresh list of names the caller owns, bottom-first, and
+        ---     empty when nothing is pushed. It is a copy taken at the call
+        ---     rather than a view, so a later push or pop does not reach it.
+        listStates: function(self): {string}
 
         -------------------------------------------------------------------------------
         -- Sparse relationship methods

@@ -237,6 +237,44 @@ The pipeline generates a private name for an unnamed system. Treat that name
 as engine-owned and unstable. `world:removeSystem(name)` requires an existing
 name, so callers should remove only explicitly named systems.
 
+## Listing and stopping systems
+
+`world:listSystems()` reports every system the world runs, ordered by phase and
+by run order within each phase. Each row names the system and its phase, gives
+its position in that phase, and says whether the system is enabled and whether
+it declares a `runIf` of its own:
+
+```teal
+for _, info in ipairs(world:listSystems()) do
+    print(info.phase, info.position, info.name, info.enabled)
+end
+```
+
+The list is a fresh copy, so a later enable or disable does not reach a list
+already handed out.
+
+`world:setSystemEnabled(name, enabled)` stops one system or starts it again. A
+disabled system stays registered: it keeps its name, its position and its
+ordering constraints, contributes to `world:getStats().systems`, and simply
+does not run from the next `world:update`. Enabling restores the `runIf` it
+declared for itself, so a gated system comes back gated:
+
+```teal
+local stopped, reason = world:setSystemEnabled("game.Spin", false)
+if not stopped then
+    print(reason)
+end
+```
+
+A name no system carries returns `false` and a reason rather than raising,
+because that name usually comes from a person or a debugger rather than from
+code. Disabling a system that is already disabled reports success and changes
+nothing.
+
+Use `removeSystem` when the system is never to run again, and
+`setSystemEnabled` when it is a pause. The debug server exposes the same pair
+as the `systems` command.
+
 ## Conditional execution
 
 `runIf(dt, world, systemName)` gates `run`. Any function with that shape may

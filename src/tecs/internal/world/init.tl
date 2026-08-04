@@ -957,6 +957,15 @@ function WorldImpl:peekState(): string
     return stack[#stack]
 end
 
+function WorldImpl:listStates(): {string}
+    local stack <const> = self._stateStack
+    local names: {string} = {}
+    for index = 1, #stack do
+        names[index] = stack[index]
+    end
+    return names
+end
+
 -------------------------------------------------------------------------------
 -- Sparse resource methods
 -------------------------------------------------------------------------------
@@ -1052,6 +1061,14 @@ end
 
 function WorldImpl:removeSystem(systemName: string)
     self.pipeline:removeSystem(systemName)
+end
+
+function WorldImpl:listSystems(): {types.SystemInfo}
+    return self.pipeline:listSystems()
+end
+
+function WorldImpl:setSystemEnabled(systemName: string, enabled: boolean): boolean, string
+    return self.pipeline:setSystemEnabled(systemName, enabled)
 end
 
 -------------------------------------------------------------------------------

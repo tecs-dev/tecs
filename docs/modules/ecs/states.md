@@ -56,6 +56,25 @@ an unregistered name raises.
 Each transition stages its entity mutations as one transaction and publishes
 them together before returning.
 
+## Reading the stack
+
+`world:peekState()` answers the top name, and `world:listStates()` answers the
+whole stack bottom-first:
+
+```teal
+world:pushState("game")
+world:pushState("pause")
+
+world:listStates() -- {"game", "pause"}
+world:peekState() -- "pause"
+```
+
+Read the whole stack to tell a pause pushed over play from a pause that is all
+there is, which is what a back button, a save prompt and a debugger each need.
+The returned list is a fresh copy and holds only the states that were pushed,
+so a state `createState` registered and nothing pushed does not appear. The
+debug server reports the same stack as the `states` command.
+
 ## Lifecycle policies
 
 | Hook      | Moment                                                 |

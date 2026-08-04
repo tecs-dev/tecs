@@ -683,6 +683,202 @@ describe(
     end
 )
 
+-- What a world answers about its own systems, and what happens when something
+-- turns one off. The listing is the only way anything outside the engine learns
+-- what a world runs, and stopping a system has to take effect on the next
+-- update rather than at the next unrelated add or remove: the flat groups the
+-- dispatch loop reads are rebuilt only when the pipeline is marked dirty, so a
+-- toggle that forgot to mark it would pass every assertion about the listing
+-- and change nothing about the frame.
+describe(
+    "World system listing",
+    function()
+        local world: tecs.World
+
+        before_each(function() world = tecs.ecs.newWorld() end)
+
+        --- Finds one row by name in whatever the world currently lists.
+        local function rowFor(name: string): tecs.ecs.SystemInfo
+            for _, info in ipairs(world:listSystems()) do
+                if info.name == name then
+                    return info
+                end
+            end
+            return nil
+        end
+
+        it(
+            "reports a registered system with its phase, position and state",
+            function()
+                world:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    name = "listing.First",
+                    run = function(_dt: number, _world: tecs.World) end,
+                })
+                world:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    name = "listing.Second",
+                    run = function(_dt: number, _world: tecs.World) end,
+                })
+
+                local first <const> = rowFor("listing.First")
+                local second <const> = rowFor("listing.Second")
+
+                luassert.is_not_nil(first, "the listing must report a system that was added")
+                luassert.equals("Update", first.phase)
+                luassert.equals(1, first.position, "registration order is run order without constraints")
+                luassert.is_true(first.enabled)
+                luassert.is_false(first.hasRunIf, "a system that declares no gate must not claim one")
+                luassert.equals(2, second.position, "positions count within the phase")
+            end
+        )
+
+        it(
+            "reports the position a before constraint moved a system to",
+            function()
+                world:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    name = "listing.Target",
+                    run = function(_dt: number, _world: tecs.World) end,
+                })
+                world:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    name = "listing.Source",
+                    before = {"listing.Target"},
+                    run = function(_dt: number, _world: tecs.World) end,
+                })
+
+                luassert.equals(1, rowFor("listing.Source").position, "the listing reports run order, not add order")
+                luassert.equals(2, rowFor("listing.Target").position)
+            end
+        )
+
+        it(
+            "names the anonymous system the pipeline synthesized",
+            function()
+                world:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    run = function(_dt: number, _world: tecs.World) end,
+                })
+
+                local anonymous: tecs.ecs.SystemInfo = nil
+                for _, info in ipairs(world:listSystems()) do
+                    if info.name:find("^_anonymousSystem") then
+                        anonymous = info
+                    end
+                end
+
+                luassert.is_not_nil(anonymous, "an unnamed system must still be listed under the name it was given")
+                luassert.equals("Update", anonymous.phase)
+                luassert.is_true(anonymous.enabled)
+            end
+        )
+
+        it(
+            "stops a disabled system on the next update and starts it again",
+            function()
+                local runs = 0
+                world:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    name = "listing.Counted",
+                    run = function(_dt: number, _world: tecs.World) runs = runs + 1 end,
+                })
+
+                world:update(FPS)
+                luassert.equals(1, runs, "the system runs before anything disables it")
+
+                luassert.is_true(world:setSystemEnabled("listing.Counted", false))
+                world:update(FPS)
+                luassert.equals(1, runs, "a disabled system must not run on the very next update")
+                luassert.is_false(rowFor("listing.Counted").enabled)
+
+                luassert.is_true(world:setSystemEnabled("listing.Counted", true))
+                world:update(FPS)
+                luassert.equals(2, runs, "and it runs again as soon as it is enabled")
+                luassert.is_true(rowFor("listing.Counted").enabled)
+            end
+        )
+
+        it(
+            "keeps a disabled system registered",
+            function()
+                local before <const> = world:getStats().systems
+                world:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    name = "listing.StillThere",
+                    run = function(_dt: number, _world: tecs.World) end,
+                })
+                world:setSystemEnabled("listing.StillThere", false)
+
+                luassert.equals(before + 1, world:getStats().systems, "disabling is not removing")
+                luassert.is_not_nil(rowFor("listing.StillThere"), "and a disabled system is still listed")
+            end
+        )
+
+        it(
+            "keeps a system's own runIf across a disable and enable cycle",
+            function()
+                local runs = 0
+                local allowed = false
+                world:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    name = "listing.Gated",
+                    runIf = function(_dt: number, _world: tecs.World): boolean return allowed end,
+                    run = function(_dt: number, _world: tecs.World) runs = runs + 1 end,
+                })
+
+                luassert.is_true(rowFor("listing.Gated").hasRunIf)
+
+                world:setSystemEnabled("listing.Gated", false)
+                world:setSystemEnabled("listing.Gated", true)
+
+                luassert.is_true(rowFor("listing.Gated").hasRunIf, "the gate must survive the cycle")
+                world:update(FPS)
+                luassert.equals(0, runs, "an enabled system whose own gate is false still does not run")
+
+                allowed = true
+                world:update(FPS)
+                luassert.equals(1, runs, "and runs once its own gate allows it")
+            end
+        )
+
+        it(
+            "takes one enable to undo two disables",
+            function()
+                local runs = 0
+                world:addSystem({
+                    phase = tecs.ecs.phases.Update,
+                    name = "listing.Repeated",
+                    run = function(_dt: number, _world: tecs.World) runs = runs + 1 end,
+                })
+
+                luassert.is_true(world:setSystemEnabled("listing.Repeated", false))
+                luassert.is_true(world:setSystemEnabled("listing.Repeated", false), "disabling twice is not an error")
+                luassert.is_true(world:setSystemEnabled("listing.Repeated", true))
+
+                world:update(FPS)
+                luassert.equals(1, runs, "nothing nests, so one enable is enough")
+                luassert.is_true(world:setSystemEnabled("listing.Repeated", true), "enabling twice is not an error")
+                world:update(FPS)
+                luassert.equals(2, runs)
+            end
+        )
+
+        it(
+            "reports a name no system carries rather than raising",
+            function()
+                local changed <const>, reason <const> = world:setSystemEnabled("listing.NeverAdded", false)
+
+                luassert.is_false(changed)
+                luassert.is_string(reason, "an agent types this name, so the miss is an outcome and not a crash")
+                luassert.is_truthy(
+                    reason:find("listing.NeverAdded", 1, true), "and the reason names what was asked for"
+                )
+            end
+        )
+    end
+)
+
 describe(
     "World fixed-step configuration",
     function()

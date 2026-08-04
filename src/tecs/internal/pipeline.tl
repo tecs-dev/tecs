@@ -18,11 +18,18 @@ local type System = types.System
 local type Pipeline = types.Pipeline
 local type Phase = types.Phase
 local type SystemConfig = types.SystemConfig
+local type SystemInfo = types.SystemInfo
 local type FixedOverload = types.FixedOverload
 
 -- Pipeline-owned fields are kept off the public SystemConfig contract.
 local record RegisteredSystem is SystemConfig
     id: string
+
+    -- Set by setSystemEnabled. The flat groups leave a disabled system out
+    -- entirely, so disabling costs one rebuild rather than a predicate call per
+    -- frame, and the config's own `runIf` is never touched: it is still the
+    -- system's own gate when the system runs again.
+    disabled: boolean
 end
 
 -- Flattened parallel arrays for a group of systems. Avoids per-system
@@ -324,7 +331,8 @@ local function topologicalSort(systems: {RegisteredSystem}): {RegisteredSystem}
     return sorted
 end
 
--- Build a FlatGroup from a list of registered systems.
+-- Build a FlatGroup from a list of registered systems. A disabled system is
+-- left out rather than gated, so the dispatch loop never sees it.
 local function buildFlatGroup(configs: {RegisteredSystem}): FlatGroup
     local n = #configs
     if n == 0 then
@@ -340,14 +348,22 @@ local function buildFlatGroup(configs: {RegisteredSystem}): FlatGroup
     local commitBefores: {boolean} = table_new(n, 0) as {boolean}
     local commitAfters: {boolean} = table_new(n, 0) as {boolean}
 
+    local count = 0
     for i = 1, n do
         local config = configs[i]
-        runs[i] = config.run
-        runIfs[i] = config.runIf
-        ids[i] = config.id
-        names[i] = config.name
-        commitBefores[i] = config.commitBefore or false
-        commitAfters[i] = config.commitAfter or false
+        if not config.disabled then
+            count = count + 1
+            runs[count] = config.run
+            runIfs[count] = config.runIf
+            ids[count] = config.id
+            names[count] = config.name
+            commitBefores[count] = config.commitBefore or false
+            commitAfters[count] = config.commitAfter or false
+        end
+    end
+
+    if count == 0 then
+        return EMPTY_GROUP
     end
 
     return {
@@ -357,7 +373,7 @@ local function buildFlatGroup(configs: {RegisteredSystem}): FlatGroup
         names = names,
         commitBefores = commitBefores,
         commitAfters = commitAfters,
-        count = n,
+        count = count,
     }
 end
 
@@ -698,6 +714,67 @@ function PipelineImpl:addSystem(config: SystemConfig)
     self.systems[phase.position][#self.systems[phase.position] + 1] = registered
     self.count = self.count + 1
     self.dirty = true
+end
+
+function PipelineImpl:listSystems(): {SystemInfo}
+    -- Positions are reported in run order, and run order is what the rebuild
+    -- decides, so a listing taken between an add and the next update rebuilds
+    -- rather than reporting registration order as if it were the schedule.
+    if self.dirty then
+        recreatePipeline(self)
+    end
+
+    local rows: {SystemInfo} = {}
+    for position = 1, #phases.index do
+        local phaseSystems <const> = self.systems[position]
+        if phaseSystems ~= nil then
+            local phaseName <const> = phases.index[position].name or "Unknown"
+            for index = 1, #phaseSystems do
+                local config <const> = phaseSystems[index]
+                rows[#rows + 1] = {
+                    name = config.name,
+                    phase = phaseName,
+                    position = index,
+                    enabled = not config.disabled,
+                    hasRunIf = config.runIf ~= nil,
+                }
+            end
+        end
+    end
+    return rows
+end
+
+function PipelineImpl:setSystemEnabled(systemName: string, enabled: boolean): boolean, string
+    local phasePosition <const> = self.systemNameRegistry[systemName]
+    if phasePosition == nil then
+        return false, "no system named '" .. systemName .. "' is registered"
+    end
+
+    local phaseSystems <const> = self.systems[phasePosition]
+    local found: RegisteredSystem = nil
+    if phaseSystems ~= nil then
+        for index = 1, #phaseSystems do
+            if phaseSystems[index].name == systemName then
+                found = phaseSystems[index]
+                break
+            end
+        end
+    end
+    if found == nil then
+        return false, "no system named '" .. systemName .. "' is registered"
+    end
+
+    -- Idempotent, and deliberately without a rebuild: a session that stops an
+    -- already stopped system pays nothing for saying so twice. A system that
+    -- has never been disabled carries no flag at all, so the comparison is
+    -- against the state rather than against the field.
+    local wanted <const> = not enabled
+    if (found.disabled == true) == wanted then
+        return true
+    end
+    found.disabled = wanted
+    self.dirty = true
+    return true
 end
 
 -- Recursive phase dispatch. Each leaf phase is one transaction.

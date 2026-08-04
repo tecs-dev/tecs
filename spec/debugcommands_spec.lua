@@ -289,6 +289,123 @@ describe("the engine's own debug commands", function()
         end)
     end)
 
+    describe("systems", function()
+        setup(function()
+            world:addSystem({
+                name = "spec.debug.Idle",
+                phase = tecs.ecs.phases.Update,
+                run = function() end,
+            })
+            world:addSystem({
+                name = "spec.debug.Gated",
+                phase = tecs.ecs.phases.PostUpdate,
+                runIf = function()
+                    return false
+                end,
+                run = function() end,
+            })
+        end)
+
+        local function rowFor(answer, name)
+            for _, row in ipairs(answer.systems) do
+                if row.name == name then
+                    return row
+                end
+            end
+            return nil
+        end
+
+        it("lists the systems with their phase and position", function()
+            local answer = ok("systems_list", {})
+            assert.are.equal(#answer.systems, answer.total)
+            assert.is_true(answer.registered >= answer.total)
+
+            local row = rowFor(answer, "spec.debug.Idle")
+            assert.is_not_nil(row, "the listing did not report a system the spec added")
+            assert.are.equal("Update", row.phase)
+            assert.is_number(row.position)
+            assert.is_true(row.enabled)
+            assert.is_false(row.hasRunIf)
+            assert.is_true(rowFor(answer, "spec.debug.Gated").hasRunIf)
+        end)
+
+        it("narrows the listing to one phase", function()
+            local answer = ok("systems_list", { phase = "PostUpdate" })
+            for _, row in ipairs(answer.systems) do
+                assert.are.equal("PostUpdate", row.phase)
+            end
+            assert.is_not_nil(rowFor(answer, "spec.debug.Gated"))
+        end)
+
+        it("reports one system by name", function()
+            local answer = ok("systems_info", { name = "spec.debug.Idle" })
+            assert.are.equal("spec.debug.Idle", answer.name)
+            assert.are.equal("Update", answer.phase)
+            assert.is_true(answer.enabled)
+        end)
+
+        it("stops a system, narrows the listing to it, and starts it again", function()
+            local stopped = ok("systems_stop", { name = "spec.debug.Idle" })
+            assert.is_false(stopped.enabled)
+
+            local disabled = ok("systems_list", { disabled = true })
+            assert.is_not_nil(rowFor(disabled, "spec.debug.Idle"), "the stopped system is not in the disabled list")
+            for _, row in ipairs(disabled.systems) do
+                assert.is_false(row.enabled)
+            end
+
+            local started = ok("systems_start", { name = "spec.debug.Idle" })
+            assert.is_true(started.enabled)
+            assert.is_true(ok("systems_info", { name = "spec.debug.Idle" }).enabled)
+        end)
+
+        it("names the system that does not exist rather than raising", function()
+            for _, name in ipairs({ "systems_info", "systems_stop", "systems_start" }) do
+                assert.is_truthy(
+                    failureOf(name, { name = "spec.debug.NeverAdded" }):find("unknown_system"),
+                    name .. " did not report unknown_system"
+                )
+            end
+        end)
+    end)
+
+    describe("states", function()
+        setup(function()
+            world:createState("spec.debug.play")
+            world:createState("spec.debug.pause")
+        end)
+
+        it("refuses to pop an empty stack", function()
+            assert.are.equal(0, ok("states_info", {}).depth)
+            assert.is_truthy(failureOf("states_pop", {}):find("empty_stack"))
+        end)
+
+        it("names the state nothing created", function()
+            assert.is_truthy(failureOf("states_push", { name = "spec.debug.never" }):find("unknown_state"))
+        end)
+
+        it("pushes, reports the whole stack bottom-first, and pops back down", function()
+            local pushed = ok("states_push", { name = "spec.debug.play" })
+            assert.are.equal(1, pushed.depth)
+            assert.are.equal("spec.debug.play", pushed.top)
+
+            local deeper = ok("states_push", { name = "spec.debug.pause" })
+            assert.are.equal(2, deeper.depth)
+            assert.are.same({ "spec.debug.play", "spec.debug.pause" }, deeper.states)
+
+            local reported = ok("states_info", {})
+            assert.are.same(deeper.states, reported.states)
+            assert.are.equal("spec.debug.pause", reported.top)
+
+            local popped = ok("states_pop", {})
+            assert.are.equal(1, popped.depth)
+            assert.are.equal("spec.debug.play", popped.top)
+
+            assert.are.equal(0, ok("states_pop", {}).depth)
+            assert.is_nil(ok("states_info", {}).top)
+        end)
+    end)
+
     describe("discovery", function()
         it("describes every command the engine registered", function()
             for _, name in ipairs(debugapi.of(world).names) do

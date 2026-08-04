@@ -77,6 +77,7 @@ local rendercmds <const> = require("tecs.debug.internal.cmd.render")
 local enginecmds <const> = require("tecs.debug.internal.cmd.engine")
 local capturecmds <const> = require("tecs.debug.internal.cmd.capture")
 local physicscmds <const> = require("tecs.debug.internal.cmd.physics")
+local sessioncmds <const> = require("tecs.debug.internal.cmd.session")
 
 local record debugapi
     --- Declares one command.
@@ -97,8 +98,8 @@ local record debugapi
     --- Holds the commands one world has declared.
     type Registry = registry.Registry
 
-    --- Groups commands in help and in the generated reference, in the order
-    --- they are presented. A command that names no section groups as
+    --- Read-only. Groups commands in help and in the generated reference, in
+    --- the order they are presented. A command that names no section groups as
     --- `"Custom"`.
     SECTIONS: {string}
 
@@ -126,6 +127,7 @@ local GROUPS <const>: {function(debugtypes.Env): {debugtypes.Command}} = {
     enginecmds.commands,
     capturecmds.commands,
     physicscmds.commands,
+    sessioncmds.commands,
 }
 
 --- Returns the registry installed in `world`.
