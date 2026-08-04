@@ -123,7 +123,9 @@ local function rectangle(texture, area)
     local width = area.width or texture.width
     local height = area.height or texture.height
     if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > texture.width or y + height > texture.height then
-        fail(("region (%d,%d %dx%d) is outside %dx%d target"):format(x, y, width, height, texture.width, texture.height))
+        fail(
+            ("region (%d,%d %dx%d) is outside %dx%d target"):format(x, y, width, height, texture.width, texture.height)
+        )
     end
     return x, y, width, height
 end
@@ -178,9 +180,8 @@ function render.difference(texture, before, after, area, threshold)
         for column = x, x + width - 1 do
             local first = texture:getPixel(before, column, row)
             local second = texture:getPixel(after, column, row)
-            local delta = math.max(
-                math.abs(first.r - second.r), math.abs(first.g - second.g), math.abs(first.b - second.b)
-            )
+            local delta =
+                math.max(math.abs(first.r - second.r), math.abs(first.g - second.g), math.abs(first.b - second.b))
             total = total + delta
             maximum = math.max(maximum, delta)
             if delta > threshold then
@@ -199,39 +200,43 @@ end
 
 function render.assertVisible(context, measurement, message)
     if measurement.nonBlackRatio < 0.01 or measurement.channelRange < 8 then
-        fail((
-            "%s on %s: non-black %.3f%%, channel range %d, mean luma %.2f"
-        ):format(
-            message or "expected visible output",
-            context.driver,
-            measurement.nonBlackRatio * 100,
-            measurement.channelRange,
-            measurement.meanLuma
-        ))
+        fail(
+            ("%s on %s: non-black %.3f%%, channel range %d, mean luma %.2f"):format(
+                message or "expected visible output",
+                context.driver,
+                measurement.nonBlackRatio * 100,
+                measurement.channelRange,
+                measurement.meanLuma
+            )
+        )
     end
 end
 
 function render.assertChanged(context, difference, minimumRatio, message)
     minimumRatio = minimumRatio or 0.001
     if difference.changedRatio < minimumRatio then
-        fail(("%s on %s: %.3f%% of pixels changed, expected at least %.3f%%"):format(
-            message or "expected rendered output to change",
-            context.driver,
-            difference.changedRatio * 100,
-            minimumRatio * 100
-        ))
+        fail(
+            ("%s on %s: %.3f%% of pixels changed, expected at least %.3f%%"):format(
+                message or "expected rendered output to change",
+                context.driver,
+                difference.changedRatio * 100,
+                minimumRatio * 100
+            )
+        )
     end
 end
 
 function render.assertStable(context, difference, maximumRatio, message)
     maximumRatio = maximumRatio or 0
     if difference.changedRatio > maximumRatio then
-        fail(("%s on %s: %.3f%% of pixels changed, expected at most %.3f%%"):format(
-            message or "expected rendered output to remain stable",
-            context.driver,
-            difference.changedRatio * 100,
-            maximumRatio * 100
-        ))
+        fail(
+            ("%s on %s: %.3f%% of pixels changed, expected at most %.3f%%"):format(
+                message or "expected rendered output to remain stable",
+                context.driver,
+                difference.changedRatio * 100,
+                maximumRatio * 100
+            )
+        )
     end
 end
 
