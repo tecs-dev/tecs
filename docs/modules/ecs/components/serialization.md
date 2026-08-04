@@ -23,7 +23,8 @@ tecs.ecs.newComponent({
 
 FFI components save every declared field. A binary snapshot copies a matching
 column as raw bytes. Scalar components save their raw value, and tags save
-their presence.
+their presence: a tag holds no per-row state, so it writes an empty payload and
+loads back from any payload a snapshot carries for it.
 
 The named constructor must remain defined for automatic table deserialization.
 See [Named construction](/modules/ecs/components/construction#table-construction).

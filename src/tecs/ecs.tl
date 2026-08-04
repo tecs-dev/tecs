@@ -262,7 +262,8 @@ local record ecs
     --- @return Returns the registered component whose rows hold bare values.
     newScalarComponent: function<T>(options: ScalarComponentOptions<T>): ScalarComponent<T>
 
-    --- Creates and registers a tag component.
+    --- Creates and registers a tag component. A tag holds no per-row state,
+    --- so a snapshot saves its presence and writes no payload for it.
     ---
     --- @param options The caller supplies the tag name.
     --- @return Returns the registered bitset-backed tag.

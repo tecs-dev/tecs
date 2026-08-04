@@ -1407,7 +1407,12 @@ local function expandEntry(
     for i = 1, width do
         local ct = componentTypes[i]
         local data = entry[i + 1]
-        if ct and data ~= nil and ct.deserialize then
+        -- The row path rebuilds an entity from these values, so a component
+        -- with no payload is a component the entity loads without. A tag
+        -- carries no payload by design, so it deserializes from an absent
+        -- one too; every other component keeps the rule that a missing
+        -- value means the saver could not round-trip it.
+        if ct and ct.deserialize and (data ~= nil or (ct as ComponentInternal).storageType == "tag") then
             comps[i] = ct.deserialize(world, data as {string: any})
         else
             comps[i] = nil

@@ -37,7 +37,9 @@ local record storage
     newScalarStorage: function(kind: string, defaultValue: any): Storage
 
     --- Tag storage. Presence is archetype-defined (no per-row state);
-    --- reads return the container for any row, writes are no-ops.
+    --- reads return the container for any row, writes are no-ops. Its
+    --- snapshot codec writes an empty payload and reads any payload back
+    --- as the container, so a tag costs its presence and nothing else.
     --- @param container The component to return on any read.
     newBitsetStorage: function(container: Component): Storage
 
@@ -154,7 +156,26 @@ function storage.newBitsetStorage(container: Component): Storage
         createComponent = function(_self: Storage, _container: Component): ComponentAllocator<Component>
             return function(): Component return container end
         end,
-    }
+
+        -- A tag holds no per-row state, so its snapshot payload is empty:
+        -- presence in the archetype is the whole value. The pair still has
+        -- to exist. Snapshot emits a column only for a component that has
+        -- a `serialize`, and the table format restores presence from the
+        -- per-entity payload, so a tag that serialized to nothing would
+        -- come back missing. Without this pair the component falls through
+        -- to the default codec in `internal/components.tl`, which walks the
+        -- instance; a tag's instance is the container itself, so archetype
+        -- signature bookkeeping reaches the save file.
+        serialize = function(_self: Storage, _instance: Component): {string: any} return {} end,
+
+        -- The payload is ignored, which is what lets a save written before
+        -- tags carried a codec load unchanged: its recorded fields are read
+        -- and discarded, and an absent or empty payload restores the same
+        -- tag. Column writes are no-ops (`TAG_MT.__newindex`), so returning
+        -- the container costs nothing on the column-major load path and
+        -- carries presence on the row-major one.
+        deserialize = function(_self: Storage, _data: {string: any}): Component return container end,
+    } as Storage
 end
 
 function storage.newFFIStorage(def: {string: any}): Storage

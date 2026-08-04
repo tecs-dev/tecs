@@ -1351,6 +1351,193 @@ describe(
             end
         )
 
+        -- Tags carry no per-row state, so their whole saved cost is presence.
+        -- The payload a tag wrote before it had a codec is the fixture below:
+        -- the default table codec walked the instance, and a tag's instance is
+        -- the container, so archetype signature bookkeeping reached the file.
+        local LEGACY_TAG_PAYLOAD <const>: {string: any} = {
+            _hasRequires = false,
+            signatureIndex = 6,
+            signatureWordIndex = 0,
+            storageType = "tag",
+            transient = false,
+        }
+
+        local function keyCount(payload: {string: any}): integer
+            local n = 0
+            for _ in pairs(payload) do
+                n = n + 1
+            end
+            return n
+        end
+
+        -- Answers the entity rows of the archetype carrying `name`, plus the
+        -- archetype-local column the component occupies in each row.
+        local function findColumn(snap: tecs.ecs.Snapshot, name: string): {{any}}, integer
+            for a = 1, #snap.archetypes do
+                local arch = snap.archetypes[a]
+                for i = 1, #arch.columnIndices do
+                    if snap.componentTable[arch.columnIndices[i]].name == name then
+                        return arch.entities, i
+                    end
+                end
+            end
+            return nil, 0
+        end
+
+        it(
+            "writes an empty payload for a tag, whichever spawn form set it",
+            function()
+                local testId = math.random(1, 1000000)
+                local Marker = tecs.ecs.newTagComponent({name = "SnapTagPayload" .. testId})
+
+                -- A tag's constructor answers the container, so `Marker` and
+                -- `Marker()` are the same value and reach the row the same way.
+                luassert.is_true(rawequal(Marker, Marker()))
+
+                local world = tecs.ecs.newWorld()
+                local a = world:spawn(PositionComp(1, 1), Marker)
+                local b = world:spawn(PositionComp(2, 2), Marker())
+                world:enqueueCommit()
+
+                local snap = saveTableSnapshot(world)
+                local rows, column = findColumn(snap, Marker.componentName)
+                luassert.is_not_nil(rows, "the tag keeps a column so load can restore presence")
+                luassert.equals(2, #rows)
+                for row = 1, #rows do
+                    local payload = rows[row][column + 1] as {string: any}
+                    luassert.is_table(payload)
+                    luassert.equals(0, keyCount(payload), "a tag payload carries no engine metadata")
+                end
+
+                world:loadSnapshot(snap)
+                luassert.is_true(world:has(a, Marker))
+                luassert.is_true(world:has(b, Marker))
+            end
+        )
+
+        it(
+            "restores a tag on the same entities through both formats",
+            function()
+                local testId = math.random(1, 1000000)
+                local Marker = tecs.ecs.newTagComponent({name = "SnapTagRoundTrip" .. testId})
+
+                local world = tecs.ecs.newWorld()
+                local tagged: {integer} = {}
+                for i = 1, 3 do
+                    tagged[i] = world:spawn(PositionComp(i, i), Marker)
+                end
+                local plain = world:spawn(PositionComp(9, 9))
+                world:enqueueCommit()
+
+                local snap = saveTableSnapshot(world)
+                local binary = saveBinarySnapshot(world)
+
+                world:loadSnapshot(snap)
+                for i = 1, #tagged do
+                    luassert.is_true(world:has(tagged[i], Marker), "table format, entity " .. i)
+                end
+                luassert.is_false(world:has(plain, Marker))
+
+                world:loadSnapshot(binary)
+                for i = 1, #tagged do
+                    luassert.is_true(world:has(tagged[i], Marker), "binary format, entity " .. i)
+                end
+                luassert.is_false(world:has(plain, Marker))
+                luassert.equals(1, world:get(tagged[1], PositionComp).x)
+            end
+        )
+
+        it(
+            "loads a table snapshot whose tag payload predates the tag codec",
+            function()
+                local testId = math.random(1, 1000000)
+                local Marker = tecs.ecs.newTagComponent({name = "SnapTagLegacyTable" .. testId})
+
+                local world = tecs.ecs.newWorld()
+                local a = world:spawn(PositionComp(1, 1), Marker)
+                local b = world:spawn(PositionComp(2, 2), Marker)
+                world:enqueueCommit()
+
+                local snap = saveTableSnapshot(world)
+                local rows, column = findColumn(snap, Marker.componentName)
+                luassert.is_not_nil(rows)
+                -- Stamp the payload an older engine wrote, and drop the second
+                -- one entirely: a tag that lost its payload keeps its presence.
+                rows[1][column + 1] = LEGACY_TAG_PAYLOAD
+                rows[2][column + 1] = nil
+
+                local signatureIndex <const> = (Marker as {string: any}).signatureIndex
+                world:loadSnapshot(snap)
+                luassert.is_true(world:has(a, Marker), "legacy payload still names the tag")
+                luassert.is_true(world:has(b, Marker), "an absent payload still names the tag")
+                luassert.equals(1, world:get(a, PositionComp).x)
+                -- The recorded fields are read and discarded; the load must not
+                -- write the saved bookkeeping back onto the live component.
+                luassert.equals(signatureIndex, (Marker as {string: any}).signatureIndex)
+            end
+        )
+
+        it(
+            "loads a binary snapshot whose tag payload predates the tag codec",
+            function()
+                local testId = math.random(1, 1000000)
+                local tagName = "SnapTagLegacyBinary" .. testId
+                local Marker = tecs.ecs.newTagComponent({name = tagName})
+
+                -- Hand-built frame in the on-disk layout, holding the payload
+                -- every tag wrote before it had a codec.
+                local buffer = require("string.buffer")
+                local ffi = require("ffi")
+                local buf = buffer.new()
+                buf:encode(1) -- version
+                buf:encode(2) -- nextEntityId
+                buf:encode(1) -- entityCount
+                buf:encode(1) -- archetypeCount
+                buf:encode(1) -- componentCount
+                buf:encode(tagName)
+                buf:encode("") -- tags carry no FFI schema fingerprint
+                buf:encode(1) -- columnCount
+                buf:encode(1) -- entityCount
+                buf:encode(1) -- columnIndex
+                buf:encode(0) -- column-major mode
+                local idsRaw = ffi.new("double[?]", 1)
+                local ids = idsRaw as {number}
+                ids[0] = 1
+                buf:putcdata(idsRaw, 8)
+                buf:encode(LEGACY_TAG_PAYLOAD)
+                buf:encode(nil) -- data section end
+
+                local world = tecs.ecs.newWorld()
+                world:loadSnapshot(buf)
+
+                luassert.is_true(world:isAlive(1))
+                luassert.is_true(world:has(1, Marker))
+            end
+        )
+
+        it(
+            "writes an empty payload for the builtin tags",
+            function()
+                local world = tecs.ecs.newWorld()
+                local a = world:spawn(PositionComp(1, 1), tecs.ecs.Disabled)
+                local b = world:spawn(PositionComp(2, 2), tecs.ecs.Disabled)
+                world:enqueueCommit()
+
+                local snap = saveTableSnapshot(world)
+                local rows, column = findColumn(snap, tecs.ecs.Disabled.componentName)
+                luassert.is_not_nil(rows)
+                for row = 1, #rows do
+                    local payload = rows[row][column + 1] as {string: any}
+                    luassert.equals(0, keyCount(payload), "Disabled carries no engine metadata")
+                end
+
+                world:loadSnapshot(snap)
+                luassert.is_true(world:has(a, tecs.ecs.Disabled))
+                luassert.is_true(world:has(b, tecs.ecs.Disabled))
+            end
+        )
+
         it(
             "componentTable in saveSnapshotTable lists each component once",
             function()
