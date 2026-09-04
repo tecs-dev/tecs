@@ -584,6 +584,26 @@ function suite.roundTripsSimulationStateUnderTheEstablishedKey(): nil
     test.equal(assert(world:get(entity, physics.Motion)).vx, 128)
 end
 
+function suite.reattachesAJointAfterASnapshotLoad(): nil
+    local world = newWorld()
+    local anchor = world:spawn()
+    physics.attach(world, anchor, {kind = "static"})
+    local arm = world:spawn()
+    physics.attach(world, arm)
+    local joint = world:spawn()
+    physics.attachJoint(world, joint, anchor, arm, {kind = "revolute"})
+    world:update(STEP)
+    local before = assert(world:get(joint, physics.JointLink))
+
+    world:loadSnapshot(world:saveSnapshot())
+
+    local after = assert(world:get(joint, physics.JointLink))
+    test.equal(after.index1, before.index1)
+    test.equal(after.generation, before.generation)
+    test.equal(assert(world:get(joint, physics.JointBodyA)).target, anchor)
+    test.equal(assert(world:get(joint, physics.JointBodyB)).target, arm)
+end
+
 function suite.ignoresASnapshotFromAnotherEngine(): nil
     local world, backend = newWorld()
     local entity = world:spawn()
