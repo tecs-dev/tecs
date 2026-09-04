@@ -1,0 +1,111 @@
+local gfx = require("tecs.gfx")
+local test = require("nupp.test")
+
+local suite = {}
+
+const WIDTH = 640.0
+const HEIGHT = 360.0
+
+local function close(actual: number, expected: number, message: string): nil
+    test.assert(math.abs(actual - expected) < 1e-4, message .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
+end
+
+--- Applies a column-major world-to-clip matrix to one world point.
+local function project(matrix: {number}, x: number, y: number): number, number
+    return matrix[1] * x + matrix[5] * y + matrix[13], matrix[2] * x + matrix[6] * y + matrix[14]
+end
+
+function suite.centersTheViewOnItsPosition(): nil
+    const camera = gfx.Camera2D(100, 50, 1, 0).value
+    const screenX, screenY = camera:toScreen(100, 50, WIDTH, HEIGHT)
+    close(screenX, WIDTH * 0.5, "the view center lands in the middle")
+    close(screenY, HEIGHT * 0.5, "the view center lands in the middle")
+
+    -- World y and target y both run down, so a larger world y is lower.
+    const _, below = camera:toScreen(100, 90, WIDTH, HEIGHT)
+    test.assert(below > screenY, "increasing world y moves down the target")
+end
+
+function suite.roundTripsAPointThroughBothConversions(): nil
+    const camera = gfx.Camera2D(37, -12, 2.5, 0.7).value
+    const worldX, worldY = camera:toWorld(123, 45, WIDTH, HEIGHT)
+    const screenX, screenY = camera:toScreen(worldX, worldY, WIDTH, HEIGHT)
+    close(screenX, 123, "screen x round-trips")
+    close(screenY, 45, "screen y round-trips")
+end
+
+function suite.agreesWithItsOwnMatrix(): nil
+    -- The matrix is the statement the shader transcribes, so it has to answer
+    -- exactly what `toScreen` answers for the same viewport.
+    const camera = gfx.Camera2D(220, 140, 1.75, -0.4).value
+    const matrix = camera:matrix(WIDTH, HEIGHT)
+    for _, point in ipairs({{0.0, 0.0}, {220.0, 140.0}, {-90.0, 610.0}, {639.0, 359.0}}) do
+        const clipX, clipY = project(matrix, point[1], point[2])
+        const screenX, screenY = camera:toScreen(point[1], point[2], WIDTH, HEIGHT)
+        close(clipX, screenX / WIDTH * 2.0 - 1.0, "the matrix and toScreen agree on x")
+        close(clipY, 1.0 - screenY / HEIGHT * 2.0, "the matrix and toScreen agree on y")
+    end
+end
+
+function suite.reproducesTheTargetPixelMappingWhenCentered(): nil
+    -- The view extraction supplies when a world holds no camera. It must place
+    -- one world unit on one target pixel with the origin at the top left, which
+    -- is the mapping every unconfigured scene is authored in.
+    const camera = gfx.Camera2D(WIDTH * 0.5, HEIGHT * 0.5, 1, 0).value
+    const matrix = camera:matrix(WIDTH, HEIGHT)
+    const originX, originY = project(matrix, 0, 0)
+    close(originX, -1.0, "the world origin is the top left corner")
+    close(originY, 1.0, "the world origin is the top left corner")
+    const farX, farY = project(matrix, WIDTH, HEIGHT)
+    close(farX, 1.0, "the far corner is the bottom right")
+    close(farY, -1.0, "the far corner is the bottom right")
+end
+
+function suite.turnsTheSceneCounterClockwise(): nil
+    -- A quarter turn moves a point that was to the right of the center up the
+    -- target, which is counter-clockwise on a downward y axis.
+    const camera = gfx.Camera2D(0, 0, 1, math.pi * 0.5).value
+    const screenX, screenY = camera:toScreen(100, 0, WIDTH, HEIGHT)
+    close(screenX, WIDTH * 0.5, "the point leaves the horizontal axis")
+    close(screenY, HEIGHT * 0.5 - 100, "the point rises up the target")
+end
+
+function suite.zoomsAboutTheViewCenter(): nil
+    const camera = gfx.Camera2D(80, 60, 2, 0).value
+    const centerX, centerY = camera:toScreen(80, 60, WIDTH, HEIGHT)
+    close(centerX, WIDTH * 0.5, "zoom does not move the center")
+    close(centerY, HEIGHT * 0.5, "zoom does not move the center")
+    const offsetX = camera:toScreen(90, 60, WIDTH, HEIGHT)
+    close(offsetX, WIDTH * 0.5 + 20, "ten world units cover twenty pixels at zoom two")
+end
+
+function suite.boundsWhatTheViewCanSee(): nil
+    const camera = gfx.Camera2D(0, 0, 1, 0).value
+    const minX, minY, maxX, maxY = camera:viewBounds(WIDTH, HEIGHT)
+    close(minX, -WIDTH * 0.5, "an unrotated view is exactly the viewport")
+    close(minY, -HEIGHT * 0.5, "an unrotated view is exactly the viewport")
+    close(maxX, WIDTH * 0.5, "an unrotated view is exactly the viewport")
+    close(maxY, HEIGHT * 0.5, "an unrotated view is exactly the viewport")
+
+    const turned = gfx.Camera2D(0, 0, 1, 0.6).value
+    const turnedMinX, turnedMinY, turnedMaxX, turnedMaxY = turned:viewBounds(WIDTH, HEIGHT)
+    test.assert(turnedMinX < minX and turnedMaxX > maxX, "a turned view keeps more than it must")
+    test.assert(turnedMinY < minY and turnedMaxY > maxY, "a turned view keeps more than it must")
+
+    -- Every corner of the turned viewport lies inside the reported bound.
+    for _, corner in ipairs({{0.0, 0.0}, {WIDTH, 0.0}, {0.0, HEIGHT}, {WIDTH, HEIGHT}}) do
+        const worldX, worldY = turned:toWorld(corner[1], corner[2], WIDTH, HEIGHT)
+        test.assert(worldX >= turnedMinX - 1e-6 and worldX <= turnedMaxX + 1e-6, "a corner is inside the bound")
+        test.assert(worldY >= turnedMinY - 1e-6 and worldY <= turnedMaxY + 1e-6, "a corner is inside the bound")
+    end
+end
+
+function suite.defaultsToAnUnzoomedViewAtTheOrigin(): nil
+    const camera = gfx.Camera2D().value
+    test.equal(camera.x, 0)
+    test.equal(camera.y, 0)
+    test.equal(camera.zoom, 1)
+    test.equal(camera.rotation, 0)
+end
+
+return suite

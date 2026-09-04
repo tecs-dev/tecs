@@ -1,0 +1,371 @@
+module tecs.gfx.images
+
+--[[
+Image identity, residency, and the commands that carry pixels to the backend.
+
+A game names an image, hands over its pixels, and receives a small integer that
+a [`Sprite`](tecs.gfx.Sprite) stores. The backend owns the texture, the view,
+the sampler, and the bind group; nothing native reaches game code.
+
+```nupp
+const images = tecs.gfx.images
+
+const id = images.upload({
+    name = "tiles/grass",
+    width = 2,
+    height = 2,
+    pixels = grassRgba8,
+    filter = "nearest",
+})
+
+world:spawn(
+    tecs.ecs.Transform2D(64, 64, 0, 1, 0, 32, 32),
+    tecs.gfx.Tint(1, 1, 1, 1),
+    tecs.gfx.Sprite(id),
+    tecs.gfx.Renderable2D
+)
+```
+
+An id is permanent and process-wide, in the same way component identity is, so
+a snapshot stores the name and resolves the id again on load. Uploading a name
+twice replaces the image behind that same id, and every sprite already pointing
+at it draws the new pixels on the next frame.
+
+Residency is observed rather than waited on. `upload` queues a command and
+answers immediately with `"pending"`; the host drains the command, reports the
+outcome, and `stateOf` then answers `"resident"` or `"failed"`. Extraction
+draws a sprite whose image is not resident against the backend's opaque white
+fallback, so a missing asset is a visibly untextured quad rather than a
+dropped entity or a raised error.
+
+Pixels are eight-bit RGBA with unassociated alpha, four bytes per texel, in
+rows running top to bottom. That is the only accepted layout, and the command
+names it so a later format costs a value rather than a command shape.
+]]
+
+--- The pixel layout an upload carries.
+---
+--- This value crosses to the backend inside a command and is a compatibility
+--- surface.
+export type Format = "rgba8"
+
+--- Selects minification and magnification filtering.
+---
+--- These identifiers reach configuration a developer writes and are a
+--- compatibility surface.
+export type Filter = "nearest" | "linear"
+
+--- Selects what sampling outside the zero-to-one range returns.
+---
+--- These identifiers reach configuration a developer writes and are a
+--- compatibility surface.
+export type Address = "clamp" | "repeat" | "mirror"
+
+--- Reports where one named image stands with the backend.
+export type State = "unknown" | "pending" | "resident" | "failed" | "released"
+
+--- The options `upload` accepts.
+export type UploadOptions = {
+    name: string,
+    width: integer,
+    height: integer,
+    pixels: string,
+    filter: Filter?,
+    address: Address?
+}
+
+--- Asks the backend to make one image resident under an id.
+export record UploadImageCommand
+    --- Read-only. Names the command kind, which is a compatibility surface.
+    kind: string
+
+    --- Read-only. Identifies the command for its completion report.
+    serial: integer
+
+    --- Read-only. Selects the process-wide image id the texture lands under.
+    image: integer
+
+    --- Read-only. Reports the width in texels.
+    width: integer
+
+    --- Read-only. Reports the height in texels.
+    height: integer
+
+    --- Read-only. Names the pixel layout.
+    format: Format
+
+    --- Read-only. Selects one of the backend's `SAMPLER_COUNT` samplers.
+    sampler: integer
+
+    --- Read-only. Carries the texel bytes, which the host copies and forgets.
+    pixels: string
+end
+
+--- Asks the backend to drop one image and everything bound to it.
+export record ReleaseImageCommand
+    --- Read-only. Names the command kind, which is a compatibility surface.
+    kind: string
+
+    --- Read-only. Identifies the command for its completion report.
+    serial: integer
+
+    --- Read-only. Selects the process-wide image id to drop.
+    image: integer
+end
+
+--- One queued residency request.
+export type Command = UploadImageCommand | ReleaseImageCommand
+
+--- The number of distinct samplers a backend must create.
+---
+--- Every filter paired with every address mode, so a sampler is selected by
+--- index and never created on demand.
+export const SAMPLER_COUNT: integer = 6
+
+local filterIds: {[string]: integer} = {nearest = 0, linear = 1}
+local addressIds: {[string]: integer} = {clamp = 0, ["repeat"] = 1, mirror = 2}
+
+local record Entry
+    id: integer
+    name: string
+    state: State
+    width: integer
+    height: integer
+    sampler: integer
+    reason: string?
+    serial: integer
+end
+
+local byName: {[string]: Entry} = {}
+local byId: {[integer]: Entry} = {}
+local count: integer = 0
+local pending: {Command} = {}
+local nextSerial: integer = 0
+
+local function intern(name: string): Entry
+    local existing = byName[name]
+    if existing ~= nil then
+        return existing
+    end
+    count = count + 1
+    local entry = new Entry(
+        id = count,
+        name = name,
+        state = "unknown",
+        width = 0,
+        height = 0,
+        sampler = 0,
+        reason = nil,
+        serial = 0
+    )
+    byName[name] = entry
+    byId[count] = entry
+
+    return entry
+end
+
+local function lookup(image: integer): Entry?
+    return byId[image]
+end
+
+--- Returns the permanent id one image name resolves to.
+---
+--- Interning a name does not make it resident. A sprite may be built against
+--- an id whose pixels arrive later, or never.
+--- @param name the stable image name, which a snapshot stores
+--- @return the process-wide image id, which is always greater than zero
+--- @raises when the name is empty
+export function id(name: string): integer
+    if name == "" then
+        error("gfx.images.id: name must not be empty", 2)
+    end
+
+    return intern(name).id
+end
+
+--- Returns the name one image id was interned under.
+--- @param image the process-wide image id
+--- @return the name, or nil when no image carries that id
+export function nameOf(image: integer): string?
+    local entry = lookup(image)
+
+    return entry and entry.name or nil
+end
+
+--- Returns where one image stands with the backend.
+--- @param image the process-wide image id
+--- @return the residency state, which is `"unknown"` for an id nothing uploaded
+export function stateOf(image: integer): State
+    local entry = lookup(image)
+    if entry == nil then
+        return "unknown"
+    end
+
+    return entry.state
+end
+
+--- Returns why the backend rejected one image.
+--- @param image the process-wide image id
+--- @return the host failure reason, or nil unless the state is `"failed"`
+export function failureOf(image: integer): string?
+    local entry = lookup(image)
+    if entry == nil or entry.state ~= "failed" then
+        return nil
+    end
+
+    return entry.reason
+end
+
+--- Returns the texel dimensions the last accepted upload declared.
+--- @param image the process-wide image id
+--- @return the width and then the height in texels, both zero before an upload
+export function sizeOf(image: integer): integer, integer
+    local entry = lookup(image)
+    if entry == nil then
+        return 0, 0
+    end
+
+    return entry.width, entry.height
+end
+
+--- Returns the sampler index extraction writes for one image.
+--- @param image the process-wide image id
+--- @return the sampler index, which is nearest filtering with clamped edges for an
+---     unknown id
+export function samplerOf(image: integer): integer
+    local entry = lookup(image)
+    if entry == nil then
+        return 0
+    end
+
+    return entry.sampler
+end
+
+--- Returns the sampler index one filter and address mode select.
+--- @param filter the filtering mode, defaulting to `"nearest"`
+--- @param address the addressing mode, defaulting to `"clamp"`
+--- @return the sampler index, from zero to `SAMPLER_COUNT` minus one
+--- @raises when either mode is not one of its declared values
+export function samplerIndex(filter: Filter?, address: Address?): integer
+    local filterId = filterIds[(filter or "nearest") as string]
+    if filterId == nil then
+        error("gfx.images.samplerIndex: '" .. tostring(filter) .. "' is not a filter", 2)
+    end
+    local addressId = addressIds[(address or "clamp") as string]
+    if addressId == nil then
+        error("gfx.images.samplerIndex: '" .. tostring(address) .. "' is not an address mode", 2)
+    end
+
+    return addressId * 2 + filterId
+end
+
+--- Queues one image for residency and returns its permanent id.
+---
+--- Uploading a name that is already resident replaces its pixels behind the
+--- same id, so every sprite pointing at it draws the new image once the host
+--- reports the replacement complete.
+--- @param options the name, texel dimensions, RGBA8 pixels, and sampling modes
+--- @return the process-wide image id
+--- @raises when the name is empty, a dimension is not positive, a sampling mode
+---     is unknown, or the pixel length is not four bytes per texel
+export function upload(options: UploadOptions): integer
+    if options.name == "" then
+        error("gfx.images.upload: name must not be empty", 2)
+    end
+    if options.width < 1 or options.height < 1 then
+        error("gfx.images.upload: width and height must be positive", 2)
+    end
+    local expected = options.width * options.height * 4
+    if #options.pixels ~= expected then
+        error(
+            "gfx.images.upload: " .. options.name .. " needs " .. tostring(
+                expected
+            ) .. " RGBA8 bytes and carries " .. tostring(#options.pixels),
+            2
+        )
+    end
+    local sampler = samplerIndex(options.filter, options.address)
+    local entry = intern(options.name)
+    nextSerial = nextSerial + 1
+    entry.state = "pending"
+    entry.width = options.width
+    entry.height = options.height
+    entry.sampler = sampler
+    entry.reason = nil
+    entry.serial = nextSerial
+    pending[
+        #pending + 1
+    ] = new UploadImageCommand(
+        kind = "uploadImage",
+        serial = nextSerial,
+        image = entry.id,
+        width = options.width,
+        height = options.height,
+        format = "rgba8",
+        sampler = sampler,
+        pixels = options.pixels
+    )
+
+    return entry.id
+end
+
+--- Queues one image for release.
+---
+--- The id survives the release, so a later `upload` under the same name makes
+--- the same id resident again. Sprites pointing at a released image draw the
+--- backend's fallback until then.
+--- @param name the stable image name
+--- @return whether a release was queued, which is false for a name nothing uploaded
+--- @return why nothing was queued, when unsuccessful
+export function release(name: string): boolean, string?
+    local entry = byName[name]
+    if entry == nil or entry.state == "unknown" or entry.state == "released" then
+        return false, "gfx.images.release: " .. name .. " is not uploaded"
+    end
+    nextSerial = nextSerial + 1
+    entry.state = "released"
+    entry.reason = nil
+    entry.serial = nextSerial
+    pending[#pending + 1] = new ReleaseImageCommand(kind = "releaseImage", serial = nextSerial, image = entry.id)
+
+    return true, nil
+end
+
+--- Removes the queued residency commands for the host to apply.
+--- @return the ordered command batch, which the caller owns
+export function drain(): {Command}
+    local commands = pending
+    pending = {}
+
+    return commands
+end
+
+--- Records the backend's outcome for one drained command.
+---
+--- A completion that no longer matches the image's newest serial is discarded,
+--- so a replacement queued before the previous upload completed keeps its own
+--- state.
+--- @param image the process-wide image id the command named
+--- @param serial the command serial the host applied
+--- @param ok whether the backend accepted the command
+--- @param reason the non-empty host failure, required when `ok` is false
+--- @raises when a rejection carries no reason
+export function complete(image: integer, serial: integer, ok: boolean, reason: string?): nil
+    if not ok and (reason == nil or reason == "") then
+        error("gfx.images.complete: a rejection must carry a reason", 2)
+    end
+    local entry = lookup(image)
+    if entry == nil or entry.serial ~= serial then
+        return
+    end
+    if not ok then
+        entry.state = "failed"
+        entry.reason = reason
+
+        return
+    end
+    if entry.state == "pending" then
+        entry.state = "resident"
+        entry.reason = nil
+    end
+end

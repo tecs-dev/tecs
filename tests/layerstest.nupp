@@ -1,0 +1,106 @@
+local layers = require("tecs.gfx.layers")
+local test = require("nupp.test")
+
+local suite = {}
+
+function suite.putsAHigherLayerNearerThanEverythingBelowIt(): nil
+    -- Every depth on layer 8 is nearer than every depth on layer 7, whatever
+    -- the sort inside either band decides, which is what makes a heads-up
+    -- display cover a world.
+    local nearest = 1.0
+    local farthest = 0.0
+    for _, z in ipairs({0.0, 500.0, 1000.0, 9999.0}) do
+        for _, y in ipairs({-9999.0, 0.0, 9999.0}) do
+            const near = layers.depthOf(8, z, 0, y)
+            const far = layers.depthOf(7, z, 0, y)
+            nearest = math.min(nearest, far)
+            farthest = math.max(farthest, near)
+        end
+    end
+    test.assert(farthest < nearest, "layer 8 never reaches layer 7")
+end
+
+function suite.holdsEveryDepthInsideTheDrawableRange(): nil
+    for layer = -4, layers.MAX + 4 do
+        for _, z in ipairs({-1e9, 0.0, 1e9}) do
+            const depth = layers.depthOf(layer, z, 1e9, -1e9)
+            test.assert(depth >= 0.001 and depth <= 0.999, "layer " .. tostring(layer) .. " stays drawable")
+        end
+    end
+end
+
+function suite.clampsALayerOutsideTheBandRange(): nil
+    test.equal(layers.depthOf(0, 0, 0, 0), layers.depthOf(1, 0, 0, 0))
+    test.equal(layers.depthOf(layers.MAX + 9, 0, 0, 0), layers.depthOf(layers.MAX, 0, 0, 0))
+end
+
+function suite.sortsTopDownByPositionAndHeight(): nil
+    layers.configure(10, {sort = "topdown"})
+    test.equal(layers.sortOf(10), layers.SORT_TOPDOWN)
+
+    -- Larger y is lower on screen and so nearer, and height breaks the tie.
+    test.assert(layers.depthOf(10, 0, 0, 100) < layers.depthOf(10, 0, 0, -100))
+    test.assert(layers.depthOf(10, 10, 0, 0) < layers.depthOf(10, 0, 0, 0))
+    -- Height carries most of the band, so it outweighs position.
+    test.assert(layers.depthOf(10, 1000, 0, -10000) < layers.depthOf(10, 0, 0, 10000))
+end
+
+function suite.sortsByHeightAlone(): nil
+    layers.configure(11, {sort = "z"})
+    test.equal(layers.sortOf(11), layers.SORT_Z)
+    test.equal(layers.depthOf(11, 5, -900, -900), layers.depthOf(11, 5, 900, 900))
+    test.assert(layers.depthOf(11, 10, 0, 0) < layers.depthOf(11, 0, 0, 0))
+end
+
+function suite.sortsIsometricallyOnBothAxes(): nil
+    layers.configure(12, {sort = "isometric"})
+    test.equal(layers.sortOf(12), layers.SORT_ISOMETRIC)
+    -- Both axes move an entity towards the viewer on a diamond grid.
+    test.assert(layers.depthOf(12, 0, 100, 0) < layers.depthOf(12, 0, -100, 0))
+    test.assert(layers.depthOf(12, 0, 0, 100) < layers.depthOf(12, 0, 0, -100))
+end
+
+function suite.resolvesABandOnceForManyRows(): nil
+    layers.configure(13, {sort = "topdown"})
+    const base, sort = layers.bandOf(13)
+    test.equal(sort, layers.SORT_TOPDOWN)
+    test.equal(layers.depthIn(base, sort, 3, 4, 5), layers.depthOf(13, 3, 4, 5))
+end
+
+function suite.rejectsAnUnknownLayerOrSort(): nil
+    test.raises(function(): nil
+        layers.configure(0, {sort = "z"})
+    end, "outside")
+    test.raises(function(): nil
+        layers.configure(layers.MAX + 1, {sort = "z"})
+    end, "outside")
+    test.raises(function(): nil
+        layers.configure(15, {sort = "sideways" as layers.Sort})
+    end, "is not a sort mode")
+end
+
+function suite.reportsAConfigurationRevision(): nil
+    const before = layers.revision()
+    layers.configure(14, {sort = "z"})
+    test.assert(layers.revision() > before, "configure moves the revision")
+end
+
+function suite.reportsTheFinestDepthStepItsExtentsAllow(): nil
+    const highest, half = layers.extents()
+    const finest = layers.resolution()
+    test.assert(finest > 0, "a depth target has something to preserve")
+
+    layers.setExtents(highest * 2, half * 2)
+    test.assert(layers.resolution() < finest, "a wider extent spends less depth per world unit")
+    layers.setExtents(highest, half)
+    test.equal(layers.resolution(), finest)
+
+    test.raises(function(): nil
+        layers.setExtents(0, half)
+    end, "greater than zero")
+    test.raises(function(): nil
+        layers.setExtents(highest, -1)
+    end, "greater than zero")
+end
+
+return suite

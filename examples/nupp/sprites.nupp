@@ -1,0 +1,147 @@
+module sprites
+
+--[[
+The camera and textured sprite vertical slice, as a complete game entry.
+
+The scene is the one `bench/shapes.tl` measures on the Teal implementation: a
+4000 by 2400 world field seen through a 1280 by 720 window, so roughly a tenth
+of it is on screen at once and the camera has somewhere to go. That is the
+tree's representative two-dimensional content, and it is copied rather than
+invented so the two implementations can be compared on the same scene.
+
+Two images are built here rather than loaded, because asynchronous asset
+requests are the next milestone's work and a generated image keeps this example
+runnable from a clean checkout. The checker is opaque and the disc is not, so
+one frame exercises both an opaque and a blended batch.
+
+`create` matches the Rust host's managed entry contract, so the host selects it
+with `--entry sprites.create`.
+]]
+
+local application = require("tecs.application")
+local ecs = require("tecs.ecs")
+local gfx = require("tecs.gfx")
+local host = require("tecs.host")
+local images = require("tecs.gfx.images")
+
+--- The world field the camera moves inside, in world units.
+const FIELD_WIDTH = 4000.0
+
+const FIELD_HEIGHT = 2400.0
+
+--- How many sprites fill the field. Small enough that the example starts
+--- instantly, and large enough that batching and ordering are visible.
+const COUNT = 600
+
+--- The stable image names, which a snapshot would store.
+const CHECKER = "example/sprites/checker"
+
+const DISC = "example/sprites/disc"
+
+--- Builds an opaque eight-by-eight checker as RGBA8 texels.
+local function checkerPixels(): string
+    local bytes: {string} = {}
+    for row = 0, 7 do
+        for column = 0, 7 do
+            const lit = (row // 2 + column // 2) % 2 == 0
+            const level = lit and 236 or 92
+            bytes[#bytes + 1] = string.char(level, level, level, 255)
+        end
+    end
+
+    return table.concat(bytes)
+end
+
+--- Builds a sixteen-by-sixteen soft disc whose corners are fully transparent.
+local function discPixels(): string
+    const size = 16
+    const center = (size - 1) * 0.5
+    local bytes: {string} = {}
+    for row = 0, size - 1 do
+        for column = 0, size - 1 do
+            const dx = column - center
+            const dy = row - center
+            const distance = math.sqrt(dx * dx + dy * dy) / center
+            local alpha = 0
+            if distance < 1.0 then
+                alpha = math.floor((1.0 - distance * distance) * 255 + 0.5)
+            end
+            bytes[#bytes + 1] = string.char(255, 240, 180, alpha)
+        end
+    end
+
+    return table.concat(bytes)
+end
+
+--- Fills the field, alternating the two images across three layers.
+local function spawnField(exclusive world: ecs.World, checker: integer, disc: integer): nil
+    -- A fixed multiplier rather than a random one, so two runs of the example
+    -- produce the same scene and the packet stays comparable between them.
+    local x = FIELD_WIDTH * 0.5
+    local y = FIELD_HEIGHT * 0.5
+    for index = 1, COUNT do
+        x = (x + 613.0) % FIELD_WIDTH
+        y = (y + 271.0) % FIELD_HEIGHT
+        const textured = index % 2 == 0
+        world:spawn(
+            ecs.Transform2D(x, y, index % 7, 1 + index % 3, index * 0.01, textured and 48 or 64, textured and 48 or 64),
+            gfx.Tint(0.55 + (index % 5) * 0.09, 0.5 + (index % 3) * 0.16, 0.8, textured and 1 or 0.85),
+            gfx.Sprite(textured and checker or disc),
+            gfx.Renderable2D
+        )
+    end
+end
+
+local function install(exclusive app: application.Application): nil
+    const checker = images.upload({name = CHECKER, width = 8, height = 8, pixels = checkerPixels()})
+    const disc = images.upload({name = DISC, width = 16, height = 16, pixels = discPixels(), filter = "linear",})
+
+    app.world:spawn(gfx.Camera2D(FIELD_WIDTH * 0.5, FIELD_HEIGHT * 0.5, 1, 0), gfx.ActiveCamera)
+    spawnField(app.world, checker, disc)
+
+    const sprites = app.world:newQuery({include = {ecs.Transform2D, gfx.Renderable2D}})
+    const eyes = app.world:newQuery({include = {gfx.Camera2D, gfx.ActiveCamera}})
+    local elapsed = 0.0
+    app.world:addSystem({
+        -- This system name reaches the debug server and is a compatibility
+        -- surface.
+        name = "example.sprites.animate",
+        phase = ecs.phases.Update,
+        run = function(dt: number): nil
+            elapsed = elapsed + dt
+            for candidate, count in sprites:iter() do
+                const transforms: {ecs.Transform2D} = assert(candidate:getMut(ecs.Transform2D))
+                for index = 1, count as integer do
+                    transforms[index].rotation = transforms[index].rotation + dt * (0.2 + index % 5 * 0.06)
+                end
+            end
+            for candidate, count in eyes:iter() do
+                const cameras: {gfx.Camera2D} = assert(candidate:getMut(gfx.Camera2D))
+                for index = 1, count as integer do
+                    const camera = cameras[index]
+                    camera.x = FIELD_WIDTH * 0.5 + math.cos(elapsed * 0.35) * FIELD_WIDTH * 0.3
+                    camera.y = FIELD_HEIGHT * 0.5 + math.sin(elapsed * 0.27) * FIELD_HEIGHT * 0.3
+                    camera.zoom = 1.0 + math.sin(elapsed * 0.5) * 0.35
+                    camera.rotation = math.sin(elapsed * 0.2) * 0.15
+                end
+            end
+        end,
+    })
+end
+
+--- Creates the example's host session through its statically linked plugin.
+--- @param title the desktop title
+--- @param width the initial logical width
+--- @param height the initial logical height
+--- @param debug whether guarded application failures may be cleared
+--- @param maxFrames an optional positive frame limit
+--- @return the session retained by the Rust host
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): host.Session
+    return host.createWithPlugin(install, title or "Tecs sprites", width or 1280, height or 720, debug, maxFrames)
+end

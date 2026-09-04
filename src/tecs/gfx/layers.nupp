@@ -1,0 +1,268 @@
+module tecs.gfx.layers
+
+--[[
+Depth bands and the order two-dimensional entities draw in.
+
+A layer occupies one of sixteen depth bands. Entities sort inside their own
+band and never against another band, so a heads-up display on layer 8 covers a
+world on layer 1. Extraction turns a layer, a height, and a world position into
+one depth from zero to one, with zero nearest.
+
+```nupp
+const layers = tecs.gfx.layers
+
+layers.configure(1, {sort = "topdown"})
+layers.configure(8, {sort = "z"})
+
+world:spawn(
+    tecs.ecs.Transform2D(16, 16, 0, 8, 0, 96, 24),
+    tecs.gfx.Tint(1, 1, 1, 1),
+    tecs.gfx.Renderable2D
+)
+```
+
+The fourth `Transform2D` argument selects the layer.
+
+The table is process-wide, in the same way component identity is, because one
+process drives one renderer and a scene's authored depth order cannot differ
+between two worlds in it.
+
+`setExtents` names the authored ranges each sort normalizes against. A scene
+reaching past an extent still draws, resting on the edge, and stops sorting
+against its neighbors there.
+
+The positioning options an earlier implementation carried on a layer, screen
+space, virtual coordinates, parallax, zoom independence, lighting, and the
+forward overlay lane, are not declared here. This module holds the depth
+contract alone.
+]]
+
+--- The number of bands that divide the depth range.
+---
+--- Load-bearing at sixteen. The band formula divides the range by it and a
+--- consumer recovers a layer by multiplying a depth by it, so raising it
+--- changes every depth a scene has ever recorded.
+export const MAX: integer = 16
+
+--- Selects how a layer orders its own contents.
+---
+--- These identifiers reach configuration a developer writes and are a
+--- compatibility surface.
+export type Sort = "topdown" | "z" | "isometric"
+
+--- Defines everything a layer decides about its contents.
+---
+--- A field left out takes its default, so this says what a layer is rather
+--- than amending what it was.
+export type Config = {sort: Sort}
+
+--- Sorts lower screen positions in front and breaks ties with height.
+export const SORT_TOPDOWN: integer = 0
+
+--- Sorts only by height and ignores world position.
+export const SORT_Z: integer = 1
+
+--- Sorts by x plus y plus height for a diamond grid.
+export const SORT_ISOMETRIC: integer = 2
+
+--- How much of its band a sort spreads across, leaving a sliver so the far
+--- end of one band never reaches the near end of the next.
+const BAND_FILL = 0.99
+
+--- How the topdown sort divides that span between its two inputs. Height
+--- carries most of it and position breaks the ties, which is what makes a
+--- character standing on a crate read as on top of it.
+const TOPDOWN_Z_SHARE = 0.7
+
+const TOPDOWN_Y_SHARE = 0.3
+
+--- The range the isometric sum covers: a normalized x, a normalized y, and a
+--- normalized height, each zero to one.
+const ISOMETRIC_RANGE = 3.0
+
+local sortIds: {[string]: integer} = {topdown = SORT_TOPDOWN, z = SORT_Z, isometric = SORT_ISOMETRIC,}
+
+local sorts: {integer} = {}
+for index = 1, MAX do
+    sorts[index] = SORT_TOPDOWN
+end
+
+local maxZ = 1000.0
+local maxY = 10000.0
+local generation: integer = 0
+
+--- A normalized sort term, with anything past either end resting on it.
+---
+--- Every sort divides a position by the extent this module was told to expect,
+--- and a scene reaching past that extent has to stop sorting rather than carry
+--- a depth out of its band: a consumer recovers a layer by multiplying a depth
+--- by `MAX`, so a term outside zero and one would hand the geometry another
+--- layer's band. Losing the order between two entities off the edge of the
+--- expected extent is the smaller of those two failures by a wide margin.
+local function saturate(value: number): number
+    if value < 0.0 then
+        return 0.0
+    end
+    if value > 1.0 then
+        return 1.0
+    end
+
+    return value
+end
+
+--- Sets what one layer does with its contents.
+---
+--- Replaces the layer's configuration rather than amending it, so every
+--- omitted field takes its default instead of keeping its previous value.
+--- @param layer the band to configure, from one to `MAX`
+--- @param config the complete replacement configuration
+--- @raises when the layer is outside the band range or the sort is unknown
+export function configure(layer: integer, config: Config): nil
+    if layer < 1 or layer > MAX then
+        error("gfx.layers.configure: layer " .. tostring(layer) .. " is outside 1.." .. tostring(MAX), 2)
+    end
+    local sort = sortIds[config.sort as string]
+    if sort == nil then
+        error("gfx.layers.configure: '" .. tostring(config.sort) .. "' is not a sort mode", 2)
+    end
+    sorts[layer] = sort
+    generation = generation + 1
+end
+
+--- Returns a layer's sort as the identifier `depthIn` accepts.
+--- @param layer the band to read, from one to `MAX`
+--- @return the sort identifier, which is an internal number rather than a `Sort` string
+export function sortOf(layer: integer): integer
+    return sorts[layer] or SORT_TOPDOWN
+end
+
+--- Returns the configuration revision.
+--- @return a count starting at zero that only rises, so a consumer holding a
+---     packed copy can tell whether its copy is still the answer
+export function revision(): integer
+    return generation
+end
+
+--- Returns the authored extents every sort normalizes against.
+--- @return the highest height a scene expects to use, then half the expected world
+---     extent
+export function extents(): number, number
+    return maxZ, maxY
+end
+
+--- Replaces the authored extents every sort normalizes against.
+---
+--- Raising an extent lowers the depth difference one world unit is worth,
+--- which is what `resolution` reports.
+--- @param highestZ the highest height a scene expects to use
+--- @param halfExtent half the expected world extent, used by the position terms
+--- @raises when either extent is not greater than zero
+export function setExtents(highestZ: number, halfExtent: number): nil
+    if not (highestZ > 0.0) then
+        error("gfx.layers.setExtents: the height extent must be greater than zero", 2)
+    end
+    if not (halfExtent > 0.0) then
+        error("gfx.layers.setExtents: the world extent must be greater than zero", 2)
+    end
+    maxZ = highestZ
+    maxY = halfExtent
+    generation = generation + 1
+end
+
+--- Returns the two terms `depthIn` takes, resolved once for one layer.
+---
+--- A caller writing many depths on one layer resolves the band once here
+--- rather than once a row.
+--- @param layer the band to resolve; outside one to `MAX` this resolves the
+---     nearest layer whole, so the sort answered is the clamped layer's
+--- @return the band's near edge, then the sort identifier
+export function bandOf(layer: integer): number, integer
+    local index = layer
+    if index < 1 then
+        index = 1
+    elseif index > MAX then
+        index = MAX
+    end
+
+    return (MAX - index) * (1.0 / MAX), sorts[index] or SORT_TOPDOWN
+end
+
+--- Returns one entity's depth on a band `bandOf` already resolved.
+--- @param base the band's near edge, from `bandOf`
+--- @param sort the sort identifier, from `bandOf`
+--- @param z the height in the sort, normalized against the height extent
+--- @param x the world x, read only by the isometric sort
+--- @param y the world y, read by the topdown and isometric sorts, larger being nearer
+--- @return a depth inside the band, held between 0.001 and 0.999
+export function depthIn(base: number, sort: integer, z: number, x: number, y: number): number
+    const band = 1.0 / MAX
+    const nz = saturate(z / maxZ)
+
+    local within: number
+    if sort == SORT_Z then
+        within = (1.0 - nz) * band * BAND_FILL
+    elseif sort == SORT_ISOMETRIC then
+        const extent = 2.0 * maxY
+        const nx = saturate((x + maxY) / extent)
+        const ny = saturate((y + maxY) / extent)
+        within = (1.0 - (nx + ny + nz) / ISOMETRIC_RANGE) * band * BAND_FILL
+    else
+        const ny = saturate((y + maxY) / (2.0 * maxY))
+        within = (1.0 - (nz * TOPDOWN_Z_SHARE + ny * TOPDOWN_Y_SHARE)) * band * BAND_FILL
+    end
+
+    local depth = base + within
+    if depth < 0.001 then
+        return 0.001
+    end
+    if depth > 0.999 then
+        return 0.999
+    end
+
+    return depth
+end
+
+--- Returns one entity's depth from zero to one, with zero nearest.
+---
+--- Exact ties carry no tie-breaker of their own. Extraction writes instances in
+--- sorted order and the backend draws them in that order, so two entities at
+--- one depth resolve the same way every frame: the later one wins.
+--- @param layer the band, from one to `MAX`; outside that range this takes the
+---     nearest layer whole, because a band is the only thing a depth can name
+--- @param z the height in the sort, normalized against the height extent
+--- @param x the world x, read only by the isometric sort
+--- @param y the world y, read by the topdown and isometric sorts, larger being nearer
+--- @return the depth inside the layer's own band
+export function depthOf(layer: integer, z: number, x: number, y: number): number
+    const base, sort = bandOf(layer)
+
+    return depthIn(base, sort, z, x, y)
+end
+
+--- Returns the smallest depth difference `depthOf` produces between two
+--- entities one world unit apart, taken over every sort mode.
+---
+--- A depth target must preserve this difference. A format with a larger step
+--- keeps the bands, so layer order stays safe, and loses the sort inside them.
+--- @return the depth difference, in the input that moves depth least
+export function resolution(): number
+    const span = (1.0 / MAX) * BAND_FILL
+    const steps: {
+        number
+    } = {
+        span * TOPDOWN_Z_SHARE / maxZ,
+        span * TOPDOWN_Y_SHARE / (2.0 * maxY),
+        span / maxZ,
+        span / ISOMETRIC_RANGE / maxZ,
+        span / ISOMETRIC_RANGE / (2.0 * maxY),
+    }
+
+    local finest = steps[1]
+    for index = 2, #steps do
+        if steps[index] < finest then
+            finest = steps[index]
+        end
+    end
+
+    return finest
+end

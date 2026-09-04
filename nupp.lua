@@ -20,6 +20,8 @@ local hostExports = {
     "tecs.host.pushText",
     "tecs.host.nextWindowCommand",
     "tecs.host.windowCommandFailed",
+    "tecs.host.nextImageCommand",
+    "tecs.host.imageCommandResult",
 }
 
 local flatcolorExports = {}
@@ -27,6 +29,12 @@ for index = 1, #hostExports do
     flatcolorExports[index] = hostExports[index]
 end
 flatcolorExports[#flatcolorExports + 1] = "flatcolor.create"
+
+local spritesExports = {}
+for index = 1, #hostExports do
+    spritesExports[index] = hostExports[index]
+end
+spritesExports[#spritesExports + 1] = "sprites.create"
 
 return {
     include = {"src", "examples/nupp"},
@@ -44,6 +52,8 @@ return {
                     "tecs.data",
                     "tecs.events",
                     "tecs.gfx",
+                    "tecs.gfx.images",
+                    "tecs.gfx.layers",
                     "tecs.host",
                     "tecs.input",
                     "tecs.platform.events",
@@ -77,6 +87,12 @@ return {
                 description = "Build the animated flat-color Nupp example",
                 entries = {"tecs.host", "flatcolor"},
                 exports = flatcolorExports,
+            },
+            sprites = {
+                kind = "component",
+                description = "Build the camera and textured sprite Nupp example",
+                entries = {"tecs.host", "sprites"},
+                exports = spritesExports,
             },
         },
     },

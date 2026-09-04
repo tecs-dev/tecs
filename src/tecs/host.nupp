@@ -12,6 +12,7 @@ collector address becomes part of the host contract.
 local application = require("tecs.application")
 local framepacket = require("tecs.internal.framepacket")
 local framepump = require("tecs.internal.framepump")
+local images = require("tecs.gfx.images")
 local platformevents = require("tecs.platform.events")
 local window = require("tecs.platform.window")
 
@@ -21,6 +22,8 @@ export record Session
     private events: {platformevents.Event}
     private commands: {window.Command}
     private commandIndex: integer
+    private imageCommands: {images.Command}
+    private imageCommandIndex: integer
     private pump: framepump.Pump
     private extractor: framepacket.Extractor
 end
@@ -84,6 +87,8 @@ local function sessionFor(app: application.Application): Session
         events = {},
         commands = {},
         commandIndex = 1,
+        imageCommands = {},
+        imageCommandIndex = 1,
         pump = framepump.newPump(),
         extractor = framepacket.new(app.world)
     )
@@ -168,10 +173,61 @@ export function crashed(borrows session: Session): string?
 end
 
 --- Extracts the current renderable world into one versioned byte packet.
+---
+--- The viewport is the window's physical drawable size rather than its logical
+--- size, because the camera projects into target pixels and the swapchain the
+--- packet is drawn into is that size on every display.
 --- @return the packet consumed by the Rust renderer after a completed frame
-export function renderPacket(borrows session: Session): string
-    local width, height = session.app.window:getSize()
+export function renderPacket(exclusive session: Session): string
+    local width, height = session.app.window:getPixelSize()
+
     return session.extractor:packet(width, height)
+end
+
+--- Returns and consumes the next pending image residency command.
+---
+--- The result is a scalar tagged tuple for the managed embedding ABI. `kind`
+--- is `"uploadImage"` or `"releaseImage"`, and a release leaves every field
+--- after `image` nil. `pixels` carries eight-bit RGBA texels with unassociated
+--- alpha, four bytes per texel, in rows running top to bottom.
+--- @param session the host session draining the process-wide image registry
+--- @return the command kind, the serial, the image id, the width, the height,
+---     the sampler index, the pixel format, and the texel bytes
+export function nextImageCommand(
+    exclusive session: Session
+): string?, integer?, integer?, integer?, integer?, integer?, string?, string?
+    if session.imageCommandIndex > #session.imageCommands then
+        session.imageCommands = images.drain()
+        session.imageCommandIndex = 1
+    end
+    local command = session.imageCommands[session.imageCommandIndex]
+    if command == nil then
+        return nil, nil, nil, nil, nil, nil, nil, nil
+    end
+    session.imageCommandIndex = session.imageCommandIndex + 1
+
+    if command is images.UploadImageCommand then
+        return command.kind, command.serial, command.image, command.width, command.height, command.sampler, command.format, command.pixels
+    elseif command is images.ReleaseImageCommand then
+        return command.kind, command.serial, command.image, nil, nil, nil, nil, nil
+    end
+end
+
+--- Records the backend's outcome for one drained image command.
+--- @param session the host session that drained the command
+--- @param image the image id the command named
+--- @param serial the command serial the host applied
+--- @param ok whether the backend accepted the command
+--- @param reason the non-empty host failure, required when `ok` is false
+export function imageCommandResult(
+    exclusive session: Session,
+    image: integer,
+    serial: integer,
+    ok: boolean,
+    reason: string?
+): nil
+    local _ = session
+    images.complete(image, serial, ok, reason)
 end
 
 --- Changes whether host turns advance simulation.
