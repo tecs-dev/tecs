@@ -64,6 +64,8 @@ end
 
 cdef function tecs_audio_open(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from"tecsaudio"
 
+cdef function tecs_audio_open_offline(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from"tecsaudio"
+
 cdef function tecs_audio_close(borrows device: voidptr?) from"tecsaudio"
 
 cdef function tecs_audio_available(borrows device: voidptr?): int32 from"tecsaudio"
@@ -103,6 +105,8 @@ cdef function tecs_audio_decoders(borrows device: voidptr?): cstring? from"tecsa
 
 cdef function tecs_audio_last_error(borrows device: voidptr?): cstring? from"tecsaudio"
 
+cdef function tecs_audio_layout(kind: uint32): uint32 from"tecsaudio"
+
 --- Commands buffered before one crossing, and events pulled back in one.
 ---
 --- Both arrays are allocated once and reused, because the seam is crossed every
@@ -122,6 +126,40 @@ local MODE_STREAM: integer = 2
 --- The event kind reporting that a voice has finished.
 local EVENT_FINISHED: integer = 1
 
+--- Selects the command struct in `tecs_audio_layout`.
+local LAYOUT_COMMAND: integer = 0
+
+--- Selects the event struct in `tecs_audio_layout`.
+local LAYOUT_EVENT: integer = 1
+
+--- Selects the clip-info struct in `tecs_audio_layout`.
+local LAYOUT_CLIP_INFO: integer = 2
+
+--- Reports where LuaJIT and the library disagree about a struct size.
+---
+--- Two descriptions of one memory layout can drift, and the failure a drift
+--- produces is a voice at the wrong pitch rather than a call that will not
+--- link. Comparing sizes once at open is what turns that into a refusal.
+---
+--- @return the reason, or nil when every struct agrees
+local function layoutMismatch(): string?
+    local names: {string} = {"tecsAudioCommand", "tecsAudioEvent", "tecsAudioClipInfo"}
+    local kinds: {integer} = {LAYOUT_COMMAND, LAYOUT_EVENT, LAYOUT_CLIP_INFO}
+    local sizes: {
+        integer
+    } = {ffi.sizeof<tecsAudioCommand>(), ffi.sizeof<tecsAudioEvent>(), ffi.sizeof<tecsAudioClipInfo>(),}
+    for index = 1, #kinds do
+        local reported = tecs_audio_layout(kinds[index] as uint32) as integer
+        if reported ~= sizes[index] then
+            return "libtecsaudio reports " .. names[
+                index
+            ] .. " as " .. tostring(reported) .. " bytes and this binding declares " .. tostring(sizes[index])
+        end
+    end
+
+    return nil
+end
+
 local function modeCode(mode: audiobackend.LoadMode): integer
     if mode == "resident" then
         return MODE_RESIDENT
@@ -132,19 +170,8 @@ local function modeCode(mode: audiobackend.LoadMode): integer
     end
 end
 
---- Opens a native output and returns it behind the backend contract.
----
---- @param frequency the requested output frequency in frames per second
---- @param channels the requested number of output channels
---- @param maxVoices the greatest number of voices the mixer holds at once
---- @return the backend, or nil when the library opened no output
---- @return the reason, when the first return is nil
-export function open(frequency: integer, channels: integer, maxVoices: integer): (audiobackend.Backend?, string?)
-    local device = tecs_audio_open(frequency as uint32, channels as uint32, maxVoices as uint32)
-    if device == nil then
-        return nil, "tecsaudio opened no output"
-    end
-
+--- Wraps an open library device in the backend contract.
+local function wrap(device: voidptr?): audiobackend.Backend
     local commands = carray(tecsAudioCommand, CAPACITY)
     local events = carray(tecsAudioEvent, CAPACITY)
     local info = ffi.new<tecsAudioClipInfo>()
@@ -274,4 +301,51 @@ export function open(frequency: integer, channels: integer, maxVoices: integer):
             tecs_audio_close(device)
         end
     )
+end
+
+--- Opens the platform's default output and returns it as a backend.
+---
+--- @param frequency the requested output frequency in frames per second
+--- @param channels the requested number of output channels
+--- @param maxVoices the greatest number of voices the mixer holds at once
+--- @return the backend, or nil when the library opened nothing
+--- @return the reason, when the first return is nil
+export function open(frequency: integer, channels: integer, maxVoices: integer): (audiobackend.Backend?, string?)
+    local mismatch = layoutMismatch()
+    if mismatch ~= nil then
+        return nil, mismatch
+    end
+    local device = tecs_audio_open(frequency as uint32, channels as uint32, maxVoices as uint32)
+    if device == nil then
+        return nil, "tecsaudio opened no output"
+    end
+
+    return wrap(device)
+end
+
+--- Opens a backend that touches no output device.
+---
+--- Every command still crosses and every query still answers; the mix goes
+--- nowhere unless the caller renders it, which nothing on this side does. This
+--- is what a test that has to prove the seam without needing a sound card
+--- reaches for, and it is deliberately not what `tecs.audio` opens: opening a
+--- real output can block inside the platform's audio daemon, and a headless
+--- suite must not be able to.
+---
+--- @param frequency the output frequency in frames per second
+--- @param channels the number of output channels
+--- @param maxVoices the greatest number of voices the mixer holds at once
+--- @return the backend, or nil when the library refused
+--- @return the reason, when the first return is nil
+export function openOffline(frequency: integer, channels: integer, maxVoices: integer): (audiobackend.Backend?, string?)
+    local mismatch = layoutMismatch()
+    if mismatch ~= nil then
+        return nil, mismatch
+    end
+    local device = tecs_audio_open_offline(frequency as uint32, channels as uint32, maxVoices as uint32)
+    if device == nil then
+        return nil, "tecsaudio opened no offline mixer"
+    end
+
+    return wrap(device)
 end
