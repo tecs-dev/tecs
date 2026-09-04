@@ -1,0 +1,16 @@
+[package]
+name = "tecs-physics"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "tecs_physics"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+bincode.workspace = true
+rapier2d.workspace = true
+rayon.workspace = true
+serde.workspace = true

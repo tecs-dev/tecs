@@ -2,6 +2,7 @@
 members = [
     "native/rust/runtime",
     "native/rust/build-support",
+    "native/rust/physics",
     "native/rust/tecs-audio",
     "native/rust/winit-host",
     "xtask",

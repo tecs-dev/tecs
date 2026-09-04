@@ -1,0 +1,686 @@
+local ecs = require("tecs.ecs")
+local test = require("nupp.test")
+local contract = require("tecs.physics.contract")
+local physics = require("tecs.physics")
+local reference = require("tests.physicsreference")
+local suite = {}
+
+const STEP: number = 1 / 60
+
+local marker = ecs.newTagComponent({name = "test.PhysicsMarker"})
+
+--- Builds a world driven by a reference simulation rather than the solver.
+local function newWorld(gravityY: number?): (ecs.World, reference.Reference)
+    local world = ecs.newWorld()
+    local backend = reference.create(gravityY)
+    physics.install(world, {simulation = backend.simulation})
+
+    return world, backend
+end
+
+local function handleOf(world: ecs.World, entity: integer): physics.SolverHandle
+    return assert(world:get(entity, physics.RigidBody))
+end
+
+local function logged(backend: reference.Reference, prefix: string): {string}
+    local found: {string} = {}
+    for index = 1, #backend.log do
+        if backend.log[index]:sub(1, #prefix) == prefix then
+            found[#found + 1] = backend.log[index]
+        end
+    end
+
+    return found
+end
+
+function suite.installsOnceAndExposesItsSimulation(): nil
+    local world, backend = newWorld()
+    test.assert(physics.of(world) == backend.simulation)
+    test.raises(function(): nil
+        physics.install(world, {simulation = backend.simulation})
+    end, "already has a simulation")
+end
+
+function suite.refusesToAttachWithoutASimulation(): nil
+    local world = ecs.newWorld()
+    local entity = world:spawn()
+    test.raises(function(): nil
+        physics.attach(world, entity)
+    end, "no simulation")
+end
+
+function suite.rejectsAnUnknownBodyKind(): nil
+    local world = newWorld()
+    local entity = world:spawn()
+    test.raises(function(): nil
+        physics.attach(world, entity, {kind = "floaty"})
+    end, "unknown body kind")
+end
+
+function suite.rejectsACapsuleWithoutARadius(): nil
+    local world = newWorld()
+    local entity = world:spawn()
+    test.raises(function(): nil
+        physics.attach(world, entity, {capsuleLength = 10})
+    end, "positive radius")
+end
+
+function suite.attachSuppliesTheComponentsABodyNeeds(): nil
+    local world = newWorld()
+    local entity = world:spawn()
+    physics.attach(world, entity, {kind = "static", halfWidth = 32, halfHeight = 4})
+    world:update(STEP)
+
+    local declared = assert(world:get(entity, physics.Body))
+    test.equal(declared.kind, contract.BODY_STATIC)
+    test.assert(declared.sleepEnabled)
+    local shape = assert(world:get(entity, physics.Collider))
+    test.equal(shape.shape, contract.SHAPE_BOX)
+    test.equal(shape.halfWidth, 32)
+    test.assert(world:has(entity, physics.Motion))
+    test.assert(world:has(entity, ecs.Transform2D))
+end
+
+function suite.selectsAShapeFromTheOptionsThatNameIt(): nil
+    local world = newWorld()
+    local ball = world:spawn()
+    physics.attach(world, ball, {radius = 12})
+    local capsule = world:spawn()
+    physics.attach(world, capsule, {radius = 4, capsuleLength = 20})
+    world:commit()
+
+    test.equal(assert(world:get(ball, physics.Collider)).shape, contract.SHAPE_CIRCLE)
+    test.equal(assert(world:get(capsule, physics.Collider)).shape, contract.SHAPE_CAPSULE)
+end
+
+function suite.createsBodiesInAscendingEntityOrderRatherThanArchetypeOrder(): nil
+    local world, backend = newWorld()
+    -- Two archetypes, registered so that the first one holds both the lowest
+    -- and the highest entity. Iteration order alone would report them out of
+    -- order, which is exactly what the sort exists to prevent.
+    local first = world:spawn(marker)
+    local second = world:spawn()
+    local third = world:spawn(marker)
+    for _, entity in ipairs({first, second, third}) do
+        physics.attach(world, entity)
+    end
+    world:update(STEP)
+
+    local expected: {integer} = {first, second, third}
+    table.sort(expected)
+    local creates = logged(backend, "createBody")
+    test.equal(#creates, 3)
+    for index = 1, 3 do
+        test.equal(creates[index], ("createBody %d"):format(expected[index]))
+    end
+end
+
+function suite.publishesRigidBodyRowsAfterTheStepThatCreatedThem(): nil
+    local world, backend = newWorld()
+    local entity = world:spawn()
+    physics.attach(world, entity)
+    world:commit()
+    test.assert(not physics.hasBody(world, entity))
+
+    world:update(STEP)
+
+    test.assert(physics.hasBody(world, entity))
+    local row = handleOf(world, entity)
+    test.notEqual(row.index1, 0)
+    test.equal(row.world0, backend.simulation.id)
+    test.equal(backend.bodyCount(), 1)
+end
+
+function suite.rejectsARowLeftOverFromAnotherSimulation(): nil
+    local world = newWorld()
+    local entity = world:spawn()
+    physics.attach(world, entity)
+    world:update(STEP)
+    test.assert(physics.hasBody(world, entity))
+
+    local row = assert(world:getMut(entity, physics.RigidBody))
+    row.world0 = row.world0 + 1
+
+    test.assert(not physics.hasBody(world, entity))
+    local vx, vy = physics.velocity(world, entity)
+    test.equal(vx, 0)
+    test.equal(vy, 0)
+end
+
+function suite.writesTransformsBackOnlyForBodiesThatMoved(): nil
+    local world = newWorld(9.81)
+    local moving = world:spawn(ecs.Transform2D(10, 20))
+    physics.attach(world, moving)
+    local resting = world:spawn(ecs.Transform2D(30, 40))
+    physics.attach(world, resting, {kind = "static"})
+    world:update(STEP)
+    world:update(STEP)
+
+    local movedTransform = assert(world:get(moving, ecs.Transform2D))
+    test.notEqual(movedTransform.y, 20)
+    local restingTransform = assert(world:get(resting, ecs.Transform2D))
+    test.equal(restingTransform.x, 30)
+    test.equal(restingTransform.y, 40)
+end
+
+function suite.convertsPixelsToMetersAcrossTheCrossing(): nil
+    local world = newWorld()
+    local entity = world:spawn(ecs.Transform2D(64, 32))
+    physics.attach(world, entity)
+    local backend = assert(physics.of(world))
+    world:update(STEP)
+
+    local row = handleOf(world, entity)
+    local _vx, _vy, _omega = backend.velocityOf(row.index1, row.generation)
+    physics.setVelocity(world, entity, 320, 0)
+    world:update(STEP)
+    local vx = physics.velocity(world, entity)
+    test.equal(vx, 320)
+    local transform = assert(world:get(entity, ecs.Transform2D))
+    test.assert(transform.x > 64, "the body advanced in pixels")
+end
+
+function suite.destroysABodyWhenItsDeclarationIsRemoved(): nil
+    local world, backend = newWorld()
+    local entity = world:spawn()
+    physics.attach(world, entity)
+    world:update(STEP)
+    local row = handleOf(world, entity)
+
+    physics.detach(world, entity)
+    backend.clearLog()
+    world:update(STEP)
+
+    test.equal(#logged(backend, "destroyBody"), 1)
+    test.equal(logged(backend, "destroyBody")[1], ("destroyBody %d"):format(row.index1))
+    test.assert(not world:has(entity, physics.RigidBody))
+    test.equal(backend.bodyCount(), 0)
+end
+
+function suite.destroysABodyWhenItsEntityDespawns(): nil
+    local world, backend = newWorld()
+    local entity = world:spawn()
+    physics.attach(world, entity)
+    world:update(STEP)
+    test.equal(backend.bodyCount(), 1)
+
+    world:despawn(entity)
+    backend.clearLog()
+    world:update(STEP)
+
+    test.equal(#logged(backend, "destroyBody"), 1)
+    test.equal(backend.bodyCount(), 0)
+end
+
+function suite.attachesASecondaryColliderToABodyTheSameBatchCreates(): nil
+    local world, backend = newWorld()
+    local body = world:spawn()
+    physics.attach(world, body)
+    local shape = world:spawn()
+    physics.attachCollider(world, shape, body, {radius = 6})
+    world:update(STEP)
+
+    local link = assert(world:get(shape, physics.ColliderShape))
+    test.notEqual(link.index1, 0)
+    test.equal(link.world0, backend.simulation.id)
+    -- One shape from the body and one from the secondary collider.
+    test.equal(backend.colliderCount(), 2)
+    test.equal(assert(world:get(shape, physics.ColliderOf)).target, body)
+end
+
+function suite.leavesASecondaryColliderUnrealizedWithoutABody(): nil
+    local world, backend = newWorld()
+    local owner = world:spawn()
+    local shape = world:spawn()
+    physics.attachCollider(world, shape, owner, {radius = 6})
+
+    world:update(STEP)
+
+    test.assert(not world:has(shape, physics.ColliderShape))
+    test.equal(backend.colliderCount(), 0)
+    test.equal(#logged(backend, "createCollider"), 0)
+end
+
+function suite.rebuildsADirtyColliderAndRefreshesItsShapeRow(): nil
+    local world, backend = newWorld()
+    local body = world:spawn()
+    physics.attach(world, body)
+    local shape = world:spawn()
+    physics.attachCollider(world, shape, body, {radius = 6})
+    world:update(STEP)
+    local before = assert(world:get(shape, physics.ColliderShape)).generation
+
+    local writable = assert(world:getMut(shape, physics.Collider))
+    writable.radius = 12
+    backend.clearLog()
+    world:update(STEP)
+
+    test.equal(#logged(backend, "updateCollider"), 1)
+    test.equal(assert(world:get(shape, physics.ColliderShape)).generation, before + 1)
+end
+
+function suite.leavesACleanColliderAlone(): nil
+    local world, backend = newWorld()
+    local body = world:spawn()
+    physics.attach(world, body)
+    world:update(STEP)
+    backend.clearLog()
+
+    world:update(STEP)
+
+    test.equal(#logged(backend, "updateCollider"), 0)
+end
+
+function suite.redeclaresADirtyBodyOnlyOnce(): nil
+    local world, backend = newWorld()
+    local entity = world:spawn()
+    physics.attach(world, entity)
+    world:update(STEP)
+    backend.clearLog()
+
+    local declared = assert(world:getMut(entity, physics.Body))
+    declared.gravityScale = 0.25
+    world:update(STEP)
+    test.equal(#logged(backend, "updateBody"), 1)
+
+    backend.clearLog()
+    world:update(STEP)
+    test.equal(#logged(backend, "updateBody"), 0)
+end
+
+function suite.holdsAndReleasesPausedBodies(): nil
+    local world = newWorld()
+    local state = world:createState("test.physics.paused")
+    local entity = world:spawn()
+    physics.attach(world, entity)
+    world:update(STEP)
+    physics.setVelocity(world, entity, 640, 320)
+    world:update(STEP)
+
+    world:set(entity, ecs.Paused)
+    world:update(STEP)
+
+    test.assert(world:has(entity, physics.PhysicsHeld))
+    local motion = assert(world:get(entity, physics.Motion))
+    test.equal(motion.vx, 640)
+    test.equal(motion.vy, 320)
+    local vx, vy = physics.velocity(world, entity)
+    test.equal(vx, 0)
+    test.equal(vy, 0)
+
+    world:remove(entity, ecs.Paused)
+    world:update(STEP)
+
+    test.assert(not world:has(entity, physics.PhysicsHeld))
+    local resumedX, resumedY = physics.velocity(world, entity)
+    test.equal(resumedX, 640)
+    test.equal(resumedY, 320)
+    test.assert(state ~= nil)
+end
+
+function suite.disablesAndEnablesBodies(): nil
+    local world = newWorld(9.81)
+    local entity = world:spawn(ecs.Transform2D(0, 0))
+    physics.attach(world, entity)
+    world:update(STEP)
+
+    world:set(entity, ecs.Disabled)
+    world:update(STEP)
+    test.assert(world:has(entity, physics.PhysicsDisabled))
+    local held = assert(world:get(entity, ecs.Transform2D)).y
+    world:update(STEP)
+    world:update(STEP)
+    test.equal(assert(world:get(entity, ecs.Transform2D)).y, held)
+
+    world:remove(entity, ecs.Disabled)
+    world:update(STEP)
+    test.assert(not world:has(entity, physics.PhysicsDisabled))
+    world:update(STEP)
+    test.assert(assert(world:get(entity, ecs.Transform2D)).y ~= held)
+end
+
+function suite.emitsContactAndSensorEventsFromTheDrainedBuffer(): nil
+    local world, backend = newWorld()
+    local entity = world:spawn()
+    physics.attach(world, entity)
+    world:update(STEP)
+
+    local seen: {string} = {}
+    world:observe(0, physics.ContactBegin, function(value: physics.ContactPair, exclusive _running: ecs.World): nil
+        seen[#seen + 1] = ("contactBegin %d %d"):format(value.entityA, value.entityB)
+    end)
+    world:observe(0, physics.ContactEnd, function(value: physics.ContactPair, exclusive _running: ecs.World): nil
+        seen[#seen + 1] = ("contactEnd %d %d"):format(value.entityA, value.entityB)
+    end)
+    world:observe(0, physics.SensorBegin, function(value: physics.SensorPair, exclusive _running: ecs.World): nil
+        seen[#seen + 1] = ("sensorBegin %d %d"):format(value.sensor, value.visitor)
+    end)
+    world:observe(0, physics.SensorEnd, function(value: physics.SensorPair, exclusive _running: ecs.World): nil
+        seen[#seen + 1] = ("sensorEnd %d %d"):format(value.sensor, value.visitor)
+    end)
+
+    backend.pushEvent(11, 22, true, false)
+    backend.pushEvent(33, 44, false, false)
+    backend.pushEvent(55, 66, true, true)
+    backend.pushEvent(77, 88, false, true)
+    world:update(STEP)
+
+    test.equal(#seen, 4)
+    test.equal(seen[1], "contactBegin 11 22")
+    test.equal(seen[2], "contactEnd 33 44")
+    test.equal(seen[3], "sensorBegin 55 66")
+    test.equal(seen[4], "sensorEnd 77 88")
+end
+
+function suite.queuesEveryBodyActionForTheStepThatFollowsIt(): nil
+    local world, backend = newWorld()
+    local entity = world:spawn()
+    physics.attach(world, entity)
+    world:update(STEP)
+    local row = handleOf(world, entity)
+    backend.clearLog()
+
+    physics.applyImpulse(world, entity, 32, 0)
+    physics.applyForce(world, entity, 0, 32)
+    physics.applyTorque(world, entity, 2)
+    physics.setAngularVelocity(world, entity, 1)
+    physics.setAwake(world, entity, false)
+    -- Nothing has crossed yet: a queued action is invisible until the step.
+    test.equal(#logged(backend, "action"), 0)
+
+    world:update(STEP)
+
+    local applied = logged(backend, "action")
+    test.equal(#applied, 5)
+    test.equal(applied[1], ("action %d %d"):format(contract.ACTION_IMPULSE, row.index1))
+    test.equal(applied[2], ("action %d %d"):format(contract.ACTION_FORCE, row.index1))
+    test.equal(applied[3], ("action %d %d"):format(contract.ACTION_TORQUE, row.index1))
+    test.equal(applied[4], ("action %d %d"):format(contract.ACTION_SET_ANGULAR_VELOCITY, row.index1))
+    test.equal(applied[5], ("action %d %d"):format(contract.ACTION_SET_AWAKE, row.index1))
+    test.assert(not physics.isAwake(world, entity))
+end
+
+function suite.ignoresActionsOnEntitiesWithNoLiveBody(): nil
+    local world, backend = newWorld()
+    local entity = world:spawn()
+    world:commit()
+
+    physics.applyImpulse(world, entity, 32, 0)
+    physics.setVelocity(world, entity, 1, 1)
+    world:update(STEP)
+
+    test.equal(#logged(backend, "action"), 0)
+end
+
+function suite.teleportsTheTransformNowAndTheBodyAtTheNextStep(): nil
+    local world, backend = newWorld()
+    local entity = world:spawn(ecs.Transform2D(0, 0))
+    physics.attach(world, entity)
+    world:update(STEP)
+    local row = handleOf(world, entity)
+    backend.clearLog()
+
+    physics.teleport(world, entity, 96, 64, 1.5)
+
+    local transform = assert(world:get(entity, ecs.Transform2D))
+    test.equal(transform.x, 96)
+    test.equal(transform.y, 64)
+    test.equal(transform.rotation, 1.5)
+
+    world:update(STEP)
+    local applied = logged(backend, "action")
+    test.equal(applied[1], ("action %d %d"):format(contract.ACTION_SET_TRANSFORM, row.index1))
+    local x, y = backend.poseAt(row.index1)
+    test.equal(assert(x), 3)
+    test.equal(y, 2)
+end
+
+function suite.createsAJointOnceBothBodiesAreQueued(): nil
+    local world, backend = newWorld()
+    local anchor = world:spawn()
+    physics.attach(world, anchor, {kind = "static"})
+    local arm = world:spawn()
+    physics.attach(world, arm)
+    local joint = world:spawn()
+    physics.attachJoint(world, joint, anchor, arm, {kind = "revolute", anchorBX = -64})
+    world:update(STEP)
+
+    local link = assert(world:get(joint, physics.JointLink))
+    test.notEqual(link.index1, 0)
+    test.equal(link.world0, backend.simulation.id)
+    test.equal(backend.jointCount(), 1)
+    local declared = assert(world:get(joint, physics.Joint))
+    test.equal(declared.kind, contract.JOINT_REVOLUTE)
+    test.equal(declared.anchorBX, -64)
+end
+
+function suite.destroysAJointWhenItsDeclarationGoes(): nil
+    local world, backend = newWorld()
+    local anchor = world:spawn()
+    physics.attach(world, anchor, {kind = "static"})
+    local arm = world:spawn()
+    physics.attach(world, arm)
+    local joint = world:spawn()
+    physics.attachJoint(world, joint, anchor, arm)
+    world:update(STEP)
+    test.equal(backend.jointCount(), 1)
+
+    world:remove(joint, physics.Joint)
+    backend.clearLog()
+    world:update(STEP)
+
+    test.equal(#logged(backend, "destroyJoint"), 1)
+    test.assert(not world:has(joint, physics.JointLink))
+    test.equal(backend.jointCount(), 0)
+end
+
+function suite.despawnsAJointWithEitherOfItsBodies(): nil
+    local world, backend = newWorld()
+    local anchor = world:spawn()
+    physics.attach(world, anchor, {kind = "static"})
+    local arm = world:spawn()
+    physics.attach(world, arm)
+    local joint = world:spawn()
+    physics.attachJoint(world, joint, anchor, arm)
+    world:update(STEP)
+
+    world:despawn(arm)
+    world:update(STEP)
+
+    test.assert(not world:isAlive(joint))
+    test.equal(backend.jointCount(), 0)
+end
+
+function suite.leavesAJointUnrealizedWithoutBodies(): nil
+    local world, backend = newWorld()
+    local anchor = world:spawn()
+    local arm = world:spawn()
+    local joint = world:spawn()
+    physics.attachJoint(world, joint, anchor, arm)
+
+    world:update(STEP)
+
+    test.assert(not world:has(joint, physics.JointLink))
+    test.equal(backend.jointCount(), 0)
+end
+
+function suite.rejectsAnUnknownJointKind(): nil
+    local world = newWorld()
+    local anchor = world:spawn()
+    physics.attach(world, anchor)
+    local arm = world:spawn()
+    physics.attach(world, arm)
+    local joint = world:spawn()
+    world:update(STEP)
+    test.raises(function(): nil
+        physics.attachJoint(world, joint, anchor, arm, {kind = "wobbly"})
+    end, "unknown joint kind")
+end
+
+function suite.keepsACallerSuppliedTransformWhenABodyIsAttached(): nil
+    local world = newWorld()
+    local placed = world:spawn(ecs.Transform2D(48, 96, 0, 3, 1.25))
+    physics.attach(world, placed)
+    local bare = world:spawn()
+    physics.attach(world, bare)
+    world:update(STEP)
+
+    local kept = assert(world:get(placed, ecs.Transform2D))
+    test.equal(kept.x, 48)
+    test.equal(kept.y, 96)
+    test.equal(kept.layer, 3)
+    test.equal(kept.rotation, 1.25)
+    local defaulted = assert(world:get(bare, ecs.Transform2D))
+    test.equal(defaulted.x, 0)
+    test.equal(defaulted.layer, 1)
+end
+
+function suite.raycastsInPixelsAndReturnsNilWithoutASimulation(): nil
+    local world = newWorld()
+    local entity = world:spawn(ecs.Transform2D(64, 0))
+    physics.attach(world, entity)
+    world:update(STEP)
+
+    local hit = physics.raycast(world, 0, 0, 128, 0)
+    test.equal(assert(hit).entity, entity)
+    test.equal(assert(hit).x, 64)
+    test.equal(physics.raycast(ecs.newWorld(), 0, 0, 1, 0), nil)
+end
+
+function suite.roundTripsSimulationStateUnderTheEstablishedKey(): nil
+    local world = newWorld()
+    local entity = world:spawn(ecs.Transform2D(0, 0))
+    physics.attach(world, entity)
+    local shape = world:spawn()
+    physics.attachCollider(world, shape, entity, {radius = 4})
+    world:update(STEP)
+    physics.setVelocity(world, entity, 128, 256)
+    world:update(STEP)
+    local before = handleOf(world, entity)
+
+    local snapshot = world:saveSnapshot()
+
+    local saved: {[string]: any}? = nil
+    for index = 1, #snapshot.data do
+        if snapshot.data[index].key == "tecs.physics" then
+            saved = snapshot.data[index].value as {[string]: any}
+        end
+    end
+    test.assert(saved ~= nil, "the snapshot carries a tecs.physics entry")
+    test.assert(assert(saved).state ~= nil)
+    -- `Motion` is where a save records velocity, so it survives the load.
+    local motion = assert(world:get(entity, physics.Motion))
+    test.equal(motion.vx, 128)
+    test.equal(motion.vy, 256)
+
+    world:loadSnapshot(snapshot)
+
+    test.assert(world:isAlive(entity))
+    local after = assert(world:get(entity, physics.RigidBody))
+    test.equal(after.index1, before.index1)
+    test.equal(after.generation, before.generation)
+    test.assert(physics.hasBody(world, entity))
+    test.notEqual(assert(world:get(shape, physics.ColliderShape)).index1, 0)
+    test.equal(assert(world:get(entity, physics.Motion)).vx, 128)
+end
+
+function suite.reattachesAJointAfterASnapshotLoad(): nil
+    local world = newWorld()
+    local anchor = world:spawn()
+    physics.attach(world, anchor, {kind = "static"})
+    local arm = world:spawn()
+    physics.attach(world, arm)
+    local joint = world:spawn()
+    physics.attachJoint(world, joint, anchor, arm, {kind = "revolute"})
+    world:update(STEP)
+    local before = assert(world:get(joint, physics.JointLink))
+
+    world:loadSnapshot(world:saveSnapshot())
+
+    local after = assert(world:get(joint, physics.JointLink))
+    test.equal(after.index1, before.index1)
+    test.equal(after.generation, before.generation)
+    test.equal(assert(world:get(joint, physics.JointBodyA)).target, anchor)
+    test.equal(assert(world:get(joint, physics.JointBodyB)).target, arm)
+end
+
+function suite.ignoresASnapshotFromAnotherEngine(): nil
+    local world, backend = newWorld()
+    local entity = world:spawn()
+    physics.attach(world, entity)
+    world:update(STEP)
+    local snapshot = world:saveSnapshot()
+    for index = 1, #snapshot.data do
+        if snapshot.data[index].key == "tecs.physics" then
+            (snapshot.data[index].value as {[string]: any}).engine = "somethingelse"
+        end
+    end
+
+    backend.clearLog()
+    world:loadSnapshot(snapshot)
+
+    test.equal(#logged(backend, "load"), 0)
+end
+
+--- Runs one identical scenario and answers the command stream it produced.
+local function scenario(): {string}
+    local world, backend = newWorld(9.81)
+    local ground = world:spawn(ecs.Transform2D(0, 100))
+    physics.attach(world, ground, {kind = "static", halfWidth = 200, halfHeight = 8})
+    local boxes: {integer} = {}
+    for index = 1, 8 do
+        -- Two archetypes, so archetype order and entity order disagree and the
+        -- stream only matches when the reconcile pass sorts.
+        local box: integer
+        if index % 2 == 0 then
+            box = world:spawn(ecs.Transform2D(index * 12, index * -7), marker)
+        else
+            box = world:spawn(ecs.Transform2D(index * 12, index * -7))
+        end
+        physics.attach(world, box, {halfWidth = 6, halfHeight = 6, restitution = 0.2})
+        boxes[index] = box
+    end
+    local joint = world:spawn()
+    physics.attachJoint(world, joint, ground, boxes[1], {kind = "revolute"})
+
+    for frame = 1, 20 do
+        if frame == 5 then
+            physics.applyImpulse(world, boxes[3], 64, -32)
+        elseif frame == 9 then
+            physics.detach(world, boxes[6])
+        elseif frame == 12 then
+            world:despawn(boxes[7])
+        end
+        world:update(STEP)
+    end
+    world:shutdown()
+
+    return backend.log
+end
+
+function suite.producesTheSameCommandStreamForTheSameScenario(): nil
+    local first = scenario()
+    local second = scenario()
+
+    test.equal(#first, #second)
+    test.assert(#first > 20, "the scenario produced a command stream worth comparing")
+    for index = 1, #first do
+        test.equal(second[index], first[index], "command " .. tostring(index) .. " diverged")
+    end
+end
+
+function suite.releasesTheSimulationAtShutdown(): nil
+    local world, backend = newWorld()
+    local entity = world:spawn()
+    physics.attach(world, entity)
+    world:update(STEP)
+    backend.clearLog()
+
+    world:shutdown()
+
+    test.equal(#logged(backend, "destroy"), 1)
+    test.equal(physics.of(world), nil)
+    test.assert(not physics.hasBody(world, entity))
+end
+
+return suite

@@ -1,0 +1,533 @@
+module tecs.physics.contract
+
+--[[
+The batched crossing between Tecs entities and a native rigid-body solver.
+
+One fixed step is one crossing. A frame's systems queue commands through the
+`queue*` functions, `step` applies every queued command and advances the
+solver once, and the results are read back from buffers the simulation
+already holds. Nothing here calls a solver once per body, and nothing a
+solver owns ever calls back into Nupp: a Nupp function reached through a
+foreign function pointer cannot be entered from a compiled trace or from a
+thread the Nupp VM never created, so contacts, poses and assigned handles
+leave through buffers instead.
+
+`tecs.physics.rapier` implements this over the `tecs_physics` Rust library.
+A test supplies its own implementation, which is what lets the entity-facing
+half of `tecs.physics` be exercised with no native library present.
+
+Every length here is in solver meters and every angle is in radians.
+`tecs.physics` owns the pixel conversion and does not push it across this
+boundary.
+
+A handle is a one-based `index1` plus a `generation`. Zero `index1` names
+nothing, which is what a snapshot load leaves behind and what a failed
+creation reports.
+]]
+
+--- A body the solver never moves.
+export const BODY_STATIC: integer = 0
+
+--- A body the game moves through velocity, which pushes dynamic bodies.
+export const BODY_KINEMATIC: integer = 1
+
+--- A body the solver moves.
+export const BODY_DYNAMIC: integer = 2
+
+--- An axis-aligned box in the body frame.
+export const SHAPE_BOX: integer = 0
+
+--- A circle.
+export const SHAPE_CIRCLE: integer = 1
+
+--- A vertical capsule.
+export const SHAPE_CAPSULE: integer = 2
+
+--- A joint holding one relative pose between two bodies.
+export const JOINT_FIXED: integer = 0
+
+--- A joint sharing one anchor point, leaving rotation about it free.
+export const JOINT_REVOLUTE: integer = 1
+
+--- A joint sharing one sliding axis, leaving translation along it free.
+export const JOINT_PRISMATIC: integer = 2
+
+--- Adds a center-of-mass impulse from `a` and `b`.
+export const ACTION_IMPULSE: integer = 0
+
+--- Adds the impulse `a`, `b` at the world point `c`, `d`.
+export const ACTION_IMPULSE_AT: integer = 1
+
+--- Adds a center-of-mass force from `a` and `b`.
+export const ACTION_FORCE: integer = 2
+
+--- Adds the force `a`, `b` at the world point `c`, `d`.
+export const ACTION_FORCE_AT: integer = 3
+
+--- Adds the torque `a`.
+export const ACTION_TORQUE: integer = 4
+
+--- Replaces linear velocity with `a`, `b`.
+export const ACTION_SET_VELOCITY: integer = 5
+
+--- Replaces angular velocity with `a`.
+export const ACTION_SET_ANGULAR_VELOCITY: integer = 6
+
+--- Wakes the body when `a` is nonzero and sleeps it otherwise.
+export const ACTION_SET_AWAKE: integer = 7
+
+--- Enables the body when `a` is nonzero and disables it otherwise.
+export const ACTION_SET_ENABLED: integer = 8
+
+--- Replaces the body kind with `a`, one of the body-kind constants.
+export const ACTION_SET_BODY_TYPE: integer = 9
+
+--- Teleports the body to `a`, `b` at angle `c`, leaving velocity alone.
+export const ACTION_SET_TRANSFORM: integer = 10
+
+--- One collider's geometry, material and collision filtering.
+export record ColliderDef
+    --- Caller-writable. Names the entity that owns this shape, which is what
+    --- a contact event and an entity-addressed replacement both report.
+    entity: integer
+
+    --- Caller-writable. Selects one of the shape constants.
+    shape: integer
+
+    --- Caller-writable. Reports overlap without a collision response.
+    sensor: boolean
+
+    --- Caller-writable. Sets the box half extent along x, in meters.
+    halfWidth: number
+
+    --- Caller-writable. Sets the box half extent along y, in meters.
+    halfHeight: number
+
+    --- Caller-writable. Sets the circle or capsule radius, in meters.
+    radius: number
+
+    --- Caller-writable. Sets the distance between capsule end centers, in
+    --- meters, excluding the caps.
+    length: number
+
+    --- Caller-writable. Offsets the shape along x in the body frame, in
+    --- meters.
+    offsetX: number
+
+    --- Caller-writable. Offsets the shape along y with `offsetX`.
+    offsetY: number
+
+    --- Caller-writable. Sets mass per unit area.
+    density: number
+
+    --- Caller-writable. Sets Coulomb friction.
+    friction: number
+
+    --- Caller-writable. Sets the bounce coefficient.
+    restitution: number
+
+    --- Caller-writable. Sets the low 32 collision-group category bits.
+    categoryBits: integer
+
+    --- Caller-writable. Sets the categories this shape may contact.
+    maskBits: integer
+end
+
+--- One body creation, together with the primary collider it always carries.
+export record BodyCreate
+    --- Caller-writable. Names the entity the body belongs to.
+    entity: integer
+
+    --- Caller-writable. Describes the shape created with the body.
+    collider: ColliderDef
+
+    --- Caller-writable. Selects one of the body-kind constants.
+    kind: integer
+
+    --- Caller-writable. Locks the body's angle.
+    fixedRotation: boolean
+
+    --- Caller-writable. Sweeps the body's motion for continuous collision.
+    isBullet: boolean
+
+    --- Caller-writable. Permits the body to sleep when it comes to rest.
+    sleepEnabled: boolean
+
+    --- Caller-writable. Scales gravity for this body alone.
+    gravityScale: number
+
+    --- Caller-writable. Damps linear velocity.
+    linearDamping: number
+
+    --- Caller-writable. Damps angular velocity.
+    angularDamping: number
+
+    --- Caller-writable. Places the body's origin along x, in meters.
+    x: number
+
+    --- Caller-writable. Places the body's origin along y with `x`.
+    y: number
+
+    --- Caller-writable. Sets the body's initial angle, in radians.
+    angle: number
+
+    --- Caller-writable. Sets initial linear velocity along x, in meters per
+    --- second.
+    vx: number
+
+    --- Caller-writable. Sets initial linear velocity along y with `vx`.
+    vy: number
+
+    --- Caller-writable. Sets initial angular velocity, in radians per second.
+    omega: number
+end
+
+--- One secondary collider added to an existing or same-batch body.
+export record ColliderCreate
+    --- Caller-writable. Describes the shape to add.
+    def: ColliderDef
+
+    --- Caller-writable. Names the owning body slot, one-based, when
+    --- `bodyOrder` is zero.
+    bodyIndex1: integer
+
+    --- Caller-writable. Rejects a stale owning body with `bodyIndex1`.
+    bodyGeneration: integer
+
+    --- Caller-writable. Names the one-based order of the `queueCreateBody`
+    --- call in this same batch that owns the shape, or zero when
+    --- `bodyIndex1` is authoritative. Queueing a shape onto a body the same
+    --- batch creates is what keeps a compound body one crossing.
+    bodyOrder: integer
+end
+
+--- One in-place collider replacement, addressed by handle or by entity.
+export record ColliderUpdate
+    --- Caller-writable. Describes the replacement shape.
+    def: ColliderDef
+
+    --- Caller-writable. Names the collider slot to replace, one-based, or
+    --- zero to find the shape under `bodyIndex1` whose entity is `def.entity`.
+    index1: integer
+
+    --- Caller-writable. Rejects a stale collider slot with `index1`.
+    generation: integer
+
+    --- Caller-writable. Names the owning body slot, one-based, used when
+    --- `index1` is zero.
+    bodyIndex1: integer
+
+    --- Caller-writable. Rejects a stale owning body with `bodyIndex1`.
+    bodyGeneration: integer
+end
+
+--- One joint creation between two existing or same-batch bodies.
+export record JointCreate
+    --- Caller-writable. Names the entity that owns the joint.
+    entity: integer
+
+    --- Caller-writable. Selects one of the joint-kind constants.
+    kind: integer
+
+    --- Caller-writable. Names the first body slot, one-based, when
+    --- `bodyAOrder` is zero.
+    bodyAIndex1: integer
+
+    --- Caller-writable. Rejects a stale first body with `bodyAIndex1`.
+    bodyAGeneration: integer
+
+    --- Caller-writable. Names the one-based `queueCreateBody` order in this
+    --- batch that supplies the first body, or zero.
+    bodyAOrder: integer
+
+    --- Caller-writable. Names the second body slot, one-based, when
+    --- `bodyBOrder` is zero.
+    bodyBIndex1: integer
+
+    --- Caller-writable. Rejects a stale second body with `bodyBIndex1`.
+    bodyBGeneration: integer
+
+    --- Caller-writable. Names the one-based `queueCreateBody` order in this
+    --- batch that supplies the second body, or zero.
+    bodyBOrder: integer
+
+    --- Caller-writable. Anchors the joint in the first body's frame along x,
+    --- in meters.
+    anchorAX: number
+
+    --- Caller-writable. Anchors the joint in the first body's frame along y.
+    anchorAY: number
+
+    --- Caller-writable. Anchors the joint in the second body's frame along x.
+    anchorBX: number
+
+    --- Caller-writable. Anchors the joint in the second body's frame along y.
+    anchorBY: number
+
+    --- Caller-writable. Sets the prismatic sliding axis along x. The solver
+    --- normalizes it, and the other joint kinds ignore it.
+    axisX: number
+
+    --- Caller-writable. Sets the prismatic sliding axis along y.
+    axisY: number
+
+    --- Caller-writable. Enforces `limitMin` and `limitMax`.
+    limitsEnabled: boolean
+
+    --- Caller-writable. Sets the lower limit, in radians for a revolute joint
+    --- and meters for a prismatic one.
+    limitMin: number
+
+    --- Caller-writable. Sets the upper limit with `limitMin`.
+    limitMax: number
+
+    --- Caller-writable. Drives the joint's free degree of freedom.
+    motorEnabled: boolean
+
+    --- Caller-writable. Sets the motor's target velocity, in radians or
+    --- meters per second.
+    motorTargetVelocity: number
+
+    --- Caller-writable. Bounds the force or torque the motor may apply.
+    motorMaxForce: number
+
+    --- Caller-writable. Lets the two joined bodies still collide.
+    contactsEnabled: boolean
+end
+
+--- The body and collider handle owned by each entity a lookup asked about.
+---
+--- Each array holds one entry per requested entity, in the requested order,
+--- and a zero `index1` means the simulation has nothing for that entity.
+export record EntityHandles
+    --- Read-only. Holds each entity's body slot, one-based.
+    bodyIndex1: {integer}
+
+    --- Read-only. Holds each entity's body generation.
+    bodyGeneration: {integer}
+
+    --- Read-only. Holds each entity's collider slot, one-based.
+    colliderIndex1: {integer}
+
+    --- Read-only. Holds each entity's collider generation.
+    colliderGeneration: {integer}
+
+    --- Read-only. Holds each entity's joint slot, one-based.
+    jointIndex1: {integer}
+
+    --- Read-only. Holds each entity's joint generation.
+    jointGeneration: {integer}
+end
+
+--- One live simulation, driven entirely through batched commands.
+---
+--- Every field is a closure over one simulation's private state, so an
+--- implementation is a value rather than a subclass and a test may supply
+--- its own without a native library.
+export record Simulation
+    --- Read-only. Identifies this simulation among the process's live ones,
+    --- which is what a stored handle carries so a row left over from another
+    --- simulation is rejected rather than resolved against whatever took its
+    --- place.
+    id: integer
+
+    --- Read-only. Reports how many substeps each `step` divides its interval
+    --- into.
+    subStepCount: integer
+
+    --- Read-only. Reports the solver width the process settled on.
+    workerCount: integer
+
+    --- Queues one body creation and returns its one-based order in this
+    --- batch, which `createdBody` and a same-batch `bodyOrder` both use.
+    queueCreateBody: function(command: BodyCreate): integer
+
+    --- Queues one secondary collider and returns its one-based order.
+    queueCreateCollider: function(command: ColliderCreate): integer
+
+    --- Queues one joint and returns its one-based order.
+    queueCreateJoint: function(command: JointCreate): integer
+
+    --- Queues one body redeclaration, which never moves the body and never
+    --- changes its owning entity.
+    ---
+    --- The arguments are positional because a redeclaration runs once per
+    --- dirty body row, and a record per row is an allocation in a loop whose
+    --- length is the game's business.
+    --- @param index1 the one-based target body slot
+    --- @param generation the generation that must match
+    --- @param kind one of the body-kind constants
+    --- @param fixedRotation whether the body's angle is locked
+    --- @param isBullet whether the body sweeps its motion
+    --- @param sleepEnabled whether the body may sleep at rest
+    --- @param gravityScale the body's own gravity multiplier
+    --- @param linearDamping the linear velocity damping term
+    --- @param angularDamping the angular velocity damping term
+    queueUpdateBody: function(
+        index1: integer,
+        generation: integer,
+        kind: integer,
+        fixedRotation: boolean,
+        isBullet: boolean,
+        sleepEnabled: boolean,
+        gravityScale: number,
+        linearDamping: number,
+        angularDamping: number
+    ): nil
+
+    --- Queues one collider replacement and returns its one-based order,
+    --- which `updatedCollider` uses to read the replacement's handle.
+    queueUpdateCollider: function(command: ColliderUpdate): integer
+
+    --- Queues one mutation of a live body.
+    ---
+    --- Actions apply at the start of the step that follows them, in the order
+    --- they were queued, and reads report the state after the last completed
+    --- step. A queued impulse is therefore not visible until that step runs.
+    --- The arguments are positional because a game applies actions in its own
+    --- loops.
+    --- @param index1 the one-based target body slot
+    --- @param generation the generation that must match
+    --- @param action one of the action constants
+    --- @param a the action's first operand
+    --- @param b the action's second operand
+    --- @param c the action's third operand
+    --- @param d the action's fourth operand
+    queueAction: function(
+        index1: integer,
+        generation: integer,
+        action: integer,
+        a: number,
+        b: number,
+        c: number,
+        d: number
+    ): nil
+
+    --- Queues one body destruction, which also removes its colliders and
+    --- joints. A slot the simulation no longer holds is ignored.
+    queueDestroyBody: function(index1: integer, generation: integer): nil
+
+    --- Queues one collider destruction, ignoring a slot already gone.
+    queueDestroyCollider: function(index1: integer, generation: integer): nil
+
+    --- Queues one joint destruction, ignoring a slot already gone.
+    queueDestroyJoint: function(index1: integer, generation: integer): nil
+
+    --- Applies every queued command and advances the simulation once.
+    ---
+    --- Commands apply in a fixed order that does not depend on the order
+    --- systems discovered them: joint, collider and body destruction, then
+    --- body, collider and joint creation, then body redeclaration, collider
+    --- replacement, and queued actions. The queues are empty afterwards.
+    --- @param dt the interval to advance, in seconds
+    --- @raises when the simulation cannot apply the batch
+    step: function(dt: number): nil
+
+    --- Returns the body and collider assigned to one queued creation.
+    --- @param order the one-based order `queueCreateBody` returned
+    --- @return the body slot, one-based and zero when creation failed, the
+    ---     body generation, the primary collider slot, and its generation
+    createdBody: function(order: integer): (integer, integer, integer, integer)
+
+    --- Returns the collider assigned to one queued secondary creation.
+    --- @param order the one-based order `queueCreateCollider` returned
+    --- @return the collider slot, one-based and zero on failure, and its
+    ---     generation
+    createdCollider: function(order: integer): (integer, integer)
+
+    --- Returns the joint assigned to one queued creation.
+    --- @param order the one-based order `queueCreateJoint` returned
+    --- @return the joint slot, one-based and zero on failure, and its
+    ---     generation
+    createdJoint: function(order: integer): (integer, integer)
+
+    --- Returns the collider a queued replacement produced.
+    --- @param order the one-based order `queueUpdateCollider` returned
+    --- @return the collider slot, one-based and zero on failure, and its
+    ---     generation
+    updatedCollider: function(order: integer): (integer, integer)
+
+    --- Reports whether the simulation still holds this body.
+    isLive: function(index1: integer, generation: integer): boolean
+
+    --- Reports whether the solver is still integrating this body.
+    isAwake: function(index1: integer, generation: integer): boolean
+
+    --- Returns a body's pose only when the last step moved it.
+    --- @param index1 the one-based body slot
+    --- @param generation the generation that must match
+    --- @return nil when the body is gone or did not move, otherwise x in
+    ---     meters, y in meters, the cosine of its angle, and the sine
+    poseOf: function(index1: integer, generation: integer): (number?, number, number, number)
+
+    --- Returns a body's velocity after the last completed step.
+    --- @param index1 the one-based body slot
+    --- @param generation the generation that must match
+    --- @return linear velocity along x and y in meters per second, and
+    ---     angular velocity in radians per second, all zero when the body is
+    ---     gone
+    velocityOf: function(index1: integer, generation: integer): (number, number, number)
+
+    --- Reports how many contact and sensor transitions the last step queued.
+    eventCount: function(): integer
+
+    --- Returns one queued transition.
+    --- @param index the one-based position within the last step's events
+    --- @return the first entity, the second entity, whether the pair began
+    ---     touching rather than stopped, and whether the pair involved a
+    ---     sensor. A sensor transition names the sensor first.
+    eventAt: function(index: integer): (integer, integer, boolean, boolean)
+
+    --- Casts a finite segment and returns its nearest hit.
+    --- @param x1 the segment start along x, in meters
+    --- @param y1 the segment start along y, in meters
+    --- @param x2 the segment end along x, in meters
+    --- @param y2 the segment end along y, in meters
+    --- @param categoryBits the ray's collision categories
+    --- @param maskBits the categories the ray may hit
+    --- @return nil on a miss, otherwise the owning entity, the contact point
+    ---     x and y in meters, the outward unit normal x and y, and the
+    ---     fraction along the segment
+    raycast: function(
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number,
+        categoryBits: integer,
+        maskBits: integer
+    ): (integer?, number, number, number, number, number)
+
+    --- Answers the handles the simulation holds for a list of entities.
+    ---
+    --- A snapshot load asks about every restored entity at once, so the cost
+    --- stays linear in the simulation rather than quadratic.
+    --- @param entities the entity ids to look up
+    --- @return one caller-owned record of parallel result arrays
+    resolveEntities: function(entities: {integer}): EntityHandles
+
+    --- Serializes the complete simulation state.
+    --- @return the bytes, or nil and a reason when the state cannot be saved
+    save: function(): (string?, string?)
+
+    --- Replaces the simulation state with previously saved bytes.
+    ---
+    --- Slots and generations survive, so a handle a save recorded still
+    --- addresses the same body afterwards.
+    --- @param bytes the value a previous `save` returned
+    --- @return whether the state was restored, and a reason when it was not
+    load: function(bytes: string): (boolean, string?)
+
+    --- Releases the simulation and everything it owns.
+    ---
+    --- Calling it twice is harmless. Every other function is undefined
+    --- afterwards.
+    destroy: function(): nil
+end
+
+--- Options accepted when a simulation is created.
+export type Options = {
+    gravityX: number?,
+    gravityY: number?,
+    subStepCount: integer?,
+    workerCount: integer?
+}

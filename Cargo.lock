@@ -4074,6 +4074,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tecs-physics"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "rapier2d",
+ "rayon",
+ "serde",
+]
+
+[[package]]
 name = "tecs-winit-host"
 version = "0.1.0"
 dependencies = [

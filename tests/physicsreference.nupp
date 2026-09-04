@@ -1,0 +1,765 @@
+module tests.physicsreference
+
+--[[
+A deterministic point-mass simulation implementing the physics crossing.
+
+The purpose is to exercise the entity-facing half of `tecs.physics` with no
+native library present: it records every command it receives, applies them in
+the order the contract documents, and integrates bodies as points under
+gravity. It resolves no contacts, so a test that wants a transition pushes one
+with `pushEvent`.
+
+`log` is the point of the whole thing. It is the ordered command stream one
+fixed step produced, which is what makes ordering and determinism assertions
+possible without reading a solver's internals.
+]]
+
+local contract = require("tecs.physics.contract")
+
+--- One body the reference integrates.
+local record Slot
+    live: boolean
+    generation: integer
+    entity: integer
+    kind: integer
+    x: number
+    y: number
+    angle: number
+    vx: number
+    vy: number
+    omega: number
+    gravityScale: number
+    awake: boolean
+    enabled: boolean
+    moved: boolean
+end
+
+--- One collider or joint the reference holds.
+local record Link
+    live: boolean
+    generation: integer
+    entity: integer
+    owner: integer
+end
+
+local record PendingEvent
+    entityA: integer
+    entityB: integer
+    started: boolean
+    sensor: boolean
+end
+
+--- A reference simulation together with the hooks a test drives it through.
+export record Reference
+    --- Read-only. Holds the contract implementation to hand `physics.install`.
+    simulation: contract.Simulation
+
+    --- Read-only. Holds the command stream the last `step` applied, in the
+    --- order it applied them.
+    log: {string}
+
+    --- Queues one transition for the next step to report.
+    pushEvent: function(entityA: integer, entityB: integer, started: boolean, sensor: boolean): nil
+
+    --- Returns how many bodies the reference holds.
+    bodyCount: function(): integer
+
+    --- Returns how many colliders the reference holds.
+    colliderCount: function(): integer
+
+    --- Returns how many joints the reference holds.
+    jointCount: function(): integer
+
+    --- Returns a body's pose, or nil when the slot is not live.
+    poseAt: function(index1: integer): (number?, number, number)
+
+    --- Empties the command log.
+    clearLog: function(): nil
+end
+
+local nextId: integer = 1
+
+--- Creates an independent reference simulation.
+--- @param gravityY the downward acceleration in meters per second squared
+--- @return the reference and its hooks
+export function create(gravityY: number?): Reference
+    local gravity = gravityY or 0.0
+    local id = nextId
+    nextId = id + 1
+
+    local bodies: {Slot} = {}
+    local colliders: {Link} = {}
+    local joints: {Link} = {}
+    local log: {string} = {}
+
+    local createBodies: {contract.BodyCreate} = {}
+    local createColliders: {contract.ColliderCreate} = {}
+    local createJoints: {contract.JointCreate} = {}
+    local updateBodies: {{number}} = {}
+    local updateColliders: {contract.ColliderUpdate} = {}
+    local actions: {{number}} = {}
+    local destroyBodies: {{integer}} = {}
+    local destroyColliders: {{integer}} = {}
+    local destroyJoints: {{integer}} = {}
+
+    local createdBodies: {{integer}} = {}
+    local createdColliders: {{integer}} = {}
+    local createdJoints: {{integer}} = {}
+    local updatedColliders: {{integer}} = {}
+
+    local pending: {PendingEvent} = {}
+    local reported: {PendingEvent} = {}
+
+    local function record(entry: string): nil
+        log[#log + 1] = entry
+    end
+
+    local function freeSlot(values: {Slot}): integer
+        for index = 1, #values do
+            if not values[index].live then
+                return index
+            end
+        end
+
+        return #values + 1
+    end
+
+    local function freeLink(values: {Link}): integer
+        for index = 1, #values do
+            if not values[index].live then
+                return index
+            end
+        end
+
+        return #values + 1
+    end
+
+    local function liveSlot(index1: integer, generation: integer): Slot?
+        local slot = bodies[index1]
+        if slot == nil or not slot.live or slot.generation ~= generation then
+            return nil
+        end
+
+        return slot
+    end
+
+    local function queueCreateBody(command: contract.BodyCreate): integer
+        createBodies[#createBodies + 1] = command
+
+        return #createBodies
+    end
+
+    local function queueCreateCollider(command: contract.ColliderCreate): integer
+        createColliders[#createColliders + 1] = command
+
+        return #createColliders
+    end
+
+    local function queueCreateJoint(command: contract.JointCreate): integer
+        createJoints[#createJoints + 1] = command
+
+        return #createJoints
+    end
+
+    local function queueUpdateBody(
+        index1: integer,
+        generation: integer,
+        kind: integer,
+        fixedRotation: boolean,
+        isBullet: boolean,
+        sleepEnabled: boolean,
+        gravityScale: number,
+        linearDamping: number,
+        angularDamping: number
+    ): nil
+        updateBodies[#updateBodies + 1] = {index1, generation, kind, gravityScale}
+    end
+
+    local function queueUpdateCollider(command: contract.ColliderUpdate): integer
+        updateColliders[#updateColliders + 1] = command
+
+        return #updateColliders
+    end
+
+    local function queueAction(
+        index1: integer,
+        generation: integer,
+        action: integer,
+        a: number,
+        b: number,
+        c: number,
+        d: number
+    ): nil
+        actions[#actions + 1] = {index1, generation, action, a, b, c, d}
+    end
+
+    local function queueDestroyBody(index1: integer, generation: integer): nil
+        destroyBodies[#destroyBodies + 1] = {index1, generation}
+    end
+
+    local function queueDestroyCollider(index1: integer, generation: integer): nil
+        destroyColliders[#destroyColliders + 1] = {index1, generation}
+    end
+
+    local function queueDestroyJoint(index1: integer, generation: integer): nil
+        destroyJoints[#destroyJoints + 1] = {index1, generation}
+    end
+
+    local function applyAction(entry: {number}): nil
+        local index1 = entry[1] as integer
+        local slot = liveSlot(index1, entry[2] as integer)
+        local action = entry[3] as integer
+        record(("action %d %d"):format(action, index1))
+        if slot == nil then
+            return
+        end
+        if action == contract.ACTION_IMPULSE then
+            slot.vx = slot.vx + entry[4]
+            slot.vy = slot.vy + entry[5]
+            slot.awake = true
+        elseif action == contract.ACTION_FORCE then
+            slot.vx = slot.vx + entry[4]
+            slot.vy = slot.vy + entry[5]
+            slot.awake = true
+        elseif action == contract.ACTION_TORQUE then
+            slot.omega = slot.omega + entry[4]
+            slot.awake = true
+        elseif action == contract.ACTION_SET_VELOCITY then
+            slot.vx = entry[4]
+            slot.vy = entry[5]
+            slot.awake = true
+        elseif action == contract.ACTION_SET_ANGULAR_VELOCITY then
+            slot.omega = entry[4]
+            slot.awake = true
+        elseif action == contract.ACTION_SET_AWAKE then
+            slot.awake = entry[4] ~= 0
+        elseif action == contract.ACTION_SET_ENABLED then
+            slot.enabled = entry[4] ~= 0
+        elseif action == contract.ACTION_SET_BODY_TYPE then
+            slot.kind = entry[4] as integer
+        elseif action == contract.ACTION_SET_TRANSFORM then
+            slot.x = entry[4]
+            slot.y = entry[5]
+            slot.angle = entry[6]
+        end
+    end
+
+    local function ownerOf(index1: integer, generation: integer, order: integer): integer
+        if order > 0 then
+            local created = createdBodies[order]
+            return created ~= nil and created[1] or 0
+        end
+        local slot = liveSlot(index1, generation)
+
+        return slot ~= nil and index1 or 0
+    end
+
+    local function step(dt: number): nil
+        for index = 1, #destroyJoints do
+            local entry = destroyJoints[index]
+            local link = joints[entry[1]]
+            record(("destroyJoint %d"):format(entry[1]))
+            if link ~= nil and link.live and link.generation == entry[2] then
+                link.live = false
+            end
+        end
+        for index = 1, #destroyColliders do
+            local entry = destroyColliders[index]
+            local link = colliders[entry[1]]
+            record(("destroyCollider %d"):format(entry[1]))
+            if link ~= nil and link.live and link.generation == entry[2] then
+                link.live = false
+            end
+        end
+        for index = 1, #destroyBodies do
+            local entry = destroyBodies[index]
+            local slot = bodies[entry[1]]
+            record(("destroyBody %d"):format(entry[1]))
+            if slot ~= nil and slot.live and slot.generation == entry[2] then
+                slot.live = false
+                for link = 1, #colliders do
+                    if colliders[link].live and colliders[link].owner == entry[1] then
+                        colliders[link].live = false
+                    end
+                end
+                for link = 1, #joints do
+                    if joints[link].live and joints[link].owner == entry[1] then
+                        joints[link].live = false
+                    end
+                end
+            end
+        end
+
+        createdBodies = {}
+        for index = 1, #createBodies do
+            local command = createBodies[index]
+            record(("createBody %d"):format(command.entity))
+            local slotIndex = freeSlot(bodies)
+            local existing = bodies[slotIndex]
+            local generation = existing ~= nil and existing.generation + 1 or 0
+            bodies[slotIndex] = new Slot(
+                live = true,
+                generation = generation,
+                entity = command.entity,
+                kind = command.kind,
+                x = command.x,
+                y = command.y,
+                angle = command.angle,
+                vx = command.vx,
+                vy = command.vy,
+                omega = command.omega,
+                gravityScale = command.gravityScale,
+                awake = true,
+                enabled = true,
+                moved = true
+            )
+            local shapeIndex = freeLink(colliders)
+            local previous = colliders[shapeIndex]
+            colliders[shapeIndex] = new Link(
+                live = true,
+                generation = previous ~= nil and previous.generation + 1 or 0,
+                entity = command.entity,
+                owner = slotIndex
+            )
+            createdBodies[index] = {slotIndex, generation, shapeIndex, colliders[shapeIndex].generation}
+        end
+
+        createdColliders = {}
+        for index = 1, #createColliders do
+            local command = createColliders[index]
+            record(("createCollider %d"):format(command.def.entity))
+            local owner = ownerOf(command.bodyIndex1, command.bodyGeneration, command.bodyOrder)
+            if owner == 0 then
+                createdColliders[index] = {0, 0}
+            else
+                local shapeIndex = freeLink(colliders)
+                local previous = colliders[shapeIndex]
+                colliders[shapeIndex] = new Link(
+                    live = true,
+                    generation = previous ~= nil and previous.generation + 1 or 0,
+                    entity = command.def.entity,
+                    owner = owner
+                )
+                createdColliders[index] = {shapeIndex, colliders[shapeIndex].generation}
+            end
+        end
+
+        createdJoints = {}
+        for index = 1, #createJoints do
+            local command = createJoints[index]
+            record(("createJoint %d"):format(command.entity))
+            local first = ownerOf(command.bodyAIndex1, command.bodyAGeneration, command.bodyAOrder)
+            local second = ownerOf(command.bodyBIndex1, command.bodyBGeneration, command.bodyBOrder)
+            if first == 0 or second == 0 then
+                createdJoints[index] = {0, 0}
+            else
+                local jointIndex = freeLink(joints)
+                local previous = joints[jointIndex]
+                joints[jointIndex] = new Link(
+                    live = true,
+                    generation = previous ~= nil and previous.generation + 1 or 0,
+                    entity = command.entity,
+                    owner = first
+                )
+                createdJoints[index] = {jointIndex, joints[jointIndex].generation}
+            end
+        end
+
+        for index = 1, #updateBodies do
+            local entry = updateBodies[index]
+            record(("updateBody %d"):format(entry[1] as integer))
+            local slot = liveSlot(entry[1] as integer, entry[2] as integer)
+            if slot ~= nil then
+                slot.kind = entry[3] as integer
+                slot.gravityScale = entry[4]
+            end
+        end
+
+        updatedColliders = {}
+        for index = 1, #updateColliders do
+            local command = updateColliders[index]
+            record(("updateCollider %d"):format(command.def.entity))
+            local target = command.index1
+            if target == 0 then
+                for link = 1, #colliders do
+                    if colliders[link].live and colliders[link].entity == command.def.entity then
+                        target = link
+                        break
+                    end
+                end
+            end
+            local link = colliders[target]
+            if link == nil or not link.live then
+                updatedColliders[index] = {0, 0}
+            else
+                link.generation = link.generation + 1
+                updatedColliders[index] = {target, link.generation}
+            end
+        end
+
+        for index = 1, #actions do
+            applyAction(actions[index])
+        end
+
+        createBodies = {}
+        createColliders = {}
+        createJoints = {}
+        updateBodies = {}
+        updateColliders = {}
+        actions = {}
+        destroyBodies = {}
+        destroyColliders = {}
+        destroyJoints = {}
+
+        for index = 1, #bodies do
+            local slot = bodies[index]
+            if slot.live and slot.enabled and slot.kind == contract.BODY_DYNAMIC then
+                slot.vy = slot.vy + gravity * slot.gravityScale * dt
+            end
+            if slot.live and slot.enabled and slot.kind ~= contract.BODY_STATIC then
+                local x = slot.x + slot.vx * dt
+                local y = slot.y + slot.vy * dt
+                local angle = slot.angle + slot.omega * dt
+                slot.moved = slot.moved or x ~= slot.x or y ~= slot.y or angle ~= slot.angle
+                slot.x = x
+                slot.y = y
+                slot.angle = angle
+            end
+        end
+
+        reported = pending
+        pending = {}
+    end
+
+    local function createdBody(order: integer): (integer, integer, integer, integer)
+        local created = createdBodies[order]
+        if created == nil then
+            return 0, 0, 0, 0
+        end
+
+        return created[1], created[2], created[3], created[4]
+    end
+
+    local function createdCollider(order: integer): (integer, integer)
+        local created = createdColliders[order]
+        if created == nil then
+            return 0, 0
+        end
+
+        return created[1], created[2]
+    end
+
+    local function createdJoint(order: integer): (integer, integer)
+        local created = createdJoints[order]
+        if created == nil then
+            return 0, 0
+        end
+
+        return created[1], created[2]
+    end
+
+    local function updatedCollider(order: integer): (integer, integer)
+        local updated = updatedColliders[order]
+        if updated == nil then
+            return 0, 0
+        end
+
+        return updated[1], updated[2]
+    end
+
+    local function isLive(index1: integer, generation: integer): boolean
+        return liveSlot(index1, generation) ~= nil
+    end
+
+    local function isAwake(index1: integer, generation: integer): boolean
+        local slot = liveSlot(index1, generation)
+
+        return slot ~= nil and slot.awake
+    end
+
+    local function poseOf(index1: integer, generation: integer): (number?, number, number, number)
+        local slot = liveSlot(index1, generation)
+        if slot == nil or not slot.moved then
+            return nil, 0, 0, 0
+        end
+        slot.moved = false
+
+        return slot.x, slot.y, math.cos(slot.angle), math.sin(slot.angle)
+    end
+
+    local function velocityOf(index1: integer, generation: integer): (number, number, number)
+        local slot = liveSlot(index1, generation)
+        if slot == nil then
+            return 0, 0, 0
+        end
+
+        return slot.vx, slot.vy, slot.omega
+    end
+
+    local function eventCount(): integer
+        return #reported
+    end
+
+    local function eventAt(index: integer): (integer, integer, boolean, boolean)
+        local event = reported[index]
+        if event == nil then
+            return 0, 0, false, false
+        end
+
+        return event.entityA, event.entityB, event.started, event.sensor
+    end
+
+    local function raycast(
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number,
+        categoryBits: integer,
+        maskBits: integer
+    ): (integer?, number, number, number, number, number)
+        for index = 1, #bodies do
+            local slot = bodies[index]
+            if slot.live and slot.x >= math.min(x1, x2) and slot.x <= math.max(x1, x2) then
+                return slot.entity, slot.x, slot.y, 1.0, 0.0, 0.5
+            end
+        end
+
+        return nil, 0, 0, 0, 0, 0
+    end
+
+    local function resolveEntities(entities: {integer}): contract.EntityHandles
+        local result = new contract.EntityHandles(
+            bodyIndex1 = {},
+            bodyGeneration = {},
+            colliderIndex1 = {},
+            colliderGeneration = {},
+            jointIndex1 = {},
+            jointGeneration = {}
+        )
+        for index = 1, #entities do
+            local entity = entities[index]
+            result.bodyIndex1[index] = 0
+            result.bodyGeneration[index] = 0
+            result.colliderIndex1[index] = 0
+            result.colliderGeneration[index] = 0
+            result.jointIndex1[index] = 0
+            result.jointGeneration[index] = 0
+            for slot = 1, #bodies do
+                if bodies[slot].live and bodies[slot].entity == entity then
+                    result.bodyIndex1[index] = slot
+                    result.bodyGeneration[index] = bodies[slot].generation
+                    break
+                end
+            end
+            for link = 1, #colliders do
+                if colliders[link].live and colliders[link].entity == entity then
+                    result.colliderIndex1[index] = link
+                    result.colliderGeneration[index] = colliders[link].generation
+                    break
+                end
+            end
+            for link = 1, #joints do
+                if joints[link].live and joints[link].entity == entity then
+                    result.jointIndex1[index] = link
+                    result.jointGeneration[index] = joints[link].generation
+                    break
+                end
+            end
+        end
+
+        return result
+    end
+
+    local function save(): (string?, string?)
+        local parts: {string} = {}
+        for index = 1, #bodies do
+            local slot = bodies[index]
+            parts[#parts + 1] = ("B %d %s %d %d %.17g %.17g %.17g %.17g %.17g %.17g"):format(
+                index,
+                slot.live and "1" or "0",
+                slot.generation,
+                slot.entity,
+                slot.x,
+                slot.y,
+                slot.angle,
+                slot.vx,
+                slot.vy,
+                slot.omega
+            )
+        end
+        for index = 1, #colliders do
+            local link = colliders[index]
+            parts[#parts + 1] = ("C %d %s %d %d %d"):format(
+                index,
+                link.live and "1" or "0",
+                link.generation,
+                link.entity,
+                link.owner
+            )
+        end
+        for index = 1, #joints do
+            local link = joints[index]
+            parts[#parts + 1] = ("J %d %s %d %d %d"):format(
+                index,
+                link.live and "1" or "0",
+                link.generation,
+                link.entity,
+                link.owner
+            )
+        end
+
+        return table.concat(parts, "\n")
+    end
+
+    local function fields(line: string): {string}
+        local parts: {string} = {}
+        for field in line:gmatch("%S+") do
+            parts[#parts + 1] = field
+        end
+
+        return parts
+    end
+
+    local function number(text: string): number
+        return tonumber(text) as number
+    end
+
+    local function index(text: string): integer
+        return math.floor(number(text))
+    end
+
+    local function load(bytes: string): (boolean, string?)
+        bodies = {}
+        colliders = {}
+        joints = {}
+        for line in bytes:gmatch("[^\n]+") do
+            local parts = fields(line)
+            if parts[1] == "B" and #parts == 11 then
+                bodies[index(parts[2])] = new Slot(
+                    live = parts[3] == "1",
+                    generation = index(parts[4]),
+                    entity = index(parts[5]),
+                    kind = contract.BODY_DYNAMIC,
+                    x = number(parts[6]),
+                    y = number(parts[7]),
+                    angle = number(parts[8]),
+                    vx = number(parts[9]),
+                    vy = number(parts[10]),
+                    omega = number(parts[11]),
+                    gravityScale = 1.0,
+                    awake = true,
+                    enabled = true,
+                    moved = true
+                )
+            elseif parts[1] == "C" and #parts == 6 then
+                colliders[index(parts[2])] = new Link(
+                    live = parts[3] == "1",
+                    generation = index(parts[4]),
+                    entity = index(parts[5]),
+                    owner = index(parts[6])
+                )
+            elseif parts[1] == "J" and #parts == 6 then
+                joints[index(parts[2])] = new Link(
+                    live = parts[3] == "1",
+                    generation = index(parts[4]),
+                    entity = index(parts[5]),
+                    owner = index(parts[6])
+                )
+            end
+        end
+        record("load")
+
+        return true
+    end
+
+    local function destroy(): nil
+        record("destroy")
+        bodies = {}
+        colliders = {}
+        joints = {}
+    end
+
+    local simulation = new contract.Simulation(
+        id = id,
+        subStepCount = 4,
+        workerCount = 1,
+        queueCreateBody = queueCreateBody,
+        queueCreateCollider = queueCreateCollider,
+        queueCreateJoint = queueCreateJoint,
+        queueUpdateBody = queueUpdateBody,
+        queueUpdateCollider = queueUpdateCollider,
+        queueAction = queueAction,
+        queueDestroyBody = queueDestroyBody,
+        queueDestroyCollider = queueDestroyCollider,
+        queueDestroyJoint = queueDestroyJoint,
+        step = step,
+        createdBody = createdBody,
+        createdCollider = createdCollider,
+        createdJoint = createdJoint,
+        updatedCollider = updatedCollider,
+        isLive = isLive,
+        isAwake = isAwake,
+        poseOf = poseOf,
+        velocityOf = velocityOf,
+        eventCount = eventCount,
+        eventAt = eventAt,
+        raycast = raycast,
+        resolveEntities = resolveEntities,
+        save = save,
+        load = load,
+        destroy = destroy
+    )
+
+    local function countLive(values: {Link}): integer
+        local total: integer = 0
+        for index = 1, #values do
+            if values[index].live then
+                total = total + 1
+            end
+        end
+
+        return total
+    end
+
+    return new Reference(
+        simulation = simulation,
+        log = log,
+        pushEvent = function(entityA: integer, entityB: integer, started: boolean, sensor: boolean): nil
+            pending[#pending + 1] = new PendingEvent(
+                entityA = entityA,
+                entityB = entityB,
+                started = started,
+                sensor = sensor
+            )
+        end,
+        bodyCount = function(): integer
+            local total: integer = 0
+            for index = 1, #bodies do
+                if bodies[index].live then
+                    total = total + 1
+                end
+            end
+
+            return total
+        end,
+        colliderCount = function(): integer
+            return countLive(colliders)
+        end,
+        jointCount = function(): integer
+            return countLive(joints)
+        end,
+        poseAt = function(index1: integer): (number?, number, number)
+            local slot = bodies[index1]
+            if slot == nil or not slot.live then
+                return nil, 0, 0
+            end
+
+            return slot.x, slot.y, slot.angle
+        end,
+        clearLog = function(): nil
+            for index = #log, 1, -1 do
+                log[index] = nil
+            end
+        end
+    )
+end
