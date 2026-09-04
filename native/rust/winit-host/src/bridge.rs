@@ -24,6 +24,8 @@ const EXPORT_NAMES: &[&str] = &[
     "tecs.host.nextWindowCommand",
     "tecs.host.windowCommandFailed",
     "tecs.host.renderPacket",
+    "tecs.host.nextImageCommand",
+    "tecs.host.imageCommandResult",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -58,6 +60,19 @@ pub struct WindowCommand {
     pub flag: Option<bool>,
 }
 
+/// One drained image residency request. `pixels` is empty for a release.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImageCommand {
+    pub kind: String,
+    pub serial: u64,
+    pub image: u32,
+    pub width: u32,
+    pub height: u32,
+    pub sampler: u32,
+    pub format: String,
+    pub pixels: Vec<u8>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FrameState {
     Parked,
@@ -85,6 +100,8 @@ struct Exports {
     next_window_command: ManagedHandle,
     window_command_failed: ManagedHandle,
     render_packet: ManagedHandle,
+    next_image_command: ManagedHandle,
+    image_command_result: ManagedHandle,
 }
 
 pub struct Bridge {
@@ -400,6 +417,50 @@ impl Bridge {
         }))
     }
 
+    pub fn next_image_command(&mut self) -> Result<Option<ImageCommand>> {
+        let values = self.call(self.exports.next_image_command, &[])?;
+        let Some(kind) = optional_text(&values, 0, "tecs.host.nextImageCommand kind")? else {
+            return Ok(None);
+        };
+        let serial = required_number(&values, 1, "tecs.host.nextImageCommand serial")?;
+        let image = required_number(&values, 2, "tecs.host.nextImageCommand image")?;
+        let release = kind == "releaseImage";
+        Ok(Some(ImageCommand {
+            kind,
+            serial: exact_u64(serial, "image command serial")?,
+            image: exact_u32(image, "image command id")?,
+            width: optional_u32(&values, 3, "tecs.host.nextImageCommand width")?,
+            height: optional_u32(&values, 4, "tecs.host.nextImageCommand height")?,
+            sampler: optional_u32(&values, 5, "tecs.host.nextImageCommand sampler")?,
+            format: optional_text(&values, 6, "tecs.host.nextImageCommand format")?
+                .unwrap_or_default(),
+            pixels: if release {
+                Vec::new()
+            } else {
+                optional_bytes(&values, 7, "tecs.host.nextImageCommand pixels")?
+            },
+        }))
+    }
+
+    pub fn report_image_result(
+        &mut self,
+        image: u32,
+        serial: u64,
+        reason: Option<&str>,
+    ) -> Result<()> {
+        let export = self.exports.image_command_result;
+        self.call(
+            export,
+            &[
+                number(image),
+                unsigned(serial),
+                ManagedValue::Boolean(reason.is_none()),
+                optional_text_value(reason),
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn report_window_failure(&mut self, serial: u64, reason: &str) -> Result<()> {
         let export = self.exports.window_command_failed;
         self.call(export, &[unsigned(serial), text(reason)])?;
@@ -443,6 +504,8 @@ impl Exports {
             next_window_command: handles[17],
             window_command_failed: handles[18],
             render_packet: handles[19],
+            next_image_command: handles[20],
+            image_command_result: handles[21],
         })
     }
 }
@@ -572,6 +635,28 @@ fn optional_boolean(
         ManagedValue::Boolean(value) => Ok(Some(*value)),
         _ => bail!("{operation} returned non-boolean result {}", index + 1),
     }
+}
+
+fn optional_u32(values: &[ManagedValue], index: usize, operation: &str) -> Result<u32> {
+    match optional_number(values, index, operation)? {
+        None => Ok(0),
+        Some(value) => exact_u32(value, operation),
+    }
+}
+
+fn optional_bytes(values: &[ManagedValue], index: usize, operation: &str) -> Result<Vec<u8>> {
+    match value(values, index, operation)? {
+        ManagedValue::Nil => Ok(Vec::new()),
+        ManagedValue::Bytes(bytes) => Ok(bytes.clone()),
+        _ => bail!("{operation} returned a non-byte result {}", index + 1),
+    }
+}
+
+fn exact_u32(value: f64, field: &str) -> Result<u32> {
+    if value < 0.0 || value > f64::from(u32::MAX) || value.fract() != 0.0 {
+        bail!("{field} is not a 32-bit unsigned integer: {value}");
+    }
+    Ok(value as u32)
 }
 
 fn exact_u64(value: f64, field: &str) -> Result<u64> {

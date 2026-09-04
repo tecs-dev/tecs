@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
-use bridge::{Bridge, FrameState, WindowCommand, WindowState};
+use bridge::{Bridge, FrameState, ImageCommand, WindowCommand, WindowState};
 use graphics::Graphics;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
@@ -183,6 +183,23 @@ impl App {
         Ok(())
     }
 
+    /// Drains every queued residency request and reports each outcome.
+    ///
+    /// A rejected image is reported back rather than failing the frame, so a
+    /// game observes a failed asset and the window keeps drawing.
+    fn apply_image_commands(&mut self) -> Result<()> {
+        while let Some(command) = self.bridge.next_image_command()? {
+            let outcome = match self.graphics.as_mut() {
+                None => Err(anyhow!("the renderer is not attached")),
+                Some(graphics) => apply_image_command(graphics, &command),
+            };
+            let reason = outcome.err().map(|error| format!("{error:#}"));
+            self.bridge
+                .report_image_result(command.image, command.serial, reason.as_deref())?;
+        }
+        Ok(())
+    }
+
     fn apply_command(&mut self, command: &WindowCommand) -> Result<()> {
         let window = self
             .window
@@ -275,6 +292,7 @@ impl App {
             }
         }
         self.apply_commands()?;
+        self.apply_image_commands()?;
         if let Some(graphics) = self.graphics.as_mut() {
             let packet = self.bridge.render_packet()?;
             graphics.render(&packet)?;
@@ -469,6 +487,24 @@ impl ApplicationHandler for App {
 impl Drop for App {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+fn apply_image_command(graphics: &mut Graphics, command: &ImageCommand) -> Result<()> {
+    match command.kind.as_str() {
+        "uploadImage" => {
+            if command.format != "rgba8" {
+                return Err(anyhow!("unknown image format {}", command.format));
+            }
+            graphics.upload_image(
+                command.image,
+                command.width,
+                command.height,
+                &command.pixels,
+            )
+        }
+        "releaseImage" => graphics.release_image(command.image),
+        kind => Err(anyhow!("unknown image command {kind}")),
     }
 }
 
