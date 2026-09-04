@@ -1,0 +1,261 @@
+local ecs = require("tecs.ecs")
+local sequence = require("tecs.sequence")
+local sequencesnapshot = require("tecs.internal.sequencesnapshot")
+local test = require("nupp.test")
+
+local suite = {}
+
+local nextName = 0
+
+local function uniqueName(prefix: string): string
+    nextName = nextName + 1
+    return prefix .. tostring(nextName)
+end
+
+local STEP = 0.125
+
+local function newWorld(): ecs.World
+    local world = ecs.newWorld({timestep = STEP})
+    sequence.plugin(world)
+
+    return world
+end
+
+local function step(exclusive world: ecs.World, count: integer?): nil
+    for _ = 1, count or 1 do
+        world:update(STEP)
+    end
+end
+
+local function sequenceData(snapshot: ecs.Snapshot): {[string]: any}?
+    for index = 1, #snapshot.data do
+        -- This snapshot handler key is a compatibility surface: an earlier
+        -- build's save file names the sequencer's state by exactly this string.
+        if snapshot.data[index].key == "tecs.sequence" then
+            return snapshot.data[index].value as {[string]: any}
+        end
+    end
+
+    return nil
+end
+
+function suite.savesUnderTheEstablishedHandlerKey(): nil
+    local world = newWorld()
+    local program = sequence.define(uniqueName("test.saved."), {sequence.waitSteps(20)})
+    sequence.play(world, program)
+    step(world)
+
+    local snapshot = world:saveSnapshot()
+
+    local payload = assert(sequenceData(snapshot))
+    test.equal(payload.version, sequencesnapshot.VERSION)
+    test.equal(#(payload.cursors as {any}), 1)
+    test.equal(#(payload.programs as {any}), 1)
+end
+
+function suite.resumesAWaitingPlaybackWhereItLeftOff(): nil
+    local world = newWorld()
+    local log: {string} = {}
+    sequence.registerAction(world, "test.saveMark", function(
+        exclusive _world: ecs.World,
+        context: sequence.ActionContext
+    ): nil
+        log[#log + 1] = context.args[1] as string
+    end)
+    local program = sequence.define(uniqueName("test.resume."), {
+        sequence.call("test.saveMark", "before"),
+        sequence.waitSteps(4),
+        sequence.call("test.saveMark", "after"),
+    })
+    local handle = sequence.play(world, program, {params = {tag = "carried"}})
+    step(world, 2)
+    test.equal(table.concat(log, ","), "before")
+
+    local snapshot = world:saveSnapshot()
+    local savedStep = sequence.currentStep(world)
+
+    -- Run past the point the wait would have expired, then rewind.
+    step(world, 6)
+    test.equal(table.concat(log, ","), "before,after")
+    log = {}
+    world:loadSnapshot(snapshot)
+
+    test.equal(sequence.currentStep(world), savedStep)
+    local status = assert(sequence.status(world, handle))
+    test.equal(status.state, "running")
+    test.equal(status.program, program.name)
+    test.equal(status.version, program.version)
+    test.equal(assert(status.wakeAt), savedStep + 3)
+    step(world, 2)
+    test.equal(#log, 0)
+    step(world)
+    test.equal(table.concat(log, ","), "after")
+end
+
+function suite.carriesBindingsParametersAndPauseHoldersAcrossALoad(): nil
+    local world = newWorld()
+    local seen: {string} = {}
+    sequence.registerAction(world, "test.report", function(
+        exclusive _world: ecs.World,
+        context: sequence.ActionContext
+    ): nil
+        seen[#seen + 1] = tostring(context:entity("actor")) .. ":" .. tostring(assert(context.params).tag)
+    end)
+    local program = sequence.define(uniqueName("test.carry."), {
+        sequence.waitSteps(2),
+        sequence.call("test.report"),
+    })
+    local actor = world:spawn()
+    world:commit()
+    local handle = sequence.play(world, program, {
+        owner = actor,
+        bindings = {actor = actor},
+        params = {tag = "carried"},
+        channel = "story",
+    })
+    step(world)
+    test.assert(sequence.pause(world, handle, "menu"))
+
+    local snapshot = world:saveSnapshot()
+    world:loadSnapshot(snapshot)
+
+    local status = assert(sequence.status(world, handle))
+    test.equal(status.state, "paused")
+    step(world, 5)
+    test.equal(#seen, 0)
+
+    test.assert(sequence.resume(world, handle, "menu"))
+    step(world, 4)
+    test.equal(table.concat(seen, ","), tostring(actor) .. ":carried")
+
+    -- The owner index and the channel map both came back, so a despawn still
+    -- reaches the playback and a second playback still replaces it.
+    local again = sequence.play(world, program, {owner = actor, channel = "story"})
+    test.equal(assert(sequence.status(world, again)).state, "running")
+    world:despawn(actor)
+    world:commit()
+    test.equal(assert(sequence.status(world, again)).state, "canceled")
+end
+
+function suite.restoresASignalWaiterIntoItsChannelIndex(): nil
+    local world = newWorld()
+    local woke = false
+    sequence.registerAction(world, "test.signalWoke", function(
+        exclusive _world: ecs.World,
+        _context: sequence.ActionContext
+    ): nil
+        woke = true
+    end)
+    local program = sequence.define(uniqueName("test.signalSave."), {
+        sequence.waitSignal("test.saved"),
+        sequence.call("test.signalWoke"),
+    })
+    sequence.play(world, program)
+    step(world)
+
+    local snapshot = world:saveSnapshot()
+    world:loadSnapshot(snapshot)
+
+    test.equal(sequence.waitingOn(world, "test.saved"), 1)
+    sequence.signal(world, "test.saved")
+    step(world)
+    test.assert(woke)
+end
+
+function suite.restoresABranchTreeAndItsPendingJoin(): nil
+    local world = newWorld()
+    local joined = false
+    sequence.registerAction(world, "test.joined", function(
+        exclusive _world: ecs.World,
+        _context: sequence.ActionContext
+    ): nil
+        joined = true
+    end)
+    local program = sequence.define(uniqueName("test.branchSave."), {
+        sequence.fork({sequence.waitSteps(4)}),
+        sequence.join(),
+        sequence.call("test.joined"),
+    })
+    local handle = sequence.play(world, program)
+    step(world, 2)
+    local status = assert(sequence.status(world, handle))
+    test.assert(status.joining)
+    test.equal(status.branches, 1)
+
+    local snapshot = world:saveSnapshot()
+    world:loadSnapshot(snapshot)
+
+    local restored = assert(sequence.status(world, handle))
+    test.assert(restored.joining)
+    test.equal(restored.branches, 1)
+    test.equal(sequence.activeCount(world), 2)
+
+    step(world, 5)
+    test.assert(joined)
+end
+
+function suite.resumesAnEvaluatingTimelineWhereItWas(): nil
+    -- A quarter-second fixed step advances the timeline by exactly a quarter of
+    -- its one-second length per update.
+    local world = ecs.newWorld({timestep = 0.25})
+    sequence.plugin(world)
+    local actor = world:spawn(ecs.Transform2D(0, 0))
+    world:commit()
+    local slide = sequence.timeline(uniqueName("test.savedSlide."), {
+        sequence.tweenTo(1, "linear", "transform.x", 100),
+    }, {clock = "fixed"})
+    local handle = sequence.play(world, slide, {owner = actor})
+    world:update(0.25)
+    world:update(0.25)
+    world:update(0.25)
+    test.assert(math.abs(assert(world:get(actor, ecs.Transform2D)).x - 50) < 1e-9)
+
+    local snapshot = world:saveSnapshot()
+    world:update(0.25)
+    world:update(0.25)
+    test.equal(assert(sequence.status(world, handle)).state, "completed")
+
+    world:loadSnapshot(snapshot)
+
+    test.equal(assert(sequence.status(world, handle)).state, "running")
+    test.assert(math.abs(assert(world:get(actor, ecs.Transform2D)).x - 50) < 1e-9)
+    world:update(0.25)
+    test.assert(math.abs(assert(world:get(actor, ecs.Transform2D)).x - 75) < 1e-9)
+end
+
+function suite.leavesRunningPlaybacksAloneWhenAPayloadIsRejected(): nil
+    local world = newWorld()
+    local program = sequence.define(uniqueName("test.rejected."), {sequence.waitSteps(20)})
+    local handle = sequence.play(world, program)
+    step(world)
+    local snapshot = world:saveSnapshot()
+    local payload = assert(sequenceData(snapshot))
+    payload.version = 99
+
+    test.raises(function(): nil
+        world:loadSnapshot(snapshot)
+    end, "snapshot version")
+
+    -- The payload is validated before any live cursor is touched, so the
+    -- playback is exactly where it was rather than half cleared.
+    local status = assert(sequence.status(world, handle))
+    test.equal(status.state, "running")
+    step(world, 20)
+    test.equal(assert(sequence.status(world, handle)).state, "completed")
+end
+
+function suite.dropsPlaybacksWhenNoSequencerStateWasSaved(): nil
+    local world = newWorld()
+    local program = sequence.define(uniqueName("test.emptySave."), {sequence.waitSteps(20)})
+    sequence.play(world, program)
+    step(world)
+    test.equal(sequence.activeCount(world), 1)
+
+    local empty = ecs.newWorld({timestep = STEP})
+    sequence.plugin(empty)
+    world:loadSnapshot(empty:saveSnapshot())
+
+    test.equal(sequence.activeCount(world), 0)
+end
+
+return suite

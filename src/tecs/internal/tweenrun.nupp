@@ -1,0 +1,443 @@
+module tecs.internal.tweenrun
+
+--[[
+Timelines as programs: the evaluator a compiled timeline runs under.
+
+A tween playback is a cursor that never sleeps. It joins its clock's active set
+at the evaluating instruction and is walked from there every tick, holding a
+direct reference to its timeline and one contiguous state array.
+
+That is the point of keeping the tween runtime inside the sequencer. Reaching a
+playback through a query, an archetype, a component, a cursor list, and a
+registry lookup before touching a number costs that per playback per frame.
+Here the walk is the dense array and the timeline is a field.
+]]
+
+local entityworld = require("tecs.internal.world")
+local sequencecursors = require("tecs.internal.sequencecursors")
+local sequenceregistry = require("tecs.internal.sequenceregistry")
+local sequencetypes = require("tecs.internal.sequencetypes")
+local tweeneval = require("tecs.internal.tweeneval")
+
+local floor = math.floor
+
+--- The name a compiled timeline's evaluating instruction carries.
+---
+--- This evaluator name is a compatibility surface: a snapshot carries it in
+--- the program's constant pool and on every restored cursor.
+export const EVALUATOR: string = "tecs.tween"
+
+--- One playback's working state: where it is in its timeline, and the slot
+--- state the evaluation loop writes through.
+---
+--- The same record serves a nested run, which is a playback of the child
+--- timeline driven by its parent's position rather than by elapsed time.
+export record Playback
+    --- Read-only. Holds the timeline this playback runs.
+    timeline: tweeneval.Timeline
+
+    --- Engine-owned. Holds the flat per-slot state array.
+    state: {number}
+
+    --- Engine-owned. Holds one child playback per nested run.
+    children: {Playback}
+
+    --- Read-only. Reports the second this playback sits at.
+    elapsed: number
+
+    --- Read-only. Reports one going forward and minus one on a ping-pong
+    --- return leg.
+    direction: integer
+
+    --- Read-only. Selects how this playback repeats.
+    mode: tweeneval.PlaybackMode
+
+    --- Read-only. Counts the passes left, or minus one when endless.
+    remainingPasses: integer
+
+    --- Engine-owned. Indexes the next emit this playback will fire.
+    nextEmit: integer
+
+    --- Read-only. Multiplies elapsed time, from the `speed` parameter.
+    rate: number
+
+    --- Read-only. Counts the seconds left before the first frame.
+    delay: number
+
+    --- Read-only. Reports whether a nested run has reached its end.
+    completed: boolean
+
+    --- Engine-owned. Remembers which pass of a nested run was last evaluated.
+    lastCycleIndex: integer
+end
+
+--- Resolves the playback options a timeline reads out of its parameters.
+--- @param params the playback parameters supplied at `play`, or nil
+--- @param totalDuration the timeline's own length in seconds
+--- @return the repeat mode, its pass count, the speed multiplier, and the
+---     delay in seconds
+--- @raises when speed is not positive, delay is negative, or a repeating
+---     timeline has no duration
+export function resolveOptions(
+    params: {[string]: any}?,
+    totalDuration: number
+): tweeneval.PlaybackMode, integer, number, number
+    local mode, passCount = tweeneval.playbackMode(
+        params ~= nil and params.mode as tweeneval.PlaybackMode? or nil,
+        params ~= nil and params.count as integer? or nil
+    )
+    local speed = (params ~= nil and params.speed as number? or nil) or 1
+    local delay = (params ~= nil and params.delay as number? or nil) or 0
+    if speed <= 0 then
+        error("tween: speed must be greater than zero", 0)
+    end
+    if delay < 0 then
+        error("tween: delay must be at least zero", 0)
+    end
+    if passCount ~= 1 and totalDuration <= 0 then
+        error("tween: a repeating timeline must have a duration", 0)
+    end
+
+    return mode, passCount, speed, delay
+end
+
+local function newPlayback(
+    timeline: tweeneval.Timeline,
+    mode: tweeneval.PlaybackMode,
+    passCount: integer,
+    rate: number,
+    delay: number
+): Playback
+    local children: {Playback} = {}
+    for index = 1, #timeline.runs do
+        local runSlot = timeline.runs[index]
+        children[index] = newPlayback(runSlot.timeline, runSlot.mode, runSlot.passCount, 1, 0)
+    end
+
+    return new Playback(
+        timeline = timeline,
+        state = tweeneval.newState(timeline.stateSize),
+        children = children,
+        elapsed = 0,
+        direction = 1,
+        mode = mode,
+        remainingPasses = passCount,
+        nextEmit = 1,
+        rate = rate,
+        delay = delay,
+        completed = false,
+        lastCycleIndex = 0
+    )
+end
+
+-- The handle is packed here rather than passed down, so a timeline with no
+-- emits, which is nearly all of them, pays nothing for the possibility.
+local function fireEmits(
+    playback: Playback,
+    exclusive world: entityworld.World,
+    entity: integer,
+    cursor: sequencetypes.Cursor
+): nil
+    local emits = playback.timeline.emits
+    while playback.nextEmit <= #emits do
+        local emitSlot = emits[playback.nextEmit]
+        if playback.elapsed < emitSlot.time then
+            break
+        end
+        playback.nextEmit = playback.nextEmit + 1
+        -- An authored emit is an ordinary sequence event: the name it was
+        -- given, and the entity it played on.
+        world:emit(
+            0,
+            sequencetypes.Event(emitSlot.name, {entity}, sequencecursors.packHandle(cursor.slot, cursor.generation))
+        )
+    end
+end
+
+local function resetCycle(playback: Playback): nil
+    tweeneval.clearState(playback.state, playback.timeline.stateSize)
+    playback.elapsed = 0
+    playback.direction = 1
+    playback.nextEmit = 1
+    playback.completed = false
+    playback.lastCycleIndex = 0
+    for index = 1, #playback.children do
+        resetCycle(playback.children[index])
+    end
+end
+
+local evaluate: function(
+    playback: Playback,
+    exclusive world: entityworld.World,
+    entity: integer,
+    cursor: sequencetypes.Cursor
+): nil
+
+local function beginRunCycle(playback: Playback, runSlot: tweeneval.RunSlot, cycleIndex: integer): nil
+    if runSlot.mode == "loop" or cycleIndex % 2 == 0 then
+        resetCycle(playback)
+    end
+    playback.direction = (runSlot.mode == "pingPong" and cycleIndex % 2 == 1) and -1 or 1
+    if playback.direction == -1 then
+        playback.nextEmit = #playback.timeline.emits + 1
+    else
+        playback.nextEmit = 1
+    end
+    playback.lastCycleIndex = cycleIndex
+    playback.remainingPasses = runSlot.passCount - cycleIndex
+end
+
+local function evaluateRun(
+    playback: Playback,
+    runSlot: tweeneval.RunSlot,
+    localElapsed: number,
+    exclusive world: entityworld.World,
+    entity: integer,
+    cursor: sequencetypes.Cursor
+): nil
+    local cycleDuration = playback.timeline.totalDuration
+    if cycleDuration <= 0 then
+        return
+    end
+    local atEnd = localElapsed >= runSlot.effectiveDuration
+    local cycleIndex = atEnd and (runSlot.passCount - 1) or (floor(localElapsed / cycleDuration) as integer)
+    local cyclePosition = atEnd and cycleDuration or (localElapsed % cycleDuration)
+    if cycleIndex > playback.lastCycleIndex then
+        for completedCycle = playback.lastCycleIndex, cycleIndex - 1 do
+            local reverse = runSlot.mode == "pingPong" and completedCycle % 2 == 1
+            playback.elapsed = reverse and 0 or cycleDuration
+            evaluate(playback, world, entity, cursor)
+            beginRunCycle(playback, runSlot, completedCycle + 1)
+        end
+    elseif cycleIndex < playback.lastCycleIndex then
+        playback.lastCycleIndex = cycleIndex
+        playback.direction = (runSlot.mode == "pingPong" and cycleIndex % 2 == 1) and -1 or 1
+    end
+    if runSlot.mode == "pingPong" and cycleIndex % 2 == 1 then
+        cyclePosition = cycleDuration - cyclePosition
+    end
+    playback.elapsed = cyclePosition
+    playback.remainingPasses = runSlot.passCount - cycleIndex
+    evaluate(playback, world, entity, cursor)
+    playback.completed = atEnd
+end
+
+evaluate = function(
+    playback: Playback,
+    exclusive world: entityworld.World,
+    entity: integer,
+    cursor: sequencetypes.Cursor
+): nil
+    local timeline = playback.timeline
+    tweeneval.evaluateSlots(timeline.slots, playback.state, world, entity, playback.elapsed)
+    fireEmits(playback, world, entity, cursor)
+    local runs = timeline.runs
+    for index = 1, #runs do
+        local runSlot = runs[index]
+        local child = playback.children[index]
+        local runStart = runSlot.startTime
+        local runEnd = runStart + runSlot.effectiveDuration
+        if playback.elapsed >= runStart and playback.elapsed <= runEnd then
+            evaluateRun(child, runSlot, playback.elapsed - runStart, world, entity, cursor)
+        elseif playback.elapsed > runEnd and not child.completed then
+            evaluateRun(child, runSlot, runSlot.effectiveDuration, world, entity, cursor)
+        end
+    end
+end
+
+--- Advances one playback by an elapsed duration.
+--- @param playback the playback to advance
+--- @param dt the elapsed seconds
+--- @param world the world holding the animated entity
+--- @param entity the animated entity
+--- @param cursor the cursor this playback belongs to
+--- @return whether the playback has finished
+export function advance(
+    playback: Playback,
+    dt: number,
+    exclusive world: entityworld.World,
+    entity: integer,
+    cursor: sequencetypes.Cursor
+): boolean
+    local elapsed = dt
+    if playback.delay > 0 then
+        playback.delay = playback.delay - elapsed
+        if playback.delay > 0 then
+            return false
+        end
+        elapsed = -playback.delay
+        playback.delay = 0
+    end
+    local totalDuration = playback.timeline.totalDuration
+    if totalDuration <= 0 then
+        evaluate(playback, world, entity, cursor)
+        return true
+    end
+    local remaining = elapsed * playback.rate
+    if remaining <= 0 then
+        evaluate(playback, world, entity, cursor)
+        return false
+    end
+    while remaining > 0 do
+        local distance = playback.direction == 1 and (totalDuration - playback.elapsed) or playback.elapsed
+        if remaining < distance then
+            playback.elapsed = playback.elapsed + remaining * playback.direction
+            evaluate(playback, world, entity, cursor)
+            return false
+        end
+        -- Land on the boundary exactly, so a destination is reached rather
+        -- than approached.
+        playback.elapsed = playback.direction == 1 and totalDuration or 0
+        evaluate(playback, world, entity, cursor)
+        remaining = remaining - distance
+        if playback.remainingPasses == -1 or playback.remainingPasses > 1 then
+            if playback.remainingPasses > 1 then
+                playback.remainingPasses = playback.remainingPasses - 1
+            end
+            if playback.mode == "pingPong" then
+                playback.direction = -playback.direction
+                if playback.direction == 1 then
+                    resetCycle(playback)
+                end
+            else
+                resetCycle(playback)
+            end
+        else
+            return true
+        end
+    end
+
+    return false
+end
+
+local function saveSlotState(state: {number}, count: integer): {{number}}
+    local out: {{number}} = {}
+    for index = 0, count - 1 do
+        local base = index * tweeneval.SLOT_STRIDE
+        local row: {number} = {}
+        for field = 1, tweeneval.SLOT_STRIDE do
+            row[field] = state[base + field]
+        end
+        out[index + 1] = row
+    end
+
+    return out
+end
+
+local function loadSlotState(state: {number}, count: integer, rows: {{number}}?): nil
+    if rows == nil then
+        return
+    end
+    for index = 0, count - 1 do
+        local row = rows[index + 1]
+        if row == nil then
+            return
+        end
+        local base = index * tweeneval.SLOT_STRIDE
+        for field = 1, tweeneval.SLOT_STRIDE do
+            state[base + field] = row[field] or 0
+        end
+    end
+end
+
+local function savePlayback(playback: Playback): {[string]: any}
+    local children: {{[string]: any}} = {}
+    for index = 1, #playback.children do
+        children[index] = savePlayback(playback.children[index])
+    end
+
+    return {
+        elapsed = playback.elapsed,
+        direction = playback.direction,
+        mode = playback.mode,
+        remainingPasses = playback.remainingPasses,
+        nextEmit = playback.nextEmit,
+        rate = playback.rate,
+        delay = playback.delay,
+        completed = playback.completed,
+        lastCycleIndex = playback.lastCycleIndex,
+        state = saveSlotState(playback.state, playback.timeline.stateSize),
+        children = children,
+    }
+end
+
+-- The timeline comes back from the program rather than the save, so a playback
+-- restores where it was in instructions this build compiled, never in
+-- instructions the save carried.
+local function loadPlayback(timeline: tweeneval.Timeline, data: {[string]: any}): Playback
+    local playback = newPlayback(
+        timeline,
+        (data.mode as tweeneval.PlaybackMode?) or "once",
+        (data.remainingPasses as integer?) or 1,
+        (data.rate as number?) or 1,
+        (data.delay as number?) or 0
+    )
+    playback.elapsed = (data.elapsed as number?) or 0
+    playback.direction = (data.direction as integer?) or 1
+    playback.nextEmit = (data.nextEmit as integer?) or 1
+    playback.completed = data.completed == true
+    playback.lastCycleIndex = (data.lastCycleIndex as integer?) or 0
+    loadSlotState(playback.state, timeline.stateSize, data.state as {{number}}?)
+    local savedChildren = data.children as {{[string]: any}}?
+    if savedChildren ~= nil then
+        for index = 1, #playback.children do
+            local saved = savedChildren[index]
+            if saved ~= nil then
+                playback.children[index] = loadPlayback(timeline.runs[index].timeline, saved)
+            end
+        end
+    end
+
+    return playback
+end
+
+local installed = false
+
+--- Registers the tween evaluator.
+---
+--- Registration is process-wide, so installing the sequencer in a second world
+--- does nothing here.
+export function install(): nil
+    if installed then
+        return
+    end
+    installed = true
+    sequenceregistry.registerEvaluator(
+        EVALUATOR,
+        new sequencetypes.Evaluator(
+            -- One resolve per program constant, shared by every playback of it:
+            -- easing names become functions and target identifiers become targets
+            -- once, not once per entity.
+            resolve = function(data: any): any
+                return tweeneval.deserializeTimeline(data as {[string]: any})
+            end,
+            newState = function(_program: sequencetypes.Program, data: any, cursor: sequencetypes.Cursor): any
+                local timeline = data as tweeneval.Timeline
+                local mode, passCount, speed, delay = resolveOptions(cursor.params, timeline.totalDuration)
+                return newPlayback(timeline, mode, passCount, speed, delay)
+            end,
+            step = function(exclusive world: entityworld.World, cursor: sequencetypes.Cursor, dt: number): boolean
+                local entity = cursor.owner
+                -- A timeline animates the playback's owner. Without one there is
+                -- nothing to write to, so it is done rather than faulted, which is
+                -- the same answer a despawned target gives.
+                if entity == 0 then
+                    return true
+                end
+
+                return advance(cursor.evalState as Playback, dt, world, entity, cursor)
+            end,
+            save = function(state: any): any
+                return savePlayback(state as Playback)
+            end,
+            load = function(_program: sequencetypes.Program, data: any, saved: any): any
+                local timeline = data as tweeneval.Timeline
+                if saved == nil then
+                    return newPlayback(timeline, "once", 1, 1, 0)
+                end
+
+                return loadPlayback(timeline, saved as {[string]: any})
+            end
+        )
+    )
+end

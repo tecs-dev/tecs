@@ -1,0 +1,382 @@
+module tecs.internal.sequenceprogram
+
+--[[
+The sequencer's compiler, disassembler, and straight-line lookahead.
+
+A program is a flat integer array with stride three, holding `(op, a, b)` over
+a constant pool. That is what makes it serializable: a saved program carries
+its own instructions rather than a reference to the Nupp closure that built
+it. The opcodes live here because the instruction loop interprets what this
+module emits.
+]]
+
+local sequencetypes = require("tecs.internal.sequencetypes")
+
+local floor = math.floor
+
+--- Waits, with `a` naming the seconds constant or minus one, and `b` holding a
+--- literal tick count when `a` is minus one.
+export const WAIT: integer = 1
+
+--- Runs a registered action, with `a` naming it and `b` naming its arguments.
+export const CALL: integer = 2
+
+--- Emits a sequence event, with `a` naming it and `b` naming its arguments.
+export const EMIT: integer = 3
+
+--- Jumps to `a`, either unconditionally when `b` is minus one or while the
+--- loop register keyed by this address remains positive.
+export const JUMP: integer = 4
+
+--- Ends a program or a branch body.
+export const END: integer = 5
+
+--- Blocks until the signal named by `a` is delivered.
+export const WAIT_SIGNAL: integer = 6
+
+--- Starts a branch whose body begins at `a`, continuing at `b`.
+export const FORK: integer = 7
+
+--- Waits for every branch this cursor forked and has not joined.
+export const JOIN: integer = 8
+
+--- Blocks until the query named by `a` satisfies the condition in `b`, which
+--- holds one for a match and zero for an empty query.
+export const WAIT_QUERY: integer = 9
+
+--- Starts the timeline named by `a` on the entity named by `b`.
+export const PLAY_TWEEN: integer = 10
+
+--- Waits for the playback the last `PLAY_TWEEN` started.
+export const WAIT_TWEEN: integer = 11
+
+--- Evaluates the evaluator named by `a` every tick, carrying the constant at
+--- `b` or minus one for none.
+export const EVAL: integer = 12
+
+--- Blocks on the awaitable provider named by `a` for the entity named by `b`.
+export const AWAIT: integer = 13
+
+--- The number of integers one instruction occupies.
+export const STRIDE: integer = 3
+
+--- Describes one step a playback reaches without branching.
+export record Step
+    --- Read-only. Counts ticks of the program's clock from the reference point
+    --- until this step runs.
+    ticks: integer
+
+    --- Read-only. Holds `"call"` or `"emit"`.
+    kind: string
+
+    --- Read-only. Names the action for a call or the event for an emit.
+    name: string
+
+    --- Read-only. Carries the step's constants, unresolved. This list is the
+    --- program's own rather than a copy, so read it and do not write to it.
+    args: {any}
+end
+
+--- Reports whether a value is an entity reference from `bind`.
+--- @param value the constant to test
+--- @return whether the value carries a binding name
+export function isEntityRef(value: any): boolean
+    if type(value) ~= "table" then
+        return false
+    end
+    local candidate = value as {[string]: any}
+
+    return candidate.isBinding == true and type(candidate.bindName) == "string"
+end
+
+local record Compiler
+    code: {integer}
+    consts: {any}
+    constIndex: {[any]: integer}
+    loopCounts: {[integer]: integer}
+end
+
+local function intern(state: Compiler, value: any): integer
+    -- Only scalars deduplicate by value; tables are appended as authored.
+    if type(value) ~= "table" then
+        local existing = state.constIndex[value]
+        if existing ~= nil then
+            return existing
+        end
+    end
+    local index = #state.consts + 1
+    state.consts[index] = value
+    if type(value) ~= "table" then
+        state.constIndex[value] = index
+    end
+
+    return index
+end
+
+local function emitOp(state: Compiler, op: integer, a: integer, b: integer): integer
+    local pc = floor(#state.code / STRIDE) as integer
+    state.code[#state.code + 1] = op
+    state.code[#state.code + 1] = a
+    state.code[#state.code + 1] = b
+
+    return pc
+end
+
+local compileBlock: function(state: Compiler, nodes: {sequencetypes.Node}, depth: integer): nil
+
+-- A branch body is laid out inline, between the fork and the instruction the
+-- forking cursor continues at, and terminated by its own END. One program
+-- holds the whole tree, so a snapshot carries one program and a disassembly
+-- shows every branch in place.
+local function compileFork(state: Compiler, nodes: {sequencetypes.Node}, depth: integer): nil
+    local forkPc = emitOp(state, FORK, 0, 0)
+    state.code[forkPc * STRIDE + 2] = forkPc + 1
+    compileBlock(state, nodes, depth)
+    emitOp(state, END, -1, -1)
+    state.code[forkPc * STRIDE + 3] = floor(#state.code / STRIDE) as integer
+end
+
+local function compileNode(state: Compiler, node: sequencetypes.Node, depth: integer): nil
+    local kind = node.kind
+    if kind == "call" then
+        emitOp(state, CALL, intern(state, node.text), intern(state, node.args))
+    elseif kind == "emit" then
+        emitOp(state, EMIT, intern(state, node.text), intern(state, node.args))
+    elseif kind == "wait" then
+        emitOp(state, WAIT, intern(state, node.number), -1)
+    elseif kind == "waitSignal" then
+        emitOp(state, WAIT_SIGNAL, intern(state, node.text), -1)
+    elseif kind == "waitQuery" then
+        emitOp(state, WAIT_QUERY, intern(state, node.text), assert(node.count))
+    elseif kind == "waitSteps" then
+        emitOp(state, WAIT, -1, assert(node.number) as integer)
+    elseif kind == "loop" then
+        local top = floor(#state.code / STRIDE) as integer
+        compileBlock(state, assert(node.nodes), depth + 1)
+        -- A nil count loops forever, and the register is unused in that case.
+        local jumpPc = emitOp(state, JUMP, top, node.count ~= nil and depth + 1 or -1)
+        -- Counts are keyed by the jump's own address, so a cursor reaching
+        -- that jump for the first time knows what to seed its register with.
+        local count = node.count
+        if count ~= nil then
+            state.loopCounts[jumpPc] = count
+        end
+    elseif kind == "fork" then
+        compileFork(state, assert(node.nodes), depth)
+    elseif kind == "playTween" then
+        emitOp(state, PLAY_TWEEN, intern(state, node.text), intern(state, node.args))
+    elseif kind == "waitTween" then
+        emitOp(state, WAIT_TWEEN, -1, -1)
+    elseif kind == "await" then
+        emitOp(state, AWAIT, intern(state, node.text), intern(state, node.args))
+    elseif kind == "eval" then
+        emitOp(state, EVAL, intern(state, node.text), node.args ~= nil and intern(state, node.args) or -1)
+    elseif kind == "join" then
+        emitOp(state, JOIN, -1, -1)
+    elseif kind == "parallel" then
+        local blocks = assert(node.blocks)
+        for index = 1, #blocks do
+            compileFork(state, blocks[index], depth)
+        end
+        emitOp(state, JOIN, -1, -1)
+    else
+        error("sequence: unknown node kind '" .. tostring(kind) .. "'", 0)
+    end
+end
+
+compileBlock = function(state: Compiler, nodes: {sequencetypes.Node}, depth: integer): nil
+    for index = 1, #nodes do
+        local node = nodes[index]
+        if type(node) ~= "table" or node.kind == nil then
+            error("sequence: entry " .. tostring(index) .. " is not a sequence node", 0)
+        end
+        compileNode(state, node, depth)
+    end
+end
+
+--- Marks the constant indexes whose argument list holds an entity reference.
+---
+--- Derived rather than stored, so a program restored from a snapshot computes
+--- the same flags from its own constant pool.
+--- @param program the program to index
+export function indexBindingArgs(program: sequencetypes.Program): nil
+    local flags: {[integer]: boolean} = {}
+    local consts = program.consts
+    for index = 1, #consts do
+        local value = consts[index]
+        if type(value) == "table" then
+            local list = value as {any}
+            for position = 1, #list do
+                if isEntityRef(list[position]) then
+                    flags[index] = true
+                    break
+                end
+            end
+        end
+    end
+    program.bindingArgs = flags
+end
+
+--- Compiles authored nodes into a program under a name and version.
+--- @param name the stable symbolic program name
+--- @param version the monotonic version this compile publishes
+--- @param clock the clock this program's waits count
+--- @param nodes the authored steps, which may be empty
+--- @return the compiled immutable program
+--- @raises when an entry is not a node or names an unknown step
+export function compile(
+    name: string,
+    version: integer,
+    clock: sequencetypes.ClockId,
+    nodes: {sequencetypes.Node}
+): sequencetypes.Program
+    local state = new Compiler(code = {}, consts = {}, constIndex = {}, loopCounts = {})
+    compileBlock(state, nodes, 0)
+    emitOp(state, END, -1, -1)
+    local program = new sequencetypes.Program(
+        name = name,
+        version = version,
+        clock = clock,
+        code = state.code,
+        consts = state.consts,
+        loopCounts = state.loopCounts,
+        bindingArgs = {}
+    )
+    indexBindingArgs(program)
+
+    return program
+end
+
+local function describeArgs(args: {any}?): string
+    if args == nil or #args == 0 then
+        return ""
+    end
+    local parts: {string} = {}
+    for index = 1, #args do
+        local value = args[index]
+        if isEntityRef(value) then
+            parts[#parts + 1] = "bind(" .. ((value as {[string]: any}).bindName as string) .. ")"
+        elseif type(value) == "string" then
+            parts[#parts + 1] = string.format("%q", value as string)
+        else
+            parts[#parts + 1] = tostring(value)
+        end
+    end
+
+    return ", " .. table.concat(parts, ", ")
+end
+
+local function describeOp(program: sequencetypes.Program, at: integer): string
+    local base = at * STRIDE
+    local op = program.code[base + 1]
+    local a = program.code[base + 2]
+    local b = program.code[base + 3]
+    local consts = program.consts
+    if op == WAIT then
+        if a >= 0 then
+            return string.format("WAIT      %ss", tostring(consts[a]))
+        end
+
+        return string.format("WAIT      %d step(s)", b)
+    elseif op == WAIT_SIGNAL then
+        return string.format("WAITSIG   %q", consts[a] as string)
+    elseif op == WAIT_QUERY then
+        return string.format("WAITQUERY %q %s", consts[a] as string, b == 1 and "any" or "empty")
+    elseif op == CALL then
+        return string.format("CALL      %q%s", consts[a] as string, describeArgs(consts[b] as {any}?))
+    elseif op == EMIT then
+        return string.format("EMIT      %q%s", consts[a] as string, describeArgs(consts[b] as {any}?))
+    elseif op == JUMP then
+        local count = program.loopCounts[at]
+        return string.format("JUMP      -> %d  (%s)", a, b < 0 and "forever" or ("x" .. tostring(count or 1)))
+    elseif op == FORK then
+        return string.format("FORK      branch %d..%d, continue -> %d", a, b - 1, b)
+    elseif op == PLAY_TWEEN then
+        local spec = consts[b] as {any}
+        local reference = spec[1] as {[string]: any}
+        return string.format("PLAYTWEEN %q, bind(%s)", consts[a] as string, reference.bindName as string)
+    elseif op == WAIT_TWEEN then
+        return "WAITTWEEN"
+    elseif op == AWAIT then
+        local spec = consts[b] as {any}
+        local reference = spec[1] as {[string]: any}
+        return string.format("AWAIT     %q, bind(%s)", consts[a] as string, reference.bindName as string)
+    elseif op == EVAL then
+        return string.format("EVAL      %q%s", consts[a] as string, b >= 0 and "  (+data)" or "")
+    elseif op == JOIN then
+        return "JOIN"
+    elseif op == END then
+        return "END"
+    end
+
+    return "?? " .. tostring(op)
+end
+
+--- Renders a program as readable instructions, marking one address.
+---
+--- The format is for reading rather than for parsing and is free to change.
+--- @param program the compiled program to render
+--- @param pc the address to mark, or nil for an unmarked listing
+--- @return the header line followed by one newline-separated line per
+---     instruction
+export function disassemble(program: sequencetypes.Program, pc: integer?): string
+    local count = floor(#program.code / STRIDE) as integer
+    local out: {string} = {string.format("%s v%d  (%d instructions)", program.name, program.version, count)}
+    for at = 0, count - 1 do
+        out[#out + 1] = string.format("%s %4d  %s", at == pc and "->" or "  ", at, describeOp(program, at))
+    end
+
+    return table.concat(out, "\n")
+end
+
+--- Walks the straight-line run ahead of an address, accumulating waits.
+---
+--- The walk stops at the first instruction whose successor cannot be known
+--- without running it, which is a jump, a fork, a join, or a wait on something
+--- other than time. A wait written in seconds also ends the walk, because
+--- converting it needs a clock the program does not carry.
+--- @param program the program to walk
+--- @param pc the address to start from
+--- @param offset the ticks already owed before the first instruction
+--- @param withinTicks report only what is due within this many ticks, or nil
+---     for everything the walk can reach
+--- @return a caller-owned list of the calls and emits ahead, in order
+export function ahead(program: sequencetypes.Program, pc: integer, offset: integer, withinTicks: integer?): {Step}
+    local out: {Step} = {}
+    local code = program.code
+    local consts = program.consts
+    local count = floor(#code / STRIDE) as integer
+    local ticks = offset
+    local at = pc
+    while at >= 0 and at < count do
+        local base = at * STRIDE
+        local op = code[base + 1]
+        local a = code[base + 2]
+        local b = code[base + 3]
+        if op == WAIT then
+            if a >= 0 then
+                return out
+            end
+            ticks = ticks + (b > 0 and b or 1)
+            if withinTicks ~= nil and ticks > withinTicks then
+                return out
+            end
+        elseif op == CALL or op == EMIT then
+            out[
+                #out + 1
+            ] = new Step(
+                ticks = ticks,
+                kind = op == CALL and "call" or "emit",
+                name = consts[a] as string,
+                args = (consts[b] as {any}?) or {}
+            )
+        else
+            -- Anything else needs the world to say where it goes next: how
+            -- long an evaluation runs, or which way a branch turns.
+            return out
+        end
+        at = at + 1
+    end
+
+    return out
+end

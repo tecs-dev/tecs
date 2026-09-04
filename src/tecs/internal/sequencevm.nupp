@@ -1,0 +1,669 @@
+module tecs.internal.sequencevm
+
+--[[
+The instruction loop, and the per-tick driver that feeds it.
+
+One cursor runs until it waits, finishes, or faults, and the driver decides
+which cursors run at all. The waits that are not times, which are signals,
+query conditions, awaitable providers and tween endings, are delivered at the
+top of a fixed tick before anything advances, so a cursor woken by one runs in
+the same tick rather than a tick later.
+
+The loop is a bytecode interpreter rather than a coroutine because a
+suspended Nupp stack cannot be serialized. `nupp.tasks` owns the world's
+logical update; it cannot own a playback that has to survive a save file.
+]]
+
+local entityworld = require("tecs.internal.world")
+local query = require("tecs.internal.query")
+local sequencecursors = require("tecs.internal.sequencecursors")
+local sequenceprogram = require("tecs.internal.sequenceprogram")
+local sequenceregistry = require("tecs.internal.sequenceregistry")
+local sequencetypes = require("tecs.internal.sequencetypes")
+local wakeheap = require("tecs.internal.wakeheap")
+
+local floor = math.floor
+
+--- The frame duration a `frame` or `presentation` wait divides seconds by
+--- when nothing has set one.
+export const DEFAULT_FRAME_TIME: number = 1 / 60
+
+-- Nominal rather than the frame's measured time, because a wake is a tick
+-- number fixed when the wait runs and never revisited: dividing by whatever
+-- one frame happened to cost would make the same wait a different number of
+-- ticks on every machine and every frame it started on.
+local nominalFrameTime: number = DEFAULT_FRAME_TIME
+
+--- Sets the nominal frame duration seconds convert against on the `frame` and
+--- `presentation` clocks.
+--- @param seconds the loop's nominal frame duration in seconds
+--- @raises when seconds is not greater than zero
+export function setNominalFrameTime(seconds: number): nil
+    if seconds <= 0 or seconds ~= seconds then
+        error("sequence: the nominal frame time must be greater than zero", 3)
+    end
+    nominalFrameTime = seconds
+end
+
+--- Returns the nominal frame duration seconds convert against.
+--- @return the duration in seconds
+export function getNominalFrameTime(): number
+    return nominalFrameTime
+end
+
+-- Arguments without a binding in them are handed over as the program stored
+-- them; the rest are resolved into the world's scratch list. Either way the
+-- list belongs to the sequencer, and an action must read it rather than keep
+-- or modify it.
+local function resolveArgs(
+    exclusive world: entityworld.World,
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    index: integer
+): {any}
+    local raw = cursor.program.consts[index] as {any}
+    if not cursor.program.bindingArgs[index] then
+        return raw
+    end
+    local out = state.argScratch
+    local bindings = cursor.bindings
+    local count = #raw
+    for position = 1, count do
+        local value = raw[position]
+        if sequenceprogram.isEntityRef(value) then
+            local name = (value as {[string]: any}).bindName as string
+            local id = bindings ~= nil and bindings[name] or nil
+            out[position] = (id ~= nil and world:isAlive(id)) and id or nil
+        else
+            out[position] = value
+        end
+    end
+    for position = #out, count + 1, -1 do
+        out[position] = nil
+    end
+
+    return out
+end
+
+-- Seconds are authored and a clock counts ticks. `fixed` is the only clock
+-- whose tick is a fixed step, so it is the only one converted with the world's
+-- timestep; `frame` and `presentation` both advance once per frame and convert
+-- with the loop's nominal frame time. The same program then waits the same
+-- wall-clock duration whichever clock it is on.
+local function secondsToSteps(borrows world: entityworld.World, clock: sequencetypes.ClockId, seconds: number): integer
+    if seconds <= 0 then
+        return 0
+    end
+    local timestep = nominalFrameTime
+    if clock == "fixed" then
+        timestep = world:getFixedTiming()
+    end
+    if timestep <= 0 then
+        return 1
+    end
+    local steps = floor(seconds / timestep + 0.5) as integer
+    if steps < 1 then
+        steps = 1
+    end
+
+    return steps
+end
+
+local function contextFor(
+    exclusive world: entityworld.World,
+    state: sequencetypes.WorldState
+): sequencetypes.ActionContext
+    local existing = state.context
+    if existing ~= nil then
+        return existing
+    end
+    local created = new sequencetypes.ActionContext(world = world, handle = 0, owner = 0, args = {})
+    state.context = created
+
+    return created
+end
+
+local function startTween(
+    exclusive world: entityworld.World,
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    presetName: string,
+    spec: {any}
+): boolean
+    local reference = spec[1] as {[string]: any}
+    local bindings = cursor.bindings
+    local id = bindings ~= nil and bindings[reference.bindName as string] or nil
+    sequencecursors.releaseTween(state, cursor)
+    cursor.tweenOutcome = nil
+    local timeline = sequenceregistry.newest(presetName)
+    if timeline == nil then
+        sequencecursors.fault(state, cursor, "unregisteredTween", "timeline '" .. presetName .. "' is not defined")
+        return false
+    end
+    if id == nil or not world:isAlive(id) then
+        -- A missing or dead actor is a game state rather than a defect in the
+        -- program. Nothing plays, and a following `waitTween` has its answer
+        -- already.
+        cursor.tweenOutcome = "targetLost"
+        return true
+    end
+    -- A timeline is a program, so starting one is starting a playback: it gets
+    -- its own cursor on the timeline's clock, and this one holds its handle.
+    local params = spec[2] as {[string]: any}?
+    local started = sequencecursors.alloc(state, timeline, timeline.clock)
+    started.owner = id
+    started.params = params
+    started.budget = cursor.budget
+    started.budgetLeft = cursor.budget
+    started.channel = params ~= nil and params.channel as string? or nil
+    started.awaitedBy = cursor.slot
+    sequenceregistry.retain(timeline)
+    sequencecursors.linkOwner(state, started)
+    sequencecursors.claimChannel(state, started)
+    sequencecursors.schedule(state, started, sequencecursors.clockOf(state, started).step + 1)
+    cursor.tweenPlayback = sequencecursors.packHandle(started.slot, started.generation)
+
+    return true
+end
+
+local function beginEval(
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    name: string,
+    dataIndex: integer
+): boolean
+    local evaluator = sequenceregistry.findEvaluator(name)
+    if evaluator == nil then
+        sequencecursors.fault(state, cursor, "unregisteredEvaluator", "evaluator '" .. name .. "' is not registered")
+        return false
+    end
+    -- The cursor leaves the heap and joins the active set: from here the
+    -- evaluator decides when it is done, not a wake time.
+    cursor.pc = cursor.pc + 1
+    cursor.evaluator = name
+    cursor.evalIndex = dataIndex >= 0 and dataIndex or nil
+    local program = cursor.program
+    if dataIndex >= 0 then
+        -- Resolving the constant and building the state both run the
+        -- evaluator's own code, so both fault the playback rather than the
+        -- tick.
+        local succeeded, resolved = pcall(function(): any
+            return sequenceregistry.resolveEvaluatorData(program, evaluator, dataIndex)
+        end)
+        if not succeeded then
+            sequencecursors.fault(state, cursor, "actionError", tostring(resolved))
+            return false
+        end
+        cursor.evalData = resolved
+    end
+    local newState = evaluator.newState
+    if newState ~= nil then
+        local succeeded, built = pcall(function(): any
+            return newState(program, cursor.evalData, cursor)
+        end)
+        if not succeeded then
+            sequencecursors.fault(state, cursor, "actionError", tostring(built))
+            return false
+        end
+        cursor.evalState = built
+    end
+    cursor.evalImpl = evaluator
+    cursor.wakeAt = nil
+    sequencecursors.activate(state, cursor)
+
+    return true
+end
+
+--- Runs one cursor until it waits, finishes, or faults.
+--- @param world the world the playback belongs to
+--- @param state the world's sequencer state
+--- @param cursor the cursor to advance
+--- @param budget the instructions left in this tick
+--- @return the instructions still left after the cursor yielded
+export function run(
+    exclusive world: entityworld.World,
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    budget: integer
+): integer
+    local remaining = budget
+    local program = cursor.program
+    local code = program.code
+    local consts = program.consts
+    while true do
+        remaining = remaining - 1
+        if remaining < 0 then
+            sequencecursors.fault(
+                state,
+                cursor,
+                "budgetExceeded",
+                "exceeded " .. tostring(cursor.budget) .. " instructions in one step without waiting"
+            )
+            return remaining
+        end
+        local base = cursor.pc * sequenceprogram.STRIDE
+        local op = code[base + 1]
+        local a = code[base + 2]
+        local b = code[base + 3]
+        if op == sequenceprogram.END then
+            sequencecursors.retire(state, cursor, "completed")
+            return remaining
+        elseif op == sequenceprogram.WAIT then
+            local steps = a >= 0 and secondsToSteps(world, cursor.clock, consts[a] as number) or b
+            cursor.pc = cursor.pc + 1
+            local step = sequencecursors.clockOf(state, cursor).step
+            sequencecursors.schedule(state, cursor, step + (steps > 0 and steps or 1))
+            return remaining
+        elseif op == sequenceprogram.WAIT_SIGNAL then
+            local channel = consts[a] as string
+            cursor.pc = cursor.pc + 1
+            cursor.waitChannel = channel
+            cursor.wakeAt = nil
+            sequencecursors.park(state.channels, channel, cursor.slot)
+            return remaining
+        elseif op == sequenceprogram.WAIT_QUERY then
+            local name = consts[a] as string
+            if state.queries[name] == nil then
+                sequencecursors.fault(
+                    state,
+                    cursor,
+                    "unregisteredQuery",
+                    "query '" .. name .. "' is not registered on this world"
+                )
+                return remaining
+            end
+            cursor.pc = cursor.pc + 1
+            cursor.waitQuery = name
+            cursor.waitCondition = b
+            cursor.wakeAt = nil
+            -- Tested at the next fixed step rather than here: a spawn or a
+            -- despawn from this step is still staged, so the query cannot
+            -- answer for the world this cursor has already asked about.
+            sequencecursors.park(state.queryWaiters, name, cursor.slot)
+            return remaining
+        elseif op == sequenceprogram.PLAY_TWEEN then
+            if not startTween(world, state, cursor, consts[a] as string, consts[b] as {any}) then
+                return remaining
+            end
+            cursor.pc = cursor.pc + 1
+        elseif op == sequenceprogram.AWAIT then
+            local name = consts[a] as string
+            if sequenceregistry.findAwaitable(name) == nil then
+                sequencecursors.fault(
+                    state,
+                    cursor,
+                    "unregisteredAwaitable",
+                    "awaitable '" .. name .. "' is not registered"
+                )
+                return remaining
+            end
+            local spec = consts[b] as {any}
+            local reference = spec[1] as {[string]: any}
+            local bindings = cursor.bindings
+            local id = bindings ~= nil and bindings[reference.bindName as string] or nil
+            cursor.pc = cursor.pc + 1
+            -- A binding that is missing or dead is not a fault: there is
+            -- nothing to wait for, and the program carries on.
+            if id ~= nil and world:isAlive(id) then
+                cursor.awaitProvider = name
+                cursor.awaitEntity = id
+                cursor.awaitKey = spec[2] as string?
+                cursor.wakeAt = nil
+                state.awaitWaiters[cursor.slot] = true
+                return remaining
+            end
+        elseif op == sequenceprogram.EVAL then
+            beginEval(state, cursor, consts[a] as string, b)
+            return remaining
+        elseif op == sequenceprogram.WAIT_TWEEN then
+            cursor.pc = cursor.pc + 1
+            local handle = cursor.tweenPlayback
+            local started = handle ~= nil and sequencecursors.resolve(state, handle) or nil
+            if started ~= nil and started.alive then
+                -- No wake time: the playback wakes this one when it ends,
+                -- however it ends, so a waiter never parks forever.
+                cursor.waitingTween = true
+                cursor.wakeAt = nil
+                return remaining
+            end
+            -- Nothing to wait for: either no `playTween` ran, its target was
+            -- already gone, or it finished and left its outcome behind.
+            if handle ~= nil and cursor.tweenOutcome == nil then
+                cursor.tweenOutcome = "canceled"
+            end
+            cursor.tweenPlayback = nil
+        elseif op == sequenceprogram.CALL then
+            local name = consts[a] as string
+            local action = state.actions[name]
+            if action == nil then
+                sequencecursors.fault(
+                    state,
+                    cursor,
+                    "unregisteredAction",
+                    "action '" .. name .. "' is not registered on this world"
+                )
+                return remaining
+            end
+            local context = contextFor(world, state)
+            context.handle = sequencecursors.packHandle(cursor.slot, cursor.generation)
+            context.owner = cursor.owner
+            context.args = resolveArgs(world, state, cursor, b)
+            context.params = cursor.params
+            context.cursor = cursor
+            local succeeded, failure = pcall(function(): nil
+                action(world, context)
+            end)
+            if not succeeded then
+                sequencecursors.fault(state, cursor, "actionError", tostring(failure))
+                return remaining
+            end
+            -- An action may cancel its own playback.
+            if not cursor.alive then
+                return remaining
+            end
+            cursor.pc = cursor.pc + 1
+        elseif op == sequenceprogram.EMIT then
+            -- An emitted list is copied rather than borrowed: it leaves with
+            -- the event, and an observer is entitled to keep it.
+            local resolved = resolveArgs(world, state, cursor, b)
+            local args: {any} = {}
+            for position = 1, #resolved do
+                args[position] = resolved[position]
+            end
+            world:emit(
+                0,
+                sequencetypes.Event(
+                    consts[a] as string,
+                    args,
+                    sequencecursors.packHandle(cursor.slot, cursor.generation)
+                )
+            )
+            cursor.pc = cursor.pc + 1
+        elseif op == sequenceprogram.JUMP then
+            if b < 0 then
+                cursor.pc = a
+            else
+                local registers = cursor.loopRegs
+                if registers == nil then
+                    registers = {}
+                    cursor.loopRegs = registers
+                end
+                local left = registers[cursor.pc]
+                if left == nil then
+                    left = program.loopCounts[cursor.pc] or 1
+                end
+                left = left - 1
+                if left > 0 then
+                    registers[cursor.pc] = left
+                    cursor.pc = a
+                else
+                    registers[cursor.pc] = nil
+                    cursor.pc = cursor.pc + 1
+                end
+            end
+        elseif op == sequenceprogram.FORK then
+            -- The branch is queued for this same tick rather than entered
+            -- here: it runs once this cursor yields, which keeps a tree of
+            -- branches breadth-first, off the Nupp stack, and ordered by the
+            -- scheduler like everything else.
+            local child = sequencecursors.alloc(state, program, cursor.clock)
+            sequenceregistry.retain(program)
+            child.pc = a
+            child.owner = cursor.owner
+            child.bindings = cursor.bindings
+            child.params = cursor.params
+            child.budget = cursor.budget
+            child.budgetLeft = cursor.budget
+            child.parentSlot = cursor.slot
+            child.parentGeneration = cursor.generation
+            local children = cursor.children
+            if children == nil then
+                children = {}
+                cursor.children = children
+            end
+            children[child.slot] = true
+            sequencecursors.linkOwner(state, child)
+            sequencecursors.schedule(state, child, sequencecursors.clockOf(state, child).step)
+            cursor.pc = b
+        elseif op == sequenceprogram.JOIN then
+            cursor.pc = cursor.pc + 1
+            local children = cursor.children
+            if children ~= nil and next(children) ~= nil then
+                -- No wake time: the last branch to finish schedules it.
+                cursor.joining = true
+                cursor.wakeAt = nil
+                return remaining
+            end
+        else
+            sequencecursors.fault(state, cursor, "actionError", "unknown opcode " .. tostring(op))
+            return remaining
+        end
+    end
+end
+
+--- Runs one cursor, arming its budget the first time it runs in a tick.
+--- @param world the world the playback belongs to
+--- @param state the world's sequencer state
+--- @param cursor the cursor to advance
+export function advance(
+    exclusive world: entityworld.World,
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor
+): nil
+    local step = sequencecursors.clockOf(state, cursor).step
+    if cursor.budgetStep ~= step then
+        cursor.budgetStep = step
+        cursor.budgetLeft = cursor.budget
+    end
+    cursor.budgetLeft = run(world, state, cursor, cursor.budgetLeft)
+end
+
+local function wakeNow(state: sequencetypes.WorldState, cursor: sequencetypes.Cursor): nil
+    sequencecursors.unlinkWaits(state, cursor)
+    sequencecursors.schedule(state, cursor, sequencecursors.clockOf(state, cursor).step)
+end
+
+local function deliverSignals(state: sequencetypes.WorldState): nil
+    local pending = state.pendingSignals
+    local count = #pending
+    if count == 0 then
+        return
+    end
+    state.pendingSignals = {}
+    for index = 1, count do
+        local slots = sequencecursors.parkedSlots(state.channels, pending[index])
+        for position = 1, #slots do
+            local cursor = state.cursors[slots[position]]
+            if cursor ~= nil and cursor.alive then
+                wakeNow(state, cursor)
+            end
+        end
+    end
+end
+
+local function queryMatches(value: query.Query): boolean
+    for _ in value:iter() do
+        return true
+    end
+
+    return false
+end
+
+-- Every query name a cursor is parked on is re-tested at each fixed step. The
+-- Nupp query layer exposes no archetype-transition callbacks, so there is no
+-- edge to subscribe to; the cost tracks the number of distinct names waited
+-- on rather than the number of waiters.
+local function deliverQueryWaits(state: sequencetypes.WorldState): nil
+    local names: {string} = {}
+    for name in pairs(state.queryWaiters) do
+        names[#names + 1] = name
+    end
+    if #names == 0 then
+        return
+    end
+    table.sort(names)
+    for index = 1, #names do
+        local name = names[index]
+        local registered = state.queries[name]
+        if registered ~= nil then
+            local matched = queryMatches(registered) and 1 or 0
+            local slots = sequencecursors.parkedSlots(state.queryWaiters, name)
+            for position = 1, #slots do
+                local cursor = state.cursors[slots[position]]
+                if cursor ~= nil and cursor.alive and cursor.waitCondition == matched then
+                    wakeNow(state, cursor)
+                end
+            end
+        end
+    end
+end
+
+-- A provider answers for something outside the sequencer, an animation or a
+-- load, so there is no edge to subscribe to and the condition is asked at each
+-- fixed step boundary the same way a query wait is.
+local function deliverAwaits(exclusive world: entityworld.World, state: sequencetypes.WorldState): nil
+    local slots: {integer} = {}
+    for slot in pairs(state.awaitWaiters) do
+        slots[#slots + 1] = slot
+    end
+    if #slots == 0 then
+        return
+    end
+    table.sort(slots)
+    for index = 1, #slots do
+        local slot = slots[index]
+        local cursor = state.cursors[slot]
+        if cursor == nil or not cursor.alive then
+            state.awaitWaiters[slot] = nil
+        elseif cursor.state == "running" then
+            local providerName = cursor.awaitProvider
+            local entity = cursor.awaitEntity
+            local provider = providerName ~= nil and sequenceregistry.findAwaitable(providerName) or nil
+            local pending = false
+            if provider ~= nil and entity ~= nil and world:isAlive(entity) then
+                local isPending = provider.isPending
+                local key = cursor.awaitKey
+                local succeeded, result = pcall(function(): boolean
+                    return isPending(world, entity, key)
+                end)
+                if not succeeded then
+                    sequencecursors.fault(state, cursor, "actionError", tostring(result))
+                    pending = true
+                else
+                    pending = result as boolean
+                end
+            end
+            -- A provider that is gone, or an entity that is, releases the
+            -- cursor rather than stranding it for the life of the world.
+            if not pending and cursor.alive then
+                wakeNow(state, cursor)
+            end
+        end
+    end
+end
+
+-- The active walk is the one loop that runs per evaluating playback per tick,
+-- so it touches fields rather than tables: the cursor is the array entry and
+-- the evaluator is held on the cursor. Protecting each step with its own pcall
+-- would cost more than the interpolation it guards, so one pcall covers the
+-- whole walk and a raise resumes it below the cursor that caused it.
+local walkAt: integer = 0
+local walkCursor: sequencetypes.Cursor? = nil
+
+local function stepActive(
+    exclusive world: entityworld.World,
+    state: sequencetypes.WorldState,
+    clock: sequencetypes.Clock,
+    dt: number
+): nil
+    walkAt = #clock.active
+    if walkAt == 0 then
+        return
+    end
+    local active = clock.active
+    local function walk(): nil
+        while walkAt >= 1 do
+            local cursor = active[walkAt]
+            walkCursor = cursor
+            if cursor.state == "running" then
+                local evaluator = cursor.evalImpl
+                local finished = evaluator == nil or evaluator.step(world, cursor, dt)
+                if finished and cursor.alive then
+                    sequencecursors.deactivate(state, cursor)
+                    cursor.evaluator = nil
+                    cursor.evalImpl = nil
+                    cursor.evalState = nil
+                    cursor.evalIndex = nil
+                    cursor.evalData = nil
+                    sequencecursors.schedule(state, cursor, clock.step)
+                end
+            end
+            walkAt = walkAt - 1
+        end
+    end
+
+    while walkAt >= 1 do
+        local succeeded, failure = pcall(walk)
+        if succeeded then
+            break
+        end
+        local cursor = walkCursor
+        if cursor ~= nil and cursor.alive then
+            sequencecursors.fault(state, cursor, "actionError", tostring(failure))
+        end
+        -- Faulting retires the cursor, which fills its place from the end of
+        -- the array, so the walk resumes at the same index rather than past
+        -- the entry that just moved into it.
+        if walkAt > #active or active[walkAt] == cursor then
+            walkAt = walkAt - 1
+        end
+    end
+    walkCursor = nil
+end
+
+--- Advances one clock by one tick and runs everything due on it.
+---
+--- Signals, query conditions, and awaitable providers are delivered on the
+--- fixed clock alone, because they are gameplay concepts. A frame or
+--- presentation program waits on ticks and evaluations only.
+--- @param world the world whose playbacks advance
+--- @param state the world's sequencer state
+--- @param clockId the clock to advance
+--- @param dt the elapsed seconds this tick carries to evaluators
+export function tick(
+    exclusive world: entityworld.World,
+    state: sequencetypes.WorldState,
+    clockId: sequencetypes.ClockId,
+    dt: number
+): nil
+    local clock = sequencetypes.clockById(state.clocks, clockId)
+    clock.step = clock.step + 1
+    local step = clock.step
+    if clockId == "fixed" then
+        deliverSignals(state)
+        deliverQueryWaits(state)
+        deliverAwaits(world, state)
+    end
+    stepActive(world, state, clock, dt)
+    while true do
+        local due = wakeheap.peek(clock.waiting)
+        if due == nil or due > step then
+            break
+        end
+        local _, sequence, packed = wakeheap.pop(clock.waiting)
+        local handle = packed as integer
+        local slot = handle % sequencecursors.SLOT_LIMIT
+        local generation = (handle - slot) / sequencecursors.SLOT_LIMIT
+        local cursor = state.cursors[slot]
+        -- A stale entry names a cursor that was canceled, retired, or
+        -- rescheduled since it was queued.
+        if cursor ~= nil and cursor.generation == generation and cursor.alive and cursor.seq == sequence then
+            if cursor.state == "paused" then
+                -- Keep a paused cursor out of the heap; resuming reschedules.
+                cursor.wakeAt = step
+            else
+                advance(world, state, cursor)
+            end
+        end
+    end
+end

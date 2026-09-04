@@ -1,0 +1,410 @@
+module tecs.internal.sequencesnapshot
+
+--[[
+Saving and restoring a world's playbacks.
+
+The payload carries its layout version, so incompatible data is rejected before
+any live cursor state is touched.
+
+A snapshot carries the exact program versions its live cursors run, so a load
+resumes the instructions each playback started with even when the code has
+since been redefined. Programs restored this way register under their original
+name and version, leaving the newest version untouched for later `play` calls.
+]]
+
+local log = require("nupp.log")
+local sequencecursors = require("tecs.internal.sequencecursors")
+local sequenceprogram = require("tecs.internal.sequenceprogram")
+local sequenceregistry = require("tecs.internal.sequenceregistry")
+local sequencetypes = require("tecs.internal.sequencetypes")
+
+local floor = math.floor
+
+-- This logger name is a compatibility surface: it is the unit a developer
+-- filters on rather than an identifier this tree may move.
+local logger = log.named("tecs.sequence")
+
+--- The payload layout this build writes and accepts.
+export const VERSION: integer = 1
+
+local function serializeProgram(program: sequencetypes.Program): {[string]: any}
+    return {
+        name = program.name,
+        version = program.version,
+        code = program.code,
+        consts = program.consts,
+        clock = program.clock,
+        loopCounts = program.loopCounts,
+    }
+end
+
+-- A program can name another: a `playTween` instruction carries a timeline's
+-- name in its constant pool. The named one is not running when the save is
+-- written, because the playback has not reached that step yet, so collecting
+-- only what live cursors run would leave the restored playback to fault the
+-- moment it got there. Referenced programs travel too, transitively.
+local function collectReferenced(
+    program: sequencetypes.Program,
+    out: {sequencetypes.Program},
+    seen: {[string]: boolean}
+): nil
+    local code = program.code
+    local stride = sequenceprogram.STRIDE
+    local count = floor(#code / stride) as integer
+    for at = 0, count - 1 do
+        local base = at * stride
+        if code[base + 1] == sequenceprogram.PLAY_TWEEN then
+            local name = program.consts[code[base + 2]] as string?
+            local referenced = name ~= nil and sequenceregistry.newest(name) or nil
+            if referenced ~= nil then
+                local key = referenced.name .. "@" .. tostring(referenced.version)
+                if not seen[key] then
+                    seen[key] = true
+                    out[#out + 1] = referenced
+                    collectReferenced(referenced, out, seen)
+                end
+            end
+        end
+    end
+end
+
+local function clockRow(clock: sequencetypes.Clock): {[string]: integer}
+    return {step = clock.step, seq = clock.seq}
+end
+
+local function saveCursor(cursor: sequencetypes.Cursor): {[string]: any}
+    -- Only the evaluator says what of its working state is data; one that does
+    -- not say carries nothing and comes back at the start of whatever it was
+    -- evaluating.
+    local evalState: any = nil
+    local evaluatorName = cursor.evaluator
+    if evaluatorName ~= nil then
+        local evaluator = sequenceregistry.findEvaluator(evaluatorName)
+        if evaluator ~= nil and evaluator.save ~= nil then
+            evalState = evaluator.save(cursor.evalState)
+        end
+    end
+
+    return {
+        slot = cursor.slot,
+        generation = cursor.generation,
+        evaluator = cursor.evaluator,
+        evalIndex = cursor.evalIndex,
+        evalState = evalState,
+        program = cursor.program.name,
+        version = cursor.program.version,
+        pc = cursor.pc,
+        state = cursor.state,
+        clock = cursor.clock,
+        owner = cursor.owner,
+        bindings = cursor.bindings,
+        params = cursor.params,
+        pauseHolders = cursor.pauseHolders,
+        budget = cursor.budget,
+        wakeAt = cursor.wakeAt,
+        seq = cursor.seq,
+        loopRegs = cursor.loopRegs,
+        waitChannel = cursor.waitChannel,
+        waitQuery = cursor.waitQuery,
+        waitCondition = cursor.waitCondition,
+        tweenPlayback = cursor.tweenPlayback,
+        tweenOutcome = cursor.tweenOutcome,
+        waitingTween = cursor.waitingTween,
+        awaitedBy = cursor.awaitedBy,
+        channel = cursor.channel,
+        awaitProvider = cursor.awaitProvider,
+        awaitEntity = cursor.awaitEntity,
+        awaitKey = cursor.awaitKey,
+        parentSlot = cursor.parentSlot,
+        parentGeneration = cursor.parentGeneration,
+        joining = cursor.joining,
+    }
+end
+
+--- Returns everything a world's live playbacks need to come back.
+---
+--- Actions, queries, evaluators and awaitable providers stay out of the
+--- payload: they are code, rebound by name. Only the parked cursors are data.
+--- @param state the world's sequencer state
+--- @return the caller-owned plain-value payload
+export function save(state: sequencetypes.WorldState): {[string]: any}
+    local programs: {{[string]: any}} = {}
+    local seenPrograms: {[string]: boolean} = {}
+    local referenced: {sequencetypes.Program} = {}
+    local cursors: {{[string]: any}} = {}
+    local slots: {integer} = {}
+    for slot in pairs(state.cursors) do
+        slots[#slots + 1] = slot
+    end
+    table.sort(slots)
+    for index = 1, #slots do
+        local cursor = assert(state.cursors[slots[index]])
+        if cursor.alive then
+            local program = cursor.program
+            local key = program.name .. "@" .. tostring(program.version)
+            if not seenPrograms[key] then
+                seenPrograms[key] = true
+                programs[#programs + 1] = serializeProgram(program)
+                collectReferenced(program, referenced, seenPrograms)
+            end
+            cursors[#cursors + 1] = saveCursor(cursor)
+        end
+    end
+    for index = 1, #referenced do
+        programs[#programs + 1] = serializeProgram(referenced[index])
+    end
+
+    return {
+        version = VERSION,
+        clocks = {
+            fixed = clockRow(state.clocks.fixed),
+            frame = clockRow(state.clocks.frame),
+            presentation = clockRow(state.clocks.presentation),
+        },
+        budget = state.budget,
+        nextSlot = state.nextSlot,
+        generations = state.generations,
+        programs = programs,
+        cursors = cursors,
+        pendingSignals = state.pendingSignals,
+    }
+end
+
+local function restoreClock(clock: sequencetypes.Clock, saved: {[string]: integer}?): nil
+    if saved == nil then
+        return
+    end
+    clock.step = saved.step or 0
+    clock.seq = saved.seq or 0
+end
+
+-- An evaluating playback rejoins its clock's active set rather than the heap:
+-- it has no wake time, only work to do every tick. An evaluator this build no
+-- longer registers is not fatal; the playback gives up its working state and
+-- carries on at the instruction after its evaluating one.
+local function restoreEvaluator(
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    program: sequencetypes.Program,
+    saved: any
+): nil
+    local name = assert(cursor.evaluator)
+    local evaluator = sequenceregistry.findEvaluator(name)
+    if evaluator == nil then
+        logger:warn("%s v%d: evaluator '%s' is gone; resuming past it", program.name, program.version, name)
+        cursor.evaluator = nil
+        cursor.evalIndex = nil
+        sequencecursors.schedule(state, cursor, sequencecursors.clockOf(state, cursor).step + 1)
+        return
+    end
+    local dataIndex = cursor.evalIndex
+    if dataIndex ~= nil then
+        cursor.evalData = sequenceregistry.resolveEvaluatorData(program, evaluator, dataIndex)
+    end
+    local load = evaluator.load
+    local newState = evaluator.newState
+    if load ~= nil then
+        cursor.evalState = load(program, cursor.evalData, saved)
+    elseif newState ~= nil then
+        cursor.evalState = newState(program, cursor.evalData, cursor)
+    else
+        cursor.evalState = nil
+    end
+    cursor.evalImpl = evaluator
+    sequencecursors.activate(state, cursor)
+end
+
+local function restoreCursor(row: {[string]: any}, program: sequencetypes.Program): sequencetypes.Cursor
+    return new sequencetypes.Cursor(
+        slot = row.slot as integer,
+        generation = row.generation as integer,
+        alive = true,
+        program = program,
+        clock = (row.clock as sequencetypes.ClockId?) or "fixed",
+        pc = (row.pc as integer?) or 0,
+        state = (row.state as sequencetypes.PlaybackState?) or "running",
+        owner = (row.owner as integer?) or 0,
+        budget = (row.budget as integer?) or sequencecursors.DEFAULT_BUDGET,
+        budgetLeft = (row.budget as integer?) or sequencecursors.DEFAULT_BUDGET,
+        wakeAt = row.wakeAt as integer?,
+        seq = (row.seq as integer?) or 0,
+        bindings = row.bindings as {[string]: integer}?,
+        params = row.params as {[string]: any}?,
+        pauseHolders = row.pauseHolders as {[string]: boolean}?,
+        loopRegs = row.loopRegs as {[integer]: integer}?,
+        channel = row.channel as string?,
+        waitChannel = row.waitChannel as string?,
+        waitQuery = row.waitQuery as string?,
+        waitCondition = row.waitCondition as integer?,
+        waitingTween = row.waitingTween == true,
+        tweenPlayback = row.tweenPlayback as integer?,
+        tweenOutcome = row.tweenOutcome as sequencetypes.TweenOutcome?,
+        awaitedBy = row.awaitedBy as integer?,
+        awaitProvider = row.awaitProvider as string?,
+        awaitEntity = row.awaitEntity as integer?,
+        awaitKey = row.awaitKey as string?,
+        parentSlot = row.parentSlot as integer?,
+        parentGeneration = row.parentGeneration as integer?,
+        joining = row.joining == true,
+        evaluator = row.evaluator as string?,
+        evalIndex = row.evalIndex as integer?
+    )
+end
+
+local function clearLiveState(state: sequencetypes.WorldState): nil
+    -- The playbacks about to be discarded give up their claim on the program
+    -- versions they were running, so a version this world was the last user of
+    -- goes with them.
+    for _, cursor in pairs(state.cursors) do
+        if cursor.alive then
+            sequenceregistry.release(cursor.program)
+        end
+    end
+    -- Actions and queries stay registered: they are code, rebound by name.
+    state.cursors = {}
+    state.freeSlots = {}
+    state.ownerIndex = {}
+    state.channels = {}
+    state.pendingSignals = {}
+    state.queryWaiters = {}
+    state.channelled = {}
+    state.awaitWaiters = {}
+    -- The call scratch points at cursors that are about to be replaced.
+    state.context = nil
+    state.argScratch = {}
+    state.nextSlot = 1
+    state.generations = {}
+    sequencetypes.clearClock(state.clocks.fixed)
+    sequencetypes.clearClock(state.clocks.frame)
+    sequencetypes.clearClock(state.clocks.presentation)
+end
+
+--- Replaces a world's playbacks with a payload's.
+---
+--- The payload is validated before any live state is touched, so a rejected
+--- one leaves the world's playbacks exactly as they were rather than half
+--- cleared. A nil payload clears the world's playbacks and stops there.
+--- @param state the world's sequencer state
+--- @param value the payload written by `save`, or nil
+--- @raises when the payload is not a table or carries an unsupported layout
+---     version
+export function load(state: sequencetypes.WorldState, value: any): nil
+    if value ~= nil then
+        if type(value) ~= "table" then
+            error("tecs.sequence snapshot data must be a table", 3)
+        end
+        local header = value as {[string]: any}
+        if header.version ~= VERSION then
+            error("unsupported tecs.sequence snapshot version: " .. tostring(header.version), 3)
+        end
+    end
+    clearLiveState(state)
+    if value == nil then
+        return
+    end
+    local data = value as {[string]: any}
+    local clocks = data.clocks as {[string]: {[string]: integer}}?
+    if clocks ~= nil then
+        restoreClock(state.clocks.fixed, clocks.fixed)
+        restoreClock(state.clocks.frame, clocks.frame)
+        restoreClock(state.clocks.presentation, clocks.presentation)
+    end
+    state.budget = (data.budget as integer?) or sequencecursors.DEFAULT_BUDGET
+    state.nextSlot = (data.nextSlot as integer?) or 1
+    state.generations = (data.generations as {[integer]: integer}?) or {}
+    state.pendingSignals = (data.pendingSignals as {string}?) or {}
+
+    local restored: {[string]: sequencetypes.Program} = {}
+    local programs = (data.programs as {{[string]: any}}?) or {}
+    for index = 1, #programs do
+        local program = sequenceregistry.restore(programs[index])
+        restored[program.name .. "@" .. tostring(program.version)] = program
+    end
+
+    local rows = (data.cursors as {{[string]: any}}?) or {}
+    local evalRows: {{[string]: any}} = {}
+    for index = 1, #rows do
+        local row = rows[index]
+        local key = (row.program as string) .. "@" .. tostring(row.version)
+        local program = restored[key]
+        if program == nil then
+            logger:warn("dropping cursor for missing program %s", key)
+        else
+            local cursor = restoreCursor(row, program)
+            state.cursors[cursor.slot] = cursor
+            sequenceregistry.retain(program)
+            sequencecursors.linkOwner(state, cursor)
+            local channel = cursor.channel
+            if channel ~= nil then
+                state.channelled[tostring(cursor.owner) .. "\0" .. channel] = cursor.slot
+            end
+            -- Wake indexes are rebuilt from the primary data rather than
+            -- deserialized, in the order the instruction loop would have
+            -- placed them.
+            if cursor.waitChannel ~= nil then
+                sequencecursors.park(state.channels, cursor.waitChannel, cursor.slot)
+            elseif cursor.evaluator ~= nil then
+                evalRows[#evalRows + 1] = {cursor = cursor, program = program, saved = row.evalState}
+            elseif cursor.waitQuery ~= nil then
+                sequencecursors.park(state.queryWaiters, cursor.waitQuery, cursor.slot)
+            elseif cursor.awaitProvider ~= nil then
+                state.awaitWaiters[cursor.slot] = true
+            elseif cursor.waitingTween then
+                -- The playback it waits on carries the back reference.
+            elseif not cursor.joining then
+                sequencecursors.requeue(state, cursor, cursor.wakeAt or 0, cursor.seq)
+            end
+        end
+    end
+    for index = 1, #evalRows do
+        local entry = evalRows[index]
+        restoreEvaluator(
+            state,
+            entry.cursor as sequencetypes.Cursor,
+            entry.program as sequencetypes.Program,
+            entry.saved
+        )
+    end
+
+    -- Relink the branch tree, then rescue any join whose branches the payload
+    -- did not carry, because it would otherwise never wake.
+    local slots: {integer} = {}
+    for slot in pairs(state.cursors) do
+        slots[#slots + 1] = slot
+    end
+    table.sort(slots)
+    for index = 1, #slots do
+        local cursor = assert(state.cursors[slots[index]])
+        local parentSlot = cursor.parentSlot
+        if parentSlot ~= nil then
+            local parent = state.cursors[parentSlot]
+            if parent == nil or parent.generation ~= cursor.parentGeneration then
+                cursor.parentSlot = nil
+                cursor.parentGeneration = nil
+            else
+                local children = parent.children
+                if children == nil then
+                    children = {}
+                    parent.children = children
+                end
+                children[cursor.slot] = true
+            end
+        end
+    end
+    for index = 1, #slots do
+        local cursor = assert(state.cursors[slots[index]])
+        if cursor.joining and (cursor.children == nil or next(cursor.children) == nil) then
+            logger:warn("join at pc=%d lost its branches; resuming", cursor.pc)
+            cursor.joining = false
+            sequencecursors.schedule(state, cursor, sequencecursors.clockOf(state, cursor).step + 1)
+        end
+    end
+
+    -- Slots below the restored allocation cursor that the payload did not fill
+    -- are free for reuse.
+    for slot = state.nextSlot - 1, 1, -1 do
+        if state.cursors[slot] == nil then
+            state.freeSlots[#state.freeSlots + 1] = slot
+        end
+    end
+end

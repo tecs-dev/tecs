@@ -1,0 +1,402 @@
+local ecs = require("tecs.ecs")
+local sequence = require("tecs.sequence")
+local test = require("nupp.test")
+
+local suite = {}
+
+local nextName = 0
+
+local function uniqueName(prefix: string): string
+    nextName = nextName + 1
+    return prefix .. tostring(nextName)
+end
+
+-- Every world here runs on an eighth-of-a-second fixed step, so one update of
+-- that length advances the fixed clock exactly once.
+local STEP = 0.125
+
+local function newWorld(): ecs.World
+    local world = ecs.newWorld({timestep = STEP})
+    sequence.plugin(world)
+
+    return world
+end
+
+local function step(exclusive world: ecs.World, count: integer?): nil
+    for _ = 1, count or 1 do
+        world:update(STEP)
+    end
+end
+
+function suite.runsStepsInOrderOnTheTickAfterPlay(): nil
+    local world = newWorld()
+    local log: {string} = {}
+    sequence.registerAction(world, "test.first", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+        log[#log + 1] = "first"
+    end)
+    sequence.registerAction(world, "test.second", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+        log[#log + 1] = "second"
+    end)
+    local program = sequence.define(uniqueName("test.order."), {
+        sequence.call("test.first"),
+        sequence.waitSteps(1),
+        sequence.call("test.second"),
+    })
+
+    local handle = sequence.play(world, program)
+
+    -- The first instruction runs on the next tick, never inside `play`.
+    test.equal(#log, 0)
+    step(world)
+    test.equal(table.concat(log, ","), "first")
+    step(world)
+    test.equal(table.concat(log, ","), "first,second")
+    local status = assert(sequence.status(world, handle))
+    test.equal(status.state, "completed")
+end
+
+function suite.convertsSecondsToWholeFixedSteps(): nil
+    local world = newWorld()
+    local ran = false
+    sequence.registerAction(world, "test.timed", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+        ran = true
+    end)
+    local program = sequence.define(uniqueName("test.seconds."), {
+        sequence.wait(0.5),
+        sequence.call("test.timed"),
+    })
+
+    sequence.play(world, program)
+
+    -- Half a second is four eighth-second steps, and `play` costs one more.
+    step(world, 4)
+    test.assert(not ran)
+    step(world)
+    test.assert(ran)
+end
+
+function suite.resolvesBindingsWhenTheInstructionRuns(): nil
+    local world = newWorld()
+    local seen: integer? = nil
+    sequence.registerAction(world, "test.seeBinding", function(exclusive _world: ecs.World, context: sequence.ActionContext): nil
+        seen = context:entity("actor")
+    end)
+    local program = sequence.define(uniqueName("test.bind."), {sequence.call("test.seeBinding")})
+    local actor = world:spawn()
+    world:commit()
+
+    sequence.play(world, program, {bindings = {actor = actor}})
+    step(world)
+
+    test.equal(seen, actor)
+end
+
+function suite.repeatsALoopItsCountedNumberOfTimes(): nil
+    local world = newWorld()
+    local runs = 0
+    sequence.registerAction(world, "test.tick", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+        runs = runs + 1
+    end)
+    local program = sequence.define(uniqueName("test.loop."), {
+        sequence.loop(3, {sequence.call("test.tick"), sequence.waitSteps(1)}),
+    })
+
+    sequence.play(world, program)
+    step(world, 6)
+
+    test.equal(runs, 3)
+end
+
+function suite.faultsALoopThatNeverWaits(): nil
+    local world = newWorld()
+    local program = sequence.define(uniqueName("test.spin."), {sequence.loop(nil, {sequence.waitSteps(0)})})
+    sequence.setInstructionBudget(world, 8)
+
+    local handle = sequence.play(world, program)
+    step(world)
+
+    local status = assert(sequence.status(world, handle))
+    test.equal(status.state, "running")
+
+    local runaway = sequence.define(uniqueName("test.runaway."), {sequence.loop(nil, {sequence.join()})})
+    local hot = sequence.play(world, runaway)
+    step(world)
+
+    local hotStatus = assert(sequence.status(world, hot))
+    test.equal(hotStatus.state, "faulted")
+    test.equal(hotStatus.fault, "budgetExceeded")
+end
+
+function suite.forksBranchesAndJoinsThemInTheSameTick(): nil
+    local world = newWorld()
+    local log: {string} = {}
+    sequence.registerAction(world, "test.mark", function(exclusive _world: ecs.World, context: sequence.ActionContext): nil
+        log[#log + 1] = context.args[1] as string
+    end)
+    local program = sequence.define(uniqueName("test.parallel."), {
+        sequence.parallel({
+            {sequence.call("test.mark", "left")},
+            {sequence.call("test.mark", "right")},
+        }),
+        sequence.call("test.mark", "after"),
+    })
+
+    local handle = sequence.play(world, program)
+    step(world)
+
+    test.equal(table.concat(log, ","), "left,right,after")
+    test.equal(assert(sequence.status(world, handle)).state, "completed")
+end
+
+function suite.wakesASignalWaiterOnTheNextFixedStep(): nil
+    local world = newWorld()
+    local woke = false
+    sequence.registerAction(world, "test.woke", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+        woke = true
+    end)
+    local program = sequence.define(uniqueName("test.signal."), {
+        sequence.waitSignal("test.go"),
+        sequence.call("test.woke"),
+    })
+
+    sequence.play(world, program)
+    step(world)
+    test.equal(sequence.waitingOn(world, "test.go"), 1)
+
+    test.equal(sequence.signal(world, "test.go"), 1)
+    test.assert(not woke)
+    step(world)
+
+    test.assert(woke)
+    test.equal(sequence.waitingOn(world, "test.go"), 0)
+end
+
+function suite.resumesAQueryWaitWhoseConditionAlreadyHolds(): nil
+    local world = newWorld()
+    local marker = ecs.newTagComponent({name = uniqueName("test.SequenceMarker.")})
+    sequence.registerQuery(world, "test.marked", {include = {marker}})
+    local resumed = false
+    sequence.registerAction(world, "test.resumed", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+        resumed = true
+    end)
+    local program = sequence.define(uniqueName("test.query."), {
+        sequence.waitQuery("test.marked", "any"),
+        sequence.call("test.resumed"),
+    })
+
+    sequence.play(world, program)
+    step(world)
+    test.assert(not resumed)
+
+    world:spawn(marker)
+    world:commit()
+    step(world, 2)
+
+    test.assert(resumed)
+end
+
+function suite.cancelsAPlaybackMidSequenceAndTakesItsBranches(): nil
+    local world = newWorld()
+    local reached = false
+    sequence.registerAction(world, "test.reached", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+        reached = true
+    end)
+    local program = sequence.define(uniqueName("test.cancel."), {
+        sequence.fork({sequence.waitSteps(5), sequence.call("test.reached")}),
+        sequence.waitSteps(5),
+        sequence.call("test.reached"),
+    })
+
+    local handle = sequence.play(world, program)
+    step(world)
+    test.equal(sequence.activeCount(world), 2)
+
+    test.assert(sequence.cancel(world, handle))
+    test.equal(sequence.activeCount(world), 0)
+    step(world, 8)
+
+    test.assert(not reached)
+    test.equal(assert(sequence.status(world, handle)).state, "canceled")
+    test.assert(not sequence.cancel(world, handle))
+end
+
+function suite.cancelsEveryPlaybackWhenItsOwnerDespawns(): nil
+    local world = newWorld()
+    local owner = world:spawn()
+    world:commit()
+    local program = sequence.define(uniqueName("test.owned."), {sequence.waitSteps(20)})
+    local handle = sequence.play(world, program, {owner = owner})
+    step(world)
+    test.equal(sequence.activeCount(world), 1)
+
+    world:despawn(owner)
+    world:commit()
+
+    test.equal(sequence.activeCount(world), 0)
+    test.equal(assert(sequence.status(world, handle)).state, "canceled")
+end
+
+function suite.replacesAChannelHolderOnTheSameOwner(): nil
+    local world = newWorld()
+    local owner = world:spawn()
+    world:commit()
+    local program = sequence.define(uniqueName("test.channel."), {sequence.waitSteps(20)})
+
+    local first = sequence.play(world, program, {owner = owner, channel = "move"})
+    local second = sequence.play(world, program, {owner = owner, channel = "move"})
+
+    test.equal(assert(sequence.status(world, first)).state, "canceled")
+    test.equal(assert(sequence.status(world, second)).state, "running")
+end
+
+function suite.holdsAPauseUntilEveryHolderReleasesIt(): nil
+    local world = newWorld()
+    local ran = false
+    sequence.registerAction(world, "test.afterPause", function(
+        exclusive _world: ecs.World,
+        _context: sequence.ActionContext
+    ): nil
+        ran = true
+    end)
+    local program = sequence.define(uniqueName("test.pause."), {
+        sequence.waitSteps(1),
+        sequence.call("test.afterPause"),
+    })
+    local handle = sequence.play(world, program)
+    step(world)
+
+    test.assert(sequence.pause(world, handle, "menu"))
+    test.assert(not sequence.pause(world, handle, "focus"))
+    step(world, 3)
+    test.assert(not ran)
+
+    test.assert(not sequence.resume(world, handle, "menu"))
+    step(world)
+    test.assert(not ran)
+
+    test.assert(sequence.resume(world, handle, "focus"))
+    step(world, 2)
+    test.assert(ran)
+end
+
+function suite.emitsSequenceEventsAtAddressZero(): nil
+    local world = newWorld()
+    local seen: {string} = {}
+    world:observe(0, sequence.Event, function(value: sequence.Emission, exclusive _world: ecs.World): nil
+        seen[#seen + 1] = value.name .. ":" .. tostring(value.args[1])
+    end)
+    local program = sequence.define(uniqueName("test.emit."), {sequence.emit("boss.ready", 7)})
+
+    sequence.play(world, program)
+    step(world)
+
+    test.equal(table.concat(seen, ","), "boss.ready:7")
+end
+
+function suite.faultsOnAnUnregisteredActionAndReportsWhy(): nil
+    local world = newWorld()
+    local program = sequence.define(uniqueName("test.missing."), {sequence.call("test.neverRegistered")})
+
+    local handle = sequence.play(world, program)
+    step(world)
+
+    local status = assert(sequence.status(world, handle))
+    test.equal(status.state, "faulted")
+    test.equal(status.fault, "unregisteredAction")
+    test.matches(assert(status.faultMessage), "neverRegistered")
+end
+
+function suite.publishesANewVersionAndLeavesRunningPlaybacksOnTheOld(): nil
+    local world = newWorld()
+    local name = uniqueName("test.versioned.")
+    local first = sequence.define(name, {sequence.waitSteps(20)})
+    local handle = sequence.play(world, first, {})
+    step(world)
+
+    local second = sequence.define(name, {sequence.waitSteps(1)})
+
+    test.equal(first.version, 1)
+    test.equal(second.version, 2)
+    test.equal(assert(sequence.program(name)).version, 2)
+    test.equal(assert(sequence.status(world, handle)).version, 1)
+end
+
+function suite.reportsUpcomingCallsAndTheirTiming(): nil
+    local world = newWorld()
+    sequence.registerAction(world, "test.noop", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+    end)
+    local program = sequence.define(uniqueName("test.upcoming."), {
+        sequence.waitSteps(2),
+        sequence.call("test.noop", "a"),
+        sequence.waitSteps(3),
+        sequence.emit("done"),
+    })
+
+    local handle = sequence.play(world, program)
+    local ahead = sequence.upcoming(world, handle)
+
+    test.equal(#ahead, 2)
+    test.equal(ahead[1].kind, "call")
+    test.equal(ahead[1].name, "test.noop")
+    test.equal(ahead[1].ticks, 3)
+    test.equal(ahead[2].kind, "emit")
+    test.equal(ahead[2].ticks, 6)
+end
+
+function suite.disassemblesAProgramAndMarksAnAddress(): nil
+    local name = uniqueName("test.listing.")
+    local program = sequence.define(name, {sequence.wait(1), sequence.emit("done")})
+
+    local listing = sequence.disassemble(program, 1)
+
+    test.matches(listing, name)
+    test.matches(listing, "WAIT")
+    test.matches(listing, "EMIT")
+    test.matches(listing, "%-> +1")
+end
+
+function suite.rejectsInvalidAuthoringArguments(): nil
+    test.raises(function(): nil
+        sequence.bind("")
+    end, "binding name")
+    test.raises(function(): nil
+        sequence.wait(-1)
+    end, "non%-negative")
+    test.raises(function(): nil
+        sequence.loop(0, {sequence.join()})
+    end, "positive whole number")
+    test.raises(function(): nil
+        sequence.fork({})
+    end, "non%-empty block")
+    test.raises(function(): nil
+        sequence.define("", {})
+    end, "program name")
+    test.raises(function(): nil
+        sequence.define("test.badClock", {}, {clock = "wall" as sequence.ClockId})
+    end, "clock must be")
+end
+
+function suite.advancesTheFrameClockOncePerFrameWhateverTheFixedStepsAre(): nil
+    local world = ecs.newWorld({timestep = 0.01})
+    sequence.plugin(world)
+    local runs = 0
+    sequence.registerAction(world, "test.perFrame", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+        runs = runs + 1
+    end)
+    local program = sequence.define(
+        uniqueName("test.frameClock."),
+        {sequence.loop(nil, {sequence.call("test.perFrame"), sequence.waitSteps(1)})},
+        {clock = "frame"}
+    )
+
+    sequence.play(world, program)
+    -- One long frame runs many fixed steps; the frame clock still ticks once.
+    world:update(0.1)
+    world:update(0.1)
+
+    test.equal(runs, 2)
+    test.equal(sequence.currentStep(world, "frame"), 2)
+    test.equal(sequence.currentStep(world, "fixed"), 20)
+end
+
+return suite
