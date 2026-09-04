@@ -1,10 +1,29 @@
 module tecs.gfx
 
 --[[
-The first public scene-rendering values in the Nupp rewrite.
+The public scene-rendering values a two-dimensional game spawns.
 
-`Tint` and `Renderable2D` accompany `tecs.ecs.Transform2D`. Until sprite asset
-loading lands, the Rust backend draws their scale as a flat-color rectangle.
+`Tint`, `Sprite`, and `Renderable2D` accompany `tecs.ecs.Transform2D` on a
+drawable entity, and `Camera2D` with `ActiveCamera` selects the view every
+frame is projected through.
+
+```nupp
+const ecs = tecs.ecs
+const gfx = tecs.gfx
+
+const image = gfx.images.upload({name = "tiles/grass", width = 2, height = 2, pixels = grassRgba8})
+
+world:spawn(gfx.Camera2D(320, 180, 1, 0), gfx.ActiveCamera)
+world:spawn(
+    ecs.Transform2D(320, 180, 0, 1, 0, 64, 64),
+    gfx.Tint(1, 1, 1, 1),
+    gfx.Sprite(image),
+    gfx.Renderable2D
+)
+```
+
+`tecs.gfx.layers` decides the order those entities draw in, and
+`tecs.gfx.images` owns image identity and residency.
 ]]
 
 local rendercomponents = require("tecs.internal.rendercomponents")
@@ -12,8 +31,28 @@ local rendercomponents = require("tecs.internal.rendercomponents")
 --- A four-channel color stored on a renderable entity.
 export type Tint = rendercomponents.Tint
 
+--- An image region stored on a renderable entity.
+export type Sprite = rendercomponents.Sprite
+
+--- A view onto the world, in world units and target pixels.
+export type Camera2D = rendercomponents.Camera2D
+
 --- Constructs a tint whose omitted channels default to one.
 export const Tint = rendercomponents.TintComponent
 
---- Marks an entity as contributing flat-color geometry.
+--- Constructs a sprite whose omitted UV rectangle covers the whole image.
+export const Sprite = rendercomponents.SpriteComponent
+
+--- Constructs a camera centered on the world origin at zoom one.
+export const Camera2D = rendercomponents.Camera2DComponent
+
+--- Selects the camera entity extraction projects the scene through.
+---
+--- Extraction reads the lowest live entity carrying both `Camera2D` and this
+--- tag. A world with no such entity draws through a camera centered on the
+--- render target at zoom one, which places world unit and target pixel on top
+--- of each other with the origin at the top left corner.
+export const ActiveCamera = rendercomponents.ActiveCamera
+
+--- Marks an entity as contributing geometry to the two-dimensional scene.
 export const Renderable2D = rendercomponents.Renderable2D

@@ -1,110 +1,400 @@
 module tecs.internal.framepacket
 
 --[[
-Extraction for the first Rust-owned GPU lane.
+Extraction for the Rust-owned GPU lane.
 
 One host-endian packet crosses the managed ABI per completed frame. Nupp owns
-world queries and draw ordering; Rust validates the packet and owns upload,
-pipelines, submission, and presentation.
+world queries, camera selection, depth, and draw ordering; Rust validates the
+packet and owns upload, textures, pipelines, submission, and presentation.
+Image pixels never ride in a packet. They cross once through the residency
+commands `tecs.gfx.images` queues, so a frame carries only the id a batch
+binds.
+
+# Packet version 2
+
+Every field is little or big endian to match the host, every integer is
+unsigned, and every real is a 32-bit float. Offsets are in bytes from the start
+of the packet.
+
+## Header, 56 bytes
+
+| Offset | Type  | Field            | Contract                                            |
+| ------ | ----- | ---------------- | --------------------------------------------------- |
+| 0      | `u32` | `magic`          | `0x54454353`, and nothing else is a Tecs packet.     |
+| 4      | `u32` | `version`        | `2`. A reader rejects every other value.             |
+| 8      | `u32` | `headerSize`     | `56`. Instances and batches start after it.          |
+| 12     | `u32` | `batchStride`    | `16`.                                                |
+| 16     | `u32` | `batchCount`     | Zero only when `instanceCount` is zero.              |
+| 20     | `u32` | `instanceStride` | `56`.                                                |
+| 24     | `u32` | `instanceCount`  | How many instances follow the batch table.           |
+| 28     | `u32` | `flags`          | `0`. Reserved, and a reader rejects any other value. |
+| 32     | `f32` | `targetWidth`    | Render target width in pixels, greater than zero.    |
+| 36     | `f32` | `targetHeight`   | Render target height in pixels, greater than zero.   |
+| 40     | `f32` | `cameraX`        | View center x in world units.                        |
+| 44     | `f32` | `cameraY`        | View center y in world units, increasing downward.   |
+| 48     | `f32` | `cameraZoom`     | Greater than zero.                                   |
+| 52     | `f32` | `cameraRotation` | Radians, turning the scene counter-clockwise.        |
+
+## Batch table, `batchCount` entries of 16 bytes at offset 56
+
+| Offset | Type  | Field           | Contract                                                |
+| ------ | ----- | --------------- | ------------------------------------------------------- |
+| 0      | `u32` | `image`         | A `tecs.gfx.images` id, or `0` for the white fallback.   |
+| 4      | `u32` | `sampler`       | Below `tecs.gfx.images.SAMPLER_COUNT`.                   |
+| 8      | `u32` | `firstInstance` | Zero-based index of the batch's first instance.          |
+| 12     | `u32` | `instanceCount` | At least one.                                            |
+
+Batches partition the instances exactly: the first starts at zero, each one
+starts where the previous ended, and their counts sum to `instanceCount`. They
+are runs in draw order rather than a grouping, because the scene is drawn back
+to front with no depth test and reordering by image would reorder the picture.
+
+## Instances, `instanceCount` entries of 56 bytes at offset 56 plus the batch table
+
+| Offset | Type  | Field      | Contract                                                     |
+| ------ | ----- | ---------- | ------------------------------------------------------------ |
+| 0      | `f32` | `x`        | Center x in world units.                                      |
+| 4      | `f32` | `y`        | Center y in world units.                                      |
+| 8      | `f32` | `rotation` | Radians, turning the quad clockwise on screen.                |
+| 12     | `f32` | `scaleX`   | Full width in world units, not a half extent.                 |
+| 16     | `f32` | `scaleY`   | Full height in world units.                                   |
+| 20     | `f32` | `depth`    | Zero nearest to one farthest, from `tecs.gfx.layers.depthOf`. |
+| 24     | `f32` | `u0`       | Left edge of the sampled region.                              |
+| 28     | `f32` | `v0`       | Top edge of the sampled region.                               |
+| 32     | `f32` | `u1`       | Right edge of the sampled region.                             |
+| 36     | `f32` | `v1`       | Bottom edge of the sampled region.                            |
+| 40     | `f32` | `r`        | Red, multiplied into the sampled color.                       |
+| 44     | `f32` | `g`        | Green.                                                        |
+| 48     | `f32` | `b`        | Blue.                                                         |
+| 52     | `f32` | `a`        | Alpha, multiplied into the sampled alpha.                     |
+
+Instances run in draw order: farthest depth first, and entity id ascending
+between equal depths. A backend draws them in that order and the later one
+covers the earlier, which is what makes the order deterministic between runs
+without a tie-breaker of its own.
+
+Every real in the packet is finite. A backend rejects a packet whose length
+does not match its declared counts, whose strides differ from the constants
+above, or whose batches do not partition its instances.
 ]]
 
 local archetype = require("tecs.internal.archetype")
+local images = require("tecs.gfx.images")
+local layers = require("tecs.gfx.layers")
 local query = require("tecs.internal.query")
 local rendercomponents = require("tecs.internal.rendercomponents")
 local world = require("tecs.internal.world")
 
+--- Identifies a Tecs frame packet, and is a compatibility surface.
 export const MAGIC: uint32 = 0x54454353
-export const VERSION: uint32 = 1
-export const INSTANCE_STRIDE: uint32 = 36
 
-local record Draw
-    entity: integer
-    transform: rendercomponents.Transform2D
-    tint: rendercomponents.Tint
+--- The packet layout this module writes.
+export const VERSION: uint32 = 2
+
+--- The byte length of the packet header.
+export const HEADER_SIZE: uint32 = 56
+
+--- The byte length of one batch table entry.
+export const BATCH_STRIDE: uint32 = 16
+
+--- The byte length of one instance.
+export const INSTANCE_STRIDE: uint32 = 56
+
+const narrow = nupp.math.f32.narrow
+const wrap = nupp.math.u32.wrap
+const huge = math.huge
+
+local function finite(value: number): boolean
+    return value == value and value ~= huge and value ~= -huge
 end
 
 --- A world-bound reusable renderer query.
+---
+--- The row arrays grow to a scene's high-water mark and are then reused, so a
+--- steady scene extracts without allocating anything but the packet itself.
 export record Extractor
-    private query: query.Query
+    private drawables: query.Query
+    private activeCameras: query.Query
+    private cameras: query.Query
+    private order: {integer}
+    private entities: {integer}
+    private depths: {number}
+    private transforms: {rendercomponents.Transform2D}
+    private tints: {rendercomponents.Tint}
+    private imageIds: {integer}
+    private samplers: {integer}
+    private u0: {number}
+    private v0: {number}
+    private u1: {number}
+    private v1: {number}
+    private rowCount: integer
+    private sorted: integer
+    private before: function(left: integer, right: integer): boolean
 
-    packet: function(self: Extractor, width: integer, height: integer): string
+    packet: function(exclusive self: Extractor, width: integer, height: integer): string
 end
 
---- Creates an extractor and registers its query with one world.
+--- Creates an extractor and registers its queries with one world.
+--- @param value the world whose renderable entities and cameras it reads
+--- @return the extractor, which the caller keeps for the world's lifetime
 export function new(exclusive value: world.World): Extractor
+    local entities: {integer} = {}
+    local depths: {number} = {}
+    local before = function(left: integer, right: integer): boolean
+        const leftDepth = depths[left]
+        const rightDepth = depths[right]
+        if leftDepth ~= rightDepth then
+            -- Farthest first, so the nearer instance is drawn over it.
+            return leftDepth > rightDepth
+        end
+
+        return entities[left] < entities[right]
+    end
+
     return new Extractor(
-        query = value:newQuery({
+        drawables = value:newQuery({
             include = {
                 rendercomponents.Transform2DComponent,
                 rendercomponents.TintComponent,
                 rendercomponents.Renderable2D,
             },
-        })
+        }),
+        activeCameras = value:newQuery({
+            include = {rendercomponents.Camera2DComponent, rendercomponents.ActiveCamera},
+        }),
+        cameras = value:newQuery({include = {rendercomponents.Camera2DComponent}}),
+        order = {},
+        entities = entities,
+        depths = depths,
+        transforms = {},
+        tints = {},
+        imageIds = {},
+        samplers = {},
+        u0 = {},
+        v0 = {},
+        u1 = {},
+        v1 = {},
+        rowCount = 0,
+        sorted = 0,
+        before = before
     )
 end
 
-local function before(left: Draw, right: Draw): boolean
-    local leftTransform = left.transform
-    local rightTransform = right.transform
-    if leftTransform.layer ~= rightTransform.layer then
-        return leftTransform.layer < rightTransform.layer
-    end
-    if leftTransform.z ~= rightTransform.z then
-        return leftTransform.z < rightTransform.z
-    end
-
-    return left.entity < right.entity
-end
-
-local function collect(self: Extractor): {Draw}
-    local draws: {Draw} = {}
-    for candidate, count in self.query:iter() do
+--- Returns the lowest live entity carrying a camera the query matched.
+local function pick(value: query.Query): rendercomponents.Camera2D?
+    local chosen: rendercomponents.Camera2D? = nil
+    local chosenEntity = 0
+    for candidate, count in value:iter() do
         local active = candidate as archetype.Archetype
-        local transforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
-        local tints: {rendercomponents.Tint} = assert(active:get(rendercomponents.TintComponent))
+        local cameras: {rendercomponents.Camera2D} = assert(active:get(rendercomponents.Camera2DComponent))
         for index = 1, count as integer do
-            draws[
-                #draws + 1
-            ] = new Draw(entity = active.entities[index], transform = transforms[index], tint = tints[index])
+            const entity = active.entities[index]
+            if chosen == nil or entity < chosenEntity then
+                chosen = cameras[index]
+                chosenEntity = entity
+            end
         end
     end
-    table.sort(draws, before)
 
-    return draws
+    return chosen
 end
 
---- Encodes one complete flat-color scene packet.
+--- Returns the view this frame projects through, as center, zoom, and rotation.
+---
+--- A world with no camera entity draws through a camera centered on the render
+--- target at zoom one, which is the mapping that puts one world unit on one
+--- target pixel with the origin at the top left corner.
+--- @raises when the selected camera's zoom is not greater than zero, or when
+---     any of its four values is not finite
+local function view(borrows self: Extractor, width: number, height: number): number, number, number, number
+    local camera = pick(self.activeCameras)
+    if camera == nil then
+        camera = pick(self.cameras)
+    end
+    if camera == nil then
+        return width * 0.5, height * 0.5, 1.0, 0.0
+    end
+    if not (camera.zoom > 0.0) or not finite(camera.zoom) then
+        error("framepacket: the active camera's zoom must be greater than zero", 3)
+    end
+    if not finite(camera.x) or not finite(camera.y) or not finite(camera.rotation) then
+        error("framepacket: the active camera holds a value that is not finite", 3)
+    end
+
+    return camera.x, camera.y, camera.zoom, camera.rotation
+end
+
+--- Reads every renderable row into the extractor's reused arrays.
+local function collect(exclusive self: Extractor): nil
+    const entities = self.entities
+    const depths = self.depths
+    const transforms = self.transforms
+    const tints = self.tints
+    const imageIds = self.imageIds
+    const samplers = self.samplers
+    const u0 = self.u0
+    const v0 = self.v0
+    const u1 = self.u1
+    const v1 = self.v1
+    local rows: integer = 0
+    for candidate, count in self.drawables:iter() do
+        local active = candidate as archetype.Archetype
+        local rowTransforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
+        local rowTints: {rendercomponents.Tint} = assert(active:get(rendercomponents.TintComponent))
+        local rowSprites = active:get(rendercomponents.SpriteComponent) as {rendercomponents.Sprite}?
+        for index = 1, count as integer do
+            const transform = rowTransforms[index]
+            rows = rows + 1
+            entities[rows] = active.entities[index]
+            transforms[rows] = transform
+            tints[rows] = rowTints[index]
+            depths[rows] = layers.depthOf(transform.layer, transform.z, transform.x, transform.y)
+            if rowSprites == nil then
+                imageIds[rows] = 0
+                samplers[rows] = 0
+                u0[rows] = 0.0
+                v0[rows] = 0.0
+                u1[rows] = 1.0
+                v1[rows] = 1.0
+            else
+                const sprite = rowSprites[index]
+                const image = sprite.image
+                -- An image that never became resident draws against the
+                -- backend's white fallback rather than dropping the entity.
+                if image ~= 0 and images.stateOf(image) == "resident" then
+                    imageIds[rows] = image
+                    samplers[rows] = images.samplerOf(image)
+                else
+                    imageIds[rows] = 0
+                    samplers[rows] = 0
+                end
+                u0[rows] = sprite.u0
+                v0[rows] = sprite.v0
+                u1[rows] = sprite.u1
+                v1[rows] = sprite.v1
+            end
+        end
+    end
+    self.rowCount = rows
+end
+
+--- Orders the collected rows farthest first, breaking ties by entity id.
+local function sortRows(exclusive self: Extractor): nil
+    const order = self.order
+    const rows = self.rowCount
+    for index = 1, rows do
+        order[index] = index
+    end
+    for index = rows + 1, self.sorted do
+        order[index] = nil
+    end
+    self.sorted = rows
+    table.sort(order, self.before)
+end
+
+--- Encodes one complete scene packet.
 --- @param self the extractor to run
---- @param width the positive logical viewport width
---- @param height the positive logical viewport height
+--- @param width the positive render target width in pixels
+--- @param height the positive render target height in pixels
 --- @return a host-endian versioned packet owned by the caller
---- @raises when either viewport dimension is not positive
-function Extractor.packet(self: Extractor, width: integer, height: integer): string
+--- @raises when a viewport dimension is not positive, or when the active
+---     camera holds a zoom that is not greater than zero
+function Extractor.packet(exclusive self: Extractor, width: integer, height: integer): string
     if width < 1 or height < 1 then
         error("framepacket: viewport dimensions must be positive", 2)
     end
-    local draws = collect(self)
+    const cameraX, cameraY, zoom, rotation = view(self, width, height)
+    collect(self)
+    sortRows(self)
+
+    const order = self.order
+    const imageIds = self.imageIds
+    const samplers = self.samplers
+    const rows = self.rowCount
+
+    -- The batch table is written before the instances, so the runs are counted
+    -- once here and the values are read again below rather than staged.
+    local batches: integer = 0
+    local runImage: integer = -1
+    local runSampler: integer = -1
+    for index = 1, rows do
+        const row = order[index]
+        if imageIds[row] ~= runImage or samplers[row] ~= runSampler then
+            batches = batches + 1
+            runImage = imageIds[row]
+            runSampler = samplers[row]
+        end
+    end
+
     local buffer = nupp.io.newBuffer()
     local writer = nupp.io.newScalarWriter(buffer)
     writer:writeUint32(MAGIC)
         :writeUint32(VERSION)
+        :writeUint32(HEADER_SIZE)
+        :writeUint32(BATCH_STRIDE)
+        :writeUint32(wrap(batches))
         :writeUint32(INSTANCE_STRIDE)
-        :writeUint32(nupp.math.u32.wrap(#draws))
-        :writeFloat32(nupp.math.f32.narrow(width))
-        :writeFloat32(nupp.math.f32.narrow(height))
-    for index = 1, #draws do
-        local draw = draws[index]
-        local transform = draw.transform
-        local tint = draw.tint
-        writer:writeFloat32(nupp.math.f32.narrow(transform.x))
-            :writeFloat32(nupp.math.f32.narrow(transform.y))
-            :writeFloat32(nupp.math.f32.narrow(transform.rotation))
-            :writeFloat32(nupp.math.f32.narrow(transform.scaleX))
-            :writeFloat32(nupp.math.f32.narrow(transform.scaleY))
-            :writeFloat32(nupp.math.f32.narrow(tint.r))
-            :writeFloat32(nupp.math.f32.narrow(tint.g))
-            :writeFloat32(nupp.math.f32.narrow(tint.b))
-            :writeFloat32(nupp.math.f32.narrow(tint.a))
+        :writeUint32(wrap(rows))
+        :writeUint32(0)
+        :writeFloat32(narrow(width))
+        :writeFloat32(narrow(height))
+        :writeFloat32(narrow(cameraX))
+        :writeFloat32(narrow(cameraY))
+        :writeFloat32(narrow(zoom))
+        :writeFloat32(narrow(rotation))
+
+    runImage = -1
+    runSampler = -1
+    local runFirst: integer = 0
+    local runLength: integer = 0
+    for index = 1, rows do
+        const row = order[index]
+        if imageIds[row] ~= runImage or samplers[row] ~= runSampler then
+            if runLength > 0 then
+                writer:writeUint32(wrap(runImage))
+                    :writeUint32(wrap(runSampler))
+                    :writeUint32(wrap(runFirst))
+                    :writeUint32(wrap(runLength))
+            end
+            runImage = imageIds[row]
+            runSampler = samplers[row]
+            runFirst = index - 1
+            runLength = 0
+        end
+        runLength = runLength + 1
+    end
+    if runLength > 0 then
+        writer:writeUint32(wrap(runImage))
+            :writeUint32(wrap(runSampler))
+            :writeUint32(wrap(runFirst))
+            :writeUint32(wrap(runLength))
+    end
+
+    const depths = self.depths
+    const transforms = self.transforms
+    const tints = self.tints
+    const u0 = self.u0
+    const v0 = self.v0
+    const u1 = self.u1
+    const v1 = self.v1
+    for index = 1, rows do
+        const row = order[index]
+        const transform = transforms[row]
+        const tint = tints[row]
+        writer:writeFloat32(narrow(transform.x))
+            :writeFloat32(narrow(transform.y))
+            :writeFloat32(narrow(transform.rotation))
+            :writeFloat32(narrow(transform.scaleX))
+            :writeFloat32(narrow(transform.scaleY))
+            :writeFloat32(narrow(depths[row]))
+            :writeFloat32(narrow(u0[row]))
+            :writeFloat32(narrow(v0[row]))
+            :writeFloat32(narrow(u1[row]))
+            :writeFloat32(narrow(v1[row]))
+            :writeFloat32(narrow(tint.r))
+            :writeFloat32(narrow(tint.g))
+            :writeFloat32(narrow(tint.b))
+            :writeFloat32(narrow(tint.a))
     end
     writer:drop()
     local packed = buffer:getString()

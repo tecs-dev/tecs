@@ -1,26 +1,202 @@
 local ecs = require("tecs.ecs")
 local framepacket = require("tecs.internal.framepacket")
 local gfx = require("tecs.gfx")
+local images = require("tecs.gfx.images")
 local test = require("nupp.test")
 
 local suite = {}
 
+local record Header
+    batches: integer
+    instances: integer
+    targetWidth: number
+    targetHeight: number
+    cameraX: number
+    cameraY: number
+    zoom: number
+    rotation: number
+end
+
+local record Batch
+    image: integer
+    sampler: integer
+    first: integer
+    count: integer
+end
+
+--- Reads the fixed v2 header and holds the packet to every constant in it.
+local function header(borrows reader: nupp.io.ScalarReader): Header
+    test.equal(reader:readUint32(), framepacket.MAGIC)
+    test.equal(reader:readUint32(), framepacket.VERSION)
+    test.equal(reader:readUint32(), framepacket.HEADER_SIZE)
+    test.equal(reader:readUint32(), framepacket.BATCH_STRIDE)
+    local batches = reader:readUint32()
+    test.equal(reader:readUint32(), framepacket.INSTANCE_STRIDE)
+    local instances = reader:readUint32()
+    test.equal(reader:readUint32(), 0)
+
+    return new Header(
+        batches = batches as integer,
+        instances = instances as integer,
+        targetWidth = reader:readFloat32(),
+        targetHeight = reader:readFloat32(),
+        cameraX = reader:readFloat32(),
+        cameraY = reader:readFloat32(),
+        zoom = reader:readFloat32(),
+        rotation = reader:readFloat32()
+    )
+end
+
+local function batch(borrows reader: nupp.io.ScalarReader): Batch
+    return new Batch(
+        image = reader:readUint32() as integer,
+        sampler = reader:readUint32() as integer,
+        first = reader:readUint32() as integer,
+        count = reader:readUint32() as integer
+    )
+end
+
+--- Skips one instance and answers the fields the ordering tests read.
+local function instance(borrows reader: nupp.io.ScalarReader): number, number, number
+    local x = reader:readFloat32()
+    local y = reader:readFloat32()
+    reader:skip(12)
+    local depth = reader:readFloat32()
+    reader:skip(32)
+
+    return x, y, depth
+end
+
+--- Makes one image resident without a host, so extraction sees a live id.
+local function resident(name: string): integer
+    local id = images.upload({name = name, width = 1, height = 1, pixels = "\255\255\255\255"})
+    local commands = images.drain()
+    for index = 1, #commands do
+        images.complete(commands[index].image, commands[index].serial, true, nil)
+    end
+    test.equal(images.stateOf(id), "resident")
+
+    return id
+end
+
 function suite.exposesTheMinimumDrawableComponents(): nil
-    local world = ecs.newWorld({maxEntities = 1})
+    local world = ecs.newWorld({maxEntities = 2})
     local entity = world:spawn(
         ecs.Transform2D(10, 20, 3, 4, 0.25, 30, 40),
         gfx.Tint(0.1, 0.2, 0.3, 0.4),
+        gfx.Sprite(7, 0.25, 0.5, 0.75, 1),
         gfx.Renderable2D
     )
+    local eye = world:spawn(gfx.Camera2D(5, 6, 2, 0.5), gfx.ActiveCamera)
     world:commit()
 
     local transform: ecs.Transform2D = assert(world:get(entity, ecs.Transform2D))
     local tint: gfx.Tint = assert(world:get(entity, gfx.Tint))
+    local sprite: gfx.Sprite = assert(world:get(entity, gfx.Sprite))
+    local camera: gfx.Camera2D = assert(world:get(eye, gfx.Camera2D))
     test.equal(transform.x, 10)
     test.equal(transform.layer, 4)
     test.equal(transform.scaleY, 40)
     test.equal(tint.a, 0.4)
+    test.equal(sprite.image, 7)
+    test.equal(sprite.u1, 0.75)
+    test.equal(camera.zoom, 2)
     test.assert(world:has(entity, gfx.Renderable2D))
+    test.assert(world:has(eye, gfx.ActiveCamera))
+end
+
+function suite.defaultsToACameraCenteredOnTheTarget(): nil
+    local world = ecs.newWorld({maxEntities = 1})
+    local extractor = framepacket.new(world)
+    world:spawn(ecs.Transform2D(1, 2, 0, 1, 0, 3, 4), gfx.Tint(), gfx.Renderable2D)
+    world:commit()
+
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
+    local read = header(reader)
+    test.equal(read.targetWidth, 640)
+    test.equal(read.targetHeight, 360)
+    -- The default view puts one world unit on one target pixel with the origin
+    -- at the top left corner, which is what an unconfigured scene authors in.
+    test.equal(read.cameraX, 320)
+    test.equal(read.cameraY, 180)
+    test.equal(read.zoom, 1)
+    test.equal(read.rotation, 0)
+    reader:drop()
+end
+
+function suite.tracksTheTargetThroughAResize(): nil
+    local world = ecs.newWorld({maxEntities = 1})
+    local extractor = framepacket.new(world)
+    world:spawn(ecs.Transform2D(1, 2, 0, 1, 0, 3, 4), gfx.Tint(), gfx.Renderable2D)
+    world:commit()
+
+    local first = nupp.io.newScalarReader(extractor:packet(640, 360))
+    test.equal(header(first).cameraX, 320)
+    first:drop()
+
+    local second = nupp.io.newScalarReader(extractor:packet(1920, 1080))
+    local read = header(second)
+    test.equal(read.targetWidth, 1920)
+    test.equal(read.targetHeight, 1080)
+    test.equal(read.cameraX, 960)
+    test.equal(read.cameraY, 540)
+    second:drop()
+
+    test.raises(function(): nil
+        extractor:packet(0, 360)
+    end, "viewport dimensions must be positive")
+end
+
+function suite.projectsThroughTheLowestActiveCamera(): nil
+    local world = ecs.newWorld({maxEntities = 4})
+    local extractor = framepacket.new(world)
+    world:spawn(ecs.Transform2D(1, 2, 0, 1, 0, 3, 4), gfx.Tint(), gfx.Renderable2D)
+    -- A camera with no `ActiveCamera` tag is the fallback, so the tagged one
+    -- spawned after it still wins.
+    world:spawn(gfx.Camera2D(11, 12, 3, 0.75))
+    local chosen = world:spawn(gfx.Camera2D(100, 200, 2, 0.5), gfx.ActiveCamera)
+    world:spawn(gfx.Camera2D(-1, -2, 4, 1), gfx.ActiveCamera)
+    world:commit()
+
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
+    local read = header(reader)
+    test.equal(read.cameraX, 100)
+    test.equal(read.cameraY, 200)
+    test.equal(read.zoom, 2)
+    test.equal(read.rotation, 0.5)
+    reader:drop()
+
+    world:despawn(chosen)
+    world:commit()
+    local after = nupp.io.newScalarReader(extractor:packet(640, 360))
+    test.equal(header(after).cameraX, -1)
+    after:drop()
+end
+
+function suite.fallsBackToAnUntaggedCamera(): nil
+    local world = ecs.newWorld({maxEntities = 2})
+    local extractor = framepacket.new(world)
+    world:spawn(ecs.Transform2D(1, 2, 0, 1, 0, 3, 4), gfx.Tint(), gfx.Renderable2D)
+    world:spawn(gfx.Camera2D(64, 32, 0.5, 0))
+    world:commit()
+
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
+    local read = header(reader)
+    test.equal(read.cameraX, 64)
+    test.equal(read.zoom, 0.5)
+    reader:drop()
+end
+
+function suite.rejectsACameraZoomThatCannotProject(): nil
+    local world = ecs.newWorld({maxEntities = 2})
+    local extractor = framepacket.new(world)
+    world:spawn(ecs.Transform2D(1, 2, 0, 1, 0, 3, 4), gfx.Tint(), gfx.Renderable2D)
+    world:spawn(gfx.Camera2D(0, 0, 0, 0), gfx.ActiveCamera)
+    world:commit()
+
+    test.raises(function(): nil
+        extractor:packet(640, 360)
+    end, "zoom must be greater than zero")
 end
 
 function suite.encodesOneOrderedBatchForRust(): nil
@@ -32,32 +208,200 @@ function suite.encodesOneOrderedBatchForRust(): nil
     world:commit()
 
     local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
-    test.equal(reader:readUint32(), framepacket.MAGIC)
-    test.equal(reader:readUint32(), framepacket.VERSION)
-    test.equal(reader:readUint32(), framepacket.INSTANCE_STRIDE)
-    test.equal(reader:readUint32(), 2)
-    test.equal(reader:readFloat32(), 640)
-    test.equal(reader:readFloat32(), 360)
+    local read = header(reader)
+    test.equal(read.batches, 1)
+    test.equal(read.instances, 2)
 
+    -- Untextured rows share the fallback image and its nearest clamped sampler,
+    -- so one run covers the scene.
+    local only = batch(reader)
+    test.equal(only.image, 0)
+    test.equal(only.sampler, 0)
+    test.equal(only.first, 0)
+    test.equal(only.count, 2)
+
+    -- Layer 1 sits farther from the viewer than layer 2, so it is written first.
     test.equal(reader:readFloat32(), 50)
     test.equal(reader:readFloat32(), 60)
     test.equal(reader:readFloat32(), 0.5)
     test.equal(reader:readFloat32(), 70)
     test.equal(reader:readFloat32(), 80)
+    local farDepth = reader:readFloat32()
+    test.equal(reader:readFloat32(), 0)
+    test.equal(reader:readFloat32(), 0)
+    test.equal(reader:readFloat32(), 1)
+    test.equal(reader:readFloat32(), 1)
     test.equal(reader:readFloat32(), 0)
     test.equal(reader:readFloat32(), 1)
     test.equal(reader:readFloat32(), 0)
     test.equal(reader:readFloat32(), 0.5)
 
-    test.equal(reader:readFloat32(), 200)
-    test.equal(reader:readFloat32(), 100)
+    local nearX, nearY, nearDepth = instance(reader)
+    test.equal(nearX, 200)
+    test.equal(nearY, 100)
+    test.assert(nearDepth < farDepth, "a higher layer draws nearer")
+    test.assert(reader:atEnd())
+    reader:drop()
+end
+
+function suite.ordersEqualDepthsByEntityId(): nil
+    local world = ecs.newWorld({maxEntities = 3})
+    local extractor = framepacket.new(world)
+    local first = world:spawn(ecs.Transform2D(1, 5, 0, 1, 0, 1, 1), gfx.Tint(), gfx.Renderable2D)
+    local second = world:spawn(ecs.Transform2D(2, 5, 0, 1, 0, 1, 1), gfx.Tint(), gfx.Renderable2D)
+    local third = world:spawn(ecs.Transform2D(3, 5, 0, 1, 0, 1, 1), gfx.Tint(), gfx.Renderable2D)
+    world:commit()
+    test.assert(first < second and second < third)
+
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
+    test.equal(header(reader).instances, 3)
+    test.equal(batch(reader).count, 3)
+    local firstX = instance(reader)
+    local secondX = instance(reader)
+    local thirdX = instance(reader)
+    test.equal(firstX, 1)
+    test.equal(secondX, 2)
+    test.equal(thirdX, 3)
+    reader:drop()
+end
+
+function suite.repeatsItselfExactlyBetweenFrames(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    local extractor = framepacket.new(world)
+    for index = 1, 8 do
+        world:spawn(
+            ecs.Transform2D(index * 3, index * 7, index % 3, 1 + index % 4, 0, 5, 5),
+            gfx.Tint(),
+            gfx.Renderable2D
+        )
+    end
+    world:commit()
+
+    local first = extractor:packet(640, 360)
+    local second = extractor:packet(640, 360)
+    test.equal(second, first, "extraction is deterministic across frames")
+
+    -- The row arrays are reused, so a shrinking scene must not leave stale rows
+    -- behind in the sort order.
+    world:despawn(1)
+    world:commit()
+    local shrunk = nupp.io.newScalarReader(extractor:packet(640, 360))
+    test.equal(header(shrunk).instances, 7)
+    shrunk:drop()
+end
+
+function suite.carriesSpriteIdentityAndSamplerIntoBatches(): nil
+    local world = ecs.newWorld({maxEntities = 4})
+    local extractor = framepacket.new(world)
+    local grass = resident("framepacket/grass")
+    local stone = images.upload({
+        name = "framepacket/stone",
+        width = 1,
+        height = 1,
+        pixels = "\0\0\0\255",
+        filter = "linear",
+        address = "repeat",
+    })
+    local pending = images.drain()
+    for index = 1, #pending do
+        images.complete(pending[index].image, pending[index].serial, true, nil)
+    end
+
+    -- Layer 1 is farthest, so the written order is grass, grass, stone.
+    world:spawn(ecs.Transform2D(1, 1, 0, 1, 0, 1, 1), gfx.Tint(), gfx.Sprite(grass, 0, 0, 0.5, 0.5), gfx.Renderable2D)
+    world:spawn(ecs.Transform2D(2, 1, 0, 1, 0, 1, 1), gfx.Tint(), gfx.Sprite(grass), gfx.Renderable2D)
+    world:spawn(ecs.Transform2D(3, 1, 0, 2, 0, 1, 1), gfx.Tint(), gfx.Sprite(stone), gfx.Renderable2D)
+    world:commit()
+
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
+    local read = header(reader)
+    test.equal(read.instances, 3)
+    test.equal(read.batches, 2)
+
+    local grassBatch = batch(reader)
+    test.equal(grassBatch.image, grass)
+    test.equal(grassBatch.sampler, images.samplerIndex("nearest", "clamp"))
+    test.equal(grassBatch.first, 0)
+    test.equal(grassBatch.count, 2)
+
+    local stoneBatch = batch(reader)
+    test.equal(stoneBatch.image, stone)
+    test.equal(stoneBatch.sampler, images.samplerIndex("linear", "repeat"))
+    test.equal(stoneBatch.first, 2)
+    test.equal(stoneBatch.count, 1)
+
+    -- The first sprite's UV rectangle survives the crossing intact.
+    reader:skip(24)
     test.equal(reader:readFloat32(), 0)
-    test.equal(reader:readFloat32(), 20)
-    test.equal(reader:readFloat32(), 30)
-    test.equal(reader:readFloat32(), 1)
     test.equal(reader:readFloat32(), 0)
-    test.equal(reader:readFloat32(), 0)
-    test.equal(reader:readFloat32(), 1)
+    test.equal(reader:readFloat32(), 0.5)
+    test.equal(reader:readFloat32(), 0.5)
+    reader:drop()
+end
+
+function suite.drawsAMissingImageAgainstTheFallback(): nil
+    local world = ecs.newWorld({maxEntities = 3})
+    local extractor = framepacket.new(world)
+    local missing = images.id("framepacket/never-uploaded")
+    local failed = images.upload({name = "framepacket/rejected", width = 1, height = 1, pixels = "\1\2\3\4"})
+    local queued = images.drain()
+    for index = 1, #queued do
+        images.complete(queued[index].image, queued[index].serial, false, "the backend rejected it")
+    end
+    test.equal(images.stateOf(missing), "unknown")
+    test.equal(images.stateOf(failed), "failed")
+
+    world:spawn(ecs.Transform2D(1, 1, 0, 1, 0, 1, 1), gfx.Tint(), gfx.Sprite(missing), gfx.Renderable2D)
+    world:spawn(ecs.Transform2D(2, 1, 0, 1, 0, 1, 1), gfx.Tint(), gfx.Sprite(failed), gfx.Renderable2D)
+    world:commit()
+
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
+    local read = header(reader)
+    test.equal(read.instances, 2)
+    -- Neither image is resident, so both rows fall into the fallback run rather
+    -- than dropping out of the frame.
+    test.equal(read.batches, 1)
+    local only = batch(reader)
+    test.equal(only.image, 0)
+    test.equal(only.count, 2)
+    reader:drop()
+end
+
+function suite.keepsTransparentRowsInBackToFrontOrder(): nil
+    local world = ecs.newWorld({maxEntities = 3})
+    local extractor = framepacket.new(world)
+    -- One archetype, three alpha values, three layers. Blending depends on the
+    -- write order, so the packet has to place the farthest row first whatever
+    -- order the world spawned them in.
+    world:spawn(ecs.Transform2D(3, 1, 0, 3, 0, 1, 1), gfx.Tint(1, 1, 1, 0.25), gfx.Renderable2D)
+    world:spawn(ecs.Transform2D(1, 1, 0, 1, 0, 1, 1), gfx.Tint(1, 1, 1, 1), gfx.Renderable2D)
+    world:spawn(ecs.Transform2D(2, 1, 0, 2, 0, 1, 1), gfx.Tint(1, 1, 1, 0.5), gfx.Renderable2D)
+    world:commit()
+
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
+    test.equal(header(reader).instances, 3)
+    test.equal(batch(reader).count, 3)
+    local firstX, _, firstDepth = instance(reader)
+    local secondX, _, secondDepth = instance(reader)
+    local thirdX, _, thirdDepth = instance(reader)
+    test.equal(firstX, 1)
+    test.equal(secondX, 2)
+    test.equal(thirdX, 3)
+    test.assert(firstDepth > secondDepth and secondDepth > thirdDepth, "written back to front")
+    reader:drop()
+end
+
+function suite.encodesAnEmptyScene(): nil
+    local world = ecs.newWorld({maxEntities = 1})
+    local extractor = framepacket.new(world)
+    world:commit()
+
+    local packed = extractor:packet(16, 9)
+    test.equal(#packed, framepacket.HEADER_SIZE as integer)
+    local reader = nupp.io.newScalarReader(packed)
+    local read = header(reader)
+    test.equal(read.batches, 0)
+    test.equal(read.instances, 0)
     test.assert(reader:atEnd())
     reader:drop()
 end
