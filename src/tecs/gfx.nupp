@@ -1,0 +1,19 @@
+module tecs.gfx
+
+--[[
+The first public scene-rendering values in the Nupp rewrite.
+
+`Tint` and `Renderable2D` accompany `tecs.ecs.Transform2D`. Until sprite asset
+loading lands, the Rust backend draws their scale as a flat-color rectangle.
+]]
+
+local rendercomponents = require("tecs.internal.rendercomponents")
+
+--- A four-channel color stored on a renderable entity.
+export type Tint = rendercomponents.Tint
+
+--- Constructs a tint whose omitted channels default to one.
+export const Tint = rendercomponents.TintComponent
+
+--- Marks an entity as contributing flat-color geometry.
+export const Renderable2D = rendercomponents.Renderable2D

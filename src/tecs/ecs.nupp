@@ -1,0 +1,234 @@
+module tecs.ecs
+
+--[[
+The entity component system shared by game code and engine systems.
+
+The Nupp rewrite exposes staged entity lifetime, tag and scalar components,
+dense archetype storage, and reusable queries. A spawn reserves its id
+immediately, and `commit` publishes structural changes.
+]]
+
+local idallocator = require("tecs.internal.idallocator")
+local archetype = require("tecs.internal.archetype")
+local components = require("tecs.internal.components")
+local entityworld = require("tecs.internal.world")
+local events = require("tecs.internal.events")
+local phasevalues = require("tecs.internal.phases")
+local query = require("tecs.internal.query")
+local rendercomponents = require("tecs.internal.rendercomponents")
+
+--- The options accepted by `newWorld`.
+export type WorldConfig = {
+    maxEntities: integer?,
+    timestep: number?,
+    fixedMaxSteps: integer?,
+    fixedOverload: entityworld.FixedOverload?
+}
+
+--- A Tecs world.
+export type World = entityworld.World
+
+--- A process-wide component definition.
+export type Component = components.Component
+
+--- A component definition or constructed value accepted by a mutation.
+export type ComponentInput = components.Input
+
+--- A primitive-valued component definition.
+export type ScalarComponent<T> = components.ScalarComponent<T>
+
+--- A record-valued component definition.
+export type TableComponent<T> = components.TableComponent<T>
+
+--- A one-target-per-source entity relationship.
+export type Relationship = components.RelationshipComponent
+
+--- The value returned when reading an exclusive relationship.
+export type RelationshipValue = components.RelationshipValue
+
+--- Options for a marker component with no per-entity value.
+export type TagComponentOptions = components.TagComponentOptions
+
+--- Options accepted by the kind-correlated scalar component factory.
+export type ScalarComponentOptions = components.ScalarComponentOptions
+
+--- Options for a record-valued component.
+export type TableComponentOptions<T> = components.TableComponentOptions<T>
+
+--- Options for an exclusive entity relationship.
+export type RelationshipOptions = components.RelationshipOptions
+
+--- Include and exclude constraints for a reusable query.
+export type QueryDescriptor = query.Descriptor
+
+--- A reusable archetype query.
+export type Query = query.Query
+
+--- A dense archetype returned by query iteration.
+export type Archetype = archetype.Archetype
+
+--- A frame phase.
+export type Phase = phasevalues.Phase
+
+--- An ordered predefined group of frame or lifecycle phases.
+export type PhaseGroup = phasevalues.PhaseGroup
+
+--- A leaf phase or predefined group accepted by schedule controls.
+export type PhaseSelection = phasevalues.Selection
+
+--- Registration options for a frame system.
+export type SystemConfig = entityworld.SystemConfig
+
+--- A system body receiving elapsed time, its world, and the update task scope.
+export type System = entityworld.System
+
+--- One registered system as reported in execution order.
+export type SystemInfo = entityworld.SystemInfo
+
+--- The policy applied when a frame exceeds its fixed-step limit.
+export type FixedOverload = entityworld.FixedOverload
+
+--- Fixed-step overload counters accumulated by a world.
+export type WorldStats = entityworld.WorldStats
+
+--- Policy hooks for one world state.
+export type StatePolicy = entityworld.StatePolicy
+
+--- A reusable world-bound spawn shape.
+export type Bundle = entityworld.Bundle
+
+--- Required and defaulted components for a bundle.
+export type BundleDefinition = entityworld.BundleDefinition
+
+--- A detached, format-neutral world snapshot.
+export type Snapshot = entityworld.Snapshot
+
+--- Metadata returned by a snapshot load.
+export type SnapshotPrelude = entityworld.SnapshotPrelude
+
+--- Options for adding custom snapshot data.
+export type SnapshotOptions = entityworld.SnapshotOptions
+
+--- A named custom snapshot participant.
+export type SnapshotHandler = entityworld.SnapshotHandler
+
+--- The payload shared by entity spawn and despawn lifecycle events.
+export type EntityLifecycle = events.EntityLifecycle
+
+--- The payload emitted when a state enters or exits.
+export type StateChange = events.StateChange
+
+--- The payload emitted when a state loses focus.
+export type StateBlurChange = events.StateBlurChange
+
+--- The payload emitted when a state regains focus.
+export type StateFocusChange = events.StateFocusChange
+
+--- The ordered frame phase constants.
+export const phases = phasevalues
+
+--- Fires at address zero after an entity becomes committed and alive.
+export const OnSpawn = events.OnSpawn
+
+--- Fires at the entity address and address zero immediately before removal.
+export const OnDespawn = events.OnDespawn
+
+--- Marks entities paused by a state policy.
+export const Paused = components.Paused
+
+--- Marks entities disabled by a state policy.
+export const Disabled = components.Disabled
+
+--- Places an entity in the two-dimensional world.
+export type Transform2D = rendercomponents.Transform2D
+
+--- Constructs the shared two-dimensional transform component.
+export const Transform2D = rendercomponents.Transform2DComponent
+
+--- Fires after a state becomes active.
+export const StateEnter = events.StateEnter
+
+--- Fires before a state leaves the stack.
+export const StateExit = events.StateExit
+
+--- Fires after the current state loses focus.
+export const StateBlur = events.StateBlur
+
+--- Fires after an uncovered state regains focus.
+export const StateFocus = events.StateFocus
+
+--- The greatest entity capacity supported by the packed id format.
+export const MAX_ENTITIES: integer = idallocator.absoluteMaxSlotCount
+
+--- The entity capacity used when `newWorld` receives no override.
+export const DEFAULT_MAX_ENTITIES: integer = idallocator.defaultMaxSlotCount
+
+--- The fixed update interval used when `newWorld` receives no override.
+export const DEFAULT_TIMESTEP: number = entityworld.DEFAULT_TIMESTEP
+
+--- The per-frame fixed-step limit used when `newWorld` receives no override.
+export const DEFAULT_FIXED_MAX_STEPS: integer = entityworld.DEFAULT_FIXED_MAX_STEPS
+
+--- Creates an independent empty world.
+--- @param config the world settings, or nil for defaults
+--- @return the empty world
+--- @raises when a capacity or fixed-clock option is invalid
+export function newWorld(config: WorldConfig?): World
+    return entityworld.new(
+        config and config.maxEntities,
+        config and config.timestep,
+        config and config.fixedMaxSteps,
+        config and config.fixedOverload
+    )
+end
+
+--- Creates and registers a marker component with no per-entity value.
+--- @param options the process-unique component name and snapshot policy
+--- @return the registered tag component
+--- @raises when the name is empty or already registered
+export function newTagComponent(options: TagComponentOptions): Component
+    return components.newTagComponent(options)
+end
+
+--- Creates and registers a scalar component whose column stores raw values.
+--- @param options the process-unique name, primitive kind, default, and snapshot policy
+--- @return the registered scalar component specialized to the selected kind
+--- @raises when the name is empty or already registered
+export const newScalarComponent: components.NewScalarComponent = components.newScalarComponent
+
+--- Creates and registers a record-valued component.
+--- @param options the process-unique name, constructor, default factory, and snapshot
+---     policy
+--- @return the registered table component
+--- @raises when the name is empty or already registered
+export function newComponent<T>(options: TableComponentOptions<T>): TableComponent<T>
+    return components.newComponent(options)
+end
+
+--- Creates and registers an exclusive entity relationship.
+--- @param options the relationship name and reverse-index behavior
+--- @return the callable relationship component
+--- @raises when cascade deletion lacks reverse indexing
+export function newRelationship(options: RelationshipOptions): Relationship
+    return components.newRelationship(options)
+end
+
+--- Returns a registered component by numeric id.
+--- @param id the process-wide component id
+--- @return the component, or nil when the id is unknown
+export function findComponentById(id: integer): Component?
+    return components.findById(id)
+end
+
+--- Returns a registered component by name.
+--- @param name the process-wide component name
+--- @return the component, or nil when the name is unknown
+export function findComponentByName(name: string): Component?
+    return components.findByName(name)
+end
+
+--- Returns a fresh snapshot of every declared component.
+--- @return the caller-owned name-to-component table
+export function declaredComponents(): {[string]: Component}
+    return components.declared()
+end

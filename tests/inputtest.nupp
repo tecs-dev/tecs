@@ -1,0 +1,172 @@
+local application = require("tecs.application")
+local ecs = require("tecs.ecs")
+local input = require("tecs.input")
+local platformevents = require("tecs.platform.events")
+local test = require("nupp.test")
+
+local suite = {}
+
+local function key(down: boolean, repeated: boolean?): platformevents.KeyEvent
+    return platformevents.key(down, "Space", " ", nil, 0, repeated)
+end
+
+function suite.keepsHeldStateAcrossFrameEdges(): nil
+    local state = input.newInput()
+    state:beginFrame()
+    state:handleEvent(key(true))
+    test.assert(state:keyDown("Space"))
+    test.assert(state:keyPressed("Space"))
+    test.assert(not state:keyReleased("Space"))
+
+    state:beginFrame()
+    test.assert(state:keyDown("Space"))
+    test.assert(not state:keyPressed("Space"))
+    state:handleEvent(key(false))
+    test.assert(not state:keyDown("Space"))
+    test.assert(state:keyReleased("Space"))
+end
+
+function suite.doesNotTurnKeyRepeatsIntoPresses(): nil
+    local state = input.newInput()
+    state:beginFrame()
+    state:handleEvent(key(true))
+    state:beginFrame()
+    state:handleEvent(key(true, true))
+
+    test.assert(state:keyDown("Space"))
+    test.assert(not state:keyPressed("Space"))
+end
+
+function suite.latchesEdgesAcrossFramesUntilAFixedStep(): nil
+    local state = input.newInput()
+    state:beginFrame()
+    state:handleEvent(key(true))
+    state:beginFrame()
+    state:handleEvent(key(false))
+    test.assert(not state:keyPressed("Space"))
+
+    state:enterFixedPhase()
+    test.assert(state:keyPressed("Space"))
+    test.assert(state:keyReleased("Space"))
+    state:exitFixedPhase()
+
+    state:enterFixedPhase()
+    test.assert(not state:keyPressed("Space"))
+    test.assert(not state:keyReleased("Space"))
+    state:exitFixedPhase()
+end
+
+function suite.accumulatesPointerWheelAndTextForOneFrame(): nil
+    local state = input.newInput()
+    state:beginFrame()
+    state:handleEvent(platformevents.pointerMoved(10, 20, 2, 3))
+    state:handleEvent(platformevents.pointerMoved(14, 25, 4, 5))
+    state:handleEvent(platformevents.wheel(0.5, -1, 0, -1, 14, 25))
+    state:handleEvent(platformevents.text("nu"))
+    state:handleEvent(platformevents.text("pp"))
+
+    test.equal(state.mouseX, 14)
+    test.equal(state.mouseY, 25)
+    test.equal(state.mouseDeltaX, 6)
+    test.equal(state.mouseDeltaY, 8)
+    test.equal(state.wheelY, -1)
+    test.equal(state.wheelTicksY, -1)
+    test.equal(state.text, "nupp")
+
+    state:beginFrame()
+    test.equal(state.mouseX, 14)
+    test.equal(state.mouseDeltaX, 0)
+    test.equal(state.wheelY, 0)
+    test.equal(state.text, "")
+end
+
+function suite.tracksPointerButtonsByNameOrNumber(): nil
+    local state = input.newInput()
+    state:beginFrame()
+    state:handleEvent(platformevents.pointerButton(true, 1, 4, 5))
+    test.assert(state:mouseDown("left"))
+    test.assert(state:mousePressed(1))
+
+    state:beginFrame()
+    state:handleEvent(platformevents.pointerButton(false, 1, 4, 5))
+    test.assert(not state:mouseDown("left"))
+    test.assert(state:mouseReleased("left"))
+end
+
+function suite.releasesHeldControlsWhenFocusIsLost(): nil
+    local state = input.newInput()
+    state:beginFrame()
+    state:handleEvent(key(true))
+    state:handleEvent(platformevents.pointerButton(true, 1, 0, 0))
+    state:beginFrame()
+
+    state:handleEvent(platformevents.focused(false))
+
+    test.assert(not state:keyDown("Space"))
+    test.assert(state:keyReleased("Space"))
+    test.assert(not state:mouseDown("left"))
+    test.assert(state:mouseReleased("left"))
+end
+
+function suite.movesCaptureAtBlockingLayerBoundaries(): nil
+    local state = input.newInput()
+    state:beginFrame()
+    state:handleEvent(key(true))
+
+    local menu = state:pushLayer("menu")
+    test.assert(state:keyDown("Space", menu))
+    test.assert(not state:keyDown("Space"))
+    test.assert(not state:keyPressed("Space", menu))
+
+    state:popLayer()
+    test.assert(state:keyDown("Space"))
+    test.assert(not state:keyPressed("Space"))
+end
+
+function suite.keepsEdgesAcrossNonblockingLayers(): nil
+    local state = input.newInput()
+    state:beginFrame()
+    state:handleEvent(key(true))
+
+    local overlay = state:pushLayer("overlay", false)
+
+    test.assert(state:keyPressed("Space"))
+    test.assert(state:keyPressed("Space", overlay))
+    state:popLayer()
+    test.assert(state:keyPressed("Space"))
+end
+
+function suite.applicationFoldsInputBeforeObserversAndFixedSystems(): nil
+    local observerSawHeld = false
+    local fixedSawPress = false
+    local fixedSawRelease = false
+    local app = application.newApplication({
+        world = {timestep = 0.1},
+        plugin = function(exclusive running: application.Application): nil
+            running.world:observe(0, platformevents.on.keyDown, function(
+                _event: platformevents.KeyEvent,
+                exclusive world: ecs.World
+            ): nil
+                observerSawHeld = assert(input.of(world)):keyDown("Space")
+            end)
+            running.world:addSystem({
+                phase = ecs.phases.FixedUpdate,
+                run = function(_dt: number, exclusive world: ecs.World): nil
+                    local state = assert(input.of(world))
+                    fixedSawPress = state:keyPressed("Space")
+                    fixedSawRelease = state:keyReleased("Space")
+                end,
+            })
+        end,
+    })
+    app:init()
+
+    app:iterate(0.05, {key(true)})
+    app:iterate(0.05, {key(false)})
+
+    test.assert(observerSawHeld)
+    test.assert(fixedSawPress)
+    test.assert(fixedSawRelease)
+end
+
+return suite

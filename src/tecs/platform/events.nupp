@@ -1,0 +1,439 @@
+module tecs.platform.events
+
+--[[
+Typed platform events produced by the Rust host.
+
+Each record carries only fields meaningful for its kind. The kind strings stay
+compatible with the Teal engine because recordings and tools treat them as an
+external data surface. Rust translates `winit` events into these records and
+passes one ordered batch to `tecs.application.Application:iterate`.
+]]
+
+local ecs = require("tecs.ecs")
+local events = require("tecs.events")
+
+--- A platform event kind supported by the first `winit` boundary.
+export type Kind = "quit"
+    | "windowCloseRequested"
+    | "windowResized"
+    | "windowScaleChanged"
+    | "windowFocusGained"
+    | "windowFocusLost"
+    | "keyDown"
+    | "keyUp"
+    | "mouseMotion"
+    | "mouseDown"
+    | "mouseUp"
+    | "mouseWheel"
+    | "textInput"
+
+--- A process or window close request.
+export record QuitEvent
+    kind: "quit" | "windowCloseRequested"
+    timestamp: number
+    sequence: integer
+    window: integer
+end
+
+--- A logical window size change.
+export record ResizeEvent
+    kind: "windowResized" | "windowScaleChanged"
+    timestamp: number
+    sequence: integer
+    window: integer
+    width: integer
+    height: integer
+    pixelWidth: integer
+    pixelHeight: integer
+    scaleFactor: number
+end
+
+--- A window focus transition.
+export record FocusEvent
+    kind: "windowFocusGained" | "windowFocusLost"
+    timestamp: number
+    sequence: integer
+    window: integer
+    focused: boolean
+end
+
+--- A physical and logical keyboard transition.
+export record KeyEvent
+    kind: "keyDown" | "keyUp"
+    timestamp: number
+    sequence: integer
+    window: integer
+    physicalKey: string
+    logicalKey: string?
+    text: string?
+    modifiers: integer
+    repeated: boolean
+    down: boolean
+end
+
+--- An absolute pointer position and optional relative movement.
+export record PointerMoveEvent
+    kind: "mouseMotion"
+    timestamp: number
+    sequence: integer
+    window: integer
+    x: number
+    y: number
+    dx: number
+    dy: number
+end
+
+--- A pointer button transition.
+export record PointerButtonEvent
+    kind: "mouseDown" | "mouseUp"
+    timestamp: number
+    sequence: integer
+    window: integer
+    x: number
+    y: number
+    button: integer
+    clicks: integer
+    down: boolean
+end
+
+--- A normalized pointer wheel movement.
+export record WheelEvent
+    kind: "mouseWheel"
+    timestamp: number
+    sequence: integer
+    window: integer
+    x: number
+    y: number
+    wheelX: number
+    wheelY: number
+    wheelTicksX: integer
+    wheelTicksY: integer
+end
+
+--- Text committed by the platform input method.
+export record TextEvent
+    kind: "textInput"
+    timestamp: number
+    sequence: integer
+    window: integer
+    text: string
+end
+
+--- An event in one sealed host batch.
+export type Event = QuitEvent
+    | ResizeEvent
+    | FocusEvent
+    | KeyEvent
+    | PointerMoveEvent
+    | PointerButtonEvent
+    | WheelEvent
+    | TextEvent
+
+local function sameQuit(value: QuitEvent): QuitEvent
+    return value
+end
+
+local function sameResize(value: ResizeEvent): ResizeEvent
+    return value
+end
+
+local function sameFocus(value: FocusEvent): FocusEvent
+    return value
+end
+
+local function sameKey(value: KeyEvent): KeyEvent
+    return value
+end
+
+local function samePointerMove(value: PointerMoveEvent): PointerMoveEvent
+    return value
+end
+
+local function samePointerButton(value: PointerButtonEvent): PointerButtonEvent
+    return value
+end
+
+local function sameWheel(value: WheelEvent): WheelEvent
+    return value
+end
+
+local function sameText(value: TextEvent): TextEvent
+    return value
+end
+
+--- Typed ECS event definitions observed at address zero.
+export record EventTypes
+    quit: events.Event<QuitEvent>
+    windowCloseRequested: events.Event<QuitEvent>
+    windowResized: events.Event<ResizeEvent>
+    windowScaleChanged: events.Event<ResizeEvent>
+    windowFocusGained: events.Event<FocusEvent>
+    windowFocusLost: events.Event<FocusEvent>
+    keyDown: events.Event<KeyEvent>
+    keyUp: events.Event<KeyEvent>
+    mouseMotion: events.Event<PointerMoveEvent>
+    mouseDown: events.Event<PointerButtonEvent>
+    mouseUp: events.Event<PointerButtonEvent>
+    mouseWheel: events.Event<WheelEvent>
+    textInput: events.Event<TextEvent>
+end
+
+export const on = new EventTypes(
+    quit = events.newEvent({
+        name = "tecs.platform.events.quit",
+        construct = sameQuit
+    }),
+    windowCloseRequested = events.newEvent({
+        name = "tecs.platform.events.windowCloseRequested",
+        construct = sameQuit
+    }),
+    windowResized = events.newEvent({name = "tecs.platform.events.windowResized", construct = sameResize}),
+    windowScaleChanged = events.newEvent({name = "tecs.platform.events.windowScaleChanged", construct = sameResize}),
+    windowFocusGained = events.newEvent({name = "tecs.platform.events.windowFocusGained", construct = sameFocus}),
+    windowFocusLost = events.newEvent({name = "tecs.platform.events.windowFocusLost", construct = sameFocus}),
+    keyDown = events.newEvent({name = "tecs.platform.events.keyDown", construct = sameKey}),
+    keyUp = events.newEvent({name = "tecs.platform.events.keyUp", construct = sameKey}),
+    mouseMotion = events.newEvent({name = "tecs.platform.events.mouseMotion", construct = samePointerMove}),
+    mouseDown = events.newEvent({name = "tecs.platform.events.mouseDown", construct = samePointerButton}),
+    mouseUp = events.newEvent({name = "tecs.platform.events.mouseUp", construct = samePointerButton}),
+    mouseWheel = events.newEvent({name = "tecs.platform.events.mouseWheel", construct = sameWheel}),
+    textInput = events.newEvent({name = "tecs.platform.events.textInput", construct = sameText})
+)
+
+--- Constructs a process or window close request.
+export function quit(window: integer?, timestamp: number?, sequence: integer?): QuitEvent
+    return new QuitEvent(kind = "quit", timestamp = timestamp or 0, sequence = sequence or 0, window = window or 0)
+end
+
+--- Constructs a close request for one window.
+export function closeRequested(window: integer?, timestamp: number?, sequence: integer?): QuitEvent
+    return new QuitEvent(
+        kind = "windowCloseRequested",
+        timestamp = timestamp or 0,
+        sequence = sequence or 0,
+        window = window or 0
+    )
+end
+
+--- Constructs a logical window resize.
+export function resized(
+    width: integer,
+    height: integer,
+    window: integer?,
+    scaleFactor: number?,
+    timestamp: number?,
+    sequence: integer?,
+    pixelWidth: integer?,
+    pixelHeight: integer?
+): ResizeEvent
+    if width < 0 or height < 0 then
+        error("platform.events.resized: dimensions must be non-negative", 2)
+    end
+    local scale = scaleFactor or 1
+    if scale <= 0 or scale ~= scale then
+        error("platform.events.resized: scaleFactor must be greater than zero", 2)
+    end
+    local physicalWidth = pixelWidth or math.floor(width * scale + 0.5)
+    local physicalHeight = pixelHeight or math.floor(height * scale + 0.5)
+    if physicalWidth < 0 or physicalHeight < 0 then
+        error("platform.events.resized: pixel dimensions must be non-negative", 2)
+    end
+
+    return new ResizeEvent(
+        kind = "windowResized",
+        timestamp = timestamp or 0,
+        sequence = sequence or 0,
+        window = window or 0,
+        width = width,
+        height = height,
+        pixelWidth = physicalWidth,
+        pixelHeight = physicalHeight,
+        scaleFactor = scale
+    )
+end
+
+--- Constructs a scale-factor change with the resulting logical size.
+export function scaleChanged(
+    scaleFactor: number,
+    width: integer,
+    height: integer,
+    window: integer?,
+    timestamp: number?,
+    sequence: integer?,
+    pixelWidth: integer?,
+    pixelHeight: integer?
+): ResizeEvent
+    local event = resized(width, height, window, scaleFactor, timestamp, sequence, pixelWidth, pixelHeight)
+    event.kind = "windowScaleChanged"
+
+    return event
+end
+
+--- Constructs a window focus transition.
+export function focused(focused: boolean, window: integer?, timestamp: number?, sequence: integer?): FocusEvent
+    return new FocusEvent(
+        kind = focused and "windowFocusGained" or "windowFocusLost",
+        timestamp = timestamp or 0,
+        sequence = sequence or 0,
+        window = window or 0,
+        focused = focused
+    )
+end
+
+--- Constructs a keyboard transition.
+export function key(
+    down: boolean,
+    physicalKey: string,
+    logicalKey: string?,
+    text: string?,
+    modifiers: integer?,
+    repeated: boolean?,
+    window: integer?,
+    timestamp: number?,
+    sequence: integer?
+): KeyEvent
+    if physicalKey == "" then
+        error("platform.events.key: physicalKey must not be empty", 2)
+    end
+    return new KeyEvent(
+        kind = down and "keyDown" or "keyUp",
+        timestamp = timestamp or 0,
+        sequence = sequence or 0,
+        window = window or 0,
+        physicalKey = physicalKey,
+        logicalKey = logicalKey,
+        text = text,
+        modifiers = modifiers or 0,
+        repeated = repeated == true,
+        down = down
+    )
+end
+
+--- Constructs an absolute pointer movement.
+export function pointerMoved(
+    x: number,
+    y: number,
+    dx: number?,
+    dy: number?,
+    window: integer?,
+    timestamp: number?,
+    sequence: integer?
+): PointerMoveEvent
+    return new PointerMoveEvent(
+        kind = "mouseMotion",
+        timestamp = timestamp or 0,
+        sequence = sequence or 0,
+        window = window or 0,
+        x = x,
+        y = y,
+        dx = dx or 0,
+        dy = dy or 0
+    )
+end
+
+--- Constructs a pointer button transition.
+export function pointerButton(
+    down: boolean,
+    button: integer,
+    x: number,
+    y: number,
+    clicks: integer?,
+    window: integer?,
+    timestamp: number?,
+    sequence: integer?
+): PointerButtonEvent
+    if button < 1 then
+        error("platform.events.pointerButton: button must be positive", 2)
+    end
+    return new PointerButtonEvent(
+        kind = down and "mouseDown" or "mouseUp",
+        timestamp = timestamp or 0,
+        sequence = sequence or 0,
+        window = window or 0,
+        x = x,
+        y = y,
+        button = button,
+        clicks = clicks or 1,
+        down = down
+    )
+end
+
+--- Constructs normalized pointer wheel movement.
+export function wheel(
+    wheelX: number,
+    wheelY: number,
+    ticksX: integer?,
+    ticksY: integer?,
+    x: number?,
+    y: number?,
+    window: integer?,
+    timestamp: number?,
+    sequence: integer?
+): WheelEvent
+    return new WheelEvent(
+        kind = "mouseWheel",
+        timestamp = timestamp or 0,
+        sequence = sequence or 0,
+        window = window or 0,
+        x = x or 0,
+        y = y or 0,
+        wheelX = wheelX,
+        wheelY = wheelY,
+        wheelTicksX = ticksX or 0,
+        wheelTicksY = ticksY or 0
+    )
+end
+
+--- Constructs committed text input.
+export function text(text: string, window: integer?, timestamp: number?, sequence: integer?): TextEvent
+    return new TextEvent(
+        kind = "textInput",
+        timestamp = timestamp or 0,
+        sequence = sequence or 0,
+        window = window or 0,
+        text = text
+    )
+end
+
+--- Emits one translated event through the world's typed event bus.
+--- @param world the receiving world
+--- @param event the translated platform event
+export function dispatch(exclusive world: ecs.World, event: Event): nil
+    if event is QuitEvent then
+        if event.kind == "quit" then
+            world:emit(0, on.quit(event))
+        else
+            world:emit(0, on.windowCloseRequested(event))
+        end
+    elseif event is ResizeEvent then
+        if event.kind == "windowResized" then
+            world:emit(0, on.windowResized(event))
+        else
+            world:emit(0, on.windowScaleChanged(event))
+        end
+    elseif event is FocusEvent then
+        if event.focused then
+            world:emit(0, on.windowFocusGained(event))
+        else
+            world:emit(0, on.windowFocusLost(event))
+        end
+    elseif event is KeyEvent then
+        if event.down then
+            world:emit(0, on.keyDown(event))
+        else
+            world:emit(0, on.keyUp(event))
+        end
+    elseif event is PointerMoveEvent then
+        world:emit(0, on.mouseMotion(event))
+    elseif event is PointerButtonEvent then
+        if event.down then
+            world:emit(0, on.mouseDown(event))
+        else
+            world:emit(0, on.mouseUp(event))
+        end
+    elseif event is WheelEvent then
+        world:emit(0, on.mouseWheel(event))
+    elseif event is TextEvent then
+        world:emit(0, on.textInput(event))
+    end
+end

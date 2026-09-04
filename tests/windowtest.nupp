@@ -1,0 +1,227 @@
+local application = require("tecs.application")
+local platformevents = require("tecs.platform.events")
+local test = require("nupp.test")
+local window = require("tecs.platform.window")
+
+local suite = {}
+
+local function state(id: integer, title: string, width: integer?, height: integer?): window.HostState
+    local logicalWidth = width or 800
+    local logicalHeight = height or 600
+    return new window.HostState(
+        id = id,
+        title = title,
+        width = logicalWidth,
+        height = logicalHeight,
+        pixelWidth = logicalWidth * 2,
+        pixelHeight = logicalHeight * 2,
+        scaleFactor = 2,
+        x = 40,
+        y = 60,
+        focused = true,
+        visible = true,
+        minimized = false,
+        maximized = false,
+        fullscreen = false,
+        occluded = false,
+        resizable = true,
+        cursorVisible = true,
+        cursorGrab = "none"
+    )
+end
+
+function suite.validatesAndCopiesCreationOptions(): nil
+    local handle = window.newWindow({
+        title = "example",
+        width = 640,
+        height = 360,
+        resizable = false,
+        borderless = true,
+        hidden = true,
+        x = -20,
+        y = 30,
+        minWidth = 320,
+        minHeight = 180,
+        maxWidth = 1920,
+        maxHeight = 1080,
+    })
+    local create = handle:creationOptions()
+
+    test.equal(create.title, "example")
+    test.equal(create.width, 640)
+    test.equal(create.height, 360)
+    test.assert(not create.resizable)
+    test.assert(not create.decorations)
+    test.assert(not create.visible)
+    test.equal(create.x, -20)
+    test.equal(create.minWidth, 320)
+    create.title = "mutated copy"
+    test.equal(handle:creationOptions().title, "example")
+
+    local defaulted = window.newWindow():creationOptions()
+    test.equal(defaulted.title, "tecs")
+    test.equal(defaulted.width, 1280)
+    test.equal(defaulted.height, 720)
+    test.assert(defaulted.resizable)
+    test.assert(defaulted.visible)
+    test.assert(defaulted.decorations)
+end
+
+function suite.rejectsInvalidCreationAndSizeRequests(): nil
+    test.raises(function(): nil
+        window.newWindow({width = 0})
+    end, "width must be positive")
+    test.raises(function(): nil
+        window.newWindow({x = 1})
+    end, "x and y")
+    test.raises(function(): nil
+        window.newWindow({minWidth = 10})
+    end, "minWidth and minHeight")
+    test.raises(function(): nil
+        window.newWindow({minWidth = 20, minHeight = 10, maxWidth = 10, maxHeight = 20})
+    end, "minWidth")
+
+    local handle = window.newWindow()
+    test.raises(function(): nil
+        handle:setSize(-1, 10)
+    end, "width must be positive")
+end
+
+function suite.queuesTypedCommandsWithMonotonicSerials(): nil
+    local handle = window.newWindow({title = "before", width = 640, height = 480})
+    local first = handle:setTitle("after")
+    local second = handle:setSize(1280, 720)
+    local third = handle:setCursorGrab("locked")
+    local fourth = handle:requestRedraw()
+
+    test.equal(first, 1)
+    test.equal(second, 2)
+    test.equal(third, 3)
+    test.equal(fourth, 4)
+    test.equal(handle:title(), "before")
+    local width, height = handle:getSize()
+    test.equal(width, 640)
+    test.equal(height, 480)
+
+    local commands = window.drainCommands(handle)
+    test.equal(#commands, 4)
+    local title = commands[1]
+    if title is window.SetTitleCommand then
+        test.equal(title.title, "after")
+        test.equal(title.serial, 1)
+    else
+        error("expected title command")
+    end
+    local size = commands[2]
+    if size is window.SetSizeCommand then
+        test.equal(size.width, 1280)
+        test.equal(size.height, 720)
+    else
+        error("expected size command")
+    end
+    local grab = commands[3]
+    if grab is window.SetCursorGrabCommand then
+        test.equal(grab.mode, "locked")
+    else
+        error("expected cursor grab command")
+    end
+    test.equal(#window.drainCommands(handle), 0)
+end
+
+function suite.appliesOnlyAcknowledgedHostState(): nil
+    local handle = window.newWindow()
+    test.assert(not handle:isAttached())
+    test.equal(handle:id(), 0)
+
+    window.attach(handle, state(7, "attached"))
+    test.assert(handle:isAttached())
+    test.equal(handle:id(), 7)
+    test.equal(handle:title(), "attached")
+    test.equal(handle:scaleFactor(), 2)
+    local pixelWidth, pixelHeight = handle:getPixelSize()
+    test.equal(pixelWidth, 1600)
+    test.equal(pixelHeight, 1200)
+
+    local changed = state(7, "changed", 1024, 768)
+    changed.fullscreen = true
+    changed.cursorVisible = false
+    window.applyState(handle, changed)
+    test.equal(handle:title(), "changed")
+    test.assert(handle:isFullscreen())
+    test.assert(not handle:isCursorVisible())
+
+    test.raises(function(): nil
+        window.applyState(handle, state(8, "wrong window"))
+    end, "id changed")
+    test.raises(function(): nil
+        window.attach(handle, state(7, "again"))
+    end, "already attached")
+
+    window.detach(handle)
+    test.assert(not handle:isAttached())
+    test.equal(handle:id(), 0)
+    test.assert(not handle:hasFocus())
+    test.assert(not handle:isVisible())
+end
+
+function suite.foldsMatchingResizeScaleAndFocusEvents(): nil
+    local handle = window.newWindow()
+    window.attach(handle, state(9, "events"))
+
+    window.handleEvent(handle, platformevents.resized(500, 300, 9, 1.5, 0, 0, 751, 451))
+    local width, height = handle:getSize()
+    local pixelWidth, pixelHeight = handle:getPixelSize()
+    test.equal(width, 500)
+    test.equal(height, 300)
+    test.equal(pixelWidth, 751)
+    test.equal(pixelHeight, 451)
+    test.equal(handle:scaleFactor(), 1.5)
+
+    window.handleEvent(handle, platformevents.focused(false, 9))
+    test.assert(not handle:hasFocus())
+    window.handleEvent(handle, platformevents.focused(true, 10))
+    test.assert(not handle:hasFocus())
+end
+
+function suite.correlatesAndConsumesHostFailures(): nil
+    local handle = window.newWindow()
+    local serial = handle:setCursorGrab("confined")
+    window.reportFailure(handle, serial, "confinement is unsupported")
+
+    local failures = window.takeFailures(handle)
+    test.equal(#failures, 1)
+    test.equal(failures[1].serial, serial)
+    test.equal(failures[1].reason, "confinement is unsupported")
+    test.equal(#window.takeFailures(handle), 0)
+
+    test.raises(function(): nil
+        window.reportFailure(handle, 0, "invalid")
+    end, "serial must be positive")
+    test.raises(function(): nil
+        window.reportFailure(handle, 1, "")
+    end, "reason must not be empty")
+end
+
+function suite.applicationFoldsWindowStateBeforeEventCallbacks(): nil
+    local observedWidth = 0
+    local observedPixels = 0
+    local app = application.newApplication({
+        window = {title = "configured", width = 640, height = 360},
+        onEvent = function(event: platformevents.Event, exclusive running: application.Application): nil
+            if event is platformevents.ResizeEvent then
+                observedWidth = running.window:getSize()
+                observedPixels = running.window:getPixelSize()
+            end
+        end,
+    })
+    test.equal(app.window:creationOptions().title, "configured")
+    window.attach(app.window, state(3, "configured", 640, 360))
+    app:init()
+
+    app:iterate(0, {platformevents.resized(900, 500, 3, 2, 0, 1, 1800, 1000)})
+
+    test.equal(observedWidth, 900)
+    test.equal(observedPixels, 1800)
+end
+
+return suite

@@ -1,0 +1,114 @@
+module tecs.internal.framepacket
+
+--[[
+Extraction for the first Rust-owned GPU lane.
+
+One host-endian packet crosses the managed ABI per completed frame. Nupp owns
+world queries and draw ordering; Rust validates the packet and owns upload,
+pipelines, submission, and presentation.
+]]
+
+local archetype = require("tecs.internal.archetype")
+local query = require("tecs.internal.query")
+local rendercomponents = require("tecs.internal.rendercomponents")
+local world = require("tecs.internal.world")
+
+export const MAGIC: uint32 = 0x54454353
+export const VERSION: uint32 = 1
+export const INSTANCE_STRIDE: uint32 = 36
+
+local record Draw
+    entity: integer
+    transform: rendercomponents.Transform2D
+    tint: rendercomponents.Tint
+end
+
+--- A world-bound reusable renderer query.
+export record Extractor
+    private query: query.Query
+
+    packet: function(self: Extractor, width: integer, height: integer): string
+end
+
+--- Creates an extractor and registers its query with one world.
+export function new(exclusive value: world.World): Extractor
+    return new Extractor(
+        query = value:newQuery({
+            include = {
+                rendercomponents.Transform2DComponent,
+                rendercomponents.TintComponent,
+                rendercomponents.Renderable2D,
+            },
+        })
+    )
+end
+
+local function before(left: Draw, right: Draw): boolean
+    local leftTransform = left.transform
+    local rightTransform = right.transform
+    if leftTransform.layer ~= rightTransform.layer then
+        return leftTransform.layer < rightTransform.layer
+    end
+    if leftTransform.z ~= rightTransform.z then
+        return leftTransform.z < rightTransform.z
+    end
+
+    return left.entity < right.entity
+end
+
+local function collect(self: Extractor): {Draw}
+    local draws: {Draw} = {}
+    for candidate, count in self.query:iter() do
+        local active = candidate as archetype.Archetype
+        local transforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
+        local tints: {rendercomponents.Tint} = assert(active:get(rendercomponents.TintComponent))
+        for index = 1, count as integer do
+            draws[
+                #draws + 1
+            ] = new Draw(entity = active.entities[index], transform = transforms[index], tint = tints[index])
+        end
+    end
+    table.sort(draws, before)
+
+    return draws
+end
+
+--- Encodes one complete flat-color scene packet.
+--- @param self the extractor to run
+--- @param width the positive logical viewport width
+--- @param height the positive logical viewport height
+--- @return a host-endian versioned packet owned by the caller
+--- @raises when either viewport dimension is not positive
+function Extractor.packet(self: Extractor, width: integer, height: integer): string
+    if width < 1 or height < 1 then
+        error("framepacket: viewport dimensions must be positive", 2)
+    end
+    local draws = collect(self)
+    local buffer = nupp.io.newBuffer()
+    local writer = nupp.io.newScalarWriter(buffer)
+    writer:writeUint32(MAGIC)
+        :writeUint32(VERSION)
+        :writeUint32(INSTANCE_STRIDE)
+        :writeUint32(nupp.math.u32.wrap(#draws))
+        :writeFloat32(nupp.math.f32.narrow(width))
+        :writeFloat32(nupp.math.f32.narrow(height))
+    for index = 1, #draws do
+        local draw = draws[index]
+        local transform = draw.transform
+        local tint = draw.tint
+        writer:writeFloat32(nupp.math.f32.narrow(transform.x))
+            :writeFloat32(nupp.math.f32.narrow(transform.y))
+            :writeFloat32(nupp.math.f32.narrow(transform.rotation))
+            :writeFloat32(nupp.math.f32.narrow(transform.scaleX))
+            :writeFloat32(nupp.math.f32.narrow(transform.scaleY))
+            :writeFloat32(nupp.math.f32.narrow(tint.r))
+            :writeFloat32(nupp.math.f32.narrow(tint.g))
+            :writeFloat32(nupp.math.f32.narrow(tint.b))
+            :writeFloat32(nupp.math.f32.narrow(tint.a))
+    end
+    writer:drop()
+    local packed = buffer:getString()
+    buffer:drop()
+
+    return packed
+end

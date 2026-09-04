@@ -1,0 +1,260 @@
+module tecs.application
+
+--[[
+The host-neutral application lifecycle for the Nupp rewrite.
+
+The Rust host owns polling and passes one sealed event batch and elapsed delta
+to `iterate`. This module owns only game lifecycle: plugin installation,
+startup, world updates, crash containment, suspension, quit requests, and
+shutdown. Windowing, rendering, audio, and platform event conversion remain
+Rust service boundaries rather than fields filled with SDL compatibility
+objects.
+]]
+
+local ecs = require("tecs.ecs")
+local hostcancellation = require("tecs.internal.hostcancellation")
+local input = require("tecs.input")
+local platformevents = require("tecs.platform.events")
+local platformwindow = require("tecs.platform.window")
+
+--- A platform event already translated by the Rust host.
+export type HostEvent = platformevents.Event
+
+--- The lifecycle state visible to host diagnostics.
+export type State = "created" | "running" | "stopped"
+
+--- Installs a game's entities, resources, observers, and systems before startup.
+export type Plugin = function(exclusive app: Application): nil
+
+--- A host-driven application and its world.
+export record Application
+    world: ecs.World
+    input: input.Input
+    window: platformwindow.Window
+    quitRequested: boolean
+    suspended: boolean
+    elapsed: number
+    frame: integer
+
+    private state: State
+    private plugin: Plugin?
+    private onEvent: (function(event: platformevents.Event, exclusive app: Application): nil)?
+    private debug: boolean
+    private debugMaxFrames: integer?
+    private failure: string?
+    private shutdownDone: boolean
+
+    init: function(exclusive self: Application): boolean
+    iterate: function(exclusive self: Application, dt: number, events: {platformevents.Event}?): boolean
+    requestQuit: function(exclusive self: Application): nil
+    setSuspended: function(exclusive self: Application, suspended: boolean): nil
+    crashed: function(borrows self: Application): string?
+    clearCrash: function(exclusive self: Application): (boolean, string?)
+    shutdown: function(exclusive self: Application): boolean
+    getState: function(borrows self: Application): State
+end
+
+--- Settings copied by `newApplication`.
+export type Config = {
+    world: ecs.WorldConfig?,
+    window: platformwindow.Options?,
+    plugin: Plugin?,
+    onEvent: (function(event: platformevents.Event, exclusive app: Application): nil)?,
+    debug: boolean?,
+    debugMaxFrames: integer?
+}
+
+local function captureFailure(exclusive app: Application, failure: any): nil
+    if hostcancellation.is(failure) then
+        error(failure, 0)
+    end
+    if app.failure == nil then
+        app.failure = tostring(failure)
+    end
+end
+
+--- Builds an inert application without opening platform services.
+--- @param config the copied world and lifecycle settings
+--- @return an application waiting for `init`
+--- @raises when the debug frame limit is not a positive integer
+export function newApplication(config: Config?): Application
+    local maxFrames = config and config.debugMaxFrames or nil
+    if maxFrames ~= nil and (maxFrames < 1 or maxFrames % 1 ~= 0) then
+        error("application.newApplication: debugMaxFrames must be a positive integer", 2)
+    end
+    local world = ecs.newWorld(config and config.world)
+    local inputState = input.install(world)
+    local windowState = platformwindow.newWindow(config and config.window)
+
+    return new Application(
+        world = world,
+        input = inputState,
+        window = windowState,
+        quitRequested = false,
+        suspended = false,
+        elapsed = 0,
+        frame = 0,
+        state = "created",
+        plugin = config and config.plugin or nil,
+        onEvent = config and config.onEvent or nil,
+        debug = config ~= nil and config.debug == true,
+        debugMaxFrames = maxFrames,
+        failure = nil,
+        shutdownDone = false
+    )
+end
+
+--- Installs the game plugin and runs startup phases once.
+--- @param self the application the host is starting
+--- @return true so a host may continue serving a guarded startup failure
+--- @raises when the host initializes an application more than once
+function Application.init(exclusive self: Application): boolean
+    if self.state == "created" then
+        self.state = "running"
+    else
+        error("application.init: application is already " .. self.state, 2)
+    end
+    local plugin = self.plugin
+    if plugin ~= nil then
+        local succeeded, failure = pcall(function(): nil
+            plugin(self)
+        end)
+        if not succeeded then
+            captureFailure(self, failure)
+        end
+    end
+    if self.failure == nil then
+        local succeeded, failure = pcall(function(): nil
+            self.world:startup()
+        end)
+        if not succeeded then
+            captureFailure(self, failure)
+        end
+    end
+
+    return true
+end
+
+--- Runs one host iteration and returns whether another is wanted.
+--- @param self the running application
+--- @param dt elapsed simulation time in seconds
+--- @param batch the caller-owned sealed event batch for this iteration
+--- @return false after a quit request or configured frame limit
+--- @raises for an invalid delta or when called outside the running lifecycle
+function Application.iterate(exclusive self: Application, dt: number, batch: {platformevents.Event}?): boolean
+    if self.state == "running" then
+        -- The host is inside the only state that accepts iterations.
+    else
+        error("application.iterate: application is " .. self.state, 2)
+    end
+    if dt < 0 or dt ~= dt then
+        error("application.iterate: dt must be a non-negative number", 2)
+    end
+    if self.quitRequested then
+        return false
+    end
+
+    self.input:beginFrame()
+    local incoming = batch or {}
+    local handler = self.onEvent
+    for index = 1, #incoming do
+        local event = incoming[index]
+        local succeeded, failure = pcall(function(): nil
+            platformwindow.handleEvent(self.window, event)
+            self.input:handleEvent(event)
+            platformevents.dispatch(self.world, event)
+            if handler ~= nil then
+                handler(event, self)
+            end
+        end)
+        if not succeeded then
+            captureFailure(self, failure)
+            break
+        end
+        if event is platformevents.QuitEvent then
+            self.quitRequested = true
+        end
+        if self.quitRequested then
+            return false
+        end
+    end
+
+    if not self.suspended and self.failure == nil then
+        self.elapsed = self.elapsed + dt
+        local succeeded, failure = pcall(function(): nil
+            self.world:update(dt)
+        end)
+        if not succeeded then
+            captureFailure(self, failure)
+        end
+    end
+
+    self.frame = self.frame + 1
+    local limit = self.debugMaxFrames
+    if limit ~= nil and self.frame >= limit then
+        return false
+    end
+
+    return not self.quitRequested
+end
+
+--- Requests that the host stop after the current callback returns.
+--- @param self the application to stop
+function Application.requestQuit(exclusive self: Application): nil
+    self.quitRequested = true
+end
+
+--- Changes whether iterations advance simulation.
+--- @param self the application receiving a platform lifecycle change
+--- @param suspended whether frame updates should pause
+function Application.setSuspended(exclusive self: Application, suspended: boolean): nil
+    self.suspended = suspended
+end
+
+--- Returns the first guarded game failure.
+--- @param self the application to inspect
+--- @return the failure text, or nil while healthy
+function Application.crashed(borrows self: Application): string?
+    return self.failure
+end
+
+--- Clears a guarded game failure in a debug application.
+--- @param self the application to resume
+--- @return whether simulation may resume, plus a refusal reason
+function Application.clearCrash(exclusive self: Application): boolean, string?
+    if self.failure == nil then
+        return true
+    end
+    if not self.debug then
+        return false, "application debug mode is disabled"
+    end
+    self.failure = nil
+
+    return true
+end
+
+--- Runs world shutdown once, including after a guarded startup failure.
+--- @param self the application the host is stopping
+--- @return true after shutdown has been attempted
+function Application.shutdown(exclusive self: Application): boolean
+    if self.shutdownDone then
+        return true
+    end
+    self.shutdownDone = true
+    local succeeded, failure = pcall(function(): nil
+        self.world:shutdown()
+    end)
+    if not succeeded then
+        captureFailure(self, failure)
+    end
+    self.state = "stopped"
+
+    return true
+end
+
+--- Returns the current host lifecycle state.
+--- @param self the application to inspect
+--- @return `created`, `running`, or `stopped`
+function Application.getState(borrows self: Application): State
+    return self.state
+end

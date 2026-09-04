@@ -1,0 +1,63 @@
+module flatcolor
+
+--[[
+A complete game entry for the first Nupp and Rust rendering vertical slice.
+
+The exported `create` function matches the Rust host's managed entry contract.
+It installs three animated entities and delegates all platform and rendering
+ownership to `tecs.host`.
+]]
+
+local application = require("tecs.application")
+local ecs = require("tecs.ecs")
+local gfx = require("tecs.gfx")
+local host = require("tecs.host")
+
+local function install(exclusive app: application.Application): nil
+    local width, height = app.window:getSize()
+    local moving = app.world:newQuery({include = {ecs.Transform2D, gfx.Renderable2D}})
+    app.world:spawn(
+        ecs.Transform2D(width * 0.3, height * 0.5, 0, 1, -0.2, 180, 110),
+        gfx.Tint(0.15, 0.65, 1, 1),
+        gfx.Renderable2D
+    )
+    app.world:spawn(
+        ecs.Transform2D(width * 0.5, height * 0.5, 0, 2, 0.15, 150, 150),
+        gfx.Tint(1, 0.35, 0.2, 0.9),
+        gfx.Renderable2D
+    )
+    app.world:spawn(
+        ecs.Transform2D(width * 0.7, height * 0.5, 0, 3, 0.35, 110, 180),
+        gfx.Tint(0.55, 1, 0.3, 0.8),
+        gfx.Renderable2D
+    )
+    app.world:addSystem({
+        name = "example.flatcolor.rotate",
+        phase = ecs.phases.Update,
+        run = function(dt: number): nil
+            for candidate, count in moving:iter() do
+                local transforms: {ecs.Transform2D} = assert(candidate:getMut(ecs.Transform2D))
+                for index = 1, count as integer do
+                    transforms[index].rotation = transforms[index].rotation + dt * (0.35 + index * 0.1)
+                end
+            end
+        end,
+    })
+end
+
+--- Creates the example's host session through its statically linked plugin.
+--- @param title the desktop title
+--- @param width the initial logical width
+--- @param height the initial logical height
+--- @param debug whether guarded application failures may be cleared
+--- @param maxFrames an optional positive frame limit
+--- @return the session retained by the Rust host
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): host.Session
+    return host.createWithPlugin(install, title or "Tecs flat color", width, height, debug, maxFrames)
+end

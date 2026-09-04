@@ -1,0 +1,126 @@
+local ecs = require("tecs.ecs")
+local test = require("nupp.test")
+local suite = {}
+
+local record DirtyPosition
+    x: number
+end
+
+local function positionComponent(name: string): ecs.TableComponent<DirtyPosition>
+    return ecs.newComponent({
+        name = name,
+        construct = function(x: number): DirtyPosition
+            return new DirtyPosition(x = x)
+        end,
+        default = function(): DirtyPosition
+            return new DirtyPosition(x = 0)
+        end,
+    })
+end
+
+local function matching(world: ecs.World, component: ecs.Component): ecs.Archetype
+    local query = world:newQuery({include = {component}})
+    local candidate = query:iter()()
+    return assert(candidate)
+end
+
+function suite.marksPlacementsAndClearsAtUpdateEnd(): nil
+    local position = positionComponent("test.DirtyPlacement")
+    local world = ecs.newWorld()
+    local entity = world:spawn(position(1))
+    world:commit()
+    local source = matching(world, position)
+    test.assert(source:isComponentDirty(position))
+    world:update(0)
+    test.assert(not source:isComponentDirty(position))
+    test.assert(world:isAlive(entity))
+end
+
+function suite.keepsReadsCleanAndMarksMutableAccess(): nil
+    local position = positionComponent("test.DirtyMutable")
+    local world = ecs.newWorld()
+    local entity = world:spawn(position(1))
+    world:commit()
+    local source = matching(world, position)
+    source:clearDirtyComponents()
+    test.equal(assert(world:get(entity, position)).x, 1)
+    test.assert(not source:anyComponentDirty())
+    local writable = assert(world:getMut(entity, position))
+    writable.x = 2
+    test.assert(source:isComponentDirty(position))
+    test.equal(assert(world:get(entity, position)).x, 2)
+end
+
+function suite.marksOnlyAnInPlaceReplacementComponent(): nil
+    local position = positionComponent("test.DirtyReplacementPosition")
+    local velocity = ecs.newScalarComponent({name = "test.DirtyReplacementVelocity", kind = "number"})
+    local world = ecs.newWorld()
+    local entity = world:spawn(position(1), velocity(2))
+    world:commit()
+    local source = matching(world, position)
+    source:clearDirtyComponents()
+    world:set(entity, position(3))
+    world:commit()
+    test.assert(source:isComponentDirty(position))
+    test.assert(not source:isComponentDirty(velocity))
+end
+
+function suite.marksSourceAndDestinationAfterAStructuralMove(): nil
+    local position = positionComponent("test.DirtyMovePosition")
+    local velocity = ecs.newScalarComponent({name = "test.DirtyMoveVelocity", kind = "number"})
+    local world = ecs.newWorld()
+    local entity = world:spawn(position(1), velocity(2))
+    world:commit()
+    local source = matching(world, velocity)
+    source:clearDirtyComponents()
+    world:remove(entity, velocity)
+    world:commit()
+    local target = matching(world, position)
+    test.assert(source:isComponentDirty(position))
+    test.assert(source:isComponentDirty(velocity))
+    test.assert(target:isComponentDirty(position))
+end
+
+function suite.supportsColumnAndExplicitMarks(): nil
+    local position = positionComponent("test.DirtyExplicit")
+    local world = ecs.newWorld()
+    local entity = world:spawn(position(1))
+    world:commit()
+    local source = matching(world, position)
+    source:clearDirtyComponents()
+    local column = assert(source:getMut(position))
+    column[1].x = 4
+    test.assert(source:isComponentDirty(position))
+    source:clearDirtyComponents()
+    world:markComponentDirty(entity, position)
+    test.assert(source:isComponentDirty(position))
+end
+
+function suite.iteratesDirtyComponentsInSignatureOrder(): nil
+    local first = positionComponent("test.DirtyIterFirst")
+    local second = ecs.newScalarComponent({name = "test.DirtyIterSecond", kind = "number"})
+    local world = ecs.newWorld()
+    world:spawn(first(1), second(2))
+    world:commit()
+    local source = matching(world, first)
+    local names: {string} = {}
+    for component in source:dirtyComponents() do
+        names[#names + 1] = assert(component).componentName
+    end
+    test.equal(table.concat(names, ","), "test.DirtyIterFirst,test.DirtyIterSecond")
+end
+
+function suite.ignoresExplicitMarksForStaleEntities(): nil
+    local position = positionComponent("test.DirtyStale")
+    local world = ecs.newWorld()
+    local entity = world:spawn(position(1))
+    world:commit()
+    local source = matching(world, position)
+    world:despawn(entity)
+    world:commit()
+    source:clearDirtyComponents()
+    world:markComponentDirty(entity, position)
+    test.assert(not source:anyComponentDirty())
+end
+
+return suite

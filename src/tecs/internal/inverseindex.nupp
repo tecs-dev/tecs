@@ -1,0 +1,93 @@
+module tecs.internal.inverseindex
+
+--[[
+Reverse relationship lookup for the headless ECS.
+
+Each target owns a set of source entity identifiers. Links are idempotent and
+lookup order is deliberately unspecified. The implementation keeps no
+source-side index because callers already have the outgoing targets when an
+entity is removed.
+]]
+
+local EMPTY: {[integer]: boolean} = {}
+
+--- Maps relationship targets back to their source entities.
+export record InverseIndex
+    private inverse: {[integer]: {[integer]: boolean}}
+
+    --- Runs when a target receives its first source.
+    onTargetAdded: (function(integer): nil)?
+
+    --- Runs when a target loses its last source.
+    onTargetRemoved: (function(integer): nil)?
+
+    --- Adds an idempotent source-to-target edge.
+    function link(self, sourceId: integer, targetId: integer): nil
+        local sources = self.inverse[targetId]
+        if sources == nil then
+            sources = {}
+            self.inverse[targetId] = sources
+            if self.onTargetAdded ~= nil then
+                self.onTargetAdded(targetId)
+            end
+        end
+        sources[sourceId] = true
+    end
+
+    --- Removes one source-to-target edge.
+    function unlink(self, sourceId: integer, targetId: integer): nil
+        local sources = self.inverse[targetId]
+        if sources == nil then
+            return
+        end
+
+        sources[sourceId] = nil
+        if next(sources) == nil then
+            self.inverse[targetId] = nil
+            if self.onTargetRemoved ~= nil then
+                self.onTargetRemoved(targetId)
+            end
+        end
+    end
+
+    --- Visits every source linked to a target.
+    function forEachSource(self, targetId: integer, callback: function(integer, any): nil, context: any?): nil
+        local sources = self.inverse[targetId]
+        if sources ~= nil then
+            for sourceId in pairs(sources) do
+                callback(sourceId, context)
+            end
+        end
+    end
+
+    --- Removes a target and returns its source set.
+    ---
+    --- The returned table is the stored set and must not be modified. A shared
+    --- empty sentinel is returned when the target was absent.
+    function removeTarget(self, targetId: integer): {[integer]: boolean}
+        local sources = self.inverse[targetId]
+        if sources == nil then
+            return EMPTY
+        end
+
+        self.inverse[targetId] = nil
+        if self.onTargetRemoved ~= nil then
+            self.onTargetRemoved(targetId)
+        end
+
+        return sources
+    end
+
+    --- Removes a source from each supplied target.
+    function unlinkSourceFromTargets(self, sourceId: integer, targets: {integer}): nil
+        for index = 1, #targets do
+            self:unlink(sourceId, targets[index])
+        end
+    end
+end
+
+--- Creates an empty reverse relationship index.
+--- @return the empty index
+export function new(): InverseIndex
+    return new InverseIndex(inverse = {})
+end

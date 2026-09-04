@@ -1,0 +1,43 @@
+module tecs.data
+
+--[[
+Typed in-memory stores for world resources and application state.
+
+Keys are shared process identities while stores remain independent. Name keys
+that must survive module reloads or appear in tooling.
+]]
+
+local store = require("tecs.internal.store")
+
+--- A process-wide typed store key.
+export type Key<T> = store.Key<T>
+
+--- An independent typed store.
+export type Store = store.Store
+
+--- Creates or recovers a process-wide typed key.
+--- @param name the reload-stable key name, or nil for a fresh key
+--- @param forType an optional inference witness
+--- @return the typed key
+export function newKey<T>(name: string?, borrows forType: T?): Key<T>
+    return store.newKey(name, forType)
+end
+
+--- Returns a named key when it has already been declared.
+--- @param name the process-wide key name
+--- @return the key, or nil when unknown
+export function findKey<T>(name: string): Key<T>?
+    return store.findKey(name)
+end
+
+--- Returns a fresh name-to-id snapshot of declared keys.
+--- @return the caller-owned key listing
+export function listKeys(): {[string]: integer}
+    return store.listKeys()
+end
+
+--- Creates an independent empty typed store.
+--- @return the empty store
+export function newStore(): Store
+    return store.new()
+end

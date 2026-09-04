@@ -1,0 +1,55 @@
+local test = require("nupp.test")
+local archetype = require("tecs.internal.archetype")
+local components = require("tecs.internal.components")
+local suite = {}
+
+function suite.canonicalizesComponentOrder(): nil
+    local first = components.newTagComponent({name = "test.ArchetypeFirst"})
+    local second = components.newTagComponent({name = "test.ArchetypeSecond"})
+    test.equal(archetype.signatureOf({first, second}), archetype.signatureOf({second, first}))
+end
+
+function suite.tracksMembershipByIdentity(): nil
+    local present = components.newTagComponent({name = "test.ArchetypePresent"})
+    local absent = components.newTagComponent({name = "test.ArchetypeAbsent"})
+    local value = archetype.new(1, {present})
+    test.assert(archetype.has(value, present))
+    test.assert(not archetype.has(value, absent))
+end
+
+function suite.rejectsDuplicateComponents(): nil
+    local tag = components.newTagComponent({name = "test.ArchetypeDuplicate"})
+    test.raises(function(): nil
+        archetype.signatureOf({tag, tag})
+    end, "repeats component")
+end
+
+function suite.storesRawScalarsInDenseColumns(): nil
+    local health = components.newScalarComponent({
+        name = "test.ArchetypeHealth",
+        kind = "number",
+        default = 100
+    })
+    local value = archetype.new(1, {health})
+    archetype.append(value, 10, {[health.componentId] = 42})
+    archetype.append(value, 20, {})
+    local values: {number} = assert(archetype.column(value, health))
+    test.equal(values[1], 42)
+    test.equal(values[2], 100)
+    test.equal(archetype.valueAt(value, 0, health) as number, 42)
+end
+
+function suite.swapRemovesScalarColumnsWithEntities(): nil
+    local label = components.newScalarComponent({name = "test.ArchetypeLabel", kind = "string"})
+    local value = archetype.new(1, {label})
+    archetype.append(value, 10, {[label.componentId] = "first"})
+    archetype.append(value, 20, {[label.componentId] = "last"})
+    local moved = archetype.removeRow(value, 0)
+    local labels: {string} = assert(archetype.column(value, label))
+    test.equal(moved as integer, 20)
+    test.equal(value.entities[1], 20)
+    test.equal(labels[1], "last")
+    test.equal(#labels, 1)
+end
+
+return suite

@@ -1,0 +1,18 @@
+module tecs.internal.componentids
+
+--[[
+Process-wide component identity allocation.
+
+This remains a small shared module so ordinary and native-layout components
+draw from one monotonically increasing id space without creating a dependency
+cycle between their definitions.
+]]
+
+local nextId: integer = 0
+
+--- Allocates the next process-wide component id.
+--- @return the new positive component id
+export function allocate(): integer
+    nextId = nextId + 1
+    return nextId
+end

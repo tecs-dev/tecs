@@ -1,0 +1,147 @@
+local ecs = require("tecs.ecs")
+local test = require("nupp.test")
+
+local suite = {}
+
+function suite.runsStartupAndShutdownLeavesInOrder(): nil
+    local value = ecs.newWorld()
+    local order: {string} = {}
+    local lifecycle = {
+        ecs.phases.PreStartup,
+        ecs.phases.Startup,
+        ecs.phases.PostStartup,
+        ecs.phases.PreShutdown,
+        ecs.phases.Shutdown,
+        ecs.phases.PostShutdown,
+    }
+    for index = 1, #lifecycle do
+        local phase = lifecycle[index]
+        value:addSystem({
+            name = "test.lifecycle." .. phase,
+            phase = phase,
+            run = function(dt: number, exclusive _world: ecs.World): nil
+                test.equal(dt, 0)
+                order[#order + 1] = phase
+            end,
+        })
+    end
+
+    value:startup()
+    value:shutdown()
+
+    test.equal(table.concat(order, ","), table.concat({
+        "PreStartup",
+        "Startup",
+        "PostStartup",
+        "PreShutdown",
+        "Shutdown",
+        "PostShutdown",
+    }, ","))
+end
+
+function suite.publishesBetweenLifecycleLeaves(): nil
+    local marker = ecs.newTagComponent({name = "test.LifecycleBarrier"})
+    local value = ecs.newWorld()
+    local entity: integer = 0
+    local observed = false
+    value:addSystem({
+        phase = ecs.phases.PreStartup,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            entity = running:spawn(marker)
+        end,
+    })
+    value:addSystem({
+        phase = ecs.phases.Startup,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            observed = running:has(entity, marker)
+        end,
+    })
+
+    value:startup()
+
+    test.assert(observed)
+end
+
+function suite.settlesLifecycleChildTasks(): nil
+    local value = ecs.newWorld()
+    local answer = 0
+    value:addSystem({
+        phase = ecs.phases.Startup,
+        run = function(
+            _dt: number,
+            exclusive _world: ecs.World,
+            borrows scope: nupp.tasks.Scope
+        ): nil
+            scope:spawn(function(): nil
+                answer = 42
+            end)
+        end,
+    })
+
+    value:startup()
+
+    test.equal(answer, 42)
+end
+
+function suite.runsOneRequestedLeafWithTheRequestedDelta(): nil
+    local value = ecs.newWorld()
+    local updateCalls = 0
+    local renderCalls = 0
+    local seenDt = 0
+    value:addSystem({
+        phase = ecs.phases.Update,
+        run = function(dt: number, exclusive _world: ecs.World): nil
+            updateCalls = updateCalls + 1
+            seenDt = dt
+        end,
+    })
+    value:addSystem({
+        phase = ecs.phases.Render,
+        run = function(_dt: number, exclusive _world: ecs.World): nil
+            renderCalls = renderCalls + 1
+        end,
+    })
+
+    value:runPhase(ecs.phases.Update, 0.25)
+
+    test.equal(updateCalls, 1)
+    test.equal(renderCalls, 0)
+    test.equal(seenDt, 0.25)
+    test.equal(value:fixedStepCount(), 0)
+end
+
+function suite.recoversAfterALifecycleSystemRaises(): nil
+    local value = ecs.newWorld()
+    value:addSystem({
+        name = "test.lifecycle.failure",
+        phase = ecs.phases.Startup,
+        run = function(_dt: number, exclusive _world: ecs.World): nil
+            error("expected lifecycle failure")
+        end,
+    })
+    test.raises(function(): nil
+        value:startup()
+    end, "expected lifecycle failure")
+    test.assert(value:removeSystem("test.lifecycle.failure"))
+    value:startup()
+end
+
+function suite.reportsCoreWorldStatistics(): nil
+    local marker = ecs.newTagComponent({name = "test.StatisticsMarker"})
+    local value = ecs.newWorld()
+    value:spawn(marker)
+    value:commit()
+    value:addSystem({
+        phase = ecs.phases.Update,
+        run = function(_dt: number, exclusive _world: ecs.World): nil end,
+    })
+
+    local stats = value:getStats()
+
+    test.equal(stats.entities, 1)
+    test.equal(stats.archetypes, 2)
+    test.equal(stats.components, 1)
+    test.equal(stats.systems, 1)
+end
+
+return suite

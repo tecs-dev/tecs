@@ -1,0 +1,86 @@
+module tecs.internal.query
+
+--[[
+A reusable archetype query over tag component signatures.
+
+Queries retain matching archetypes rather than rescanning the world. Iteration
+skips empty matches, so archetypes can remain registered after their final
+entity leaves and become active again without rebuilding the query.
+]]
+
+local archetype = require("tecs.internal.archetype")
+local components = require("tecs.internal.components")
+
+--- Include and exclude constraints for an archetype query.
+export type Descriptor = {
+    include: {components.Component}?,
+    exclude: {components.Component}?
+}
+
+--- A reusable query whose matching archetypes are updated by its world.
+export record Query
+    private include: {components.Component}
+    private exclude: {components.Component}
+    private active: {archetype.Archetype}
+
+    iter: function(self: Query): function(): (archetype.Archetype?, integer?)
+end
+
+--- Creates a query with no active archetypes yet.
+--- @param descriptor the include and exclude constraints
+--- @return the reusable query
+export function new(descriptor: Descriptor?): Query
+    return new Query(
+        include = descriptor and descriptor.include or {},
+        exclude = descriptor and descriptor.exclude or {},
+        active = {}
+    )
+end
+
+--- Reports whether an archetype satisfies a query.
+--- @param value the query to inspect
+--- @param candidate the archetype to test
+--- @return whether every constraint is satisfied
+export function matches(value: Query, candidate: archetype.Archetype): boolean
+    for index = 1, #value.include do
+        if not archetype.has(candidate, value.include[index]) then
+            return false
+        end
+    end
+    for index = 1, #value.exclude do
+        if archetype.has(candidate, value.exclude[index]) then
+            return false
+        end
+    end
+
+    return true
+end
+
+--- Adds an archetype when it satisfies the query.
+--- @param value the query to update
+--- @param candidate the newly registered archetype
+export function addArchetype(value: Query, candidate: archetype.Archetype): nil
+    if matches(value, candidate) then
+        value.active[#value.active + 1] = candidate
+    end
+end
+
+--- Iterates nonempty matching archetypes and their current entity counts.
+--- @param self the query to iterate
+--- @return the iterator
+function Query.iter(self: Query): function(): (archetype.Archetype?, integer?)
+    local active = self.active
+    local index: integer = 0
+    return function(): (archetype.Archetype?, integer?)
+        while index < #active do
+            index = index + 1
+            local candidate = active[index]
+            local count = #candidate.entities
+            if count > 0 then
+                return candidate, count
+            end
+        end
+
+        return nil, nil
+    end
+end

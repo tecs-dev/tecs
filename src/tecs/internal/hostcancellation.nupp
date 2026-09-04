@@ -1,0 +1,18 @@
+module tecs.internal.hostcancellation
+
+--[[A private identity used to unwind a frame parked during host shutdown.]]
+
+--- The private cancellation raised through application guards.
+export record Cancellation
+    reason: string
+end
+
+--- Raises a host cancellation without presenting it as an operational failure.
+export function raise(reason: string): never
+    error(new Cancellation(reason = reason), 0)
+end
+
+--- Reports whether a caught value is the host's private cancellation.
+export function is(value: any): boolean
+    return value is Cancellation
+end

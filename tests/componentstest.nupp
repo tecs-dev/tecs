@@ -1,0 +1,92 @@
+local test = require("nupp.test")
+local components = require("tecs.internal.components")
+local suite = {}
+
+function suite.registersTagsByNameAndId(): nil
+    local tag = components.newTagComponent({name = "test.RegisteredTag"})
+    test.equal(tag.storageType, "tag")
+    test.assert(components.findByName(tag.componentName) == tag)
+    test.assert(components.findById(tag.componentId) == tag)
+end
+
+function suite.rejectsDuplicateNames(): nil
+    components.newTagComponent({name = "test.DuplicateTag"})
+    test.raises(function(): nil
+        components.newTagComponent({name = "test.DuplicateTag"})
+    end, "already registered")
+end
+
+function suite.returnsAnIndependentRegistrySnapshot(): nil
+    local tag = components.newTagComponent({name = "test.SnapshotTag", transient = true})
+    local snapshot = components.declared()
+    test.assert(snapshot[tag.componentName] == tag)
+    snapshot[tag.componentName] = nil
+    test.assert(components.findByName(tag.componentName) == tag)
+    test.assert(tag.transient)
+end
+
+function suite.createsKindTypedScalarComponents(): nil
+    local health = components.newScalarComponent({
+        name = "test.ScalarHealth",
+        kind = "number",
+        default = 100
+    })
+    local title = components.newScalarComponent({name = "test.ScalarTitle", kind = "string"})
+    local enabled = components.newScalarComponent({name = "test.ScalarEnabled", kind = "boolean"})
+    local amount: number = health(42).value
+    local text: string = title("hero").value
+    local flag: boolean = enabled(true).value
+    test.equal(amount, 42)
+    test.equal(text, "hero")
+    test.equal(flag, true)
+    test.equal(health.scalarDefault, 100)
+    test.equal(title.scalarDefault, "")
+    test.equal(enabled.scalarDefault, false)
+end
+
+function suite.unwrapsScalarMutationInputs(): nil
+    local score = components.newScalarComponent({name = "test.ScalarInput", kind = "number"})
+    local instance = score(9)
+    test.assert(components.definitionOf(instance) == score)
+    local raw, explicit = components.explicitValue(instance)
+    test.equal(raw as number, 9)
+    test.assert(explicit)
+    test.assert(components.definitionOf(score) == score)
+end
+
+local record Point
+    x: number
+    y: number
+end
+
+function suite.createsTypedTableComponentInstances(): nil
+    local position = components.newComponent({
+        name = "test.TablePosition",
+        construct = function(x: number, y: number): Point
+            return new Point(x = x, y = y)
+        end,
+        default = function(): Point
+            return new Point(x = 0, y = 0)
+        end
+    })
+    local instance = position(3, 4)
+    local point: Point = instance.value
+    test.equal(point.x, 3)
+    test.equal(point.y, 4)
+    test.assert(components.definitionOf(instance) == position)
+end
+
+function suite.createsExclusiveRelationshipInstances(): nil
+    local follows = components.newRelationship({
+        name = "test.ComponentRelationship",
+        exclusive = true,
+        reverseIndex = true
+    })
+    local instance = follows(42)
+    test.assert(components.definitionOf(instance) == follows)
+    test.equal(instance.value.target, 42)
+    test.assert(follows.exclusive)
+    test.assert(follows.reverseIndex)
+end
+
+return suite

@@ -1,0 +1,183 @@
+module tecs.internal.framepump
+
+--[[
+Runs one host operation at a time under Nupp's suspension handler.
+
+The embedding call that starts or polls an operation never yields. A wait parks
+the operation coroutine here, its readiness callback only queues that
+coroutine, and a later host turn polls sources and drains the queue.
+]]
+
+local suspension = require("nupp.suspension")
+local hostcancellation = require("tecs.internal.hostcancellation")
+
+--- The result of starting or polling one host operation.
+export type State = "parked" | "continue" | "stopped"
+
+--- A host-local scheduler for one application session.
+export record Pump
+    handler: suspension.Handler
+
+    private runnable: {thread}
+    private queued: {[thread]: boolean}
+    private active: thread?
+    private result: boolean?
+    private failure: any?
+end
+
+local function enqueue(exclusive pump: Pump, task: thread): nil
+    if pump.queued[task] or coroutine.status(task) ~= "suspended" then
+        return
+    end
+    pump.queued[task] = true
+    pump.runnable[#pump.runnable + 1] = task
+end
+
+local function resumeTask(exclusive pump: Pump, task: thread, keepRunning: boolean?): nil
+    pump.queued[task] = nil
+    if coroutine.status(task) ~= "suspended" then
+        return
+    end
+    local succeeded, failure = coroutine.resume(task, keepRunning)
+    if not succeeded and pump.failure == nil then
+        pump.failure = failure
+    end
+end
+
+local function runReady(exclusive pump: Pump): nil
+    local pass = pump.runnable
+    pump.runnable = {}
+    for index = 1, #pass do
+        resumeTask(pump, pass[index])
+    end
+end
+
+--- Creates an idle frame pump.
+--- @return a pump whose handler permits application waits
+export function newPump(): Pump
+    local pump = new Pump(
+        handler = nil as suspension.Handler,
+        runnable = {},
+        queued = {},
+        active = nil,
+        result = nil,
+        failure = nil
+    )
+    pump.handler = new suspension.Handler(
+        park = function(_: suspension.Handler, waiting: suspension.Waiting, _: function(): nil): nil
+            local task = assert(coroutine.running())
+            local function wake(): nil
+                enqueue(pump, task)
+            end
+
+            while not waiting:ready() do
+                waiting:onResume(wake)
+                if not waiting:ready() then
+                    local keepRunning = coroutine.yield()
+                    if keepRunning == false then
+                        hostcancellation.raise("the host stopped while the operation was parked")
+                    end
+                end
+            end
+        end,
+        canPark = function(_: suspension.Handler): boolean
+            return true
+        end,
+        shutdown = function(_: suspension.Handler): nil
+            while #pump.runnable > 0 do
+                runReady(pump)
+            end
+        end
+    )
+
+    return pump
+end
+
+local function state(exclusive pump: Pump): State
+    local failure = pump.failure
+    if failure ~= nil then
+        pump.failure = nil
+        pump.active = nil
+        error(failure, 0)
+    end
+    local task = pump.active
+    if task ~= nil and coroutine.status(task) ~= "dead" then
+        return "parked"
+    end
+    pump.active = nil
+    if pump.result == false then
+        pump.result = nil
+        return "stopped"
+    end
+    pump.result = nil
+
+    return "continue"
+end
+
+--- Starts one operation and runs it until it completes or parks.
+--- @param pump the idle application pump
+--- @param body the lifecycle operation to run
+--- @return whether the operation parked, completed, or stopped the application
+--- @raises when another operation is still parked
+export function start(exclusive pump: Pump, body: function(): boolean): State
+    if pump.active ~= nil then
+        error("framepump.start: an operation is already parked", 2)
+    end
+    pump.result = nil
+    pump.failure = nil
+    local task = coroutine.create(function(): nil
+        local succeeded, result = pcall(function(): boolean
+            handle suspension with pump.handler do
+                return body()
+            end
+        end)
+        if succeeded then
+            pump.result = result
+        else
+            pump.failure = result
+        end
+    end)
+    pump.active = task
+    resumeTask(pump, task)
+
+    return state(pump)
+end
+
+--- Polls readiness once and resumes every operation woken in that pass.
+--- @param pump the application pump
+--- @return whether the operation remains parked, completed, or stopped the application
+--- @raises when no operation is parked
+export function poll(exclusive pump: Pump): State
+    if pump.active == nil then
+        error("framepump.poll: no operation is parked", 2)
+    end
+    suspension.poll()
+    runReady(pump)
+
+    return state(pump)
+end
+
+--- Reports whether one operation is parked between host turns.
+--- @param pump the application pump
+--- @return whether an operation remains active
+export function parked(borrows pump: Pump): boolean
+    return pump.active ~= nil
+end
+
+--- Unwinds a parked operation before application shutdown.
+--- @param pump the application pump
+export function cancel(exclusive pump: Pump): nil
+    local task = pump.active
+    if task == nil then
+        return
+    end
+    resumeTask(pump, task, false)
+    if coroutine.status(task) ~= "dead" then
+        error("framepump.cancel: the parked operation did not unwind", 2)
+    end
+    pump.active = nil
+    pump.result = nil
+    pump.failure = nil
+    pump.runnable = {}
+    pump.queued = {}
+end

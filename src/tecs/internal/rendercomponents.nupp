@@ -1,0 +1,95 @@
+module tecs.internal.rendercomponents
+
+--[[
+The dependency-low component definitions shared by the ECS surface and the
+first Rust renderer slice.
+
+These component names are snapshot compatibility surfaces. Their Nupp storage
+is record-backed for now; a later packed storage implementation must keep the
+names and public value shapes intact.
+]]
+
+local components = require("tecs.internal.components")
+
+--- Places an entity in the two-dimensional world.
+export record Transform2D
+    --- Caller-writable. Sets the horizontal position in world units.
+    x: number
+
+    --- Caller-writable. Sets the vertical position in world units.
+    y: number
+
+    --- Caller-writable. Sets depth within the selected layer.
+    z: number
+
+    --- Caller-writable. Selects the integer draw layer.
+    layer: integer
+
+    --- Caller-writable. Sets clockwise rotation in radians.
+    rotation: number
+
+    --- Caller-writable. Sets horizontal scale in world units.
+    scaleX: number
+
+    --- Caller-writable. Sets vertical scale in world units.
+    scaleY: number
+end
+
+--- The process-wide `Transform2D` component definition.
+export const Transform2DComponent: components.TableComponent<Transform2D> = components.newComponent({
+    -- This persisted component name is a compatibility surface.
+    name = "Transform2D",
+    construct = function(
+        x: number?,
+        y: number?,
+        z: number?,
+        layer: integer?,
+        rotation: number?,
+        scaleX: number?,
+        scaleY: number?
+    ): Transform2D
+        return new Transform2D(
+            x = x or 0,
+            y = y or 0,
+            z = z or 0,
+            layer = layer or 1,
+            rotation = rotation or 0,
+            scaleX = scaleX or 1,
+            scaleY = scaleY or 1
+        )
+    end,
+    default = function(): Transform2D
+        return new Transform2D(x = 0, y = 0, z = 0, layer = 1, rotation = 0, scaleX = 1, scaleY = 1)
+    end,
+})
+
+--- Controls a renderable entity's color and opacity.
+export record Tint
+    --- Caller-writable. Sets the red channel from zero to one.
+    r: number
+
+    --- Caller-writable. Sets the green channel from zero to one.
+    g: number
+
+    --- Caller-writable. Sets the blue channel from zero to one.
+    b: number
+
+    --- Caller-writable. Sets opacity from transparent at zero to opaque at one.
+    a: number
+end
+
+--- The process-wide `Tint` component definition.
+export const TintComponent: components.TableComponent<Tint> = components.newComponent({
+    -- This persisted component name is a compatibility surface.
+    name = "Tint",
+    construct = function(r: number?, g: number?, b: number?, a: number?): Tint
+        return new Tint(r = r or 1, g = g or 1, b = b or 1, a = a or 1)
+    end,
+    default = function(): Tint
+        return new Tint(r = 1, g = 1, b = 1, a = 1)
+    end,
+})
+
+--- Marks an entity as contributing geometry to the two-dimensional scene.
+-- This persisted component name is a compatibility surface.
+export const Renderable2D: components.Component = components.newTagComponent({name = "Renderable2D"})

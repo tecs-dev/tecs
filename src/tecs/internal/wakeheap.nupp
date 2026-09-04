@@ -1,0 +1,137 @@
+module tecs.internal.wakeheap
+
+--[[
+A deterministic min-heap for values scheduled at an integer time.
+
+Entries are ordered by `(key, sequence)`. The sequence breaks key ties, so the
+caller controls deterministic ordering independently of insertion order. The
+parallel arrays and hole-moving sifts preserve the allocation-free scheduling
+path used by the ECS task runtime.
+]]
+
+local floor = math.floor
+
+--- A deterministic min-heap ordered by key and sequence.
+export record Heap
+    keys: {integer}
+    sequences: {integer}
+    values: {any}
+    size: integer
+end
+
+--- Creates an empty heap.
+--- @return the empty heap
+export function new(): Heap
+    return new Heap(keys = {}, sequences = {}, values = {}, size = 0)
+end
+
+--- Discards every entry while retaining the heap's tables.
+--- @param heap the heap to clear
+export function clear(heap: Heap): nil
+    for index = 1, heap.size do
+        heap.values[index] = nil
+    end
+    heap.size = 0
+end
+
+--- Adds a value ordered by its key and sequence.
+--- @param heap the heap to modify
+--- @param key the scheduled integer time
+--- @param sequence the caller-controlled tie breaker
+--- @param value the value to schedule
+export function push(heap: Heap, key: integer, sequence: integer, value: any): nil
+    local keys = heap.keys
+    local sequences = heap.sequences
+    local values = heap.values
+    local index = heap.size + 1
+    heap.size = index
+
+    while index > 1 do
+        local parent = floor(index / 2) as integer
+        local parentKey = keys[parent]
+        local parentSequence = sequences[parent]
+        if key < parentKey or (key == parentKey and sequence < parentSequence) then
+            keys[index] = parentKey
+            sequences[index] = parentSequence
+            values[index] = values[parent]
+            index = parent
+        else
+            break
+        end
+    end
+
+    keys[index] = key
+    sequences[index] = sequence
+    values[index] = value
+end
+
+--- Returns the earliest key, or nil when the heap is empty.
+--- @param heap the heap to inspect
+--- @return the earliest key, or nil when empty
+export function peek(heap: Heap): integer?
+    if heap.size == 0 then
+        return nil
+    end
+    return heap.keys[1]
+end
+
+--- Removes and returns the earliest entry.
+--- @param heap the heap to modify
+--- @return the key, sequence, and value, or nil values when empty
+export function pop(heap: Heap): (integer?, integer?, any)
+    local size = heap.size
+    if size == 0 then
+        return nil, nil, nil
+    end
+
+    local keys = heap.keys
+    local sequences = heap.sequences
+    local values = heap.values
+    local key = keys[1]
+    local sequence = sequences[1]
+    local value = values[1]
+    local tailKey = keys[size]
+    local tailSequence = sequences[size]
+    local tailValue = values[size]
+
+    values[size] = nil
+    size = size - 1
+    heap.size = size
+
+    local index: integer = 1
+    while true do
+        local left = (index * 2) as integer
+        if left > size then
+            break
+        end
+
+        local child: integer = left
+        local right = (left + 1) as integer
+        if right <= size then
+            local leftKey = keys[left]
+            local rightKey = keys[right]
+            if rightKey < leftKey or (rightKey == leftKey and sequences[right] < sequences[left]) then
+                child = right
+            end
+        end
+
+        local childKey = keys[child]
+        local childSequence = sequences[child]
+        if childKey < tailKey or (childKey == tailKey and childSequence < tailSequence) then
+            keys[index] = childKey
+            sequences[index] = childSequence
+            values[index] = values[child]
+            index = child
+        else
+            break
+        end
+    end
+
+    if size > 0 then
+        keys[index] = tailKey
+        sequences[index] = tailSequence
+        values[index] = tailValue
+    end
+
+    return key, sequence, value
+end

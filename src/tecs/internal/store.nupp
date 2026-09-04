@@ -1,0 +1,88 @@
+module tecs.internal.store
+
+--[[
+Typed process-wide keys and independent in-memory stores.
+
+Keys are phantom identities: Nupp remembers T while the runtime indexes one
+integer. Repeating a non-empty name returns the same identity so module reloads
+keep reaching the same world resource.
+]]
+
+local nextKeyId: integer = 1
+
+--- A process-wide typed store key.
+export record Key<T>
+    id: integer
+    name: string?
+end
+
+local namedKeys: {[string]: Key<any>} = {}
+
+--- A typed key-value store.
+export record Store
+    private values: {[integer]: any}
+    metamethod __index: function<T>(self, key: Key<T>): T?
+    metamethod __newindex: function<T>(self, key: Key<T>, value: T?)
+end
+
+Store.__index = function<T>(self: Store, key: Key<T>): T?
+    return self.values[key.id] as T?
+end
+
+Store.__newindex = function<T>(self: Store, key: Key<T>, value: T?): nil
+    self.values[key.id] = value
+end
+
+--- Creates or recovers a process-wide typed key.
+--- @param name the reload-stable key name, or nil for a fresh anonymous key
+--- @param _forType an optional inference witness that is never stored
+--- @return the typed key
+--- @raises when name is empty
+export function newKey<T>(name: string?, borrows _forType: T?): Key<T>
+    if name == "" then
+        error("newKey: name must not be empty", 2)
+    end
+    if name ~= nil then
+        local existing = namedKeys[name]
+        if existing ~= nil then
+            return existing as Key<T>
+        end
+    end
+    local key: Key<T> = new Key(id = nextKeyId, name = name)
+    nextKeyId = nextKeyId + 1
+    if name ~= nil then
+        namedKeys[name] = key as Key<any>
+    end
+
+    return key
+end
+
+--- Returns a named key when it has already been declared.
+--- @param name the process-wide key name
+--- @return the key, or nil when the name is unknown
+export function findKey<T>(name: string): Key<T>?
+    return namedKeys[name] as Key<T>?
+end
+
+--- Returns a fresh name-to-id snapshot of declared keys.
+--- @return the caller-owned key listing
+export function listKeys(): {[string]: integer}
+    local result: {[string]: integer} = {}
+    for name, key in pairs(namedKeys) do
+        result[name] = key.id
+    end
+
+    return result
+end
+
+--- Creates an independent empty store.
+--- @return the empty typed store
+export function new(): Store
+    return new Store(values = {})
+end
+
+--- Removes every value from a store.
+--- @param value the store to clear
+export function clear(value: Store): nil
+    value.values = {}
+end

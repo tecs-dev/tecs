@@ -1,0 +1,185 @@
+local application = require("tecs.application")
+local ecs = require("tecs.ecs")
+local platformevents = require("tecs.platform.events")
+local test = require("nupp.test")
+
+local suite = {}
+
+function suite.constructsInertThenRunsPluginBeforeStartup(): nil
+    local pluginCalled = false
+    local startupObserved = false
+    local app = application.newApplication({
+        plugin = function(exclusive running: application.Application): nil
+            pluginCalled = true
+            running.world:addSystem({
+                phase = ecs.phases.Startup,
+                run = function(_dt: number, exclusive _world: ecs.World): nil
+                    startupObserved = pluginCalled
+                end,
+            })
+        end,
+    })
+
+    test.assert(not pluginCalled)
+    test.equal(app:getState(), "created")
+    test.assert(app:init())
+
+    test.assert(startupObserved)
+    test.equal(app:getState(), "running")
+end
+
+function suite.deliversASealedEventBatchBeforeTheFrame(): nil
+    local delivered: {string} = {}
+    local seenByUpdate = 0
+    local resizeWidth = 0
+    local app = application.newApplication({
+        onEvent = function(event: platformevents.Event, exclusive _running: application.Application): nil
+            delivered[#delivered + 1] = event.kind
+        end,
+        plugin = function(exclusive running: application.Application): nil
+            running.world:observe(0, platformevents.on.windowResized, function(
+                event: platformevents.ResizeEvent,
+                exclusive _world: ecs.World
+            ): nil
+                resizeWidth = event.width
+            end)
+            running.world:addSystem({
+                phase = ecs.phases.Ingress,
+                run = function(_dt: number, exclusive _world: ecs.World): nil
+                    seenByUpdate = #delivered
+                end,
+            })
+        end,
+    })
+    app:init()
+
+    local continues = app:iterate(0.25, {
+        platformevents.resized(1280, 720),
+        platformevents.focused(true),
+    })
+
+    test.assert(continues)
+    test.equal(table.concat(delivered, ","), "windowResized,windowFocusGained")
+    test.equal(resizeWidth, 1280)
+    test.equal(seenByUpdate, 2)
+    test.equal(app.elapsed, 0.25)
+    test.equal(app.frame, 1)
+end
+
+function suite.honorsQuitRequestsFromEvents(): nil
+    local app = application.newApplication({
+        onEvent = function(_event: platformevents.Event, exclusive _running: application.Application): nil end,
+    })
+    app:init()
+
+    test.assert(not app:iterate(0.1, {platformevents.closeRequested(1)}))
+
+    test.equal(app.frame, 0)
+    test.equal(app.elapsed, 0)
+end
+
+function suite.pausesSimulationButNotHostIterations(): nil
+    local app = application.newApplication()
+    app:init()
+    app:setSuspended(true)
+
+    test.assert(app:iterate(0.5))
+
+    test.equal(app.frame, 1)
+    test.equal(app.elapsed, 0)
+    test.equal(app.world:fixedStepCount(), 0)
+end
+
+function suite.containsAFrameCrashAndResumesInDebugMode(): nil
+    local shouldFail = true
+    local calls = 0
+    local app = application.newApplication({
+        debug = true,
+        plugin = function(exclusive running: application.Application): nil
+            running.world:addSystem({
+                phase = ecs.phases.Update,
+                run = function(_dt: number, exclusive _world: ecs.World): nil
+                    calls = calls + 1
+                    if shouldFail then
+                        error("expected frame crash")
+                    end
+                end,
+            })
+        end,
+    })
+    app:init()
+
+    test.assert(app:iterate(0.1))
+    test.assert(app:crashed() ~= nil)
+    test.assert(app:iterate(0.1))
+    test.equal(calls, 1)
+
+    shouldFail = false
+    test.assert(app:clearCrash())
+    test.assert(app:iterate(0.1))
+    test.equal(calls, 2)
+end
+
+function suite.refusesCrashRecoveryOutsideDebugMode(): nil
+    local app = application.newApplication({
+        plugin = function(exclusive _running: application.Application): nil
+            error("expected plugin crash")
+        end,
+    })
+    app:init()
+
+    local resumed, reason = app:clearCrash()
+
+    test.assert(not resumed)
+    test.equal(reason, "application debug mode is disabled")
+end
+
+function suite.stopsAtTheConfiguredFrameLimit(): nil
+    local app = application.newApplication({debugMaxFrames = 2})
+    app:init()
+
+    test.assert(app:iterate(0))
+    test.assert(not app:iterate(0))
+    test.equal(app.frame, 2)
+end
+
+function suite.runsShutdownOnceAfterAStartupFailure(): nil
+    local shutdownCalls = 0
+    local app = application.newApplication({
+        plugin = function(exclusive running: application.Application): nil
+            running.world:addSystem({
+                phase = ecs.phases.Shutdown,
+                run = function(_dt: number, exclusive _world: ecs.World): nil
+                    shutdownCalls = shutdownCalls + 1
+                end,
+            })
+            error("expected startup failure")
+        end,
+    })
+    app:init()
+
+    test.assert(app:shutdown())
+    test.assert(app:shutdown())
+
+    test.equal(shutdownCalls, 1)
+    test.equal(app:getState(), "stopped")
+end
+
+function suite.rejectsInvalidHostLifecycleCalls(): nil
+    local app = application.newApplication()
+    test.raises(function(): nil
+        app:iterate(0)
+    end, "created")
+    app:init()
+    test.raises(function(): nil
+        app:init()
+    end, "already running")
+    test.raises(function(): nil
+        app:iterate(-1)
+    end, "negative number")
+    test.raises(function(): nil
+        application.newApplication({debugMaxFrames = 0})
+    end, "positive integer")
+end
+
+return suite

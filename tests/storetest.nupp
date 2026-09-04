@@ -1,0 +1,62 @@
+local test = require("nupp.test")
+local data = require("tecs.data")
+local ecs = require("tecs.ecs")
+local suite = {}
+
+function suite.storesValuesUnderTypedKeys(): nil
+    local speed = data.newKey("test.store.speed", 0)
+    local store = data.newStore()
+    store[speed] = 120
+    local current: number? = store[speed]
+    test.equal(current as number, 120)
+    store[speed] = nil
+    test.assert(store[speed] == nil)
+end
+
+function suite.reusesNamedKeysAcrossDeclarations(): nil
+    local first = data.newKey("test.store.reload", "")
+    local second: data.Key<string> = data.newKey("test.store.reload", nil)
+    local found: data.Key<string>? = data.findKey("test.store.reload")
+    test.assert(first == second)
+    test.equal(found as data.Key<string>, first)
+    test.equal(data.listKeys()["test.store.reload"], first.id)
+end
+
+function suite.keepsStoresAndWorldsIndependent(): nil
+    local score = data.newKey("test.store.world.score", 0)
+    local first = ecs.newWorld({maxEntities = 2})
+    local second = ecs.newWorld({maxEntities = 2})
+    first.resources[score] = 10
+    second.resources[score] = 20
+    test.equal(first.resources[score] as number, 10)
+    test.equal(second.resources[score] as number, 20)
+end
+
+function suite.preservesResourcesWhenEntitiesAreCleared(): nil
+    local label = data.newKey("test.store.clear.label", "")
+    local world = ecs.newWorld({maxEntities = 2})
+    world.resources[label] = "ready"
+    world:spawn()
+    world:commit()
+    world:clearEntities()
+    test.equal(world.resources[label] as string, "ready")
+    test.equal(world.liveCount, 0)
+end
+
+function suite.sharesTypedStateBetweenSystems(): nil
+    local frames = data.newKey("test.store.system.frames", 0)
+    local world = ecs.newWorld({maxEntities = 2})
+    world.resources[frames] = 0
+    world:addSystem({
+        name = "test.resource.writer",
+        phase = ecs.phases.Update,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            running.resources[frames] = (running.resources[frames] or 0) + 1
+        end
+    })
+    world:update(0)
+    world:update(0)
+    test.equal(world.resources[frames] as number, 2)
+end
+
+return suite

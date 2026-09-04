@@ -1,0 +1,160 @@
+local ecs = require("tecs.ecs")
+local gfx = require("tecs.gfx")
+local host = require("tecs.host")
+local test = require("nupp.test")
+local window = require("tecs.platform.window")
+local suspension = nupp.suspension
+
+local suite = {}
+
+local function attach(exclusive session: host.Session): nil
+    host.attachWindow(
+        session,
+        1,
+        "host test",
+        640,
+        360,
+        1280,
+        720,
+        2,
+        10,
+        20,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        "none"
+    )
+end
+
+function suite.sealsTranslatedEventsIntoOneApplicationFrame(): nil
+    local session = host.create("host test", 640, 360, true, nil)
+    host.init(session)
+    attach(session)
+    host.pushFocus(session, false, 1, 1)
+    host.pushResize(session, false, 800, 450, 1600, 900, 2, 1.1, 2)
+    host.pushKey(session, true, "KeyW", "w", "w", 0, false, 1.2, 3)
+
+    test.equal(host.iterate(session, 0.25), "continue")
+
+    local width, height = session.app.window:getSize()
+    test.equal(width, 800)
+    test.equal(height, 450)
+    test.assert(not session.app.window:hasFocus())
+    test.assert(session.app.input:keyPressed("KeyW"))
+    test.equal(session.app.elapsed, 0.25)
+    test.assert(host.shutdown(session))
+end
+
+function suite.exposesTaggedCommandsAndCorrelatedFailures(): nil
+    local session = host.create(nil, nil, nil, false, nil)
+    host.init(session)
+    local serial = session.app.window:setTitle("changed")
+
+    local kind, returnedSerial, text, x, y, flag = host.nextWindowCommand(session)
+    test.equal(kind, "setTitle")
+    test.equal(returnedSerial, serial)
+    test.equal(text, "changed")
+    test.equal(x, nil)
+    test.equal(y, nil)
+    test.equal(flag, nil)
+    test.equal(host.nextWindowCommand(session), nil)
+
+    host.windowCommandFailed(session, assert(returnedSerial), "desktop rejected the title")
+    local failures = window.takeFailures(session.app.window)
+    test.equal(failures[1].serial, serial)
+    test.equal(failures[1].reason, "desktop rejected the title")
+    test.assert(host.shutdown(session))
+end
+
+function suite.supportsBoundedHeadlessSmokeRuns(): nil
+    local session = host.create(nil, nil, nil, false, 1)
+    host.init(session)
+
+    test.equal(host.iterate(session, 0), "stopped")
+    test.equal(session.app.frame, 1)
+    test.assert(host.shutdown(session))
+end
+
+function suite.exposesOneBatchedRenderPacketAfterACompletedFrame(): nil
+    local session = host.create(nil, 320, 180, false, nil)
+    session.app.world:spawn(ecs.Transform2D(40, 50, 0, 1, 0, 20, 30), gfx.Tint(), gfx.Renderable2D)
+    session.app.world:commit()
+    host.init(session)
+
+    test.equal(host.iterate(session, 0), "continue")
+    local reader = nupp.io.newScalarReader(host.renderPacket(session))
+    test.equal(reader:readUint32(), 0x54454353)
+    test.equal(reader:readUint32(), 1)
+    test.equal(reader:readUint32(), 36)
+    test.equal(reader:readUint32(), 1)
+    test.equal(reader:readFloat32(), 320)
+    test.equal(reader:readFloat32(), 180)
+    reader:drop()
+    test.assert(host.shutdown(session))
+end
+
+function suite.resumesAParkedUpdateOnALaterHostTurn(): nil
+    local session = host.create(nil, nil, nil, false, nil)
+    local polls = 0
+    local resumed = false
+    session.app.world:addSystem({
+        name = "test.host.parked",
+        phase = ecs.phases.Update,
+        run = function(): nil
+            if resumed then
+                return
+            end
+            resumed = suspension.suspend("host test wait", function(resume, context): function()
+                context:source("test.host.parked", 50, function(): integer
+                    polls = polls + 1
+                    if polls == 2 then
+                        resume(true)
+                        return 1
+                    end
+
+                    return 0
+                end)
+
+                return function(): nil
+                end
+            end)
+        end,
+    })
+    host.init(session)
+
+    test.equal(host.iterate(session, 0.25), "parked")
+    test.equal(session.app.frame, 0)
+    test.equal(host.iterate(session, 99), "parked")
+    test.equal(session.app.frame, 0)
+    test.equal(host.iterate(session, 99), "continue")
+    test.assert(resumed)
+    test.equal(session.app.frame, 1)
+    test.equal(session.app.elapsed, 0.25)
+    test.assert(host.shutdown(session))
+end
+
+function suite.shutdownUnwindsAParkedUpdateWithoutReportingACrash(): nil
+    local session = host.create(nil, nil, nil, false, nil)
+    session.app.world:addSystem({
+        name = "test.host.cancel",
+        phase = ecs.phases.Update,
+        run = function(): nil
+            suspension.suspend("host test never ready", function(_resume): function()
+                return function(): nil
+                end
+            end)
+        end,
+    })
+    host.init(session)
+
+    test.equal(host.iterate(session, 0), "parked")
+    test.assert(host.shutdown(session))
+    test.equal(host.crashed(session), nil)
+end
+
+return suite

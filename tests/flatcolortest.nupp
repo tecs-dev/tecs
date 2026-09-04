@@ -1,0 +1,29 @@
+local flatcolor = require("flatcolor")
+local framepacket = require("tecs.internal.framepacket")
+local host = require("tecs.host")
+local test = require("nupp.test")
+
+local suite = {}
+
+function suite.installsACompleteGameThroughItsEntry(): nil
+    local session = flatcolor.create(nil, 800, 450, false, 1)
+    test.assert(host.init(session))
+    test.equal(session.app.world.liveCount, 3)
+
+    local reader = nupp.io.newScalarReader(host.renderPacket(session))
+    test.equal(reader:readUint32(), framepacket.MAGIC)
+    test.equal(reader:readUint32(), framepacket.VERSION)
+    test.equal(reader:readUint32(), framepacket.INSTANCE_STRIDE)
+    test.equal(reader:readUint32(), 3)
+    test.equal(reader:readFloat32(), 800)
+    test.equal(reader:readFloat32(), 450)
+    test.equal(reader:readFloat32(), 240)
+    test.equal(reader:readFloat32(), 225)
+    reader:drop()
+
+    test.equal(host.iterate(session, 1), "stopped")
+    test.equal(host.crashed(session), nil)
+    test.assert(host.shutdown(session))
+end
+
+return suite

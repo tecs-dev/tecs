@@ -1,0 +1,106 @@
+module tecs.internal.events
+
+--[[
+Typed process-wide event definitions.
+
+An event definition is callable and produces a short-lived envelope. Worlds
+own observer state; the definition owns only its stable type id and constructor.
+]]
+
+local nextEventId: integer = 1
+
+--- A registered event definition whose payload type is T.
+export interface Event<T>
+    eventId: integer
+    eventName: string
+    construct: function(...: any): T
+    metamethod __call: function(self, ...: any): Instance<T>
+end
+
+--- One event payload paired with its registered definition.
+export record Instance<T>
+    eventType: Event<T>
+    value: T
+end
+
+--- Options for a typed event definition.
+export type Options<T> = {
+    name: string,
+    construct: function(...: any): T
+}
+
+--- Creates a callable process-wide event definition.
+--- @param options the diagnostic name and payload constructor
+--- @return the callable event definition
+--- @raises when the event name is empty
+export function new<T>(options: Options<T>): Event<T>
+    if options.name == "" then
+        error("newEvent: name must not be empty", 2)
+    end
+    local id = nextEventId
+    nextEventId = id + 1
+    local event: Event<T>
+    event = setmetatable({eventId = id, eventName = options.name, construct = options.construct}, {
+        __call = function(self: Event<T>, ...: any): Instance<T>
+            return new Instance(eventType = self, value = self.construct(...))
+        end,
+    }) as Event<T>
+
+    return event
+end
+
+--- The payload shared by entity spawn and despawn lifecycle events.
+export record EntityLifecycle
+    entity: integer
+end
+
+local function entityLifecycle(entity: integer): EntityLifecycle
+    return new EntityLifecycle(entity = entity)
+end
+
+--- Fires at address zero after an entity becomes committed and alive.
+export const OnSpawn: Event<EntityLifecycle> = new({name = "OnSpawn", construct = entityLifecycle})
+
+--- Fires at the entity address and address zero immediately before removal.
+export const OnDespawn: Event<EntityLifecycle> = new({name = "OnDespawn", construct = entityLifecycle})
+
+--- The payload emitted when a state enters or exits the stack.
+export record StateChange
+    state: string
+end
+
+--- The payload emitted when a state loses focus to a pushed state.
+export record StateBlurChange
+    state: string
+    pushed: string
+end
+
+--- The payload emitted when a state regains focus after a pop.
+export record StateFocusChange
+    state: string
+    popped: string
+end
+
+local function stateChange(state: string): StateChange
+    return new StateChange(state = state)
+end
+
+local function stateBlur(state: string, pushed: string): StateBlurChange
+    return new StateBlurChange(state = state, pushed = pushed)
+end
+
+local function stateFocus(state: string, popped: string): StateFocusChange
+    return new StateFocusChange(state = state, popped = popped)
+end
+
+--- Fires at address zero after a state becomes active.
+export const StateEnter: Event<StateChange> = new({name = "StateEnter", construct = stateChange})
+
+--- Fires at address zero before a popped state leaves the stack.
+export const StateExit: Event<StateChange> = new({name = "StateExit", construct = stateChange})
+
+--- Fires at address zero after the current state loses focus.
+export const StateBlur: Event<StateBlurChange> = new({name = "StateBlur", construct = stateBlur})
+
+--- Fires at address zero after the uncovered state regains focus.
+export const StateFocus: Event<StateFocusChange> = new({name = "StateFocus", construct = stateFocus})

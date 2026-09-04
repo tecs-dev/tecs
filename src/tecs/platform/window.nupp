@@ -1,0 +1,553 @@
+module tecs.platform.window
+
+--[[
+Host-neutral state and commands for one application window.
+
+Nupp owns the requested configuration and the last state observed from the
+host. Rust owns the `winit` window. Game-facing setters enqueue typed commands;
+they do not update getters optimistically because a compositor may reject or
+defer a request. The host drains commands, applies them, and reports a complete
+state snapshot or a failure for the originating serial.
+]]
+
+local platformevents = require("tecs.platform.events")
+
+--- A pointer confinement mode understood by `winit`.
+export type CursorGrab = "none" | "confined" | "locked"
+
+--- Optional settings copied when the application is constructed.
+export type Options = {
+    title: string?,
+    width: integer?,
+    height: integer?,
+    resizable: boolean?,
+    fullscreen: boolean?,
+    borderless: boolean?,
+    hidden: boolean?,
+    alwaysOnTop: boolean?,
+    transparent: boolean?,
+    x: integer?,
+    y: integer?,
+    minWidth: integer?,
+    minHeight: integer?,
+    maxWidth: integer?,
+    maxHeight: integer?
+}
+
+--- The validated creation request read by the Rust host.
+export record CreateOptions
+    title: string
+    width: integer
+    height: integer
+    resizable: boolean
+    fullscreen: boolean
+    decorations: boolean
+    visible: boolean
+    alwaysOnTop: boolean
+    transparent: boolean
+    x: integer?
+    y: integer?
+    minWidth: integer?
+    minHeight: integer?
+    maxWidth: integer?
+    maxHeight: integer?
+end
+
+--- A complete host observation applied atomically to a window.
+export record HostState
+    id: integer
+    title: string
+    width: integer
+    height: integer
+    pixelWidth: integer
+    pixelHeight: integer
+    scaleFactor: number
+    x: integer
+    y: integer
+    focused: boolean
+    visible: boolean
+    minimized: boolean
+    maximized: boolean
+    fullscreen: boolean
+    occluded: boolean
+    resizable: boolean
+    cursorVisible: boolean
+    cursorGrab: CursorGrab
+end
+
+--- A request to change the desktop title.
+export record SetTitleCommand
+    kind: "setTitle"
+    serial: integer
+    title: string
+end
+
+--- A request to change the logical client size.
+export record SetSizeCommand
+    kind: "setSize"
+    serial: integer
+    width: integer
+    height: integer
+end
+
+--- A request to move the top-left client position.
+export record SetPositionCommand
+    kind: "setPosition"
+    serial: integer
+    x: integer
+    y: integer
+end
+
+--- A request to map or unmap the window.
+export record SetVisibleCommand
+    kind: "setVisible"
+    serial: integer
+    visible: boolean
+end
+
+--- A request to enable or disable edge resizing.
+export record SetResizableCommand
+    kind: "setResizable"
+    serial: integer
+    resizable: boolean
+end
+
+--- A request to enter or leave borderless desktop fullscreen.
+export record SetFullscreenCommand
+    kind: "setFullscreen"
+    serial: integer
+    fullscreen: boolean
+end
+
+--- A request to show or hide the pointer.
+export record SetCursorVisibleCommand
+    kind: "setCursorVisible"
+    serial: integer
+    visible: boolean
+end
+
+--- A request to change pointer confinement.
+export record SetCursorGrabCommand
+    kind: "setCursorGrab"
+    serial: integer
+    mode: CursorGrab
+end
+
+--- A request for a redraw callback on the next suitable host turn.
+export record RequestRedrawCommand
+    kind: "requestRedraw"
+    serial: integer
+end
+
+--- One command drained by the Rust `winit` adapter.
+export type Command = SetTitleCommand
+    | SetSizeCommand
+    | SetPositionCommand
+    | SetVisibleCommand
+    | SetResizableCommand
+    | SetFullscreenCommand
+    | SetCursorVisibleCommand
+    | SetCursorGrabCommand
+    | RequestRedrawCommand
+
+--- A host rejection associated with one command serial.
+export record CommandFailure
+    serial: integer
+    reason: string
+end
+
+--- The game-facing handle for one Rust-owned window.
+export record Window
+    private create: CreateOptions
+    private state: HostState
+    private attached: boolean
+    private nextSerial: integer
+    private pending: {Command}
+    private failures: {CommandFailure}
+
+    creationOptions: function(borrows self: Window): CreateOptions
+    isAttached: function(borrows self: Window): boolean
+    id: function(borrows self: Window): integer
+    title: function(borrows self: Window): string
+    getSize: function(borrows self: Window): (integer, integer)
+    getPixelSize: function(borrows self: Window): (integer, integer)
+    scaleFactor: function(borrows self: Window): number
+    position: function(borrows self: Window): (integer, integer)
+    hasFocus: function(borrows self: Window): boolean
+    isVisible: function(borrows self: Window): boolean
+    isMinimized: function(borrows self: Window): boolean
+    isMaximized: function(borrows self: Window): boolean
+    isFullscreen: function(borrows self: Window): boolean
+    isOccluded: function(borrows self: Window): boolean
+    isResizable: function(borrows self: Window): boolean
+    isCursorVisible: function(borrows self: Window): boolean
+    cursorGrab: function(borrows self: Window): CursorGrab
+    setTitle: function(exclusive self: Window, title: string): integer
+    setSize: function(exclusive self: Window, width: integer, height: integer): integer
+    setPosition: function(exclusive self: Window, x: integer, y: integer): integer
+    setVisible: function(exclusive self: Window, visible: boolean): integer
+    setResizable: function(exclusive self: Window, resizable: boolean): integer
+    setFullscreen: function(exclusive self: Window, fullscreen: boolean): integer
+    setCursorVisible: function(exclusive self: Window, visible: boolean): integer
+    setCursorGrab: function(exclusive self: Window, mode: CursorGrab): integer
+    requestRedraw: function(exclusive self: Window): integer
+end
+
+local function positive(value: integer, field: string, level: integer): nil
+    if value < 1 then
+        error("platform.window: " .. field .. " must be positive", level)
+    end
+end
+
+local function pair(first: integer?, second: integer?, firstName: string, secondName: string): nil
+    if (first == nil) ~= (second == nil) then
+        error("platform.window: " .. firstName .. " and " .. secondName .. " must be supplied together", 3)
+    end
+    if first ~= nil then
+        positive(first, firstName, 3)
+        positive(assert(second), secondName, 3)
+    end
+end
+
+local function copyCreate(borrows value: CreateOptions): CreateOptions
+    return new CreateOptions(
+        title = value.title,
+        width = value.width,
+        height = value.height,
+        resizable = value.resizable,
+        fullscreen = value.fullscreen,
+        decorations = value.decorations,
+        visible = value.visible,
+        alwaysOnTop = value.alwaysOnTop,
+        transparent = value.transparent,
+        x = value.x,
+        y = value.y,
+        minWidth = value.minWidth,
+        minHeight = value.minHeight,
+        maxWidth = value.maxWidth,
+        maxHeight = value.maxHeight
+    )
+end
+
+local function copyState(borrows value: HostState): HostState
+    return new HostState(
+        id = value.id,
+        title = value.title,
+        width = value.width,
+        height = value.height,
+        pixelWidth = value.pixelWidth,
+        pixelHeight = value.pixelHeight,
+        scaleFactor = value.scaleFactor,
+        x = value.x,
+        y = value.y,
+        focused = value.focused,
+        visible = value.visible,
+        minimized = value.minimized,
+        maximized = value.maximized,
+        fullscreen = value.fullscreen,
+        occluded = value.occluded,
+        resizable = value.resizable,
+        cursorVisible = value.cursorVisible,
+        cursorGrab = value.cursorGrab
+    )
+end
+
+local function validateState(borrows state: HostState): nil
+    if state.id < 1 then
+        error("platform.window.attach: id must be positive", 3)
+    end
+    if state.width < 0 or state.height < 0 or state.pixelWidth < 0 or state.pixelHeight < 0 then
+        error("platform.window.attach: dimensions must be non-negative", 3)
+    end
+    if state.scaleFactor <= 0 or state.scaleFactor ~= state.scaleFactor then
+        error("platform.window.attach: scaleFactor must be greater than zero", 3)
+    end
+end
+
+local function serial(exclusive window: Window): integer
+    local value = window.nextSerial
+    window.nextSerial = value + 1
+    return value
+end
+
+local function enqueue(exclusive window: Window, command: Command): integer
+    window.pending[#window.pending + 1] = command
+    return command.serial
+end
+
+--- Creates a detached window contract without opening an OS window.
+--- @param options the copied and validated creation options
+--- @return a window ready for the Rust host to attach
+export function newWindow(options: Options?): Window
+    local width = options and options.width or 1280
+    local height = options and options.height or 720
+    positive(width, "width", 2)
+    positive(height, "height", 2)
+    local minWidth = options and options.minWidth or nil
+    local minHeight = options and options.minHeight or nil
+    local maxWidth = options and options.maxWidth or nil
+    local maxHeight = options and options.maxHeight or nil
+    pair(minWidth, minHeight, "minWidth", "minHeight")
+    pair(maxWidth, maxHeight, "maxWidth", "maxHeight")
+    if minWidth ~= nil and maxWidth ~= nil and minWidth > maxWidth then
+        error("platform.window: minWidth must not exceed maxWidth", 2)
+    end
+    if minHeight ~= nil and maxHeight ~= nil and minHeight > maxHeight then
+        error("platform.window: minHeight must not exceed maxHeight", 2)
+    end
+    local x = options and options.x or nil
+    local y = options and options.y or nil
+    if (x == nil) ~= (y == nil) then
+        error("platform.window: x and y must be supplied together", 2)
+    end
+
+    local create = new CreateOptions(
+        title = options and options.title or "tecs",
+        width = width,
+        height = height,
+        resizable = options == nil or options.resizable ~= false,
+        fullscreen = options ~= nil and options.fullscreen == true,
+        decorations = options == nil or options.borderless ~= true,
+        visible = options == nil or options.hidden ~= true,
+        alwaysOnTop = options ~= nil and options.alwaysOnTop == true,
+        transparent = options ~= nil and options.transparent == true,
+        x = x,
+        y = y,
+        minWidth = minWidth,
+        minHeight = minHeight,
+        maxWidth = maxWidth,
+        maxHeight = maxHeight
+    )
+    local initial = new HostState(
+        id = 0,
+        title = create.title,
+        width = create.width,
+        height = create.height,
+        pixelWidth = create.width,
+        pixelHeight = create.height,
+        scaleFactor = 1,
+        x = create.x or 0,
+        y = create.y or 0,
+        focused = false,
+        visible = create.visible,
+        minimized = false,
+        maximized = false,
+        fullscreen = create.fullscreen,
+        occluded = false,
+        resizable = create.resizable,
+        cursorVisible = true,
+        cursorGrab = "none"
+    )
+
+    return new Window(create = create, state = initial, attached = false, nextSerial = 1, pending = {}, failures = {})
+end
+
+--- Returns a detached copy of the validated creation request.
+--- @param self the window contract to inspect
+--- @return a copy safe for the host to retain
+function Window.creationOptions(borrows self: Window): CreateOptions
+    return copyCreate(self.create)
+end
+
+--- Reports whether the Rust host has attached an OS window.
+function Window.isAttached(borrows self: Window): boolean
+    return self.attached
+end
+
+--- Returns the application-local host window id, or zero before attachment.
+function Window.id(borrows self: Window): integer
+    return self.state.id
+end
+
+--- Returns the last title acknowledged by the host.
+function Window.title(borrows self: Window): string
+    return self.state.title
+end
+
+--- Returns the last logical client size observed from the host.
+function Window.getSize(borrows self: Window): integer, integer
+    return self.state.width, self.state.height
+end
+
+--- Returns the last physical drawable size observed from the host.
+function Window.getPixelSize(borrows self: Window): integer, integer
+    return self.state.pixelWidth, self.state.pixelHeight
+end
+
+--- Returns the current physical-pixels-per-logical-unit ratio.
+function Window.scaleFactor(borrows self: Window): number
+    return self.state.scaleFactor
+end
+
+--- Returns the last desktop position observed from the host.
+function Window.position(borrows self: Window): integer, integer
+    return self.state.x, self.state.y
+end
+
+function Window.hasFocus(borrows self: Window): boolean
+    return self.state.focused
+end
+
+function Window.isVisible(borrows self: Window): boolean
+    return self.state.visible
+end
+
+function Window.isMinimized(borrows self: Window): boolean
+    return self.state.minimized
+end
+
+function Window.isMaximized(borrows self: Window): boolean
+    return self.state.maximized
+end
+
+function Window.isFullscreen(borrows self: Window): boolean
+    return self.state.fullscreen
+end
+
+function Window.isOccluded(borrows self: Window): boolean
+    return self.state.occluded
+end
+
+function Window.isResizable(borrows self: Window): boolean
+    return self.state.resizable
+end
+
+function Window.isCursorVisible(borrows self: Window): boolean
+    return self.state.cursorVisible
+end
+
+function Window.cursorGrab(borrows self: Window): CursorGrab
+    return self.state.cursorGrab
+end
+
+function Window.setTitle(exclusive self: Window, title: string): integer
+    return enqueue(self, new SetTitleCommand(kind = "setTitle", serial = serial(self), title = title))
+end
+
+function Window.setSize(exclusive self: Window, width: integer, height: integer): integer
+    positive(width, "width", 2)
+    positive(height, "height", 2)
+    return enqueue(self, new SetSizeCommand(kind = "setSize", serial = serial(self), width = width, height = height))
+end
+
+function Window.setPosition(exclusive self: Window, x: integer, y: integer): integer
+    return enqueue(self, new SetPositionCommand(kind = "setPosition", serial = serial(self), x = x, y = y))
+end
+
+function Window.setVisible(exclusive self: Window, visible: boolean): integer
+    return enqueue(self, new SetVisibleCommand(kind = "setVisible", serial = serial(self), visible = visible))
+end
+
+function Window.setResizable(exclusive self: Window, resizable: boolean): integer
+    return enqueue(self, new SetResizableCommand(kind = "setResizable", serial = serial(self), resizable = resizable))
+end
+
+function Window.setFullscreen(exclusive self: Window, fullscreen: boolean): integer
+    return enqueue(
+        self,
+        new SetFullscreenCommand(kind = "setFullscreen", serial = serial(self), fullscreen = fullscreen)
+    )
+end
+
+function Window.setCursorVisible(exclusive self: Window, visible: boolean): integer
+    return enqueue(
+        self,
+        new SetCursorVisibleCommand(kind = "setCursorVisible", serial = serial(self), visible = visible)
+    )
+end
+
+function Window.setCursorGrab(exclusive self: Window, mode: CursorGrab): integer
+    return enqueue(self, new SetCursorGrabCommand(kind = "setCursorGrab", serial = serial(self), mode = mode))
+end
+
+function Window.requestRedraw(exclusive self: Window): integer
+    return enqueue(self, new RequestRedrawCommand(kind = "requestRedraw", serial = serial(self)))
+end
+
+--- Attaches the OS window and atomically installs its initial observed state.
+--- @param window the contract the host created the OS window for
+--- @param state the complete initial state
+--- @raises when already attached or when the state is invalid
+export function attach(exclusive window: Window, state: HostState): nil
+    if window.attached then
+        error("platform.window.attach: window is already attached", 2)
+    end
+    validateState(state)
+    window.state = copyState(state)
+    window.attached = true
+end
+
+--- Replaces observed state after the host applies commands or reads the OS.
+--- @param window the attached window contract
+--- @param state the complete new state
+export function applyState(exclusive window: Window, state: HostState): nil
+    if not window.attached then
+        error("platform.window.applyState: window is not attached", 2)
+    end
+    validateState(state)
+    if state.id ~= window.state.id then
+        error("platform.window.applyState: window id changed", 2)
+    end
+    window.state = copyState(state)
+end
+
+--- Folds a translated window event before game observers receive it.
+--- @param window the window contract receiving the event
+--- @param event the ordered platform event
+export function handleEvent(exclusive window: Window, event: platformevents.Event): nil
+    if event.window ~= 0 and window.state.id ~= 0 and event.window ~= window.state.id then
+        return
+    end
+    if event is platformevents.ResizeEvent then
+        window.state.width = event.width
+        window.state.height = event.height
+        window.state.pixelWidth = event.pixelWidth
+        window.state.pixelHeight = event.pixelHeight
+        window.state.scaleFactor = event.scaleFactor
+    elseif event is platformevents.FocusEvent then
+        window.state.focused = event.focused
+    end
+end
+
+--- Removes the current pending command batch for the host to process.
+--- @param window the window whose requests the host is draining
+--- @return the ordered command batch, which the caller owns
+export function drainCommands(exclusive window: Window): {Command}
+    local commands = window.pending
+    window.pending = {}
+    return commands
+end
+
+--- Records a non-empty operational failure for one command.
+--- @param window the originating window
+--- @param serial the rejected command serial
+--- @param reason the host failure suitable for diagnostics
+export function reportFailure(exclusive window: Window, serial: integer, reason: string): nil
+    if serial < 1 then
+        error("platform.window.reportFailure: serial must be positive", 2)
+    end
+    if reason == "" then
+        error("platform.window.reportFailure: reason must not be empty", 2)
+    end
+    window.failures[#window.failures + 1] = new CommandFailure(serial = serial, reason = reason)
+end
+
+--- Removes the current command failures for game-side diagnostics.
+--- @param window the window whose failures are consumed
+--- @return the ordered failure batch, which the caller owns
+export function takeFailures(exclusive window: Window): {CommandFailure}
+    local failures = window.failures
+    window.failures = {}
+    return failures
+end
+
+--- Detaches an OS window after host teardown.
+--- @param window the contract to detach
+export function detach(exclusive window: Window): nil
+    window.attached = false
+    window.state.id = 0
+    window.state.focused = false
+    window.state.visible = false
+    window.state.cursorGrab = "none"
+    window.pending = {}
+end

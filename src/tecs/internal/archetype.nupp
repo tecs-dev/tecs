@@ -1,0 +1,285 @@
+module tecs.internal.archetype
+
+--[[
+A dense entity list and component columns for one signature.
+
+Tags allocate no column. Scalar columns contain raw primitives at the same
+one-based index as the entity list, while world placement rows remain
+zero-based. Swap removal updates every column in lockstep.
+]]
+
+local components = require("tecs.internal.components")
+
+--- Dense storage for entities sharing one component signature.
+export record Archetype
+    id: integer
+    signature: string
+    componentIds: {[integer]: boolean}
+    components: {components.Component}
+    entities: {integer}
+    columns: {[integer]: {any}}
+    private dirty: {[integer]: boolean}
+
+    get: function<C is components.Component>(self: Archetype, component: C): {C.Value}?
+    getMut: function<C is components.Component>(self: Archetype, component: C): {C.Value}?
+    isComponentDirty: function(self: Archetype, component: components.Component): boolean
+    anyComponentDirty: function(self: Archetype): boolean
+    markComponentDirty: function(self: Archetype, component: components.Component): nil
+    markAllComponentsDirty: function(self: Archetype): nil
+    clearDirtyComponents: function(self: Archetype): nil
+    dirtyComponents: function(self: Archetype): function(): components.Component?
+end
+
+--- Produces the canonical signature for a component collection.
+--- @param values the components to canonicalize
+--- @return the sorted signature
+--- @raises when one component appears more than once
+export function signatureOf(values: {components.Component}): string
+    local ids: {integer} = {}
+    local seen: {[integer]: boolean} = {}
+    for index = 1, #values do
+        local id = values[index].componentId
+        if seen[id] then
+            error("archetype signature repeats component " .. values[index].componentName, 2)
+        end
+        seen[id] = true
+        ids[index] = id
+    end
+    table.sort(ids)
+    local parts: {string} = {}
+    for index = 1, #ids do
+        parts[index] = tostring(ids[index])
+    end
+
+    return table.concat(parts, ",")
+end
+
+--- Creates an empty archetype for a canonical component collection.
+--- @param id the world-local archetype id
+--- @param values the components in any order
+--- @return the empty archetype
+export function new(id: integer, values: {components.Component}): Archetype
+    local membership: {[integer]: boolean} = {}
+    local ordered: {components.Component} = {}
+    local columns: {[integer]: {any}} = {}
+    for index = 1, #values do
+        local component = values[index]
+        membership[component.componentId] = true
+        ordered[index] = component
+        if component.storageType ~= "tag" then
+            columns[component.componentId] = {}
+        end
+    end
+    table.sort(ordered, function(left: components.Component, right: components.Component): boolean
+        return left.componentId < right.componentId
+    end)
+
+    return new Archetype(
+        id = id,
+        signature = signatureOf(values),
+        componentIds = membership,
+        components = ordered,
+        entities = {},
+        columns = columns,
+        dirty = {}
+    )
+end
+
+--- Reports whether this archetype contains a component.
+--- @param value the archetype to inspect
+--- @param component the component to find
+--- @return whether the signature contains the component
+export function has(value: Archetype, component: components.Component): boolean
+    return value.componentIds[component.componentId] == true
+end
+
+--- Returns a component column, or nil for an absent component or tag.
+--- @param value the archetype to inspect
+--- @param component the value-bearing component to find
+--- @return the dense raw-value column
+export function column<C is components.Component>(value: Archetype, component: C): {C.Value}?
+    return value.columns[component.componentId] as {C.Value}?
+end
+
+--- Returns a component column from a queried archetype.
+--- @param self the archetype to inspect
+--- @param component the value-bearing component to find
+--- @return the dense raw-value column
+function Archetype.get<C is components.Component>(self: Archetype, component: C): {C.Value}?
+    return column(self, component)
+end
+
+--- Returns a component column and marks it dirty before the caller can write.
+--- @param self the archetype to modify
+--- @param component the value-bearing component to find
+--- @return the dense raw-value column, or nil when absent or a tag
+function Archetype.getMut<C is components.Component>(self: Archetype, component: C): {C.Value}?
+    local result = column(self, component)
+    if result ~= nil then
+        self:markComponentDirty(component)
+    end
+
+    return result
+end
+
+--- Reports whether one component changed since the last world update.
+--- @param self the archetype to inspect
+--- @param component the component to test
+--- @return whether the component belongs to this archetype and is dirty
+function Archetype.isComponentDirty(self: Archetype, component: components.Component): boolean
+    return has(self, component) and self.dirty[component.componentId] == true
+end
+
+--- Reports whether any component in this archetype is dirty.
+--- @param self the archetype to inspect
+--- @return whether at least one component is dirty
+function Archetype.anyComponentDirty(self: Archetype): boolean
+    return next(self.dirty) ~= nil
+end
+
+--- Marks one present component dirty.
+--- @param self the archetype to modify
+--- @param component the component whose column or membership changed
+function Archetype.markComponentDirty(self: Archetype, component: components.Component): nil
+    if has(self, component) then
+        self.dirty[component.componentId] = true
+    end
+end
+
+--- Marks every component in the archetype dirty after a structural change.
+--- @param self the archetype to modify
+function Archetype.markAllComponentsDirty(self: Archetype): nil
+    for index = 1, #self.components do
+        self.dirty[self.components[index].componentId] = true
+    end
+end
+
+--- Clears every component dirty mark.
+--- @param self the archetype to modify
+function Archetype.clearDirtyComponents(self: Archetype): nil
+    self.dirty = {}
+end
+
+--- Iterates dirty components in canonical archetype order.
+--- @param self the archetype to inspect
+--- @return an iterator over dirty component definitions
+function Archetype.dirtyComponents(self: Archetype): function(): components.Component?
+    local index: integer = 0
+    return function(): components.Component?
+        while index < #self.components do
+            index = index + 1
+            local component = self.components[index]
+            if self.dirty[component.componentId] then
+                return component
+            end
+        end
+
+        return nil
+    end
+end
+
+--- Returns one committed component value.
+--- @param value the archetype to inspect
+--- @param row the zero-based entity row
+--- @param component the component to read
+--- @return the raw scalar value, tag singleton, or nil when absent
+export function valueAt<C is components.Component>(value: Archetype, row: integer, component: C): C.Value?
+    if not has(value, component) then
+        return nil
+    end
+    if component.storageType == "tag" then
+        return component as C.Value
+    end
+    local values = assert(value.columns[component.componentId])
+
+    return values[row + 1] as C.Value?
+end
+
+--- Appends an entity and its scalar values.
+--- @param value the archetype to modify
+--- @param entity the packed entity id
+--- @param supplied raw values keyed by component id
+--- @return the zero-based row assigned to the entity
+export function append(value: Archetype, entity: integer, supplied: {[integer]: any}): integer
+    local row = #value.entities
+    value.entities[row + 1] = entity
+    for index = 1, #value.components do
+        local component = value.components[index]
+        if component.storageType ~= "tag" then
+            local raw = supplied[component.componentId]
+            if raw == nil then
+                raw = components.defaultValue(component)
+            end
+            local stored = assert(value.columns[component.componentId])
+            stored[row + 1] = raw
+        end
+    end
+    value:markAllComponentsDirty()
+
+    return row
+end
+
+--- Collects the values required to move one row to a target signature.
+--- @param source the current archetype
+--- @param row the zero-based current row
+--- @param target the destination archetype
+--- @param overrides explicit values supplied by the mutation
+--- @return raw target values keyed by component id
+export function valuesForMove(
+    source: Archetype,
+    row: integer,
+    target: Archetype,
+    overrides: {[integer]: any}
+): {[integer]: any}
+    local result: {[integer]: any} = {}
+    for index = 1, #target.components do
+        local component = target.components[index]
+        if component.storageType ~= "tag" then
+            local raw = overrides[component.componentId]
+            if raw == nil and has(source, component) then
+                local stored = assert(source.columns[component.componentId])
+                raw = stored[row + 1]
+            end
+            if raw == nil then
+                raw = components.defaultValue(component)
+            end
+            result[component.componentId] = raw
+        end
+    end
+
+    return result
+end
+
+--- Swap-removes one entity and all of its scalar values.
+--- @param value the archetype to modify
+--- @param row the zero-based row to remove
+--- @return the id moved into the removed row, or nil when the row was last
+export function removeRow(value: Archetype, row: integer): integer?
+    local index = row + 1
+    local lastIndex = #value.entities
+    local movedId: integer? = nil
+    if index < lastIndex then
+        movedId = value.entities[lastIndex]
+        value.entities[index] = movedId
+    end
+    value.entities[lastIndex] = nil
+    for componentId, stored in pairs(value.columns) do
+        if index < lastIndex then
+            stored[index] = stored[lastIndex]
+        end
+        stored[lastIndex] = nil
+    end
+    value:markAllComponentsDirty()
+
+    return movedId
+end
+
+--- Clears every entity and value column while preserving signature identity.
+--- @param value the archetype to clear
+export function clear(value: Archetype): nil
+    value.entities = {}
+    for componentId, _column in pairs(value.columns) do
+        value.columns[componentId] = {}
+    end
+    value:clearDirtyComponents()
+end

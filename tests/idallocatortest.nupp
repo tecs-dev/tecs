@@ -1,0 +1,120 @@
+local test = require("nupp.test")
+local idallocator = require("tecs.internal.idallocator")
+local suite = {}
+
+function suite.packsTheFullIdentityRangeExactly(): nil
+    local slot = idallocator.absoluteMaxSlotCount
+    local generation = idallocator.generationCount - 1
+    local id = idallocator.encodeId(slot, generation)
+    test.equal(idallocator.slotOf(id), slot)
+    test.equal(idallocator.generationPartOf(id), generation)
+    test.equal(idallocator.generationOfWithSlot(id, slot), generation)
+end
+
+function suite.allocatesFreshSlotsThenRecyclesLifo(): nil
+    local allocator = idallocator.new(4)
+    test.equal(idallocator.allocSlot(allocator), 1)
+    test.equal(idallocator.allocSlot(allocator), 2)
+    idallocator.place(allocator, 1, 7, 3)
+    idallocator.place(allocator, 2, 7, 4)
+    idallocator.freeSlot(allocator, 1)
+    idallocator.freeSlot(allocator, 2)
+    test.equal(idallocator.allocSlot(allocator), 2)
+    test.equal(idallocator.allocSlot(allocator), 1)
+end
+
+function suite.tracksPlacementWithoutExposingNativeStorage(): nil
+    local allocator = idallocator.new(2)
+    local slot = idallocator.allocSlot(allocator)
+    idallocator.place(allocator, slot, 13, 0)
+    local archetypeId, row = idallocator.placement(allocator, slot)
+    test.equal(archetypeId, 13)
+    test.equal(row, 0)
+    test.equal(idallocator.generationAt(allocator, slot), 0)
+end
+
+function suite.invalidatesFreedHandles(): nil
+    local allocator = idallocator.new(1)
+    local slot = idallocator.allocSlot(allocator)
+    idallocator.place(allocator, slot, 1, 1)
+    local original = idallocator.encodeId(slot, idallocator.generationAt(allocator, slot))
+    test.assert(not idallocator.isStale(allocator, original))
+    idallocator.freeSlot(allocator, slot)
+    test.assert(idallocator.isStale(allocator, original))
+    local recycled = idallocator.allocSlot(allocator)
+    idallocator.place(allocator, recycled, 1, 1)
+    local current = idallocator.encodeId(recycled, idallocator.generationAt(allocator, recycled))
+    test.assert(not idallocator.isStale(allocator, current))
+end
+
+function suite.allocatesContiguousSlotsOnlyFromFreshSuffix(): nil
+    local allocator = idallocator.new(8)
+    local recycled = idallocator.allocSlot(allocator)
+    idallocator.place(allocator, recycled, 1, 1)
+    idallocator.freeSlot(allocator, recycled)
+    test.equal(idallocator.allocContiguousSlots(allocator, 3), 2)
+    test.equal(idallocator.allocSlot(allocator), 1)
+    test.equal(idallocator.allocSlot(allocator), 5)
+end
+
+function suite.unfreePreventsAStakedSlotFromBeingReissued(): nil
+    local allocator = idallocator.new(3)
+    local first = idallocator.allocSlot(allocator)
+    local second = idallocator.allocSlot(allocator)
+    idallocator.place(allocator, first, 1, 1)
+    idallocator.place(allocator, second, 1, 2)
+    idallocator.freeSlot(allocator, first)
+    idallocator.freeSlot(allocator, second)
+    idallocator.unfree(allocator, first)
+    idallocator.place(allocator, first, 2, 1)
+    test.equal(idallocator.allocSlot(allocator), second)
+    test.equal(idallocator.allocSlot(allocator), 3)
+end
+
+function suite.rebuildsTheFreeStackFromLiveness(): nil
+    local allocator = idallocator.new(4)
+    for row = 1, 4 do
+        local slot = idallocator.allocSlot(allocator)
+        idallocator.place(allocator, slot, 1, row)
+    end
+    idallocator.freeSlot(allocator, 2)
+    idallocator.freeSlot(allocator, 4)
+    allocator.freeCount = 0
+    idallocator.rebuildFreeStack(allocator)
+    test.equal(allocator.freeCount, 2)
+    test.equal(idallocator.allocSlot(allocator), 4)
+    test.equal(idallocator.allocSlot(allocator), 2)
+end
+
+function suite.resetInvalidatesAllHandlesAndReusesFromOne(): nil
+    local allocator = idallocator.new(3)
+    local first = idallocator.allocSlot(allocator)
+    local second = idallocator.allocSlot(allocator)
+    idallocator.place(allocator, first, 1, 1)
+    idallocator.place(allocator, second, 1, 2)
+    local firstId = idallocator.encodeId(first, idallocator.generationAt(allocator, first))
+    local secondId = idallocator.encodeId(second, idallocator.generationAt(allocator, second))
+    idallocator.reset(allocator)
+    test.assert(idallocator.isStale(allocator, firstId))
+    test.assert(idallocator.isStale(allocator, secondId))
+    test.equal(idallocator.allocSlot(allocator), 1)
+end
+
+function suite.rejectsExhaustion(): nil
+    local allocator = idallocator.new(1)
+    idallocator.allocSlot(allocator)
+    test.raises(function(): nil
+        idallocator.allocSlot(allocator)
+    end, "entity ID exhaustion")
+end
+
+function suite.rejectsInvalidCapacities(): nil
+    test.raises(function(): nil
+        idallocator.new(0)
+    end, "positive integer")
+    test.raises(function(): nil
+        idallocator.new(idallocator.absoluteMaxSlotCount + 1)
+    end, "exceeds format limit")
+end
+
+return suite

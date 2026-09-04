@@ -1,0 +1,117 @@
+local ecs = require("tecs.ecs")
+local platformevents = require("tecs.platform.events")
+local test = require("nupp.test")
+
+local suite = {}
+
+function suite.constructsTypedWindowEvents(): nil
+    local resized = platformevents.resized(1280, 720, 4, 2, 10.5, 7)
+    test.equal(resized.kind, "windowResized")
+    test.equal(resized.width, 1280)
+    test.equal(resized.height, 720)
+    test.equal(resized.pixelWidth, 2560)
+    test.equal(resized.pixelHeight, 1440)
+    test.equal(resized.window, 4)
+    test.equal(resized.scaleFactor, 2)
+    test.equal(resized.timestamp, 10.5)
+    test.equal(resized.sequence, 7)
+
+    local focused = platformevents.focused(false, 4)
+    test.equal(focused.kind, "windowFocusLost")
+    test.assert(not focused.focused)
+
+    local scaled = platformevents.scaleChanged(1.5, 800, 600, 4)
+    test.equal(scaled.kind, "windowScaleChanged")
+    test.equal(scaled.scaleFactor, 1.5)
+    test.equal(scaled.pixelWidth, 1200)
+    test.equal(scaled.pixelHeight, 900)
+end
+
+function suite.constructsPhysicalAndLogicalKeyData(): nil
+    local key = platformevents.key(true, "KeyW", "w", "w", 3, true, 2, 9, 11)
+
+    test.equal(key.kind, "keyDown")
+    test.equal(key.physicalKey, "KeyW")
+    test.equal(key.logicalKey, "w")
+    test.equal(key.text, "w")
+    test.equal(key.modifiers, 3)
+    test.assert(key.repeated)
+    test.assert(key.down)
+end
+
+function suite.dispatchesOnlyTheMatchingTypedEvent(): nil
+    local world = ecs.newWorld()
+    local downs = 0
+    local ups = 0
+    world:observe(0, platformevents.on.keyDown, function(
+        event: platformevents.KeyEvent,
+        exclusive _running: ecs.World
+    ): nil
+        test.assert(event.down)
+        downs = downs + 1
+    end)
+    world:observe(0, platformevents.on.keyUp, function(
+        event: platformevents.KeyEvent,
+        exclusive _running: ecs.World
+    ): nil
+        test.assert(not event.down)
+        ups = ups + 1
+    end)
+
+    platformevents.dispatch(world, platformevents.key(true, "Space"))
+    platformevents.dispatch(world, platformevents.key(false, "Space"))
+
+    test.equal(downs, 1)
+    test.equal(ups, 1)
+end
+
+function suite.preservesCompatibilitySensitiveKindNames(): nil
+    test.equal(platformevents.pointerMoved(1, 2).kind, "mouseMotion")
+    test.equal(platformevents.pointerButton(true, 1, 1, 2).kind, "mouseDown")
+    test.equal(platformevents.pointerButton(false, 1, 1, 2).kind, "mouseUp")
+    test.equal(platformevents.wheel(1, -1).kind, "mouseWheel")
+    test.equal(platformevents.text("hello").kind, "textInput")
+    test.equal(platformevents.quit().kind, "quit")
+    test.equal(platformevents.closeRequested(1).kind, "windowCloseRequested")
+end
+
+function suite.routesPointerAndTextPayloads(): nil
+    local world = ecs.newWorld()
+    local pointerX = 0
+    local typed = ""
+    world:observe(0, platformevents.on.mouseMotion, function(
+        event: platformevents.PointerMoveEvent,
+        exclusive _running: ecs.World
+    ): nil
+        pointerX = event.x
+    end)
+    world:observe(0, platformevents.on.textInput, function(
+        event: platformevents.TextEvent,
+        exclusive _running: ecs.World
+    ): nil
+        typed = event.text
+    end)
+
+    platformevents.dispatch(world, platformevents.pointerMoved(12, 20, 2, 3))
+    platformevents.dispatch(world, platformevents.text("nupp"))
+
+    test.equal(pointerX, 12)
+    test.equal(typed, "nupp")
+end
+
+function suite.rejectsInvalidTranslatedValues(): nil
+    test.raises(function(): nil
+        platformevents.resized(-1, 720)
+    end, "dimensions")
+    test.raises(function(): nil
+        platformevents.resized(1, 1, nil, 1, nil, nil, -1, 1)
+    end, "pixel dimensions")
+    test.raises(function(): nil
+        platformevents.key(true, "")
+    end, "physicalKey")
+    test.raises(function(): nil
+        platformevents.pointerButton(true, 0, 0, 0)
+    end, "button")
+end
+
+return suite

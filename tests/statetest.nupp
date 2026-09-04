@@ -1,0 +1,108 @@
+local ecs = require("tecs.ecs")
+local test = require("nupp.test")
+local suite = {}
+
+function suite.pushesPopsAndCopiesTheStack(): nil
+    local world = ecs.newWorld()
+    world:createState("test.state.base")
+    world:createState("test.state.pause")
+    test.assert(world:peekState() == nil)
+    world:pushState("test.state.base")
+    world:pushState("test.state.pause")
+    test.equal(world:peekState() as string, "test.state.pause")
+    local snapshot = world:listStates()
+    world:popState()
+    test.equal(world:peekState() as string, "test.state.base")
+    test.equal(#snapshot, 2)
+    test.equal(snapshot[2], "test.state.pause")
+end
+
+function suite.rejectsDuplicateUnknownAndEmptyTransitions(): nil
+    local world = ecs.newWorld()
+    world:createState("test.state.known")
+    test.raises(function(): nil
+        world:createState("test.state.known")
+    end, "already exists")
+    test.raises(function(): nil
+        world:pushState("test.state.unknown")
+    end, "not found")
+    test.raises(function(): nil
+        world:popState()
+    end, "empty")
+end
+
+function suite.autoTagsSpawnsAndDespawnsThemOnExit(): nil
+    local world = ecs.newWorld()
+    local state = world:createState("test.state.autotag")
+    world:pushState("test.state.autotag")
+    local entity = world:spawn()
+    world:commit()
+    test.assert(world:has(entity, state))
+    world:popState()
+    test.assert(world:isAlive(entity))
+    world:commit()
+    test.assert(not world:isAlive(entity))
+end
+
+function suite.appliesPauseResumeAndCompoundPolicies(): nil
+    local world = ecs.newWorld()
+    local focused = false
+    world:createState("test.state.game", {
+        onBlur = "pause",
+        onFocus = {
+            apply = "resume",
+            call = function(exclusive _running: ecs.World): nil
+                focused = true
+            end,
+        },
+    })
+    world:createState("test.state.overlay")
+    world:pushState("test.state.game")
+    local entity = world:spawn()
+    world:commit()
+    world:pushState("test.state.overlay")
+    world:commit()
+    test.assert(world:has(entity, ecs.Paused))
+    world:popState()
+    world:commit()
+    test.assert(not world:has(entity, ecs.Paused))
+    test.assert(focused)
+end
+
+function suite.emitsTypedStateTransitions(): nil
+    local world = ecs.newWorld()
+    local seen: {string} = {}
+    world:createState("test.state.events.base")
+    world:createState("test.state.events.top")
+    world:observe(0, ecs.StateEnter, function(event: ecs.StateChange, exclusive _running: ecs.World): nil
+        seen[#seen + 1] = "enter:" .. event.state
+    end)
+    world:observe(0, ecs.StateBlur, function(event: ecs.StateBlurChange, exclusive _running: ecs.World): nil
+        seen[#seen + 1] = "blur:" .. event.state .. ":" .. event.pushed
+    end)
+    world:observe(0, ecs.StateExit, function(event: ecs.StateChange, exclusive _running: ecs.World): nil
+        seen[#seen + 1] = "exit:" .. event.state
+    end)
+    world:observe(0, ecs.StateFocus, function(event: ecs.StateFocusChange, exclusive _running: ecs.World): nil
+        seen[#seen + 1] = "focus:" .. event.state .. ":" .. event.popped
+    end)
+    world:pushState("test.state.events.base")
+    world:pushState("test.state.events.top")
+    world:popState()
+    test.equal(
+        table.concat(seen, ","),
+        "enter:test.state.events.base,blur:test.state.events.base:test.state.events.top,"
+            .. "enter:test.state.events.top,exit:test.state.events.top,"
+            .. "focus:test.state.events.base:test.state.events.top"
+    )
+end
+
+function suite.reusesStateTagIdentityAcrossWorlds(): nil
+    local first = ecs.newWorld()
+    local second = ecs.newWorld()
+    local left = first:createState("test.state.shared")
+    local right = second:createState("test.state.shared")
+    test.assert(left == right)
+end
+
+return suite

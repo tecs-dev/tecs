@@ -1,0 +1,400 @@
+module tecs.input
+
+--[[
+Keyboard and pointer state folded from typed platform events.
+
+Live state survives frame boundaries. Frame edges clear before each sealed host
+batch, while latched edges accumulate until the first fixed step consumes
+them. Blocking layers move capture and clear pending edges without inventing
+releases for controls that remain physically held.
+]]
+
+local data = require("tecs.data")
+local ecs = require("tecs.ecs")
+local platformevents = require("tecs.platform.events")
+
+--- A position in the input capture stack.
+export record Layer
+    name: string
+    blocking: boolean
+    index: integer
+end
+
+--- A conventional pointer button name.
+export type MouseButton = "left" | "middle" | "right" | "back" | "forward"
+
+--- Live, frame-edge, and fixed-latched keyboard and pointer input.
+export record Input
+    mouseX: number
+    mouseY: number
+    mouseDeltaX: number
+    mouseDeltaY: number
+    wheelX: number
+    wheelY: number
+    wheelTicksX: integer
+    wheelTicksY: integer
+    text: string
+
+    private keysDown: {[string]: boolean}
+    private keysPressed: {[string]: boolean}
+    private keysReleased: {[string]: boolean}
+    private keysLatchedPressed: {[string]: boolean}
+    private keysLatchedReleased: {[string]: boolean}
+    private mouseButtonsDown: {[integer]: boolean}
+    private mouseButtonsPressed: {[integer]: boolean}
+    private mouseButtonsReleased: {[integer]: boolean}
+    private mouseButtonsLatchedPressed: {[integer]: boolean}
+    private mouseButtonsLatchedReleased: {[integer]: boolean}
+    private modifierMask: integer
+    private fixed: boolean
+    private layers: {Layer}
+    private enterFixedSystem: ecs.System?
+    private exitFixedSystem: ecs.System?
+
+    beginFrame: function(exclusive self: Input): nil
+    enterFixedPhase: function(exclusive self: Input): nil
+    exitFixedPhase: function(exclusive self: Input): nil
+    handleEvent: function(exclusive self: Input, event: platformevents.Event): nil
+    keyDown: function(borrows self: Input, key: string, layer: Layer?): boolean
+    keyPressed: function(borrows self: Input, key: string, layer: Layer?): boolean
+    keyReleased: function(borrows self: Input, key: string, layer: Layer?): boolean
+    modifiers: function(borrows self: Input): integer
+    mouseDown: function(borrows self: Input, button: MouseButton | integer, layer: Layer?): boolean
+    mousePressed: function(borrows self: Input, button: MouseButton | integer, layer: Layer?): boolean
+    mouseReleased: function(borrows self: Input, button: MouseButton | integer, layer: Layer?): boolean
+    pushLayer: function(exclusive self: Input, name: string, blocking: boolean?): Layer
+    popLayer: function(exclusive self: Input): Layer?
+    topLayer: function(borrows self: Input): Layer
+    canRead: function(borrows self: Input, layer: Layer?): boolean
+end
+
+local worldInputKey: data.Key<Input> = data.newKey("tecs.input", nil)
+
+local function clearEdges(exclusive input: Input): nil
+    input.keysPressed = {}
+    input.keysReleased = {}
+    input.keysLatchedPressed = {}
+    input.keysLatchedReleased = {}
+    input.mouseButtonsPressed = {}
+    input.mouseButtonsReleased = {}
+    input.mouseButtonsLatchedPressed = {}
+    input.mouseButtonsLatchedReleased = {}
+    input.mouseDeltaX = 0
+    input.mouseDeltaY = 0
+    input.wheelX = 0
+    input.wheelY = 0
+    input.wheelTicksX = 0
+    input.wheelTicksY = 0
+    input.text = ""
+end
+
+local function readableFrom(borrows input: Input): integer
+    for index = #input.layers, 1, -1 do
+        if input.layers[index].blocking then
+            return index
+        end
+    end
+
+    return 1
+end
+
+local function releaseHeld(exclusive input: Input): nil
+    for key in pairs(input.keysDown) do
+        input.keysReleased[key] = true
+        input.keysLatchedReleased[key] = true
+    end
+    for button in pairs(input.mouseButtonsDown) do
+        input.mouseButtonsReleased[button] = true
+        input.mouseButtonsLatchedReleased[button] = true
+    end
+    input.keysDown = {}
+    input.mouseButtonsDown = {}
+    input.modifierMask = 0
+end
+
+local function mouseCode(button: MouseButton | integer): integer
+    if button is integer then
+        if button < 1 then
+            error("input: mouse button must be positive", 3)
+        end
+        return button
+    elseif button == "left" then
+        return 1
+    elseif button == "middle" then
+        return 2
+    elseif button == "right" then
+        return 3
+    elseif button == "back" then
+        return 4
+    elseif button == "forward" then
+        return 5
+    end
+
+    error("input: unknown mouse button", 3)
+end
+
+--- Creates empty input state with the readable base layer.
+--- @return a standalone input state suitable for an application or headless test
+export function newInput(): Input
+    local base = new Layer(name = "base", blocking = true, index = 1)
+    local result = new Input(
+        mouseX = 0,
+        mouseY = 0,
+        mouseDeltaX = 0,
+        mouseDeltaY = 0,
+        wheelX = 0,
+        wheelY = 0,
+        wheelTicksX = 0,
+        wheelTicksY = 0,
+        text = "",
+        keysDown = {},
+        keysPressed = {},
+        keysReleased = {},
+        keysLatchedPressed = {},
+        keysLatchedReleased = {},
+        mouseButtonsDown = {},
+        mouseButtonsPressed = {},
+        mouseButtonsReleased = {},
+        mouseButtonsLatchedPressed = {},
+        mouseButtonsLatchedReleased = {},
+        modifierMask = 0,
+        fixed = false,
+        layers = {base},
+        enterFixedSystem = nil,
+        exitFixedSystem = nil
+    )
+    result.enterFixedSystem = function(_dt: number, exclusive _world: ecs.World): nil
+        result:enterFixedPhase()
+    end
+    result.exitFixedSystem = function(_dt: number, exclusive _world: ecs.World): nil
+        result:exitFixedPhase()
+    end
+
+    return result
+end
+
+--- Starts a frame by clearing frame-local edges and accumulated deltas.
+--- @param self the input state receiving the next event batch
+function Input.beginFrame(exclusive self: Input): nil
+    self.keysPressed = {}
+    self.keysReleased = {}
+    self.mouseButtonsPressed = {}
+    self.mouseButtonsReleased = {}
+    self.mouseDeltaX = 0
+    self.mouseDeltaY = 0
+    self.wheelX = 0
+    self.wheelY = 0
+    self.wheelTicksX = 0
+    self.wheelTicksY = 0
+    self.text = ""
+end
+
+--- Selects latched edges for queries inside one fixed step.
+--- @param self the installed input state
+function Input.enterFixedPhase(exclusive self: Input): nil
+    self.fixed = true
+end
+
+--- Leaves fixed-edge mode and consumes the latched edges.
+--- @param self the installed input state
+function Input.exitFixedPhase(exclusive self: Input): nil
+    self.fixed = false
+    self.keysLatchedPressed = {}
+    self.keysLatchedReleased = {}
+    self.mouseButtonsLatchedPressed = {}
+    self.mouseButtonsLatchedReleased = {}
+end
+
+--- Folds one translated platform event into live and edge state.
+--- @param self the input state to update
+--- @param event the translated event, in host sequence order
+function Input.handleEvent(exclusive self: Input, event: platformevents.Event): nil
+    if event is platformevents.KeyEvent then
+        self.modifierMask = event.modifiers
+        if event.down then
+            self.keysDown[event.physicalKey] = true
+            if not event.repeated then
+                self.keysPressed[event.physicalKey] = true
+                self.keysLatchedPressed[event.physicalKey] = true
+            end
+        else
+            self.keysDown[event.physicalKey] = nil
+            self.keysReleased[event.physicalKey] = true
+            self.keysLatchedReleased[event.physicalKey] = true
+        end
+    elseif event is platformevents.PointerButtonEvent then
+        self.mouseX = event.x
+        self.mouseY = event.y
+        if event.down then
+            self.mouseButtonsDown[event.button] = true
+            self.mouseButtonsPressed[event.button] = true
+            self.mouseButtonsLatchedPressed[event.button] = true
+        else
+            self.mouseButtonsDown[event.button] = nil
+            self.mouseButtonsReleased[event.button] = true
+            self.mouseButtonsLatchedReleased[event.button] = true
+        end
+    elseif event is platformevents.PointerMoveEvent then
+        self.mouseX = event.x
+        self.mouseY = event.y
+        self.mouseDeltaX = self.mouseDeltaX + event.dx
+        self.mouseDeltaY = self.mouseDeltaY + event.dy
+    elseif event is platformevents.WheelEvent then
+        self.mouseX = event.x
+        self.mouseY = event.y
+        self.wheelX = self.wheelX + event.wheelX
+        self.wheelY = self.wheelY + event.wheelY
+        self.wheelTicksX = self.wheelTicksX + event.wheelTicksX
+        self.wheelTicksY = self.wheelTicksY + event.wheelTicksY
+    elseif event is platformevents.TextEvent then
+        self.text = self.text .. event.text
+    elseif event is platformevents.FocusEvent and not event.focused then
+        releaseHeld(self)
+    end
+end
+
+--- Returns whether a physical key is held.
+--- @param self the input state to read
+--- @param key the case-sensitive `winit` physical key name
+--- @param layer the reading layer, or the base layer when omitted
+--- @return whether the layer may read and the key is held
+function Input.keyDown(borrows self: Input, key: string, layer: Layer?): boolean
+    return self:canRead(layer) and self.keysDown[key] == true
+end
+
+--- Returns whether a physical key went down in the active edge tier.
+--- @param self the input state to read
+--- @param key the case-sensitive `winit` physical key name
+--- @param layer the reading layer, or the base layer when omitted
+--- @return whether the key was pressed
+function Input.keyPressed(borrows self: Input, key: string, layer: Layer?): boolean
+    local edges = self.fixed and self.keysLatchedPressed or self.keysPressed
+    return self:canRead(layer) and edges[key] == true
+end
+
+--- Returns whether a physical key came up in the active edge tier.
+--- @param self the input state to read
+--- @param key the case-sensitive `winit` physical key name
+--- @param layer the reading layer, or the base layer when omitted
+--- @return whether the key was released
+function Input.keyReleased(borrows self: Input, key: string, layer: Layer?): boolean
+    local edges = self.fixed and self.keysLatchedReleased or self.keysReleased
+    return self:canRead(layer) and edges[key] == true
+end
+
+--- Returns the modifier mask from the most recent key event.
+--- @param self the input state to read
+--- @return the host-defined modifier bit mask
+function Input.modifiers(borrows self: Input): integer
+    return self.modifierMask
+end
+
+--- Returns whether a pointer button is held.
+--- @param self the input state to read
+--- @param button a conventional name or positive host button number
+--- @param layer the reading layer, or the base layer when omitted
+--- @return whether the button is held
+function Input.mouseDown(borrows self: Input, button: MouseButton | integer, layer: Layer?): boolean
+    return self:canRead(layer) and self.mouseButtonsDown[mouseCode(button)] == true
+end
+
+--- Returns whether a pointer button went down in the active edge tier.
+--- @param self the input state to read
+--- @param button a conventional name or positive host button number
+--- @param layer the reading layer, or the base layer when omitted
+--- @return whether the button was pressed
+function Input.mousePressed(borrows self: Input, button: MouseButton | integer, layer: Layer?): boolean
+    local edges = self.fixed and self.mouseButtonsLatchedPressed or self.mouseButtonsPressed
+    return self:canRead(layer) and edges[mouseCode(button)] == true
+end
+
+--- Returns whether a pointer button came up in the active edge tier.
+--- @param self the input state to read
+--- @param button a conventional name or positive host button number
+--- @param layer the reading layer, or the base layer when omitted
+--- @return whether the button was released
+function Input.mouseReleased(borrows self: Input, button: MouseButton | integer, layer: Layer?): boolean
+    local edges = self.fixed and self.mouseButtonsLatchedReleased or self.mouseButtonsReleased
+    return self:canRead(layer) and edges[mouseCode(button)] == true
+end
+
+--- Pushes a capture layer.
+--- @param self the input state to modify
+--- @param name the non-empty diagnostic layer name
+--- @param blocking whether the layer hides lower layers, defaulting to true
+--- @return the new top layer
+--- @raises when the layer name is empty
+function Input.pushLayer(exclusive self: Input, name: string, blocking: boolean?): Layer
+    if name == "" then
+        error("input.pushLayer: name must not be empty", 2)
+    end
+    local before = readableFrom(self)
+    local layer = new Layer(name = name, blocking = blocking ~= false, index = #self.layers + 1)
+    self.layers[layer.index] = layer
+    if readableFrom(self) ~= before then
+        clearEdges(self)
+    end
+
+    return layer
+end
+
+--- Removes and returns the top layer, preserving the base layer.
+--- @param self the input state to modify
+--- @return the removed layer, or nil at the base
+function Input.popLayer(exclusive self: Input): Layer?
+    local count = #self.layers
+    if count <= 1 then
+        return nil
+    end
+    local before = readableFrom(self)
+    local layer = self.layers[count]
+    self.layers[count] = nil
+    if readableFrom(self) ~= before then
+        clearEdges(self)
+    end
+
+    return layer
+end
+
+--- Returns the top input layer.
+--- @param self the input state to read
+--- @return the top layer
+function Input.topLayer(borrows self: Input): Layer
+    return self.layers[#self.layers]
+end
+
+--- Reports whether a layer may read through the current capture stack.
+--- @param self the input state to read
+--- @param layer the layer to test, or the base layer when omitted
+--- @return whether the layer is at or above the topmost blocking layer
+function Input.canRead(borrows self: Input, layer: Layer?): boolean
+    local index = layer ~= nil and layer.index or 1
+    return index >= readableFrom(self)
+end
+
+--- Installs and returns the input state owned by one world.
+--- @param world the world whose fixed steps consume latched edges
+--- @return the new input state, also available through `of`
+--- @raises when the world already owns input state
+export function install(exclusive world: ecs.World): Input
+    if world.resources[worldInputKey] ~= nil then
+        error("input.install: world input state is already installed", 2)
+    end
+    local state = newInput()
+    world.resources[worldInputKey] = state
+    world:addSystem({
+        name = "tecs.EnterFixedInput",
+        phase = ecs.phases.FixedFirst,
+        run = assert(state.enterFixedSystem),
+    })
+    world:addSystem({name = "tecs.ExitFixedInput", phase = ecs.phases.FixedLast, run = assert(state.exitFixedSystem),})
+
+    return state
+end
+
+--- Returns the input state installed in a world.
+--- @param world the world to inspect
+--- @return its input state, or nil when none is installed
+export function of(borrows world: ecs.World): Input?
+    return world.resources[worldInputKey]
+end

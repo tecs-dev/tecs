@@ -1,0 +1,133 @@
+local ecs = require("tecs.ecs")
+local test = require("nupp.test")
+local suite = {}
+
+local record Position
+    x: number
+    y: number
+end
+
+function suite.spawnsEmptyAndRequiredBundles(): nil
+    local world = ecs.newWorld()
+    local tag = ecs.newTagComponent({name = "test.BundleRequiredTag"})
+    local empty = world:newBundle("test.bundle.empty")
+    local required = world:newBundle("test.bundle.required", {required = {tag}})
+    local bare = empty:spawn()
+    local marked = required:spawn(tag)
+    world:commit()
+    test.assert(world:isAlive(bare))
+    test.assert(world:has(marked, tag))
+    test.equal(required.required[1], tag.componentName)
+end
+
+function suite.callsDefaultFactoriesForEverySpawn(): nil
+    local world = ecs.newWorld()
+    local position = ecs.newComponent({
+        name = "test.BundlePosition",
+        construct = function(x: number, y: number): Position
+            return new Position(x = x, y = y)
+        end,
+        default = function(): Position
+            return new Position(x = 0, y = 0)
+        end,
+    })
+    local nextValue = 0
+    local bundle = world:newBundle("test.bundle.factory", {
+        with = {
+            [position] = function(): ecs.ComponentInput
+                nextValue = nextValue + 1
+                return position(nextValue, 0)
+            end,
+        },
+    })
+    local first = bundle:spawn()
+    local second = bundle:spawn()
+    world:commit()
+    local firstPosition = assert(world:get(first, position))
+    local secondPosition = assert(world:get(second, position))
+    test.equal(firstPosition.x, 1)
+    test.equal(secondPosition.x, 2)
+    test.assert(firstPosition ~= secondPosition)
+end
+
+function suite.usesComponentDefaultsForTrueEntries(): nil
+    local world = ecs.newWorld()
+    local health = ecs.newScalarComponent({name = "test.BundleHealth", kind = "number", default = 100})
+    local marker = ecs.newTagComponent({name = "test.BundleDefaultTag"})
+    local bundle = world:newBundle("test.bundle.defaults", {with = {[health] = true, [marker] = true}})
+    local entity = bundle:spawn()
+    world:commit()
+    test.equal(world:get(entity, health) as number, 100)
+    test.assert(world:has(entity, marker))
+end
+
+function suite.validatesRequiredInputs(): nil
+    local world = ecs.newWorld()
+    local first = ecs.newTagComponent({name = "test.BundleFirst"})
+    local second = ecs.newTagComponent({name = "test.BundleSecond"})
+    local bundle = world:newBundle("test.bundle.validation", {required = {first, second}})
+    test.raises(function(): nil
+        bundle:spawn(first)
+    end, "Required component missing: test.BundleSecond")
+    test.raises(function(): nil
+        bundle:spawn(second, first)
+    end, "expected test.BundleFirst at position 1")
+    test.raises(function(): nil
+        bundle:spawn(first, second, first)
+    end, "too many required components")
+end
+
+function suite.rejectsDuplicateAndIncorrectFactoryComponents(): nil
+    local world = ecs.newWorld()
+    local first = ecs.newTagComponent({name = "test.BundleDuplicate"})
+    local second = ecs.newTagComponent({name = "test.BundleFactoryOther"})
+    test.raises(function(): nil
+        world:newBundle("test.bundle.duplicate", {required = {first}, with = {[first] = true}})
+    end, "Component already in bundle")
+    local bundle = world:newBundle("test.bundle.factory.invalid", {
+        with = {[first] = function(): ecs.ComponentInput return second end},
+    })
+    test.raises(function(): nil
+        bundle:spawn()
+    end, "returned another component")
+end
+
+function suite.supportsNamedSpawnAndCallerOwnedListings(): nil
+    local world = ecs.newWorld()
+    local marker = ecs.newTagComponent({name = "test.BundleNamedTag"})
+    local bundle = world:newBundle("test.bundle.named", {required = {marker}})
+    local listing = world:getBundles()
+    listing["test.bundle.named"] = nil
+    test.assert(world:getBundle("test.bundle.named") == bundle)
+    local entity = world:spawnBundle("test.bundle.named", marker)
+    world:commit()
+    test.assert(world:has(entity, marker))
+    test.raises(function(): nil
+        world:spawnBundle("test.bundle.missing")
+    end, "Unknown bundle")
+end
+
+function suite.preservesBundlesAcrossEntityClears(): nil
+    local world = ecs.newWorld()
+    local marker = ecs.newTagComponent({name = "test.BundleClearTag"})
+    local bundle = world:newBundle("test.bundle.clear", {with = {[marker] = true}})
+    local first = bundle:spawn()
+    world:commit()
+    world:clearEntities()
+    local second = bundle:spawn()
+    world:commit()
+    test.assert(not world:isAlive(first))
+    test.assert(world:has(second, marker))
+end
+
+function suite.composesWithActiveStateAutoTagging(): nil
+    local world = ecs.newWorld()
+    local state = world:createState("test.bundle.state")
+    world:pushState("test.bundle.state")
+    local bundle = world:newBundle("test.bundle.state.spawn")
+    local entity = bundle:spawn()
+    world:commit()
+    test.assert(world:has(entity, state))
+end
+
+return suite

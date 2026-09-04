@@ -1,0 +1,416 @@
+module tecs.internal.components
+
+--[[
+Process-wide component definitions and registration.
+
+Component identity is permanent and shared by every world. A component's
+associated `Value` type describes what its archetype column contains. Tags use
+their own singleton as the value, while scalar components store raw Lua
+primitives and use a small wrapper only at spawn and set boundaries.
+]]
+
+local componentids = require("tecs.internal.componentids")
+local snapshotvalue = require("tecs.internal.snapshotvalue")
+
+--- A registered component definition.
+export interface Component
+    associated type Value = self
+
+    componentId: integer
+    componentName: string
+    storageType: string
+    transient: boolean
+end
+
+--- A marker component with no per-entity column.
+export record TagComponent is Component
+    componentId: integer
+    componentName: string
+    storageType: string
+    transient: boolean
+end
+
+--- A scalar component whose committed column stores raw primitive values.
+export record ScalarComponent<T> is Component
+    associated type Value = T
+
+    componentId: integer
+    componentName: string
+    storageType: string
+    transient: boolean
+    scalarKind: "number" | "boolean" | "string"
+    scalarDefault: T
+    metamethod __call: function(self, value: T): ScalarInstance<T>
+end
+
+--- A scalar value carried only across a spawn or set boundary.
+export record ScalarInstance<T>
+    componentType: ScalarComponent<T>
+    value: T
+end
+
+--- A table component whose committed column stores record values.
+export interface TableComponent<T> is Component
+    associated type Value == T
+
+    componentId: integer
+    componentName: string
+    storageType: string
+    transient: boolean
+    construct: function(...: any): T
+    defaultFactory: function(): T
+    snapshotSave: function(value: T): any
+    snapshotLoad: function(value: any): T
+    metamethod __call: function(self, ...: any): TableInstance<T>
+end
+
+--- A table value carried only across a spawn or set boundary.
+export record TableInstance<T>
+    componentType: TableComponent<T>
+    value: T
+end
+
+--- The committed value of an exclusive entity relationship.
+export record RelationshipValue
+    target: integer
+end
+
+--- A one-target-per-source relationship component.
+export record RelationshipComponent is Component
+    associated type Value = RelationshipValue
+
+    componentId: integer
+    componentName: string
+    storageType: string
+    transient: boolean
+    exclusive: boolean
+    reverseIndex: boolean
+    cascadeDelete: boolean
+    metamethod __call: function(self, target: integer): RelationshipInstance
+end
+
+--- A relationship value carried across a spawn or set boundary.
+export record RelationshipInstance
+    componentType: RelationshipComponent
+    value: RelationshipValue
+end
+
+--- A component definition or value supplied at a mutation boundary.
+export type Input = Component | ScalarInstance<any> | TableInstance<any> | RelationshipInstance
+
+--- Options for a marker component with no per-entity value.
+export type TagComponentOptions = {
+    name: string,
+    transient: boolean?
+}
+
+--- Options for a number-valued scalar component.
+export type NumberComponentOptions = {
+    name: string,
+    kind: "number",
+    default: number?,
+    transient: boolean?
+}
+
+--- Options for a boolean-valued scalar component.
+export type BooleanComponentOptions = {
+    name: string,
+    kind: "boolean",
+    default: boolean?,
+    transient: boolean?
+}
+
+--- Options for a string-valued scalar component.
+export type StringComponentOptions = {
+    name: string,
+    kind: "string",
+    default: string?,
+    transient: boolean?
+}
+
+export type ScalarComponentOptions = NumberComponentOptions | BooleanComponentOptions | StringComponentOptions
+
+--- The kind-correlated scalar component factory.
+export type NewScalarComponent = function(NumberComponentOptions): ScalarComponent<number>
+    & function(BooleanComponentOptions): ScalarComponent<boolean>
+    & function(StringComponentOptions): ScalarComponent<string>
+
+--- Options for a record-valued component.
+export type TableComponentOptions<T> = {
+    name: string,
+    construct: function(...: any): T,
+    default: function(): T,
+    save: (function(value: T): any)?,
+    load: (function(value: any): T)?,
+    transient: boolean?
+}
+
+--- Options for an exclusive target relationship.
+export type RelationshipOptions = {
+    name: string,
+    exclusive: boolean,
+    reverseIndex: boolean?,
+    cascadeDelete: boolean?,
+    transient: boolean?
+}
+
+local registeredByName: {[string]: Component} = {}
+local registeredById: {[integer]: Component} = {}
+local registeredRelationships: {RelationshipComponent} = {}
+
+local function validateName(name: string, caller: string): nil
+    if name == "" then
+        error(caller .. ": name must not be empty", 3)
+    end
+    if registeredByName[name] ~= nil then
+        error("Component " .. name .. " already registered", 3)
+    end
+end
+
+local function register<C is Component>(component: C): C
+    registeredByName[component.componentName] = component
+    registeredById[component.componentId] = component
+    return component
+end
+
+ScalarComponent.__call = function<T>(self: ScalarComponent, value: T): ScalarInstance<T>
+    return new ScalarInstance(componentType = self as ScalarComponent<T>, value = value)
+end
+
+RelationshipComponent.__call = function(self: RelationshipComponent, target: integer): RelationshipInstance
+    return new RelationshipInstance(componentType = self, value = new RelationshipValue(target = target))
+end
+
+--- Creates and permanently registers a tag component.
+--- @param options the process-unique component name and snapshot policy
+--- @return the registered component
+--- @raises when the name is empty or already registered
+export function newTagComponent(options: TagComponentOptions): TagComponent
+    local name = options.name
+    validateName(name, "newTagComponent")
+    return register(
+        new TagComponent(
+            componentId = componentids.allocate(),
+            componentName = name,
+            storageType = "tag",
+            transient = options.transient == true
+        )
+    )
+end
+
+local function createScalar<T>(
+    name: string,
+    kind: "number" | "boolean" | "string",
+    defaultValue: T,
+    transient: boolean
+): ScalarComponent<T>
+    validateName(name, "newScalarComponent")
+    return register(
+        new ScalarComponent(
+            componentId = componentids.allocate(),
+            componentName = name,
+            storageType = "scalar",
+            transient = transient,
+            scalarKind = kind,
+            scalarDefault = defaultValue
+        )
+    )
+end
+
+local function createScalarComponent(options: ScalarComponentOptions): ScalarComponent<any>
+    local defaultValue: any = options.default
+    if defaultValue == nil then
+        if options.kind == "number" then
+            defaultValue = 0
+        elseif options.kind == "boolean" then
+            defaultValue = false
+        else
+            defaultValue = ""
+        end
+    end
+
+    return createScalar(options.name, options.kind, defaultValue, options.transient == true)
+end
+
+--- Creates and permanently registers a primitive-valued scalar component.
+--- @param options the name, primitive kind, default, and snapshot policy
+--- @return the registered scalar component
+--- @raises when the name is empty or already registered
+export const newScalarComponent: NewScalarComponent = createScalarComponent as NewScalarComponent
+
+--- Creates and permanently registers a record-valued component.
+--- @param options the name, positional constructor, default factory, and snapshot
+---     policy
+--- @return the registered table component
+--- @raises when the name is empty or already registered
+export function newComponent<T>(options: TableComponentOptions<T>): TableComponent<T>
+    validateName(options.name, "newComponent")
+    if (options.save == nil) ~= (options.load == nil) then
+        error("newComponent: snapshot save and load must be provided together", 2)
+    end
+    local save = options.save
+    local load = options.load
+    if save == nil then
+        save = function(value: T): any
+            return snapshotvalue.clone(value)
+        end
+        load = function(value: any): T
+            local restored = snapshotvalue.clone(value)
+            if type(restored) == "table" then
+                local prototype = options.default()
+                setmetatable(restored as table, getmetatable(prototype as any))
+            end
+
+            return restored as T
+        end
+    end
+    local component: TableComponent<T>
+    component = setmetatable(
+        {
+            componentId = componentids.allocate(),
+            componentName = options.name,
+            storageType = "table",
+            transient = options.transient == true,
+            construct = options.construct,
+            defaultFactory = options.default,
+            snapshotSave = save,
+            snapshotLoad = assert(load)
+        },
+        {
+            __call = function(self: TableComponent<T>, ...: any): TableInstance<T>
+                return new TableInstance(componentType = self, value = self.construct(...))
+            end,
+        }
+    ) as TableComponent<T>
+    -- An interface may extend another interface without itself being a
+    -- concrete implementor, so the registry erases only at this storage seam.
+    registeredByName[component.componentName] = component as Component
+    registeredById[component.componentId] = component as Component
+
+    return component
+end
+
+--- Creates an exclusive entity relationship.
+--- @param options the relationship identity and reverse-index behavior
+--- @return the callable relationship component
+--- @raises when cascade deletion lacks a reverse index
+export function newRelationship(options: RelationshipOptions): RelationshipComponent
+    validateName(options.name, "newRelationship")
+    if not options.exclusive then
+        error("newRelationship: only exclusive relationships are implemented", 2)
+    end
+    if options.cascadeDelete == true and options.reverseIndex ~= true then
+        error("newRelationship: cascadeDelete requires reverseIndex = true", 2)
+    end
+    local relationship = new RelationshipComponent(
+        componentId = componentids.allocate(),
+        componentName = options.name,
+        storageType = "relationship",
+        transient = options.transient == true,
+        exclusive = true,
+        reverseIndex = options.reverseIndex == true,
+        cascadeDelete = options.cascadeDelete == true
+    )
+    registeredRelationships[#registeredRelationships + 1] = relationship
+
+    return register(relationship)
+end
+
+--- Returns the definition carried by a mutation input.
+--- @param input the component definition or scalar wrapper
+--- @return the registered component definition
+export function definitionOf(input: Input): Component
+    if input is ScalarInstance<any> then
+        return input.componentType
+    end
+    if input is TableInstance<any> then
+        return input.componentType
+    end
+    if input is RelationshipInstance then
+        return input.componentType
+    end
+
+    return input
+end
+
+--- Returns an input's scalar payload and whether it supplied one.
+--- @param input the component definition or scalar wrapper
+--- @return the raw payload and whether the input was a wrapper
+export function explicitValue(input: Input): any, boolean
+    if input is ScalarInstance<any> then
+        return input.value, true
+    end
+    if input is TableInstance<any> then
+        return input.value, true
+    end
+    if input is RelationshipInstance then
+        return input.value, true
+    end
+
+    return nil, false
+end
+
+--- Returns a component's default committed value.
+--- @param component the component definition
+--- @return the scalar default or the tag singleton
+export function defaultValue<C is Component>(component: C): C.Value
+    if component is ScalarComponent<any> then
+        return component.scalarDefault as C.Value
+    end
+    if component.storageType == "table" then
+        local tableComponent = component as TableComponent<any>
+        return tableComponent.defaultFactory() as C.Value
+    end
+    if component.storageType == "relationship" then
+        error("Relationship " .. component.componentName .. " requires a target", 2)
+    end
+
+    return component as C.Value
+end
+
+--- Returns a component as a relationship when it carries that storage kind.
+--- @param component the component to inspect
+--- @return the relationship component, or nil for another storage kind
+export function asRelationship(component: Component): RelationshipComponent?
+    if component.storageType == "relationship" then
+        return component as RelationshipComponent
+    end
+    return nil
+end
+
+--- Returns the process-wide relationship definitions.
+--- @return the internal registry view
+export function relationships(): {RelationshipComponent}
+    return registeredRelationships
+end
+
+--- Marks an entity whose state is paused.
+export const Paused: TagComponent = newTagComponent({name = "Paused"})
+
+--- Marks an entity disabled by a state policy.
+export const Disabled: TagComponent = newTagComponent({name = "Disabled"})
+
+--- Returns the component registered under an id.
+--- @param id the process-wide component id
+--- @return the component, or nil when the id is unknown
+export function findById(id: integer): Component?
+    return registeredById[id]
+end
+
+--- Returns the component registered under a name.
+--- @param name the process-wide component name
+--- @return the component, or nil when the name is unknown
+export function findByName(name: string): Component?
+    return registeredByName[name]
+end
+
+--- Returns a fresh name-to-component snapshot of the registry.
+--- @return the caller-owned registry snapshot
+export function declared(): {[string]: Component}
+    local result: {[string]: Component} = {}
+    for name, component in pairs(registeredByName) do
+        result[name] = component
+    end
+
+    return result
+end

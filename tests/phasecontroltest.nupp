@@ -1,0 +1,116 @@
+local ecs = require("tecs.ecs")
+local test = require("nupp.test")
+
+local suite = {}
+
+function suite.disablesAndEnablesOneLeaf(): nil
+    local value = ecs.newWorld()
+    local calls = 0
+    value:addSystem({
+        phase = ecs.phases.Update,
+        run = function(_dt: number, exclusive _world: ecs.World): nil
+            calls = calls + 1
+        end,
+    })
+
+    value:disablePhase(ecs.phases.Update)
+    test.assert(not value:isPhaseEnabled(ecs.phases.Update))
+    value:update(0)
+    test.equal(calls, 0)
+
+    value:enablePhase(ecs.phases.Update)
+    test.assert(value:isPhaseEnabled(ecs.phases.Update))
+    value:update(0)
+    test.equal(calls, 1)
+end
+
+function suite.controlsEveryLeafInAGroup(): nil
+    local value = ecs.newWorld()
+
+    value:disablePhase(ecs.phases.RenderGroup)
+
+    test.assert(not value:isPhaseEnabled(ecs.phases.RenderFirst))
+    test.assert(not value:isPhaseEnabled(ecs.phases.PreRender))
+    test.assert(not value:isPhaseEnabled(ecs.phases.Render))
+    test.assert(not value:isPhaseEnabled(ecs.phases.PostRender))
+    test.assert(not value:isPhaseEnabled(ecs.phases.RenderLast))
+    test.assert(value:isPhaseEnabled(ecs.phases.Update))
+end
+
+function suite.advancesFixedTimeWhileFixedDispatchIsDisabled(): nil
+    local value = ecs.newWorld({timestep = 0.125})
+    local calls = 0
+    value:addSystem({
+        phase = ecs.phases.FixedUpdate,
+        run = function(_dt: number, exclusive _world: ecs.World): nil
+            calls = calls + 1
+        end,
+    })
+
+    value:disablePhase(ecs.phases.FixedUpdateGroup)
+    value:update(0.125)
+    test.equal(calls, 0)
+    test.equal(value:fixedStepCount(), 1)
+
+    value:enablePhase(ecs.phases.FixedUpdate)
+    value:update(0.125)
+    test.equal(calls, 1)
+    test.equal(value:fixedStepCount(), 2)
+end
+
+function suite.runsARequestedGroupWithoutAdvancingItsClock(): nil
+    local value = ecs.newWorld()
+    local order: {string} = {}
+    local fixed = {
+        ecs.phases.FixedFirst,
+        ecs.phases.FixedPreUpdate,
+        ecs.phases.FixedUpdate,
+        ecs.phases.FixedPostUpdate,
+        ecs.phases.FixedLast,
+    }
+    for index = 1, #fixed do
+        local phase = fixed[index]
+        value:addSystem({
+            phase = phase,
+            run = function(dt: number, exclusive _world: ecs.World): nil
+                test.equal(dt, 0.5)
+                order[#order + 1] = phase
+            end,
+        })
+    end
+
+    value:runPhase(ecs.phases.FixedUpdateGroup, 0.5)
+
+    test.equal(table.concat(order, ","), table.concat(fixed, ","))
+    test.equal(value:fixedStepCount(), 0)
+end
+
+function suite.controlsTheWholeBuiltInLifecycle(): nil
+    local value = ecs.newWorld()
+    local startupCalls = 0
+    local updateCalls = 0
+    value:addSystem({
+        phase = ecs.phases.Startup,
+        run = function(_dt: number, exclusive _world: ecs.World): nil
+            startupCalls = startupCalls + 1
+        end,
+    })
+    value:addSystem({
+        phase = ecs.phases.Update,
+        run = function(_dt: number, exclusive _world: ecs.World): nil
+            updateCalls = updateCalls + 1
+        end,
+    })
+
+    value:disablePhase(ecs.phases.AllGroups)
+    value:startup()
+    value:update(0)
+    test.equal(startupCalls, 0)
+    test.equal(updateCalls, 0)
+
+    value:enablePhase(ecs.phases.Startup)
+    value:startup()
+    test.equal(startupCalls, 1)
+end
+
+return suite

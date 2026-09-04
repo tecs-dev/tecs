@@ -1,0 +1,452 @@
+module tecs.host
+
+--[[
+Managed-call bridge between the Rust application host and Nupp game state.
+
+This module keeps the embedding ABI scalar. Rust holds a managed `Session`
+handle, queues translated platform values through exported functions, and asks
+for one frame at a time. Records remain inside Nupp and no Lua stack layout or
+collector address becomes part of the host contract.
+]]
+
+local application = require("tecs.application")
+local framepacket = require("tecs.internal.framepacket")
+local framepump = require("tecs.internal.framepump")
+local platformevents = require("tecs.platform.events")
+local window = require("tecs.platform.window")
+
+--- Host-owned state rooted by one Nupp managed handle.
+export record Session
+    app: application.Application
+    private events: {platformevents.Event}
+    private commands: {window.Command}
+    private commandIndex: integer
+    private pump: framepump.Pump
+    private extractor: framepacket.Extractor
+end
+
+local function append(exclusive session: Session, event: platformevents.Event): nil
+    session.events[#session.events + 1] = event
+end
+
+local function grabMode(mode: string): window.CursorGrab
+    if mode == "none" or mode == "confined" or mode == "locked" then
+        return mode
+    end
+    error("host: unknown cursor grab mode", 3)
+end
+
+local function hostState(
+    id: integer,
+    title: string,
+    width: integer,
+    height: integer,
+    pixelWidth: integer,
+    pixelHeight: integer,
+    scaleFactor: number,
+    x: integer,
+    y: integer,
+    focused: boolean,
+    visible: boolean,
+    minimized: boolean,
+    maximized: boolean,
+    fullscreen: boolean,
+    occluded: boolean,
+    resizable: boolean,
+    cursorVisible: boolean,
+    cursorGrab: string
+): window.HostState
+    return new window.HostState(
+        id = id,
+        title = title,
+        width = width,
+        height = height,
+        pixelWidth = pixelWidth,
+        pixelHeight = pixelHeight,
+        scaleFactor = scaleFactor,
+        x = x,
+        y = y,
+        focused = focused,
+        visible = visible,
+        minimized = minimized,
+        maximized = maximized,
+        fullscreen = fullscreen,
+        occluded = occluded,
+        resizable = resizable,
+        cursorVisible = cursorVisible,
+        cursorGrab = grabMode(cursorGrab)
+    )
+end
+
+local function sessionFor(app: application.Application): Session
+    return new Session(
+        app = app,
+        events = {},
+        commands = {},
+        commandIndex = 1,
+        pump = framepump.newPump(),
+        extractor = framepacket.new(app.world)
+    )
+end
+
+--- Creates an application session around a game-owned installation callback.
+---
+--- A game component exports a function with the managed `create` signature and
+--- delegates here with its statically imported plugin. Rust selects that export
+--- with `--entry`, so the host never dynamically requires game code.
+--- @param plugin the game installation callback
+--- @param title the desktop title, defaulting to `tecs`
+--- @param width the positive initial logical width, defaulting to 1280
+--- @param height the positive initial logical height, defaulting to 720
+--- @param debug whether guarded application failures may be cleared
+--- @param maxFrames an optional positive frame limit for host smoke runs
+--- @return the session the embedding host keeps as a managed handle
+export function createWithPlugin(
+    plugin: application.Plugin,
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): Session
+    return sessionFor(
+        application.newApplication({
+            window = {title = title, width = width, height = height},
+            plugin = plugin,
+            debug = debug == true,
+            debugMaxFrames = maxFrames,
+        })
+    )
+end
+
+--- Creates one blank application session for the first Rust host slice.
+--- @param title the desktop title, defaulting to `tecs`
+--- @param width the positive initial logical width, defaulting to 1280
+--- @param height the positive initial logical height, defaulting to 720
+--- @param debug whether guarded application failures may be cleared
+--- @param maxFrames an optional positive frame limit for host smoke runs
+--- @return the session the embedding host keeps as a managed handle
+export function create(title: string?, width: integer?, height: integer?, debug: boolean?, maxFrames: integer?): Session
+    return sessionFor(
+        application.newApplication({
+            window = {title = title, width = width, height = height},
+            debug = debug == true,
+            debugMaxFrames = maxFrames,
+        })
+    )
+end
+
+--- Initializes the application and runs startup phases.
+export function init(exclusive session: Session): boolean
+    return session.app:init()
+end
+
+--- Starts one frame or polls the frame already parked on asynchronous work.
+--- @return `parked`, `continue`, or `stopped`
+export function iterate(exclusive session: Session, dt: number): framepump.State
+    if framepump.parked(session.pump) then
+        return framepump.poll(session.pump)
+    end
+    local events = session.events
+    session.events = {}
+    local app = session.app
+
+    return framepump.start(session.pump, function(): boolean
+        return app:iterate(dt, events)
+    end)
+end
+
+--- Runs application shutdown once.
+export function shutdown(exclusive session: Session): boolean
+    framepump.cancel(session.pump)
+    return session.app:shutdown()
+end
+
+--- Returns the first guarded application failure, if one exists.
+export function crashed(borrows session: Session): string?
+    return session.app:crashed()
+end
+
+--- Extracts the current renderable world into one versioned byte packet.
+--- @return the packet consumed by the Rust renderer after a completed frame
+export function renderPacket(borrows session: Session): string
+    local width, height = session.app.window:getSize()
+    return session.extractor:packet(width, height)
+end
+
+--- Changes whether host turns advance simulation.
+export function setSuspended(exclusive session: Session, suspended: boolean): nil
+    session.app:setSuspended(suspended)
+end
+
+--- Attaches the Rust-created window with a complete initial state.
+export function attachWindow(
+    exclusive session: Session,
+    id: integer,
+    title: string,
+    width: integer,
+    height: integer,
+    pixelWidth: integer,
+    pixelHeight: integer,
+    scaleFactor: number,
+    x: integer,
+    y: integer,
+    focused: boolean,
+    visible: boolean,
+    minimized: boolean,
+    maximized: boolean,
+    fullscreen: boolean,
+    occluded: boolean,
+    resizable: boolean,
+    cursorVisible: boolean,
+    cursorGrab: string
+): nil
+    window.attach(
+        session.app.window,
+        hostState(
+            id,
+            title,
+            width,
+            height,
+            pixelWidth,
+            pixelHeight,
+            scaleFactor,
+            x,
+            y,
+            focused,
+            visible,
+            minimized,
+            maximized,
+            fullscreen,
+            occluded,
+            resizable,
+            cursorVisible,
+            cursorGrab
+        )
+    )
+end
+
+--- Applies a complete state acknowledgement after processing commands.
+export function applyWindowState(
+    exclusive session: Session,
+    id: integer,
+    title: string,
+    width: integer,
+    height: integer,
+    pixelWidth: integer,
+    pixelHeight: integer,
+    scaleFactor: number,
+    x: integer,
+    y: integer,
+    focused: boolean,
+    visible: boolean,
+    minimized: boolean,
+    maximized: boolean,
+    fullscreen: boolean,
+    occluded: boolean,
+    resizable: boolean,
+    cursorVisible: boolean,
+    cursorGrab: string
+): nil
+    window.applyState(
+        session.app.window,
+        hostState(
+            id,
+            title,
+            width,
+            height,
+            pixelWidth,
+            pixelHeight,
+            scaleFactor,
+            x,
+            y,
+            focused,
+            visible,
+            minimized,
+            maximized,
+            fullscreen,
+            occluded,
+            resizable,
+            cursorVisible,
+            cursorGrab
+        )
+    )
+end
+
+--- Detaches the OS window after the host destroys it.
+export function detachWindow(exclusive session: Session): nil
+    window.detach(session.app.window)
+end
+
+--- Queues a process quit event.
+export function pushQuit(exclusive session: Session, timestamp: number, sequence: integer): nil
+    append(session, platformevents.quit(session.app.window:id(), timestamp, sequence))
+end
+
+--- Queues a close request for the application window.
+export function pushClose(exclusive session: Session, timestamp: number, sequence: integer): nil
+    append(session, platformevents.closeRequested(session.app.window:id(), timestamp, sequence))
+end
+
+--- Queues a logical and physical window size observation.
+export function pushResize(
+    exclusive session: Session,
+    scaleChanged: boolean,
+    width: integer,
+    height: integer,
+    pixelWidth: integer,
+    pixelHeight: integer,
+    scaleFactor: number,
+    timestamp: number,
+    sequence: integer
+): nil
+    local event: platformevents.ResizeEvent
+    if scaleChanged then
+        event = platformevents.scaleChanged(
+            scaleFactor,
+            width,
+            height,
+            session.app.window:id(),
+            timestamp,
+            sequence,
+            pixelWidth,
+            pixelHeight
+        )
+    else
+        event = platformevents.resized(
+            width,
+            height,
+            session.app.window:id(),
+            scaleFactor,
+            timestamp,
+            sequence,
+            pixelWidth,
+            pixelHeight
+        )
+    end
+    append(session, event)
+end
+
+--- Queues a window focus transition.
+export function pushFocus(exclusive session: Session, focused: boolean, timestamp: number, sequence: integer): nil
+    append(session, platformevents.focused(focused, session.app.window:id(), timestamp, sequence))
+end
+
+--- Queues a physical and logical keyboard transition.
+export function pushKey(
+    exclusive session: Session,
+    down: boolean,
+    physicalKey: string,
+    logicalKey: string?,
+    text: string?,
+    modifiers: integer,
+    repeated: boolean,
+    timestamp: number,
+    sequence: integer
+): nil
+    append(
+        session,
+        platformevents.key(
+            down,
+            physicalKey,
+            logicalKey,
+            text,
+            modifiers,
+            repeated,
+            session.app.window:id(),
+            timestamp,
+            sequence
+        )
+    )
+end
+
+--- Queues an absolute pointer position and relative delta.
+export function pushPointerMove(
+    exclusive session: Session,
+    x: number,
+    y: number,
+    dx: number,
+    dy: number,
+    timestamp: number,
+    sequence: integer
+): nil
+    append(session, platformevents.pointerMoved(x, y, dx, dy, session.app.window:id(), timestamp, sequence))
+end
+
+--- Queues a pointer button transition.
+export function pushPointerButton(
+    exclusive session: Session,
+    down: boolean,
+    button: integer,
+    x: number,
+    y: number,
+    timestamp: number,
+    sequence: integer
+): nil
+    append(session, platformevents.pointerButton(down, button, x, y, 1, session.app.window:id(), timestamp, sequence))
+end
+
+--- Queues normalized wheel movement.
+export function pushWheel(
+    exclusive session: Session,
+    wheelX: number,
+    wheelY: number,
+    ticksX: integer,
+    ticksY: integer,
+    x: number,
+    y: number,
+    timestamp: number,
+    sequence: integer
+): nil
+    append(
+        session,
+        platformevents.wheel(wheelX, wheelY, ticksX, ticksY, x, y, session.app.window:id(), timestamp, sequence)
+    )
+end
+
+--- Queues committed input-method text.
+export function pushText(exclusive session: Session, text: string, timestamp: number, sequence: integer): nil
+    append(session, platformevents.text(text, session.app.window:id(), timestamp, sequence))
+end
+
+--- Returns and consumes the next pending window command.
+---
+--- The result is a scalar tagged tuple for the managed embedding ABI. `text`
+--- carries a title or cursor mode, `x` and `y` carry size or position, and
+--- `flag` carries a boolean setter. Fields unused by a kind are nil.
+export function nextWindowCommand(exclusive session: Session): string?, integer?, string?, number?, number?, boolean?
+    if session.commandIndex > #session.commands then
+        session.commands = window.drainCommands(session.app.window)
+        session.commandIndex = 1
+    end
+    local command = session.commands[session.commandIndex]
+    if command == nil then
+        return nil, nil, nil, nil, nil, nil
+    end
+    session.commandIndex = session.commandIndex + 1
+
+    if command is window.SetTitleCommand then
+        return command.kind, command.serial, command.title, nil, nil, nil
+    elseif command is window.SetSizeCommand then
+        return command.kind, command.serial, nil, command.width, command.height, nil
+    elseif command is window.SetPositionCommand then
+        return command.kind, command.serial, nil, command.x, command.y, nil
+    elseif command is window.SetVisibleCommand then
+        return command.kind, command.serial, nil, nil, nil, command.visible
+    elseif command is window.SetResizableCommand then
+        return command.kind, command.serial, nil, nil, nil, command.resizable
+    elseif command is window.SetFullscreenCommand then
+        return command.kind, command.serial, nil, nil, nil, command.fullscreen
+    elseif command is window.SetCursorVisibleCommand then
+        return command.kind, command.serial, nil, nil, nil, command.visible
+    elseif command is window.SetCursorGrabCommand then
+        return command.kind, command.serial, command.mode, nil, nil, nil
+    elseif command is window.RequestRedrawCommand then
+        return command.kind, command.serial, nil, nil, nil, nil
+    end
+end
+
+--- Reports one rejected command to the game-facing window.
+export function windowCommandFailed(exclusive session: Session, serial: integer, reason: string): nil
+    window.reportFailure(session.app.window, serial, reason)
+end

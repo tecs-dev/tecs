@@ -1,0 +1,144 @@
+local ecs = require("tecs.ecs")
+local test = require("nupp.test")
+
+local suite = {}
+
+local function near(actual: number, expected: number): nil
+    test.assert(math.abs(actual - expected) < 1e-9)
+end
+
+function suite.runsTheCompleteFrameOrder(): nil
+    local value = ecs.newWorld({timestep = 0.125})
+    local order: {string} = {}
+    for index = 1, ecs.phases.count do
+        local phase = assert(ecs.phases.at(index))
+        value:addSystem({
+            name = "test.phase." .. phase,
+            phase = phase,
+            run = function(_dt: number, exclusive _world: ecs.World): nil
+                order[#order + 1] = phase
+            end,
+        })
+    end
+
+    value:update(0.125)
+
+    test.equal(table.concat(order, ","), table.concat({
+        "Ingress",
+        "First",
+        "PreUpdate",
+        "FixedFirst",
+        "FixedPreUpdate",
+        "FixedUpdate",
+        "FixedPostUpdate",
+        "FixedLast",
+        "Update",
+        "PostUpdate",
+        "RenderFirst",
+        "PreRender",
+        "Render",
+        "PostRender",
+        "RenderLast",
+        "Last",
+    }, ","))
+end
+
+function suite.usesTheFixedTimestepOnlyForFixedSystems(): nil
+    local value = ecs.newWorld({timestep = 0.125})
+    local fixedDt = 0
+    local frameDt = 0
+    value:addSystem({
+        phase = ecs.phases.FixedUpdate,
+        run = function(dt: number, exclusive _world: ecs.World): nil
+            fixedDt = dt
+        end,
+    })
+    value:addSystem({
+        phase = ecs.phases.Update,
+        run = function(dt: number, exclusive _world: ecs.World): nil
+            frameDt = dt
+        end,
+    })
+
+    value:update(0.25)
+
+    near(fixedDt, 0.125)
+    near(frameDt, 0.25)
+    test.equal(value:fixedStepCount(), 2)
+end
+
+function suite.retainsResidualTimeForInterpolation(): nil
+    local value = ecs.newWorld({timestep = 0.125})
+    value:update(0.3125)
+    local timestep, accumulator, alpha = value:getFixedTiming()
+    near(timestep, 0.125)
+    near(accumulator, 0.0625)
+    near(alpha, 0.5)
+    test.equal(value:fixedStepCount(), 2)
+
+    value:update(0.0625)
+    _, accumulator, alpha = value:getFixedTiming()
+    near(accumulator, 0)
+    near(alpha, 0)
+    test.equal(value:fixedStepCount(), 3)
+end
+
+function suite.dropsWholeCatchUpStepsAtTheDefaultPolicy(): nil
+    local value = ecs.newWorld({timestep = 0.125, fixedMaxSteps = 2})
+
+    value:update(1)
+
+    test.equal(value:fixedStepCount(), 2)
+    local _, accumulator, alpha = value:getFixedTiming()
+    near(accumulator, 0)
+    near(alpha, 0)
+    local stats = value:getStats()
+    near(stats.fixedTimeDropped, 0.75)
+    test.equal(stats.fixedStepsDropped, 6)
+end
+
+function suite.accumulatesCatchUpWhenConfigured(): nil
+    local value = ecs.newWorld({timestep = 0.125, fixedMaxSteps = 2, fixedOverload = "accumulate"})
+
+    value:update(1)
+    local _, accumulator, alpha = value:getFixedTiming()
+    near(accumulator, 0.75)
+    near(alpha, 1)
+    test.equal(value:fixedStepCount(), 2)
+
+    value:update(0)
+    _, accumulator, alpha = value:getFixedTiming()
+    near(accumulator, 0.5)
+    near(alpha, 1)
+    test.equal(value:fixedStepCount(), 4)
+    local stats = value:getStats()
+    near(stats.fixedTimeDropped, 0)
+    test.equal(stats.fixedStepsDropped, 0)
+end
+
+function suite.doesNotRunAFixedPhaseBeforeOneStepIsOwed(): nil
+    local value = ecs.newWorld({timestep = 0.125})
+    local calls = 0
+    value:addSystem({
+        phase = ecs.phases.FixedUpdate,
+        run = function(_dt: number, exclusive _world: ecs.World): nil
+            calls = calls + 1
+        end,
+    })
+
+    value:update(0.124)
+
+    test.equal(calls, 0)
+    test.equal(value:fixedStepCount(), 0)
+end
+
+function suite.rejectsInvalidFixedClockOptions(): nil
+    test.raises(function(): nil
+        ecs.newWorld({timestep = 0})
+    end, "timestep")
+    test.raises(function(): nil
+        ecs.newWorld({fixedMaxSteps = 0})
+    end, "fixedMaxSteps")
+end
+
+return suite

@@ -1,0 +1,82 @@
+local ecs = require("tecs.ecs")
+local test = require("nupp.test")
+
+local suite = {}
+
+function suite.givesSystemsTheLogicalUpdateScope(): nil
+    local value = ecs.newWorld()
+    local answer = 0
+    value:addSystem({
+        name = "test.task.await",
+        phase = ecs.phases.Update,
+        run = function(_dt: number, exclusive _running: ecs.World, borrows scope: nupp.tasks.Scope): nil
+            const child = scope:spawn(function(): integer
+                return 42
+            end)
+            answer = child:await()
+        end,
+    })
+
+    value:update(0)
+
+    test.equal(answer, 42)
+end
+
+function suite.settlesUnawaitedChildrenBeforeTheUpdateReturns(): nil
+    local value = ecs.newWorld()
+    local finished = false
+    value:addSystem({
+        name = "test.task.settle",
+        phase = ecs.phases.Update,
+        run = function(_dt: number, exclusive _running: ecs.World, borrows scope: nupp.tasks.Scope): nil
+            scope:spawn(function(): nil
+                finished = true
+            end)
+        end,
+    })
+
+    value:update(0)
+
+    test.assert(finished)
+end
+
+function suite.propagatesAnUnawaitedChildFailure(): nil
+    local value = ecs.newWorld()
+    value:addSystem({
+        name = "test.task.failure",
+        phase = ecs.phases.Update,
+        run = function(_dt: number, exclusive _running: ecs.World, borrows scope: nupp.tasks.Scope): nil
+            scope:spawn(function(): nil
+                error("expected child failure")
+            end)
+        end,
+    })
+
+    test.raises(function(): nil
+        value:update(0)
+    end, "expected child failure")
+end
+
+function suite.recoversWorldBookkeepingAfterAChildFailure(): nil
+    local value = ecs.newWorld()
+    local failed = false
+    value:addSystem({
+        name = "test.task.recovery",
+        phase = ecs.phases.Update,
+        run = function(_dt: number, exclusive _running: ecs.World, borrows scope: nupp.tasks.Scope): nil
+            if not failed then
+                failed = true
+                scope:spawn(function(): nil
+                    error("fail once")
+                end)
+            end
+        end,
+    })
+
+    test.raises(function(): nil
+        value:update(0)
+    end, "fail once")
+    value:update(0)
+end
+
+return suite

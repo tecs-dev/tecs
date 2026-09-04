@@ -1,0 +1,188 @@
+module tecs.internal.phases
+
+--[[
+The ordered leaf phases of one Tecs frame.
+
+Fixed phases repeat once per simulation step. Every other phase runs once per
+logical frame, and the world publishes staged structural changes after every
+leaf phase. Startup and shutdown are separate lifecycle operations and do not
+belong to this frame order.
+]]
+
+--- A frame phase name.
+export type Phase = "Ingress"
+    | "PreStartup"
+    | "Startup"
+    | "PostStartup"
+    | "First"
+    | "PreUpdate"
+    | "FixedFirst"
+    | "FixedPreUpdate"
+    | "FixedUpdate"
+    | "FixedPostUpdate"
+    | "FixedLast"
+    | "Update"
+    | "PostUpdate"
+    | "RenderFirst"
+    | "PreRender"
+    | "Render"
+    | "PostRender"
+    | "RenderLast"
+    | "Last"
+    | "PreShutdown"
+    | "Shutdown"
+    | "PostShutdown"
+
+--- A predefined ordered group of leaf phases.
+export type PhaseGroup = "StartupGroup"
+    | "FixedUpdateGroup"
+    | "RenderGroup"
+    | "MainGroup"
+    | "ShutdownGroup"
+    | "AllGroups"
+
+--- A leaf phase or predefined phase group accepted by schedule controls.
+export type Selection = Phase | PhaseGroup
+
+export const PreStartup: Phase = "PreStartup"
+export const Startup: Phase = "Startup"
+export const PostStartup: Phase = "PostStartup"
+export const Ingress: Phase = "Ingress"
+export const First: Phase = "First"
+export const PreUpdate: Phase = "PreUpdate"
+export const FixedFirst: Phase = "FixedFirst"
+export const FixedPreUpdate: Phase = "FixedPreUpdate"
+export const FixedUpdate: Phase = "FixedUpdate"
+export const FixedPostUpdate: Phase = "FixedPostUpdate"
+export const FixedLast: Phase = "FixedLast"
+export const Update: Phase = "Update"
+export const PostUpdate: Phase = "PostUpdate"
+export const RenderFirst: Phase = "RenderFirst"
+export const PreRender: Phase = "PreRender"
+export const Render: Phase = "Render"
+export const PostRender: Phase = "PostRender"
+export const RenderLast: Phase = "RenderLast"
+export const Last: Phase = "Last"
+export const PreShutdown: Phase = "PreShutdown"
+export const Shutdown: Phase = "Shutdown"
+export const PostShutdown: Phase = "PostShutdown"
+
+export const StartupGroup: PhaseGroup = "StartupGroup"
+export const FixedUpdateGroup: PhaseGroup = "FixedUpdateGroup"
+export const RenderGroup: PhaseGroup = "RenderGroup"
+export const MainGroup: PhaseGroup = "MainGroup"
+export const ShutdownGroup: PhaseGroup = "ShutdownGroup"
+export const AllGroups: PhaseGroup = "AllGroups"
+
+export const startupCount: integer = 3
+export const beforeFixedCount: integer = 3
+export const fixedFirstIndex: integer = 4
+export const fixedLastIndex: integer = 8
+export const count: integer = 16
+export const shutdownCount: integer = 3
+
+--- Returns a startup phase by its one-based lifecycle position.
+--- @param index the one-based startup position
+--- @return the phase, or nil outside the startup order
+export function startupAt(index: integer): Phase?
+    if index == 1 then
+        return PreStartup
+    elseif index == 2 then
+        return Startup
+    elseif index == 3 then
+        return PostStartup
+    end
+
+    return nil
+end
+
+--- Returns a shutdown phase by its one-based lifecycle position.
+--- @param index the one-based shutdown position
+--- @return the phase, or nil outside the shutdown order
+export function shutdownAt(index: integer): Phase?
+    if index == 1 then
+        return PreShutdown
+    elseif index == 2 then
+        return Shutdown
+    elseif index == 3 then
+        return PostShutdown
+    end
+
+    return nil
+end
+
+--- Returns one leaf from a phase or predefined group.
+--- @param selection the leaf or group to traverse
+--- @param index the one-based position inside the selection
+--- @return the selected leaf, or nil after the selection is exhausted
+export function selectionAt(selection: Selection, index: integer): Phase?
+    if selection == StartupGroup then
+        return startupAt(index)
+    elseif selection == FixedUpdateGroup then
+        if index >= 1 and index <= fixedLastIndex - fixedFirstIndex + 1 then
+            return at(fixedFirstIndex + index - 1)
+        end
+        return nil
+    elseif selection == RenderGroup then
+        if index >= 1 and index <= 5 then
+            return at(10 + index)
+        end
+        return nil
+    elseif selection == MainGroup then
+        return at(index)
+    elseif selection == ShutdownGroup then
+        return shutdownAt(index)
+    elseif selection == AllGroups then
+        if index <= startupCount then
+            return startupAt(index)
+        elseif index <= startupCount + count then
+            return at(index - startupCount)
+        end
+        return shutdownAt(index - startupCount - count)
+    elseif index == 1 then
+        return selection as Phase
+    end
+
+    return nil
+end
+
+--- Returns a phase by its one-based frame position.
+--- @param index the one-based phase position
+--- @return the phase, or nil outside the frame order
+export function at(index: integer): Phase?
+    if index == 1 then
+        return Ingress
+    elseif index == 2 then
+        return First
+    elseif index == 3 then
+        return PreUpdate
+    elseif index == 4 then
+        return FixedFirst
+    elseif index == 5 then
+        return FixedPreUpdate
+    elseif index == 6 then
+        return FixedUpdate
+    elseif index == 7 then
+        return FixedPostUpdate
+    elseif index == 8 then
+        return FixedLast
+    elseif index == 9 then
+        return Update
+    elseif index == 10 then
+        return PostUpdate
+    elseif index == 11 then
+        return RenderFirst
+    elseif index == 12 then
+        return PreRender
+    elseif index == 13 then
+        return Render
+    elseif index == 14 then
+        return PostRender
+    elseif index == 15 then
+        return RenderLast
+    elseif index == 16 then
+        return Last
+    end
+
+    return nil
+end

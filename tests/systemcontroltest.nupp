@@ -1,0 +1,86 @@
+local ecs = require("tecs.ecs")
+local test = require("nupp.test")
+
+local suite = {}
+
+local function noop(_dt: number, exclusive _world: ecs.World): nil end
+
+function suite.listsSystemsInExecutionOrder(): nil
+    local value = ecs.newWorld()
+    value:addSystem({name = "update.second", phase = ecs.phases.Update, run = noop})
+    value:addSystem({name = "first.first", phase = ecs.phases.First, run = noop})
+    value:addSystem({name = "update.first", phase = ecs.phases.Update, run = noop})
+
+    local listed = value:listSystems()
+
+    test.equal(#listed, 3)
+    test.equal(listed[1].name, "first.first")
+    test.equal(listed[1].position, 1)
+    test.equal(listed[2].name, "update.second")
+    test.equal(listed[2].position, 1)
+    test.equal(listed[3].name, "update.first")
+    test.equal(listed[3].position, 2)
+end
+
+function suite.reportsGeneratedNamesAndGates(): nil
+    local value = ecs.newWorld()
+    local generated = value:addSystem({
+        phase = ecs.phases.Update,
+        run = noop,
+        runIf = function(_dt: number, exclusive _world: ecs.World, _name: string): boolean
+            return true
+        end,
+    })
+
+    local listed = value:listSystems()
+
+    test.equal(listed[1].name, generated)
+    test.assert(listed[1].hasRunIf)
+    test.assert(listed[1].enabled)
+end
+
+function suite.disablesAndReenablesSystemsIdempotently(): nil
+    local value = ecs.newWorld()
+    local calls = 0
+    value:addSystem({
+        name = "controlled",
+        phase = ecs.phases.Update,
+        run = function(_dt: number, exclusive _world: ecs.World): nil
+            calls = calls + 1
+        end,
+    })
+
+    test.assert(value:setSystemEnabled("controlled", false))
+    test.assert(value:setSystemEnabled("controlled", false))
+    value:update(0)
+    test.equal(calls, 0)
+    test.assert(not value:listSystems()[1].enabled)
+    test.equal(value:getStats().systems, 1)
+
+    test.assert(value:setSystemEnabled("controlled", true))
+    test.assert(value:setSystemEnabled("controlled", true))
+    value:update(0)
+    test.equal(calls, 1)
+end
+
+function suite.removesADisabledSystem(): nil
+    local value = ecs.newWorld()
+    value:addSystem({name = "removed", phase = ecs.phases.Update, run = noop})
+    test.assert(value:setSystemEnabled("removed", false))
+
+    test.assert(value:removeSystem("removed"))
+
+    test.equal(#value:listSystems(), 0)
+    test.equal(value:getStats().systems, 0)
+end
+
+function suite.returnsAReasonForAnUnknownSystem(): nil
+    local value = ecs.newWorld()
+
+    local changed, reason = value:setSystemEnabled("missing", false)
+
+    test.assert(not changed)
+    test.equal(reason, "no system named 'missing' is registered")
+end
+
+return suite

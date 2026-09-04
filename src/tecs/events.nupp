@@ -1,0 +1,26 @@
+module tecs.events
+
+--[[
+Typed event definitions for addressed world delivery.
+
+Definitions are process-wide identities. Observer state belongs to each world,
+and callbacks receive that world explicitly as their second argument.
+]]
+
+local events = require("tecs.internal.events")
+
+--- A callable typed event definition.
+export type Event<T> = events.Event<T>
+
+--- One constructed event envelope.
+export type Instance<T> = events.Instance<T>
+
+--- Options for a typed event definition.
+export type Options<T> = events.Options<T>
+
+--- Creates a callable event definition.
+--- @param options the diagnostic name and payload constructor
+--- @return the registered event definition
+export function newEvent<T>(options: Options<T>): Event<T>
+    return events.new(options)
+end

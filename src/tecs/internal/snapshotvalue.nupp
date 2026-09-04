@@ -1,0 +1,44 @@
+module tecs.internal.snapshotvalue
+
+--[[
+Detached values for the format-neutral snapshot layer.
+
+The ECS owns no JSON or binary codec. It produces plain values that Nupp serde
+can encode. Copying here prevents a saved snapshot from remaining a live view
+onto component or custom-data tables.
+]]
+
+local function cloneValue(value: any, active: {[table]: boolean}): any
+    local kind = type(value)
+    if kind == "nil" or kind == "boolean" or kind == "number" or kind == "string" then
+        return value
+    end
+    if kind == "table" then
+        local source = value as table
+        if active[source] then
+            error("snapshot value cannot contain a cycle", 3)
+        end
+        active[source] = true
+        local result: {[any]: any} = {}
+        for key, item in pairs(source) do
+            local keyKind = type(key)
+            if keyKind ~= "string" and keyKind ~= "number" then
+                error("snapshot table keys must be strings or numbers", 3)
+            end
+            result[key] = cloneValue(item, active)
+        end
+        active[source] = nil
+
+        return result
+    else
+        error("snapshot value cannot contain " .. kind, 3)
+    end
+end
+
+--- Returns a detached tree of nil, booleans, numbers, strings, and tables.
+--- @param value the component or custom value to detach
+--- @return a recursively independent plain value
+--- @raises when the graph contains an unsupported value, key, or cycle
+export function clone(value: any): any
+    return cloneValue(value, {})
+end
