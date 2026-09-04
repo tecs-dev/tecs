@@ -1,0 +1,225 @@
+module tecs.internal.mcpsandbox
+
+--[[
+The environment `run_lua` compiles into, and the formatter its results come
+back through.
+
+Two jobs, kept here rather than in the tool so that protocol dispatch carries
+no policy. It decides what compiled code can reach, and it holds one
+environment across calls, so an agent stashes a handle in one call and reads it
+in the next. That is what makes an exploratory session possible at all.
+
+The filtering is a guard rail and not a security boundary. `run_lua` exists to
+do what no structured tool covers, so anything the engine can reach, code
+compiled here can reach: `require` and `ffi` are both in scope. What the
+environment removes are the operations that damage the machine rather than the
+game, because an agent exploring a world should not delete a file by mistyping
+a table name.
+
+Nupp lowers to LuaJIT, so the chunk an agent sends is Lua 5.1 and is compiled
+by `loadstring` under `setfenv`. Both are reached through the global table
+because the Nupp standard library does not declare them.
+]]
+
+local json = require("nupp.data.json")
+
+local globals = _G as {[string]: any}
+
+--- One compiled `run_lua` chunk, taking the bound world as its one argument.
+export type Chunk = function(world: any): ...any
+
+local loadstring = globals["loadstring"] as function(text: string, name: string): (Chunk?, string?)
+local setfenv = globals["setfenv"] as function(chunk: any, environment: {[string]: any}): nil
+
+--- The fields of `os` that cannot touch the machine.
+local SAFE_OS: {string} = {"time", "clock", "date", "difftime", "getenv"}
+
+--- The names passed through untouched.
+---
+--- Everything absent from this list is absent from the environment, so a new
+--- global in the host does not silently become reachable. Absent on purpose:
+--- `io`, `dofile`, `loadfile`, `load`, and `os.execute`, `remove`, `rename`
+--- and `exit`. Reading and writing files is what the asset and storage APIs
+--- are for.
+local PASSED: {
+    string
+} = {
+    "assert",
+    "error",
+    "ipairs",
+    "next",
+    "pairs",
+    "pcall",
+    "print",
+    "select",
+    "setmetatable",
+    "getmetatable",
+    "rawget",
+    "rawset",
+    "rawequal",
+    "rawlen",
+    "tonumber",
+    "tostring",
+    "type",
+    "unpack",
+    "xpcall",
+    "require",
+    "string",
+    "table",
+    "math",
+    "coroutine",
+    "bit",
+    "jit",
+    "ffi"
+}
+
+--- The depth beyond which a table is summarized rather than walked. Deep
+--- enough for the shapes an agent asks for, shallow enough that returning the
+--- world by mistake answers instead of hanging.
+local MAX_DEPTH: integer = 6
+
+--- The entries beyond which a table stops and reports that it was truncated.
+local MAX_ENTRIES: integer = 256
+
+local environment: {[string]: any}? = nil
+
+local function build(): {[string]: any}
+    local env: {[string]: any} = {}
+    for _, name in ipairs(PASSED) do
+        env[name] = globals[name]
+    end
+
+    local safeOs: {[string]: any} = {}
+    local hostOs = globals["os"] as {[string]: any}
+    for _, name in ipairs(SAFE_OS) do
+        safeOs[name] = hostOs[name]
+    end
+    env["os"] = safeOs
+    env["_G"] = env
+
+    return env
+end
+
+local function current(): {[string]: any}
+    local existing = environment
+    if existing == nil then
+        existing = build()
+        environment = existing
+    end
+
+    return existing
+end
+
+--- Forgets everything a previous call stashed.
+---
+--- The next `compile` builds a fresh environment. A chunk already compiled
+--- keeps the old one and goes on seeing the values it held, so a reset makes a
+--- clean slate for new code rather than for code already in flight.
+export function reset(): nil
+    environment = nil
+end
+
+--- Reports whether a name is reachable from the sandbox environment.
+---
+--- The policy read back rather than reimplemented, so a test asserts on what
+--- `compile` actually installs.
+--- @param name the global name to look for
+--- @return whether a chunk compiled here would see that name
+export function reaches(name: string): boolean
+    return current()[name] ~= nil
+end
+
+--- Compiles `code` as a function body with `world` in scope.
+---
+--- Tried first as a statement block and then, when that fails to parse, as a
+--- bare expression with `return` in front. The diagnostic reported when both
+--- fail is the statement form's, so an expression with a typo in it is
+--- described in terms of the wrapping this applied rather than the wrapping
+--- that would have suited it.
+--- @param code Lua rather than Nupp, compiled by LuaJIT, so 5.1 syntax
+--- @return the chunk taking the world as its one argument, or nil when `code`
+---     did not compile
+--- @return the compiler's message when the first return is nil, and nil
+---     otherwise
+export function compile(code: string): (Chunk?, string?)
+    local chunk, reason = loadstring("local world = ...\n" .. code, "=run_lua")
+    if chunk == nil then
+        -- A bare expression is the common typo, so try it as one before
+        -- reporting a syntax error the agent would have to work out.
+        local expression = loadstring("local world = ...\nreturn " .. code, "=run_lua")
+        if expression == nil then
+            return nil, reason
+        end
+        chunk = expression
+    end
+    setfenv(chunk, current())
+
+    return chunk
+end
+
+--- Converts a value into something JSON can carry.
+---
+--- Necessary because encoding raises on a function, a coroutine or cdata, and
+--- an agent that returned one by accident should get a description of it
+--- rather than a failed call. Cycles are not detected: the depth cap is the
+--- only thing that stops a self-referential table, and it stops it by
+--- summarizing rather than by failing.
+--- @param value anything at all, cdata and coroutines included
+--- @param depth the recursion depth already spent, which a caller omits
+--- @return an always-encodable value: nil becomes JSON null, a number, string
+---     or boolean passes through, anything else that is not a table becomes a
+---     `"<kind: address>"` string, a table nested past six levels becomes
+---     `"<table: address>"`, and one past 256 entries stops there and carries a
+---     `"<truncated>"` key
+export function describe(value: any, depth: integer?): any
+    local spent = depth or 0
+    local kind = type(value)
+
+    if value == nil then
+        return json.NULL
+    elseif kind == "number" or kind == "string" or kind == "boolean" then
+        return value
+    elseif kind ~= "table" then
+        -- Functions, threads, userdata and cdata all land here.
+        return `<${kind}: ${tostring(value)}>`
+    end
+
+    if spent >= MAX_DEPTH then
+        return `<table: ${tostring(value)}>`
+    end
+
+    local out: {[string]: any} = {}
+    local list: {any} = {}
+    local isArray = true
+    local count = 0
+
+    for key, entry in pairs(value as {[any]: any}) do
+        count = count + 1
+        if count > MAX_ENTRIES then
+            out["<truncated>"] = true
+            isArray = false
+            break
+        end
+        local numeric = key as number
+        if isArray and type(key) == "number" and numeric == math.floor(numeric) and numeric >= 1 then
+            list[numeric as integer] = describe(entry, spent + 1)
+        else
+            isArray = false
+            out[tostring(key)] = describe(entry, spent + 1)
+        end
+    end
+
+    if isArray then
+        return json.asArray(list)
+    end
+
+    -- A table that turned out to be mixed loses nothing: the numeric keys were
+    -- written into `list` and are copied across as strings.
+    for index = 1, #list do
+        if out[tostring(index)] == nil then
+            out[tostring(index)] = list[index]
+        end
+    end
+
+    return out
+end

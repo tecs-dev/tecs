@@ -1,0 +1,246 @@
+module tecs.internal.mcpregistry
+
+--[[
+The MCP tool registry and the in-process JSON-RPC dispatcher.
+
+The registry is process-wide and holds every tool an agent may call, in
+first-registration order. Dispatch answers the three MCP methods a debug
+session needs, `initialize`, `tools/list` and `tools/call`, and reports a
+failing handler to the agent instead of taking the frame down with it.
+
+Tool names, and the argument keys of their schemas, are a compatibility
+surface. An agent reaches them through JSON payloads this tree cannot see, so
+they keep the spelling the Teal engine published even where it disagrees with
+the house naming rules. `tecs.mcp` re-exports everything here; nothing else
+should require this module directly.
+]]
+
+local json = require("nupp.data.json")
+local log = require("nupp.log")
+
+-- The externally typed logger name is `tecs.mcp`, independent of the module
+-- path it is created from. Do not rename this compatibility surface.
+local logger = log.named("tecs.mcp")
+
+--- The MCP protocol revision this server negotiates. The string is the
+--- specification's own and is not a Tecs identifier.
+local PROTOCOL_VERSION = "2025-06-18"
+
+--- JSON-RPC error codes used by the in-process dispatcher.
+local PARSE_ERROR: integer = -32700
+
+local INVALID_REQUEST: integer = -32600
+local METHOD_NOT_FOUND: integer = -32601
+
+--- The decoded arguments a tool receives and the structured content it returns.
+export type ToolHandler = function(arguments: {[string]: any}): {[string]: any}?
+
+--- One registered tool and its handler.
+---
+--- `name` is what an agent calls and is the registry key. Established names
+--- follow the MCP ecosystem's spelling, including `run_lua` and `send_event`,
+--- so they use snake_case where the rest of this tree uses camelCase. Do not
+--- rename one.
+---
+--- `description` is the single line shown beside the name, and nil is sent as
+--- an empty string rather than omitted. `inputSchema` is the JSON Schema sent
+--- verbatim in the tool list; its property names are as externally typed as
+--- the tool name. `outputSchema` is omitted from the listing when nil rather
+--- than advertised as an empty schema.
+---
+--- `readOnly` and `destructive` are advisory hints the server reports and
+--- enforces neither. `whenCrashed` keeps a tool callable after a guarded game
+--- failure; it is false by default, because a crashed world cannot answer
+--- anything true about itself.
+export type Tool = {
+    name: string,
+    description: string?,
+    inputSchema: {[string]: any}?,
+    outputSchema: {[string]: any}?,
+    handler: ToolHandler,
+    readOnly: boolean?,
+    destructive: boolean?,
+    whenCrashed: boolean?
+}
+
+local tools: {[string]: Tool} = {}
+local order: {string} = {}
+
+--- Counts calls to `register`, including the ones that replace a name. A
+--- server publishes its listing when this number moves past the one it last
+--- published, so a frame that registered nothing encodes nothing.
+local revision: integer = 0
+
+--- The traceback of a guarded game failure, once one has been recorded.
+local crashedText: string? = nil
+
+--- Records a crash so every world-touching tool reports it instead of running.
+--- @param traceback the failure text, or nil to clear the crashed state
+export function setCrashed(traceback: string?): nil
+    crashedText = traceback
+end
+
+--- Returns the recorded crash text.
+--- @return the traceback, or nil while nothing has recorded a crash
+export function crashed(): string?
+    return crashedText
+end
+
+--- Returns the registry revision, which changes on every registration.
+--- @return the monotonically increasing count of registrations
+export function currentRevision(): integer
+    return revision
+end
+
+--- Registers a tool, replacing any tool already holding its name.
+---
+--- A replacement keeps the name's original position, so the order a client
+--- sees is first-registration order rather than last.
+--- @param tool the declaration, stored by reference and never copied
+--- @raises when the declaration carries no name or no handler
+export function register(tool: Tool): nil
+    if tool.name == nil or tool.handler == nil then
+        error("tecs.mcp.register: a tool needs a name and a handler", 3)
+    end
+    if tools[tool.name] == nil then
+        order[#order + 1] = tool.name
+    end
+    tools[tool.name] = tool
+    revision = revision + 1
+end
+
+--- Returns every registered tool in registration order.
+--- @return a fresh list the caller owns, holding the registered declarations
+export function listTools(): {Tool}
+    local list: {Tool} = {}
+    for index = 1, #order do
+        list[index] = tools[order[index]] as Tool
+    end
+
+    return list
+end
+
+--- Returns one registered tool by name.
+--- @param name the registered tool name
+--- @return the declaration, or nil when no tool carries that name
+export function findTool(name: string?): Tool?
+    if name == nil then
+        return nil
+    end
+
+    return tools[name]
+end
+
+--- Returns the tool listing in the shape MCP puts on the wire.
+--- @return a JSON-encodable array of tool entries, empty-array marked when bare
+export function describe(): any
+    local list: {any} = {}
+    for _, tool in ipairs(listTools()) do
+        local entry: {[string]: any} = {
+            name = tool.name,
+            description = tool.description or "",
+            inputSchema = tool.inputSchema or {type = "object", properties = json.EMPTY_OBJECT},
+            annotations = {
+                readOnlyHint = tool.readOnly == true,
+                destructiveHint = tool.destructive == true,
+                -- Not an MCP annotation but ours, so an agent can tell which
+                -- tools survive a crash without calling them.
+                whenCrashedHint = tool.whenCrashed == true
+            }
+        }
+        -- A tool that declares no output schema advertises none, so the key
+        -- stays off the wire entry rather than carrying an empty default.
+        if tool.outputSchema ~= nil then
+            entry.outputSchema = tool.outputSchema
+        end
+        list[#list + 1] = entry
+    end
+
+    return json.asArray(list)
+end
+
+--- Returns the encoded tool listing a transport publishes.
+--- @return the JSON text of the listing
+export function describeJSON(): string
+    return json.encode(describe())
+end
+
+local function reply(id: any, result: {[string]: any}): string
+    return json.encode({jsonrpc = "2.0", id = id ?? json.NULL, result = result}, json.NULL)
+end
+
+local function fail(id: any, code: integer, message: string): string
+    return json.encode({jsonrpc = "2.0", id = id ?? json.NULL, error = {code = code, message = message}}, json.NULL)
+end
+
+--- Runs one tool handler and returns the JSON-RPC result object for it.
+---
+--- Shared by the in-process dispatcher and by the transport, so an agent
+--- reaching the server over HTTP and a test calling `dispatch` are answered on
+--- identical terms.
+--- @param tool the tool to call
+--- @param arguments the decoded call arguments
+--- @return the result object, carrying `isError` when the handler raised
+export function callTool(tool: Tool, arguments: {[string]: any}): {[string]: any}
+    if crashedText ~= nil and tool.whenCrashed ~= true then
+        return {isError = true, crashed = true, content = {{type = "text", text = crashedText}}}
+    end
+    -- A tool that raises must not take the server with it: the agent is told,
+    -- and the frame carries on.
+    local called, payload = pcall(tool.handler, arguments)
+    if not called then
+        logger:warn("tool %s failed: %s", tool.name, tostring(payload))
+
+        return {isError = true, content = {{type = "text", text = tostring(payload)}}}
+    end
+    local structured = (payload or {}) as {[string]: any}
+
+    return {structuredContent = structured, content = {{type = "text", text = json.encode(structured)}}}
+end
+
+--- Runs one JSON-RPC request and returns the response text.
+---
+--- The three methods answered, `initialize`, `tools/list` and `tools/call`,
+--- carry the names the MCP specification gives them. Anything else is a
+--- method-not-found error.
+--- @param text one JSON-RPC request object, which may not be a batch
+--- @return the response as JSON text, which reports bad input in band rather
+---     than by raising
+export function dispatch(text: string): string
+    local decoded, value = pcall(json.decode, text, json.NULL)
+    if not decoded then
+        return fail(json.NULL, PARSE_ERROR, "invalid JSON")
+    end
+    if type(value) ~= "table" then
+        return fail(json.NULL, INVALID_REQUEST, "no method")
+    end
+
+    local request = value as {[string]: any}
+    local id = request.id
+    local method = request.method as string?
+    if method == nil then
+        return fail(id, INVALID_REQUEST, "no method")
+    end
+
+    if method == "initialize" then
+        return reply(id, {
+            protocolVersion = PROTOCOL_VERSION,
+            capabilities = {tools = json.EMPTY_OBJECT},
+            serverInfo = {name = "tecs", version = "0.1.0"}
+        })
+    elseif method == "tools/list" then
+        return reply(id, {tools = describe()})
+    elseif method == "tools/call" then
+        local params = (request.params or {}) as {[string]: any}
+        local name = params.name as string?
+        local tool = findTool(name)
+        if tool == nil then
+            return fail(id, METHOD_NOT_FOUND, `no tool named '${tostring(name)}'`)
+        end
+        local arguments = (params.arguments or {}) as {[string]: any}
+
+        return reply(id, callTool(tool, arguments))
+    end
+
+    return fail(id, METHOD_NOT_FOUND, `no method '${method}'`)
+end

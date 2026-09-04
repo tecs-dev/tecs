@@ -1,0 +1,84 @@
+module tecs.internal.netadapter
+
+--[[
+The slice of `nupp.io.net` the debug server uses, declared locally.
+
+`nupp.io.net` does not publish its types to a strictly checked consumer with
+the compiler this tree builds against: a require of it resolves to `unknown`,
+and every field read on that is a strict-mode error. Everything below is a
+declaration of the module's own contract, narrowed to the operations Tecs
+reaches for, so exactly one file carries the assertion and exactly one file has
+to be deleted when the module resolves.
+
+Nothing here reimplements anything. The listener, the connections, the reactor
+and the suspension they park on are all `nupp.io.net`'s. What is lost by
+crossing through a cast is the affine ownership of a listener and a stream, so
+a caller closes both explicitly rather than at a lexical boundary.
+]]
+
+--- One connection, as much of `nupp.io.net`'s `Stream` as Tecs uses.
+---
+--- `read` answers bytes, suspends while none have arrived, or answers the
+--- empty string because the peer closed its sending half. Empty is only ever
+--- the end.
+export record Stream
+    read: function(self: Stream, count: integer): (string?, string?)
+    write: function(self: Stream, bytes: string): (boolean, string?)
+    isEnded: function(self: Stream): boolean
+    setNoDelay: function(self: Stream, enable: boolean): (boolean, string?)
+    close: function(self: Stream): nil
+end
+
+--- One listening socket, as much of `nupp.io.net`'s `Listener` as Tecs uses.
+export record Listener
+    port: function(self: Listener): integer
+    accept: function(self: Listener): (Stream?, string?)
+    close: function(self: Listener): nil
+end
+
+--- The module surface Tecs reaches for.
+local record Module
+    listen: function(options: {
+        host: string?,
+        port: integer?,
+        backlog: integer?
+    }): (Listener?, string?)
+    connect: function(options: {
+        host: string?,
+        port: integer?,
+        timeoutMs: integer?
+    }): (Stream?, string?)
+    pump: function(timeoutMs: integer): nil
+end
+
+local net = require("nupp.io.net") as Module
+
+--- Opens a listener the caller owns and must close.
+--- @param options the address to bind and the backlog depth to ask for
+--- @return the listener, or nil when it could not bind
+--- @return why it could not bind, when unsuccessful
+export function listen(options: {
+    host: string?,
+    port: integer?,
+    backlog: integer?
+}): (Listener?, string?)
+    return net.listen(options)
+end
+
+--- Opens a connection the caller owns and must close.
+--- @param options the peer to reach and how long the connect may take
+--- @return the connection, or nil when it could not be opened
+--- @return why it could not connect, when unsuccessful
+export function connect(options: {
+    host: string?,
+    port: integer?,
+    timeoutMs: integer?
+}): (Stream?, string?)
+    return net.connect(options)
+end
+
+--- Drives this lane's network reactor.
+--- @param timeoutMs how long to wait, zero to take only what is ready now
+export function pump(timeoutMs: integer): nil
+    net.pump(timeoutMs)
+end
