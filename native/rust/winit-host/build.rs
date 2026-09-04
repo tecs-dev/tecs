@@ -26,8 +26,7 @@ fn main() {
 }
 
 fn stage_sdk() -> PathBuf {
-    let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo sets it"));
-    let script = manifest.join("../../../../nupp/scripts/toolchain");
+    let script = find_toolchain();
     let output = Command::new(&script)
         .arg("host-library")
         .arg("base")
@@ -47,4 +46,28 @@ fn stage_sdk() -> PathBuf {
         .find(|line| !line.trim().is_empty())
         .expect("toolchain printed no SDK path");
     PathBuf::from(path.trim())
+}
+
+/// Locates the Nupp toolchain script beside the checkout.
+///
+/// The path is searched upward rather than counted, because a fixed
+/// `../../../../` from the manifest directory only resolves in the primary
+/// checkout. A git worktree sits deeper, so the fixed hop lands inside
+/// `.claude/worktrees` and the build fails there with a missing script rather
+/// than an obviously wrong path. Every ancestor is tried, so both layouts and
+/// any future nesting resolve the same way. Set `NUPP_SDK` to bypass this.
+fn find_toolchain() -> PathBuf {
+    let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo sets it"));
+    let mut directory = manifest.as_path();
+    while let Some(parent) = directory.parent() {
+        let candidate = parent.join("nupp/scripts/toolchain");
+        if candidate.is_file() {
+            return candidate;
+        }
+        directory = parent;
+    }
+    panic!(
+        "no nupp/scripts/toolchain above {}; set NUPP_SDK to the staged SDK directory",
+        manifest.display()
+    );
 }
