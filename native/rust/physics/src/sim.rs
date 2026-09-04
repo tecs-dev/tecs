@@ -329,6 +329,10 @@ impl Simulation {
                 .contacts_enabled(command.flags & JOINT_CONTACTS != 0)
                 .into(),
         };
+        // The joint carries its entity the way a body and a collider do, so a
+        // snapshot load resolves all three from the restored state alone.
+        let mut joint = joint;
+        joint.user_data = command.entity as u128;
         public_joint(self.world.impulse_joints.insert(first, second, joint, true))
     }
 
@@ -594,15 +598,17 @@ impl Simulation {
         })
     }
 
-    /// Answers one body and collider handle for each requested entity.
+    /// Answers one body, collider, and joint handle for each entity asked
+    /// about.
     ///
     /// A snapshot load asks for every restored entity at once, so this walks
-    /// the arenas once instead of once per entity.
+    /// each arena once instead of once per entity.
     pub fn resolve_entities(
         &self,
         entities: &[u64],
         bodies: &mut [TecsPhysicsHandle],
         colliders: &mut [TecsPhysicsHandle],
+        joints: &mut [TecsPhysicsHandle],
     ) {
         let mut body_index: HashMap<u64, TecsPhysicsHandle> = HashMap::new();
         for (handle, body) in self.world.bodies.iter() {
@@ -616,12 +622,22 @@ impl Simulation {
                 .entry(collider.user_data as u64)
                 .or_insert_with(|| public_collider(handle));
         }
+        let mut joint_index: HashMap<u64, TecsPhysicsHandle> = HashMap::new();
+        for (handle, joint) in self.world.impulse_joints.iter() {
+            joint_index
+                .entry(joint.data.user_data as u64)
+                .or_insert_with(|| public_joint(handle));
+        }
         for (slot, entity) in entities.iter().enumerate() {
             bodies[slot] = body_index
                 .get(entity)
                 .copied()
                 .unwrap_or(TecsPhysicsHandle::NULL);
             colliders[slot] = collider_index
+                .get(entity)
+                .copied()
+                .unwrap_or(TecsPhysicsHandle::NULL);
+            joints[slot] = joint_index
                 .get(entity)
                 .copied()
                 .unwrap_or(TecsPhysicsHandle::NULL);

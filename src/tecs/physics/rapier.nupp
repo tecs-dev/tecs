@@ -1,0 +1,1169 @@
+module tecs.physics.rapier
+
+--[[
+The Rapier implementation of the batched physics crossing.
+
+Requiring this module binds the `tecs_physics` native library, so
+`tecs.physics` reaches it only when a world actually asks for the native
+solver. A world driven by a simulation its caller supplied never loads it.
+
+The declarations below are the managed half of one ABI whose Rust half lives
+in `native/rust/physics`. Layout is positional, so the field order here has to
+match the Rust order exactly; `assertLayout` repeats every size the Rust
+`layout_is_pinned` test pins, and a mismatch fails the first time a game asks
+for physics rather than somewhere inside the solver.
+
+Every command and result buffer belongs to this module. The native side
+borrows them for exactly the duration of one call and retains nothing, which
+is what makes the crossing free of foreign lifetimes. Reads and writes into
+those buffers sit inside `unsafe do` because the checker cannot see that an
+index this module bounds-checked against a capacity this module allocated is
+in range; every such block is preceded by the check that makes it true.
+]]
+
+local ffi = require("ffi")
+local contract = require("tecs.physics.contract")
+
+cdef struct TecsPhysicsHandle
+    index: uint32
+    generation: uint32
+end
+
+cdef struct TecsPhysicsColliderDef
+    entity: uint64
+    shape: uint32
+    flags: uint32
+    halfWidth: float
+    halfHeight: float
+    radius: float
+    length: float
+    offsetX: float
+    offsetY: float
+    density: float
+    friction: float
+    restitution: float
+    categoryBits: uint32
+    maskBits: uint32
+end
+
+cdef struct TecsPhysicsBodyCreate
+    entity: uint64
+    collider: TecsPhysicsColliderDef
+    kind: uint32
+    flags: uint32
+    gravityScale: float
+    linearDamping: float
+    angularDamping: float
+    x: float
+    y: float
+    angle: float
+    vx: float
+    vy: float
+    omega: float
+end
+
+cdef struct TecsPhysicsBodyUpdate
+    body: TecsPhysicsHandle
+    kind: uint32
+    flags: uint32
+    gravityScale: float
+    linearDamping: float
+    angularDamping: float
+end
+
+cdef struct TecsPhysicsColliderCreate
+    def: TecsPhysicsColliderDef
+    body: TecsPhysicsHandle
+    bodyCreateIndex: int32
+    reserved: uint32
+end
+
+cdef struct TecsPhysicsColliderUpdate
+    def: TecsPhysicsColliderDef
+    collider: TecsPhysicsHandle
+    body: TecsPhysicsHandle
+    mode: uint32
+    reserved: uint32
+end
+
+cdef struct TecsPhysicsJointCreate
+    entity: uint64
+    bodyA: TecsPhysicsHandle
+    bodyB: TecsPhysicsHandle
+    bodyACreateIndex: int32
+    bodyBCreateIndex: int32
+    kind: uint32
+    flags: uint32
+    anchorAX: float
+    anchorAY: float
+    anchorBX: float
+    anchorBY: float
+    axisX: float
+    axisY: float
+    limitMin: float
+    limitMax: float
+    motorTargetVelocity: float
+    motorMaxForce: float
+end
+
+cdef struct TecsPhysicsBodyAction
+    body: TecsPhysicsHandle
+    action: uint32
+    reserved: uint32
+    a: float
+    b: float
+    c: float
+    d: float
+end
+
+cdef struct TecsPhysicsBodyState
+    generation: uint32
+    flags: uint32
+    x: float
+    y: float
+    cosine: float
+    sine: float
+    vx: float
+    vy: float
+    omega: float
+    reserved: uint32
+end
+
+cdef struct TecsPhysicsCreatedBody
+    body: TecsPhysicsHandle
+    collider: TecsPhysicsHandle
+end
+
+cdef struct TecsPhysicsPairEvent
+    entityA: uint64
+    entityB: uint64
+    started: uint32
+    sensor: uint32
+end
+
+cdef struct TecsPhysicsRayHit
+    entity: uint64
+    x: float
+    y: float
+    normalX: float
+    normalY: float
+    fraction: float
+    reserved: uint32
+end
+
+cdef struct TecsPhysicsBatch
+    dt: float
+    reserved: uint32
+
+    createBodies: TecsPhysicsBodyCreate*?
+    createBodyCount: uint64
+    createColliders: TecsPhysicsColliderCreate*?
+    createColliderCount: uint64
+    createJoints: TecsPhysicsJointCreate*?
+    createJointCount: uint64
+    updateBodies: TecsPhysicsBodyUpdate*?
+    updateBodyCount: uint64
+    updateColliders: TecsPhysicsColliderUpdate*?
+    updateColliderCount: uint64
+    actions: TecsPhysicsBodyAction*?
+    actionCount: uint64
+    destroyBodies: TecsPhysicsHandle*?
+    destroyBodyCount: uint64
+    destroyColliders: TecsPhysicsHandle*?
+    destroyColliderCount: uint64
+    destroyJoints: TecsPhysicsHandle*?
+    destroyJointCount: uint64
+
+    createdBodies: TecsPhysicsCreatedBody*?
+    createdBodyCapacity: uint64
+    createdColliders: TecsPhysicsHandle*?
+    createdColliderCapacity: uint64
+    createdJoints: TecsPhysicsHandle*?
+    createdJointCapacity: uint64
+    updatedColliders: TecsPhysicsHandle*?
+    updatedColliderCapacity: uint64
+    states: TecsPhysicsBodyState*?
+    stateCapacity: uint64
+    moved: uint32*?
+    movedCapacity: uint64
+    events: TecsPhysicsPairEvent*?
+    eventCapacity: uint64
+
+    stateCount: uint64
+    movedCount: uint64
+    eventCount: uint64
+end
+
+cdef function tecsPhysicsWorldCreate(
+    gravityX: float,
+    gravityY: float,
+    substeps: uint32,
+    workerCount: uint32
+): voidptr from"tecs_physics"
+
+cdef function tecsPhysicsWorldDestroy(exclusive world: voidptr) from"tecs_physics"
+
+cdef function tecsPhysicsSubstepCount(borrows world: voidptr): uint32 from"tecs_physics"
+
+cdef function tecsPhysicsWorkerCount(borrows world: voidptr): uint32 from"tecs_physics"
+
+cdef function tecsPhysicsDefaultWorkerCount(): uint32 from"tecs_physics"
+
+cdef function tecsPhysicsStep(exclusive world: voidptr, exclusive batch: TecsPhysicsBatch*): int32 from"tecs_physics"
+
+cdef function tecsPhysicsDrain(borrows world: voidptr, exclusive batch: TecsPhysicsBatch*): int32 from"tecs_physics"
+
+cdef function tecsPhysicsRaycast(
+    borrows world: voidptr,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    categoryBits: uint32,
+    maskBits: uint32,
+    exclusive output: TecsPhysicsRayHit*
+): int32 from"tecs_physics"
+
+cdef function tecsPhysicsResolveEntities(
+    borrows world: voidptr,
+    borrows entities: uint64*,
+    count: uint64,
+    exclusive bodies: TecsPhysicsHandle*,
+    exclusive colliders: TecsPhysicsHandle*,
+    exclusive joints: TecsPhysicsHandle*
+): int32 from"tecs_physics"
+
+cdef function tecsPhysicsSnapshotBegin(exclusive world: voidptr): uint64 from"tecs_physics"
+
+cdef function tecsPhysicsSnapshotRead(
+    borrows world: voidptr,
+    exclusive output: uint8*,
+    capacity: uint64
+): uint64 from"tecs_physics"
+
+cdef function tecsPhysicsSnapshotRestore(
+    exclusive world: voidptr,
+    borrows bytes: cstring,
+    length: uint64
+): int32 from"tecs_physics"
+
+cdef function tecsPhysicsLastError(): cstring from"tecs_physics"
+
+const STATUS_OK: integer = 0
+const STATUS_TRUNCATED: integer = 1
+
+const BODY_FIXED_ROTATION: integer = 1
+const BODY_BULLET: integer = 2
+const BODY_SLEEP_ENABLED: integer = 4
+
+const COLLIDER_SENSOR: integer = 1
+const COLLIDER_BY_HANDLE: integer = 0
+const COLLIDER_BY_ENTITY: integer = 1
+
+const JOINT_LIMITS: integer = 1
+const JOINT_MOTOR: integer = 2
+const JOINT_CONTACTS: integer = 4
+
+const STATE_LIVE: integer = 1
+const STATE_AWAKE: integer = 2
+const STATE_MOVED: integer = 4
+
+--- The arena index the native side reports for a failed creation.
+const NULL_INDEX: integer = 0xFFFFFFFF
+
+--- Holds this module against the Rust layout it declares.
+---
+--- The numbers repeat what `layout_is_pinned` asserts on the Rust side, so a
+--- reordered field there fails here the first time a game asks for physics.
+--- @raises when the loaded library does not match these declarations
+local function assertLayout(): nil
+    local sizes: {
+        [string]: integer
+    } = {
+        TecsPhysicsHandle = 8,
+        TecsPhysicsColliderDef = 64,
+        TecsPhysicsBodyCreate = 120,
+        TecsPhysicsBodyUpdate = 28,
+        TecsPhysicsColliderCreate = 80,
+        TecsPhysicsColliderUpdate = 88,
+        TecsPhysicsJointCreate = 80,
+        TecsPhysicsBodyAction = 32,
+        TecsPhysicsBodyState = 40,
+        TecsPhysicsCreatedBody = 16,
+        TecsPhysicsPairEvent = 24,
+        TecsPhysicsRayHit = 32,
+        TecsPhysicsBatch = 288,
+    }
+    local observed: {
+        [string]: integer
+    } = {
+        TecsPhysicsHandle = ffi.sizeof<TecsPhysicsHandle>(),
+        TecsPhysicsColliderDef = ffi.sizeof<TecsPhysicsColliderDef>(),
+        TecsPhysicsBodyCreate = ffi.sizeof<TecsPhysicsBodyCreate>(),
+        TecsPhysicsBodyUpdate = ffi.sizeof<TecsPhysicsBodyUpdate>(),
+        TecsPhysicsColliderCreate = ffi.sizeof<TecsPhysicsColliderCreate>(),
+        TecsPhysicsColliderUpdate = ffi.sizeof<TecsPhysicsColliderUpdate>(),
+        TecsPhysicsJointCreate = ffi.sizeof<TecsPhysicsJointCreate>(),
+        TecsPhysicsBodyAction = ffi.sizeof<TecsPhysicsBodyAction>(),
+        TecsPhysicsBodyState = ffi.sizeof<TecsPhysicsBodyState>(),
+        TecsPhysicsCreatedBody = ffi.sizeof<TecsPhysicsCreatedBody>(),
+        TecsPhysicsPairEvent = ffi.sizeof<TecsPhysicsPairEvent>(),
+        TecsPhysicsRayHit = ffi.sizeof<TecsPhysicsRayHit>(),
+        TecsPhysicsBatch = ffi.sizeof<TecsPhysicsBatch>(),
+    }
+    for name, expected in pairs(sizes) do
+        if observed[name] ~= expected then
+            error(
+                (
+                    "tecs.physics.rapier: %s is %d bytes here and %d bytes in the ABI"
+                ):format(name, observed[name] or 0, expected),
+                0
+            )
+        end
+    end
+end
+
+assertLayout()
+
+--- Returns the native side's most recent failure message.
+local function lastError(): string
+    local message = tecsPhysicsLastError()
+    if message == nil then
+        return "the physics library reported no reason"
+    end
+
+    return ffi.string(message)
+end
+
+--- One simulation's command and result buffers.
+---
+--- Every array here belongs to this module. Command counts reset after each
+--- step, and result capacities grow only when a step reports that a result
+--- did not fit.
+local record Buffers
+    batch: TecsPhysicsBatch
+
+    createBodies: TecsPhysicsBodyCreate[?]
+    createBodyCapacity: integer
+    createBodyCount: integer
+
+    createColliders: TecsPhysicsColliderCreate[?]
+    createColliderCapacity: integer
+    createColliderCount: integer
+
+    createJoints: TecsPhysicsJointCreate[?]
+    createJointCapacity: integer
+    createJointCount: integer
+
+    updateBodies: TecsPhysicsBodyUpdate[?]
+    updateBodyCapacity: integer
+    updateBodyCount: integer
+
+    updateColliders: TecsPhysicsColliderUpdate[?]
+    updateColliderCapacity: integer
+    updateColliderCount: integer
+
+    actions: TecsPhysicsBodyAction[?]
+    actionCapacity: integer
+    actionCount: integer
+
+    destroyBodies: TecsPhysicsHandle[?]
+    destroyBodyCapacity: integer
+    destroyBodyCount: integer
+
+    destroyColliders: TecsPhysicsHandle[?]
+    destroyColliderCapacity: integer
+    destroyColliderCount: integer
+
+    destroyJoints: TecsPhysicsHandle[?]
+    destroyJointCapacity: integer
+    destroyJointCount: integer
+
+    createdBodies: TecsPhysicsCreatedBody[?]
+    createdBodyCapacity: integer
+    createdColliders: TecsPhysicsHandle[?]
+    createdColliderCapacity: integer
+    createdJoints: TecsPhysicsHandle[?]
+    createdJointCapacity: integer
+    updatedColliders: TecsPhysicsHandle[?]
+    updatedColliderCapacity: integer
+
+    states: TecsPhysicsBodyState[?]
+    stateCapacity: integer
+    stateCount: integer
+    events: TecsPhysicsPairEvent[?]
+    eventCapacity: integer
+    eventCount: integer
+end
+
+--- The capacity every buffer starts at, doubled from there as needed.
+const INITIAL_CAPACITY: integer = 16
+
+local function grownCapacity(capacity: integer, needed: integer): integer
+    local grown = capacity
+    while grown < needed do
+        grown = grown * 2
+    end
+
+    return grown
+end
+
+local function newBuffers(): Buffers
+    return new Buffers(
+        batch = ffi.new<TecsPhysicsBatch>(),
+        createBodies = carray(TecsPhysicsBodyCreate, INITIAL_CAPACITY),
+        createBodyCapacity = INITIAL_CAPACITY,
+        createBodyCount = 0,
+        createColliders = carray(TecsPhysicsColliderCreate, INITIAL_CAPACITY),
+        createColliderCapacity = INITIAL_CAPACITY,
+        createColliderCount = 0,
+        createJoints = carray(TecsPhysicsJointCreate, INITIAL_CAPACITY),
+        createJointCapacity = INITIAL_CAPACITY,
+        createJointCount = 0,
+        updateBodies = carray(TecsPhysicsBodyUpdate, INITIAL_CAPACITY),
+        updateBodyCapacity = INITIAL_CAPACITY,
+        updateBodyCount = 0,
+        updateColliders = carray(TecsPhysicsColliderUpdate, INITIAL_CAPACITY),
+        updateColliderCapacity = INITIAL_CAPACITY,
+        updateColliderCount = 0,
+        actions = carray(TecsPhysicsBodyAction, INITIAL_CAPACITY),
+        actionCapacity = INITIAL_CAPACITY,
+        actionCount = 0,
+        destroyBodies = carray(TecsPhysicsHandle, INITIAL_CAPACITY),
+        destroyBodyCapacity = INITIAL_CAPACITY,
+        destroyBodyCount = 0,
+        destroyColliders = carray(TecsPhysicsHandle, INITIAL_CAPACITY),
+        destroyColliderCapacity = INITIAL_CAPACITY,
+        destroyColliderCount = 0,
+        destroyJoints = carray(TecsPhysicsHandle, INITIAL_CAPACITY),
+        destroyJointCapacity = INITIAL_CAPACITY,
+        destroyJointCount = 0,
+        createdBodies = carray(TecsPhysicsCreatedBody, INITIAL_CAPACITY),
+        createdBodyCapacity = INITIAL_CAPACITY,
+        createdColliders = carray(TecsPhysicsHandle, INITIAL_CAPACITY),
+        createdColliderCapacity = INITIAL_CAPACITY,
+        createdJoints = carray(TecsPhysicsHandle, INITIAL_CAPACITY),
+        createdJointCapacity = INITIAL_CAPACITY,
+        updatedColliders = carray(TecsPhysicsHandle, INITIAL_CAPACITY),
+        updatedColliderCapacity = INITIAL_CAPACITY,
+        states = carray(TecsPhysicsBodyState, INITIAL_CAPACITY),
+        stateCapacity = INITIAL_CAPACITY,
+        stateCount = 0,
+        events = carray(TecsPhysicsPairEvent, INITIAL_CAPACITY),
+        eventCapacity = INITIAL_CAPACITY,
+        eventCount = 0
+    )
+end
+
+local nextSimulationId: integer = 1
+
+--- Creates a simulation backed by the native Rapier library.
+--- @param options the gravity in meters per second squared, the substep count
+---     and the requested solver width
+--- @return the simulation, ready to receive queued commands
+--- @raises when the native library cannot create a world
+export function create(options: contract.Options?): contract.Simulation
+    local settings = options or {}
+    local world = tecsPhysicsWorldCreate(
+        (settings.gravityX or 0.0) as float,
+        (settings.gravityY or 0.0) as float,
+        (settings.subStepCount or 4) as uint32,
+        (settings.workerCount or tonumber(tecsPhysicsDefaultWorkerCount()) as integer) as uint32
+    )
+    if world == nil then
+        error("tecs.physics.rapier: cannot create a physics world: " .. lastError(), 2)
+    end
+    local buffers = newBuffers()
+    local id = nextSimulationId
+    nextSimulationId = id + 1
+    local destroyed = false
+
+    local function colliderFlags(def: contract.ColliderDef): integer
+        return def.sensor and COLLIDER_SENSOR or 0
+    end
+
+    local function writeColliderDef(target: TecsPhysicsColliderDef, def: contract.ColliderDef): nil
+        target.entity = def.entity as uint64
+        target.shape = def.shape as uint32
+        target.flags = colliderFlags(def) as uint32
+        target.halfWidth = def.halfWidth as float
+        target.halfHeight = def.halfHeight as float
+        target.radius = def.radius as float
+        target.length = def.length as float
+        target.offsetX = def.offsetX as float
+        target.offsetY = def.offsetY as float
+        target.density = def.density as float
+        target.friction = def.friction as float
+        target.restitution = def.restitution as float
+        target.categoryBits = def.categoryBits as uint32
+        target.maskBits = def.maskBits as uint32
+    end
+
+    local function queueCreateBody(command: contract.BodyCreate): integer
+        local slot = buffers.createBodyCount
+        if slot + 1 > buffers.createBodyCapacity then
+            local capacity = grownCapacity(buffers.createBodyCapacity, slot + 1)
+            local grown = carray(TecsPhysicsBodyCreate, capacity)
+            unsafe do
+                for index = 0, slot - 1 do
+                    grown[index] = buffers.createBodies[index]
+                end
+            end
+            buffers.createBodies = grown
+            buffers.createBodyCapacity = capacity
+        end
+        unsafe do
+            local target = buffers.createBodies[slot]
+            target.entity = command.entity as uint64
+            writeColliderDef(target.collider, command.collider)
+            target.kind = command.kind as uint32
+            target.flags = (
+                (
+                    command.fixedRotation and BODY_FIXED_ROTATION or 0
+                ) | (command.isBullet and BODY_BULLET or 0) | (command.sleepEnabled and BODY_SLEEP_ENABLED or 0)
+            ) as uint32
+            target.gravityScale = command.gravityScale as float
+            target.linearDamping = command.linearDamping as float
+            target.angularDamping = command.angularDamping as float
+            target.x = command.x as float
+            target.y = command.y as float
+            target.angle = command.angle as float
+            target.vx = command.vx as float
+            target.vy = command.vy as float
+            target.omega = command.omega as float
+        end
+        buffers.createBodyCount = slot + 1
+
+        return slot + 1
+    end
+
+    local function queueCreateCollider(command: contract.ColliderCreate): integer
+        local slot = buffers.createColliderCount
+        if slot + 1 > buffers.createColliderCapacity then
+            local capacity = grownCapacity(buffers.createColliderCapacity, slot + 1)
+            local grown = carray(TecsPhysicsColliderCreate, capacity)
+            unsafe do
+                for index = 0, slot - 1 do
+                    grown[index] = buffers.createColliders[index]
+                end
+            end
+            buffers.createColliders = grown
+            buffers.createColliderCapacity = capacity
+        end
+        unsafe do
+            local target = buffers.createColliders[slot]
+            writeColliderDef(target.def, command.def)
+            target.body.index = (command.bodyIndex1 - 1) as uint32
+            target.body.generation = command.bodyGeneration as uint32
+            target.bodyCreateIndex = (command.bodyOrder - 1) as int32
+            target.reserved = 0 as uint32
+        end
+        buffers.createColliderCount = slot + 1
+
+        return slot + 1
+    end
+
+    local function queueCreateJoint(command: contract.JointCreate): integer
+        local slot = buffers.createJointCount
+        if slot + 1 > buffers.createJointCapacity then
+            local capacity = grownCapacity(buffers.createJointCapacity, slot + 1)
+            local grown = carray(TecsPhysicsJointCreate, capacity)
+            unsafe do
+                for index = 0, slot - 1 do
+                    grown[index] = buffers.createJoints[index]
+                end
+            end
+            buffers.createJoints = grown
+            buffers.createJointCapacity = capacity
+        end
+        unsafe do
+            local target = buffers.createJoints[slot]
+            target.entity = command.entity as uint64
+            target.bodyA.index = (command.bodyAIndex1 - 1) as uint32
+            target.bodyA.generation = command.bodyAGeneration as uint32
+            target.bodyB.index = (command.bodyBIndex1 - 1) as uint32
+            target.bodyB.generation = command.bodyBGeneration as uint32
+            target.bodyACreateIndex = (command.bodyAOrder - 1) as int32
+            target.bodyBCreateIndex = (command.bodyBOrder - 1) as int32
+            target.kind = command.kind as uint32
+            target.flags = (
+                (
+                    command.limitsEnabled and JOINT_LIMITS or 0
+                ) | (command.motorEnabled and JOINT_MOTOR or 0) | (command.contactsEnabled and JOINT_CONTACTS or 0)
+            ) as uint32
+            target.anchorAX = command.anchorAX as float
+            target.anchorAY = command.anchorAY as float
+            target.anchorBX = command.anchorBX as float
+            target.anchorBY = command.anchorBY as float
+            target.axisX = command.axisX as float
+            target.axisY = command.axisY as float
+            target.limitMin = command.limitMin as float
+            target.limitMax = command.limitMax as float
+            target.motorTargetVelocity = command.motorTargetVelocity as float
+            target.motorMaxForce = command.motorMaxForce as float
+        end
+        buffers.createJointCount = slot + 1
+
+        return slot + 1
+    end
+
+    local function queueUpdateBody(
+        index1: integer,
+        generation: integer,
+        kind: integer,
+        fixedRotation: boolean,
+        isBullet: boolean,
+        sleepEnabled: boolean,
+        gravityScale: number,
+        linearDamping: number,
+        angularDamping: number
+    ): nil
+        local slot = buffers.updateBodyCount
+        if slot + 1 > buffers.updateBodyCapacity then
+            local capacity = grownCapacity(buffers.updateBodyCapacity, slot + 1)
+            local grown = carray(TecsPhysicsBodyUpdate, capacity)
+            unsafe do
+                for index = 0, slot - 1 do
+                    grown[index] = buffers.updateBodies[index]
+                end
+            end
+            buffers.updateBodies = grown
+            buffers.updateBodyCapacity = capacity
+        end
+        unsafe do
+            local target = buffers.updateBodies[slot]
+            target.body.index = (index1 - 1) as uint32
+            target.body.generation = generation as uint32
+            target.kind = kind as uint32
+            target.flags = (
+                (
+                    fixedRotation and BODY_FIXED_ROTATION or 0
+                ) | (isBullet and BODY_BULLET or 0) | (sleepEnabled and BODY_SLEEP_ENABLED or 0)
+            ) as uint32
+            target.gravityScale = gravityScale as float
+            target.linearDamping = linearDamping as float
+            target.angularDamping = angularDamping as float
+        end
+        buffers.updateBodyCount = slot + 1
+    end
+
+    local function queueUpdateCollider(command: contract.ColliderUpdate): integer
+        local slot = buffers.updateColliderCount
+        if slot + 1 > buffers.updateColliderCapacity then
+            local capacity = grownCapacity(buffers.updateColliderCapacity, slot + 1)
+            local grown = carray(TecsPhysicsColliderUpdate, capacity)
+            unsafe do
+                for index = 0, slot - 1 do
+                    grown[index] = buffers.updateColliders[index]
+                end
+            end
+            buffers.updateColliders = grown
+            buffers.updateColliderCapacity = capacity
+        end
+        unsafe do
+            local target = buffers.updateColliders[slot]
+            writeColliderDef(target.def, command.def)
+            target.collider.index = (command.index1 - 1) as uint32
+            target.collider.generation = command.generation as uint32
+            target.body.index = (command.bodyIndex1 - 1) as uint32
+            target.body.generation = command.bodyGeneration as uint32
+            target.mode = (command.index1 == 0 and COLLIDER_BY_ENTITY or COLLIDER_BY_HANDLE) as uint32
+            target.reserved = 0 as uint32
+        end
+        buffers.updateColliderCount = slot + 1
+
+        return slot + 1
+    end
+
+    local function queueAction(
+        index1: integer,
+        generation: integer,
+        action: integer,
+        a: number,
+        b: number,
+        c: number,
+        d: number
+    ): nil
+        local slot = buffers.actionCount
+        if slot + 1 > buffers.actionCapacity then
+            local capacity = grownCapacity(buffers.actionCapacity, slot + 1)
+            local grown = carray(TecsPhysicsBodyAction, capacity)
+            unsafe do
+                for index = 0, slot - 1 do
+                    grown[index] = buffers.actions[index]
+                end
+            end
+            buffers.actions = grown
+            buffers.actionCapacity = capacity
+        end
+        unsafe do
+            local target = buffers.actions[slot]
+            target.body.index = (index1 - 1) as uint32
+            target.body.generation = generation as uint32
+            target.action = action as uint32
+            target.reserved = 0 as uint32
+            target.a = a as float
+            target.b = b as float
+            target.c = c as float
+            target.d = d as float
+        end
+        buffers.actionCount = slot + 1
+    end
+
+    local function queueDestroyBody(index1: integer, generation: integer): nil
+        local slot = buffers.destroyBodyCount
+        if slot + 1 > buffers.destroyBodyCapacity then
+            local capacity = grownCapacity(buffers.destroyBodyCapacity, slot + 1)
+            local grown = carray(TecsPhysicsHandle, capacity)
+            unsafe do
+                for index = 0, slot - 1 do
+                    grown[index] = buffers.destroyBodies[index]
+                end
+            end
+            buffers.destroyBodies = grown
+            buffers.destroyBodyCapacity = capacity
+        end
+        unsafe do
+            buffers.destroyBodies[slot].index = (index1 - 1) as uint32
+            buffers.destroyBodies[slot].generation = generation as uint32
+        end
+        buffers.destroyBodyCount = slot + 1
+    end
+
+    local function queueDestroyCollider(index1: integer, generation: integer): nil
+        local slot = buffers.destroyColliderCount
+        if slot + 1 > buffers.destroyColliderCapacity then
+            local capacity = grownCapacity(buffers.destroyColliderCapacity, slot + 1)
+            local grown = carray(TecsPhysicsHandle, capacity)
+            unsafe do
+                for index = 0, slot - 1 do
+                    grown[index] = buffers.destroyColliders[index]
+                end
+            end
+            buffers.destroyColliders = grown
+            buffers.destroyColliderCapacity = capacity
+        end
+        unsafe do
+            buffers.destroyColliders[slot].index = (index1 - 1) as uint32
+            buffers.destroyColliders[slot].generation = generation as uint32
+        end
+        buffers.destroyColliderCount = slot + 1
+    end
+
+    local function queueDestroyJoint(index1: integer, generation: integer): nil
+        local slot = buffers.destroyJointCount
+        if slot + 1 > buffers.destroyJointCapacity then
+            local capacity = grownCapacity(buffers.destroyJointCapacity, slot + 1)
+            local grown = carray(TecsPhysicsHandle, capacity)
+            unsafe do
+                for index = 0, slot - 1 do
+                    grown[index] = buffers.destroyJoints[index]
+                end
+            end
+            buffers.destroyJoints = grown
+            buffers.destroyJointCapacity = capacity
+        end
+        unsafe do
+            buffers.destroyJoints[slot].index = (index1 - 1) as uint32
+            buffers.destroyJoints[slot].generation = generation as uint32
+        end
+        buffers.destroyJointCount = slot + 1
+    end
+
+    --- Sizes the per-command result buffers and points the batch at every
+    --- array before one crossing.
+    local function prepare(dt: number): nil
+        if buffers.createdBodyCapacity < buffers.createBodyCount then
+            buffers.createdBodyCapacity = grownCapacity(buffers.createdBodyCapacity, buffers.createBodyCount)
+            buffers.createdBodies = carray(TecsPhysicsCreatedBody, buffers.createdBodyCapacity)
+        end
+        if buffers.createdColliderCapacity < buffers.createColliderCount then
+            buffers.createdColliderCapacity = grownCapacity(
+                buffers.createdColliderCapacity,
+                buffers.createColliderCount
+            )
+            buffers.createdColliders = carray(TecsPhysicsHandle, buffers.createdColliderCapacity)
+        end
+        if buffers.createdJointCapacity < buffers.createJointCount then
+            buffers.createdJointCapacity = grownCapacity(buffers.createdJointCapacity, buffers.createJointCount)
+            buffers.createdJoints = carray(TecsPhysicsHandle, buffers.createdJointCapacity)
+        end
+        if buffers.updatedColliderCapacity < buffers.updateColliderCount then
+            buffers.updatedColliderCapacity = grownCapacity(
+                buffers.updatedColliderCapacity,
+                buffers.updateColliderCount
+            )
+            buffers.updatedColliders = carray(TecsPhysicsHandle, buffers.updatedColliderCapacity)
+        end
+
+        local batch = buffers.batch
+        batch.dt = dt as float
+        batch.reserved = 0 as uint32
+        batch.createBodies = buffers.createBodies
+        batch.createBodyCount = buffers.createBodyCount as uint64
+        batch.createColliders = buffers.createColliders
+        batch.createColliderCount = buffers.createColliderCount as uint64
+        batch.createJoints = buffers.createJoints
+        batch.createJointCount = buffers.createJointCount as uint64
+        batch.updateBodies = buffers.updateBodies
+        batch.updateBodyCount = buffers.updateBodyCount as uint64
+        batch.updateColliders = buffers.updateColliders
+        batch.updateColliderCount = buffers.updateColliderCount as uint64
+        batch.actions = buffers.actions
+        batch.actionCount = buffers.actionCount as uint64
+        batch.destroyBodies = buffers.destroyBodies
+        batch.destroyBodyCount = buffers.destroyBodyCount as uint64
+        batch.destroyColliders = buffers.destroyColliders
+        batch.destroyColliderCount = buffers.destroyColliderCount as uint64
+        batch.destroyJoints = buffers.destroyJoints
+        batch.destroyJointCount = buffers.destroyJointCount as uint64
+        batch.createdBodies = buffers.createdBodies
+        batch.createdBodyCapacity = buffers.createdBodyCapacity as uint64
+        batch.createdColliders = buffers.createdColliders
+        batch.createdColliderCapacity = buffers.createdColliderCapacity as uint64
+        batch.createdJoints = buffers.createdJoints
+        batch.createdJointCapacity = buffers.createdJointCapacity as uint64
+        batch.updatedColliders = buffers.updatedColliders
+        batch.updatedColliderCapacity = buffers.updatedColliderCapacity as uint64
+        batch.states = buffers.states
+        batch.stateCapacity = buffers.stateCapacity as uint64
+        -- Nothing here reads the moved-index list, because the state mirror
+        -- already carries a moved flag per body. A null result pointer is how
+        -- the ABI spells "not wanted", so declining it costs no truncation.
+        batch.moved = nil
+        batch.movedCapacity = 0 as uint64
+        batch.events = buffers.events
+        batch.eventCapacity = buffers.eventCapacity as uint64
+        batch.stateCount = 0 as uint64
+        batch.movedCount = 0 as uint64
+        batch.eventCount = 0 as uint64
+    end
+
+    local function clearCommands(): nil
+        buffers.createBodyCount = 0
+        buffers.createColliderCount = 0
+        buffers.createJointCount = 0
+        buffers.updateBodyCount = 0
+        buffers.updateColliderCount = 0
+        buffers.actionCount = 0
+        buffers.destroyBodyCount = 0
+        buffers.destroyColliderCount = 0
+        buffers.destroyJointCount = 0
+    end
+
+    local function step(dt: number): nil
+        if destroyed then
+            error("tecs.physics.rapier: this simulation has been destroyed", 2)
+        end
+        prepare(dt)
+        local status = tecsPhysicsStep(world, buffers.batch) as integer
+        if status ~= STATUS_OK and status ~= STATUS_TRUNCATED then
+            clearCommands()
+            error("tecs.physics.rapier: cannot step the simulation: " .. lastError(), 2)
+        end
+        if status == STATUS_TRUNCATED then
+            -- The step already ran, so the results only have to be copied
+            -- again into buffers wide enough to hold them.
+            local states = tonumber(buffers.batch.stateCount) as integer
+            local events = tonumber(buffers.batch.eventCount) as integer
+            if states > buffers.stateCapacity then
+                buffers.stateCapacity = grownCapacity(buffers.stateCapacity, states)
+                buffers.states = carray(TecsPhysicsBodyState, buffers.stateCapacity)
+            end
+            if events > buffers.eventCapacity then
+                buffers.eventCapacity = grownCapacity(buffers.eventCapacity, events)
+                buffers.events = carray(TecsPhysicsPairEvent, buffers.eventCapacity)
+            end
+            buffers.batch.states = buffers.states
+            buffers.batch.stateCapacity = buffers.stateCapacity as uint64
+            buffers.batch.events = buffers.events
+            buffers.batch.eventCapacity = buffers.eventCapacity as uint64
+            local drained = tecsPhysicsDrain(world, buffers.batch) as integer
+            if drained ~= STATUS_OK then
+                clearCommands()
+                error("tecs.physics.rapier: cannot read the simulation results: " .. lastError(), 2)
+            end
+        end
+        buffers.stateCount = tonumber(buffers.batch.stateCount) as integer
+        buffers.eventCount = tonumber(buffers.batch.eventCount) as integer
+        clearCommands()
+    end
+
+    local function createdBody(order: integer): (integer, integer, integer, integer)
+        if order < 1 or order > buffers.createdBodyCapacity then
+            return 0, 0, 0, 0
+        end
+        unsafe do
+            local created = buffers.createdBodies[order - 1]
+            local bodyIndex = tonumber(created.body.index) as integer
+            local colliderIndex = tonumber(created.collider.index) as integer
+            if bodyIndex == NULL_INDEX then
+                return 0, 0, 0, 0
+            end
+
+            return bodyIndex + 1, tonumber(
+                created.body.generation
+            ) as integer, colliderIndex == NULL_INDEX and 0 or colliderIndex + 1, tonumber(
+                created.collider.generation
+            ) as integer
+        end
+    end
+
+    local function handleAt(values: TecsPhysicsHandle[?], capacity: integer, order: integer): (integer, integer)
+        if order < 1 or order > capacity then
+            return 0, 0
+        end
+        unsafe do
+            local index = tonumber(values[order - 1].index) as integer
+            if index == NULL_INDEX then
+                return 0, 0
+            end
+
+            return index + 1, tonumber(values[order - 1].generation) as integer
+        end
+    end
+
+    local function createdCollider(order: integer): (integer, integer)
+        return handleAt(buffers.createdColliders, buffers.createdColliderCapacity, order)
+    end
+
+    local function createdJoint(order: integer): (integer, integer)
+        return handleAt(buffers.createdJoints, buffers.createdJointCapacity, order)
+    end
+
+    local function updatedCollider(order: integer): (integer, integer)
+        return handleAt(buffers.updatedColliders, buffers.updatedColliderCapacity, order)
+    end
+
+    --- Returns the state slot for a live body, or nil for a stale handle.
+    local function slotOf(index1: integer, generation: integer): TecsPhysicsBodyState?
+        if index1 < 1 or index1 > buffers.stateCount then
+            return nil
+        end
+        unsafe do
+            local slot = buffers.states[index1 - 1]
+            if (tonumber(slot.flags) as integer) & STATE_LIVE == 0 then
+                return nil
+            end
+            if (tonumber(slot.generation) as integer) ~= generation then
+                return nil
+            end
+
+            return slot
+        end
+    end
+
+    local function isLive(index1: integer, generation: integer): boolean
+        return slotOf(index1, generation) ~= nil
+    end
+
+    local function isAwake(index1: integer, generation: integer): boolean
+        local slot = slotOf(index1, generation)
+
+        return slot ~= nil and (tonumber(slot.flags) as integer) & STATE_AWAKE ~= 0
+    end
+
+    local function poseOf(index1: integer, generation: integer): (number?, number, number, number)
+        local slot = slotOf(index1, generation)
+        if slot == nil or (tonumber(slot.flags) as integer) & STATE_MOVED == 0 then
+            return nil, 0, 0, 0
+        end
+
+        return tonumber(
+            slot.x
+        ) as number, tonumber(slot.y) as number, tonumber(slot.cosine) as number, tonumber(slot.sine) as number
+    end
+
+    local function velocityOf(index1: integer, generation: integer): (number, number, number)
+        local slot = slotOf(index1, generation)
+        if slot == nil then
+            return 0, 0, 0
+        end
+
+        return tonumber(slot.vx) as number, tonumber(slot.vy) as number, tonumber(slot.omega) as number
+    end
+
+    local function eventCount(): integer
+        return buffers.eventCount
+    end
+
+    local function eventAt(index: integer): (integer, integer, boolean, boolean)
+        if index < 1 or index > buffers.eventCount then
+            return 0, 0, false, false
+        end
+        unsafe do
+            local event = buffers.events[index - 1]
+
+            return tonumber(
+                event.entityA
+            ) as integer, tonumber(
+                event.entityB
+            ) as integer, (tonumber(event.started) as integer) ~= 0, (tonumber(event.sensor) as integer) ~= 0
+        end
+    end
+
+    local function raycast(
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number,
+        categoryBits: integer,
+        maskBits: integer
+    ): (integer?, number, number, number, number, number)
+        local hit = ffi.new<TecsPhysicsRayHit>()
+        local found = tecsPhysicsRaycast(
+            world,
+            x1 as float,
+            y1 as float,
+            x2 as float,
+            y2 as float,
+            categoryBits as uint32,
+            maskBits as uint32,
+            hit
+        ) as integer
+        if found ~= 1 then
+            return nil, 0, 0, 0, 0, 0
+        end
+
+        return tonumber(
+            hit.entity
+        ) as integer, tonumber(
+            hit.x
+        ) as number, tonumber(
+            hit.y
+        ) as number, tonumber(hit.normalX) as number, tonumber(hit.normalY) as number, tonumber(hit.fraction) as number
+    end
+
+    local function resolveEntities(entities: {integer}): contract.EntityHandles
+        local count = #entities
+        local result = new contract.EntityHandles(
+            bodyIndex1 = {},
+            bodyGeneration = {},
+            colliderIndex1 = {},
+            colliderGeneration = {},
+            jointIndex1 = {},
+            jointGeneration = {}
+        )
+        if count == 0 then
+            return result
+        end
+        local requested = ffi.new("uint64_t[?]", count)
+        local bodies = carray(TecsPhysicsHandle, count)
+        local colliders = carray(TecsPhysicsHandle, count)
+        local joints = carray(TecsPhysicsHandle, count)
+        unsafe do
+            for index = 1, count do
+                requested[index - 1] = entities[index] as uint64
+            end
+        end
+        local status = tecsPhysicsResolveEntities(
+            world,
+            requested,
+            count as uint64,
+            bodies,
+            colliders,
+            joints
+        ) as integer
+        if status ~= 0 then
+            error("tecs.physics.rapier: cannot resolve entities: " .. lastError(), 2)
+        end
+        unsafe do
+            for index = 1, count do
+                local bodyIndex = tonumber(bodies[index - 1].index) as integer
+                local colliderIndex = tonumber(colliders[index - 1].index) as integer
+                local jointIndex = tonumber(joints[index - 1].index) as integer
+                result.bodyIndex1[index] = bodyIndex == NULL_INDEX and 0 or bodyIndex + 1
+                result.bodyGeneration[index] = tonumber(bodies[index - 1].generation) as integer
+                result.colliderIndex1[index] = colliderIndex == NULL_INDEX and 0 or colliderIndex + 1
+                result.colliderGeneration[index] = tonumber(colliders[index - 1].generation) as integer
+                result.jointIndex1[index] = jointIndex == NULL_INDEX and 0 or jointIndex + 1
+                result.jointGeneration[index] = tonumber(joints[index - 1].generation) as integer
+            end
+        end
+
+        return result
+    end
+
+    local function save(): (string?, string?)
+        local length = tonumber(tecsPhysicsSnapshotBegin(world)) as integer
+        if length == 0 then
+            return nil, lastError()
+        end
+        local bytes = ffi.new("uint8_t[?]", length)
+        local written = tonumber(tecsPhysicsSnapshotRead(world, bytes, length as uint64)) as integer
+        if written ~= length then
+            return nil, "the physics library wrote " .. tostring(written) .. " of " .. tostring(length) .. " bytes"
+        end
+
+        return ffi.string(bytes, length)
+    end
+
+    local function load(bytes: string): (boolean, string?)
+        local status = tecsPhysicsSnapshotRestore(world, bytes, #bytes as uint64) as integer
+        if status ~= 0 then
+            return false, lastError()
+        end
+        clearCommands()
+        prepare(0)
+        local drained = tecsPhysicsDrain(world, buffers.batch) as integer
+        if drained == STATUS_TRUNCATED then
+            local states = tonumber(buffers.batch.stateCount) as integer
+            if states > buffers.stateCapacity then
+                buffers.stateCapacity = grownCapacity(buffers.stateCapacity, states)
+                buffers.states = carray(TecsPhysicsBodyState, buffers.stateCapacity)
+            end
+            buffers.batch.states = buffers.states
+            buffers.batch.stateCapacity = buffers.stateCapacity as uint64
+            drained = tecsPhysicsDrain(world, buffers.batch) as integer
+        end
+        if drained ~= STATUS_OK then
+            return false, lastError()
+        end
+        buffers.stateCount = tonumber(buffers.batch.stateCount) as integer
+        buffers.eventCount = 0
+
+        return true
+    end
+
+    local function destroy(): nil
+        if destroyed then
+            return
+        end
+        destroyed = true
+        clearCommands()
+        buffers.stateCount = 0
+        buffers.eventCount = 0
+        tecsPhysicsWorldDestroy(world)
+    end
+
+    return new contract.Simulation(
+        id = id,
+        subStepCount = tonumber(tecsPhysicsSubstepCount(world)) as integer,
+        workerCount = tonumber(tecsPhysicsWorkerCount(world)) as integer,
+        queueCreateBody = queueCreateBody,
+        queueCreateCollider = queueCreateCollider,
+        queueCreateJoint = queueCreateJoint,
+        queueUpdateBody = queueUpdateBody,
+        queueUpdateCollider = queueUpdateCollider,
+        queueAction = queueAction,
+        queueDestroyBody = queueDestroyBody,
+        queueDestroyCollider = queueDestroyCollider,
+        queueDestroyJoint = queueDestroyJoint,
+        step = step,
+        createdBody = createdBody,
+        createdCollider = createdCollider,
+        createdJoint = createdJoint,
+        updatedCollider = updatedCollider,
+        isLive = isLive,
+        isAwake = isAwake,
+        poseOf = poseOf,
+        velocityOf = velocityOf,
+        eventCount = eventCount,
+        eventAt = eventAt,
+        raycast = raycast,
+        resolveEntities = resolveEntities,
+        save = save,
+        load = load,
+        destroy = destroy
+    )
+end

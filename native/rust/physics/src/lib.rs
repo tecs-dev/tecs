@@ -136,14 +136,20 @@ unsafe fn command_slice<'a, T>(data: *const T, count: u64) -> Option<&'a [T]> {
 
 /// Copies `source` into caller memory and reports whether it fit.
 ///
+/// A null target means the caller does not want that result, which is not a
+/// shortfall: the count is still reported and nothing is truncated.
+///
 /// # Safety
 ///
 /// For a nonzero `capacity`, `target` must address that many writable
 /// elements.
 unsafe fn copy_out<T: Copy>(source: &[T], target: *mut T, capacity: u64) -> bool {
+    if target.is_null() {
+        return true;
+    }
     let fits = source.len() as u64 <= capacity;
     let count = source.len().min(capacity as usize);
-    if count > 0 && !target.is_null() {
+    if count > 0 {
         // SAFETY: the caller guarantees this writable range for the call.
         unsafe { ptr::copy_nonoverlapping(source.as_ptr(), target, count) };
     }
@@ -324,7 +330,7 @@ pub unsafe extern "C" fn tecsPhysicsRaycast(
     }
 }
 
-/// Answers the body and collider handle owned by each requested entity.
+/// Answers the body, collider, and joint handle owned by each entity.
 ///
 /// A snapshot load resolves every restored entity in one call so the cost
 /// stays linear in the world rather than quadratic.
@@ -332,8 +338,8 @@ pub unsafe extern "C" fn tecsPhysicsRaycast(
 /// # Safety
 ///
 /// `world` must point to a live world, `entities` must address `count`
-/// readable ids, and `bodies` and `colliders` must each address `count`
-/// writable handles.
+/// readable ids, and `bodies`, `colliders` and `joints` must each address
+/// `count` writable handles.
 #[no_mangle]
 pub unsafe extern "C" fn tecsPhysicsResolveEntities(
     world: *const Simulation,
@@ -341,6 +347,7 @@ pub unsafe extern "C" fn tecsPhysicsResolveEntities(
     count: u64,
     bodies: *mut TecsPhysicsHandle,
     colliders: *mut TecsPhysicsHandle,
+    joints: *mut TecsPhysicsHandle,
 ) -> i32 {
     let Some(world) = (unsafe { world.as_ref() }) else {
         set_error("physics entity resolution received a null world");
@@ -349,16 +356,17 @@ pub unsafe extern "C" fn tecsPhysicsResolveEntities(
     if count == 0 {
         return STATUS_OK;
     }
-    if entities.is_null() || bodies.is_null() || colliders.is_null() {
+    if entities.is_null() || bodies.is_null() || colliders.is_null() || joints.is_null() {
         set_error("physics entity resolution received a null array with a nonzero count");
         return STATUS_ERROR;
     }
-    // SAFETY: the caller guarantees all three ranges for the call.
+    // SAFETY: the caller guarantees all four ranges for the call.
     unsafe {
         world.resolve_entities(
             slice::from_raw_parts(entities, count as usize),
             slice::from_raw_parts_mut(bodies, count as usize),
             slice::from_raw_parts_mut(colliders, count as usize),
+            slice::from_raw_parts_mut(joints, count as usize),
         );
     }
     STATUS_OK

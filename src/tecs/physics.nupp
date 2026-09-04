@@ -1,0 +1,2016 @@
+module tecs.physics
+
+--[[
+Rigid-body simulation as part of the world.
+
+Install physics, spawn an entity with a
+[`Transform2D`](tealdoc:tecs.ecs.Transform2D), and attach a body:
+
+```nupp
+local physics = tecs.physics
+
+physics.install(world, {gravity = {0.0, 980.0}})
+
+local ground = world:spawn(ecs.Transform2D(320, 460))
+physics.attach(world, ground, {kind = "static", halfWidth = 320, halfHeight = 20})
+
+local crate = world:spawn(ecs.Transform2D(320, 100))
+physics.attach(world, crate, {halfWidth = 16, halfHeight = 16, friction = 0.4})
+
+physics.applyImpulse(world, crate, 400.0, 0.0)
+```
+
+The solver writes each body's `Transform2D` back, so nothing else has to move
+the entity. `detach` takes a body out of the solve without despawning its
+entity.
+
+Public positions, extents, linear velocities, impulses, forces and gravity use
+pixels. Angles and angular velocities use radians. The solver works in meters
+through the `pixelsPerMeter` conversion.
+
+`Body` and `Collider` declare what the game requested. `Motion` preserves
+simulation state across pauses. Engine-owned `RigidBody` keeps the attachment
+visible to tools, and ordinary game code should ignore it. A secondary
+collider lives on its own entity and relates back through `ColliderOf`; a
+joint lives on its own entity and relates to its two bodies through
+`JointBodyA` and `JointBodyB`.
+
+The fixed phases own the simulation, and one fixed step is one crossing into
+the solver. Every mutation a game requests is queued and applied at the start
+of the step that follows it, and every read reports the state after the last
+completed step. That is what keeps the crossing batched: a world of ten
+thousand bodies costs one call per step rather than one call per body.
+
+A body declared during a frame becomes live during that frame's next fixed
+step, and its `RigidBody` row appears at the end of that step's `FixedUpdate`,
+which is where the solver hands back the slot it assigned.
+]]
+
+local ecs = require("tecs.ecs")
+local data = require("tecs.data")
+local events = require("tecs.events")
+local contract = require("tecs.physics.contract")
+
+const vec2 = nupp.math.vec2
+
+--- Reports the fixed conversion between public pixels and solver meters.
+---
+--- The conversion keeps game coordinates in pixels and solver coordinates in
+--- meter-sized values.
+export const pixelsPerMeter: number = 32.0
+
+--- Declares a body's simulation behavior.
+---
+--- Write its fields through `getMut`; physics applies the change during the
+--- next fixed update.
+local record BodyValue
+    --- Caller-writable. Selects 0 for static, 1 for kinematic or 2 for
+    --- dynamic.
+    kind: integer
+
+    --- Caller-writable. Locks the body's angle when true.
+    fixedRotation: boolean
+
+    --- Caller-writable. Sweeps the body's motion for continuous collision
+    --- when true.
+    isBullet: boolean
+
+    --- Caller-writable. Permits the body to sleep when it comes to rest.
+    sleepEnabled: boolean
+
+    --- Caller-writable. Scales gravity for this body alone. Zero floats, and
+    --- a negative value falls upward.
+    gravityScale: number
+
+    --- Caller-writable. Damps linear velocity.
+    linearDamping: number
+
+    --- Caller-writable. Damps angular velocity.
+    angularDamping: number
+end
+
+--- Declares a body's geometry, material and collision filtering.
+---
+--- Write its fields through `getMut`; physics rebuilds the shape during the
+--- next fixed update.
+local record ColliderValue
+    --- Caller-writable. Selects 0 for box, 1 for circle or 2 for capsule.
+    shape: integer
+
+    --- Caller-writable. Sets the box half extent along x, in pixels.
+    halfWidth: number
+
+    --- Caller-writable. Sets the box half extent along y, in pixels.
+    halfHeight: number
+
+    --- Caller-writable. Sets the circle or capsule radius, in pixels.
+    radius: number
+
+    --- Caller-writable. Sets the pixel distance between capsule end centers,
+    --- excluding the caps.
+    length: number
+
+    --- Caller-writable. Offsets the shape along x in body-frame pixels, so it
+    --- turns with the body.
+    offsetX: number
+
+    --- Caller-writable. Offsets the shape along y with `offsetX`.
+    offsetY: number
+
+    --- Caller-writable. Sets mass per unit area. Zero mass is infinite mass.
+    density: number
+
+    --- Caller-writable. Sets Coulomb friction. A contact takes the geometric
+    --- mean of the two shapes', so zero on either one slides.
+    friction: number
+
+    --- Caller-writable. Sets bounce. A contact takes the larger of the two
+    --- shapes', so the bouncier surface decides.
+    restitution: number
+
+    --- Caller-writable. Sets the shape's collision categories, in the low 32
+    --- solver group bits.
+    categoryBits: integer
+
+    --- Caller-writable. Sets the categories this shape may contact. Two
+    --- shapes touch only when each mask names the other's category.
+    maskBits: integer
+
+    --- Caller-writable. Reports overlap events without a collision response
+    --- when true.
+    isSensor: boolean
+end
+
+--- Preserves a body's saved velocity in pixels and radians per second.
+---
+--- Physics writes it when a body pauses, when a snapshot is saved, and when
+--- one is loaded. It is not a live mirror: between those points a body's real
+--- velocity is what `velocity` and `angularVelocity` report.
+local record MotionValue
+    --- Read-only. Holds horizontal velocity in pixels per second. Use
+    --- `velocity` for live state.
+    vx: number
+
+    --- Read-only. Holds vertical velocity in pixels per second with `vx`.
+    vy: number
+
+    --- Read-only. Holds angular velocity in radians per second with `vx`.
+    omega: number
+end
+
+--- Identifies one live slot in a simulation.
+---
+--- Engine-owned and transient. `RigidBody`, `ColliderShape` and `JointLink`
+--- all use this shape so debug tools can read an attachment without knowing
+--- which arena it names. Ordinary game code should use `Body`, `Motion` and
+--- the functions on this module.
+export record SolverHandle
+    --- Engine-owned. Identifies the slot, one-based, and zero when the entity
+    --- has no live counterpart. Ordinary game code should ignore it.
+    index1: integer
+
+    --- Engine-owned. Identifies the simulation, so a row left over from
+    --- another world is rejected rather than resolved against whatever took
+    --- its place. Ordinary game code should ignore it.
+    world0: integer
+
+    --- Engine-owned. Rejects a stale slot. Ordinary game code should ignore
+    --- it.
+    generation: integer
+end
+
+--- Declares a joint between the two bodies its entity relates to.
+local record JointValue
+    --- Caller-writable. Selects 0 for fixed, 1 for revolute or 2 for
+    --- prismatic.
+    kind: integer
+
+    --- Caller-writable. Anchors the joint in the first body's frame along x,
+    --- in pixels.
+    anchorAX: number
+
+    --- Caller-writable. Anchors the joint in the first body's frame along y.
+    anchorAY: number
+
+    --- Caller-writable. Anchors the joint in the second body's frame along x.
+    anchorBX: number
+
+    --- Caller-writable. Anchors the joint in the second body's frame along y.
+    anchorBY: number
+
+    --- Caller-writable. Sets the prismatic sliding axis along x. Physics
+    --- normalizes it, and the other joint kinds ignore it.
+    axisX: number
+
+    --- Caller-writable. Sets the prismatic sliding axis along y.
+    axisY: number
+
+    --- Caller-writable. Enforces `limitMin` and `limitMax` when true.
+    limitsEnabled: boolean
+
+    --- Caller-writable. Sets the lower limit, in radians for a revolute joint
+    --- and pixels for a prismatic one.
+    limitMin: number
+
+    --- Caller-writable. Sets the upper limit with `limitMin`.
+    limitMax: number
+
+    --- Caller-writable. Drives the joint's free degree of freedom when true.
+    motorEnabled: boolean
+
+    --- Caller-writable. Sets the motor's target velocity, in radians or
+    --- pixels per second.
+    motorTargetVelocity: number
+
+    --- Caller-writable. Bounds the force or torque the motor may apply.
+    motorMaxForce: number
+
+    --- Caller-writable. Lets the two joined bodies still collide when true.
+    contactsEnabled: boolean
+end
+
+--- Reports where a ray first met a collider.
+export record RaycastHit
+    --- Read-only. Names the shape owner. A secondary collider reports its own
+    --- entity rather than its body's.
+    entity: integer
+
+    --- Read-only. Holds the contact point along x, in world pixels.
+    x: number
+
+    --- Read-only. Holds the contact point along y, in world pixels, positive
+    --- downward.
+    y: number
+
+    --- Read-only. Holds the outward unit normal along x, unscaled by pixels.
+    normalX: number
+
+    --- Read-only. Holds the outward unit normal along y.
+    normalY: number
+
+    --- Read-only. Holds the position along the segment, zero at its start and
+    --- one at its end.
+    fraction: number
+end
+
+--- The payload both contact events carry.
+export record ContactPair
+    --- Read-only. Names one body in the contact.
+    entityA: integer
+
+    --- Read-only. Names the other body in the contact.
+    entityB: integer
+end
+
+--- The payload both sensor events carry.
+export record SensorPair
+    --- Read-only. Names the sensor entity.
+    sensor: integer
+
+    --- Read-only. Names the entity that entered or left the sensor.
+    visitor: integer
+end
+
+--- The initial body and collider settings `attach` reads.
+export type BodyOptions = {
+    kind: string?,
+    halfWidth: number?,
+    halfHeight: number?,
+    radius: number?,
+    capsuleLength: number?,
+    offsetX: number?,
+    offsetY: number?,
+    density: number?,
+    friction: number?,
+    restitution: number?,
+    categoryBits: integer?,
+    maskBits: integer?,
+    isSensor: boolean?,
+    fixedRotation: boolean?,
+    isBullet: boolean?,
+    sleepEnabled: boolean?,
+    gravityScale: number?,
+    linearDamping: number?,
+    angularDamping: number?
+}
+
+--- The joint settings `attachJoint` reads.
+export type JointOptions = {
+    kind: string?,
+    anchorAX: number?,
+    anchorAY: number?,
+    anchorBX: number?,
+    anchorBY: number?,
+    axisX: number?,
+    axisY: number?,
+    limitMin: number?,
+    limitMax: number?,
+    motorTargetVelocity: number?,
+    motorMaxForce: number?,
+    contactsEnabled: boolean?
+}
+
+--- The collision filters a raycast reads.
+export type QueryOptions = {
+    categoryBits: integer?,
+    maskBits: integer?
+}
+
+--- The one function `install` needs from the native backend module.
+---
+--- The type is written here rather than taken from `tecs.physics.rapier`,
+--- because naming that module in a require binds the solver library, and a
+--- world driven by a caller-supplied simulation must not need one.
+local type RapierBackend = {create: function(options: contract.Options): contract.Simulation}
+
+--- The settings `install` reads before it creates a simulation.
+export type Options = {
+    gravity: {number}?,
+    subStepCount: integer?,
+    workerCount: integer?,
+    simulation: contract.Simulation?
+}
+
+local function newBody(
+    kind: integer?,
+    fixedRotation: boolean?,
+    isBullet: boolean?,
+    sleepEnabled: boolean?,
+    gravityScale: number?,
+    linearDamping: number?,
+    angularDamping: number?
+): BodyValue
+    return new BodyValue(
+        kind = kind or contract.BODY_DYNAMIC,
+        fixedRotation = fixedRotation == true,
+        isBullet = isBullet == true,
+        sleepEnabled = sleepEnabled ~= false,
+        gravityScale = gravityScale or 1.0,
+        linearDamping = linearDamping or 0.0,
+        angularDamping = angularDamping or 0.0
+    )
+end
+
+--- The value a `Body` column holds.
+export type Body = BodyValue
+
+--- Declares a body's simulation behavior.
+-- This persisted component name is a compatibility surface.
+export const Body: ecs.TableComponent<BodyValue> = ecs.newComponent({
+    name = "Body",
+    construct = newBody,
+    default = function(): BodyValue
+        return newBody()
+    end,
+})
+
+local function newCollider(
+    shape: integer?,
+    halfWidth: number?,
+    halfHeight: number?,
+    radius: number?,
+    length: number?,
+    offsetX: number?,
+    offsetY: number?,
+    density: number?,
+    friction: number?,
+    restitution: number?,
+    categoryBits: integer?,
+    maskBits: integer?,
+    isSensor: boolean?
+): ColliderValue
+    return new ColliderValue(
+        shape = shape or contract.SHAPE_BOX,
+        halfWidth = halfWidth or 8.0,
+        halfHeight = halfHeight or 8.0,
+        radius = radius or 0.0,
+        length = length or 0.0,
+        offsetX = offsetX or 0.0,
+        offsetY = offsetY or 0.0,
+        density = density or 1.0,
+        friction = friction or 0.6,
+        restitution = restitution or 0.0,
+        categoryBits = categoryBits or 1,
+        maskBits = maskBits or 0xFFFFFFFF,
+        isSensor = isSensor == true
+    )
+end
+
+--- The value a `Collider` column holds.
+export type Collider = ColliderValue
+
+--- Declares a body's geometry, material and collision filtering.
+-- This persisted component name is a compatibility surface.
+export const Collider: ecs.TableComponent<ColliderValue> = ecs.newComponent({
+    name = "Collider",
+    construct = newCollider,
+    default = function(): ColliderValue
+        return newCollider()
+    end,
+})
+
+local function newMotion(vx: number?, vy: number?, omega: number?): MotionValue
+    return new MotionValue(vx = vx or 0.0, vy = vy or 0.0, omega = omega or 0.0)
+end
+
+--- The value a `Motion` column holds.
+export type Motion = MotionValue
+
+--- Preserves a body's saved velocity across pauses and snapshots.
+-- This persisted component name is a compatibility surface.
+export const Motion: ecs.TableComponent<MotionValue> = ecs.newComponent({
+    name = "Motion",
+    construct = newMotion,
+    default = function(): MotionValue
+        return newMotion()
+    end,
+})
+
+local function newHandle(index1: integer?, world0: integer?, generation: integer?): SolverHandle
+    return new SolverHandle(index1 = index1 or 0, world0 = world0 or 0, generation = generation or 0)
+end
+
+local function emptyHandle(): SolverHandle
+    return newHandle()
+end
+
+--- Identifies one live body in a simulation.
+---
+--- Engine-owned and transient. A snapshot never carries it, because the slot
+--- it names belongs to one run of one simulation.
+-- This component name is a compatibility surface.
+export const RigidBody: ecs.TableComponent<SolverHandle> = ecs.newComponent({
+    name = "RigidBody",
+    construct = newHandle,
+    default = emptyHandle,
+    transient = true,
+})
+
+--- Identifies the live shape owned by a secondary collider entity.
+---
+--- Engine-owned and transient.
+-- This component name is a compatibility surface.
+export const ColliderShape: ecs.TableComponent<SolverHandle> = ecs.newComponent({
+    name = "ColliderShape",
+    construct = newHandle,
+    default = emptyHandle,
+    transient = true,
+})
+
+--- Identifies the live joint owned by a joint entity.
+---
+--- Engine-owned and transient.
+-- This component name is a compatibility surface.
+export const JointLink: ecs.TableComponent<SolverHandle> = ecs.newComponent({
+    name = "JointLink",
+    construct = newHandle,
+    default = emptyHandle,
+    transient = true,
+})
+
+local function newJoint(
+    kind: integer?,
+    anchorAX: number?,
+    anchorAY: number?,
+    anchorBX: number?,
+    anchorBY: number?,
+    axisX: number?,
+    axisY: number?,
+    limitsEnabled: boolean?,
+    limitMin: number?,
+    limitMax: number?,
+    motorEnabled: boolean?,
+    motorTargetVelocity: number?,
+    motorMaxForce: number?,
+    contactsEnabled: boolean?
+): JointValue
+    return new JointValue(
+        kind = kind or contract.JOINT_FIXED,
+        anchorAX = anchorAX or 0.0,
+        anchorAY = anchorAY or 0.0,
+        anchorBX = anchorBX or 0.0,
+        anchorBY = anchorBY or 0.0,
+        axisX = axisX or 1.0,
+        axisY = axisY or 0.0,
+        limitsEnabled = limitsEnabled == true,
+        limitMin = limitMin or 0.0,
+        limitMax = limitMax or 0.0,
+        motorEnabled = motorEnabled == true,
+        motorTargetVelocity = motorTargetVelocity or 0.0,
+        motorMaxForce = motorMaxForce or 0.0,
+        contactsEnabled = contactsEnabled == true
+    )
+end
+
+--- The value a `Joint` column holds.
+export type Joint = JointValue
+
+--- Declares a joint between the two bodies its entity relates to.
+-- This persisted component name is a compatibility surface.
+export const Joint: ecs.TableComponent<JointValue> = ecs.newComponent({
+    name = "Joint",
+    construct = newJoint,
+    default = function(): JointValue
+        return newJoint()
+    end,
+})
+
+--- Marks a body physics paused, after the solver made it static and stored
+--- its motion.
+---
+--- Engine-owned and transient.
+-- This component name is a compatibility surface.
+export const PhysicsHeld: ecs.Component = ecs.newTagComponent({name = "PhysicsHeld", transient = true})
+
+--- Marks a body the solver has been told to stop simulating.
+---
+--- Engine-owned and transient.
+-- This component name is a compatibility surface.
+export const PhysicsDisabled: ecs.Component = ecs.newTagComponent({name = "PhysicsDisabled", transient = true})
+
+--- Relates a secondary collider entity to the body that owns its shape.
+---
+--- The relationship is reverse-indexed for inspection and cascade-deleted
+--- with the body, so a shape never outlives what it was attached to.
+-- This relationship name is a compatibility surface.
+export const ColliderOf: ecs.Relationship = ecs.newRelationship({
+    name = "ColliderOf",
+    exclusive = true,
+    reverseIndex = true,
+    cascadeDelete = true,
+})
+
+--- Relates a joint entity to the first body it constrains.
+-- This relationship name is a compatibility surface.
+export const JointBodyA: ecs.Relationship = ecs.newRelationship({
+    name = "JointBodyA",
+    exclusive = true,
+    reverseIndex = true,
+    cascadeDelete = true,
+})
+
+--- Relates a joint entity to the second body it constrains.
+-- This relationship name is a compatibility surface.
+export const JointBodyB: ecs.Relationship = ecs.newRelationship({
+    name = "JointBodyB",
+    exclusive = true,
+    reverseIndex = true,
+    cascadeDelete = true,
+})
+
+local function contactPair(entityA: integer, entityB: integer): ContactPair
+    return new ContactPair(entityA = entityA, entityB = entityB)
+end
+
+local function sensorPair(sensor: integer, visitor: integer): SensorPair
+    return new SensorPair(sensor = sensor, visitor = visitor)
+end
+
+--- Fires at address zero when two bodies begin touching.
+-- This event name is a compatibility surface.
+export const ContactBegin: events.Event<ContactPair> = events.newEvent({
+    name = "ContactBegin",
+    construct = contactPair,
+})
+
+--- Fires at address zero when two bodies stop touching.
+-- This event name is a compatibility surface.
+export const ContactEnd: events.Event<ContactPair> = events.newEvent({name = "ContactEnd", construct = contactPair})
+
+--- Fires at address zero when a body enters a sensor.
+-- This event name is a compatibility surface.
+export const SensorBegin: events.Event<SensorPair> = events.newEvent({name = "SensorBegin", construct = sensorPair})
+
+--- Fires at address zero when a body leaves a sensor.
+-- This event name is a compatibility surface.
+export const SensorEnd: events.Event<SensorPair> = events.newEvent({name = "SensorEnd", construct = sensorPair})
+
+--- The name a snapshot writes physics state under.
+---
+--- This persisted key is a compatibility surface. It also names the world
+--- resource, so a debug tool that lists resources finds physics where it
+--- always was.
+const SNAPSHOT_KEY: string = "tecs.physics"
+
+--- The engine identity a snapshot records, which gates its own load.
+---
+--- This persisted value is a compatibility surface. Loading a snapshot whose
+--- engine differs restores nothing rather than feeding one solver's bytes to
+--- another.
+const SNAPSHOT_ENGINE: string = "rapier2d-0.34"
+
+--- One world's simulation together with the bookkeeping its systems share.
+local record State
+    simulation: contract.Simulation
+
+    poselessBodies: ecs.Query
+    motionlessBodies: ecs.Query
+    pendingBodies: ecs.Query
+    detachedBodies: ecs.Query
+    detachedShapes: ecs.Query
+    detachedJoints: ecs.Query
+    pausedBodies: ecs.Query
+    resumedBodies: ecs.Query
+    disabledBodies: ecs.Query
+    enabledBodies: ecs.Query
+    declaredBodies: ecs.Query
+    primaryColliders: ecs.Query
+    pendingSecondary: ecs.Query
+    secondaryColliders: ecs.Query
+    pendingJoints: ecs.Query
+    simulatedBodies: ecs.Query
+    snapshotBodies: ecs.Query
+
+    --- Holds the entities gathered by whichever reconcile pass is running.
+    gathered: {integer}
+
+    --- Holds the entity behind each `queueCreateBody` order, ascending by
+    --- entity so a same-batch owner can be found by binary search.
+    createOrder: {integer}
+
+    createCount: integer
+
+    --- Holds the entity behind each `queueCreateCollider` order.
+    colliderOrder: {integer}
+
+    colliderCount: integer
+
+    --- Holds the entity behind each `queueCreateJoint` order.
+    jointOrder: {integer}
+
+    jointCount: integer
+
+    --- Holds the entity behind each `queueUpdateCollider` order, or zero for
+    --- a primary collider whose handle no component stores.
+    shapeUpdateOrder: {integer}
+
+    shapeUpdateCount: integer
+end
+
+--- Names the world resource holding physics state.
+---
+--- The key name is the compatibility surface `SNAPSHOT_KEY` declares.
+const stateKey: data.Key<State> = data.newKey(SNAPSHOT_KEY, nil)
+
+local function toMeters(pixels: number): number
+    return pixels / pixelsPerMeter
+end
+
+local function toPixels(meters: number): number
+    return meters * pixelsPerMeter
+end
+
+local function bodyKindOf(name: string?): integer
+    if name == nil or name == "dynamic" then
+        return contract.BODY_DYNAMIC
+    elseif name == "static" then
+        return contract.BODY_STATIC
+    elseif name == "kinematic" then
+        return contract.BODY_KINEMATIC
+    end
+
+    error("physics: unknown body kind '" .. name .. "'; expected static, kinematic or dynamic", 3)
+end
+
+local function jointKindOf(name: string?): integer
+    if name == nil or name == "fixed" then
+        return contract.JOINT_FIXED
+    elseif name == "revolute" then
+        return contract.JOINT_REVOLUTE
+    elseif name == "prismatic" then
+        return contract.JOINT_PRISMATIC
+    end
+
+    error("physics: unknown joint kind '" .. name .. "'; expected fixed, revolute or prismatic", 3)
+end
+
+--- Trims a reused gather buffer to the entries this pass wrote.
+local function trim(values: {integer}, count: integer): nil
+    for index = #values, count + 1, -1 do
+        values[index] = nil
+    end
+end
+
+--- Returns the one-based create order of an entity queued by this batch.
+---
+--- `createOrder` is ascending by entity, which is what a search rather than a
+--- per-frame lookup table depends on.
+local function orderOf(state: State, entity: integer): integer
+    local low: integer = 1
+    local high: integer = state.createCount
+    while low <= high do
+        local middle = (low + high) // 2
+        local found = state.createOrder[middle]
+        if found == entity then
+            return middle
+        elseif found < entity then
+            low = middle + 1
+        else
+            high = middle - 1
+        end
+    end
+
+    return 0
+end
+
+--- Collects every entity a query matches into the shared gather buffer.
+local function gather(state: State, from: ecs.Query): integer
+    local values = state.gathered
+    local count: integer = 0
+    for candidate, matched in from:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        local entities = archetype.entities
+        for row = 1, length do
+            count = count + 1
+            values[count] = entities[row]
+        end
+    end
+    trim(values, count)
+    -- Ascending entity order, so nothing downstream depends on the order the
+    -- archetypes happened to be registered in.
+    table.sort(values)
+
+    return count
+end
+
+local function colliderDefOf(entity: integer, shape: ColliderValue): contract.ColliderDef
+    return new contract.ColliderDef(
+        entity = entity,
+        shape = shape.shape,
+        sensor = shape.isSensor,
+        halfWidth = toMeters(shape.halfWidth),
+        halfHeight = toMeters(shape.halfHeight),
+        radius = toMeters(shape.radius),
+        length = toMeters(shape.length),
+        offsetX = toMeters(shape.offsetX),
+        offsetY = toMeters(shape.offsetY),
+        density = shape.density,
+        friction = shape.friction,
+        restitution = shape.restitution,
+        categoryBits = shape.categoryBits,
+        maskBits = shape.maskBits
+    )
+end
+
+--- Builds the collider component one set of attach options describes.
+--- @raises when a capsule is requested without a positive radius
+local function colliderFrom(options: BodyOptions): ecs.ComponentInput
+    local shape = contract.SHAPE_BOX
+    if options.capsuleLength ~= nil then
+        shape = contract.SHAPE_CAPSULE
+        if options.radius == nil or options.radius <= 0 then
+            error("physics: a capsule needs a positive radius", 3)
+        end
+    elseif options.radius ~= nil then
+        shape = contract.SHAPE_CIRCLE
+    end
+
+    return Collider(
+        shape,
+        options.halfWidth,
+        options.halfHeight,
+        options.radius,
+        options.capsuleLength,
+        options.offsetX,
+        options.offsetY,
+        options.density,
+        options.friction,
+        options.restitution,
+        options.categoryBits,
+        options.maskBits,
+        options.isSensor
+    )
+end
+
+local function liveHandle(state: State, row: SolverHandle?): SolverHandle?
+    if row == nil or row.index1 == 0 or row.world0 ~= state.simulation.id then
+        return nil
+    end
+
+    return row
+end
+
+--- Returns the state installed in a world, or nil before installation.
+--- @param world the world to inspect
+--- @return the world's physics state, or nil
+local function stateOf(borrows world: ecs.World): State?
+    return world.resources[stateKey]
+end
+
+--- Returns the simulation installed in a world.
+--- @param world the world to inspect
+--- @return the world's live simulation, or nil before `install` and after
+---     shutdown
+export function of(borrows world: ecs.World): contract.Simulation?
+    local state = stateOf(world)
+    return state and state.simulation
+end
+
+--- Declares a body on an entity.
+---
+--- Physics creates the body during the next fixed update, at which point the
+--- entity gains its `RigidBody` row.
+--- @param world a world with physics installed
+--- @param entity the entity that gains `Body` and `Collider`, and gains a
+---     default `Transform2D` and `Motion` at the next fixed step when it does
+---     not already carry them
+--- @param options the initial body and collider settings, or nil for a
+---     dynamic eight-pixel box
+--- @raises when the world has no simulation, the body kind is unknown, or a
+---     capsule has no positive radius
+export function attach(exclusive world: ecs.World, entity: integer, options: BodyOptions?): nil
+    if stateOf(world) == nil then
+        error("physics.attach: this world has no simulation; call physics.install first", 2)
+    end
+    local settings = options or {}
+    local kind = bodyKindOf(settings.kind)
+    world:set(
+        entity,
+        Body(
+            kind,
+            settings.fixedRotation,
+            settings.isBullet,
+            settings.sleepEnabled,
+            settings.gravityScale,
+            settings.linearDamping,
+            settings.angularDamping
+        )
+    )
+    world:set(entity, colliderFrom(settings))
+end
+
+--- Adds another collider to a declared body.
+---
+--- The collider is its own entity, which makes each shape independently
+--- inspectable and mutable. Physics creates the shape at the first fixed step
+--- after its body is live, and an owner that never gains a
+--- [`Body`](tealdoc:tecs.physics.Body) leaves the shape declared and
+--- unrealized.
+--- @param world the world that owns both entities
+--- @param entity the secondary collider entity, which gains `Collider` and
+---     `ColliderOf`
+--- @param body an entity carrying `Body`
+--- @param options the shape, material, filter and offset settings; body-level
+---     fields have no effect
+--- @raises when a capsule is requested without a positive radius
+export function attachCollider(exclusive world: ecs.World, entity: integer, body: integer, options: BodyOptions?): nil
+    world:set(entity, colliderFrom(options or {}))
+    world:set(entity, ColliderOf(body))
+end
+
+--- Declares a joint between two bodies.
+---
+--- Physics creates the joint at the first fixed step after both bodies are
+--- live, so declaring the joint in the same frame as the bodies it constrains
+--- costs no extra frame. A target that never gains a
+--- [`Body`](tealdoc:tecs.physics.Body) leaves the joint declared and
+--- unrealized, which is deliberate: a spawn staged this frame is not
+--- published yet, so reading the target here would reject correct code.
+--- Destroying either body destroys the joint entity with it.
+--- @param world the world that owns all three entities
+--- @param entity the joint entity, which gains `Joint`, `JointBodyA` and
+---     `JointBodyB`
+--- @param bodyA the first constrained entity
+--- @param bodyB the second constrained entity
+--- @param options the joint kind, anchors, limits and motor settings
+--- @raises when the joint kind is unknown
+export function attachJoint(
+    exclusive world: ecs.World,
+    entity: integer,
+    bodyA: integer,
+    bodyB: integer,
+    options: JointOptions?
+): nil
+    local settings = options or {}
+    local kind = jointKindOf(settings.kind)
+    local limited = settings.limitMin ~= nil or settings.limitMax ~= nil
+    local driven = settings.motorTargetVelocity ~= nil or settings.motorMaxForce ~= nil
+    world:set(
+        entity,
+        Joint(
+            kind,
+            settings.anchorAX,
+            settings.anchorAY,
+            settings.anchorBX,
+            settings.anchorBY,
+            settings.axisX,
+            settings.axisY,
+            limited,
+            settings.limitMin,
+            settings.limitMax,
+            driven,
+            settings.motorTargetVelocity,
+            settings.motorMaxForce,
+            settings.contactsEnabled
+        )
+    )
+    world:set(entity, JointBodyA(bodyA))
+    world:set(entity, JointBodyB(bodyB))
+end
+
+--- Removes a body's declaration.
+---
+--- Physics destroys the body during the next fixed update. The entity's other
+--- physics components remain.
+--- @param world the world holding the entity
+--- @param entity the entity that loses `Body`
+export function detach(exclusive world: ecs.World, entity: integer): nil
+    world:remove(entity, Body)
+end
+
+--- Reports whether the solver is still simulating a body for an entity.
+---
+--- False for an entity whose `RigidBody` row came out of a snapshot into a
+--- simulation that never issued it, which is how a game tells "was simulating
+--- and is not any more" from "never had a body".
+--- @param world the world holding the entity
+--- @param entity any entity
+--- @return true only while the simulation holds a valid live body
+export function hasBody(borrows world: ecs.World, entity: integer): boolean
+    local state = stateOf(world)
+    if state == nil then
+        return false
+    end
+    local row = liveHandle(state, world:get(entity, RigidBody))
+
+    return row ~= nil and state.simulation.isLive(row.index1, row.generation)
+end
+
+local function queue(
+    borrows world: ecs.World,
+    entity: integer,
+    action: integer,
+    a: number,
+    b: number,
+    c: number,
+    d: number
+): nil
+    local state = stateOf(world)
+    if state == nil then
+        return
+    end
+    local row = liveHandle(state, world:get(entity, RigidBody))
+    if row == nil then
+        return
+    end
+    state.simulation.queueAction(row.index1, row.generation, action, a, b, c, d)
+end
+
+--- Pushes a body once, at its center of mass.
+---
+--- An impulse rather than a force, so the effect does not depend on how long
+--- the step happened to be. The solver applies it at the start of the next
+--- fixed step and wakes the body, because a resting island would otherwise
+--- ignore it.
+--- @param world the world holding the entity
+--- @param entity the target entity; a missing live body makes this a no-op
+--- @param x the pixel-scaled impulse along x
+--- @param y the pixel-scaled impulse along y, positive downward
+export function applyImpulse(borrows world: ecs.World, entity: integer, x: number, y: number): nil
+    queue(world, entity, contract.ACTION_IMPULSE, toMeters(x), toMeters(y), 0.0, 0.0)
+end
+
+--- Pushes a body once at a world-space point, which spins it as well.
+--- @param world the world holding the entity
+--- @param entity the target entity; a missing live body makes this a no-op
+--- @param x the pixel-scaled impulse along x
+--- @param y the pixel-scaled impulse along y, positive downward
+--- @param pointX the world-pixel impact position along x
+--- @param pointY the world-pixel impact position along y
+export function applyImpulseAt(
+    borrows world: ecs.World,
+    entity: integer,
+    x: number,
+    y: number,
+    pointX: number,
+    pointY: number
+): nil
+    queue(world, entity, contract.ACTION_IMPULSE_AT, toMeters(x), toMeters(y), toMeters(pointX), toMeters(pointY))
+end
+
+--- Applies a continuous force at the body's center.
+---
+--- The solver clears forces at the end of every step, so holding a body up
+--- against gravity means calling this every fixed step rather than once.
+--- @param world the world holding the entity
+--- @param entity the target entity; a missing live body makes this a no-op
+--- @param x the pixel-scaled force along x
+--- @param y the pixel-scaled force along y, positive downward
+export function applyForce(borrows world: ecs.World, entity: integer, x: number, y: number): nil
+    queue(world, entity, contract.ACTION_FORCE, toMeters(x), toMeters(y), 0.0, 0.0)
+end
+
+--- Applies a continuous force at a world-space point.
+---
+--- Cleared at the end of every step, like `applyForce`.
+--- @param world the world holding the entity
+--- @param entity the target entity; a missing live body makes this a no-op
+--- @param x the pixel-scaled force along x
+--- @param y the pixel-scaled force along y, positive downward
+--- @param pointX the world-pixel application point along x
+--- @param pointY the world-pixel application point along y
+export function applyForceAt(
+    borrows world: ecs.World,
+    entity: integer,
+    x: number,
+    y: number,
+    pointX: number,
+    pointY: number
+): nil
+    queue(world, entity, contract.ACTION_FORCE_AT, toMeters(x), toMeters(y), toMeters(pointX), toMeters(pointY))
+end
+
+--- Applies torque, cleared at the end of every step like the two forces.
+--- @param world the world holding the entity
+--- @param entity the target entity; a missing live body makes this a no-op
+--- @param torque the solver's native torque units, where a positive value
+---     raises angular velocity
+export function applyTorque(borrows world: ecs.World, entity: integer, torque: number): nil
+    queue(world, entity, contract.ACTION_TORQUE, torque, 0.0, 0.0, 0.0)
+end
+
+--- Reads a body's velocity after the last completed fixed step, in pixels per
+--- second.
+---
+--- Pixels match every other linear number this module accepts and returns. A
+--- caller that wants meters divides by `pixelsPerMeter`.
+---
+--- This reports what the solver last computed. `Motion` stores velocity only
+--- at a pause or a save, and does not mirror live motion.
+--- @param world the world holding the entity
+--- @param entity the target entity
+--- @return horizontal velocity in pixels per second, zero without a live body
+--- @return vertical velocity in pixels per second, positive downward
+export function velocity(borrows world: ecs.World, entity: integer): (number, number)
+    local state = stateOf(world)
+    if state == nil then
+        return 0.0, 0.0
+    end
+    local row = liveHandle(state, world:get(entity, RigidBody))
+    if row == nil then
+        return 0.0, 0.0
+    end
+    local vx, vy = state.simulation.velocityOf(row.index1, row.generation)
+
+    return toPixels(vx), toPixels(vy)
+end
+
+--- Sets a body's velocity, in pixels per second, and wakes it.
+---
+--- Does nothing for an entity with no live body, which matches the zero
+--- `velocity` returns for one.
+--- @param world the world holding the entity
+--- @param entity the target entity
+--- @param vx horizontal velocity in pixels per second
+--- @param vy vertical velocity in pixels per second, positive downward
+export function setVelocity(borrows world: ecs.World, entity: integer, vx: number, vy: number): nil
+    queue(world, entity, contract.ACTION_SET_VELOCITY, toMeters(vx), toMeters(vy), 0.0, 0.0)
+end
+
+--- Reads angular velocity in radians per second.
+---
+--- Radians need no conversion, so this is the number the solver holds, unlike
+--- the linear velocity beside it.
+--- @param world the world holding the entity
+--- @param entity the target entity
+--- @return angular velocity in radians per second, zero without a live body
+export function angularVelocity(borrows world: ecs.World, entity: integer): number
+    local state = stateOf(world)
+    if state == nil then
+        return 0.0
+    end
+    local row = liveHandle(state, world:get(entity, RigidBody))
+    if row == nil then
+        return 0.0
+    end
+    local _vx, _vy, omega = state.simulation.velocityOf(row.index1, row.generation)
+
+    return omega
+end
+
+--- Sets angular velocity in radians per second and wakes the body.
+--- @param world the world holding the entity
+--- @param entity the target entity; a missing live body makes this a no-op
+--- @param omega angular velocity in radians per second
+export function setAngularVelocity(borrows world: ecs.World, entity: integer, omega: number): nil
+    queue(world, entity, contract.ACTION_SET_ANGULAR_VELOCITY, omega, 0.0, 0.0, 0.0)
+end
+
+--- Reports whether the solver currently considers a body awake.
+--- @param world the world holding the entity
+--- @param entity any entity
+--- @return true while the solver actively integrates the body, false when it
+---     sleeps or does not exist
+export function isAwake(borrows world: ecs.World, entity: integer): boolean
+    local state = stateOf(world)
+    if state == nil then
+        return false
+    end
+    local row = liveHandle(state, world:get(entity, RigidBody))
+
+    return row ~= nil and state.simulation.isAwake(row.index1, row.generation)
+end
+
+--- Wakes or sleeps a body at the next fixed step.
+--- @param world the world holding the entity
+--- @param entity the target entity; a missing live body makes this a no-op
+--- @param awake true to wake the body, false to sleep it
+export function setAwake(borrows world: ecs.World, entity: integer, awake: boolean): nil
+    queue(world, entity, contract.ACTION_SET_AWAKE, awake and 1.0 or 0.0, 0.0, 0.0, 0.0)
+end
+
+--- Teleports a body and immediately updates its `Transform2D`.
+---
+--- A move rather than a push: velocity is left exactly as it was, so a falling
+--- body carries on falling from wherever it lands. The solver receives the
+--- move at the next fixed step, while the transform changes now so the frame
+--- that requested the teleport already draws it there.
+--- @param world the world holding the entity
+--- @param entity the target entity; a missing live body makes this a no-op,
+---     including its `Transform2D`
+--- @param x the body's origin in world pixels along x
+--- @param y the body's origin in world pixels along y, positive downward
+--- @param angle radians, or nil to keep the current `Transform2D.rotation`
+export function teleport(exclusive world: ecs.World, entity: integer, x: number, y: number, angle: number?): nil
+    local state = stateOf(world)
+    if state == nil then
+        return
+    end
+    local row = liveHandle(state, world:get(entity, RigidBody))
+    if row == nil then
+        return
+    end
+    local transform = world:getMut(entity, ecs.Transform2D)
+    if transform == nil then
+        return
+    end
+    local rotation = angle or transform.rotation
+    state.simulation.queueAction(
+        row.index1,
+        row.generation,
+        contract.ACTION_SET_TRANSFORM,
+        toMeters(x),
+        toMeters(y),
+        rotation,
+        0.0
+    )
+    transform.x = x
+    transform.y = y
+    transform.rotation = rotation
+end
+
+--- Casts a segment and returns its nearest collider, in pixels.
+---
+--- The cast tests one segment and ignores everything beyond its end, so a miss
+--- may mean the segment was too short.
+--- @param world a world; one without physics returns nil
+--- @param x1 the segment start in world pixels along x
+--- @param y1 the segment start in world pixels along y
+--- @param x2 the segment end in world pixels along x
+--- @param y2 the segment end in world pixels along y
+--- @param options the collision filters, or nil to test every shape including
+---     sensors
+--- @return a fresh caller-owned nearest hit, or nil on a miss
+export function raycast(
+    borrows world: ecs.World,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    options: QueryOptions?
+): RaycastHit?
+    local state = stateOf(world)
+    if state == nil then
+        return nil
+    end
+    local filters = options or {}
+    local entity, x, y, normalX, normalY, fraction = state.simulation.raycast(
+        toMeters(x1),
+        toMeters(y1),
+        toMeters(x2),
+        toMeters(y2),
+        filters.categoryBits or 0xFFFFFFFF,
+        filters.maskBits or 0xFFFFFFFF
+    )
+    if entity == nil then
+        return nil
+    end
+
+    return new RaycastHit(
+        entity = entity,
+        x = toPixels(x),
+        y = toPixels(y),
+        normalX = normalX,
+        normalY = normalY,
+        fraction = fraction
+    )
+end
+
+--- Queues one body creation from an entity's declaration.
+local function queueBody(state: State, borrows world: ecs.World, entity: integer): nil
+    local transform = world:get(entity, ecs.Transform2D)
+    local declared = world:get(entity, Body)
+    local shape = world:get(entity, Collider)
+    if transform == nil or declared == nil or shape == nil then
+        return
+    end
+    local motion = world:get(entity, Motion)
+    local order = state.simulation.queueCreateBody(
+        new contract.BodyCreate(
+            entity = entity,
+            collider = colliderDefOf(entity, shape),
+            kind = declared.kind,
+            fixedRotation = declared.fixedRotation,
+            isBullet = declared.isBullet,
+            sleepEnabled = declared.sleepEnabled,
+            gravityScale = declared.gravityScale,
+            linearDamping = declared.linearDamping,
+            angularDamping = declared.angularDamping,
+            x = toMeters(transform.x),
+            y = toMeters(transform.y),
+            angle = transform.rotation,
+            vx = toMeters(motion and motion.vx or 0.0),
+            vy = toMeters(motion and motion.vy or 0.0),
+            omega = motion and motion.omega or 0.0
+        )
+    )
+    state.createOrder[order] = entity
+    state.createCount = order
+end
+
+--- Queues one secondary collider, resolving an owner this batch may create.
+local function queueSecondary(state: State, borrows world: ecs.World, entity: integer): nil
+    local link = world:get(entity, ColliderOf)
+    local shape = world:get(entity, Collider)
+    if link == nil or shape == nil then
+        return
+    end
+    local owner = liveHandle(state, world:get(link.target, RigidBody))
+    local ownerOrder: integer = 0
+    if owner == nil then
+        ownerOrder = orderOf(state, link.target)
+        if ownerOrder == 0 then
+            return
+        end
+    end
+    local order = state.simulation.queueCreateCollider(
+        new contract.ColliderCreate(
+            def = colliderDefOf(entity, shape),
+            bodyIndex1 = owner and owner.index1 or 0,
+            bodyGeneration = owner and owner.generation or 0,
+            bodyOrder = ownerOrder
+        )
+    )
+    state.colliderOrder[order] = entity
+    state.colliderCount = order
+end
+
+--- Queues one joint, resolving bodies this batch may create.
+local function queueJoint(state: State, borrows world: ecs.World, entity: integer): nil
+    local declared = world:get(entity, Joint)
+    local first = world:get(entity, JointBodyA)
+    local second = world:get(entity, JointBodyB)
+    if declared == nil or first == nil or second == nil then
+        return
+    end
+    local bodyA = liveHandle(state, world:get(first.target, RigidBody))
+    local bodyB = liveHandle(state, world:get(second.target, RigidBody))
+    local orderA: integer = 0
+    local orderB: integer = 0
+    if bodyA == nil then
+        orderA = orderOf(state, first.target)
+        if orderA == 0 then
+            return
+        end
+    end
+    if bodyB == nil then
+        orderB = orderOf(state, second.target)
+        if orderB == 0 then
+            return
+        end
+    end
+    -- A prismatic joint slides, so its limits and motor target are distances
+    -- and convert like every other length. A revolute joint turns, so its own
+    -- are angles and do not.
+    local sliding = declared.kind == contract.JOINT_PRISMATIC
+    local order = state.simulation.queueCreateJoint(
+        new contract.JointCreate(
+            entity = entity,
+            kind = declared.kind,
+            bodyAIndex1 = bodyA and bodyA.index1 or 0,
+            bodyAGeneration = bodyA and bodyA.generation or 0,
+            bodyAOrder = orderA,
+            bodyBIndex1 = bodyB and bodyB.index1 or 0,
+            bodyBGeneration = bodyB and bodyB.generation or 0,
+            bodyBOrder = orderB,
+            anchorAX = toMeters(declared.anchorAX),
+            anchorAY = toMeters(declared.anchorAY),
+            anchorBX = toMeters(declared.anchorBX),
+            anchorBY = toMeters(declared.anchorBY),
+            axisX = declared.axisX,
+            axisY = declared.axisY,
+            limitsEnabled = declared.limitsEnabled,
+            limitMin = sliding and toMeters(declared.limitMin) or declared.limitMin,
+            limitMax = sliding and toMeters(declared.limitMax) or declared.limitMax,
+            motorEnabled = declared.motorEnabled,
+            motorTargetVelocity = sliding and toMeters(declared.motorTargetVelocity) or declared.motorTargetVelocity,
+            motorMaxForce = declared.motorMaxForce,
+            contactsEnabled = declared.contactsEnabled
+        )
+    )
+    state.jointOrder[order] = entity
+    state.jointCount = order
+end
+
+--- Gives every declared body the pose and motion storage it needs.
+---
+--- A body cannot be created without a pose, and `attach` cannot supply one
+--- itself: a spawn staged in the same frame is not published yet, so a read
+--- there would answer for an entity that does not exist and then overwrite
+--- the transform the caller spawned it with. Here the entity is committed, so
+--- an absent component is genuinely absent and receives its own default.
+local function completeBodyDeclarations(state: State, exclusive world: ecs.World): nil
+    for candidate, matched in state.poselessBodies:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        local entities = archetype.entities
+        for row = 1, length do
+            world:set(entities[row], ecs.Transform2D)
+        end
+    end
+    for candidate, matched in state.motionlessBodies:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        local entities = archetype.entities
+        for row = 1, length do
+            world:set(entities[row], Motion)
+        end
+    end
+end
+
+local function reconcileBodies(state: State, exclusive world: ecs.World): nil
+    local simulation = state.simulation
+    state.createCount = 0
+    state.colliderCount = 0
+    state.jointCount = 0
+    state.shapeUpdateCount = 0
+
+    -- A body outlives its entity otherwise: the solver owns it until something
+    -- says so, and nothing else knows the declaration is gone.
+    for candidate, matched in state.detachedBodies:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        local rows: {SolverHandle} = assert(archetype:get(RigidBody))
+        local entities = archetype.entities
+        for row = 1, length do
+            local handle = rows[row]
+            if handle.world0 == simulation.id then
+                simulation.queueDestroyBody(handle.index1, handle.generation)
+            end
+            world:remove(entities[row], RigidBody)
+        end
+    end
+    for candidate, matched in state.detachedShapes:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        local rows: {SolverHandle} = assert(archetype:get(ColliderShape))
+        local entities = archetype.entities
+        for row = 1, length do
+            local handle = rows[row]
+            if handle.world0 == simulation.id then
+                simulation.queueDestroyCollider(handle.index1, handle.generation)
+            end
+            world:remove(entities[row], ColliderShape)
+        end
+    end
+
+    local pending = gather(state, state.pendingBodies)
+    for index = 1, pending do
+        queueBody(state, world, state.gathered[index])
+    end
+    local secondary = gather(state, state.pendingSecondary)
+    for index = 1, secondary do
+        queueSecondary(state, world, state.gathered[index])
+    end
+end
+
+local function reconcileJoints(state: State, exclusive world: ecs.World): nil
+    local simulation = state.simulation
+    for candidate, matched in state.detachedJoints:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        local rows: {SolverHandle} = assert(archetype:get(JointLink))
+        local entities = archetype.entities
+        for row = 1, length do
+            local handle = rows[row]
+            if handle.world0 == simulation.id then
+                simulation.queueDestroyJoint(handle.index1, handle.generation)
+            end
+            world:remove(entities[row], JointLink)
+        end
+    end
+    local pending = gather(state, state.pendingJoints)
+    for index = 1, pending do
+        queueJoint(state, world, state.gathered[index])
+    end
+end
+
+local function holdPausedBodies(state: State, exclusive world: ecs.World): nil
+    local simulation = state.simulation
+    for candidate, matched in state.pausedBodies:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        local rows: {SolverHandle} = assert(archetype:get(RigidBody))
+        local motions: {MotionValue} = assert(archetype:getMut(Motion))
+        local entities = archetype.entities
+        for row = 1, length do
+            local handle = rows[row]
+            local motion = motions[row]
+            if handle.world0 == simulation.id then
+                local vx, vy, omega = simulation.velocityOf(handle.index1, handle.generation)
+                motion.vx = toPixels(vx)
+                motion.vy = toPixels(vy)
+                motion.omega = omega
+                simulation.queueAction(handle.index1, handle.generation, contract.ACTION_SET_VELOCITY, 0, 0, 0, 0)
+                simulation.queueAction(
+                    handle.index1,
+                    handle.generation,
+                    contract.ACTION_SET_ANGULAR_VELOCITY,
+                    0,
+                    0,
+                    0,
+                    0
+                )
+                simulation.queueAction(
+                    handle.index1,
+                    handle.generation,
+                    contract.ACTION_SET_BODY_TYPE,
+                    contract.BODY_STATIC,
+                    0,
+                    0,
+                    0
+                )
+            end
+            world:set(entities[row], PhysicsHeld)
+        end
+    end
+end
+
+local function releasePausedBodies(state: State, exclusive world: ecs.World): nil
+    local simulation = state.simulation
+    for candidate, matched in state.resumedBodies:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        local declarations: {BodyValue} = assert(archetype:get(Body))
+        local rows: {SolverHandle} = assert(archetype:get(RigidBody))
+        local motions: {MotionValue} = assert(archetype:get(Motion))
+        local entities = archetype.entities
+        for row = 1, length do
+            local handle = rows[row]
+            if handle.world0 == simulation.id then
+                local motion = motions[row]
+                simulation.queueAction(
+                    handle.index1,
+                    handle.generation,
+                    contract.ACTION_SET_BODY_TYPE,
+                    declarations[row].kind,
+                    0,
+                    0,
+                    0
+                )
+                simulation.queueAction(
+                    handle.index1,
+                    handle.generation,
+                    contract.ACTION_SET_VELOCITY,
+                    toMeters(motion.vx),
+                    toMeters(motion.vy),
+                    0,
+                    0
+                )
+                simulation.queueAction(
+                    handle.index1,
+                    handle.generation,
+                    contract.ACTION_SET_ANGULAR_VELOCITY,
+                    motion.omega,
+                    0,
+                    0,
+                    0
+                )
+            end
+            world:remove(entities[row], PhysicsHeld)
+        end
+    end
+end
+
+local function applyColliderChanges(state: State, borrows _world: ecs.World): nil
+    local simulation = state.simulation
+    for candidate, matched in state.primaryColliders:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        if archetype:isComponentDirty(Collider) then
+            local shapes: {ColliderValue} = assert(archetype:get(Collider))
+            local rows: {SolverHandle} = assert(archetype:get(RigidBody))
+            local entities = archetype.entities
+            for row = 1, length do
+                local handle = rows[row]
+                if handle.world0 == simulation.id and handle.index1 ~= 0 then
+                    local order = simulation.queueUpdateCollider(
+                        new contract.ColliderUpdate(
+                            def = colliderDefOf(entities[row], shapes[row]),
+                            index1 = 0,
+                            generation = 0,
+                            bodyIndex1 = handle.index1,
+                            bodyGeneration = handle.generation
+                        )
+                    )
+                    -- No component stores a primary collider's handle, so the
+                    -- replacement's identity has nothing to write back to.
+                    state.shapeUpdateOrder[order] = 0
+                    state.shapeUpdateCount = order
+                end
+            end
+        end
+    end
+    for candidate, matched in state.secondaryColliders:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        if archetype:isComponentDirty(Collider) then
+            local shapes: {ColliderValue} = assert(archetype:get(Collider))
+            local rows: {SolverHandle} = assert(archetype:get(ColliderShape))
+            local entities = archetype.entities
+            for row = 1, length do
+                local handle = rows[row]
+                if handle.world0 == simulation.id and handle.index1 ~= 0 then
+                    local order = simulation.queueUpdateCollider(
+                        new contract.ColliderUpdate(
+                            def = colliderDefOf(entities[row], shapes[row]),
+                            index1 = handle.index1,
+                            generation = handle.generation,
+                            bodyIndex1 = 0,
+                            bodyGeneration = 0
+                        )
+                    )
+                    state.shapeUpdateOrder[order] = entities[row]
+                    state.shapeUpdateCount = order
+                end
+            end
+        end
+    end
+end
+
+local function applyBodyChanges(state: State, borrows _world: ecs.World): nil
+    local simulation = state.simulation
+    for candidate, matched in state.declaredBodies:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        if archetype:isComponentDirty(Body) then
+            local declarations: {BodyValue} = assert(archetype:get(Body))
+            local rows: {SolverHandle} = assert(archetype:get(RigidBody))
+            for row = 1, length do
+                local handle = rows[row]
+                local declared = declarations[row]
+                if handle.world0 == simulation.id and handle.index1 ~= 0 then
+                    simulation.queueUpdateBody(
+                        handle.index1,
+                        handle.generation,
+                        declared.kind,
+                        declared.fixedRotation,
+                        declared.isBullet,
+                        declared.sleepEnabled,
+                        declared.gravityScale,
+                        declared.linearDamping,
+                        declared.angularDamping
+                    )
+                end
+            end
+        end
+    end
+end
+
+local function setEnablement(state: State, exclusive world: ecs.World, from: ecs.Query, enabled: boolean): nil
+    local simulation = state.simulation
+    for candidate, matched in from:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        local rows: {SolverHandle} = assert(archetype:get(RigidBody))
+        local entities = archetype.entities
+        for row = 1, length do
+            local handle = rows[row]
+            if handle.world0 == simulation.id then
+                simulation.queueAction(
+                    handle.index1,
+                    handle.generation,
+                    contract.ACTION_SET_ENABLED,
+                    enabled and 1 or 0,
+                    0,
+                    0,
+                    0
+                )
+            end
+            if enabled then
+                world:remove(entities[row], PhysicsDisabled)
+            else
+                world:set(entities[row], PhysicsDisabled)
+            end
+        end
+    end
+end
+
+--- Writes back every slot the last step assigned.
+---
+--- This is the one place a created body, collider or joint becomes visible to
+--- the ECS, because the solver only names a slot once the batch that created
+--- it has run.
+local function publishHandles(state: State, exclusive world: ecs.World): nil
+    local simulation = state.simulation
+    for order = 1, state.createCount do
+        local index1, generation = simulation.createdBody(order)
+        if index1 ~= 0 then
+            world:set(state.createOrder[order], RigidBody(index1, simulation.id, generation))
+        end
+    end
+    for order = 1, state.colliderCount do
+        local index1, generation = simulation.createdCollider(order)
+        if index1 ~= 0 then
+            world:set(state.colliderOrder[order], ColliderShape(index1, simulation.id, generation))
+        end
+    end
+    for order = 1, state.jointCount do
+        local index1, generation = simulation.createdJoint(order)
+        if index1 ~= 0 then
+            world:set(state.jointOrder[order], JointLink(index1, simulation.id, generation))
+        end
+    end
+    for order = 1, state.shapeUpdateCount do
+        local entity = state.shapeUpdateOrder[order]
+        if entity ~= 0 then
+            local index1, generation = simulation.updatedCollider(order)
+            local existing = world:getMut(entity, ColliderShape)
+            if existing ~= nil then
+                existing.index1 = index1
+                existing.world0 = index1 ~= 0 and simulation.id or 0
+                existing.generation = generation
+            end
+        end
+    end
+    state.createCount = 0
+    state.colliderCount = 0
+    state.jointCount = 0
+    state.shapeUpdateCount = 0
+end
+
+local function stepPhysics(state: State, exclusive world: ecs.World): nil
+    local simulation = state.simulation
+    -- The rate comes from the world rather than from an option here. Two
+    -- numbers that have to agree and can disagree is a simulation that
+    -- integrates at one rate while the phase driving it runs at another.
+    local timestep = world:getFixedTiming()
+    simulation.step(timestep)
+    publishHandles(state, world)
+
+    -- The narrow phase is drained from a buffer, so no solver thread ever
+    -- enters the Nupp VM.
+    for index = 1, simulation.eventCount() do
+        local entityA, entityB, started, sensor = simulation.eventAt(index)
+        if sensor then
+            world:emit(0, started and SensorBegin(entityA, entityB) or SensorEnd(entityA, entityB))
+        else
+            world:emit(0, started and ContactBegin(entityA, entityB) or ContactEnd(entityA, entityB))
+        end
+    end
+end
+
+local function syncBodyTransforms(state: State, exclusive world: ecs.World): nil
+    local simulation = state.simulation
+    for candidate, matched in state.simulatedBodies:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        local rows: {SolverHandle} = assert(archetype:get(RigidBody))
+
+        -- Taken mutable on the first body that actually moved, and not at all
+        -- otherwise. Taking it up front would mark the column dirty every
+        -- frame for every archetype holding a body, which defeats every
+        -- consumer gated on that: a world whose bodies have gone to sleep
+        -- would still re-upload each of their instances.
+        local transforms: {ecs.Transform2D}? = nil
+
+        for row = 1, length do
+            local handle = rows[row]
+            if handle.world0 == simulation.id then
+                local px, py, cosine, sine = simulation.poseOf(handle.index1, handle.generation)
+                if px ~= nil then
+                    if transforms == nil then
+                        transforms = archetype:getMut(ecs.Transform2D)
+                    end
+                    local transform = assert(transforms)[row]
+                    transform.x = toPixels(px)
+                    transform.y = toPixels(py)
+                    transform.rotation = vec2.angle(cosine, sine)
+                end
+            end
+        end
+    end
+end
+
+--- Copies live velocities into `Motion` so a snapshot carries them.
+local function captureMotion(state: State): nil
+    local simulation = state.simulation
+    for candidate, matched in state.snapshotBodies:iter() do
+        local archetype: ecs.Archetype = assert(candidate)
+        local length: integer = assert(matched)
+        local rows: {SolverHandle} = assert(archetype:get(RigidBody))
+        local motions: {MotionValue} = assert(archetype:getMut(Motion))
+        for row = 1, length do
+            local handle = rows[row]
+            if handle.world0 == simulation.id then
+                local vx, vy, omega = simulation.velocityOf(handle.index1, handle.generation)
+                local motion = motions[row]
+                motion.vx = toPixels(vx)
+                motion.vy = toPixels(vy)
+                motion.omega = omega
+            end
+        end
+    end
+end
+
+--- Reattaches every restored entity to the slot the loaded state holds.
+local function reattachRestored(state: State, exclusive world: ecs.World): nil
+    local pending = gather(state, state.pendingBodies)
+    local entities: {integer} = {}
+    for index = 1, pending do
+        entities[index] = state.gathered[index]
+    end
+    local secondary = gather(state, state.pendingSecondary)
+    for index = 1, secondary do
+        entities[pending + index] = state.gathered[index]
+    end
+    local joints = gather(state, state.pendingJoints)
+    for index = 1, joints do
+        entities[pending + secondary + index] = state.gathered[index]
+    end
+    if #entities == 0 then
+        return
+    end
+    local handles = state.simulation.resolveEntities(entities)
+    local simulationId = state.simulation.id
+    for index = 1, pending do
+        if handles.bodyIndex1[index] ~= 0 then
+            world:set(
+                entities[index],
+                RigidBody(handles.bodyIndex1[index], simulationId, handles.bodyGeneration[index])
+            )
+        end
+    end
+    for index = pending + 1, pending + secondary do
+        if handles.colliderIndex1[index] ~= 0 then
+            world:set(
+                entities[index],
+                ColliderShape(handles.colliderIndex1[index], simulationId, handles.colliderGeneration[index])
+            )
+        end
+    end
+    for index = pending + secondary + 1, #entities do
+        if handles.jointIndex1[index] ~= 0 then
+            world:set(
+                entities[index],
+                JointLink(handles.jointIndex1[index], simulationId, handles.jointGeneration[index])
+            )
+        end
+    end
+end
+
+--- Installs a simulation and its fixed-step systems in a world.
+---
+--- Every system this registers runs in the fixed phases, so a simulation
+--- advances by whole steps of the world's own timestep and replays the same
+--- way on every machine.
+--- @param world a world with no simulation yet
+--- @param options the gravity, substep count, solver width, and an explicit
+---     simulation to drive instead of the default native one
+--- @return the installed simulation, also available through `of`
+--- @raises when the world already has a simulation
+export function install(exclusive world: ecs.World, options: Options?): contract.Simulation
+    if world.resources[stateKey] ~= nil then
+        error("physics.install: this world already has a simulation", 2)
+    end
+    local settings = options or {}
+    local gravity = settings.gravity or {0.0, 980.0}
+    local chosen = settings.simulation
+    if chosen == nil then
+        -- Required here rather than at the top of the file, and typed by hand
+        -- rather than by that require, because loading `tecs.physics.rapier`
+        -- binds the native solver library. A world driven by a simulation the
+        -- caller supplied never reaches this line and never needs it.
+        local rapier = require("tecs.physics.rapier") as RapierBackend
+        chosen = rapier.create({
+            gravityX = toMeters(gravity[1] or 0.0),
+            gravityY = toMeters(gravity[2] or 0.0),
+            subStepCount = settings.subStepCount,
+            workerCount = settings.workerCount,
+        })
+    end
+    local simulation: contract.Simulation = assert(chosen)
+
+    local state = new State(
+        simulation = simulation,
+        poselessBodies = world:newQuery({
+            include = {Body},
+            exclude = {ecs.Transform2D}
+        }),
+        motionlessBodies = world:newQuery({
+            include = {Body},
+            exclude = {Motion}
+        }),
+        pendingBodies = world:newQuery({
+            include = {ecs.Transform2D, Body, Collider},
+            exclude = {RigidBody}
+        }),
+        detachedBodies = world:newQuery({include = {RigidBody}, exclude = {Body}}),
+        detachedShapes = world:newQuery({include = {ColliderShape}, exclude = {Collider}}),
+        detachedJoints = world:newQuery({include = {JointLink}, exclude = {Joint}}),
+        pausedBodies = world:newQuery({include = {Body, Motion, RigidBody, ecs.Paused}, exclude = {PhysicsHeld},}),
+        resumedBodies = world:newQuery({include = {Body, Motion, RigidBody, PhysicsHeld}, exclude = {ecs.Paused},}),
+        disabledBodies = world:newQuery({include = {RigidBody, ecs.Disabled}, exclude = {PhysicsDisabled}}),
+        enabledBodies = world:newQuery({include = {RigidBody, PhysicsDisabled}, exclude = {ecs.Disabled}}),
+        declaredBodies = world:newQuery({include = {Body, RigidBody}, exclude = {PhysicsHeld, PhysicsDisabled},}),
+        primaryColliders = world:newQuery({include = {Collider, RigidBody}}),
+        pendingSecondary = world:newQuery({include = {Collider, ColliderOf}, exclude = {ColliderShape}}),
+        secondaryColliders = world:newQuery({include = {Collider, ColliderOf, ColliderShape}}),
+        pendingJoints = world:newQuery({include = {Joint, JointBodyA, JointBodyB}, exclude = {JointLink}}),
+        simulatedBodies = world:newQuery({include = {ecs.Transform2D, RigidBody}}),
+        snapshotBodies = world:newQuery({include = {Motion, RigidBody}, exclude = {PhysicsHeld}}),
+        gathered = {},
+        createOrder = {},
+        createCount = 0,
+        colliderOrder = {},
+        colliderCount = 0,
+        jointOrder = {},
+        jointCount = 0,
+        shapeUpdateOrder = {},
+        shapeUpdateCount = 0
+    )
+    world.resources[stateKey] = state
+
+    -- These system names are reported by tooling and selected on by name, so
+    -- they are compatibility surfaces rather than identifiers.
+    --
+    -- Registered before ReconcileBodies, and publishing at its own barrier, so
+    -- a body declared without a pose gains one in time to be created by the
+    -- same fixed step rather than the next.
+    world:addSystem({
+        name = "tecs.CompleteBodyDeclarations",
+        phase = ecs.phases.FixedFirst,
+        commitAfter = true,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            completeBodyDeclarations(state, running)
+        end,
+    })
+    world:addSystem({
+        name = "tecs.ReconcileBodies",
+        phase = ecs.phases.FixedFirst,
+        commitAfter = true,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            reconcileBodies(state, running)
+        end,
+    })
+    -- Registered after ReconcileBodies because it resolves joints whose bodies
+    -- that pass queued into the same batch.
+    world:addSystem({
+        name = "tecs.ReconcileJoints",
+        phase = ecs.phases.FixedFirst,
+        commitAfter = true,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            reconcileJoints(state, running)
+        end,
+    })
+    world:addSystem({
+        name = "tecs.HoldPausedBodies",
+        phase = ecs.phases.FixedFirst,
+        commitAfter = true,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            holdPausedBodies(state, running)
+        end,
+    })
+    world:addSystem({
+        name = "tecs.ReleasePausedBodies",
+        phase = ecs.phases.FixedFirst,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            releasePausedBodies(state, running)
+        end,
+    })
+    world:addSystem({
+        name = "tecs.ApplyColliderChanges",
+        phase = ecs.phases.FixedFirst,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            applyColliderChanges(state, running)
+        end,
+    })
+    world:addSystem({
+        name = "tecs.ApplyBodyChanges",
+        phase = ecs.phases.FixedFirst,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            applyBodyChanges(state, running)
+        end,
+    })
+    world:addSystem({
+        name = "tecs.DisablePhysicsBodies",
+        phase = ecs.phases.FixedFirst,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            setEnablement(state, running, state.disabledBodies, false)
+        end,
+    })
+    world:addSystem({
+        name = "tecs.EnablePhysicsBodies",
+        phase = ecs.phases.FixedFirst,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            setEnablement(state, running, state.enabledBodies, true)
+        end,
+    })
+    world:addSystem({
+        name = "tecs.StepPhysics",
+        phase = ecs.phases.FixedUpdate,
+        commitAfter = true,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            stepPhysics(state, running)
+        end,
+    })
+    world:addSystem({
+        name = "tecs.SyncBodyTransforms",
+        phase = ecs.phases.FixedPostUpdate,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            syncBodyTransforms(state, running)
+        end,
+    })
+
+    -- Where the release goes, because there is no world destructor: what
+    -- exists is `world:shutdown`, which an application calls first and
+    -- deliberately. A world simply dropped instead leaks its simulation.
+    world:addSystem({
+        name = "tecs.ShutdownPhysics",
+        phase = ecs.phases.Shutdown,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            running.resources[stateKey] = nil
+            state.simulation.destroy()
+        end,
+    })
+
+    world:observe(
+        0,
+        ecs.OnDespawn,
+        function(value: ecs.EntityLifecycle, exclusive running: ecs.World): nil
+            local shape = running:get(value.entity, ColliderShape)
+            if shape ~= nil and shape.index1 ~= 0 and shape.world0 == state.simulation.id then
+                state.simulation.queueDestroyCollider(shape.index1, shape.generation)
+            end
+            local joint = running:get(value.entity, JointLink)
+            if joint ~= nil and joint.index1 ~= 0 and joint.world0 == state.simulation.id then
+                state.simulation.queueDestroyJoint(joint.index1, joint.generation)
+            end
+            local body = running:get(value.entity, RigidBody)
+            if body ~= nil and body.index1 ~= 0 and body.world0 == state.simulation.id then
+                state.simulation.queueDestroyBody(body.index1, body.generation)
+            end
+        end,
+        "tecs.physics"
+    )
+
+    world:addSnapshotHandler({
+        -- This key is part of the persisted snapshot format.
+        name = SNAPSHOT_KEY,
+        save = function(exclusive _running: ecs.World): any
+            captureMotion(state)
+            local bytes, reason = state.simulation.save()
+            if bytes == nil then
+                error("physics: cannot save the simulation: " .. (reason or "unknown"), 0)
+            end
+
+            return {
+                engine = SNAPSHOT_ENGINE,
+                state = bytes,
+                subStepCount = state.simulation.subStepCount,
+                workerCount = state.simulation.workerCount,
+            }
+        end,
+        load = function(exclusive running: ecs.World, value: any): nil
+            local saved = value as {[string]: any}
+            local bytes = saved.state
+            if saved.engine ~= SNAPSHOT_ENGINE or not (bytes is string) then
+                return
+            end
+            local restored, reason = state.simulation.load(bytes)
+            if not restored then
+                error("physics: cannot restore the simulation: " .. (reason or "unknown"), 0)
+            end
+            reattachRestored(state, running)
+            -- The restored simulation is authoritative about velocity, and the
+            -- `Motion` column the snapshot carried was written before the save
+            -- that produced it. Publishing the reattachment first is what
+            -- makes the bodies visible to the capture below.
+            running:commit()
+            captureMotion(state)
+        end,
+    })
+
+    return simulation
+end

@@ -461,6 +461,7 @@ fn resolves_every_requested_entity_in_one_call() {
     let entities = [22u64, 11, 33];
     let mut bodies = vec![TecsPhysicsHandle::default(); 3];
     let mut colliders = vec![TecsPhysicsHandle::default(); 3];
+    let mut joints = vec![TecsPhysicsHandle::default(); 3];
     let status = unsafe {
         tecsPhysicsResolveEntities(
             world.0,
@@ -468,6 +469,7 @@ fn resolves_every_requested_entity_in_one_call() {
             entities.len() as u64,
             bodies.as_mut_ptr(),
             colliders.as_mut_ptr(),
+            joints.as_mut_ptr(),
         )
     };
 
@@ -476,6 +478,62 @@ fn resolves_every_requested_entity_in_one_call() {
     assert_eq!(bodies[1], expected[0].body);
     assert!(bodies[2].is_null());
     assert_eq!(colliders[0], expected[1].collider);
+    assert!(joints.iter().all(|handle| handle.is_null()));
+}
+
+#[test]
+fn a_snapshot_restores_joints_and_resolves_them_by_entity() {
+    let world = World::new(9.81);
+    let mut buffers = Buffers::new();
+    buffers.create_bodies.push(body(1, BODY_STATIC, 0.0, 0.0));
+    buffers.create_bodies.push(body(2, BODY_DYNAMIC, 2.0, 0.0));
+    buffers.create_joints.push(TecsPhysicsJointCreate {
+        entity: 3,
+        body_a: TecsPhysicsHandle::default(),
+        body_b: TecsPhysicsHandle::default(),
+        body_a_create_index: 0,
+        body_b_create_index: 1,
+        kind: JOINT_REVOLUTE,
+        flags: 0,
+        anchor_ax: 0.0,
+        anchor_ay: 0.0,
+        anchor_bx: -2.0,
+        anchor_by: 0.0,
+        axis_x: 0.0,
+        axis_y: 0.0,
+        limit_min: 0.0,
+        limit_max: 0.0,
+        motor_target_velocity: 0.0,
+        motor_max_force: 0.0,
+    });
+    buffers.step(world.0, 0.0);
+    let joint = buffers.created_joints[0];
+
+    let length = unsafe { tecsPhysicsSnapshotBegin(world.0) };
+    let mut bytes = vec![0u8; length as usize];
+    unsafe { tecsPhysicsSnapshotRead(world.0, bytes.as_mut_ptr(), bytes.len() as u64) };
+    let restored = World::new(0.0);
+    let status =
+        unsafe { tecsPhysicsSnapshotRestore(restored.0, bytes.as_ptr(), bytes.len() as u64) };
+    assert_eq!(status, STATUS_OK);
+
+    assert_eq!(unsafe { tecsPhysicsJointCount(restored.0) }, 1);
+    let entities = [3u64];
+    let mut bodies = vec![TecsPhysicsHandle::default(); 1];
+    let mut colliders = vec![TecsPhysicsHandle::default(); 1];
+    let mut joints = vec![TecsPhysicsHandle::default(); 1];
+    unsafe {
+        tecsPhysicsResolveEntities(
+            restored.0,
+            entities.as_ptr(),
+            1,
+            bodies.as_mut_ptr(),
+            colliders.as_mut_ptr(),
+            joints.as_mut_ptr(),
+        )
+    };
+    assert_eq!(joints[0], joint);
+    assert!(bodies[0].is_null());
 }
 
 #[test]
