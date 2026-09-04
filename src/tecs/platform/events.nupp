@@ -27,6 +27,32 @@ export type Kind = "quit"
     | "mouseWheel"
     | "textInput"
 
+--- Returns every platform event kind, in the union's declared order.
+---
+--- Compatibility surface: each string is the externally typed kind an agent
+--- names over the debug protocol, so the spellings here are the same ones
+--- `Kind` declares and must not change with a module move. The union is a
+--- type and cannot be read at run time, so a caller that needs the kinds as
+--- data reads them here rather than keeping a second copy that drifts.
+--- @return a fresh caller-owned list of the thirteen kind strings
+export function kinds(): {string}
+    return {
+        "quit",
+        "windowCloseRequested",
+        "windowResized",
+        "windowScaleChanged",
+        "windowFocusGained",
+        "windowFocusLost",
+        "keyDown",
+        "keyUp",
+        "mouseMotion",
+        "mouseDown",
+        "mouseUp",
+        "mouseWheel",
+        "textInput",
+    }
+end
+
 --- A process or window close request.
 export record QuitEvent
     kind: "quit" | "windowCloseRequested"

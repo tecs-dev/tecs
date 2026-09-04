@@ -34,27 +34,9 @@ local sandbox = require("tecs.internal.mcpsandbox")
 
 --- The platform event kinds `send_event` can push.
 ---
---- Compatibility surface: each string is the externally typed event kind an
---- agent names, and is the same spelling `tecs.platform.events` translates.
---- The list is written here because that module publishes the union as a type
---- rather than as a value; a `kinds()` there would replace it.
-local KINDS: {
-    string
-} = {
-    "quit",
-    "windowCloseRequested",
-    "windowResized",
-    "windowScaleChanged",
-    "windowFocusGained",
-    "windowFocusLost",
-    "keyDown",
-    "keyUp",
-    "mouseMotion",
-    "mouseDown",
-    "mouseUp",
-    "mouseWheel",
-    "textInput"
-}
+--- Read from `tecs.platform.events` rather than copied, so the externally
+--- typed kind strings have exactly one spelling in the tree.
+local KINDS: {string} = platformevents.kinds()
 
 --- The log file `get_logs` reads, once a host has named one.
 local logFile: string? = nil
