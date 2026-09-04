@@ -1,0 +1,277 @@
+module tecs.platform.audionative
+
+--[[
+The `tecsaudio` binding behind the audio backend contract.
+
+Loading this module loads `libtecsaudio`, so a build that has not staged the
+library raises here rather than anywhere later. `tecs.audio` requires it through
+`pcall` for exactly that reason and falls back to
+`tecs.platform.audiobackend.silent` when it is absent.
+
+Commands cross as one contiguous C array per flush and finished voices come back
+as a second one. Nothing in the library ever calls a Nupp function: a `cpal`
+output callback runs on a thread the Lua virtual machine never created, and
+entering Nupp from there is undefined. Every observation is therefore pulled by
+`drain` from the frame thread instead, which is why this binding declares no
+function pointer anywhere.
+
+```nupp
+local audionative <const> = require("tecs.platform.audionative")
+
+local backend <const> = assert(audionative.open(48000, 2, 32))
+```
+]]
+
+local audiobackend = require("tecs.platform.audiobackend")
+local ffilib = require("ffi")
+
+--- Reads a NUL-terminated C string the library owns.
+---
+--- `ffi.string` carries no Nupp declaration, so the binding states the one it
+--- uses rather than reaching for `any` at each call site.
+local readCString: function(value: cstring?): string = ffilib.string as any
+
+cdef struct tecsAudioCommand
+    kind: uint32
+    handle: uint32
+    clip: uint32
+    flags: uint32
+    gain: float
+    pitch: float
+    start: float
+    fade: float
+    loopStart: float
+    x: float
+    y: float
+    z: float
+end
+
+cdef struct tecsAudioEvent
+    kind: uint32
+    handle: uint32
+end
+
+cdef struct tecsAudioClipInfo
+    duration: float
+    resident: int32
+end
+
+-- Every entry point takes the device as a borrow, including `tecs_audio_close`.
+-- The library frees the device inside that call and the binding must not touch
+-- the pointer afterwards, which is a fact the checker cannot hold here: the
+-- pointer lives in the closure set below rather than in a lexical scope, so
+-- there is no owner for an affine obligation to sit on.
+
+cdef function tecs_audio_open(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from"tecsaudio"
+
+cdef function tecs_audio_close(borrows device: voidptr?) from"tecsaudio"
+
+cdef function tecs_audio_available(borrows device: voidptr?): int32 from"tecsaudio"
+
+cdef function tecs_audio_frequency(borrows device: voidptr?): uint32 from"tecsaudio"
+
+cdef function tecs_audio_channels(borrows device: voidptr?): uint32 from"tecsaudio"
+
+cdef function tecs_audio_submit(
+    borrows device: voidptr?,
+    borrows commands: tecsAudioCommand*,
+    count: uint32
+) from"tecsaudio"
+
+cdef function tecs_audio_drain(
+    borrows device: voidptr?,
+    borrows events: tecsAudioEvent*,
+    capacity: uint32
+): uint32 from"tecsaudio"
+
+cdef function tecs_audio_load_clip(
+    borrows device: voidptr?,
+    path: cstring,
+    clip: uint32,
+    mode: uint32,
+    streamSeconds: float,
+    borrows info: tecsAudioClipInfo*
+): int32 from"tecsaudio"
+
+cdef function tecs_audio_release_clip(borrows device: voidptr?, clip: uint32) from"tecsaudio"
+
+cdef function tecs_audio_position(borrows device: voidptr?, handle: uint32): float from"tecsaudio"
+
+cdef function tecs_audio_seek(borrows device: voidptr?, handle: uint32, seconds: float): int32 from"tecsaudio"
+
+cdef function tecs_audio_decoders(borrows device: voidptr?): cstring? from"tecsaudio"
+
+cdef function tecs_audio_last_error(borrows device: voidptr?): cstring? from"tecsaudio"
+
+--- Commands buffered before one crossing, and events pulled back in one.
+---
+--- Both arrays are allocated once and reused, because the seam is crossed every
+--- frame and a per-frame allocation on a path that exists to avoid per-voice
+--- calls would give the saving straight back.
+local CAPACITY: integer = 512
+
+--- Selects a load that measures the clip against the streaming threshold.
+local MODE_AUTO: integer = 0
+
+--- Selects a load that holds decoded samples in memory.
+local MODE_RESIDENT: integer = 1
+
+--- Selects a load each voice reads from the file for itself.
+local MODE_STREAM: integer = 2
+
+--- The event kind reporting that a voice has finished.
+local EVENT_FINISHED: integer = 1
+
+local function modeCode(mode: audiobackend.LoadMode): integer
+    if mode == "resident" then
+        return MODE_RESIDENT
+    elseif mode == "stream" then
+        return MODE_STREAM
+    else
+        return MODE_AUTO
+    end
+end
+
+--- Opens a native output and returns it behind the backend contract.
+---
+--- @param frequency the requested output frequency in frames per second
+--- @param channels the requested number of output channels
+--- @param maxVoices the greatest number of voices the mixer holds at once
+--- @return the backend, or nil when the library opened no output
+--- @return the reason, when the first return is nil
+export function open(frequency: integer, channels: integer, maxVoices: integer): (audiobackend.Backend?, string?)
+    local device = tecs_audio_open(frequency as uint32, channels as uint32, maxVoices as uint32)
+    if device == nil then
+        return nil, "tecsaudio opened no output"
+    end
+
+    local commands = carray(tecsAudioCommand, CAPACITY)
+    local events = carray(tecsAudioEvent, CAPACITY)
+    local info = ffi.new<tecsAudioClipInfo>()
+
+    local function reason(fallback: string): string
+        local message = tecs_audio_last_error(device)
+        if message == nil then
+            return fallback
+        end
+        local text = readCString(message)
+        if text == "" then
+            return fallback
+        end
+
+        return text
+    end
+
+    local function submit(pending: {audiobackend.Command}, count: integer): nil
+        local written: integer = 0
+        for index = 1, count do
+            local source = pending[index]
+            -- The index stays below `CAPACITY` because the flush below resets
+            -- it there, which is the bound the checker has no way to read off
+            -- a `carray` handle.
+            unsafe do
+                local target = commands[written]
+                target.kind = source.kind as uint32
+                target.handle = source.handle as uint32
+                target.clip = source.clip as uint32
+                target.flags = source.flags as uint32
+                target.gain = nupp.math.f32.narrow(source.gain)
+                target.pitch = nupp.math.f32.narrow(source.pitch)
+                target.start = nupp.math.f32.narrow(source.start)
+                target.fade = nupp.math.f32.narrow(source.fade)
+                target.loopStart = nupp.math.f32.narrow(source.loopStart)
+                target.x = nupp.math.f32.narrow(source.x)
+                target.y = nupp.math.f32.narrow(source.y)
+                target.z = nupp.math.f32.narrow(source.z)
+            end
+            written = written + 1
+            if written == CAPACITY then
+                tecs_audio_submit(device, commands, written as uint32)
+                written = 0
+            end
+        end
+        if written > 0 then
+            tecs_audio_submit(device, commands, written as uint32)
+        end
+    end
+
+    local function drain(out: {integer}): integer
+        local capacity = #out
+        if capacity > CAPACITY then
+            capacity = CAPACITY
+        end
+        local count = tecs_audio_drain(device, events, capacity as uint32) as integer
+        local written: integer = 0
+        for index = 0, count - 1 do
+            -- The library answers with at most the capacity it was given, so
+            -- the read stays inside the array this call allocated.
+            unsafe do
+                if events[index].kind as integer == EVENT_FINISHED then
+                    written = written + 1
+                    out[written] = events[index].handle as integer
+                end
+            end
+        end
+
+        return written
+    end
+
+    local function loadClip(
+        path: string,
+        clip: integer,
+        mode: audiobackend.LoadMode,
+        streamSeconds: number
+    ): (audiobackend.ClipInfo?, string?)
+        local status = tecs_audio_load_clip(
+            device,
+            path,
+            clip as uint32,
+            modeCode(mode) as uint32,
+            nupp.math.f32.narrow(streamSeconds),
+            info
+        )
+        if status ~= 0 then
+            return nil, reason("tecsaudio could not read '" .. path .. "'")
+        end
+
+        return new audiobackend.ClipInfo(duration = info.duration as number, resident = info.resident ~= 0)
+    end
+
+    return new audiobackend.Backend(
+        available = tecs_audio_available(device) ~= 0,
+        frequency = tecs_audio_frequency(device) as integer,
+        channels = tecs_audio_channels(device) as integer,
+        submit = submit,
+        drain = drain,
+        loadClip = loadClip,
+        releaseClip = function(clip: integer): nil
+            tecs_audio_release_clip(device, clip as uint32)
+        end,
+        position = function(handle: integer): number?
+            local seconds = tecs_audio_position(device, handle as uint32) as number
+            if seconds < 0 then
+                return nil
+            end
+
+            return seconds
+        end,
+        seek = function(handle: integer, seconds: number): boolean
+            return tecs_audio_seek(device, handle as uint32, nupp.math.f32.narrow(seconds)) ~= 0
+        end,
+        decoders = function(): {string}
+            local joined = tecs_audio_decoders(device)
+            if joined == nil then
+                return {}
+            end
+            local names: {string} = {}
+            for name in readCString(joined):gmatch("[^,]+") do
+                names[#names + 1] = name
+            end
+
+            return names
+        end,
+        close = function(): nil
+            tecs_audio_close(device)
+        end
+    )
+end

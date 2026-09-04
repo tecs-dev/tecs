@@ -1,0 +1,253 @@
+module tecs.platform.audiobackend
+
+--[[
+The command and observation contract between Tecs audio policy and a mixer.
+
+Tecs owns voice slots, groups, keyed limits and every decision about what
+should sound. A backend owns decoding, device output and sample mixing, and
+learns what Tecs decided from one array of plain commands per frame. Nothing
+crosses the seam except that array, the finished handles drained back, and the
+two flushing queries that need an answer in the same call.
+
+A command names its voice by the packed handle Tecs already hands to game code,
+so a backend stores no slot table of its own and an observation about a voice
+that has since been recycled is recognized as stale by the generation inside
+the handle rather than by anything the backend tracked.
+
+```nupp
+local audiobackend <const> = require("tecs.platform.audiobackend")
+
+local backend <const> = audiobackend.silent()
+local buffer <const> = {audiobackend.newCommand()}
+buffer[1].kind = audiobackend.SET_MASTER_GAIN
+buffer[1].gain = 0.5
+backend.submit(buffer, 1)
+```
+]]
+
+--- Requests one operation from a backend.
+---
+--- One record covers every operation, because the array crossing the seam has
+--- to be one contiguous run of identical elements. A field a command does not
+--- name carries whatever the previous use of that record left behind, so a
+--- backend reads only the fields its `kind` claims.
+export record Command
+    --- Caller-writable. Selects the operation from this module's kind
+    --- constants.
+    kind: integer
+
+    --- Caller-writable. Names the voice as the packed handle Tecs issued, and
+    --- zero for an operation on the whole output.
+    handle: integer
+
+    --- Caller-writable. Selects the clip a `PLAY` reads, by the interned index
+    --- `tecs.audio.clipId` assigned.
+    clip: integer
+
+    --- Caller-writable. Carries the `LOOP`, `SPATIAL` and `STEREO` bits.
+    flags: integer
+
+    --- Caller-writable. Sets linear amplitude for `PLAY`, `SET_GAIN` and
+    --- `SET_MASTER_GAIN`.
+    gain: number
+
+    --- Caller-writable. Sets the playback rate for `PLAY` and `SET_PITCH`.
+    pitch: number
+
+    --- Caller-writable. Sets where a `PLAY` begins, in seconds.
+    start: number
+
+    --- Caller-writable. Sets the fade duration in seconds, running in on a
+    --- `PLAY` and out on a `STOP`.
+    fade: number
+
+    --- Caller-writable. Sets the position in seconds a repeat returns to.
+    loopStart: number
+
+    --- Caller-writable. Sets the position right of the listener, or the
+    --- left-speaker gain for `SET_STEREO`.
+    x: number
+
+    --- Caller-writable. Sets the position above the listener, or the
+    --- right-speaker gain for `SET_STEREO`.
+    y: number
+
+    --- Caller-writable. Sets the position behind the listener.
+    z: number
+end
+
+--- Reports what a load settled on.
+export record ClipInfo
+    --- Read-only. Reports the audio duration in seconds, and zero when the
+    --- input cannot say.
+    duration: number
+
+    --- Read-only. Reports whether decoded samples stay in memory and are
+    --- shared by every voice reading the clip.
+    resident: boolean
+end
+
+--- Selects residency for a load.
+---
+--- `"auto"` measures the clip's duration against the configured streaming
+--- threshold, which is what a game that states no preference gets.
+export type LoadMode = "auto" | "resident" | "stream"
+
+--- Mixes sound for one output.
+---
+--- Every field is a plain function rather than a method, so a test stub is a
+--- record of closures and nothing has to be subclassed to observe the command
+--- stream Tecs produces.
+export record Backend
+    --- Read-only. Reports whether a real output opened. A false here still
+    --- takes every command and answers every query; nothing is heard.
+    available: boolean
+
+    --- Read-only. Reports the output frequency in frames per second.
+    frequency: integer
+
+    --- Read-only. Reports the number of output channels.
+    channels: integer
+
+    --- Read-only. Applies the first `count` commands of `commands` in order.
+    --- The array stays the caller's, and a backend copies whatever it needs
+    --- before returning.
+    submit: function(commands: {Command}, count: integer): nil
+
+    --- Read-only. Fills `out` with the handles of voices that have finished
+    --- since the previous drain, and returns how many it wrote. Writes at most
+    --- `#out` when the array is preallocated by the caller.
+    drain: function(out: {integer}): integer
+
+    --- Read-only. Reads a file and holds it under `clip`, returning what the
+    --- load settled on, or nil and a reason.
+    loadClip: function(path: string, clip: integer, mode: LoadMode, streamSeconds: number): (ClipInfo?, string?)
+
+    --- Read-only. Drops whatever a clip index holds. Voices already reading it
+    --- finish on the samples they started with.
+    releaseClip: function(clip: integer): nil
+
+    --- Read-only. Reports a voice's read position in seconds, or nil when the
+    --- handle names nothing and when the input will not say. Flushes queued
+    --- commands first, because the answer has to include them.
+    position: function(handle: integer): number?
+
+    --- Read-only. Moves a voice's read position to `seconds` from the start of
+    --- its clip, and reports whether the input accepted it. Flushes queued
+    --- commands first.
+    seek: function(handle: integer, seconds: number): boolean
+
+    --- Read-only. Reports the decoder names this build linked, in the
+    --- backend's own order.
+    decoders: function(): {string}
+
+    --- Read-only. Stops everything and closes the output. Calling it twice is
+    --- harmless.
+    close: function(): nil
+end
+
+--- Starts a voice on the named clip.
+export const PLAY: integer = 1
+
+--- Ends a voice, over `fade` seconds when that is positive.
+export const STOP: integer = 2
+
+--- Holds a voice where it is.
+export const PAUSE: integer = 3
+
+--- Lets a paused voice carry on.
+export const RESUME: integer = 4
+
+--- Sets the amplitude a voice reaches the mix at.
+export const SET_GAIN: integer = 5
+
+--- Sets a voice's playback rate.
+export const SET_PITCH: integer = 6
+
+--- Sets whether a voice repeats, reading the `LOOP` flag.
+export const SET_LOOP: integer = 7
+
+--- Places a voice at `x`, `y` and `z`.
+export const SET_POSITION: integer = 8
+
+--- Pins a voice to the front pair at the gains in `x` and `y`.
+export const SET_STEREO: integer = 9
+
+--- Returns a voice to unpositioned mixing.
+export const CLEAR_PLACEMENT: integer = 10
+
+--- Scales the whole output.
+export const SET_MASTER_GAIN: integer = 11
+
+--- Marks a command that repeats forever.
+export const LOOP: integer = 1
+
+--- Marks a command carrying a position.
+export const SPATIAL: integer = 2
+
+--- Marks a command carrying explicit speaker gains.
+export const STEREO: integer = 4
+
+--- Marks a `PLAY` that reads its input from the file rather than from held
+--- samples.
+export const STREAM: integer = 8
+
+--- Creates one zeroed command, for a caller filling a reusable buffer.
+--- @return a command whose every field is at rest
+export function newCommand(): Command
+    return new Command(
+        kind = 0,
+        handle = 0,
+        clip = 0,
+        flags = 0,
+        gain = 1,
+        pitch = 1,
+        start = 0,
+        fade = 0,
+        loopStart = 0,
+        x = 0,
+        y = 0,
+        z = 0
+    )
+end
+
+--- Creates a backend that accepts everything and produces no sound.
+---
+--- What a machine with no output device gets, and what a headless test gets
+--- when it does not care about the command stream. Every call succeeds so that
+--- a game needs no branch for the silent case.
+---
+--- @return a backend reporting `available` as false
+export function silent(): Backend
+    return new Backend(
+        available = false,
+        frequency = 0,
+        channels = 0,
+        submit = function(_commands: {Command}, _count: integer): nil
+        end,
+        drain = function(_out: {integer}): integer
+            return 0
+        end,
+        loadClip = function(
+            _path: string,
+            _clip: integer,
+            _mode: LoadMode,
+            _streamSeconds: number
+        ): (ClipInfo?, string?)
+            return new ClipInfo(duration = 0, resident = false)
+        end,
+        releaseClip = function(_clip: integer): nil
+        end,
+        position = function(_handle: integer): number?
+            return nil
+        end,
+        seek = function(_handle: integer, _seconds: number): boolean
+            return false
+        end,
+        decoders = function(): {string}
+            return {}
+        end,
+        close = function(): nil
+        end
+    )
+end
