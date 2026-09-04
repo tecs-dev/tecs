@@ -1,0 +1,108 @@
+local audio = require("tecs.audio")
+local audiobackend = require("tecs.platform.audiobackend")
+local test = require("nupp.test")
+
+local suite = {}
+
+--- Returns the native binding, or skips when the build has not staged
+--- `libtecsaudio` where the dynamic loader will find it.
+---
+--- These are the only tests in the suite that cross into Rust, and every one of
+--- them uses the device-free opener. Opening a real output can block inside the
+--- platform's audio daemon on a machine that has one wedged or restricted, and
+--- a headless suite must not be able to stop there.
+local function binding(): {[string]: any}
+    local ok, loaded = pcall(require, "tecs.platform.audionative")
+    if not ok then
+        test.skip("libtecsaudio is not on the loader path: " .. tostring(loaded))
+    end
+
+    return loaded as {[string]: any}
+end
+
+--- Opens a device-free native backend, skipping when the library refused.
+local function opened(): audiobackend.Backend
+    local native = binding()
+    local backend, reason = native.openOffline(48000, 2, 8)
+    if backend == nil then
+        test.skip("libtecsaudio did not open: " .. tostring(reason))
+    end
+
+    return backend as audiobackend.Backend
+end
+
+function suite.agreesWithTheLibraryAboutEveryStructOnTheSeam(): nil
+    -- The opener compares LuaJIT's view of each struct against the library's
+    -- before it hands anything back, so reaching a backend at all is the
+    -- layout assertion.
+    local backend = opened()
+    test.equal(backend.frequency, 48000)
+    test.equal(backend.channels, 2)
+    test.assert(not backend.available)
+    backend.close()
+end
+
+function suite.carriesACommandBatchAcrossAndDrainsNothingBack(): nil
+    local backend = opened()
+    local commands: {audiobackend.Command} = {}
+    for index = 1, 4 do
+        commands[index] = audiobackend.newCommand()
+    end
+    commands[1].kind = audiobackend.SET_MASTER_GAIN
+    commands[1].gain = 0.5
+    -- A stop naming a voice that never existed, which is the stale-handle case
+    -- Tecs relies on reaching nothing.
+    commands[2].kind = audiobackend.STOP
+    commands[2].handle = 65537
+    commands[3].kind = audiobackend.SET_PITCH
+    commands[3].handle = 65537
+    commands[3].pitch = 2
+    commands[4].kind = audiobackend.CLEAR_PLACEMENT
+    commands[4].handle = 65537
+    backend.submit(commands, 4)
+
+    local finished: {integer} = {0, 0, 0, 0}
+    test.equal(backend.drain(finished), 0)
+    test.equal(backend.position(65537), nil)
+    test.assert(not backend.seek(65537, 1))
+    backend.close()
+end
+
+function suite.reportsAMissingFileWithTheLibraryReason(): nil
+    local backend = opened()
+    local info, reason = backend.loadClip("tests/audio/no-such-file.ogg", 1, "auto", 10)
+    test.equal(info, nil)
+    test.assert(#assert(reason) > 0)
+    backend.close()
+end
+
+function suite.namesTheDecodersTheLibraryLinked(): nil
+    local backend = opened()
+    test.assert(#backend.decoders() > 0)
+    backend.close()
+end
+
+function suite.drivesAWholeMixerOverTheNativeBackend(): nil
+    local backend = opened()
+    local mixer = audio.newAudio({backend = backend, maxVoices = 4})
+    -- The offline backend reports no output, and Tecs answers zero rather than
+    -- taking a slot, which is what a machine with no sound card gets.
+    test.assert(not mixer.available)
+    mixer:setMasterGain(0.25)
+    mixer:setGroupGain("sfx", 0.5)
+    mixer:setLimit("footstep", {voices = 2, cooldown = 0.05})
+    test.equal(mixer:update(0.016), 0)
+    mixer:destroy()
+end
+
+function suite.fallsBackToSilenceWhenTheLibraryIsAbsent(): nil
+    -- This one needs no library: it proves the fallback rather than the
+    -- binding, so it runs on every machine.
+    local mixer = audio.newAudio({backend = audiobackend.silent(), maxVoices = 4})
+    test.assert(not mixer.available)
+    test.equal(mixer:maxVoices(), 4)
+    test.equal(mixer:sounding(), 0)
+    mixer:destroy()
+end
+
+return suite
