@@ -1,0 +1,688 @@
+module tecs.internal.sequencecursors
+
+--[[
+Cursor lifetime: the arena, the wait indexes, the branch tree, and pause.
+
+These belong together because they are mutually recursive. Retiring a cursor
+cancels its branches and may fault its parent, and faulting one retires it, so
+splitting them would need an indirection through a table in the middle of the
+hot path to say the same thing.
+
+A finished cursor frees its slot immediately, so the arena is bounded by peak
+concurrency rather than by every playback ever started. Its record survives
+until the slot is handed out again, which is what lets `status` report a final
+state; once the slot is reused, the generation check makes the old handle
+report nothing rather than another playback's state.
+
+Wake order never depends on hash iteration order. Every set of slots this
+module walks is sorted first, so a subtree is torn down and a signal is
+delivered the same way on every run.
+]]
+
+local log = require("nupp.log")
+local entityworld = require("tecs.internal.world")
+local sequenceregistry = require("tecs.internal.sequenceregistry")
+local sequencetypes = require("tecs.internal.sequencetypes")
+local wakeheap = require("tecs.internal.wakeheap")
+
+-- This logger name is a compatibility surface: it is the unit a developer
+-- filters on rather than an identifier this tree may move.
+local logger = log.named("tecs.sequence")
+
+--- The exclusive upper bound on an arena slot, and the multiplier a handle
+--- packs a generation by. A handle is `slot + generation * SLOT_LIMIT`, so it
+--- stays a plain integer that survives a snapshot and compares by value.
+export const SLOT_LIMIT: integer = 1048576
+
+--- The per-tick instruction budget a world gives a playback that asks for
+--- none.
+export const DEFAULT_BUDGET: integer = 512
+
+--- Creates an empty sequencer state for one world.
+--- @return the state with no cursors and three idle clocks
+export function newState(): sequencetypes.WorldState
+    return new sequencetypes.WorldState(
+        cursors = {},
+        freeSlots = {},
+        nextSlot = 1,
+        generations = {},
+        actions = {},
+        budget = DEFAULT_BUDGET,
+        clocks = new sequencetypes.Clocks(
+            fixed = sequencetypes.newClock(),
+            frame = sequencetypes.newClock(),
+            presentation = sequencetypes.newClock()
+        ),
+        channels = {},
+        channelled = {},
+        awaitWaiters = {},
+        pendingSignals = {},
+        queries = {},
+        queryWaiters = {},
+        argScratch = {},
+        ownerIndex = {}
+    )
+end
+
+--- Packs a slot and generation into one handle.
+--- @param slot the arena slot
+--- @param generation the slot's occupancy count
+--- @return the packed handle
+export function packHandle(slot: integer, generation: integer): sequencetypes.Handle
+    return slot + generation * SLOT_LIMIT
+end
+
+--- Returns the clock a cursor is scheduled against.
+--- @param state the world's sequencer state
+--- @param cursor the cursor to place
+--- @return its clock
+export function clockOf(state: sequencetypes.WorldState, cursor: sequencetypes.Cursor): sequencetypes.Clock
+    return sequencetypes.clockById(state.clocks, cursor.clock)
+end
+
+--- Schedules a cursor to run at a tick of its own clock.
+--- @param state the world's sequencer state
+--- @param cursor the cursor to schedule
+--- @param wakeAt the tick to run on
+export function schedule(state: sequencetypes.WorldState, cursor: sequencetypes.Cursor, wakeAt: integer): nil
+    local clock = clockOf(state, cursor)
+    local sequence = clock.seq + 1
+    clock.seq = sequence
+    cursor.wakeAt = wakeAt
+    cursor.seq = sequence
+    wakeheap.push(clock.waiting, wakeAt, sequence, packHandle(cursor.slot, cursor.generation))
+end
+
+--- Re-queues an already-numbered entry, for a snapshot load rebuilding the
+--- heap from restored cursors.
+--- @param state the world's sequencer state
+--- @param cursor the restored cursor
+--- @param wakeAt the tick it was due on
+--- @param sequence the tie breaker it carried
+export function requeue(
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    wakeAt: integer,
+    sequence: integer
+): nil
+    local clock = clockOf(state, cursor)
+    if sequence > clock.seq then
+        clock.seq = sequence
+    end
+    wakeheap.push(clock.waiting, wakeAt, sequence, packHandle(cursor.slot, cursor.generation))
+end
+
+--- Returns the cursor a handle names.
+--- @param state the world's sequencer state
+--- @param handle the packed handle
+--- @return the cursor, or nil when the handle names nothing this world issued
+export function resolve(state: sequencetypes.WorldState, handle: sequencetypes.Handle): sequencetypes.Cursor?
+    local slot = handle % SLOT_LIMIT
+    local generation = (handle - slot) / SLOT_LIMIT
+    local cursor = state.cursors[slot]
+    if cursor == nil or cursor.generation ~= generation then
+        return nil
+    end
+
+    return cursor
+end
+
+--- Allocates a running cursor from the arena.
+--- @param state the world's sequencer state
+--- @param program the program version this playback runs
+--- @param clock the clock it is scheduled against
+--- @return the fresh cursor at instruction zero
+--- @raises when the arena is exhausted
+export function alloc(
+    state: sequencetypes.WorldState,
+    program: sequencetypes.Program,
+    clock: sequencetypes.ClockId
+): sequencetypes.Cursor
+    local slot: integer
+    local freeCount = #state.freeSlots
+    if freeCount > 0 then
+        slot = state.freeSlots[freeCount]
+        state.freeSlots[freeCount] = nil
+    else
+        slot = state.nextSlot
+        state.nextSlot = slot + 1
+        if slot >= SLOT_LIMIT then
+            error("sequence: cursor arena exhausted", 0)
+        end
+    end
+    local generation = (state.generations[slot] or 0) + 1
+    state.generations[slot] = generation
+    local cursor = new sequencetypes.Cursor(
+        slot = slot,
+        generation = generation,
+        alive = true,
+        program = program,
+        clock = clock,
+        pc = 0,
+        state = "running",
+        owner = 0,
+        budget = state.budget,
+        budgetLeft = state.budget,
+        wakeAt = 0,
+        seq = 0,
+        waitingTween = false,
+        joining = false
+    )
+    state.cursors[slot] = cursor
+
+    return cursor
+end
+
+-- Joining and leaving the evaluating set. A cursor remembers where it sits, so
+-- leaving is a swap with the last entry rather than a scan: twenty thousand
+-- evaluating playbacks would otherwise make every completion linear in the
+-- rest.
+
+--- Adds a cursor to its clock's evaluating set.
+--- @param state the world's sequencer state
+--- @param cursor the cursor that begins evaluating
+export function activate(state: sequencetypes.WorldState, cursor: sequencetypes.Cursor): nil
+    if cursor.activeIndex ~= nil then
+        return
+    end
+    local active = clockOf(state, cursor).active
+    local at = #active + 1
+    active[at] = cursor
+    cursor.activeIndex = at
+end
+
+--- Removes a cursor from its clock's evaluating set.
+--- @param state the world's sequencer state
+--- @param cursor the cursor that stops evaluating
+export function deactivate(state: sequencetypes.WorldState, cursor: sequencetypes.Cursor): nil
+    local at = cursor.activeIndex
+    if at == nil then
+        return
+    end
+    cursor.activeIndex = nil
+    local active = clockOf(state, cursor).active
+    local last = #active
+    -- Order among evaluating playbacks is not observable, because they all run
+    -- every tick, so the last one fills the hole. The tick walks backwards, so
+    -- the entry that moves down has already been visited.
+    if at ~= last then
+        local moved = active[last]
+        active[at] = moved
+        moved.activeIndex = at
+    end
+    active[last] = nil
+end
+
+--- Adds a slot to a named wait index.
+--- @param index the signal or query wait index
+--- @param key the name blocked on
+--- @param slot the cursor slot to park
+export function park(index: {[string]: {[integer]: boolean}}, key: string, slot: integer): nil
+    local blocked = index[key]
+    if blocked == nil then
+        blocked = {}
+        index[key] = blocked
+    end
+    blocked[slot] = true
+end
+
+--- Removes a slot from a named wait index.
+--- @param index the signal or query wait index
+--- @param key the name blocked on
+--- @param slot the cursor slot to release
+export function unpark(index: {[string]: {[integer]: boolean}}, key: string, slot: integer): nil
+    local blocked = index[key]
+    if blocked == nil then
+        return
+    end
+    blocked[slot] = nil
+    if next(blocked) == nil then
+        index[key] = nil
+    end
+end
+
+--- Returns the slots parked on a name, sorted.
+--- @param index the signal or query wait index
+--- @param key the name blocked on
+--- @return a caller-owned sorted list, empty when nothing waits
+export function parkedSlots(index: {[string]: {[integer]: boolean}}, key: string): {integer}
+    local out: {integer} = {}
+    local blocked = index[key]
+    if blocked == nil then
+        return out
+    end
+    for slot in pairs(blocked) do
+        out[#out + 1] = slot
+    end
+    table.sort(out)
+
+    return out
+end
+
+--- Drops a cursor from whichever wait index holds it.
+---
+--- Every wait that is not a time lives in one of these, so every exit path
+--- goes through here.
+--- @param state the world's sequencer state
+--- @param cursor the cursor to release
+export function unlinkWaits(state: sequencetypes.WorldState, cursor: sequencetypes.Cursor): nil
+    local channel = cursor.waitChannel
+    if channel ~= nil then
+        cursor.waitChannel = nil
+        unpark(state.channels, channel, cursor.slot)
+    end
+    local queryName = cursor.waitQuery
+    if queryName ~= nil then
+        cursor.waitQuery = nil
+        cursor.waitCondition = nil
+        unpark(state.queryWaiters, queryName, cursor.slot)
+    end
+    cursor.waitingTween = false
+    if cursor.awaitProvider ~= nil then
+        cursor.awaitProvider = nil
+        cursor.awaitEntity = nil
+        cursor.awaitKey = nil
+        state.awaitWaiters[cursor.slot] = nil
+    end
+end
+
+--- Drops a cursor's claim on the playback it started, so one that ends while
+--- nothing follows it no longer reports back.
+--- @param state the world's sequencer state
+--- @param cursor the cursor giving up its claim
+export function releaseTween(state: sequencetypes.WorldState, cursor: sequencetypes.Cursor): nil
+    local handle = cursor.tweenPlayback
+    if handle == nil then
+        return
+    end
+    local started = resolve(state, handle)
+    if started ~= nil and started.awaitedBy == cursor.slot then
+        started.awaitedBy = nil
+    end
+    cursor.tweenPlayback = nil
+end
+
+-- Channels are per owner: one entity's "move" is not another's. A
+-- world-scoped playback has no owner to hold a channel on and so holds none.
+local function channelKey(owner: integer, channel: string): string
+    return tostring(owner) .. "\0" .. channel
+end
+
+--- Links a cursor into its owner's index.
+--- @param state the world's sequencer state
+--- @param cursor the cursor to link
+export function linkOwner(state: sequencetypes.WorldState, cursor: sequencetypes.Cursor): nil
+    if cursor.owner == 0 then
+        return
+    end
+    local owned = state.ownerIndex[cursor.owner]
+    if owned == nil then
+        owned = {}
+        state.ownerIndex[cursor.owner] = owned
+    end
+    owned[cursor.slot] = true
+end
+
+local function unlinkOwner(state: sequencetypes.WorldState, cursor: sequencetypes.Cursor): nil
+    if cursor.owner == 0 then
+        return
+    end
+    local owned = state.ownerIndex[cursor.owner]
+    if owned == nil then
+        return
+    end
+    owned[cursor.slot] = nil
+    if next(owned) == nil then
+        state.ownerIndex[cursor.owner] = nil
+    end
+end
+
+--- Returns a cursor's branch slots, sorted.
+---
+--- Sorted so a subtree is torn down the same way on every run regardless of
+--- hash iteration order.
+--- @param cursor the forking cursor
+--- @return a caller-owned sorted list, empty when it has no live branches
+export function childSlots(cursor: sequencetypes.Cursor): {integer}
+    local out: {integer} = {}
+    local children = cursor.children
+    if children == nil then
+        return out
+    end
+    for slot in pairs(children) do
+        out[#out + 1] = slot
+    end
+    table.sort(out)
+
+    return out
+end
+
+--- Links a cursor into its owner's channel slot, canceling whatever held it.
+--- @param state the world's sequencer state
+--- @param cursor the cursor claiming the channel
+export function claimChannel(state: sequencetypes.WorldState, cursor: sequencetypes.Cursor): nil
+    local channel = cursor.channel
+    if channel == nil then
+        return
+    end
+    local key = channelKey(cursor.owner, channel)
+    local held = state.channelled[key]
+    if held ~= nil then
+        local previous = state.cursors[held]
+        if previous ~= nil and previous.alive and previous ~= cursor then
+            retire(state, previous, "canceled", "replaced")
+        end
+    end
+    state.channelled[key] = cursor.slot
+end
+
+local function releaseChannel(state: sequencetypes.WorldState, cursor: sequencetypes.Cursor): nil
+    local channel = cursor.channel
+    if channel == nil then
+        return
+    end
+    local key = channelKey(cursor.owner, channel)
+    if state.channelled[key] == cursor.slot then
+        state.channelled[key] = nil
+    end
+end
+
+-- Whatever was parked on this playback finishing hears how it ended, then runs
+-- on its own clock's current tick rather than inside this one.
+local function wakeAwaiter(
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    finalState: sequencetypes.PlaybackState,
+    reason: sequencetypes.TweenOutcome?
+): nil
+    local slot = cursor.awaitedBy
+    if slot == nil then
+        return
+    end
+    cursor.awaitedBy = nil
+    local waiter = state.cursors[slot]
+    if waiter == nil or not waiter.alive or not waiter.waitingTween then
+        return
+    end
+    waiter.tweenOutcome = reason or (finalState == "completed" and "completed" or "canceled")
+    waiter.waitingTween = false
+    waiter.tweenPlayback = nil
+    schedule(state, waiter, clockOf(state, waiter).step)
+end
+
+local function detachFromParent(
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    finalState: sequencetypes.PlaybackState
+): nil
+    local slot = cursor.parentSlot
+    if slot == nil then
+        return
+    end
+    cursor.parentSlot = nil
+    local parent = state.cursors[slot]
+    if parent == nil or parent.generation ~= cursor.parentGeneration then
+        return
+    end
+    local children = parent.children
+    if children ~= nil then
+        children[cursor.slot] = nil
+    end
+    if not parent.alive then
+        return
+    end
+    -- A faulted branch is a defect in the program, so it surfaces rather than
+    -- leaving a join quietly one branch short. A canceled branch is
+    -- deliberate, and the join simply proceeds without it.
+    local faulted = finalState == "faulted"
+    if faulted then
+        fault(
+            state,
+            parent,
+            "branchFaulted",
+            "branch at pc=" .. tostring(cursor.pc) .. " faulted: " .. tostring(cursor.faultMessage)
+        )
+        return
+    end
+    if parent.joining and (children == nil or next(children) == nil) then
+        parent.joining = false
+        schedule(state, parent, clockOf(state, parent).step)
+    end
+end
+
+--- Ends a playback and frees its slot.
+---
+--- A subtree dies from the root down: branches are canceled first, so each one
+--- finds a parent already gone and reports nothing back up. Calling this on a
+--- cursor that has already ended does nothing.
+--- @param state the world's sequencer state
+--- @param cursor the cursor to end
+--- @param finalState how it ended
+--- @param reason what a `waitTween` waiter is told, or nil for the default
+export function retire(
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    finalState: sequencetypes.PlaybackState,
+    reason: sequencetypes.TweenOutcome?
+): nil
+    if not cursor.alive then
+        return
+    end
+    cursor.state = finalState
+    cursor.alive = false
+    cursor.joining = false
+    deactivate(state, cursor)
+    releaseChannel(state, cursor)
+    unlinkWaits(state, cursor)
+    releaseTween(state, cursor)
+    unlinkOwner(state, cursor)
+    sequenceregistry.release(cursor.program)
+    local children = cursor.children
+    if children ~= nil and next(children) ~= nil then
+        local slots = childSlots(cursor)
+        for index = 1, #slots do
+            local child = state.cursors[slots[index]]
+            if child ~= nil and child.alive then
+                retire(state, child, "canceled")
+            end
+        end
+    end
+    cursor.children = nil
+    detachFromParent(state, cursor, finalState)
+    wakeAwaiter(state, cursor, finalState, reason)
+    state.freeSlots[#state.freeSlots + 1] = cursor.slot
+end
+
+--- Faults a playback, recording why and retiring it.
+--- @param state the world's sequencer state
+--- @param cursor the cursor to fault
+--- @param reason the fault classification
+--- @param message the message accompanying the fault
+export function fault(
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    reason: sequencetypes.FaultReason,
+    message: string
+): nil
+    cursor.fault = reason
+    cursor.faultMessage = message
+    logger:error("%s v%d pc=%d: %s (%s)", cursor.program.name, cursor.program.version, cursor.pc, message, reason)
+    retire(state, cursor, "faulted")
+end
+
+-- Pause is holder counted, and it applies to everything a playback started.
+--
+-- Counted because two systems can want the same cutscene stopped for unrelated
+-- reasons, a menu being open and the window losing focus, and whichever
+-- resumes first must not undo the other. A playback runs again only when the
+-- last holder lets go.
+--
+-- The tree is branches and started playbacks alike: a timeline a cutscene
+-- began is a playback of its own, so cascading to it is what makes pausing the
+-- cutscene stop the animation it was driving.
+local function descendants(state: sequencetypes.WorldState, cursor: sequencetypes.Cursor): {sequencetypes.Cursor}
+    local out: {sequencetypes.Cursor} = {}
+    local slots = childSlots(cursor)
+    for index = 1, #slots do
+        local child = state.cursors[slots[index]]
+        if child ~= nil and child.alive then
+            out[#out + 1] = child
+        end
+    end
+    local handle = cursor.tweenPlayback
+    if handle ~= nil then
+        local started = resolve(state, handle)
+        if started ~= nil and started.alive then
+            out[#out + 1] = started
+        end
+    end
+
+    return out
+end
+
+-- What a paused playback waits on stops with it, when the provider says how.
+-- That is what makes pausing a cutscene stop the sprite animation it is parked
+-- on rather than leaving it running underneath.
+local function setAwaitPaused(exclusive world: entityworld.World, cursor: sequencetypes.Cursor, paused: boolean): nil
+    local name = cursor.awaitProvider
+    if name == nil then
+        return
+    end
+    local provider = sequenceregistry.findAwaitable(name)
+    if provider == nil then
+        return
+    end
+    local setPaused = provider.setPaused
+    local entity = cursor.awaitEntity
+    if setPaused == nil or entity == nil or not world:isAlive(entity) then
+        return
+    end
+    setPaused(world, entity, cursor.awaitKey, paused)
+end
+
+-- The tree is collected into one list before anything is held or released,
+-- deepest first and the root last. That keeps the walk iterative, and the
+-- caller reads its answer off the root, which is the entry it asked about.
+local function collectTree(state: sequencetypes.WorldState, root: sequencetypes.Cursor): {sequencetypes.Cursor}
+    local out: {sequencetypes.Cursor} = {}
+    local pending: {sequencetypes.Cursor} = {root}
+    while #pending > 0 do
+        local current = pending[#pending]
+        pending[#pending] = nil
+        out[#out + 1] = current
+        local children = descendants(state, current)
+        for index = 1, #children do
+            pending[#pending + 1] = children[index]
+        end
+    end
+    local reversed: {sequencetypes.Cursor} = {}
+    for index = #out, 1, -1 do
+        reversed[#reversed + 1] = out[index]
+    end
+
+    return reversed
+end
+
+local function holdOne(exclusive world: entityworld.World, cursor: sequencetypes.Cursor, holder: string): boolean
+    local holders = cursor.pauseHolders
+    if holders == nil then
+        holders = {}
+        cursor.pauseHolders = holders
+    end
+    holders[holder] = true
+    -- The result says whether the playback stopped, not whether the hold
+    -- registered: a second holder on an already-paused playback changes
+    -- nothing observable.
+    local running = cursor.state == "running"
+    if not running then
+        return false
+    end
+    cursor.state = "paused"
+    setAwaitPaused(world, cursor, true)
+
+    return true
+end
+
+local function releaseOne(
+    exclusive world: entityworld.World,
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    holder: string
+): boolean
+    local holders = cursor.pauseHolders
+    if holders == nil or not holders[holder] then
+        return false
+    end
+    holders[holder] = nil
+    if next(holders) ~= nil then
+        return false
+    end
+    cursor.pauseHolders = nil
+    local paused = cursor.state == "paused"
+    if not paused then
+        return false
+    end
+    cursor.state = "running"
+    setAwaitPaused(world, cursor, false)
+    -- A cursor blocked on a signal or parked at a join has no wake time and
+    -- stays where it is. Otherwise it keeps its heap entry, and a wake time
+    -- that passed while it was held runs it on the next tick rather than
+    -- immediately.
+    local wakeAt = cursor.wakeAt
+    local step = clockOf(state, cursor).step
+    if wakeAt ~= nil and wakeAt <= step then
+        schedule(state, cursor, step + 1)
+    end
+
+    return true
+end
+
+--- Pauses a playback and everything it started, under one named holder.
+--- @param world the world the playback belongs to
+--- @param state the world's sequencer state
+--- @param cursor the cursor to pause
+--- @param holder the name taking the hold
+--- @return whether this playback stopped, which is false when another holder
+---     already had it
+export function pauseTree(
+    exclusive world: entityworld.World,
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    holder: string
+): boolean
+    local tree = collectTree(state, cursor)
+    local stopped = false
+    for index = 1, #tree do
+        local held = holdOne(world, tree[index], holder)
+        if tree[index] == cursor then
+            stopped = held
+        end
+    end
+
+    return stopped
+end
+
+--- Releases one holder's claim on a playback and everything it started.
+--- @param world the world the playback belongs to
+--- @param state the world's sequencer state
+--- @param cursor the cursor to resume
+--- @param holder the name releasing its hold
+--- @return whether the playback started running again, which is true only for
+---     the last holder to let go
+export function resumeTree(
+    exclusive world: entityworld.World,
+    state: sequencetypes.WorldState,
+    cursor: sequencetypes.Cursor,
+    holder: string
+): boolean
+    local tree = collectTree(state, cursor)
+    local resumed = false
+    for index = 1, #tree do
+        local released = releaseOne(world, state, tree[index], holder)
+        if tree[index] == cursor then
+            resumed = released
+        end
+    end
+
+    return resumed
+end

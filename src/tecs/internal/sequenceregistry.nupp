@@ -1,0 +1,235 @@
+module tecs.internal.sequenceregistry
+
+--[[
+The process-wide program registry.
+
+Programs are keyed by name, and one name can have several versions alive at
+once: redefining a name compiles a new one, and a playback keeps the version
+it started with so a reload continues rather than resuming into changed
+instructions.
+
+A version is held by the playbacks running it and dropped when the last one
+finishes, is canceled, or is discarded by a snapshot load. The newest version
+of a name is never dropped, because that is the one `play` resolves.
+
+Registration is process-wide rather than per world, because a program is code:
+two worlds playing the same name run the same instructions.
+]]
+
+local sequenceprogram = require("tecs.internal.sequenceprogram")
+local sequencetypes = require("tecs.internal.sequencetypes")
+
+local byName: {[string]: sequencetypes.Program} = {}
+local versions: {[string]: {[integer]: sequencetypes.Program}} = {}
+local references: {[sequencetypes.Program]: integer} = {}
+
+--- Returns the newest version of a name.
+--- @param name the program name
+--- @return the newest program, or nil when the name was never defined
+export function newest(name: string): sequencetypes.Program?
+    return byName[name]
+end
+
+--- Returns one specific version of a name.
+--- @param name the program name
+--- @param version the version to look up
+--- @return the program, or nil once that version has been dropped
+export function version(name: string, version: integer): sequencetypes.Program?
+    local known = versions[name]
+    if known == nil then
+        return nil
+    end
+
+    return known[version]
+end
+
+--- Returns every defined program name, sorted.
+--- @return a caller-owned sorted list spanning every world in the process
+export function names(): {string}
+    local out: {string} = {}
+    for name in pairs(byName) do
+        out[#out + 1] = name
+    end
+    table.sort(out)
+
+    return out
+end
+
+--- Returns the version number a fresh compile of a name should carry.
+--- @param name the program name
+--- @return one for a new name, or one past the newest version
+export function nextVersion(name: string): integer
+    local previous = byName[name]
+    if previous == nil then
+        return 1
+    end
+
+    return previous.version + 1
+end
+
+--- Records a freshly compiled version as the newest of its name.
+--- @param program the compiled program to publish
+export function publish(program: sequencetypes.Program): nil
+    byName[program.name] = program
+    local known = versions[program.name]
+    if known == nil then
+        known = {}
+        versions[program.name] = known
+    end
+    known[program.version] = program
+end
+
+--- Rebuilds a version from snapshot data, reusing the live one when this
+--- process still holds it.
+---
+--- A restored version never displaces a newer definition, so loading an old
+--- save leaves later `play` calls on the newest code.
+--- @param data the serialized program row
+--- @return the registered program for that name and version
+export function restore(data: {[string]: any}): sequencetypes.Program
+    local name = data.name as string
+    local restoredVersion = data.version as integer
+    local known = versions[name]
+    if known ~= nil then
+        local existing = known[restoredVersion]
+        if existing ~= nil then
+            return existing
+        end
+    end
+    local program = new sequencetypes.Program(
+        name = name,
+        version = restoredVersion,
+        clock = (data.clock as sequencetypes.ClockId?) or "fixed",
+        code = data.code as {integer},
+        consts = data.consts as {any},
+        loopCounts = (data.loopCounts as {[integer]: integer}?) or {},
+        bindingArgs = {}
+    )
+    sequenceprogram.indexBindingArgs(program)
+    if known == nil then
+        known = {}
+        versions[name] = known
+    end
+    known[restoredVersion] = program
+    local newestKnown = byName[name]
+    if newestKnown == nil or newestKnown.version < restoredVersion then
+        byName[name] = program
+    end
+
+    return program
+end
+
+--- Claims a version on behalf of one playback.
+--- @param program the program the playback runs
+export function retain(program: sequencetypes.Program): nil
+    references[program] = (references[program] or 0) + 1
+end
+
+--- Gives up one playback's claim, dropping the version at zero.
+--- @param program the program the playback was running
+export function release(program: sequencetypes.Program): nil
+    local remaining = (references[program] or 1) - 1
+    if remaining > 0 then
+        references[program] = remaining
+        return
+    end
+    references[program] = nil
+    if byName[program.name] == program then
+        return
+    end
+    local known = versions[program.name]
+    if known == nil then
+        return
+    end
+    known[program.version] = nil
+    if next(known) == nil then
+        versions[program.name] = nil
+    end
+end
+
+-- Evaluators and awaitable providers are the other two process-wide registries
+-- the sequencer keeps, and they are here for the same reason programs are:
+-- both are code named by a string a snapshot carries, so a reload replaces the
+-- implementation without moving a live instruction pointer.
+
+local evaluators: {[string]: sequencetypes.Evaluator} = {}
+local awaitables: {[string]: sequencetypes.Awaitable} = {}
+
+--- Registers an evaluator under a stable name.
+---
+--- Registering a name twice replaces it, which is what a reload wants.
+--- @param name the process-wide evaluator name
+--- @param evaluator the evaluator, which must carry `step`
+--- @raises when the name is empty or the evaluator has no `step`
+export function registerEvaluator(name: string, evaluator: sequencetypes.Evaluator): nil
+    if name == "" then
+        error("sequence: an evaluator needs a non-empty name", 3)
+    end
+    if evaluator.step == nil then
+        error("sequence: an evaluator needs a step function", 3)
+    end
+    evaluators[name] = evaluator
+end
+
+--- Returns a registered evaluator.
+--- @param name the evaluator name
+--- @return the evaluator, or nil when the name is unknown
+export function findEvaluator(name: string): sequencetypes.Evaluator?
+    return evaluators[name]
+end
+
+--- Returns one program constant in the resolved form its evaluator reads.
+---
+--- The answer is cached on the program, so binding functions and looking up
+--- names happens once per constant rather than once per playback.
+--- @param program the program holding the constant
+--- @param evaluator the evaluator that owns the resolution
+--- @param index the constant index the evaluating instruction carries
+--- @return the resolved constant
+export function resolveEvaluatorData(
+    program: sequencetypes.Program,
+    evaluator: sequencetypes.Evaluator,
+    index: integer
+): any
+    local raw = program.consts[index]
+    local resolve = evaluator.resolve
+    if resolve == nil then
+        return raw
+    end
+    local cache = program.evalResolved
+    if cache == nil then
+        cache = {}
+        program.evalResolved = cache
+    end
+    local resolved = cache[index]
+    if resolved == nil then
+        resolved = resolve(raw)
+        cache[index] = resolved
+    end
+
+    return resolved
+end
+
+--- Registers an awaitable provider under a stable name.
+---
+--- Registering a name twice replaces the provider, so a playback already
+--- parked on the name asks the new one at the next fixed step.
+--- @param name the process-wide provider name
+--- @param provider the provider, which must carry `isPending`
+--- @raises when the name is empty or the provider has no `isPending`
+export function registerAwaitable(name: string, provider: sequencetypes.Awaitable): nil
+    if name == "" then
+        error("sequence: an awaitable needs a non-empty name", 3)
+    end
+    if provider.isPending == nil then
+        error("sequence: an awaitable needs an isPending function", 3)
+    end
+    awaitables[name] = provider
+end
+
+--- Returns a registered awaitable provider.
+--- @param name the provider name
+--- @return the provider, or nil when the name is unknown
+export function findAwaitable(name: string): sequencetypes.Awaitable?
+    return awaitables[name]
+end

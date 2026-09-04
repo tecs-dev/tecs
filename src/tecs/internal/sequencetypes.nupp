@@ -1,0 +1,571 @@
+module tecs.internal.sequencetypes
+
+--[[
+The record types the sequencer's internal modules share.
+
+This is a leaf module. The compiler, the cursor arena, the instruction loop,
+the snapshot codec, and the tween evaluator all read these declarations, and
+none of them requires the public `tecs.sequence` surface back, which would be
+a cycle.
+
+A sequence stores control flow as data rather than as a suspended stack. A
+compiled program is a flat integer array over a constant pool, and a playback
+is a cursor record holding an instruction pointer, a wait, and its bindings.
+Nupp coroutines cannot be serialized, so a coroutine-shaped sequencer could
+not survive a snapshot. That is why the runtime below exists rather than
+reaching for `nupp.tasks` for the sequence's own control flow.
+]]
+
+local events = require("tecs.internal.events")
+local wakeheap = require("tecs.internal.wakeheap")
+local entityworld = require("tecs.internal.world")
+local query = require("tecs.internal.query")
+
+--- Explains why a cursor stopped running.
+export type FaultReason = "unregisteredAction"
+    | "actionError"
+    | "budgetExceeded"
+    | "branchFaulted"
+    | "unregisteredQuery"
+    | "unregisteredEvaluator"
+    | "unregisteredAwaitable"
+    | "unregisteredTween"
+
+--- Reports how the playback a `waitTween` step was waiting on ended.
+export type TweenOutcome = "completed" | "canceled" | "replaced" | "targetLost"
+
+--- Describes the condition a `waitQuery` step waits for.
+export type QueryCondition = "any" | "empty"
+
+--- Selects the clock a program is scheduled against.
+export type ClockId = "fixed" | "frame" | "presentation"
+
+--- Describes the lifecycle state of one playback.
+export type PlaybackState = "running" | "paused" | "completed" | "canceled" | "faulted"
+
+--- Identifies one playback through a generation-checked integer reference.
+export type Handle = integer
+
+--- A clock the sequencer schedules playbacks against.
+---
+--- What a clock's counter means belongs to the clock: the heap does not care
+--- whether it counts fixed steps or gameplay frames.
+export record Clock
+    --- Read-only. Reports the ticks this clock has counted.
+    step: integer
+
+    --- Read-only. Increments per scheduling so two playbacks due on the same
+    --- tick run in the order they were scheduled.
+    seq: integer
+
+    --- Engine-owned. Holds waiting playbacks ordered by wake time and
+    --- sequence, carrying the packed handle so a reused slot cannot be woken
+    --- by the entry its previous occupant left behind.
+    waiting: wakeheap.Heap
+
+    --- Engine-owned. Holds the cursors evaluating rather than waiting, as a
+    --- dense array walked every tick. They carry no wake time to order them
+    --- by, so they never enter the heap.
+    active: {Cursor}
+end
+
+--- The three clocks one world's sequencer counts.
+export record Clocks
+    --- Engine-owned. Advances once per fixed step.
+    fixed: Clock
+
+    --- Engine-owned. Advances once per gameplay frame.
+    frame: Clock
+
+    --- Engine-owned. Advances once per frame carrying the frame's real time.
+    presentation: Clock
+end
+
+--- References an entity supplied through `PlayOptions.bindings`.
+export record EntityRef
+    --- Read-only. Names the binding this reference resolves.
+    bindName: string
+
+    --- Read-only. Marks this table apart from an ordinary table argument.
+    isBinding: boolean
+end
+
+--- Represents one authored step produced by a node constructor.
+export record Node
+    --- Read-only. Names the step this node compiles to.
+    kind: string
+
+    --- Read-only. Carries the step's name argument, when it takes one.
+    text: string?
+
+    --- Read-only. Carries the step's numeric argument, when it takes one.
+    number: number?
+
+    --- Read-only. Carries the step's integer argument, when it takes one.
+    count: integer?
+
+    --- Read-only. Carries the step's constant, when it takes one. Most steps
+    --- carry a list; an evaluating step carries whatever its evaluator reads.
+    args: any
+
+    --- Read-only. Carries the step's nested block, when it takes one.
+    nodes: {Node}?
+
+    --- Read-only. Carries one block per branch for a `parallel` step.
+    blocks: {{Node}}?
+end
+
+--- Represents a compiled, immutable program shared by every playback of it.
+---
+--- Redefining a name compiles a new version. Playbacks already running keep
+--- the version they started with, so a reload continues rather than resuming
+--- against changed instructions.
+export record Program
+    --- Read-only. Reports the name passed to `define`.
+    name: string
+
+    --- Read-only. Reports the monotonic version, starting at one.
+    version: integer
+
+    --- Read-only. Reports the clock this program's waits count.
+    clock: ClockId
+
+    --- Engine-owned. Holds the flat instruction array. Game code reads it
+    --- through `disassemble` rather than directly.
+    code: {integer}
+
+    --- Engine-owned. Holds the constant pool the instructions index.
+    consts: {any}
+
+    --- Engine-owned. Maps a jump's address to the iteration count it seeds.
+    loopCounts: {[integer]: integer}
+
+    --- Engine-owned. Marks the constant indexes whose argument list holds an
+    --- entity reference, so a call with plain constants copies nothing.
+    bindingArgs: {[integer]: boolean}
+
+    --- Engine-owned. Caches one resolved constant per evaluating instruction.
+    evalResolved: {[integer]: any}?
+end
+
+--- Provides the context a registered action receives.
+---
+--- The context and its `args` belong to the sequencer, which reuses them for
+--- the next call. Read them rather than keeping or modifying them.
+export record ActionContext
+    --- Read-only. Names the world this playback belongs to.
+    world: entityworld.World
+
+    --- Read-only. Identifies the playback, for `status` or `cancel` from
+    --- inside an action.
+    handle: Handle
+
+    --- Read-only. Reports the `owner` supplied at `play`, or zero.
+    owner: integer
+
+    --- Read-only. Carries the `call` node's constants with every entity
+    --- reference already resolved to an entity id.
+    args: {any}
+
+    --- Read-only. Carries the `params` supplied at `play`, or nil.
+    params: {[string]: any}?
+
+    --- Engine-owned. Points at the running cursor. Game code uses `entity`
+    --- and `bind` instead of reading this.
+    cursor: Cursor?
+
+    entity: function(borrows self: ActionContext, name: string): integer?
+    bind: function(exclusive self: ActionContext, name: string, entity: integer?): nil
+end
+
+--- Defines a registered effect that runs synchronously and cannot suspend.
+export type Action = function(exclusive world: entityworld.World, ctx: ActionContext): nil
+
+--- Defines something a cursor evaluates every tick rather than sleeping
+--- through.
+---
+--- A playback parked on a wait costs one comparison per tick. One that is
+--- interpolating has work on every tick, so it lives in a dense array the
+--- tick walks and never touches the wake heap.
+export record Evaluator
+    --- Caller-writable. Turns the constant an `eval` step carries into the
+    --- form that is cheapest to read every tick. Runs once per program
+    --- constant and the result is shared by every playback of it.
+    resolve: (function(data: any): any)?
+
+    --- Caller-writable. Builds per-cursor working state, or nil when the
+    --- evaluator needs none.
+    newState: (function(program: Program, data: any, cursor: Cursor): any)?
+
+    --- Caller-writable. Advances one cursor by `dt` and returns true once the
+    --- cursor should move on to the next instruction.
+    step: function(exclusive world: entityworld.World, cursor: Cursor, dt: number): boolean
+
+    --- Caller-writable. Turns working state into something a snapshot can
+    --- carry. Without both `save` and `load` an evaluating playback comes back
+    --- at the start of its state rather than where it was.
+    save: (function(state: any): any)?
+
+    --- Caller-writable. Rebuilds working state from what `save` produced.
+    load: (function(program: Program, data: any, saved: any): any)?
+end
+
+--- Defines the response an `await` step's provider must give.
+export record Awaitable
+    --- Caller-writable. Reports whether the work named by `entity` and `key`
+    --- is still going. The sequencer calls this at a fixed-step boundary for
+    --- every cursor parked on the name, so it must be cheap and must not
+    --- mutate the world. Reporting false for work that never started is
+    --- correct: a program waiting on an animation that is already over should
+    --- carry on rather than hang.
+    isPending: function(borrows world: entityworld.World, entity: integer, key: string?): boolean
+
+    --- Caller-writable. Stops and starts the work when the provider knows
+    --- how, so pausing a cutscene stops the animation it waits on. Optional.
+    setPaused: (function(exclusive world: entityworld.World, entity: integer, key: string?, paused: boolean): nil)?
+end
+
+--- One playback: an instruction pointer, its wait, and what it was given.
+---
+--- A finished cursor frees its slot immediately, so the arena is bounded by
+--- peak concurrency. Its record survives until the slot is handed out again,
+--- which is what lets `status` report a final state; once the slot is reused,
+--- the generation check makes the old handle report nothing.
+export record Cursor
+    --- Read-only. Identifies the arena slot this cursor occupies.
+    slot: integer
+
+    --- Read-only. Counts how many playbacks have used this slot.
+    generation: integer
+
+    --- Read-only. Reports whether this cursor still runs.
+    alive: boolean
+
+    --- Read-only. Names the program version this cursor runs.
+    program: Program
+
+    --- Read-only. Names the clock this cursor is scheduled against.
+    clock: ClockId
+
+    --- Read-only. Reports the instruction this cursor next runs.
+    pc: integer
+
+    --- Read-only. Reports the lifecycle state.
+    state: PlaybackState
+
+    --- Read-only. Reports the entity whose lifetime governs this playback, or
+    --- zero for a world-scoped one.
+    owner: integer
+
+    --- Read-only. Reports the per-tick instruction budget.
+    budget: integer
+
+    --- Engine-owned. Remembers the tick the budget was last armed on.
+    budgetStep: integer?
+
+    --- Engine-owned. Counts the instructions left in the current tick.
+    budgetLeft: integer
+
+    --- Read-only. Reports the tick this cursor next runs on, or nil when it
+    --- waits on something that is not a time.
+    wakeAt: integer?
+
+    --- Engine-owned. Orders equal wake times deterministically.
+    seq: integer
+
+    --- Read-only. Maps binding names to entity ids.
+    bindings: {[string]: integer}?
+
+    --- Read-only. Carries the constants supplied at `play`.
+    params: {[string]: any}?
+
+    --- Engine-owned. Names who currently holds this playback paused.
+    pauseHolders: {[string]: boolean}?
+
+    --- Engine-owned. Counts the iterations left per loop jump address.
+    loopRegs: {[integer]: integer}?
+
+    --- Read-only. Names the slot this playback occupies on its owner.
+    channel: string?
+
+    --- Read-only. Names the signal this cursor is blocked on.
+    waitChannel: string?
+
+    --- Read-only. Names the query this cursor is blocked on.
+    waitQuery: string?
+
+    --- Engine-owned. Holds one for a wait on a match and zero for a wait on
+    --- an empty query.
+    waitCondition: integer?
+
+    --- Read-only. Reports whether this cursor waits for a started playback.
+    waitingTween: boolean
+
+    --- Read-only. Identifies the playback the last `playTween` started.
+    tweenPlayback: Handle?
+
+    --- Read-only. Reports how the last awaited playback ended.
+    tweenOutcome: TweenOutcome?
+
+    --- Engine-owned. Names the slot to wake when this cursor ends.
+    awaitedBy: integer?
+
+    --- Read-only. Names the awaitable provider this cursor is blocked on.
+    awaitProvider: string?
+
+    --- Read-only. Names the entity the awaitable is asked about.
+    awaitEntity: integer?
+
+    --- Read-only. Carries the key handed to the awaitable unread.
+    awaitKey: string?
+
+    --- Engine-owned. Names the slot of the cursor that forked this branch.
+    parentSlot: integer?
+
+    --- Engine-owned. Pairs with `parentSlot` to reject a reused slot.
+    parentGeneration: integer?
+
+    --- Engine-owned. Holds the slots of branches not yet joined.
+    children: {[integer]: boolean}?
+
+    --- Read-only. Reports whether this cursor waits at a `join`.
+    joining: boolean
+
+    --- Engine-owned. Remembers where this cursor sits in its clock's active
+    --- array, so leaving the set is a swap rather than a scan.
+    activeIndex: integer?
+
+    --- Read-only. Names the evaluator this cursor runs, when it evaluates.
+    evaluator: string?
+
+    --- Engine-owned. Indexes the constant the evaluating instruction carries.
+    evalIndex: integer?
+
+    --- Engine-owned. Holds the resolved form of that constant.
+    evalData: any
+
+    --- Engine-owned. Holds the evaluator's per-cursor working state.
+    evalState: any
+
+    --- Engine-owned. Holds the evaluator itself, so the per-tick walk reads a
+    --- field rather than a registry.
+    evalImpl: Evaluator?
+
+    --- Read-only. Explains why this cursor faulted.
+    fault: FaultReason?
+
+    --- Read-only. Reports the message accompanying a fault.
+    faultMessage: string?
+end
+
+--- One world's sequencer state: the cursor arena, the registries, and the
+--- scheduler.
+export record WorldState
+    --- Engine-owned. Holds every cursor by slot, live or newly retired.
+    cursors: {[integer]: Cursor}
+
+    --- Engine-owned. Holds the slots free for reuse.
+    freeSlots: {integer}
+
+    --- Engine-owned. Reports the next slot never yet handed out.
+    nextSlot: integer
+
+    --- Engine-owned. Counts how many playbacks each slot has carried.
+    generations: {[integer]: integer}
+
+    --- Engine-owned. Holds this world's registered actions by name.
+    actions: {[string]: Action}
+
+    --- Read-only. Reports the per-tick instruction budget new playbacks take.
+    budget: integer
+
+    --- Engine-owned. Holds the three clocks this world counts.
+    clocks: Clocks
+
+    --- Engine-owned. Maps a signal name to the slots blocked on it.
+    channels: {[string]: {[integer]: boolean}}
+
+    --- Engine-owned. Maps an owner-and-channel key to the slot holding it.
+    channelled: {[string]: integer}
+
+    --- Engine-owned. Holds the slots parked on an awaitable provider.
+    awaitWaiters: {[integer]: boolean}
+
+    --- Engine-owned. Holds the signals raised this step, delivered on the
+    --- next one.
+    pendingSignals: {string}
+
+    --- Engine-owned. Holds this world's registered queries by name.
+    queries: {[string]: query.Query}
+
+    --- Engine-owned. Maps a query name to the slots blocked on it.
+    queryWaiters: {[string]: {[integer]: boolean}}
+
+    --- Engine-owned. Reuses one argument list across every action call.
+    argScratch: {any}
+
+    --- Engine-owned. Maps an owner entity to the slots it governs.
+    ownerIndex: {[integer]: {[integer]: boolean}}
+
+    --- Engine-owned. Reuses one action context across every action call.
+    context: ActionContext?
+end
+
+--- The payload an `emit` step delivers at address zero.
+export record Emission
+    --- Read-only. Carries the name supplied to `sequence.emit`.
+    name: string
+
+    --- Read-only. Carries the emitted constants with bindings resolved. This
+    --- list is built per emission and is the observer's to keep.
+    args: {any}
+
+    --- Read-only. Identifies the playback that emitted it.
+    handle: Handle
+end
+
+local function emission(name: string, args: {any}, handle: Handle): Emission
+    return new Emission(name = name, args = args, handle = handle)
+end
+
+--- Fires at address zero when an `emit` step or a timeline emit runs.
+export const Event: events.Event<Emission> = events.new({name = "SequenceEmission", construct = emission})
+
+--- Reports a playback's current state.
+export record Status
+    --- Read-only. Reports the lifecycle state.
+    state: PlaybackState
+
+    --- Read-only. Names the program this playback runs.
+    program: string
+
+    --- Read-only. Reports the program version this playback runs.
+    version: integer
+
+    --- Read-only. Reports the instruction index.
+    pc: integer
+
+    --- Read-only. Reports the tick this playback next runs on, or nil when it
+    --- is blocked on something other than a time.
+    wakeAt: integer?
+
+    --- Read-only. Names the signal this playback is blocked on.
+    waitingFor: string?
+
+    --- Read-only. Names the query this playback is blocked on.
+    waitingQuery: string?
+
+    --- Read-only. Reports the query condition this playback waits for.
+    waitingCondition: QueryCondition?
+
+    --- Read-only. Names the awaitable provider this playback is blocked on.
+    waitingAwaitable: string?
+
+    --- Read-only. Names the entity this playback's awaitable is asked about.
+    waitingAwaitableEntity: integer?
+
+    --- Read-only. Identifies the playback this one is blocked on.
+    waitingTween: Handle?
+
+    --- Read-only. Reports how the last awaited playback ended.
+    tweenOutcome: TweenOutcome?
+
+    --- Read-only. Counts live branches this playback forked and has not
+    --- joined.
+    branches: integer
+
+    --- Read-only. Reports whether this playback waits at a `join`.
+    joining: boolean
+
+    --- Read-only. Explains a faulted playback.
+    fault: FaultReason?
+
+    --- Read-only. Reports the message accompanying a fault.
+    faultMessage: string?
+end
+
+--- Configures `play`.
+export type PlayOptions = {
+    owner: integer?,
+    bindings: {[string]: integer}?,
+    params: {[string]: any}?,
+    budget: integer?,
+    channel: string?
+}
+
+--- Creates a clock at step zero with nothing waiting.
+--- @return the idle clock
+export function newClock(): Clock
+    return new Clock(step = 0, seq = 0, waiting = wakeheap.new(), active = {})
+end
+
+--- Resets a clock to step zero and drops everything waiting on it.
+--- @param value the clock to clear
+export function clearClock(value: Clock): nil
+    value.step = 0
+    value.seq = 0
+    wakeheap.clear(value.waiting)
+    local active = value.active
+    for index = #active, 1, -1 do
+        active[index] = nil
+    end
+end
+
+--- Returns one of a world's three clocks by name.
+--- @param clocks the world's clocks
+--- @param id the clock to select
+--- @return the selected clock
+export function clockById(clocks: Clocks, id: ClockId): Clock
+    return switch id do
+        case "frame" -> clocks.frame
+        case "presentation" -> clocks.presentation
+        else -> clocks.fixed
+    end
+end
+
+--- Resolves a named binding to a live entity.
+--- @param self the context the running action received
+--- @param name the binding name supplied through `PlayOptions.bindings`
+--- @return the entity id, or nil when the binding is missing or its entity is
+---     no longer alive
+function ActionContext.entity(borrows self: ActionContext, name: string): integer?
+    local cursor = self.cursor
+    if cursor == nil then
+        return nil
+    end
+    local bindings = cursor.bindings
+    if bindings == nil then
+        return nil
+    end
+    local id = bindings[name]
+    if id == nil or not self.world:isAlive(id) then
+        return nil
+    end
+
+    return id
+end
+
+--- Names an entity for the steps that follow, so an action that creates one
+--- can hand it on.
+---
+--- Bindings travel with the playback and survive a snapshot. Passing nil
+--- forgets the name.
+--- @param self the context the running action received
+--- @param name the binding name later steps resolve
+--- @param entity the entity id to bind, or nil to forget the name
+function ActionContext.bind(exclusive self: ActionContext, name: string, entity: integer?): nil
+    local cursor = self.cursor
+    if cursor == nil then
+        return
+    end
+    local bindings = cursor.bindings
+    if bindings == nil then
+        if entity == nil then
+            return
+        end
+        bindings = {}
+        cursor.bindings = bindings
+    end
+    local writable = bindings as {[string]: integer?}
+    writable[name] = entity
+end

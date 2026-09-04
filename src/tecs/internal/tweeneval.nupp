@@ -1,0 +1,1380 @@
+module tecs.internal.tweeneval
+
+--[[
+Easing curves, component-field targets, and the compiled timeline they drive.
+
+A timeline is a list of interpolations laid out on one time line, each holding
+the window of it that the interpolation covers. Compiling one produces plain
+data, which is what lets a timeline travel in a program's constant pool and
+survive a snapshot.
+
+Per-playback state is one flat array of numbers with a fixed stride rather than
+a table per slot. The evaluation loop runs per playback per tick, so the
+allocation and the pointer chase both belong outside it.
+]]
+
+local components = require("tecs.internal.components")
+local entityworld = require("tecs.internal.world")
+local rendercomponents = require("tecs.internal.rendercomponents")
+
+local cos = math.cos
+local sin = math.sin
+local pi = math.pi
+local pow = function(base: number, exponent: number): number
+    return base ^ exponent
+end
+
+--- Names one authored timeline operation.
+export type OperationKind = "to" | "adjust" | "track" | "wait" | "emit" | "run" | "parallel"
+
+--- Describes how a target maps its one to four numbers onto component fields.
+export type TargetMode = "field" | "field2" | "angle" | "color"
+
+--- Names where a `tweenTrack` operation reads its moving destination.
+export type TrackSourceKind = "self" | "trackingTarget" | "relationship"
+
+--- Selects how a timeline repeats.
+export type PlaybackMode = "once" | "loop" | "pingPong"
+
+--- Names a built-in easing curve.
+export type EasingName = "linear"
+    | "quadIn"
+    | "quadOut"
+    | "quadInOut"
+    | "quadOutIn"
+    | "cubicIn"
+    | "cubicOut"
+    | "cubicInOut"
+    | "cubicOutIn"
+    | "quartIn"
+    | "quartOut"
+    | "quartInOut"
+    | "quartOutIn"
+    | "quintIn"
+    | "quintOut"
+    | "quintInOut"
+    | "quintOutIn"
+    | "sineIn"
+    | "sineOut"
+    | "sineInOut"
+    | "sineOutIn"
+    | "expoIn"
+    | "expoOut"
+    | "expoInOut"
+    | "expoOutIn"
+    | "backIn"
+    | "backOut"
+    | "backInOut"
+    | "backOutIn"
+    | "elasticIn"
+    | "elasticOut"
+    | "elasticInOut"
+    | "elasticOutIn"
+    | "bounceIn"
+    | "bounceOut"
+    | "bounceInOut"
+    | "bounceOutIn"
+
+--- Names a built-in component-field target.
+---
+--- These identifiers are a compatibility surface: a compiled slot stores one,
+--- so a snapshot written by an earlier build names its target by this string.
+export type TargetName = "transform.x"
+    | "transform.y"
+    | "transform.xy"
+    | "transform.rotation"
+    | "transform.rotationShortest"
+    | "transform.scaleX"
+    | "transform.scaleY"
+    | "transform.scaleXY"
+    | "color.a"
+    | "color.rgba"
+
+--- Maps normalized input progress to eased output progress.
+---
+--- Easing shapes the value rather than the schedule: the argument is how far
+--- through its own window the interpolation is, clamped to zero through one,
+--- and the result is the fraction of the way from the start to the
+--- destination. A curve that leaves that range overshoots the destination
+--- rather than the duration, which is what `backOut` and `elasticOut` are for.
+export type EasingFunction = function(t: number): number
+
+--- Describes the component and one to four numeric fields a timeline
+--- operation writes.
+export record Target
+    --- Read-only. Identifies this target in a compiled slot. A built-in
+    --- carries its `TargetName`; one built from a component carries the
+    --- component name joined to its fields.
+    id: string
+
+    --- Read-only. Names the component whose fields move.
+    componentName: string
+
+    --- Engine-owned. Caches the resolved component, which a target restored
+    --- from a snapshot looks up on first use.
+    component: components.Component?
+
+    --- Read-only. Names the fields written, in the order the destinations
+    --- line up with them.
+    fields: {string}
+
+    --- Read-only. Selects how the destinations are interpreted.
+    mode: TargetMode
+end
+
+--- Provides a live component-field tracking source.
+export record TrackSource
+    --- Read-only. Selects which entity the source reads from.
+    kind: TrackSourceKind
+
+    --- Read-only. Names the relationship traversed by a `related` source.
+    relationshipName: string?
+
+    --- Engine-owned. Caches the resolved relationship component.
+    relationship: components.Component?
+
+    --- Read-only. Names the component the source reads.
+    componentName: string
+
+    --- Engine-owned. Caches the resolved component.
+    component: components.Component?
+
+    --- Read-only. Names the fields read, lined up with the target's own.
+    fields: {string}
+end
+
+--- Represents one authored timeline operation.
+---
+--- Treat one as opaque. Unlike the Teal implementation this replaces,
+--- compiling a spec reads its nodes rather than rewriting them, so the same
+--- spec compiles more than once and gives the same timeline each time.
+export record TimelineNode
+    --- Read-only. Names the operation.
+    kind: OperationKind
+
+    --- Read-only. Reports the seconds this operation occupies.
+    duration: number?
+
+    --- Read-only. Names the curve an interpolation follows.
+    easingName: EasingName?
+
+    --- Read-only. Selects the component fields an interpolation writes.
+    target: Target?
+
+    --- Read-only. Selects where a tracking interpolation reads its
+    --- destination.
+    source: TrackSource?
+
+    --- Read-only. Carries the destination for the target's first field.
+    t1: number?
+
+    --- Read-only. Carries the destination for the second field.
+    t2: number?
+
+    --- Read-only. Carries the destination for the third field.
+    t3: number?
+
+    --- Read-only. Carries the destination for the fourth field.
+    t4: number?
+
+    --- Read-only. Names the event an `emit` operation fires.
+    name: string?
+
+    --- Read-only. Carries the nested spec a `run` operation plays.
+    nested: {TimelineNode}?
+
+    --- Read-only. Selects how a `run` operation repeats.
+    mode: PlaybackMode?
+
+    --- Read-only. Counts the passes a repeating `run` operation makes.
+    count: integer?
+
+    --- Read-only. Carries one block per concurrent branch of a `parallel`
+    --- operation.
+    branches: {{TimelineNode}}?
+end
+
+--- One compiled interpolation: a target, a curve, and the window of the
+--- timeline it covers.
+export record Slot
+    --- Read-only. Holds `"to"` for a fixed destination or `"track"` for one
+    --- that keeps moving.
+    kind: string
+
+    --- Read-only. Selects the component fields this slot writes.
+    target: Target
+
+    --- Read-only. Selects where a tracking slot reads its destination.
+    source: TrackSource?
+
+    --- Read-only. Names the curve this slot follows.
+    easingName: EasingName
+
+    --- Engine-owned. Holds the curve itself, bound once per compile.
+    easing: EasingFunction
+
+    --- Read-only. Carries the destination for the target's first field.
+    t1: number
+
+    --- Read-only. Carries the destination for the second field.
+    t2: number
+
+    --- Read-only. Carries the destination for the third field.
+    t3: number
+
+    --- Read-only. Carries the destination for the fourth field.
+    t4: number
+
+    --- Read-only. Reports whether the destinations are deltas rather than
+    --- absolute values.
+    relative: boolean
+
+    --- Read-only. Reports the second this slot begins at.
+    startTime: number
+
+    --- Read-only. Reports the second this slot ends at.
+    endTime: number
+
+    --- Read-only. Reports how many seconds this slot occupies.
+    duration: number
+
+    --- Engine-owned. Indexes this slot's rows in a playback's state array.
+    stateIndex: integer
+end
+
+--- A named event a timeline fires when its cursor reaches a point.
+export record EmitSlot
+    --- Read-only. Reports the second this emit fires at.
+    time: number
+
+    --- Read-only. Names the event.
+    name: string
+
+    --- Engine-owned. Orders two emits that share a time.
+    order: integer
+end
+
+--- A nested timeline, and the window of the parent it occupies.
+export record RunSlot
+    --- Read-only. Holds the nested compiled timeline.
+    timeline: Timeline
+
+    --- Read-only. Reports the second the nested timeline begins at.
+    startTime: number
+
+    --- Read-only. Reports the seconds every pass of it occupies together.
+    effectiveDuration: number
+
+    --- Read-only. Selects how the nested timeline repeats.
+    mode: PlaybackMode
+
+    --- Read-only. Counts the passes it makes.
+    passCount: integer
+end
+
+--- An immutable compiled tween timeline.
+---
+--- Playing one is `play` on the program it compiles to, so there is nothing to
+--- call on it directly.
+export record Timeline
+    --- Engine-owned. Holds the interpolations in compile order.
+    slots: {Slot}
+
+    --- Engine-owned. Holds the nested timelines in compile order.
+    runs: {RunSlot}
+
+    --- Engine-owned. Holds the emits ordered by time and then by compile
+    --- order.
+    emits: {EmitSlot}
+
+    --- Read-only. Reports the seconds one pass of this timeline occupies.
+    totalDuration: number
+
+    --- Read-only. Counts the interpolation slots one playback needs state for.
+    stateSize: integer
+end
+
+--- Selects a dynamic tracking-source entity for a `tracking` source.
+export record TrackingTarget
+    --- Caller-writable. Names the source entity directly, or zero for none.
+    entity: integer
+
+    --- Caller-writable. Names the source entity by world key. The Nupp
+    --- rewrite has no entity-key registry yet, so a non-empty key with no
+    --- `entity` reads as no source. The field survives because the
+    --- component's persisted value shape is a compatibility surface.
+    key: string
+end
+
+--- The process-wide component a `tracking` source reads.
+-- This persisted component name is a compatibility surface.
+export const TrackingTargetComponent: components.TableComponent<TrackingTarget> = components.newComponent({
+    name = "TweenTrackingTarget",
+    construct = function(entity: integer?, key: string?): TrackingTarget
+        return new TrackingTarget(entity = entity or 0, key = key or "")
+    end,
+    default = function(): TrackingTarget
+        return new TrackingTarget(entity = 0, key = "")
+    end,
+})
+
+--- The number of state values one interpolation slot occupies.
+export const SLOT_STRIDE: integer = 11
+
+-- The state array's layout, one row per slot. `init` records that the slot has
+-- captured its start values, `applied` that it has written at least once, and
+-- `lastT` the eased progress it last wrote, so a slot that has not moved is
+-- not written again.
+local STATE_INIT: integer = 1
+local STATE_APPLIED: integer = 2
+local STATE_LAST_T: integer = 3
+local STATE_S1: integer = 4
+local STATE_D1: integer = 8
+
+--- Names the state row fields in the order a snapshot carries them.
+export const SLOT_FIELDS: {string} = {"init", "applied", "lastT", "s1", "s2", "s3", "s4", "d1", "d2", "d3", "d4"}
+
+local easings: {[string]: EasingFunction} = {}
+local easingNames: {[EasingFunction]: string} = {}
+
+local function registerEasing(name: string, curve: EasingFunction): nil
+    easings[name] = curve
+    easingNames[curve] = name
+end
+
+local function makeVariants(family: string, inCurve: EasingFunction): nil
+    registerEasing(family .. "In", inCurve)
+    registerEasing(family .. "Out", function(t: number): number
+        return 1 - inCurve(1 - t)
+    end)
+    registerEasing(family .. "InOut", function(t: number): number
+        if t < 0.5 then
+            return 0.5 * inCurve(2 * t)
+        end
+
+        return 1 - 0.5 * inCurve(2 - 2 * t)
+    end)
+    registerEasing(family .. "OutIn", function(t: number): number
+        if t < 0.5 then
+            return 0.5 - 0.5 * inCurve(1 - 2 * t)
+        end
+
+        return 0.5 + 0.5 * inCurve(2 * t - 1)
+    end)
+end
+
+registerEasing("linear", function(t: number): number
+    return t
+end)
+
+makeVariants("quad", function(t: number): number
+    return t * t
+end)
+
+makeVariants("cubic", function(t: number): number
+    return t * t * t
+end)
+
+makeVariants("quart", function(t: number): number
+    return t * t * t * t
+end)
+
+makeVariants("quint", function(t: number): number
+    return t * t * t * t * t
+end)
+
+makeVariants("sine", function(t: number): number
+    return 1 - cos(t * pi * 0.5)
+end)
+
+makeVariants("expo", function(t: number): number
+    if t == 0 then
+        return 0
+    end
+
+    return pow(2, 10 * (t - 1))
+end)
+
+makeVariants("back", function(t: number): number
+    local overshoot = 1.70158
+    return t * t * ((overshoot + 1) * t - overshoot)
+end)
+
+makeVariants("elastic", function(t: number): number
+    if t == 0 then
+        return 0
+    elseif t == 1 then
+        return 1
+    end
+    local period = 0.3
+
+    return -pow(2, 10 * (t - 1)) * sin((t - 1 - period / 4) * (2 * pi) / period)
+end)
+
+local function bounceOut(t: number): number
+    if t < 1 / 2.75 then
+        return 7.5625 * t * t
+    elseif t < 2 / 2.75 then
+        local u = t - 1.5 / 2.75
+        return 7.5625 * u * u + 0.75
+    elseif t < 2.5 / 2.75 then
+        local u = t - 2.25 / 2.75
+        return 7.5625 * u * u + 0.9375
+    end
+    local u = t - 2.625 / 2.75
+
+    return 7.5625 * u * u + 0.984375
+end
+
+local function bounceIn(t: number): number
+    return 1 - bounceOut(1 - t)
+end
+
+registerEasing("bounceIn", bounceIn)
+registerEasing("bounceOut", bounceOut)
+registerEasing("bounceInOut", function(t: number): number
+    if t < 0.5 then
+        return 0.5 * bounceIn(2 * t)
+    end
+
+    return 0.5 * bounceOut(2 * t - 1) + 0.5
+end)
+registerEasing("bounceOutIn", function(t: number): number
+    if t < 0.5 then
+        return 0.5 * bounceOut(2 * t)
+    end
+
+    return 0.5 * bounceIn(2 * t - 1) + 0.5
+end)
+
+--- Returns a built-in easing curve by name.
+--- @param name the curve name
+--- @return the curve, or nil when the name names no built-in
+export function findEasing(name: string): EasingFunction?
+    return easings[name]
+end
+
+--- Resolves an authored curve to its name and its function.
+---
+--- A compiled slot carries the curve's name so it can travel in a constant
+--- pool, so a curve this module cannot name is rejected.
+--- @param value a built-in curve name or one of the built-in curve values
+--- @return the curve name and the curve itself
+--- @raises when the value names no built-in curve
+export function resolveEasing(value: EasingName | EasingFunction): string, EasingFunction
+    if type(value) == "string" then
+        local name = value as string
+        local curve = easings[name]
+        if curve == nil then
+            error("tween: unknown easing '" .. name .. "'", 3)
+        end
+
+        return name, curve
+    end
+    local curve = value as EasingFunction
+    local name = easingNames[curve]
+    if name == nil then
+        error("tween: an easing must be a built-in easing name or value", 3)
+    end
+
+    return name, curve
+end
+
+local function newTarget(component: components.Component, fields: {string}, mode: TargetMode, id: string?): Target
+    local resolved = id
+    if resolved == nil then
+        resolved = component.componentName
+        for index = 1, #fields do
+            resolved = resolved .. "." .. fields[index]
+        end
+    end
+
+    return new Target(
+        id = resolved,
+        componentName = component.componentName,
+        component = component,
+        fields = fields,
+        mode = mode
+    )
+end
+
+--- Interpolates one numeric field of a component.
+--- @param component the component whose field moves
+--- @param fieldName the field name
+--- @return the target
+export function field(component: components.Component, fieldName: string): Target
+    return newTarget(component, {fieldName}, "field")
+end
+
+--- Interpolates two numeric fields of a component together.
+--- @param component the component whose fields move
+--- @param first the field the first destination lines up with
+--- @param second the field the second destination lines up with
+--- @return the target
+export function field2(component: components.Component, first: string, second: string): Target
+    return newTarget(component, {first, second}, "field2")
+end
+
+--- Interpolates one field as an angle, taking the short way round.
+--- @param component the component whose field moves
+--- @param fieldName the radian-valued field name
+--- @return the target
+export function angle(component: components.Component, fieldName: string): Target
+    return newTarget(component, {fieldName}, "angle")
+end
+
+--- Moves an entity horizontally.
+export const translateX: Target = newTarget(rendercomponents.Transform2DComponent, {"x"}, "field", "transform.x")
+
+--- Moves an entity vertically.
+export const translateY: Target = newTarget(rendercomponents.Transform2DComponent, {"y"}, "field", "transform.y")
+
+--- Moves an entity in both axes.
+export const translateXY: Target = newTarget(
+    rendercomponents.Transform2DComponent,
+    {"x", "y"},
+    "field2",
+    "transform.xy"
+)
+
+--- Rotates an entity to an absolute angle.
+export const rotation: Target = newTarget(
+    rendercomponents.Transform2DComponent,
+    {"rotation"},
+    "field",
+    "transform.rotation"
+)
+
+--- Rotates an entity to an absolute angle the short way round.
+export const rotationShortest: Target = newTarget(
+    rendercomponents.Transform2DComponent,
+    {"rotation"},
+    "angle",
+    "transform.rotationShortest"
+)
+
+--- Scales an entity horizontally.
+export const scaleX: Target = newTarget(rendercomponents.Transform2DComponent, {"scaleX"}, "field", "transform.scaleX")
+
+--- Scales an entity vertically.
+export const scaleY: Target = newTarget(rendercomponents.Transform2DComponent, {"scaleY"}, "field", "transform.scaleY")
+
+--- Scales an entity in both axes.
+export const scaleXY: Target = newTarget(
+    rendercomponents.Transform2DComponent,
+    {"scaleX", "scaleY"},
+    "field2",
+    "transform.scaleXY"
+)
+
+--- Fades an entity's opacity.
+export const alpha: Target = newTarget(rendercomponents.TintComponent, {"a"}, "field", "color.a")
+
+--- Interpolates an entity's four color channels together.
+export const color: Target = newTarget(rendercomponents.TintComponent, {"r", "g", "b", "a"}, "color", "color.rgba")
+
+local builtinTargets: {
+    [string]: Target
+} = {
+    ["transform.x"] = translateX,
+    ["transform.y"] = translateY,
+    ["transform.xy"] = translateXY,
+    ["transform.rotation"] = rotation,
+    ["transform.rotationShortest"] = rotationShortest,
+    ["transform.scaleX"] = scaleX,
+    ["transform.scaleY"] = scaleY,
+    ["transform.scaleXY"] = scaleXY,
+    ["color.a"] = alpha,
+    ["color.rgba"] = color,
+}
+
+--- Resolves an authored target to its runtime form.
+--- @param value a built-in target name or a target built here
+--- @return the target
+--- @raises when a name names no built-in target
+export function resolveTarget(value: TargetName | Target): Target
+    if type(value) == "string" then
+        local builtin = builtinTargets[value as string]
+        if builtin == nil then
+            error("tween: unknown target '" .. (value as string) .. "'", 3)
+        end
+
+        return builtin
+    end
+
+    return value as Target
+end
+
+--- Reads a moving destination from the animated entity itself.
+--- @param component the component read
+--- @param fields the fields read, lined up with the target's own
+--- @return the source
+export function sourceOwn(component: components.Component, fields: {string}): TrackSource
+    return new TrackSource(
+        kind = "self",
+        componentName = component.componentName,
+        component = component,
+        fields = fields
+    )
+end
+
+--- Reads a moving destination from the entity named by the animated entity's
+--- `TweenTrackingTarget`.
+--- @param component the component read
+--- @param fields the fields read, lined up with the target's own
+--- @return the source
+export function sourceTracking(component: components.Component, fields: {string}): TrackSource
+    return new TrackSource(
+        kind = "trackingTarget",
+        componentName = component.componentName,
+        component = component,
+        fields = fields
+    )
+end
+
+--- Reads a moving destination from the entity a relationship points at.
+--- @param relationship the relationship traversed from the animated entity
+--- @param component the component read on the target entity
+--- @param fields the fields read, lined up with the target's own
+--- @return the source
+export function sourceRelated(
+    relationship: components.Component,
+    component: components.Component,
+    fields: {string}
+): TrackSource
+    return new TrackSource(
+        kind = "relationship",
+        relationshipName = relationship.componentName,
+        relationship = relationship,
+        componentName = component.componentName,
+        component = component,
+        fields = fields
+    )
+end
+
+local function requireComponent(name: string): components.Component
+    local found = components.findByName(name)
+    if found == nil then
+        error("tween: unknown component '" .. name .. "'", 0)
+    end
+
+    return found
+end
+
+local function targetComponent(value: Target): components.Component
+    local resolved = value.component
+    if resolved == nil then
+        resolved = requireComponent(value.componentName)
+        value.component = resolved
+    end
+
+    return resolved
+end
+
+--- Resolves and validates a repeat mode and its pass count.
+--- @param mode the authored mode, or nil for `"once"`
+--- @param count the authored pass count, or nil
+--- @param finite whether an endless repeat is refused
+--- @return the mode and its pass count, which is minus one when endless
+--- @raises when the mode is unknown, the count is not positive, `"once"`
+---     carries a count, or an endless repeat is refused
+export function playbackMode(mode: PlaybackMode?, count: integer?, finite: boolean?): PlaybackMode, integer
+    local resolved = mode or "once"
+    if resolved ~= "once" and resolved ~= "loop" and resolved ~= "pingPong" then
+        error("tween: mode must be once, loop, or pingPong", 3)
+    end
+    local once = resolved == "once"
+    if once then
+        if count ~= nil then
+            error("tween: count is only valid with loop or pingPong mode", 3)
+        end
+
+        return resolved, 1
+    end
+    if count ~= nil then
+        if count <= 0 then
+            error("tween: count must be greater than zero", 3)
+        end
+
+        return resolved, count
+    end
+    if finite == true then
+        error("tween: a nested loop or pingPong run requires a finite count", 3)
+    end
+
+    return resolved, -1
+end
+
+--- Builds an operation that interpolates to an absolute destination.
+---
+--- The operation reads its starting values from the entity on its first tick
+--- rather than during compilation, so the same timeline played on two entities
+--- starts from wherever each of them is.
+--- @param duration the seconds it occupies, which must be greater than zero
+--- @param curve a built-in easing name or one of the built-in curve values
+--- @param target which component fields move and in which order
+--- @param t1 the destination for the target's first field, in that field's own
+---     units
+--- @param t2 the destination for the second field
+--- @param t3 the destination for the third field
+--- @param t4 the destination for the fourth field
+--- @return the operation
+export function to(
+    duration: number,
+    curve: EasingName | EasingFunction,
+    target: TargetName | Target,
+    t1: number,
+    t2: number?,
+    t3: number?,
+    t4: number?
+): TimelineNode
+    local name = resolveEasing(curve)
+
+    return new TimelineNode(
+        kind = "to",
+        duration = duration,
+        easingName = name as EasingName,
+        target = resolveTarget(target),
+        t1 = t1,
+        t2 = t2,
+        t3 = t3,
+        t4 = t4
+    )
+end
+
+--- Builds an operation that interpolates by a delta from the starting value.
+--- @param duration the seconds it occupies, which must be greater than zero
+--- @param curve a built-in easing name or one of the built-in curve values
+--- @param target which component fields move and in which order
+--- @param t1 the signed change applied to the target's first field
+--- @param t2 the change applied to the second field
+--- @param t3 the change applied to the third field
+--- @param t4 the change applied to the fourth field
+--- @return the operation
+export function adjust(
+    duration: number,
+    curve: EasingName | EasingFunction,
+    target: TargetName | Target,
+    t1: number,
+    t2: number?,
+    t3: number?,
+    t4: number?
+): TimelineNode
+    local name = resolveEasing(curve)
+
+    return new TimelineNode(
+        kind = "adjust",
+        duration = duration,
+        easingName = name as EasingName,
+        target = resolveTarget(target),
+        t1 = t1,
+        t2 = t2,
+        t3 = t3,
+        t4 = t4
+    )
+end
+
+--- Builds an operation that interpolates toward a destination that keeps
+--- moving.
+---
+--- The first tick fixes the start as `to` does, and each later tick reads the
+--- destination again while the operation remains inside its window. A source
+--- whose entity or component is missing reads as zero rather than faulting.
+--- @param duration the seconds it occupies, which must be greater than zero
+--- @param curve a built-in easing name or one of the built-in curve values
+--- @param target which component fields move and in which order
+--- @param from where the destination is read each tick
+--- @return the operation
+export function track(
+    duration: number,
+    curve: EasingName | EasingFunction,
+    target: TargetName | Target,
+    from: TrackSource
+): TimelineNode
+    local name = resolveEasing(curve)
+
+    return new TimelineNode(
+        kind = "track",
+        duration = duration,
+        easingName = name as EasingName,
+        target = resolveTarget(target),
+        source = from
+    )
+end
+
+--- Builds an operation that advances the timeline cursor without changing
+--- anything.
+--- @param duration the seconds it occupies, which must be at least zero
+--- @return the operation
+export function wait(duration: number): TimelineNode
+    return new TimelineNode(kind = "wait", duration = duration)
+end
+
+--- Builds an operation that emits a named sequence event.
+---
+--- It occupies no time, so what follows it starts at the same instant, and it
+--- fires as the cursor passes it going forward, so a ping-pong return leg does
+--- not fire it a second time.
+--- @param name the name carried on the event
+--- @return the operation
+export function emit(name: string): TimelineNode
+    return new TimelineNode(kind = "emit", name = name)
+end
+
+--- Builds an operation that runs a nested timeline from its own spec.
+---
+--- The nested timeline occupies a window of the parent equal to its own length
+--- times its pass count, so a repeating nested run needs a finite count.
+--- @param spec the nested operations
+--- @param mode how the nested timeline repeats, or nil to run it once
+--- @param count the passes a repeating nested timeline makes
+--- @return the operation
+export function run(spec: {TimelineNode}, mode: PlaybackMode?, count: integer?): TimelineNode
+    return new TimelineNode(kind = "run", nested = spec, mode = mode, count = count)
+end
+
+--- Builds an operation that runs its arguments concurrently from a shared
+--- start and ends with the longest.
+---
+--- Two branches writing the same component field is not an error, and the
+--- later one in argument order wins each tick.
+--- @param branches one block per concurrent branch, each run in sequence
+--- @return the operation
+export function parallel(branches: {{TimelineNode}}): TimelineNode
+    return new TimelineNode(kind = "parallel", branches = branches)
+end
+
+local compileBlock: function(block: {TimelineNode}, startTime: number, into: Timeline): number
+
+local function compileSlot(node: TimelineNode, startTime: number, into: Timeline): number
+    local duration = node.duration
+    if duration == nil or duration <= 0 then
+        error("tween: an interpolation duration must be greater than zero", 0)
+    end
+    local target = node.target
+    if target == nil then
+        error("tween: an interpolation requires a target", 0)
+    end
+    local easingName = assert(node.easingName)
+    local tracking = node.kind == "track"
+    into.slots[
+        #into.slots + 1
+    ] = new Slot(
+        kind = tracking and "track" or "to",
+        target = target,
+        source = node.source,
+        easingName = easingName,
+        easing = assert(easings[easingName]),
+        t1 = tracking and 0 or (node.t1 or 0),
+        t2 = tracking and 0 or (node.t2 or 0),
+        t3 = tracking and 0 or (node.t3 or 0),
+        t4 = tracking and 0 or (node.t4 or 0),
+        relative = node.kind == "adjust",
+        startTime = startTime,
+        endTime = startTime + duration,
+        duration = duration,
+        stateIndex = #into.slots
+    )
+
+    return startTime + duration
+end
+
+local function compileNode(node: TimelineNode, startTime: number, into: Timeline): number
+    local kind = node.kind
+    if kind == "to" or kind == "adjust" or kind == "track" then
+        return compileSlot(node, startTime, into)
+    elseif kind == "wait" then
+        local duration = node.duration
+        if duration == nil or duration < 0 then
+            error("tween: a wait duration must be at least zero", 0)
+        end
+
+        return startTime + duration
+    elseif kind == "emit" then
+        into.emits[#into.emits + 1] = new EmitSlot(time = startTime, name = assert(node.name), order = #into.emits + 1)
+
+        return startTime
+    elseif kind == "run" then
+        local child = compile(assert(node.nested))
+        local mode, passCount = playbackMode(node.mode, node.count, true)
+        local duration = child.totalDuration * passCount
+        into.runs[
+            #into.runs + 1
+        ] = new RunSlot(
+            timeline = child,
+            startTime = startTime,
+            effectiveDuration = duration,
+            mode = mode,
+            passCount = passCount
+        )
+
+        return startTime + duration
+    elseif kind == "parallel" then
+        local endTime = startTime
+        local branches = assert(node.branches)
+        for index = 1, #branches do
+            local branchEnd = compileBlock(branches[index], startTime, into)
+            if branchEnd > endTime then
+                endTime = branchEnd
+            end
+        end
+
+        return endTime
+    end
+
+    error("tween: unknown operation '" .. tostring(kind) .. "'", 0)
+end
+
+compileBlock = function(block: {TimelineNode}, startTime: number, into: Timeline): number
+    local time = startTime
+    for index = 1, #block do
+        time = compileNode(block[index], time, into)
+    end
+
+    return time
+end
+
+--- Compiles authored operations into an immutable timeline.
+---
+--- Entries run one after the next, each starting where the one before it
+--- ended, except that a `parallel` runs its branches from a shared start.
+--- @param spec the operations in execution order
+--- @return the compiled timeline, which the caller does not own the spec of:
+---     the spec is read rather than rewritten and compiles again unchanged
+--- @raises when an operation is unknown or carries an invalid duration, mode,
+---     or count
+export function compile(spec: {TimelineNode}): Timeline
+    local timeline = new Timeline(slots = {}, runs = {}, emits = {}, totalDuration = 0, stateSize = 0)
+    timeline.totalDuration = compileBlock(spec, 0, timeline)
+    timeline.stateSize = #timeline.slots
+    table.sort(timeline.emits, function(left: EmitSlot, right: EmitSlot): boolean
+        if left.time == right.time then
+            return left.order < right.order
+        end
+
+        return left.time < right.time
+    end)
+
+    return timeline
+end
+
+--- Serializes a target into plain data for a program's constant pool.
+--- @param value the target to serialize
+--- @return the caller-owned plain-value row
+export function serializeTarget(value: Target): {[string]: any}
+    return {id = value.id, component = value.componentName, fields = value.fields, mode = value.mode}
+end
+
+--- Rebuilds a target from plain data, reusing a built-in when the identifier
+--- names one.
+--- @param data the serialized target row
+--- @return the target
+--- @raises when the named component is not registered
+export function deserializeTarget(data: {[string]: any}): Target
+    local id = data.id as string
+    local builtin = builtinTargets[id]
+    if builtin ~= nil then
+        return builtin
+    end
+
+    return newTarget(
+        requireComponent(data.component as string),
+        data.fields as {string},
+        (data.mode as TargetMode?) or "field",
+        id
+    )
+end
+
+--- Serializes a tracking source into plain data.
+--- @param value the source to serialize, or nil
+--- @return the caller-owned plain-value row, or nil
+export function serializeSource(value: TrackSource?): {[string]: any}?
+    if value == nil then
+        return nil
+    end
+
+    return {
+        kind = value.kind,
+        relationship = value.relationshipName,
+        component = value.componentName,
+        fields = value.fields,
+    }
+end
+
+--- Rebuilds a tracking source from plain data.
+--- @param data the serialized source row, or nil
+--- @return the source, or nil
+--- @raises when a named component is not registered
+export function deserializeSource(data: {[string]: any}?): TrackSource?
+    if data == nil then
+        return nil
+    end
+    local relationshipName = data.relationship as string?
+    local relationship: components.Component? = nil
+    if relationshipName ~= nil then
+        relationship = requireComponent(relationshipName)
+    end
+    local componentName = data.component as string
+
+    return new TrackSource(
+        kind = data.kind as TrackSourceKind,
+        relationshipName = relationshipName,
+        relationship = relationship,
+        componentName = componentName,
+        component = requireComponent(componentName),
+        fields = data.fields as {string}
+    )
+end
+
+--- Serializes a compiled timeline into plain data for a program's constant
+--- pool.
+--- @param value the timeline to serialize
+--- @return the caller-owned plain-value tree
+export function serializeTimeline(value: Timeline): {[string]: any}
+    local slots: {{[string]: any}} = {}
+    for index = 1, #value.slots do
+        local slot = value.slots[index]
+        slots[
+            index
+        ] = {
+            kind = slot.kind,
+            target = serializeTarget(slot.target),
+            source = serializeSource(slot.source),
+            easing = slot.easingName,
+            t1 = slot.t1,
+            t2 = slot.t2,
+            t3 = slot.t3,
+            t4 = slot.t4,
+            relative = slot.relative,
+            startTime = slot.startTime,
+            endTime = slot.endTime,
+            duration = slot.duration,
+            stateIndex = slot.stateIndex,
+        }
+    end
+    local runs: {{[string]: any}} = {}
+    for index = 1, #value.runs do
+        local runSlot = value.runs[index]
+        runs[
+            index
+        ] = {
+            timeline = serializeTimeline(runSlot.timeline),
+            startTime = runSlot.startTime,
+            effectiveDuration = runSlot.effectiveDuration,
+            mode = runSlot.mode,
+            passCount = runSlot.passCount,
+        }
+    end
+    local emits: {{[string]: any}} = {}
+    for index = 1, #value.emits do
+        local emitSlot = value.emits[index]
+        emits[index] = {time = emitSlot.time, name = emitSlot.name, order = emitSlot.order}
+    end
+
+    return {
+        slots = slots,
+        runs = runs,
+        emits = emits,
+        totalDuration = value.totalDuration,
+        stateSize = value.stateSize,
+    }
+end
+
+--- Rebuilds a compiled timeline from plain data.
+--- @param data the serialized timeline tree
+--- @return the timeline
+--- @raises when a named easing curve or component is unknown
+export function deserializeTimeline(data: {[string]: any}): Timeline
+    local slots: {Slot} = {}
+    local savedSlots = (data.slots as {{[string]: any}}?) or {}
+    for index = 1, #savedSlots do
+        local saved = savedSlots[index]
+        local easingName = saved.easing as string
+        local curve = easings[easingName]
+        if curve == nil then
+            error("tween: unknown easing '" .. tostring(easingName) .. "'", 0)
+        end
+        slots[
+            index
+        ] = new Slot(
+            kind = (saved.kind as string?) or "to",
+            target = deserializeTarget(saved.target as {[string]: any}),
+            source = deserializeSource(saved.source as {[string]: any}?),
+            easingName = easingName as EasingName,
+            easing = curve,
+            t1 = (saved.t1 as number?) or 0,
+            t2 = (saved.t2 as number?) or 0,
+            t3 = (saved.t3 as number?) or 0,
+            t4 = (saved.t4 as number?) or 0,
+            relative = saved.relative == true,
+            startTime = (saved.startTime as number?) or 0,
+            endTime = (saved.endTime as number?) or 0,
+            duration = (saved.duration as number?) or 0,
+            stateIndex = (saved.stateIndex as integer?) or (index - 1)
+        )
+    end
+    local runs: {RunSlot} = {}
+    local savedRuns = (data.runs as {{[string]: any}}?) or {}
+    for index = 1, #savedRuns do
+        local saved = savedRuns[index]
+        runs[
+            index
+        ] = new RunSlot(
+            timeline = deserializeTimeline(saved.timeline as {[string]: any}),
+            startTime = (saved.startTime as number?) or 0,
+            effectiveDuration = (saved.effectiveDuration as number?) or 0,
+            mode = assert(saved.mode as PlaybackMode?),
+            passCount = assert(saved.passCount as integer?)
+        )
+    end
+    local emits: {EmitSlot} = {}
+    local savedEmits = (data.emits as {{[string]: any}}?) or {}
+    for index = 1, #savedEmits do
+        local saved = savedEmits[index]
+        emits[
+            index
+        ] = new EmitSlot(
+            time = (saved.time as number?) or 0,
+            name = saved.name as string,
+            order = (saved.order as integer?) or index
+        )
+    end
+
+    return new Timeline(
+        slots = slots,
+        runs = runs,
+        emits = emits,
+        totalDuration = (data.totalDuration as number?) or 0,
+        stateSize = (data.stateSize as integer?) or #slots
+    )
+end
+
+--- Creates a zeroed state array for one playback of a timeline.
+--- @param count the timeline's slot count
+--- @return the caller-owned flat state array
+export function newState(count: integer): {number}
+    local state: {number} = table.new(count * SLOT_STRIDE, 0) as {number}
+    for index = 1, count * SLOT_STRIDE do
+        state[index] = 0
+    end
+
+    return state
+end
+
+--- Zeroes a playback's state array in place.
+--- @param state the state array to clear
+--- @param count the timeline's slot count
+export function clearState(state: {number}, count: integer): nil
+    for index = 1, count * SLOT_STRIDE do
+        state[index] = 0
+    end
+end
+
+local function componentFields(
+    borrows world: entityworld.World,
+    entity: integer,
+    component: components.Component
+): {[string]: number}?
+    return world:get(entity, component) as {[string]: number}?
+end
+
+--- Reads one to four numbers from a tracking source.
+--- @param world the world holding the source entity
+--- @param entity the animated entity the source is resolved against
+--- @param source the source to read
+--- @return the four numbers, zero for any field the source cannot supply
+export function valuesFromSource(
+    borrows world: entityworld.World,
+    entity: integer,
+    source: TrackSource?
+): number, number, number, number
+    if source == nil then
+        return 0, 0, 0, 0
+    end
+    local component = source.component
+    if component == nil then
+        component = requireComponent(source.componentName)
+        source.component = component
+    end
+    local sourceEntity = entity
+    if source.kind == "trackingTarget" then
+        local tracking = world:get(entity, TrackingTargetComponent)
+        if tracking == nil or tracking.entity == 0 then
+            return 0, 0, 0, 0
+        end
+        sourceEntity = tracking.entity
+    elseif source.kind == "relationship" then
+        local relationship = source.relationship
+        if relationship == nil then
+            relationship = requireComponent(assert(source.relationshipName))
+            source.relationship = relationship
+        end
+        local link = world:get(entity, relationship) as components.RelationshipValue?
+        if link == nil then
+            return 0, 0, 0, 0
+        end
+        sourceEntity = link.target
+    end
+    local values = componentFields(world, sourceEntity, component)
+    if values == nil then
+        return 0, 0, 0, 0
+    end
+    local fields = source.fields
+
+    return values[
+        fields[1]
+    ] or 0, fields[
+        2
+    ] ~= nil and (
+        values[fields[2]] or 0
+    ) or 0, fields[3] ~= nil and (values[fields[3]] or 0) or 0, fields[4] ~= nil and (values[fields[4]] or 0) or 0
+end
+
+local function captureStart(
+    borrows world: entityworld.World,
+    slot: Slot,
+    entity: integer,
+    t1: number,
+    t2: number,
+    t3: number,
+    t4: number
+): number, number, number, number, number, number, number, number
+    local component = targetComponent(slot.target)
+    local values = componentFields(world, entity, component)
+    if values == nil then
+        return 0, 0, 0, 0, 0, 0, 0, 0
+    end
+    local fields = slot.target.fields
+    local mode = slot.target.mode
+    local relative = slot.relative
+    if mode == "color" then
+        local r = values[fields[1]] or 0
+        local g = values[fields[2]] or 0
+        local b = values[fields[3]] or 0
+        local a = values[fields[4]] or 0
+        if relative then
+            return r, g, b, a, t1, t2, t3, t4
+        end
+
+        return r, g, b, a, t1 - r, t2 - g, t3 - b, t4 - a
+    elseif mode == "field2" then
+        local first = values[fields[1]] or 0
+        local second = values[fields[2]] or 0
+        if relative then
+            return first, second, 0, 0, t1, t2, 0, 0
+        end
+
+        return first, second, 0, 0, t1 - first, t2 - second, 0, 0
+    elseif mode == "angle" then
+        local start = values[fields[1]] or 0
+        local delta = t1
+        if not relative then
+            local twoPi = pi * 2
+            local difference = (t1 - start) % twoPi
+            delta = 2 * difference % twoPi - difference
+        end
+
+        return start, 0, 0, 0, delta, 0, 0, 0
+    end
+    local start = values[fields[1]] or 0
+
+    return start, 0, 0, 0, relative and t1 or (t1 - start), 0, 0, 0
+end
+
+local function applyValues(
+    exclusive world: entityworld.World,
+    slot: Slot,
+    entity: integer,
+    t: number,
+    state: {number},
+    base: integer
+): nil
+    local component = targetComponent(slot.target)
+    local values = world:getMut(entity, component) as {[string]: number}?
+    if values == nil then
+        return
+    end
+    local fields = slot.target.fields
+    local mode = slot.target.mode
+    values[fields[1]] = state[base + STATE_S1] + state[base + STATE_D1] * t
+    if mode == "field2" or mode == "color" then
+        values[fields[2]] = state[base + STATE_S1 + 1] + state[base + STATE_D1 + 1] * t
+    end
+    if mode == "color" then
+        values[fields[3]] = state[base + STATE_S1 + 2] + state[base + STATE_D1 + 2] * t
+        values[fields[4]] = state[base + STATE_S1 + 3] + state[base + STATE_D1 + 3] * t
+    end
+end
+
+--- Evaluates every slot of a timeline at one point on it.
+---
+--- A slot before its window that has already captured its start snaps back to
+--- that start, a slot inside its window interpolates, and a slot past its
+--- window holds its final value. A slot that has not moved since the last tick
+--- is not written again.
+--- @param slots the timeline's interpolations
+--- @param state the playback's flat state array
+--- @param world the world holding the animated entity
+--- @param entity the animated entity
+--- @param elapsed the point on the timeline in seconds
+export function evaluateSlots(
+    slots: {Slot},
+    state: {number},
+    exclusive world: entityworld.World,
+    entity: integer,
+    elapsed: number
+): nil
+    for index = 1, #slots do
+        local slot = slots[index]
+        local base = slot.stateIndex * SLOT_STRIDE
+        local shouldEvaluate = false
+        local active = false
+        local localT: number = 0
+        if elapsed >= slot.startTime and elapsed <= slot.endTime then
+            shouldEvaluate = true
+            active = true
+            localT = (elapsed - slot.startTime) / slot.duration
+        elseif elapsed > slot.endTime then
+            shouldEvaluate = true
+            localT = 1
+        elseif state[base + STATE_INIT] ~= 0 then
+            shouldEvaluate = true
+        end
+        if shouldEvaluate then
+            local tracking = slot.kind == "track"
+            if state[base + STATE_INIT] == 0 then
+                local t1, t2, t3, t4 = slot.t1, slot.t2, slot.t3, slot.t4
+                if tracking then
+                    t1, t2, t3, t4 = valuesFromSource(world, entity, slot.source)
+                end
+                local s1, s2, s3, s4, d1, d2, d3, d4 = captureStart(world, slot, entity, t1, t2, t3, t4)
+                state[base + STATE_S1] = s1
+                state[base + STATE_S1 + 1] = s2
+                state[base + STATE_S1 + 2] = s3
+                state[base + STATE_S1 + 3] = s4
+                state[base + STATE_D1] = d1
+                state[base + STATE_D1 + 1] = d2
+                state[base + STATE_D1 + 2] = d3
+                state[base + STATE_D1 + 3] = d4
+                state[base + STATE_INIT] = 1
+            end
+            if localT < 0 then
+                localT = 0
+            elseif localT > 1 then
+                localT = 1
+            end
+            if tracking and active then
+                local t1, t2, t3, t4 = valuesFromSource(world, entity, slot.source)
+                state[base + STATE_D1] = t1 - state[base + STATE_S1]
+                state[base + STATE_D1 + 1] = t2 - state[base + STATE_S1 + 1]
+                state[base + STATE_D1 + 2] = t3 - state[base + STATE_S1 + 2]
+                state[base + STATE_D1 + 3] = t4 - state[base + STATE_S1 + 3]
+            end
+            if state[base + STATE_APPLIED] == 0 or state[base + STATE_LAST_T] ~= localT or (tracking and active) then
+                applyValues(world, slot, entity, slot.easing(localT), state, base)
+                state[base + STATE_APPLIED] = 1
+                state[base + STATE_LAST_T] = localT
+            end
+        end
+    end
+end

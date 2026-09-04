@@ -1,0 +1,1280 @@
+module tecs.sequence
+
+--[[
+Snapshot-safe programs, waits, ownership, actions, and tween timelines.
+
+Sequences store control flow as data. A snapshot, a rewind, or a reload can
+therefore preserve a playback's program, instruction pointer, waits, bindings,
+and parameters. A coroutine cannot be serialized, so the sequencer compiles
+authored steps into instructions and stores each playback's cursor, wait, and
+branch as ordinary data. `nupp.tasks` owns the world's logical update; it
+cannot own a playback that has to survive a save file.
+
+## Programs and actions
+
+Register an action on the world, name it from a program, and bind each playback
+to the entities it acts on:
+
+```nupp
+local sequence <const> = require("tecs.sequence")
+
+sequence.registerAction(world, "game.lockControls", function(_world, _context): nil
+    controlsLocked = true
+end)
+
+local intro <const> = sequence.define("game.bossIntro", {
+    sequence.call("game.lockControls"),
+    sequence.wait(1.5),
+    sequence.emit("boss.ready"),
+})
+
+local playback <const> = sequence.play(world, intro, {owner = encounter, bindings = {boss = bossEntity}})
+```
+
+Program names are a snapshot compatibility surface. Use stable qualified names.
+Redefining a name publishes a new version: running playbacks keep the version
+they started on, and later `play` calls use the new one. Action bodies resolve
+by name when they run, so a reload can replace action code without moving a
+live instruction pointer.
+
+Actions run synchronously and cannot suspend. An action that raises faults its
+playback after preserving the mutations it already completed.
+
+## Clocks and waits
+
+`"fixed"` advances once per fixed step and serves deterministic gameplay.
+`"frame"` advances once per gameplay frame and serves scripted input, which
+needs exactly one decision per frame however many fixed steps that frame runs.
+`"presentation"` advances once per frame carrying the frame's real elapsed
+time, and serves values the simulation never reads.
+
+Durations are seconds. Step and tick values count whole advances of the
+program's clock. Every positive duration waits at least one tick, and
+`waitSteps(0)` yields until the next tick and gives a loop a fresh instruction
+budget.
+
+## Ownership
+
+`owner` ties a playback to an entity, and despawning that entity cancels the
+playback. A named `channel` gives one owner a replaceable slot, so starting a
+second playback on the same channel cancels the first.
+
+Pause uses named holders, and a playback resumes only after every holder
+releases it. A branch inherits owner, bindings, parameters, budget, and pause
+state, and cannot outlive its parent.
+
+Each playback receives a bounded instruction budget per tick and faults with
+`budgetExceeded` rather than hanging the frame.
+
+## Timelines
+
+A timeline compiles tweens into the same runtime and keeps the same ownership,
+clock, channel, pause, and snapshot rules. Targets interpolate component
+fields. A parallel block shares a start time, and a sequential block starts
+after the one before it ends.
+]]
+
+local ecs = require("tecs.ecs")
+local events = require("tecs.internal.events")
+local data = require("tecs.data")
+local sequencecursors = require("tecs.internal.sequencecursors")
+local sequenceprogram = require("tecs.internal.sequenceprogram")
+local sequenceregistry = require("tecs.internal.sequenceregistry")
+local sequencesnapshot = require("tecs.internal.sequencesnapshot")
+local sequencetypes = require("tecs.internal.sequencetypes")
+local sequencevm = require("tecs.internal.sequencevm")
+local tweeneval = require("tecs.internal.tweeneval")
+local tweenrun = require("tecs.internal.tweenrun")
+
+--- Explains why a cursor stopped running.
+export type FaultReason = sequencetypes.FaultReason
+
+--- Describes the lifecycle state of one playback.
+export type PlaybackState = sequencetypes.PlaybackState
+
+--- Describes the condition awaited by a `waitQuery` step.
+export type QueryCondition = sequencetypes.QueryCondition
+
+--- Reports how the playback awaited by `waitTween` ended.
+export type TweenOutcome = sequencetypes.TweenOutcome
+
+--- Selects the clock a program runs against.
+export type ClockId = sequencetypes.ClockId
+
+--- Represents a compiled, immutable program shared by every playback of it.
+export type Program = sequencetypes.Program
+
+--- Represents one authored step produced by a node constructor.
+export type Node = sequencetypes.Node
+
+--- References an entity supplied at `play` time.
+export type EntityRef = sequencetypes.EntityRef
+
+--- Identifies one playback through a generation-checked reference that remains
+--- meaningful across a snapshot load.
+export type Handle = sequencetypes.Handle
+
+--- Configures `play`.
+export type PlayOptions = sequencetypes.PlayOptions
+
+--- Provides the context a registered action receives.
+export type ActionContext = sequencetypes.ActionContext
+
+--- Defines a registered effect that runs synchronously and cannot suspend.
+export type Action = sequencetypes.Action
+
+--- Defines the evaluator an `eval` step runs every tick.
+export type Evaluator = sequencetypes.Evaluator
+
+--- Defines the response an `await` step's provider must give.
+export type Awaitable = sequencetypes.Awaitable
+
+--- Reports a playback's current state.
+export type Status = sequencetypes.Status
+
+--- The payload an `emit` step delivers at address zero.
+export type Emission = sequencetypes.Emission
+
+--- Describes one step a playback reaches without branching.
+export type Step = sequenceprogram.Step
+
+--- Names a built-in easing curve.
+export type EasingName = tweeneval.EasingName
+
+--- Maps normalized input progress to eased output progress.
+export type EasingFunction = tweeneval.EasingFunction
+
+--- Names a built-in component-field target.
+export type TargetName = tweeneval.TargetName
+
+--- Describes the component and one to four numeric fields a timeline
+--- operation writes.
+export type Target = tweeneval.Target
+
+--- Provides a live component-field tracking source.
+export type TrackSource = tweeneval.TrackSource
+
+--- Represents one authored timeline operation.
+export type TimelineNode = tweeneval.TimelineNode
+
+--- Selects how a timeline repeats.
+export type PlaybackMode = tweeneval.PlaybackMode
+
+--- Selects a dynamic tracking-source entity.
+export type TrackingTarget = tweeneval.TrackingTarget
+
+--- Configures `define`.
+export type DefineOptions = {clock: ClockId?}
+
+--- Configures `timeline`.
+export type TimelineOptions = {clock: ClockId?}
+
+--- Configures a nested `tweenRun` operation.
+export type RunOptions = {
+    mode: PlaybackMode?,
+    count: integer?
+}
+
+--- Fires at address zero when an `emit` step or a timeline emit runs.
+---
+--- Observers watch this one definition and filter on the emission's `name`,
+--- rather than each name being an event type of its own.
+export const Event: events.Event<Emission> = sequencetypes.Event
+
+--- The process-wide component a `tweenTrack` tracking source reads.
+export const TrackingTarget = tweeneval.TrackingTargetComponent
+
+--- The per-tick instruction budget a world gives a playback that asks for
+--- none.
+export const DEFAULT_BUDGET: integer = sequencecursors.DEFAULT_BUDGET
+
+-- Who holds a pause when the caller does not say.
+local DEFAULT_HOLDER: string = "user"
+
+local stateKey: data.Key<sequencetypes.WorldState> = data.newKey("tecs.sequence.state", nil)
+
+local function stateFor(exclusive world: ecs.World): sequencetypes.WorldState
+    local existing = world.resources[stateKey]
+    if existing ~= nil then
+        return existing
+    end
+    local created = sequencecursors.newState()
+    world.resources[stateKey] = created
+
+    return created
+end
+
+-------------------------------------------------------------------------------
+-- Authoring nodes
+-------------------------------------------------------------------------------
+
+--- References an entity supplied through `PlayOptions.bindings`.
+---
+--- The reference resolves when the instruction using it runs rather than at
+--- `play`, so a binding may name an entity that does not exist yet. A missing
+--- binding resolves to nothing instead of faulting.
+--- @param name the binding name, which must not be empty
+--- @return a reference to put in a `call` or `emit` argument list, or to hand
+---     to `playTween` or `await`
+--- @raises when the name is empty
+export function bind(name: string): EntityRef
+    if name == "" then
+        error("sequence.bind requires a non-empty binding name", 2)
+    end
+
+    return new sequencetypes.EntityRef(bindName = name, isBinding = true)
+end
+
+--- Builds a step that runs a registered action.
+---
+--- The action name resolves per world when the instruction runs, so a program
+--- may name an action registered later. A name still unregistered when the
+--- step runs faults the playback with `unregisteredAction`. The step costs no
+--- tick.
+--- @param action the registered action name
+--- @param ... the constants the action receives, which are the same values for
+---     every playback of this program; put anything that differs between two
+---     playbacks in `PlayOptions.params` instead
+--- @return a step for `define`, not to be put in a second program
+--- @raises when the action name is empty
+export function call(action: string, ...: any): Node
+    if action == "" then
+        error("sequence.call requires a non-empty action name", 2)
+    end
+
+    return new sequencetypes.Node(kind = "call", text = action, args = {...})
+end
+
+--- Builds a step that waits a duration in seconds.
+---
+--- The duration converts to whole ticks when the instruction runs, rounded to
+--- nearest, and any non-zero duration waits at least one tick. Zero still costs
+--- a tick: the cursor resumes on the program's next tick rather than carrying
+--- on within this one.
+--- @param seconds the non-negative duration
+--- @return a step for `define`, not to be put in a second program
+--- @raises when the duration is negative
+export function wait(seconds: number): Node
+    if seconds < 0 then
+        error("sequence.wait requires a non-negative duration", 2)
+    end
+
+    return new sequencetypes.Node(kind = "wait", number = seconds)
+end
+
+--- Builds a step that waits a whole number of ticks of the program's clock.
+--- @param steps the non-negative tick count, where zero yields until the next
+---     tick
+--- @return a step for `define`, not to be put in a second program
+--- @raises when the count is negative or not a whole number
+export function waitSteps(steps: integer): Node
+    if steps < 0 or steps % 1 ~= 0 then
+        error("sequence.waitSteps requires a non-negative whole number", 2)
+    end
+
+    return new sequencetypes.Node(kind = "waitSteps", number = steps)
+end
+
+--- Builds a step that blocks until `signal` raises a named signal.
+---
+--- The next fixed step delivers signals after `signal` runs, so a signal one
+--- sequence raises never runs another within the same step. A signal raised
+--- before the wait is not remembered.
+--- @param name the signal name, which is registered nowhere
+--- @return a step for `define`, not to be put in a second program
+--- @raises when the name is empty
+export function waitSignal(name: string): Node
+    if name == "" then
+        error("sequence.waitSignal requires a non-empty signal name", 2)
+    end
+
+    return new sequencetypes.Node(kind = "waitSignal", text = name)
+end
+
+--- Builds a step that blocks until a registered query matches or stops
+--- matching.
+---
+--- Unlike a signal, which is an edge, this is a condition on the world: a wait
+--- whose condition already holds resumes rather than waiting for a transition
+--- that has already happened. The condition is evaluated at the start of a
+--- fixed step rather than at the instruction, so a query wait costs at least
+--- one step.
+--- @param name the registered query name, resolved per world when the
+---     instruction runs
+--- @param condition `"any"` to wait for a match or `"empty"` to wait for none
+--- @return a step for `define`, not to be put in a second program
+--- @raises when the name is empty or the condition is neither value
+export function waitQuery(name: string, condition: QueryCondition): Node
+    if name == "" then
+        error("sequence.waitQuery requires a non-empty query name", 2)
+    end
+    if condition ~= "any" and condition ~= "empty" then
+        error("sequence.waitQuery condition must be 'any' or 'empty'", 2)
+    end
+
+    return new sequencetypes.Node(kind = "waitQuery", text = name, count = condition == "any" and 1 or 0)
+end
+
+--- Builds a step that emits a sequence event at address zero.
+---
+--- The step occupies no tick, so the step after it runs in the same one. Each
+--- emission copies its argument list and sends it with the event, so an
+--- observer may keep it, unlike the list an action receives.
+--- @param event the name carried on the emission
+--- @param ... the constants delivered on the emission with every entity
+---     reference already resolved
+--- @return a step for `define`, not to be put in a second program
+--- @raises when the event name is empty
+export function emit(event: string, ...: any): Node
+    if event == "" then
+        error("sequence.emit requires a non-empty event name", 2)
+    end
+
+    return new sequencetypes.Node(kind = "emit", text = event, args = {...})
+end
+
+--- Builds a step that repeats a block.
+--- @param count the iterations, or nil to repeat until canceled
+--- @param nodes the block, which must not be empty and which is run in order
+---     and started again from its first node
+--- @return a step for `define`, not to be put in a second program
+--- @raises when the count is not a positive whole number, or the block is
+---     empty
+export function loop(count: integer?, nodes: {Node}): Node
+    if count ~= nil and (count < 1 or count % 1 ~= 0) then
+        error("sequence.loop count must be a positive whole number or nil", 2)
+    end
+    if #nodes == 0 then
+        error("sequence.loop requires a non-empty block", 2)
+    end
+
+    return new sequencetypes.Node(kind = "loop", count = count, nodes = nodes)
+end
+
+--- Builds a step that starts a branch alongside the rest of the program.
+---
+--- The branch is a playback of its own running the same program at a different
+--- instruction, inheriting the owner, bindings, parameters, and instruction
+--- budget of the playback that forked it. It starts once that playback next
+--- waits, joins, or ends, within the same tick. A branch never outlives its
+--- parent, and a branch that faults takes its parent with it, faulted
+--- `branchFaulted`, rather than leaving a join one branch short forever.
+--- @param nodes the branch body, which must not be empty and which reads and
+---     writes the forking playback's own bindings table rather than a copy
+--- @return a step for `define`, not to be put in a second program
+--- @raises when the block is empty
+export function fork(nodes: {Node}): Node
+    if #nodes == 0 then
+        error("sequence.fork requires a non-empty block", 2)
+    end
+
+    return new sequencetypes.Node(kind = "fork", nodes = nodes)
+end
+
+--- Builds a step that waits for every branch not yet joined.
+---
+--- It falls straight through when there are none, and when the last branch
+--- finishes the waiting playback resumes within that same tick.
+--- @return a step for `define`, not to be put in a second program
+export function join(): Node
+    return new sequencetypes.Node(kind = "join")
+end
+
+--- Builds a step that forks several blocks and waits for all of them.
+---
+--- This is a `fork` per block followed by one `join`. Blocks start in argument
+--- order, and each shares the playback's bindings table as a `fork` does.
+--- @param blocks one non-empty block per branch
+--- @return a step for `define`, not to be put in a second program
+--- @raises when no block is supplied or one of them is empty
+export function parallel(blocks: {{Node}}): Node
+    if #blocks == 0 then
+        error("sequence.parallel requires at least one block", 2)
+    end
+    for index = 1, #blocks do
+        if #blocks[index] == 0 then
+            error("sequence.parallel block " .. tostring(index) .. " is empty", 2)
+        end
+    end
+
+    return new sequencetypes.Node(kind = "parallel", blocks = blocks)
+end
+
+--- Builds a step that plays a registered timeline on a bound entity.
+---
+--- The step costs no tick. It starts a separate playback owned by the bound
+--- entity, running on the named program's clock and using this playback's
+--- instruction budget. A binding that is missing or dead is not a fault:
+--- nothing plays, and a following `waitTween` resumes at once reporting
+--- `targetLost`.
+--- @param timeline the timeline name, resolved when the instruction runs and
+---     always to the newest version; an undefined name faults the playback
+---     with `unregisteredTween`
+--- @param target a `bind` reference and nothing else
+--- @param params the started playback's parameters, so `mode`, `count`,
+---     `speed`, `delay` and `channel` shape it as they do for `play`
+--- @return a step for `define`, not to be put in a second program
+--- @raises when the timeline name is empty or the target is not a `bind`
+---     reference
+export function playTween(timeline: string, target: EntityRef, params: {[string]: any}?): Node
+    if timeline == "" then
+        error("sequence.playTween requires a non-empty timeline name", 2)
+    end
+    if not sequenceprogram.isEntityRef(target) then
+        error("sequence.playTween requires a sequence.bind(name) target", 2)
+    end
+
+    return new sequencetypes.Node(kind = "playTween", text = timeline, args = {target, params})
+end
+
+--- Builds a step that waits for the playback the most recent `playTween`
+--- started.
+---
+--- It resumes when that specific playback completes, is canceled, loses its
+--- channel, or loses its entity, so it never waits forever, and `status`
+--- reports the outcome as `tweenOutcome`. A `waitTween` that no `playTween`
+--- preceded falls straight through without costing a tick.
+--- @return a step for `define`, not to be put in a second program
+export function waitTween(): Node
+    return new sequencetypes.Node(kind = "waitTween")
+end
+
+--- Builds a step that evaluates a registered evaluator every tick until it
+--- finishes.
+---
+--- Unlike every other step this one does not hand the tick back: the playback
+--- joins its clock's active set and the runtime steps it each tick. Values
+--- that move every frame need this behavior.
+--- @param evaluator the registered evaluator name, resolved when the
+---     instruction runs; an unregistered name faults the playback with
+---     `unregisteredEvaluator`
+--- @param data the constant the evaluator receives, passed through its
+---     `resolve` once per program constant and shared by every playback, so it
+---     must remain plain data and the evaluator must not write per-playback
+---     state into it
+--- @return a step for `define`, not to be put in a second program
+--- @raises when the evaluator name is empty
+export function eval(evaluator: string, data: any): Node
+    if evaluator == "" then
+        error("sequence.eval requires a non-empty evaluator name", 2)
+    end
+
+    return new sequencetypes.Node(kind = "eval", text = evaluator, args = data)
+end
+
+--- Builds a step that waits for work outside the sequencer to finish.
+---
+--- A subsystem registers a provider under a name and answers whether the work
+--- is still going; this parks the playback until it is not. The sequencer never
+--- learns what the work is, which is how a program waits on a sprite animation
+--- without the sequencer requiring the renderer. A binding that is missing or
+--- dead is not a fault, and neither is a provider reporting work that never
+--- started.
+--- @param provider the registered provider name, checked before the binding; an
+---     unregistered name faults the playback with `unregisteredAwaitable`
+--- @param target a `bind` reference and nothing else
+--- @param key handed to the provider unread, for a provider that answers about
+---     more than one thing per entity
+--- @return a step for `define`, not to be put in a second program
+--- @raises when the provider name is empty or the target is not a `bind`
+---     reference
+export function await(provider: string, target: EntityRef, key: string?): Node
+    if provider == "" then
+        error("sequence.await requires a non-empty provider name", 2)
+    end
+    if not sequenceprogram.isEntityRef(target) then
+        error("sequence.await requires a sequence.bind(name) target", 2)
+    end
+
+    return new sequencetypes.Node(kind = "await", text = provider, args = {target, key})
+end
+
+-------------------------------------------------------------------------------
+-- Timeline authoring
+-------------------------------------------------------------------------------
+
+--- Returns a built-in easing curve by name.
+--- @param name the curve name
+--- @return the curve, or nil when the name names no built-in
+export function easing(name: EasingName): EasingFunction?
+    return tweeneval.findEasing(name)
+end
+
+--- Interpolates one numeric field of a component.
+--- @param component the component whose field moves
+--- @param fieldName the field name
+--- @return the target, which holds no per-playback state and is safe to share
+export function targetField(component: ecs.Component, fieldName: string): Target
+    return tweeneval.field(component, fieldName)
+end
+
+--- Interpolates two numeric fields of a component together.
+--- @param component the component whose fields move
+--- @param first the field the first destination lines up with
+--- @param second the field the second destination lines up with
+--- @return the target
+export function targetField2(component: ecs.Component, first: string, second: string): Target
+    return tweeneval.field2(component, first, second)
+end
+
+--- Interpolates one field as an angle, taking the short way round.
+--- @param component the component whose field moves
+--- @param fieldName the radian-valued field name
+--- @return the target
+export function targetAngle(component: ecs.Component, fieldName: string): Target
+    return tweeneval.angle(component, fieldName)
+end
+
+--- Reads a moving destination from the animated entity itself.
+--- @param component the component read
+--- @param fields the fields read, lined up with the target's own
+--- @return the source
+export function sourceOwn(component: ecs.Component, fields: {string}): TrackSource
+    return tweeneval.sourceOwn(component, fields)
+end
+
+--- Reads a moving destination from the entity named by the animated entity's
+--- `TrackingTarget`.
+--- @param component the component read
+--- @param fields the fields read, lined up with the target's own
+--- @return the source
+export function sourceTracking(component: ecs.Component, fields: {string}): TrackSource
+    return tweeneval.sourceTracking(component, fields)
+end
+
+--- Reads a moving destination from the entity a relationship points at.
+--- @param relationship the relationship traversed from the animated entity
+--- @param component the component read on the target entity
+--- @param fields the fields read, lined up with the target's own
+--- @return the source
+export function sourceRelated(relationship: ecs.Component, component: ecs.Component, fields: {string}): TrackSource
+    return tweeneval.sourceRelated(relationship, component, fields)
+end
+
+--- Builds a timeline operation that interpolates to an absolute destination.
+---
+--- The operation reads its starting values from the entity on its first tick
+--- rather than during compilation, so the same timeline played on two entities
+--- starts from wherever each of them is.
+--- @param duration the seconds it occupies, which must be greater than zero
+--- @param curve a name from the built-in curves, or one of those curve values
+--- @param target which component fields move and in which order the
+---     destinations line up with them
+--- @param t1 the destination for the target's first field, in that field's own
+---     units: pixels for a translate, radians for a rotation, zero through one
+---     for a color channel
+--- @param t2 the destination for the second field
+--- @param t3 the destination for the third field
+--- @param t4 the destination for the fourth field, with anything past the
+---     target's field count ignored and an omitted field treated as zero
+--- @return an operation for a timeline spec
+--- @raises when the curve names no built-in
+export function tweenTo(
+    duration: number,
+    curve: EasingName | EasingFunction,
+    target: TargetName | Target,
+    t1: number,
+    t2: number?,
+    t3: number?,
+    t4: number?
+): TimelineNode
+    return tweeneval.to(duration, curve, target, t1, t2, t3, t4)
+end
+
+--- Builds a timeline operation that interpolates by a delta from the starting
+--- value.
+--- @param duration the seconds it occupies, which must be greater than zero
+--- @param curve a name from the built-in curves, or one of those curve values
+--- @param target which component fields move and in which order
+--- @param t1 the signed change applied to the target's first field
+--- @param t2 the change applied to the second field
+--- @param t3 the change applied to the third field
+--- @param t4 the change applied to the fourth field
+--- @return an operation for a timeline spec
+--- @raises when the curve names no built-in
+export function tweenAdjust(
+    duration: number,
+    curve: EasingName | EasingFunction,
+    target: TargetName | Target,
+    t1: number,
+    t2: number?,
+    t3: number?,
+    t4: number?
+): TimelineNode
+    return tweeneval.adjust(duration, curve, target, t1, t2, t3, t4)
+end
+
+--- Builds a timeline operation that interpolates toward a destination that
+--- keeps moving.
+---
+--- The first tick fixes the start as `tweenTo` does, and each later tick reads
+--- the destination again while the operation remains inside its window. Once
+--- the window ends the operation holds its last destination. A source whose
+--- entity or component is missing reads as zero rather than faulting.
+--- @param duration the seconds it occupies, which must be greater than zero
+--- @param curve a name from the built-in curves, or one of those curve values
+--- @param target which component fields move and which fields of the source
+---     line up with them
+--- @param from where the destination is read each tick
+--- @return an operation for a timeline spec
+--- @raises when the curve names no built-in
+export function tweenTrack(
+    duration: number,
+    curve: EasingName | EasingFunction,
+    target: TargetName | Target,
+    from: TrackSource
+): TimelineNode
+    return tweeneval.track(duration, curve, target, from)
+end
+
+--- Builds a timeline operation that advances the cursor without changing
+--- anything.
+--- @param duration the seconds it occupies, where zero performs no work
+--- @return an operation for a timeline spec
+export function tweenWait(duration: number): TimelineNode
+    return tweeneval.wait(duration)
+end
+
+--- Builds a timeline operation that emits a named sequence event.
+---
+--- It occupies no time, so what follows it starts at the same instant. The
+--- emission carries the entity the timeline is animating as its one argument
+--- and the timeline's own playback as its handle. It fires as the cursor
+--- passes the point going forward, so a ping-pong return leg does not fire it
+--- a second time.
+--- @param name the name carried on the emission
+--- @return an operation for a timeline spec
+export function tweenEmit(name: string): TimelineNode
+    return tweeneval.emit(name)
+end
+
+--- Builds a timeline operation that runs a nested timeline from its own spec.
+---
+--- The nested timeline occupies a window of the parent equal to its own length
+--- times its pass count, so a repeating nested run needs a finite `count`. Its
+--- operations keep their per-playback state separately from the parent's.
+--- @param spec the nested operations, which this call reads rather than
+---     rewrites
+--- @param options omit to run the nested timeline once; `"loop"` and
+---     `"pingPong"` need a `count` here
+--- @return an operation for a timeline spec
+--- @raises when a repeating nested run carries no finite count
+export function tweenRun(spec: {TimelineNode}, options: RunOptions?): TimelineNode
+    return tweeneval.run(spec, options and options.mode, options and options.count)
+end
+
+--- Builds a timeline operation that runs blocks concurrently and ends with the
+--- longest.
+---
+--- Every block starts where the operation sits, and what follows starts after
+--- the last of them ends. Two blocks writing the same component field is not
+--- an error, and the later one in argument order wins each tick.
+--- @param blocks one block per concurrent branch, each run in sequence within
+---     itself
+--- @return an operation for a timeline spec
+export function tweenParallel(blocks: {{TimelineNode}}): TimelineNode
+    return tweeneval.parallel(blocks)
+end
+
+-------------------------------------------------------------------------------
+-- Compilation
+-------------------------------------------------------------------------------
+
+--- Compiles a program under a stable symbolic name.
+---
+--- Defining over a name already in use publishes a new version rather than
+--- replacing the old one: playbacks already running keep the version they
+--- started on, and only later `play` calls see the new one.
+--- @param name the stable symbolic name, which is a snapshot compatibility
+---     surface
+--- @param nodes the authored steps, which may be empty, in which case the
+---     program completes on its first tick
+--- @param options the clock the program's waits count, defaulting to `"fixed"`
+--- @return the compiled program, immutable and shared by every playback of it,
+---     so the same value plays on any number of worlds
+--- @raises when the name is empty, the clock is not one of the three names, or
+---     an entry is not a step
+export function define(name: string, nodes: {Node}, options: DefineOptions?): Program
+    if name == "" then
+        error("sequence.define requires a non-empty program name", 2)
+    end
+    local clock = (options and options.clock) or "fixed"
+    if clock ~= "fixed" and clock ~= "frame" and clock ~= "presentation" then
+        error("sequence.define clock must be 'fixed', 'frame', or 'presentation'", 2)
+    end
+    local program = sequenceprogram.compile(name, sequenceregistry.nextVersion(name), clock, nodes)
+    sequenceregistry.publish(program)
+
+    return program
+end
+
+--- Compiles a tween timeline into a program under a stable name.
+---
+--- The compiled slots travel in the program's constant pool, so a timeline is
+--- snapshot safe for the same reason every other program is. Play it with
+--- `play`, giving the entity it animates as the `owner`: a playback with no
+--- owner has nothing to write to and completes on its first tick.
+---
+--- A playback reads four parameters, all optional: `mode` is `"once"`,
+--- `"loop"`, or `"pingPong"`; `count` is the passes a finite repeat makes;
+--- `speed` is a playback multiplier defaulting to one; and `delay` is the
+--- seconds to wait before the first frame. They are read when the playback
+--- builds its state, so a speed of zero or less, a negative delay, or a repeat
+--- of a zero-length timeline faults the playback with `actionError` rather
+--- than raising from `play`.
+--- @param name the stable symbolic name, sharing `define`'s namespace and
+---     versioning
+--- @param spec the timeline operations in execution order
+--- @param options the clock the timeline is evaluated against, defaulting to
+---     `"presentation"`; `"fixed"` makes it deterministic from a snapshot
+---     alone at the cost of stepping at the simulation's rate
+--- @return the compiled program, also reachable by name through `program`
+--- @raises when the clock is neither `"fixed"` nor `"presentation"`, or an
+---     operation is invalid
+export function timeline(name: string, spec: {TimelineNode}, options: TimelineOptions?): Program
+    local clock = (options and options.clock) or "presentation"
+    if clock ~= "fixed" and clock ~= "presentation" then
+        error("sequence.timeline clock must be 'fixed' or 'presentation'", 2)
+    end
+    local compiled = tweeneval.compile(spec)
+    -- The serialized form is what the constant pool carries, and the evaluator
+    -- resolves it back once when the first playback of it starts.
+
+    return define(name, {eval(tweenrun.EVALUATOR, tweeneval.serializeTimeline(compiled))}, {clock = clock})
+end
+
+--- Returns the newest version of a defined program, or a requested version.
+---
+--- Every version a playback still runs stays reachable, and the newest version
+--- of a name is never dropped.
+--- @param name a name previously passed to `define` or `timeline`
+--- @param version the version to look up, starting at one, or nil for the
+---     newest
+--- @return the program, or nil when the name was never defined or that version
+---     has been dropped
+export function program(name: string, version: integer?): Program?
+    if version ~= nil then
+        return sequenceregistry.version(name, version)
+    end
+
+    return sequenceregistry.newest(name)
+end
+
+--- Returns the names of every defined program, sorted.
+--- @return a caller-owned list; registration is process-wide, so this spans
+---     every world in the process
+export function programNames(): {string}
+    return sequenceregistry.names()
+end
+
+--- Renders a program as readable instructions.
+--- @param value a program from `define` or `timeline`
+--- @param pc the instruction to mark, as a playback's `status` reports it, or
+---     nil for an unmarked listing
+--- @return a header naming the program and its version, then one line per
+---     instruction, newline separated, for reading rather than for parsing
+export function disassemble(value: Program, pc: integer?): string
+    return sequenceprogram.disassemble(value, pc)
+end
+
+-------------------------------------------------------------------------------
+-- Registration
+-------------------------------------------------------------------------------
+
+--- Registers an action a `call` step can name.
+---
+--- Actions must obey the deterministic-action contract to keep replay and
+--- rewind meaningful: no wall-clock reads, no file or network access, and
+--- randomness only from a generator whose state travels with the snapshot.
+--- @param world the world that owns the action registry
+--- @param name the action name, which is per world unlike an evaluator or an
+---     awaitable; registering it twice replaces the action, and a playback
+---     resolves the name at each `call`, so one already running picks the new
+---     one up
+--- @param action the body, which faults its playback with `actionError` when
+---     it raises, leaving whatever it already wrote to the world written
+--- @raises when the name is empty
+export function registerAction(exclusive world: ecs.World, name: string, action: Action): nil
+    if name == "" then
+        error("sequence.registerAction requires a non-empty action name", 2)
+    end
+    stateFor(world).actions[name] = action
+end
+
+--- Reports whether a world has registered an action name.
+--- @param world the world that owns the action registry
+--- @param name the action name to find
+--- @return false for a name this world never registered, including one another
+---     world has
+export function hasAction(exclusive world: ecs.World, name: string): boolean
+    return stateFor(world).actions[name] ~= nil
+end
+
+--- Registers a query a `waitQuery` step can name.
+---
+--- Registering a name again re-tests every playback already parked on it,
+--- against the new query, at the next fixed step.
+--- @param world the world that owns the query registry
+--- @param name the query name
+--- @param descriptor the include and exclude constraints
+--- @raises when the name is empty
+export function registerQuery(exclusive world: ecs.World, name: string, descriptor: ecs.QueryDescriptor): nil
+    if name == "" then
+        error("sequence.registerQuery requires a non-empty query name", 2)
+    end
+    stateFor(world).queries[name] = world:newQuery(descriptor)
+end
+
+--- Reports whether a world has registered a query name.
+--- @param world the world that owns the query registry
+--- @param name the query name to find
+--- @return false for a name this world never registered
+export function hasQuery(exclusive world: ecs.World, name: string): boolean
+    return stateFor(world).queries[name] ~= nil
+end
+
+--- Registers an evaluator an `eval` step can name.
+---
+--- Registration is process-wide, like a program: an evaluator is code, and two
+--- worlds evaluating the same name run the same thing. Registering a name
+--- twice replaces it.
+--- @param name the evaluator name
+--- @param evaluator the evaluator, which must carry `step`; without `save` and
+---     `load` a playback evaluating this name comes back from a snapshot at the
+---     start of its state rather than where it was
+--- @raises when the name is empty or the evaluator has no `step`
+export function registerEvaluator(name: string, evaluator: Evaluator): nil
+    sequenceregistry.registerEvaluator(name, evaluator)
+end
+
+--- Registers a provider an `await` step can name.
+---
+--- Registration is process-wide, like an evaluator, because a provider is code.
+--- Registering a name twice replaces the provider, so a playback already parked
+--- on the name asks the new one at the next fixed step.
+--- @param name the provider name
+--- @param provider the provider, which must carry `isPending`; without
+---     `setPaused` it leaves its work running when a pause stops the waiting
+---     playback
+--- @raises when the name is empty or the provider has no `isPending`
+export function registerAwaitable(name: string, provider: Awaitable): nil
+    sequenceregistry.registerAwaitable(name, provider)
+end
+
+--- Raises a named signal and wakes every playback blocked on it.
+---
+--- Delivery happens on the next fixed step. Raising a signal nothing waits on
+--- is not an error and is not remembered: a playback that reaches `waitSignal`
+--- afterwards keeps waiting.
+--- @param world the world that owns the signal state
+--- @param name the signal name, registered nowhere
+--- @return the number of playbacks waiting on the name now, which may differ
+---     from the set the next fixed step wakes
+--- @raises when the name is empty
+export function signal(exclusive world: ecs.World, name: string): integer
+    if name == "" then
+        error("sequence.signal requires a non-empty signal name", 2)
+    end
+    local state = stateFor(world)
+    local waiting = #sequencecursors.parkedSlots(state.channels, name)
+    -- Delivery is deferred to the next step so a signal raised from inside a
+    -- running cursor cannot cascade within the same step.
+    state.pendingSignals[#state.pendingSignals + 1] = name
+
+    return waiting
+end
+
+--- Returns how many playbacks currently wait on a signal name.
+--- @param world the world that owns the waiting playbacks
+--- @param name the signal name to count
+--- @return zero for a name nothing waits on; a signal raised during this step
+---     leaves its waiters in the count until the next step delivers it
+export function waitingOn(exclusive world: ecs.World, name: string): integer
+    return #sequencecursors.parkedSlots(stateFor(world).channels, name)
+end
+
+--- Raises a signal whenever an event emits at address zero.
+---
+--- An ECS event is an edge, like a signal, so this wires one to the other
+--- rather than adding a separate kind of wait. Delivery follows the ordinary
+--- signal rule and waiters wake on the next fixed step.
+--- @param world the world that owns the observer and the signal state
+--- @param name the signal to raise, once per emission
+--- @param event the event definition, observed at address zero and only there;
+---     the observer lasts for the life of the world
+--- @raises when the name is empty
+export function signalOnEvent<T>(exclusive world: ecs.World, name: string, event: events.Event<T>): nil
+    if name == "" then
+        error("sequence.signalOnEvent requires a non-empty signal name", 2)
+    end
+    world:observe(0, event, function(_value: T, exclusive observing: ecs.World): nil
+        signal(observing, name)
+    end)
+end
+
+-------------------------------------------------------------------------------
+-- Playback
+-------------------------------------------------------------------------------
+
+--- Starts a program.
+---
+--- The first instruction runs on the next tick of the program's own clock,
+--- never inside this call.
+--- @param world the world that owns the new playback
+--- @param value a program from `define` or `timeline`, not a name; the playback
+---     runs this version for its whole life
+--- @param options the owner, bindings, parameters, budget, and channel; taking
+---     a channel another playback on the same owner holds cancels that one
+---     first, reporting `replaced` to anything waiting on it
+--- @return a handle to the new playback, carrying a generation so one whose
+---     playback has ended never names a later playback that took the same slot
+export function play(exclusive world: ecs.World, value: Program, options: PlayOptions?): Handle
+    local state = stateFor(world)
+    local cursor = sequencecursors.alloc(state, value, value.clock)
+    sequenceregistry.retain(value)
+    if options ~= nil then
+        cursor.owner = options.owner or 0
+        cursor.bindings = options.bindings
+        cursor.params = options.params
+        cursor.channel = options.channel
+        local budget = options.budget
+        if budget ~= nil then
+            cursor.budget = budget
+            cursor.budgetLeft = budget
+        end
+    end
+    sequencecursors.linkOwner(state, cursor)
+    sequencecursors.claimChannel(state, cursor)
+    sequencecursors.schedule(state, cursor, sequencecursors.clockOf(state, cursor).step + 1)
+
+    return sequencecursors.packHandle(cursor.slot, cursor.generation)
+end
+
+--- Stops a playback and releases its cursor.
+---
+--- This is safe on a finished handle. Cancelling takes the branches the
+--- playback forked with it, and a playback parked in a `waitTween` on the one
+--- canceled is told `canceled` and resumes. What a `playTween` started is a
+--- playback in its own right and is not canceled with the one that started it,
+--- unlike a pause, which cascades to it; stop it through its owner with
+--- `cancelOwnedBy`.
+--- @param world the world that owns the playback
+--- @param handle the playback to stop, read against this world's cursor arena
+--- @return false when the handle names nothing running, whether it already
+---     finished or was already canceled
+export function cancel(exclusive world: ecs.World, handle: Handle): boolean
+    local state = stateFor(world)
+    local cursor = sequencecursors.resolve(state, handle)
+    if cursor == nil or not cursor.alive then
+        return false
+    end
+    sequencecursors.retire(state, cursor, "canceled")
+
+    return true
+end
+
+--- Suspends a playback, its branches, and anything it started.
+---
+--- Pause is holder counted: two systems can hold the same playback for
+--- unrelated reasons, and it runs again only when the last one lets go, so
+--- whichever resumes first cannot undo the other. Its wait, if any, resumes
+--- from where it paused, and what it is waiting on stops with it when the
+--- awaitable provider knows how.
+--- @param world the world that owns the playback
+--- @param handle the playback to pause
+--- @param holder any string, treated as a set rather than a count, so two
+---     pauses under the same holder are one hold; it defaults to `"user"`
+--- @return whether the playback stopped, which is false when another holder
+---     already had it or the handle names nothing running
+export function pause(exclusive world: ecs.World, handle: Handle, holder: string?): boolean
+    local state = stateFor(world)
+    local cursor = sequencecursors.resolve(state, handle)
+    if cursor == nil or not cursor.alive then
+        return false
+    end
+
+    return sequencecursors.pauseTree(world, state, cursor, holder or DEFAULT_HOLDER)
+end
+
+--- Releases one holder's claim on a paused playback.
+--- @param world the world that owns the playback
+--- @param handle the paused playback
+--- @param holder the string that took the hold, defaulting to `"user"`;
+---     releasing one that never held it changes nothing
+--- @return whether the playback started running again, which is true only for
+---     the last holder to let go; a wake time that passed while it was held
+---     runs it on the next tick rather than immediately
+export function resume(exclusive world: ecs.World, handle: Handle, holder: string?): boolean
+    local state = stateFor(world)
+    local cursor = sequencecursors.resolve(state, handle)
+    if cursor == nil or not cursor.alive then
+        return false
+    end
+
+    return sequencecursors.resumeTree(world, state, cursor, holder or DEFAULT_HOLDER)
+end
+
+--- Returns a playback's status.
+---
+--- A finished playback still answers, with `state` saying how it ended, until
+--- a later `play` takes its slot. The waiting fields are filled only while the
+--- playback lives.
+--- @param world the world that owns the playback
+--- @param handle the playback to inspect, read against this world's cursor
+---     arena
+--- @return a caller-owned status, or nil for a handle this world never issued
+export function status(exclusive world: ecs.World, handle: Handle): Status?
+    local state = stateFor(world)
+    local cursor = sequencecursors.resolve(state, handle)
+    if cursor == nil then
+        return nil
+    end
+    local branches: integer = 0
+    local children = cursor.children
+    if children ~= nil then
+        for _ in pairs(children) do
+            branches = branches + 1
+        end
+    end
+    local alive = cursor.alive
+    local condition: QueryCondition? = nil
+    if alive and cursor.waitQuery ~= nil then
+        condition = cursor.waitCondition == 1 and "any" or "empty"
+    end
+
+    return new sequencetypes.Status(
+        state = cursor.state,
+        program = cursor.program.name,
+        version = cursor.program.version,
+        pc = cursor.pc,
+        wakeAt = alive and cursor.wakeAt or nil,
+        waitingFor = alive and cursor.waitChannel or nil,
+        waitingQuery = alive and cursor.waitQuery or nil,
+        waitingCondition = condition,
+        waitingAwaitable = alive and cursor.awaitProvider or nil,
+        waitingAwaitableEntity = alive and cursor.awaitEntity or nil,
+        waitingTween = cursor.waitingTween and cursor.tweenPlayback or nil,
+        tweenOutcome = cursor.tweenOutcome,
+        branches = branches,
+        joining = cursor.joining,
+        fault = cursor.fault,
+        faultMessage = cursor.faultMessage
+    )
+end
+
+--- Cancels every playback owned by an entity.
+--- @param world the world that owns the playbacks
+--- @param owner an entity id; nothing owns a playback started without an owner,
+---     so no argument reaches one and only `cancel` on its handle stops it
+--- @param reason what a playback parked in a `waitTween` on one of these is
+---     told, defaulting to `canceled`
+--- @return the number of canceled playbacks, counting each cursor once and
+---     reaching branches through their inherited owner
+export function cancelOwnedBy(exclusive world: ecs.World, owner: integer, reason: TweenOutcome?): integer
+    local state = stateFor(world)
+    local owned = state.ownerIndex[owner]
+    if owned == nil then
+        return 0
+    end
+    local slots: {integer} = {}
+    for slot in pairs(owned) do
+        slots[#slots + 1] = slot
+    end
+    table.sort(slots)
+    local canceled: integer = 0
+    for index = 1, #slots do
+        local cursor = state.cursors[slots[index]]
+        if cursor ~= nil and cursor.alive then
+            sequencecursors.retire(state, cursor, "canceled", reason)
+            canceled = canceled + 1
+        end
+    end
+
+    return canceled
+end
+
+--- Returns the number of live playbacks, for tests and diagnostics.
+--- @param world the world that owns the playbacks
+--- @return the count, with branches and `playTween`-started playbacks counted
+---     individually
+export function activeCount(exclusive world: ecs.World): integer
+    local state = stateFor(world)
+    local count: integer = 0
+    for _, cursor in pairs(state.cursors) do
+        if cursor.alive then
+            count = count + 1
+        end
+    end
+
+    return count
+end
+
+--- Returns handles for every live playback in a stable order.
+--- @param world the world that owns the playbacks
+--- @return a caller-owned table ordered by cursor slot, which is stable within
+---     a run but differs from creation order because new playbacks reuse free
+---     slots
+export function playbacks(exclusive world: ecs.World): {Handle}
+    local state = stateFor(world)
+    local slots: {integer} = {}
+    for slot, cursor in pairs(state.cursors) do
+        if cursor.alive then
+            slots[#slots + 1] = slot
+        end
+    end
+    table.sort(slots)
+    local handles: {Handle} = {}
+    for index = 1, #slots do
+        local cursor = assert(state.cursors[slots[index]])
+        handles[index] = sequencecursors.packHandle(cursor.slot, cursor.generation)
+    end
+
+    return handles
+end
+
+-------------------------------------------------------------------------------
+-- Configuration and tooling
+-------------------------------------------------------------------------------
+
+--- Sets the per-tick instruction budget for playbacks that ask for none.
+---
+--- The budget caps how many instructions one playback runs per tick, and
+--- exceeding it faults the playback with `budgetExceeded` rather than deferring
+--- the rest, so it guards against a loop with no wait in it rather than acting
+--- as a scheduler. It applies to playbacks started after this call.
+--- @param world the world the budget applies to
+--- @param instructions the budget, which must be at least one
+--- @raises when the budget is less than one
+export function setInstructionBudget(exclusive world: ecs.World, instructions: integer): nil
+    if instructions < 1 then
+        error("sequence.setInstructionBudget requires a positive count", 2)
+    end
+    stateFor(world).budget = instructions
+end
+
+--- Returns a clock's current tick as counted by the sequencer.
+--- @param world the world that owns the clock counters
+--- @param clock which of the three counters to read, defaulting to `"fixed"`
+--- @return the ticks of that one clock, counted from when this world's
+---     sequencer state was created and comparable only against another reading
+---     of the same clock
+export function currentStep(exclusive world: ecs.World, clock: ClockId?): integer
+    return sequencetypes.clockById(stateFor(world).clocks, clock or "fixed").step
+end
+
+--- Sets the nominal frame duration a `frame` or `presentation` wait converts
+--- seconds against.
+---
+--- The nominal duration is used rather than a frame's measured time because a
+--- wake is a tick number fixed when the wait runs and never revisited.
+--- @param seconds the loop's nominal frame duration, defaulting to one sixtieth
+---     of a second
+--- @raises when the duration is not greater than zero
+export function setNominalFrameTime(seconds: number): nil
+    sequencevm.setNominalFrameTime(seconds)
+end
+
+--- Returns the actions and emissions a playback will certainly perform next,
+--- and their timing.
+---
+--- The walk covers the straight-line run ahead of where the playback sits,
+--- accumulating waits, and stops at the first instruction whose successor
+--- requires execution.
+--- @param world the world that owns the playback
+--- @param handle the playback to inspect
+--- @param withinTicks report only what is due within this many ticks of the
+---     playback's own clock, or nil for everything the walk can reach
+--- @return a caller-owned list of the calls and emissions ahead, in order;
+---     empty for a handle that names nothing running and for one parked on a
+---     signal, a query, a join, a tween, or an evaluator, since none of those
+---     has a predictable start. A wait written in seconds also ends the walk.
+export function upcoming(exclusive world: ecs.World, handle: Handle, withinTicks: integer?): {Step}
+    local state = stateFor(world)
+    local cursor = sequencecursors.resolve(state, handle)
+    if cursor == nil or not cursor.alive then
+        return {}
+    end
+    local wakeAt = cursor.wakeAt
+    if wakeAt == nil then
+        return {}
+    end
+    local offset = wakeAt - sequencecursors.clockOf(state, cursor).step
+
+    return sequenceprogram.ahead(cursor.program, cursor.pc, offset > 0 and offset or 0, withinTicks)
+end
+
+-------------------------------------------------------------------------------
+-- Plugin
+-------------------------------------------------------------------------------
+
+local installed: {[ecs.World]: boolean} = setmetatable({}, {__mode = "k"}) as {[ecs.World]: boolean}
+
+--- Installs the sequencer into a world.
+---
+--- Installing twice on the same world does nothing, so a world that scripts
+--- input may install the sequencer itself rather than relying on the
+--- application having done it.
+--- @param world the world receiving sequencer state, systems, and the snapshot
+---     handler
+export function plugin(exclusive world: ecs.World): nil
+    if installed[world] then
+        return
+    end
+    installed[world] = true
+    local state = stateFor(world)
+    -- Evaluators are process-wide, so this registers once however many worlds
+    -- install the sequencer.
+    tweenrun.install()
+
+    -- These three system names are a compatibility surface: the debug server
+    -- reports them and an agent selects on them.
+    world:addSystem({
+        name = "sequence.Advance",
+        phase = ecs.phases.FixedFirst,
+        run = function(dt: number, exclusive running: ecs.World): nil
+            sequencevm.tick(running, state, "fixed", dt)
+        end,
+    })
+    -- First is the earliest gameplay phase, ahead of the fixed group, so a
+    -- frame-clock program has run before anything reads what it did. That is
+    -- what scripted input needs and what the fixed clock cannot give it: a
+    -- frame runs the fixed phases zero times or several, and a program driving
+    -- input has to advance exactly once per frame either way.
+    world:addSystem({
+        name = "sequence.AdvanceFrame",
+        phase = ecs.phases.First,
+        run = function(dt: number, exclusive running: ecs.World): nil
+            sequencevm.tick(running, state, "frame", dt)
+        end,
+    })
+    -- Presentation runs in Update with the frame's real elapsed time: what it
+    -- carries has to move at the display's rate, not the simulation's.
+    world:addSystem({
+        name = "sequence.AdvancePresentation",
+        phase = ecs.phases.Update,
+        run = function(dt: number, exclusive running: ecs.World): nil
+            sequencevm.tick(running, state, "presentation", dt)
+        end,
+    })
+
+    -- This snapshot handler key is a compatibility surface: a save file written
+    -- by an earlier build names its sequencer state by this string, and a
+    -- restore that finds no state under its key falls through to an empty
+    -- sequencer rather than erroring.
+    world:addSnapshotHandler({
+        name = "tecs.sequence",
+        save = function(exclusive _world: ecs.World): any
+            return sequencesnapshot.save(state)
+        end,
+        load = function(exclusive _world: ecs.World, value: any): nil
+            sequencesnapshot.load(state, value)
+        end,
+    })
+
+    -- Owner lifetime: a despawned owner cancels the playbacks it governs.
+    world:observe(0, ecs.OnDespawn, function(value: ecs.EntityLifecycle, exclusive despawning: ecs.World): nil
+        if state.ownerIndex[value.entity] ~= nil then
+            cancelOwnedBy(despawning, value.entity, "targetLost")
+        end
+    end)
+end
