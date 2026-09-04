@@ -84,6 +84,14 @@ jobs:
                   echo /opt/nupp >> "$GITHUB_PATH"
             - run: nupp fmt --check
             - run: nupp check --strict
+            # The native audio tests skip unless libtecsaudio is where
+            # ffi.load looks. Staging it is what makes the Nupp-to-Rust
+            # binding actually covered rather than reported as skipped.
+            - run: cargo build -p tecs-audio
+            - if: runner.os == 'macOS'
+              run: cp target/debug/libtecsaudio.dylib .
+            - if: runner.os == 'Linux'
+              run: cp target/debug/libtecsaudio.so .
             - run: nupp test
             - run: nupp build --target headless
             - run: nupp build --target host
