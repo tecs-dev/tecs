@@ -1,0 +1,68 @@
+module tecs.internal.mcpbindings
+
+--[[
+The world and application the built-in debug tools act on.
+
+One of each, held in module-level slots rather than passed per call, because
+the MCP protocol has nowhere to carry them. The tool modules read them through
+the two accessors here, which raise a message naming what is missing rather
+than failing opaquely, so a tool called before the application started reports
+why.
+
+This module exists so `tecs.internal.mcptools` and `tecs.internal.mcpworld`
+share one binding without either requiring the other.
+]]
+
+local application = require("tecs.application")
+local ecs = require("tecs.ecs")
+
+local boundWorld: ecs.World? = nil
+local boundApplication: application.Application? = nil
+
+--- Makes `world` the world the built-in tools read and write.
+--- @param world the world to bind, or nil to unbind
+export function bindWorld(world: ecs.World?): nil
+    boundWorld = world
+end
+
+--- Makes `app` the application the lifecycle tools act on.
+--- @param app the application to bind, or nil to unbind
+export function bindApplication(app: application.Application?): nil
+    boundApplication = app
+end
+
+--- Returns the bound world without raising.
+--- @return the world, or nil when nothing is bound
+export function world(): ecs.World?
+    return boundWorld
+end
+
+--- Returns the bound application without raising.
+--- @return the application, or nil when nothing is bound
+export function app(): application.Application?
+    return boundApplication
+end
+
+--- Returns the bound world for a tool that cannot work without one.
+--- @return the bound world
+--- @raises when no world is bound
+export function requireWorld(): ecs.World
+    local found = boundWorld
+    if found == nil then
+        error("no world is bound; the application has not started", 0)
+    end
+
+    return found
+end
+
+--- Returns the bound application for a tool that cannot work without one.
+--- @return the bound application
+--- @raises when no application is bound
+export function requireApplication(): application.Application
+    local found = boundApplication
+    if found == nil then
+        error("no application is bound; the application has not started", 0)
+    end
+
+    return found
+end

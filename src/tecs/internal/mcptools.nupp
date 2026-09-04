@@ -1,0 +1,711 @@
+module tecs.internal.mcptools
+
+--[[
+The MCP tools every build exposes.
+
+Deliberately few. A game registers what its own world needs; these are the ones
+that are true of any build and that an agent reaches for before it knows
+anything else: is it alive, what is it, what has it been saying, what is it
+running, and what happens when a key is pressed.
+
+Requiring this module registers its tools as a side effect; there is no install
+step. `tecs.mcp.bind` names the world and application they act on, and until it
+runs a tool that needs one fails with a message naming what is missing rather
+than with an opaque error.
+
+Every tool name here, and every argument key of every schema below, is a
+compatibility surface an agent reaches through JSON this tree cannot see. The
+`systems_*`, `states_*` and `stats` names are the ones the Teal debug command
+registry projected from its `systems`, `states` and `stats` commands, and they
+keep that spelling even though the command registry itself has not crossed.
+Do not rename one.
+]]
+
+local application = require("tecs.application")
+local ecs = require("tecs.ecs")
+local files = require("nupp.io.files")
+local json = require("nupp.data.json")
+local platformevents = require("tecs.platform.events")
+local platformwindow = require("tecs.platform.window")
+local time = require("nupp.time")
+local bindings = require("tecs.internal.mcpbindings")
+local registry = require("tecs.internal.mcpregistry")
+local sandbox = require("tecs.internal.mcpsandbox")
+
+--- The platform event kinds `send_event` can push.
+---
+--- Compatibility surface: each string is the externally typed event kind an
+--- agent names, and is the same spelling `tecs.platform.events` translates.
+--- The list is written here because that module publishes the union as a type
+--- rather than as a value; a `kinds()` there would replace it.
+local KINDS: {
+    string
+} = {
+    "quit",
+    "windowCloseRequested",
+    "windowResized",
+    "windowScaleChanged",
+    "windowFocusGained",
+    "windowFocusLost",
+    "keyDown",
+    "keyUp",
+    "mouseMotion",
+    "mouseDown",
+    "mouseUp",
+    "mouseWheel",
+    "textInput"
+}
+
+--- The log file `get_logs` reads, once a host has named one.
+local logFile: string? = nil
+
+--- Names the file `get_logs` reads.
+---
+--- The Nupp logging facility writes to a sink rather than to a path it can be
+--- asked for, so the host that configured a file sink is the only thing that
+--- knows where it went. Until something calls this, `get_logs` reports no path
+--- and no lines rather than guessing at one.
+--- @param path the log file path, or nil to report that there is none
+export function bindLogFile(path: string?): nil
+    logFile = path
+end
+
+--- Returns the log file a host named.
+--- @return the path, or nil while no host has named one
+export function boundLogFile(): string?
+    return logFile
+end
+
+-------------------------------------------------------------------------------
+-- Liveness and identity
+-------------------------------------------------------------------------------
+
+registry.register({
+    -- Compatibility surface: `ping`.
+    name = "ping",
+    description = "Confirms the game is running and answering. Reports a "
+    .. "crash rather than refusing to answer after one.",
+    readOnly = true,
+    whenCrashed = true,
+    inputSchema = {type = "object", properties = json.EMPTY_OBJECT},
+    handler = function(_arguments: {[string]: any}): {[string]: any}?
+        local crash = registry.crashed()
+
+        return {ok = crash == nil, crashed = crash ?? json.NULL, ticks = math.floor(time.now() * 1000)}
+    end
+})
+
+--- What the bound world holds, or nil before one is bound.
+---
+--- Through `world:getStats`, which is the ECS's own count of entities,
+--- archetypes, components and systems, rather than a second tally kept here.
+--- `declaredComponents` is beside it because the component registry is
+--- process-wide while `stats.components` counts only what an archetype in this
+--- world carries, and the difference between the two is what an agent looking
+--- for a component it cannot find needs to see.
+local function worldContext(): {[string]: any}?
+    local world = bindings.world()
+    if world == nil then
+        return nil
+    end
+    local stats = world:getStats()
+    local declared = 0
+    for _ in pairs(ecs.declaredComponents()) do
+        declared = declared + 1
+    end
+
+    return {
+        entities = stats.entities,
+        archetypes = stats.archetypes,
+        components = stats.components,
+        declaredComponents = declared,
+        systems = stats.systems,
+        -- Beside the counts because an agent looking at a world that is
+        -- behaving oddly needs to know whether its fixed step has been
+        -- silently losing time before it reads anything else here.
+        fixedTimeDropped = stats.fixedTimeDropped,
+        fixedStepsDropped = stats.fixedStepsDropped
+    }
+end
+
+registry.register({
+    -- Compatibility surface: `context`.
+    name = "context",
+    description = "What this build is, what it can do, and what the world it is running holds.",
+    readOnly = true,
+    whenCrashed = true,
+    inputSchema = {type = "object", properties = json.EMPTY_OBJECT},
+    handler = function(_arguments: {[string]: any}): {[string]: any}?
+        local app = bindings.app()
+
+        return {
+            world = worldContext() ?? json.NULL,
+            logFile = logFile ?? json.NULL,
+            state = app ~= nil and app:getState() or json.NULL,
+            frame = app ~= nil and app.frame or json.NULL,
+            elapsed = app ~= nil and app.elapsed or json.NULL,
+            suspended = app ~= nil and app.suspended or json.NULL,
+            eventKinds = json.asArray(KINDS)
+        }
+    end
+})
+
+-------------------------------------------------------------------------------
+-- The log
+-------------------------------------------------------------------------------
+
+--- Bytes read per call. A cursor rather than a whole file, so polling a long
+--- run stays cheap.
+local WINDOW: integer = 65536
+
+registry.register({
+    -- Compatibility surface: `get_logs`, with the `after` and `contains` keys.
+    name = "get_logs",
+    description = "Reads the log file from a byte offset. Poll with the returned offset to follow it.",
+    readOnly = true,
+    whenCrashed = true,
+    inputSchema = {
+        type = "object",
+        properties = {
+            after = {type = "integer", description = "Byte offset to read from. Omit to start at 0."},
+            contains = {type = "string", description = "Only return lines containing this text."}
+        }
+    },
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local path = logFile
+        if path == nil then
+            return {lines = json.EMPTY_ARRAY, offset = 0, path = json.NULL}
+        end
+
+        local handle = files.open(path, "r")
+        if handle == nil then
+            return {lines = json.EMPTY_ARRAY, offset = 0, path = path}
+        end
+
+        local after = math.floor(tonumber(arguments.after) or 0) as integer
+        local size = handle:size() or 0
+        if after > size then
+            -- The file was truncated under the cursor, so start again.
+            after = 0
+        end
+        handle:seek(after, "set")
+        -- The reader borrows the open file rather than owning it, so closing
+        -- the file is the one release this needs.
+        local window = handle:newReader():read(WINDOW) or ""
+        handle:close()
+
+        -- Only whole lines, so a cursor never lands mid-record and the next
+        -- read does not start with a fragment.
+        local lastBreak = window:find("\n[^\n]*$")
+        if lastBreak ~= nil then
+            window = window:sub(1, lastBreak)
+        end
+
+        local contains = arguments.contains as string?
+        local lines: {string} = {}
+        for line in window:gmatch("[^\n]+") do
+            if contains == nil or line:find(contains, 1, true) then
+                lines[#lines + 1] = line
+            end
+        end
+
+        return {path = path, offset = after + #window, lines = #lines > 0 and json.asArray(lines) or json.EMPTY_ARRAY}
+    end
+})
+
+-------------------------------------------------------------------------------
+-- Synthetic platform events
+-------------------------------------------------------------------------------
+
+--- Builds one platform event from the decoded tool arguments.
+---
+--- @raises when the kind is not one the host boundary translates
+local function buildEvent(kind: string, arguments: {[string]: any}): platformevents.Event
+    local window = math.floor(tonumber(arguments.window) or tonumber(arguments.which) or 0) as integer
+    local x = tonumber(arguments.x) or 0
+    local y = tonumber(arguments.y) or 0
+    local flipped = arguments.flipped == true
+    local sign = flipped and -1 or 1
+
+    if kind == "quit" then
+        return platformevents.quit(window)
+    elseif kind == "windowCloseRequested" then
+        return platformevents.closeRequested(window)
+    elseif kind == "windowResized" then
+        return platformevents.resized(
+            math.floor(tonumber(arguments.width) or 0) as integer,
+            math.floor(tonumber(arguments.height) or 0) as integer,
+            window,
+            tonumber(arguments.scaleFactor)
+        )
+    elseif kind == "windowScaleChanged" then
+        return platformevents.scaleChanged(
+            tonumber(arguments.scaleFactor) or 1,
+            math.floor(tonumber(arguments.width) or 0) as integer,
+            math.floor(tonumber(arguments.height) or 0) as integer,
+            window
+        )
+    elseif kind == "windowFocusGained" then
+        return platformevents.focused(true, window)
+    elseif kind == "windowFocusLost" then
+        return platformevents.focused(false, window)
+    elseif kind == "keyDown" or kind == "keyUp" then
+        local physical = arguments.physicalKey as string?
+        if physical == nil or physical == "" then
+            error("physicalKey is required for keyDown and keyUp", 0)
+        end
+
+        return platformevents.key(
+            kind == "keyDown",
+            physical,
+            arguments.logicalKey as string?,
+            arguments.text as string?,
+            math.floor(tonumber(arguments.modifiers) or 0) as integer,
+            arguments.repeated == true,
+            window
+        )
+    elseif kind == "mouseMotion" then
+        return platformevents.pointerMoved(x, y, tonumber(arguments.dx), tonumber(arguments.dy), window)
+    elseif kind == "mouseDown" or kind == "mouseUp" then
+        return platformevents.pointerButton(
+            kind == "mouseDown",
+            math.floor(tonumber(arguments.button) or 1) as integer,
+            x,
+            y,
+            math.floor(tonumber(arguments.clicks) or 1) as integer,
+            window
+        )
+    elseif kind == "mouseWheel" then
+        return platformevents.wheel(
+            (tonumber(arguments.wheelX) or 0) * sign,
+            (tonumber(arguments.wheelY) or 0) * sign,
+            (math.floor(tonumber(arguments.wheelTicksX) or 0) * sign) as integer,
+            (math.floor(tonumber(arguments.wheelTicksY) or 0) * sign) as integer,
+            x,
+            y,
+            window
+        )
+    elseif kind == "textInput" then
+        return platformevents.text(arguments.text as string? or "", window)
+    end
+
+    error(`no event kind named '${kind}'; call with no kind to list them`, 0)
+end
+
+registry.register({
+    -- Compatibility surface: `send_event`, with the `kind`, `x`, `y`, `button`,
+    -- `clicks`, `wheelX`, `wheelY`, `wheelTicksX`, `wheelTicksY`, `flipped`,
+    -- `repeated`, `text` and `which` keys the Teal server published. The keys
+    -- for events the `winit` boundary does not translate, `scancode`,
+    -- `penState`, `scale`, `recording`, `data1` and `data2`, are gone with the
+    -- events that carried them rather than accepted and ignored.
+    name = "send_event",
+    description = "Pushes an event into the input stream, as if it had come from the platform.",
+    destructive = true,
+    whenCrashed = true,
+    inputSchema = {
+        type = "object",
+        properties = {
+            kind = {type = "string", description = "Event kind. Call with no kind to list them."},
+            physicalKey = {type = "string", description = "Physical key name, for keyDown and keyUp."},
+            logicalKey = {type = "string", description = "Layout-mapped key name, for keyDown and keyUp."},
+            text = {type = "string", description = "Committed text, for textInput, keyDown and keyUp."},
+            modifiers = {type = "integer", description = "Modifier mask, for keyDown and keyUp."},
+            repeated = {type = "boolean", description = "For keyDown."},
+            button = {type = "integer", description = "For mouseDown, mouseUp."},
+            clicks = {
+                type = "integer",
+                description = "Clicks in the run, for mouseDown and mouseUp. One when omitted."
+            },
+            x = {type = "number"},
+            y = {type = "number"},
+            dx = {type = "number", description = "Relative movement, for mouseMotion."},
+            dy = {type = "number", description = "Relative movement, for mouseMotion."},
+            wheelX = {type = "number", description = "For mouseWheel."},
+            wheelY = {type = "number", description = "For mouseWheel."},
+            wheelTicksX = {type = "integer", description = "Whole notches, for mouseWheel."},
+            wheelTicksY = {type = "integer", description = "Whole notches."},
+            flipped = {
+                type = "boolean",
+                description = "Send the wheel event as a platform with natural "
+                .. "scrolling does, which arrives negated."
+            },
+            width = {type = "integer", description = "For windowResized and windowScaleChanged."},
+            height = {type = "integer", description = "For windowResized and windowScaleChanged."},
+            scaleFactor = {type = "number", description = "For windowResized and windowScaleChanged."},
+            window = {type = "integer", description = "The window the event is about."},
+            which = {type = "integer", description = "The window the event is about. An alias of window."}
+        }
+    },
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local kind = arguments.kind as string?
+        if kind == nil then
+            return {kinds = json.asArray(KINDS)}
+        end
+
+        local event = buildEvent(kind, arguments)
+        local app = bindings.requireApplication()
+        -- The same three folds one host iteration performs on a sealed batch,
+        -- so a synthetic event reaches window state, input state and the
+        -- world's observers exactly as a real one does.
+        platformwindow.handleEvent(app.window, event)
+        app.input:handleEvent(event)
+        platformevents.dispatch(app.world, event)
+        if event is platformevents.QuitEvent then
+            app:requestQuit()
+        end
+
+        return {pushed = kind}
+    end
+})
+
+-------------------------------------------------------------------------------
+-- The world's pipeline and state stack
+-------------------------------------------------------------------------------
+
+--- Reports one system the way every `systems` tool carries it.
+local function systemData(info: ecs.SystemInfo): {[string]: any}
+    return {
+        name = info.name,
+        phase = info.phase,
+        position = info.position,
+        enabled = info.enabled,
+        hasRunIf = info.hasRunIf
+    }
+end
+
+--- Finds one system by name in the world's current listing.
+local function findSystem(exclusive world: ecs.World, name: string): ecs.SystemInfo?
+    local listed = world:listSystems()
+    for index = 1, #listed do
+        if listed[index].name == name then
+            return listed[index]
+        end
+    end
+
+    return nil
+end
+
+--- Reads the required `name` argument the four single-name tools share.
+---
+--- @raises when the argument is absent or empty
+local function requiredName(arguments: {[string]: any}): string
+    local wanted = arguments.name as string?
+    if wanted == nil or wanted == "" then
+        error("invalid_arguments: name is required", 0)
+    end
+
+    return wanted
+end
+
+--- Reports the state stack the way every `states` tool carries it.
+local function stackData(stack: {string}): {[string]: any}
+    return {
+        states = #stack > 0 and json.asArray(stack) or json.EMPTY_ARRAY,
+        depth = #stack,
+        top = stack[#stack] ?? json.NULL
+    }
+end
+
+--- The schema the four single-name tools share.
+local NAME_SCHEMA: {
+    [string]: any
+} = {
+    type = "object",
+    properties = {name = {type = "string", description = "Names the system or state."}},
+    additionalProperties = false,
+    required = {"name"}
+}
+
+registry.register({
+    -- Compatibility surface: `stats`.
+    name = "stats",
+    description = "Reports how many entities, archetypes, components and "
+    .. "systems the world holds, plus the simulated time the fixed-step "
+    .. "overload policy abandoned.",
+    readOnly = true,
+    inputSchema = {type = "object", properties = json.EMPTY_OBJECT, additionalProperties = false},
+    handler = function(_arguments: {[string]: any}): {[string]: any}?
+        local world = bindings.requireWorld()
+        local stats = world:getStats()
+
+        return {
+            entities = stats.entities,
+            archetypes = stats.archetypes,
+            components = stats.components,
+            systems = stats.systems,
+            fixedTimeDropped = stats.fixedTimeDropped,
+            fixedStepsDropped = stats.fixedStepsDropped,
+            message = `${tostring(stats.entities)} entities in ${tostring(stats.archetypes)} archetypes`
+        }
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `systems_list`, with the `phase` and `disabled`
+    -- argument keys.
+    name = "systems_list",
+    description = "Lists the systems the world runs, in the order it runs "
+    .. "them, each with its phase, its position within that phase, whether "
+    .. "it is enabled, and whether it declares a gate of its own.",
+    readOnly = true,
+    inputSchema = {
+        type = "object",
+        properties = {
+            phase = {
+                type = "string",
+                description = "Narrows the listing to the systems in this phase, spelled as a row reports it."
+            },
+            disabled = {
+                type = "boolean",
+                description = "Narrows the listing to the systems that are currently stopped. (default: false)"
+            }
+        },
+        additionalProperties = false
+    },
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local world = bindings.requireWorld()
+        local wantedPhase = arguments.phase as string?
+        local onlyDisabled = arguments.disabled == true
+        local listed = world:listSystems()
+        local rows: {any} = {}
+        for index = 1, #listed do
+            local info = listed[index]
+            local admitted = (
+                wantedPhase == nil or info.phase == wantedPhase
+            ) and (not onlyDisabled or not info.enabled)
+            if admitted then
+                rows[#rows + 1] = systemData(info)
+            end
+        end
+
+        return {
+            systems = #rows > 0 and json.asArray(rows) or json.EMPTY_ARRAY,
+            total = #rows,
+            registered = #listed,
+            message = `${tostring(#rows)} of ${tostring(#listed)} systems`
+        }
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `systems_info`, with the `name` argument key.
+    name = "systems_info",
+    description = "Reports one system's phase, its position within that phase, "
+    .. "whether it is enabled, and whether it declares a gate of its own.",
+    readOnly = true,
+    inputSchema = NAME_SCHEMA,
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local wanted = requiredName(arguments)
+        local world = bindings.requireWorld()
+        local info = findSystem(world, wanted)
+        if info == nil then
+            error(`unknown_system: no system named '${wanted}'; see systems_list`, 0)
+        end
+        local payload = systemData(info)
+        payload.message = `${wanted} runs in ${info.phase}`
+
+        return payload
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `systems_stop`, with the `name` argument key.
+    name = "systems_stop",
+    description = "Stops one system, which stops the part of the game that "
+    .. "system performs. The system stays registered and keeps its place "
+    .. "in the schedule until systems_start starts it again.",
+    destructive = true,
+    inputSchema = NAME_SCHEMA,
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local wanted = requiredName(arguments)
+        local world = bindings.requireWorld()
+        local changed, reason = world:setSystemEnabled(wanted, false)
+        if not changed then
+            error(`unknown_system: ${reason ?? "no such system"}; see systems_list`, 0)
+        end
+        local payload = systemData(assert(findSystem(world, wanted)))
+        payload.message = `${wanted} is stopped and will not run until it is started`
+
+        return payload
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `systems_start`, with the `name` argument key.
+    name = "systems_start",
+    description = "Starts one system that systems_stop stopped, from the next "
+    .. "world update onward. The system keeps the gate it declared for itself.",
+    destructive = true,
+    inputSchema = NAME_SCHEMA,
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local wanted = requiredName(arguments)
+        local world = bindings.requireWorld()
+        local changed, reason = world:setSystemEnabled(wanted, true)
+        if not changed then
+            error(`unknown_system: ${reason ?? "no such system"}; see systems_list`, 0)
+        end
+        local payload = systemData(assert(findSystem(world, wanted)))
+        payload.message = `${wanted} runs again from the next update`
+
+        return payload
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `states_info`.
+    name = "states_info",
+    description = "Reports the states on the stack bottom-first, how deep the "
+    .. "stack is, and which state is on top.",
+    readOnly = true,
+    inputSchema = {type = "object", properties = json.EMPTY_OBJECT, additionalProperties = false},
+    handler = function(_arguments: {[string]: any}): {[string]: any}?
+        local world = bindings.requireWorld()
+        local stack = world:listStates()
+        local payload = stackData(stack)
+        payload.message = #stack == 0 and "the state stack is empty" or `${tostring(
+            #stack
+        )} states, ${stack[#stack]} on top`
+
+        return payload
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `states_push`, with the `name` argument key.
+    name = "states_push",
+    description = "Pushes one state the game created, which blurs the state "
+    .. "under it and fires the new state's enter policy.",
+    destructive = true,
+    inputSchema = NAME_SCHEMA,
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local wanted = requiredName(arguments)
+        local world = bindings.requireWorld()
+        local before = #world:listStates()
+        -- `pushState` raises on a name nothing created, and the name here comes
+        -- from a person or an agent, so the raise is caught and reported as a
+        -- code to match on. The depth separates the two failures: an unknown
+        -- name raises before the push, and an enter policy raises after it,
+        -- with the state already on the stack.
+        local pushed, failure = pcall(function(): nil
+            world:pushState(wanted)
+        end)
+        local stack = world:listStates()
+        if not pushed then
+            if #stack == before then
+                error(
+                    `unknown_state: no state named '${wanted}'; the game creates its states with world:createState`,
+                    0
+                )
+            end
+            error(`enter_failed: ${wanted} is on the stack and its enter policy raised: ${tostring(failure)}`, 0)
+        end
+        local payload = stackData(stack)
+        payload.message = `${wanted} is on top of ${tostring(#stack)} states`
+
+        return payload
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `states_pop`.
+    name = "states_pop",
+    description = "Pops the top state, which fires its exit policy and then "
+    .. "the revealed state's focus policy. The default exit policy despawns "
+    .. "every entity that state tagged.",
+    destructive = true,
+    inputSchema = {type = "object", properties = json.EMPTY_OBJECT, additionalProperties = false},
+    handler = function(_arguments: {[string]: any}): {[string]: any}?
+        local world = bindings.requireWorld()
+        local before = world:listStates()
+        if #before == 0 then
+            error("empty_stack: the state stack is empty, so there is nothing to pop", 0)
+        end
+        world:popState()
+        local stack = world:listStates()
+        local payload = stackData(stack)
+        payload.message = `${before[#before]} is off the stack`
+
+        return payload
+    end
+})
+
+-------------------------------------------------------------------------------
+-- Running code, and resuming after a crash
+-------------------------------------------------------------------------------
+
+registry.register({
+    -- Compatibility surface: `run_lua`, with the `code` argument key.
+    name = "run_lua",
+    description = "Runs Lua with `world` in scope. Returns an envelope "
+    .. "{returned, values}. State persists between calls, so a handle "
+    .. "stashed in a global is there next time. Prefer a structured tool "
+    .. "where one covers the operation.",
+    destructive = true,
+    inputSchema = {
+        type = "object",
+        properties = {code = {type = "string", description = "Lua to run. A bare expression is returned."}},
+        required = {"code"}
+    },
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local code = arguments.code as string?
+        if code == nil or code == "" then
+            error("code is required", 0)
+        end
+
+        local chunk, reason = sandbox.compile(code)
+        if chunk == nil then
+            error(`does not compile: ${tostring(reason)}`, 0)
+        end
+
+        -- Counted through select rather than table.pack, because LuaJIT is 5.1.
+        -- Returning nil has to be distinguishable from returning nothing.
+        local function collect(ok: boolean, ...: any): (integer, {any})
+            if not ok then
+                error(tostring((...)), 0)
+            end
+            local count = select("#", ...) as integer
+            local values: {any} = {}
+            for index = 1, count do
+                values[index] = sandbox.describe((select(index, ...)))
+            end
+
+            return count, values
+        end
+
+        local count, values = collect(pcall(chunk, bindings.requireWorld()))
+
+        return {returned = count, values = count > 0 and json.asArray(values) or json.EMPTY_ARRAY}
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `clear_crash`.
+    name = "clear_crash",
+    description = "Lets the loop simulate and render again after a gameplay "
+    .. "crash. A chance to look at another frame and to reload, not a "
+    .. "repair: engine invariants are restored and the game's are not, so "
+    .. "reload before trusting the world.",
+    destructive = true,
+    whenCrashed = true,
+    inputSchema = {type = "object", properties = json.EMPTY_OBJECT},
+    handler = function(_arguments: {[string]: any}): {[string]: any}?
+        local app = bindings.requireApplication()
+        local resumed, refusal = app:clearCrash()
+        if resumed then
+            registry.setCrashed(nil)
+        end
+
+        return {resumed = resumed, reason = refusal ?? json.NULL}
+    end
+})
+
+--- Reports whether the built-in tools have been registered.
+---
+--- Requiring this module is what registers them, so the answer is always true.
+--- It exists so a caller can require the module for its side effect without a
+--- lint reporting the binding as unused.
+--- @return true, once the module has loaded
+export function installed(): boolean
+    return application ~= nil
+end

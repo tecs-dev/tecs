@@ -1,0 +1,262 @@
+local application = require("tecs.application")
+local ecs = require("tecs.ecs")
+local json = require("nupp.data.json")
+local mcp = require("tecs.mcp")
+local netadapter = require("tecs.internal.netadapter")
+local suspension = require("nupp.suspension")
+local test = require("nupp.test")
+local time = require("nupp.time")
+
+-- The debug-server gate: an agent reaches a running application over the wire
+-- and both reads it and changes what it does.
+
+local suite = {}
+
+local Spun = ecs.newScalarComponent({name = "test.mcp.session.Spun", kind = "number", default = 0})
+
+--- Builds the application a session inspects, in the shape a migrated example
+--- has: a plugin that spawns entities, a named system, and a state the game
+--- created.
+local function newSession(): application.Application
+    local app = application.newApplication({
+        world = {maxEntities = 32},
+        debug = true,
+        plugin = function(exclusive running: application.Application): nil
+            local spinning = running.world:newQuery({include = {Spun}})
+            running.world:spawn(Spun(0))
+            running.world:spawn(Spun(0))
+            running.world:createState("paused")
+            running.world:addSystem({
+                name = "test.mcp.session.Spin",
+                phase = ecs.phases.Update,
+                run = function(_dt: number): nil
+                    for candidate, count in spinning:iter() do
+                        local values: {number} = assert(candidate:getMut(Spun))
+                        for index = 1, count as integer do
+                            values[index] = values[index] + 1
+                        end
+                    end
+                end
+            })
+        end
+    })
+    app:init()
+    mcp.bind(app.world, app)
+
+    return app
+end
+
+--- Reads the first entity's spin counter straight out of the world.
+local function spun(exclusive world: ecs.World): number
+    local found = world:newQuery({include = {Spun}})
+    for candidate, count in found:iter() do
+        if (count as integer) > 0 then
+            return (assert(candidate:get(Spun)))[1]
+        end
+    end
+
+    return -1
+end
+
+--- One HTTP tool call against the loopback endpoint.
+local function callOverHTTP(port: integer, name: string, arguments: {[string]: any}?): {[string]: any}
+    local stream = assert(netadapter.connect({host = "127.0.0.1", port = port}))
+    local payload = json.encode({
+        jsonrpc = "2.0",
+        id = 1,
+        method = "tools/call",
+        params = {name = name, arguments = arguments or json.EMPTY_OBJECT}
+    })
+    assert(stream:write(
+        `POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: ${tostring(#payload)}\r\n\r\n${payload}`
+    ))
+
+    local received = ""
+    local headEnd: integer = 0
+    local length: integer = -1
+    while true do
+        if headEnd == 0 then
+            local found = received:find("\r\n\r\n", 1, true)
+            if found ~= nil then
+                headEnd = found + 3
+                length = math.floor(tonumber(received:match("[Cc]ontent%-[Ll]ength:%s*(%d+)") or 0) or 0) as integer
+            end
+        end
+        if headEnd > 0 and #received - headEnd >= length then
+            break
+        end
+        local chunk = assert(stream:read(4096))
+        if chunk == "" then
+            break
+        end
+        received = received .. chunk
+    end
+    stream:close()
+
+    local response = json.decode(received:sub(headEnd + 1), json.NULL) as {[string]: any}
+    local result = response.result as {[string]: any}
+    local content = result.content as {{[string]: any}}
+    test.assert(result.isError == nil, `${name} failed: ${content ~= nil and content[1].text or "?"}`)
+
+    return result.structuredContent as {[string]: any}
+end
+
+--- The poll turns a session is given before the agent is declared stuck.
+---
+--- Bounded rather than open, so a failing assertion in the agent ends the run
+--- with that failure instead of leaving the poller looping for a flag the dead
+--- branch will never set.
+local MAX_TURNS: integer = 4000
+
+--- Runs `agent` while the server beside it is polled once a millisecond.
+---
+--- The application is stepped outside this, not inside it: `world:update` opens
+--- a task scope of its own, and nesting one inside a driver that is already
+--- running this coroutine is not what the frame does in a real host.
+--- @raises whatever the agent or the poller raised
+local function withSession<T>(server: mcp.Server, port: integer, agent: function(port: integer): T): T
+    local finished = false
+    local answers, failures = suspension.gather({
+        function(): any
+            local turns = 0
+            while not finished and turns < MAX_TURNS do
+                mcp.poll(server)
+                turns = turns + 1
+                time.sleep(1)
+            end
+            mcp.poll(server)
+
+            return nil
+        end,
+        function(): any
+            local produced = agent(port)
+            finished = true
+
+            return produced
+        end
+    })
+    for index = 1, 2 do
+        if failures[index] ~= nil then
+            error(failures[index], 0)
+        end
+    end
+
+    return answers[2] as T
+end
+
+function suite.inspectsAndControlsARunningApplicationOverTheTransport(): nil
+    local app = newSession()
+    local server = assert(mcp.listen(0))
+
+    -- The application runs, so the system has done something to observe.
+    for _ = 1, 5 do
+        app:iterate(1 / 60, nil)
+    end
+    local before = spun(app.world)
+    test.assert(before > 0, "the system should have been running")
+
+    withSession(server, server.port, function(port: integer): nil
+        local counted = callOverHTTP(port, "stats")
+        test.equal(counted.entities as integer, 2)
+
+        local listed = callOverHTTP(port, "systems_list", {phase = "Update"})
+        local rows = listed.systems as {{[string]: any}}
+        test.equal(listed.total as integer, 1)
+        test.equal(rows[1].name as string, "test.mcp.session.Spin")
+
+        local queried = callOverHTTP(port, "query", {include = {"test.mcp.session.Spun"}})
+        local entities = queried.entities as {{[string]: any}}
+        local carried = (entities[1].components as {[string]: any})["test.mcp.session.Spun"] as {[string]: any}
+        test.equal(carried.value as number, before)
+
+        -- Control: stopping the system stops the part of the game it performs.
+        local stopped = callOverHTTP(port, "systems_stop", {name = "test.mcp.session.Spin"})
+        test.assert(stopped.enabled == false)
+
+        -- Control: the state stack moves.
+        local pushed = callOverHTTP(port, "states_push", {name = "paused"})
+        test.equal(pushed.top as string, "paused")
+        test.equal(callOverHTTP(port, "states_info").depth as integer, 1)
+        callOverHTTP(port, "states_pop")
+        test.equal(callOverHTTP(port, "states_info").depth as integer, 0)
+
+        -- Control: a synthetic event reaches the same folds a real one does.
+        local sent = callOverHTTP(port, "send_event", {kind = "keyDown", physicalKey = "KeyF"})
+        test.equal(sent.pushed as string, "keyDown")
+
+        -- Control: an entity spawned over the wire is in the world.
+        local spawned = callOverHTTP(port, "spawn", {components = {["test.mcp.session.Spun"] = {value = 99}}})
+        test.assert((spawned.entity as integer) > 0)
+        test.equal(callOverHTTP(port, "stats").entities as integer, 3)
+    end)
+
+    test.assert(app.input:keyDown("KeyF"))
+
+    -- The stopped system does not run, so the counter it owns stands still.
+    local held = spun(app.world)
+    for _ = 1, 5 do
+        app:iterate(1 / 60, nil)
+    end
+    test.equal(spun(app.world), held)
+
+    withSession(server, server.port, function(port: integer): nil
+        local started = callOverHTTP(port, "systems_start", {name = "test.mcp.session.Spin"})
+        test.assert(started.enabled == true)
+    end)
+
+    app:iterate(1 / 60, nil)
+    test.assert(spun(app.world) > held)
+
+    mcp.destroy(server)
+    app:shutdown()
+end
+
+function suite.answersWhileTheApplicationIsCrashedAndResumesIt(): nil
+    local app = application.newApplication({
+        world = {maxEntities = 8},
+        debug = true,
+        plugin = function(exclusive running: application.Application): nil
+            running.world:addSystem({
+                name = "test.mcp.session.Breaks",
+                phase = ecs.phases.Update,
+                run = function(_dt: number): nil
+                    error("the game broke", 0)
+                end
+            })
+        end
+    })
+    app:init()
+    mcp.bind(app.world, app)
+
+    app:iterate(1 / 60, nil)
+    local failure = app:crashed() as string
+    test.assert(failure ~= nil)
+    mcp.setCrashed(failure)
+
+    -- A world tool reports the traceback rather than answering.
+    local blocked = json.decode(mcp.dispatch(json.encode({
+        jsonrpc = "2.0",
+        id = 1,
+        method = "tools/call",
+        params = {name = "stats", arguments = json.EMPTY_OBJECT}
+    })), json.NULL) as {[string]: any}
+    local blockedResult = blocked.result as {[string]: any}
+    test.assert(blockedResult.crashed == true)
+
+    -- `clear_crash` is one of the tools that survives a crash, and it lets the
+    -- loop simulate again.
+    local cleared = json.decode(mcp.dispatch(json.encode({
+        jsonrpc = "2.0",
+        id = 2,
+        method = "tools/call",
+        params = {name = "clear_crash", arguments = json.EMPTY_OBJECT}
+    })), json.NULL) as {[string]: any}
+    local resumed = (cleared.result as {[string]: any}).structuredContent as {[string]: any}
+
+    test.assert(resumed.resumed == true)
+    test.assert(mcp.crashed() == nil)
+    test.assert(app:crashed() == nil)
+    app:shutdown()
+end
+
+return suite

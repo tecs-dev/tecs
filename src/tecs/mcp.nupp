@@ -1,0 +1,289 @@
+module tecs.mcp
+
+--[[
+The MCP debug server, its tool registry, and the tools every build exposes.
+
+## Serving a session
+
+`listen` binds a loopback Streamable HTTP endpoint at
+`http://127.0.0.1:<port>/mcp`. Call `Server:poll` once per frame and
+`Server:destroy` at teardown. Each poll answers at most one tool call. The
+handler sees a committed world, and the frame cannot end until it returns, so a
+tool answers quickly or holds the game up.
+
+```nupp
+local mcp = require("tecs.mcp")
+
+local server = assert(mcp.listen(7100))
+mcp.bind(app.world, app)
+
+-- once per frame
+mcp.poll(server)
+```
+
+## Registering a tool
+
+```nupp
+local placed = world:newQuery({include = {tecs.Transform2D}})
+
+mcp.register({
+    name = "placed_count",
+    description = "Count entities that carry a Transform2D",
+    inputSchema = {type = "object", properties = {}},
+    readOnly = true,
+    handler = function(_arguments: {[string]: any}): {[string]: any}?
+        local total = 0
+        for _, length in placed:iter() do
+            total = total + (length as integer)
+        end
+
+        return {count = total}
+    end
+})
+```
+
+Registration is what publishes the listing, so mutating a registered table in
+place does not change what a connected agent is told.
+
+## Inspecting a world
+
+Start with `components_info`, `query` and `info`. Use `modify` for a partial
+component update and `set` for a complete value or a missing component.
+`systems_list` and `states_info` report what the world is running. Prefer these
+structured tools to `run_lua`; the Lua sandbox limits accidents but does not
+create a security boundary.
+
+## After a crash
+
+`setCrashed` records a guarded gameplay failure. The server keeps polling after
+one: `ping`, `context`, `get_logs`, `send_event` and `clear_crash` remain
+available, and every tool that touches the world reports the stored traceback
+instead of running.
+
+## Compatibility
+
+Tool names, and the argument keys of their schemas, are reached by JSON an
+agent sends and this tree cannot see. They keep the spelling the Teal engine
+published, including the snake_case names `run_lua`, `send_event`,
+`components_info`, `get_logs`, `clear_crash`, `systems_list`, `systems_info`,
+`systems_stop`, `systems_start`, `states_info`, `states_push` and `states_pop`.
+Do not rename one.
+]]
+
+local application = require("tecs.application")
+local ecs = require("tecs.ecs")
+local json = require("nupp.data.json")
+local bindings = require("tecs.internal.mcpbindings")
+local registry = require("tecs.internal.mcpregistry")
+local sandbox = require("tecs.internal.mcpsandbox")
+local tools = require("tecs.internal.mcptools")
+local transport = require("tecs.internal.mcptransport")
+local worldtools = require("tecs.internal.mcpworld")
+
+--- The decoded arguments a tool receives and the structured content it returns.
+export type ToolHandler = registry.ToolHandler
+
+--- One registered tool and its handler.
+export type Tool = registry.Tool
+
+--- One tool call taken off a connection and waiting for the frame.
+export type Request = transport.Request
+
+--- A listening MCP endpoint, which answers only while something calls `poll`.
+export record Server
+    --- Read-only. Reports the bound TCP port, which is the one `listen` was
+    --- given unless it was given zero.
+    port: integer
+
+    --- Engine-owned. Holds the HTTP transport. Ordinary game code should
+    --- ignore this field.
+    private endpoint: transport.Server
+
+    --- Engine-owned. Holds the registry revision the published listing was
+    --- encoded from, which is what `poll` compares to decide whether to
+    --- publish again. Ordinary game code should ignore this field.
+    private publishedRevision: integer
+
+    --- Engine-owned. Reports whether `destroy` has stopped the server.
+    --- Ordinary game code should ignore this field.
+    private destroyed: boolean
+end
+
+-- Requiring the two tool modules is what registers the built-in tools, and a
+-- server that listened without them would advertise an empty session.
+local builtInsInstalled: boolean = tools.installed() and worldtools.installed()
+
+--- Registers a tool, replacing any tool already holding its name.
+---
+--- A replacement keeps the name's original position, so the order a client sees
+--- is first-registration order rather than last.
+--- @param tool the declaration, stored by reference and never copied, so a
+---     later mutation changes what the server dispatches but not what a
+---     connected agent has been told
+--- @raises when the declaration carries no name or no handler
+export function register(tool: Tool): nil
+    registry.register(tool)
+end
+
+--- Returns every registered tool in registration order.
+--- @return a fresh list the caller owns, holding the registered declarations
+---     themselves rather than copies
+export function listTools(): {Tool}
+    return registry.listTools()
+end
+
+--- Names the world and application the built-in tools act on.
+---
+--- One of each. The MCP protocol has nowhere to carry them, so they are held in
+--- module-level slots and every tool that needs one fails with a message saying
+--- so until this has run.
+--- @param world the world the world tools read and write, or nil to unbind
+--- @param app the application the lifecycle tools act on, or nil to unbind
+export function bind(world: ecs.World?, app: application.Application?): nil
+    bindings.bindWorld(world)
+    bindings.bindApplication(app)
+end
+
+--- Names the file `get_logs` reads.
+---
+--- Nupp's logging writes to a sink rather than to a path it can be asked for,
+--- so the host that configured a file sink is the only thing that knows where
+--- it went. Until something calls this, `get_logs` reports no path and no lines
+--- rather than guessing at one.
+--- @param path the log file path, or nil to report that there is none
+export function bindLogFile(path: string?): nil
+    tools.bindLogFile(path)
+end
+
+--- Records a crash, after which every world-touching tool reports it.
+---
+--- The server outliving the game is the point. An agent debugging something up
+--- to the moment it broke should get the reason rather than a refused
+--- connection, and the tools that do not touch the world keep working so it can
+--- still read the log and ask what the build was.
+--- @param traceback the failure text, handed back verbatim by `crashed` and
+---     sent as the whole body of the error a blocked tool answers with, or nil
+---     to clear the crashed state
+export function setCrashed(traceback: string?): nil
+    registry.setCrashed(traceback)
+end
+
+--- Returns the recorded crash text.
+--- @return the traceback, or nil when nothing has recorded a crash; nothing
+---     here polls the game to confirm that it remains healthy
+export function crashed(): string?
+    return registry.crashed()
+end
+
+--- Forgets everything a previous `run_lua` call stashed.
+---
+--- The next `run_lua` compiles into a fresh environment. A chunk already
+--- compiled keeps the old one, so a reset makes a clean slate for new code
+--- rather than for code already in flight.
+export function resetSandbox(): nil
+    sandbox.reset()
+end
+
+--- Runs one JSON-RPC request in process and returns the response text.
+---
+--- The transport is not involved, so this is what a test drives and what a host
+--- embedding the protocol on a channel of its own can call. A tool handler runs
+--- on the calling thread, inside this call.
+--- @param text one JSON-RPC request object, which may not be a batch
+--- @return the response as JSON text, which reports bad input in band rather
+---     than by raising
+export function dispatch(text: string): string
+    return registry.dispatch(text)
+end
+
+--- Starts the server on `port`.
+--- @param port the TCP port to bind, 7100 when nil, or zero to let the platform
+---     choose one and report it as `Server.port`
+--- @return the listening server, which answers nothing until something calls
+---     `poll`, or nil when the port could not be bound
+--- @return why it could not bind, when unsuccessful
+export function listen(port: integer?): (Server?, string?)
+    local wanted = port or 7100
+    local endpoint, why = transport.listen(wanted, registry.describeJSON())
+    if endpoint == nil then
+        return nil, why ?? "the listener could not bind"
+    end
+
+    return new Server(
+        port = endpoint.port,
+        endpoint = endpoint,
+        publishedRevision = registry.currentRevision(),
+        destroyed = false
+    )
+end
+
+--- Answers at most one tool call. Call once per frame.
+---
+--- Protocol-only traffic, `initialize` and `tools/list` included, is answered
+--- without running a tool and therefore does not make this report true.
+--- @param self the running server
+--- @return whether one tool handler ran
+export function poll(exclusive self: Server): boolean
+    if self.destroyed then
+        return false
+    end
+    -- Registration is what publishes a change, so mutating a registered tool
+    -- table in place changes nothing an agent is told. Comparing the revision
+    -- keeps the encode out of every frame that registered nothing.
+    local revision = registry.currentRevision()
+    if self.publishedRevision ~= revision then
+        self.publishedRevision = revision
+        self.endpoint:setTools(registry.describeJSON())
+    end
+    self.endpoint:pump()
+
+    local request = self.endpoint:nextRequest()
+    if request == nil then
+        return false
+    end
+
+    local tool = registry.findTool(request.name)
+    if tool == nil then
+        self.endpoint:respond(request, `no tool named '${request.name}'`, true, false)
+
+        return true
+    end
+
+    local decoded, arguments = pcall(json.decode, request.arguments, json.NULL)
+    if not decoded or type(arguments) ~= "table" then
+        self.endpoint:respond(request, "invalid tool arguments", true, false)
+
+        return true
+    end
+
+    local result = registry.callTool(tool, arguments as {[string]: any})
+    if result.isError == true then
+        local content = result.content as {{[string]: any}}
+        self.endpoint:respond(request, content[1].text as string, true, result.crashed == true)
+
+        return true
+    end
+    self.endpoint:respond(request, json.encode(result.structuredContent), false, false)
+
+    return true
+end
+
+--- Releases the server. Safe to call more than once.
+---
+--- One way: the port is given up and the server cannot be made to listen again.
+--- The tool registry is process-wide and is left untouched, so a later `listen`
+--- answers the same tools.
+--- @param self the server to stop
+export function destroy(exclusive self: Server): nil
+    if self.destroyed then
+        return
+    end
+    self.destroyed = true
+    self.endpoint:destroy()
+end
+
+--- Reports whether the built-in tools were registered when this module loaded.
+--- @return true, because requiring the module registers them
+export function hasBuiltInTools(): boolean
+    return builtInsInstalled
+end

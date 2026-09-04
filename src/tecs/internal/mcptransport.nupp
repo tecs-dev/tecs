@@ -1,0 +1,504 @@
+module tecs.internal.mcptransport
+
+--[[
+The loopback MCP Streamable HTTP endpoint, over Nupp's own networking.
+
+The listener, the connections and the reactor are `nupp.io.net`. What this
+module adds is the HTTP/1.1 framing MCP puts JSON-RPC inside, and the frame
+discipline the engine needs: protocol-only traffic is answered on the
+connection's own coroutine, while a `tools/call` crosses into the frame and is
+answered by whatever drives `poll`, so a tool handler always runs on the game
+thread between world updates.
+
+A connection runs as a coroutine this module owns and schedules. Each one
+installs a `nupp.suspension` handler whose park hands control back to `poll`,
+so a read that has no bytes yet costs the frame nothing and resumes on a later
+turn. That is the same shape `tecs.internal.framepump` gives the application,
+written again here because a server runs several connections at once and a
+pump built for one parked operation cannot.
+
+The listener and the connections reach `nupp.io.net` through
+`tecs.internal.netadapter`, which is where the one cast that module currently
+needs is written down.
+]]
+
+local json = require("nupp.data.json")
+local log = require("nupp.log")
+local suspension = require("nupp.suspension")
+local netadapter = require("tecs.internal.netadapter")
+local registry = require("tecs.internal.mcpregistry")
+
+-- The externally typed logger name is `tecs.mcp`, independent of the module
+-- path it is created from. Do not rename this compatibility surface.
+local logger = log.named("tecs.mcp")
+
+--- The sentinel a parked connection raises when `destroy` unwinds it.
+local SHUTDOWN = "tecs.mcp: the server stopped"
+
+--- The path the endpoint answers on. The MCP Streamable HTTP transport names
+--- one path per server, and this is the one the Teal server published.
+local ENDPOINT = "/mcp"
+
+--- The largest request body the endpoint accepts, so a malformed
+--- `Content-Length` cannot make the server allocate without limit.
+local MAX_BODY: integer = 4 * 1024 * 1024
+
+--- One tool call taken off a connection and waiting for the frame.
+export record Request
+    --- Read-only. Names the registered tool the agent called.
+    name: string
+
+    --- Read-only. Carries the call's arguments as the JSON object text the
+    --- agent sent, which the frame decodes.
+    arguments: string
+
+    private task: thread
+    private payload: string?
+    private isError: boolean
+    private wasCrashed: boolean
+    private answered: boolean
+end
+
+--- A loopback-only Streamable HTTP endpoint at `/mcp`.
+export record Server
+    --- Read-only. Reports the TCP port bound on `127.0.0.1`, which is the one
+    --- the caller asked for unless it asked for zero.
+    port: integer
+
+    private listener: netadapter.Listener
+    private toolsJSON: string
+    private tasks: {thread}
+    private runnable: {thread}
+    private queued: {[thread]: boolean}
+    private pending: {Request}
+    private destroyed: boolean
+    private handler: suspension.Handler
+
+    setTools: function(exclusive self: Server, toolsJSON: string): nil
+    pump: function(exclusive self: Server): nil
+    nextRequest: function(exclusive self: Server): Request?
+    respond: function(
+        exclusive self: Server,
+        exclusive request: Request,
+        payload: string,
+        isError: boolean,
+        crashed: boolean
+    ): nil
+    destroy: function(exclusive self: Server): nil
+end
+
+local function enqueue(exclusive self: Server, task: thread): nil
+    if self.queued[task] or coroutine.status(task) ~= "suspended" then
+        return
+    end
+    self.queued[task] = true
+    self.runnable[#self.runnable + 1] = task
+end
+
+local function resumeTask(exclusive self: Server, task: thread, keepRunning: boolean?): nil
+    self.queued[task] = nil
+    if coroutine.status(task) ~= "suspended" then
+        return
+    end
+    local succeeded, failure = coroutine.resume(task, keepRunning ~= false)
+    if not succeeded and tostring(failure):find(SHUTDOWN, 1, true) == nil then
+        logger:warn("connection failed: %s", tostring(failure))
+    end
+end
+
+--- Hands control back to `poll` until something makes this task runnable.
+---
+--- Shared by the suspension handler and by a connection waiting for the frame
+--- to answer its tool call, so both wake through one protocol: a resume that
+--- carries false is the server unwinding, and it raises rather than returning.
+--- @raises when the server is being destroyed
+local function park(): nil
+    local keepRunning = coroutine.yield()
+    if keepRunning == false then
+        error(SHUTDOWN, 0)
+    end
+end
+
+local function newHandler(exclusive self: Server): suspension.Handler
+    return new suspension.Handler(
+        park = function(_: suspension.Handler, waiting: suspension.Waiting, _cancel: function(): nil): nil
+            local task = assert(coroutine.running())
+            -- Resumed on the pass that resolved the wait rather than queued for
+            -- the next one. A readiness source stays registered until the park
+            -- it belongs to finishes, and any driver in the process may run a
+            -- polling pass, so a connection left queued would have its one-shot
+            -- resumption fired a second time by the next pass. The status guard
+            -- in `resumeTask` covers the case where the subscription resolved
+            -- before this task ever yielded.
+            local function wake(): nil
+                resumeTask(self, task)
+            end
+
+            while not waiting:ready() do
+                waiting:onResume(wake)
+                if not waiting:ready() then
+                    park()
+                end
+            end
+        end,
+        canPark = function(_: suspension.Handler): boolean
+            return true
+        end,
+        shutdown = function(_: suspension.Handler): nil
+        end
+    )
+end
+
+-------------------------------------------------------------------------------
+-- HTTP framing
+-------------------------------------------------------------------------------
+
+--- Reads from `stream` until `head` holds a complete request head.
+---
+--- Returns nil when the peer closed before sending one, which is an ordinary
+--- end of connection rather than a failure.
+local function readHead(stream: netadapter.Stream): (string?, string?)
+    local head = ""
+    while true do
+        if head:find("\r\n\r\n", 1, true) ~= nil then
+            return head
+        end
+        if #head > MAX_BODY then
+            return nil, "the request head is too long"
+        end
+        local chunk, why = stream:read(4096)
+        if chunk == nil then
+            return nil, why
+        elseif chunk == "" then
+            return nil
+        end
+        head = head .. chunk
+    end
+end
+
+--- Reads exactly `length` further bytes, given what the head read overshot by.
+local function readBody(stream: netadapter.Stream, already: string, length: integer): (string?, string?)
+    local body = already
+    while #body < length do
+        local chunk, why = stream:read(length - #body)
+        if chunk == nil then
+            return nil, why
+        elseif chunk == "" then
+            return nil, "the peer closed before the body arrived"
+        end
+        body = body .. chunk
+    end
+
+    return body
+end
+
+--- Returns the declared body length of a request head.
+---
+--- Header names are matched case-insensitively, which HTTP requires and which
+--- an MCP client relies on.
+local function contentLength(head: string): integer
+    for line in head:gmatch("[^\r\n]+") do
+        local name, value = line:match("^([%w%-]+)%s*:%s*(.-)%s*$")
+        if name ~= nil and name:lower() == "content-length" then
+            return math.floor(tonumber(value) or 0) as integer
+        end
+    end
+
+    return 0
+end
+
+local function respondHTTP(stream: netadapter.Stream, status: string, contentType: string?, body: string): nil
+    local head = `HTTP/1.1 ${status}\r\nConnection: keep-alive\r\nContent-Length: ${tostring(#body)}\r\n`
+    if contentType ~= nil then
+        head = head .. `Content-Type: ${contentType}\r\n`
+    end
+    stream:write(head .. "\r\n" .. body)
+end
+
+-------------------------------------------------------------------------------
+-- JSON-RPC, split between the connection and the frame
+-------------------------------------------------------------------------------
+
+--- Answers one JSON-RPC request, crossing into the frame only for a tool call.
+---
+--- `initialize`, `notifications/*` and `tools/list` are protocol traffic with
+--- no game state behind them, so they are answered here on the connection's own
+--- coroutine and never make `poll` report that it ran a handler.
+local function answer(exclusive self: Server, body: string): string?
+    local decoded, value = pcall(json.decode, body, json.NULL)
+    if not decoded or type(value) ~= "table" then
+        return registry.dispatch(body)
+    end
+
+    local request = value as {[string]: any}
+    local method = request.method as string?
+    if method ~= nil and request.id == nil then
+        -- A notification is acknowledged with no body, which is what an MCP
+        -- client expects for `notifications/initialized`.
+        return nil
+    end
+    if method ~= "tools/call" then
+        return registry.dispatch(body)
+    end
+
+    local params = (request.params or {}) as {[string]: any}
+    local name = params.name as string?
+    if name == nil or registry.findTool(name) == nil then
+        return registry.dispatch(body)
+    end
+
+    local arguments = params.arguments
+    local queued = new Request(
+        name = name,
+        arguments = arguments ~= nil and json.encode(arguments) or "{}",
+        task = assert(coroutine.running()),
+        payload = nil,
+        isError = false,
+        wasCrashed = false,
+        answered = false
+    )
+    self.pending[#self.pending + 1] = queued
+    while not queued.answered do
+        park()
+    end
+
+    local result: {[string]: any} = {}
+    if queued.isError then
+        result.isError = true
+        if queued.wasCrashed then
+            result.crashed = true
+        end
+        result.content = {{type = "text", text = queued.payload ?? ""}}
+    else
+        local ok, structured = pcall(json.decode, queued.payload ?? "{}", json.NULL)
+        result.structuredContent = ok and structured or {}
+        result.content = {{type = "text", text = queued.payload ?? "{}"}}
+    end
+
+    return json.encode({jsonrpc = "2.0", id = request.id, result = result}, json.NULL)
+end
+
+--- Serves one connection until the peer closes it or the server stops.
+local function serve(exclusive self: Server, stream: netadapter.Stream): nil
+    stream:setNoDelay(true)
+    while not self.destroyed do
+        local head, why = readHead(stream)
+        if head == nil then
+            if why ~= nil then
+                logger:debug("connection ended: %s", why)
+            end
+            break
+        end
+        local boundary = assert(head:find("\r\n\r\n", 1, true))
+        local overshoot = head:sub(boundary + 4)
+        local requestLine = head:match("^(.-)\r\n") or ""
+        local method, target = requestLine:match("^(%u+)%s+(%S+)")
+        local length = contentLength(head)
+        if length > MAX_BODY then
+            respondHTTP(stream, "413 Payload Too Large", "text/plain", "body too large")
+            break
+        end
+        local body = readBody(stream, overshoot, length) ?? ""
+
+        local path = (target or ""):match("^[^?]*") or ""
+        if path ~= ENDPOINT then
+            respondHTTP(stream, "404 Not Found", "text/plain", "no endpoint here")
+        elseif method ~= "POST" then
+            -- This server offers no server-initiated stream, so the other
+            -- Streamable HTTP methods are refused rather than left hanging.
+            respondHTTP(stream, "405 Method Not Allowed", "text/plain", "POST only")
+        else
+            local response = answer(self, body)
+            if response == nil then
+                respondHTTP(stream, "202 Accepted", nil, "")
+            else
+                respondHTTP(stream, "200 OK", "application/json", response)
+            end
+        end
+    end
+    stream:close()
+end
+
+-- Forward declared: the coroutine body below dispatches to it, and it starts
+-- connection coroutines through `spawn`.
+local acceptLoop: function(exclusive self: Server): nil
+
+--- Starts one server coroutine, accepting when `stream` is nil and serving
+--- that connection otherwise.
+---
+--- The server and the connection are passed through the first resume rather
+--- than captured, because a coroutine outlives the call that created it and a
+--- closure over a borrowed owner cannot.
+local function spawn(exclusive self: Server, stream: netadapter.Stream?): nil
+    local task = coroutine.create(function(server: Server, connection: netadapter.Stream?): nil
+        handle suspension with server.handler do
+            if connection == nil then
+                acceptLoop(server)
+            else
+                serve(server, connection)
+            end
+        end
+    end)
+    self.tasks[#self.tasks + 1] = task
+    coroutine.resume(task, self, stream)
+end
+
+--- Accepts connections for as long as the server lives.
+acceptLoop = function(exclusive self: Server): nil
+    while not self.destroyed do
+        local stream, why = self.listener:accept()
+        if stream == nil then
+            if why ~= nil and not self.destroyed then
+                logger:warn("accept failed: %s", why)
+            end
+            break
+        end
+        spawn(self, stream)
+    end
+end
+
+-------------------------------------------------------------------------------
+-- The server
+-------------------------------------------------------------------------------
+
+--- Starts the endpoint at `http://127.0.0.1:<port>/mcp`.
+---
+--- Loopback only: the listener binds `127.0.0.1` and nothing configures that,
+--- because a debug server that answers the network is a remote code execution
+--- tool rather than a debugger.
+--- @param port the TCP port to bind, or zero to let the platform choose one
+--- @param toolsJSON the encoded tool listing to serve until `setTools` replaces it
+--- @return the listening server, which answers nothing until something calls `poll`
+--- @return why it could not bind, when unsuccessful
+export function listen(port: integer, toolsJSON: string): (Server?, string?)
+    local listener, why = netadapter.listen({host = "127.0.0.1", port = port})
+    if listener == nil then
+        return nil, why ?? "the listener could not bind"
+    end
+
+    local self = new Server(
+        port = listener:port(),
+        listener = listener,
+        toolsJSON = toolsJSON,
+        tasks = {},
+        runnable = {},
+        queued = {},
+        pending = {},
+        destroyed = false,
+        handler = nil as suspension.Handler
+    )
+    self.handler = newHandler(self)
+    spawn(self, nil)
+    logger:info("listening at http://127.0.0.1:%d/mcp", self.port)
+
+    return self
+end
+
+--- Replaces the tool listing this server serves.
+--- @param self the running server
+--- @param toolsJSON the encoded listing
+function Server.setTools(exclusive self: Server, toolsJSON: string): nil
+    self.toolsJSON = toolsJSON
+end
+
+--- Returns the tool listing this server currently serves.
+---
+--- The listing is held rather than read from the registry on every request, so
+--- that what a connected agent is told changes only when something publishes
+--- it. `tecs.mcp` republishes on the first poll after a registration.
+--- @param self the server to inspect
+--- @return the encoded listing
+export function tools(borrows self: Server): string
+    return self.toolsJSON
+end
+
+--- Drives the reactor once and moves every connection that can move.
+---
+--- Protocol-only traffic, `initialize` and `tools/list` included, is answered
+--- inside this call on the connection's own coroutine, so it never reaches the
+--- frame.
+--- @param self the running server
+function Server.pump(exclusive self: Server): nil
+    if self.destroyed then
+        return
+    end
+    -- The reactor first, so a connection whose bytes arrived between frames is
+    -- runnable before anything is resumed.
+    netadapter.pump(0)
+    suspension.poll()
+
+    local pass = self.runnable
+    self.runnable = {}
+    for index = 1, #pass do
+        resumeTask(self, pass[index])
+    end
+end
+
+--- Takes the next queued tool call, which the caller must answer.
+---
+--- The caller owns the answer: every request this hands out reaches `respond`
+--- exactly once, or the connection waiting for it never writes a response.
+--- @param self the running server
+--- @return the request, or nil when no tool call is waiting
+function Server.nextRequest(exclusive self: Server): Request?
+    if self.destroyed then
+        return nil
+    end
+
+    return table.remove(self.pending, 1)
+end
+
+--- Reports whether a request has already been answered.
+--- @param request the request `nextRequest` handed out
+--- @return whether `respond` has completed it
+export function answered(borrows request: Request): boolean
+    return request.answered
+end
+
+--- Completes one queued tool call and wakes the connection waiting for it.
+--- @param self the running server
+--- @param request the request `poll` handed to the frame
+--- @param payload the JSON text of the structured answer, or the failure text
+--- @param isError whether `payload` reports a failure rather than an answer
+--- @param crashed whether the failure is the recorded gameplay crash
+function Server.respond(
+    exclusive self: Server,
+    exclusive request: Request,
+    payload: string,
+    isError: boolean,
+    crashed: boolean
+): nil
+    if request.answered then
+        return
+    end
+    request.answered = true
+    request.payload = payload
+    request.isError = isError
+    request.wasCrashed = crashed
+    enqueue(self, request.task)
+end
+
+--- Releases the listener and every connection it accepted.
+---
+--- One way, and safe to call more than once: the port is given up and the
+--- server cannot be made to listen again. Every parked connection is resumed
+--- once with a stop, so its reads unwind rather than staying suspended forever.
+--- @param self the server to stop
+function Server.destroy(exclusive self: Server): nil
+    if self.destroyed then
+        return
+    end
+    self.destroyed = true
+    self.listener:close()
+    for index = 1, #self.tasks do
+        local task = self.tasks[index]
+        if coroutine.status(task) == "suspended" then
+            self.queued[task] = nil
+            coroutine.resume(task, false)
+        end
+    end
+    self.tasks = {}
+    self.runnable = {}
+    self.queued = {}
+    self.pending = {}
+end
