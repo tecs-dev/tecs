@@ -59,6 +59,49 @@ jobs:
             - run: cargo xtask dev-tools
             - run: xvfb-run -a cargo xtask test --preset linux-x64
 
+    nupp:
+        strategy:
+            matrix:
+                os: [macos-15, ubuntu-latest]
+        runs-on: ${{ matrix.os }}
+        env:
+            # Provisional pin. The rewrite is developed against a 0.0.2-dev
+            # compiler and v0.0.1 is the only published release, so this has
+            # not been proven to check the tree. Move it to 0.0.2 as soon as
+            # that ships, and treat a failure here as the pin being behind
+            # rather than as a defect in the tree.
+            NUPP_VERSION: v0.0.1
+        steps:
+            - uses: actions/checkout@v4
+            - if: runner.os == 'macOS'
+              run: brew install nupp-lang/tap/nupp
+            - if: runner.os == 'Linux'
+              run: |
+                  curl -fsSL -o nupp.tar.gz \
+                    "https://github.com/nupp-lang/nupp/releases/download/${NUPP_VERSION}/nupp-linux-x86_64.tar.gz"
+                  sudo mkdir -p /opt/nupp
+                  sudo tar xzf nupp.tar.gz -C /opt/nupp
+                  echo /opt/nupp >> "$GITHUB_PATH"
+            - run: nupp fmt --check
+            - run: nupp check --strict
+            - run: nupp test
+            - run: nupp build --target headless
+            - run: nupp build --target host
+            - run: nupp build --target flatcolor
+
+    nupp-host:
+        needs: nupp
+        runs-on: macos-15
+        env:
+            NUPP_VERSION: v0.0.1
+        steps:
+            - uses: actions/checkout@v4
+            - run: brew install nupp-lang/tap/nupp
+            - run: nupp build --target flatcolor
+            - run: cargo check -p tecs-winit-host
+            - run: cargo test -p tecs-winit-host
+            - run: cargo run -p tecs-winit-host -- --headless --frames 1
+
     docs:
         runs-on: macos-15
         permissions:
