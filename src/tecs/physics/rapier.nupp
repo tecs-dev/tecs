@@ -19,10 +19,72 @@ is what makes the crossing free of foreign lifetimes. Reads and writes into
 those buffers sit inside `unsafe do` because the checker cannot see that an
 index this module bounds-checked against a capacity this module allocated is
 in range; every such block is preceded by the check that makes it true.
+
+`openLibrary` runs before the declarations below and loads the library into
+the process namespace, which is what lets each `cdef function` name a symbol
+without naming a file. A `from` clause would have to spell one platform's
+library file in a source file shared by three, and the loader path a developer
+would set instead is stripped from a protected process on macOS.
 ]]
 
 local ffi = require("ffi")
 local contract = require("tecs.physics.contract")
+
+--- The library's file name on the running platform.
+local function libraryFile(): string
+    if ffi.os == "Windows" then
+        return "tecs_physics.dll"
+    elseif ffi.os == "OSX" then
+        return "libtecs_physics.dylib"
+    end
+
+    return "libtecs_physics.so"
+end
+
+--- Reports whether a path names a readable file.
+local function readable(path: string): boolean
+    local handle = io.open(path, "rb")
+    if handle == nil then
+        return false
+    end
+    handle:close()
+
+    return true
+end
+
+--- Loads the solver library into the process namespace.
+---
+--- `TECS_PHYSICS_LIBRARY` names an exact file and is tried first. Otherwise
+--- the search walks up from this module looking for `lib/`, which is where a
+--- packaged build puts it, then for a Cargo target directory, which is where
+--- a development checkout has it. A plain load runs last so an installed
+--- library still works and so its own diagnostic is what a failure reports.
+--- @raises when no candidate can be loaded
+local function openLibrary(): nil
+    local override = os.getenv("TECS_PHYSICS_LIBRARY")
+    if override ~= nil then
+        ffi.load(override, true)
+
+        return
+    end
+    local file = libraryFile()
+    local source = debug.getinfo(1, "S").source
+    local directory = source:match("^@(.+)[/\\][^/\\]+$") or "."
+    for _ = 0, 8 do
+        for _, relative in ipairs({"/lib/", "/target/release/", "/target/debug/"}) do
+            local candidate = directory .. relative .. file
+            if readable(candidate) then
+                ffi.load(candidate, true)
+
+                return
+            end
+        end
+        directory = directory .. "/.."
+    end
+    ffi.load(file, true)
+end
+
+openLibrary()
 
 cdef struct TecsPhysicsHandle
     index: uint32
@@ -194,24 +256,19 @@ cdef struct TecsPhysicsBatch
     eventCount: uint64
 end
 
-cdef function tecsPhysicsWorldCreate(
-    gravityX: float,
-    gravityY: float,
-    substeps: uint32,
-    workerCount: uint32
-): voidptr from"tecs_physics"
+cdef function tecsPhysicsWorldCreate(gravityX: float, gravityY: float, substeps: uint32, workerCount: uint32): voidptr
 
-cdef function tecsPhysicsWorldDestroy(exclusive world: voidptr) from"tecs_physics"
+cdef function tecsPhysicsWorldDestroy(exclusive world: voidptr)
 
-cdef function tecsPhysicsSubstepCount(borrows world: voidptr): uint32 from"tecs_physics"
+cdef function tecsPhysicsSubstepCount(borrows world: voidptr): uint32
 
-cdef function tecsPhysicsWorkerCount(borrows world: voidptr): uint32 from"tecs_physics"
+cdef function tecsPhysicsWorkerCount(borrows world: voidptr): uint32
 
-cdef function tecsPhysicsDefaultWorkerCount(): uint32 from"tecs_physics"
+cdef function tecsPhysicsDefaultWorkerCount(): uint32
 
-cdef function tecsPhysicsStep(exclusive world: voidptr, exclusive batch: TecsPhysicsBatch*): int32 from"tecs_physics"
+cdef function tecsPhysicsStep(exclusive world: voidptr, exclusive batch: TecsPhysicsBatch*): int32
 
-cdef function tecsPhysicsDrain(borrows world: voidptr, exclusive batch: TecsPhysicsBatch*): int32 from"tecs_physics"
+cdef function tecsPhysicsDrain(borrows world: voidptr, exclusive batch: TecsPhysicsBatch*): int32
 
 cdef function tecsPhysicsRaycast(
     borrows world: voidptr,
@@ -222,7 +279,7 @@ cdef function tecsPhysicsRaycast(
     categoryBits: uint32,
     maskBits: uint32,
     exclusive output: TecsPhysicsRayHit*
-): int32 from"tecs_physics"
+): int32
 
 cdef function tecsPhysicsResolveEntities(
     borrows world: voidptr,
@@ -231,23 +288,15 @@ cdef function tecsPhysicsResolveEntities(
     exclusive bodies: TecsPhysicsHandle*,
     exclusive colliders: TecsPhysicsHandle*,
     exclusive joints: TecsPhysicsHandle*
-): int32 from"tecs_physics"
+): int32
 
-cdef function tecsPhysicsSnapshotBegin(exclusive world: voidptr): uint64 from"tecs_physics"
+cdef function tecsPhysicsSnapshotBegin(exclusive world: voidptr): uint64
 
-cdef function tecsPhysicsSnapshotRead(
-    borrows world: voidptr,
-    exclusive output: uint8*,
-    capacity: uint64
-): uint64 from"tecs_physics"
+cdef function tecsPhysicsSnapshotRead(borrows world: voidptr, exclusive output: uint8*, capacity: uint64): uint64
 
-cdef function tecsPhysicsSnapshotRestore(
-    exclusive world: voidptr,
-    borrows bytes: cstring,
-    length: uint64
-): int32 from"tecs_physics"
+cdef function tecsPhysicsSnapshotRestore(exclusive world: voidptr, borrows bytes: cstring, length: uint64): int32
 
-cdef function tecsPhysicsLastError(): cstring from"tecs_physics"
+cdef function tecsPhysicsLastError(): cstring
 
 const STATUS_OK: integer = 0
 const STATUS_TRUNCATED: integer = 1

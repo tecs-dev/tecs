@@ -1,0 +1,80 @@
+--[[
+A bounded native-physics smoke run.
+
+The Nupp test suite drives `tecs.physics` through a reference simulation, so it
+needs no native library. This script is the other half: it loads
+`tecs.physics.rapier`, installs it in a world, and drops a box onto a floor, so
+the declarations, the layout self-check and real batched crossings are all
+exercised against the built `tecs_physics` library.
+
+```sh
+cargo build -p tecs-physics --release
+DYLD_LIBRARY_PATH=target/release nupp run examples/nupp/physicssmoke.nupp
+```
+]]
+
+local ecs = require("tecs.ecs")
+local physics = require("tecs.physics")
+
+local world = ecs.newWorld()
+local simulation = physics.install(world, {gravity = {0.0, 980.0}})
+print(("solver ready: substeps %d, workers %d"):format(simulation.subStepCount, simulation.workerCount))
+
+local floor = world:spawn(ecs.Transform2D(0, 400))
+physics.attach(world, floor, {kind = "static", halfWidth = 400, halfHeight = 16})
+
+local box = world:spawn(ecs.Transform2D(0, 0))
+physics.attach(world, box, {halfWidth = 16, halfHeight = 16, restitution = 0.1})
+
+local pad = world:spawn()
+physics.attachCollider(world, pad, box, {radius = 6, offsetY = 20})
+
+local wheel = world:spawn(ecs.Transform2D(120, 100))
+physics.attach(world, wheel, {radius = 12})
+local joint = world:spawn()
+physics.attachJoint(world, joint, floor, wheel, {kind = "revolute", anchorAX = 120, anchorAY = -300})
+
+local contacts: integer = 0
+world:observe(0, physics.ContactBegin, function(_value: physics.ContactPair, exclusive _running: ecs.World): nil
+    contacts = contacts + 1
+end)
+
+for frame = 1, 300 do
+    if frame == 30 then
+        physics.applyImpulse(world, box, 400.0, 0.0)
+    end
+    world:update(1 / 60)
+end
+
+local resting = assert(world:get(box, ecs.Transform2D)).y
+local hit = physics.raycast(world, 0, 0, 0, 500)
+local vx, vy = physics.velocity(world, box)
+print(
+    (
+        "box y %.2f, vx %.2f, vy %.2f, contacts %d, ray %s"
+    ):format(resting, vx, vy, contacts, hit ~= nil and tostring(hit.entity) or "miss")
+)
+print(
+    (
+        "body live %s, shape live %s, joint live %s"
+    ):format(
+        tostring(physics.hasBody(world, box)),
+        tostring(world:has(pad, physics.ColliderShape)),
+        tostring(world:has(joint, physics.JointLink))
+    )
+)
+
+local snapshot = world:saveSnapshot()
+world:loadSnapshot(snapshot)
+print(
+    (
+        "after reload, box y %.2f, body live %s, motion vx %.2f"
+    ):format(
+        assert(world:get(box, ecs.Transform2D)).y,
+        tostring(physics.hasBody(world, box)),
+        assert(world:get(box, physics.Motion)).vx
+    )
+)
+
+world:shutdown()
+print("shutdown clean")
