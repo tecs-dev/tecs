@@ -1,0 +1,484 @@
+module tecs.internal.mcpworld
+
+--[[
+The MCP tools that read and write the world.
+
+These run on the game's own thread, inside the frame, between world updates.
+They read a world that is not mid-update and write one that has not yet been
+stepped, which is why none of them queue anything and none of them lock. Each
+structural tool commits before it answers, so its result describes the settled
+mutation and the following update reads it.
+
+Component values cross as plain tables through each component's own snapshot
+codec and the constructor beside it, rather than through a second description
+of every component maintained here. A component the engine gains is a component
+these tools gain. Which components exist is read the same way, from the ECS's
+own process-wide registry, so a game's own components are nameable without the
+game being told to say so.
+
+Requiring this module registers its tools as a side effect; there is no install
+step, and `tecs.mcp.bind` is what names the world they act on.
+
+Every tool name here, and every argument key of every schema below, is a
+compatibility surface an agent reaches through JSON this tree cannot see. Do
+not rename one.
+]]
+
+local archetype = require("tecs.internal.archetype")
+local components = require("tecs.internal.components")
+local ecs = require("tecs.ecs")
+local json = require("nupp.data.json")
+local bindings = require("tecs.internal.mcpbindings")
+local registry = require("tecs.internal.mcpregistry")
+
+--- The declared components, sorted by name.
+local function sortedNames(declared: {[string]: ecs.Component}): {string}
+    local names: {string} = {}
+    for name in pairs(declared) do
+        names[#names + 1] = name
+    end
+    table.sort(names)
+
+    return names
+end
+
+--- Resolves a component by name, listing what exists when it cannot.
+---
+--- Registration rather than presence: a component nothing in this world carries
+--- is still nameable, because `spawn` and `set` are how it comes to be carried.
+--- Only a name nobody registered is refused.
+--- @raises when no component carries that name
+local function component(name: string?): ecs.Component
+    local found = name ~= nil and ecs.findComponentByName(name) or nil
+    if found == nil then
+        local names = sortedNames(ecs.declaredComponents())
+        error(`no component named '${tostring(name)}'; known: ${table.concat(names, ", ")}`, 0)
+    end
+
+    return found
+end
+
+--- Resolves a list of component names.
+local function componentList(names: {any}?): {ecs.Component}
+    local list: {ecs.Component} = {}
+    if names == nil then
+        return list
+    end
+    for index = 1, #names do
+        list[index] = component(names[index] as string)
+    end
+
+    return list
+end
+
+--- Serializes one committed value, or returns nil for a component that carries
+--- no data of its own. A tag is presence, so it has nothing to show.
+local function valueOf(kind: ecs.Component, instance: any): {[string]: any}?
+    if kind.storageType == "tag" then
+        return nil
+    end
+    if kind.storageType == "table" then
+        local table = kind as components.TableComponent<any>
+        local ok, saved = pcall(table.snapshotSave, instance)
+        if not ok or type(saved) ~= "table" then
+            return nil
+        end
+        local fields = saved as {[string]: any}
+        if next(fields) == nil then
+            return nil
+        end
+
+        return fields
+    end
+
+    -- A scalar column stores the raw primitive and a relationship stores one
+    -- target, so both report the one field they are rather than an object of
+    -- fields they do not have.
+    if kind.storageType == "relationship" then
+        return {target = (instance as components.RelationshipValue).target}
+    end
+
+    return {value = instance}
+end
+
+--- Reads one entity's components as plain tables.
+local function describe(
+    exclusive world: ecs.World,
+    entity: integer,
+    declared: {[string]: ecs.Component}
+): {[string]: any}
+    local values: {[string]: any} = {}
+    local count = 0
+    for name, kind in pairs(declared) do
+        if world:has(entity, kind) then
+            -- Through the component's own codec, so a record component crosses
+            -- as its saved fields. A tag has no data, so it reports as present
+            -- rather than as an empty object a client would special-case.
+            local ok, instance = pcall(function(): any
+                return world:get(entity, kind)
+            end)
+            local contents = ok and valueOf(kind, instance) or nil
+            values[name] = contents ~= nil and contents or true
+            count = count + 1
+        end
+    end
+
+    return {entity = entity, components = values, count = count}
+end
+
+--- Everything about one entity, with the registry read once for it.
+local function describeOne(exclusive world: ecs.World, entity: integer): {[string]: any}
+    return describe(world, entity, ecs.declaredComponents())
+end
+
+--- Builds a component value from a plain table.
+---
+--- Through the component's own snapshot loader or constructor, so defaults come
+--- from where they are declared rather than from a copy of them here. A field
+--- the payload omits therefore takes the component's default, which is what
+--- makes `set` a replacement rather than a merge.
+local function construct(kind: ecs.Component, values: {[string]: any}?): components.Input
+    if kind.storageType == "tag" then
+        return kind
+    end
+    if kind.storageType == "table" then
+        local definition = kind as components.TableComponent<any>
+        local instance = definition.defaultFactory()
+        if values ~= nil then
+            local fields = instance as {[string]: any}
+            for field, value in pairs(values) do
+                fields[field] = value
+            end
+        end
+
+        return new components.TableInstance(componentType = definition, value = instance)
+    end
+    if kind.storageType == "relationship" then
+        local definition = kind as components.RelationshipComponent
+        local target = values ~= nil and values.target or nil
+
+        return definition(math.floor(tonumber(target) or 0) as integer)
+    end
+    if kind.storageType == "scalar" then
+        local definition = kind as components.ScalarComponent<any>
+        local raw = values ~= nil and values.value or nil
+        if raw == nil then
+            raw = definition.scalarDefault
+        end
+
+        return definition(raw)
+    end
+
+    return kind
+end
+
+-------------------------------------------------------------------------------
+-- Reading
+-------------------------------------------------------------------------------
+
+--- The components some live entity of `world` carries.
+---
+--- The registry is process-wide and a world is not: a component can be declared
+--- and carried by nothing here, which is an ordinary state and not the same
+--- answer as a name nobody registered. So `components_info` reports both rather
+--- than conflating them.
+local function presentIn(exclusive world: ecs.World): {[integer]: boolean}
+    local present: {[integer]: boolean} = {}
+    local everything = world:newQuery()
+    for candidate, length in everything:iter() do
+        local active = candidate as archetype.Archetype
+        if (length as integer) > 0 then
+            local list = active.components
+            for index = 1, #list do
+                present[list[index].componentId] = true
+            end
+        end
+    end
+
+    return present
+end
+
+registry.register({
+    -- Compatibility surface: `components_info` is the name an agent calls.
+    name = "components_info",
+    description = "Lists the components these tools can name, with the fields "
+    .. "each carries and whether the bound world carries any.",
+    readOnly = true,
+    inputSchema = {type = "object", properties = json.EMPTY_OBJECT},
+    handler = function(_arguments: {[string]: any}): {[string]: any}?
+        local declared = ecs.declaredComponents()
+        local names = sortedNames(declared)
+        local world = bindings.world()
+        local present: {[integer]: boolean} = world ~= nil and presentIn(world) or {}
+
+        local described: {any} = {}
+        for index, name in ipairs(names) do
+            local kind = declared[name] as ecs.Component
+            -- Fields are read from a default value rather than declared again
+            -- here, so this cannot describe a component incorrectly.
+            local fields: {string} = {}
+            local built, sample = pcall(construct, kind, nil)
+            local contents: {[string]: any}? = nil
+            if built and kind.storageType == "table" then
+                contents = valueOf(kind, (sample as components.TableInstance<any>).value)
+            end
+            if contents ~= nil then
+                for field in pairs(contents) do
+                    fields[#fields + 1] = field
+                end
+                table.sort(fields)
+            end
+            described[index] = {
+                name = name,
+                id = kind.componentId,
+                storage = kind.storageType,
+                -- A component with no fields is a tag: presence is its whole
+                -- meaning, which is worth saying rather than leaving inferred
+                -- from an empty list.
+                tag = kind.storageType == "tag",
+                fields = #fields > 0 and json.asArray(fields) or json.EMPTY_ARRAY,
+                -- Declared here and carried by nothing is a real state, so it
+                -- reads as absent rather than as a name that does not exist.
+                present = present[kind.componentId] == true
+            }
+        end
+
+        return {components = json.asArray(described), bound = world ~= nil}
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `query`, with `include`, `limit` and `values`.
+    name = "query",
+    description = "Finds entities carrying every named component. Returns "
+    .. "their ids and, unless values is false, their component values.",
+    readOnly = true,
+    inputSchema = {
+        type = "object",
+        properties = {
+            include = {type = "array", items = {type = "string"}, description = "Component names an entity must have."},
+            limit = {type = "integer", description = "Default 50."},
+            values = {type = "boolean", description = "Include component values. Default true."}
+        },
+        required = {"include"}
+    },
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local world = bindings.requireWorld()
+        local include = componentList(arguments.include as {any}?)
+        if #include == 0 then
+            error("include must name at least one component", 0)
+        end
+
+        local limit = math.floor(tonumber(arguments.limit) or 50) as integer
+        local wantValues = arguments.values ~= false
+        -- Read once for the page rather than per row, since a describe walks it
+        -- whole and the registry cannot change while this runs.
+        local declared = ecs.declaredComponents()
+
+        local found = world:newQuery({include = include})
+        local rows: {any} = {}
+        local total = 0
+
+        for candidate, length in found:iter() do
+            local active = candidate as archetype.Archetype
+            local count = length as integer
+            total = total + count
+            for row = 1, count do
+                if #rows < limit then
+                    local entity = active.entities[row] as integer
+                    if wantValues then
+                        rows[#rows + 1] = describe(world, entity, declared)
+                    else
+                        rows[#rows + 1] = {entity = entity}
+                    end
+                end
+            end
+        end
+
+        return {matched = total, returned = #rows, entities = #rows > 0 and json.asArray(rows) or json.EMPTY_ARRAY}
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `info`, with the `entity` argument key.
+    name = "info",
+    description = "Everything known about one entity.",
+    readOnly = true,
+    inputSchema = {type = "object", properties = {entity = {type = "integer"}}, required = {"entity"}},
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local world = bindings.requireWorld()
+        local entity = math.floor(tonumber(arguments.entity) or 0) as integer
+        if not world:isAlive(entity) then
+            return {entity = entity, alive = false}
+        end
+        local described = describeOne(world, entity)
+        described.alive = true
+
+        return described
+    end
+})
+
+-------------------------------------------------------------------------------
+-- Writing
+-------------------------------------------------------------------------------
+
+registry.register({
+    -- Compatibility surface: `spawn`, with the `components` argument key.
+    name = "spawn",
+    description = "Creates an entity carrying the given components.",
+    destructive = true,
+    inputSchema = {
+        type = "object",
+        properties = {components = {type = "object", description = "Component name to its field values."}},
+        required = {"components"}
+    },
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local world = bindings.requireWorld()
+        local requested = arguments.components as {[string]: any}?
+        if requested == nil or next(requested) == nil then
+            error("components must name at least one component", 0)
+        end
+
+        local entity = world:spawn()
+        for name, values in pairs(requested) do
+            world:set(entity, construct(component(name), values as {[string]: any}?))
+        end
+        world:commit()
+
+        return describeOne(world, entity)
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `set`, with `entity`, `component` and `values`.
+    name = "set",
+    description = "Replaces a component in full, adding it if absent. Fields "
+    .. "the payload omits take the component's defaults, so prefer modify "
+    .. "for changing a value without disturbing the rest.",
+    destructive = true,
+    inputSchema = {
+        type = "object",
+        properties = {entity = {type = "integer"}, component = {type = "string"}, values = {type = "object"}},
+        required = {"entity", "component"}
+    },
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local world = bindings.requireWorld()
+        local entity = math.floor(tonumber(arguments.entity) or 0) as integer
+        if not world:isAlive(entity) then
+            error(`entity ${tostring(entity)} is not alive`, 0)
+        end
+
+        local kind = component(arguments.component as string?)
+        local added = not world:has(entity, kind)
+        world:set(entity, construct(kind, arguments.values as {[string]: any}?))
+        world:commit()
+
+        local described = describeOne(world, entity)
+        described.added = added
+
+        return described
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `modify`, with `entity`, `component` and `values`.
+    name = "modify",
+    description = "Changes only the named fields, leaving the rest alone. "
+    .. "An entity without the component is skipped rather than gaining "
+    .. "one, so a typo cannot silently add a component.",
+    destructive = true,
+    inputSchema = {
+        type = "object",
+        properties = {entity = {type = "integer"}, component = {type = "string"}, values = {type = "object"}},
+        required = {"entity", "component", "values"}
+    },
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local world = bindings.requireWorld()
+        local entity = math.floor(tonumber(arguments.entity) or 0) as integer
+        local kind = component(arguments.component as string?)
+        if not world:isAlive(entity) or not world:has(entity, kind) then
+            return {entity = entity, skipped = true}
+        end
+
+        local values = arguments.values as {[string]: any}?
+        if values == nil or next(values) == nil then
+            error("values must name at least one field", 0)
+        end
+
+        -- getMut rather than get, so the column is marked dirty and whatever
+        -- consumes it re-uploads. Writing through get would change the memory
+        -- and leave a dirty-gated consumer showing the old value.
+        if kind.storageType == "table" then
+            local instance = world:getMut(entity, kind) as {[string]: any}
+            for field, value in pairs(values) do
+                instance[field] = value
+            end
+        else
+            -- A scalar or relationship column holds one value rather than a
+            -- record of fields, so a partial change is a whole replacement of
+            -- the one field the payload may name.
+            world:set(entity, construct(kind, values))
+            world:commit()
+        end
+
+        local described = describeOne(world, entity)
+        described.skipped = false
+
+        return described
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `remove`, with `entity` and `component`.
+    name = "remove",
+    description = "Removes a component from an entity.",
+    destructive = true,
+    inputSchema = {
+        type = "object",
+        properties = {entity = {type = "integer"}, component = {type = "string"}},
+        required = {"entity", "component"}
+    },
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local world = bindings.requireWorld()
+        local entity = math.floor(tonumber(arguments.entity) or 0) as integer
+        local kind = component(arguments.component as string?)
+        if not world:isAlive(entity) or not world:has(entity, kind) then
+            return {entity = entity, skipped = true}
+        end
+        world:remove(entity, kind)
+        world:commit()
+        local described = describeOne(world, entity)
+        described.skipped = false
+
+        return described
+    end
+})
+
+registry.register({
+    -- Compatibility surface: `despawn`, with the `entity` argument key.
+    name = "despawn",
+    description = "Destroys an entity.",
+    destructive = true,
+    inputSchema = {type = "object", properties = {entity = {type = "integer"}}, required = {"entity"}},
+    handler = function(arguments: {[string]: any}): {[string]: any}?
+        local world = bindings.requireWorld()
+        local entity = math.floor(tonumber(arguments.entity) or 0) as integer
+        if not world:isAlive(entity) then
+            return {entity = entity, skipped = true}
+        end
+        world:despawn(entity)
+        world:commit()
+
+        return {entity = entity, skipped = false}
+    end
+})
+
+--- Reports whether the world tools have been registered.
+---
+--- Requiring this module is what registers them, so the answer is always true.
+--- It exists so a caller can require the module for its side effect without a
+--- lint reporting the binding as unused.
+--- @return true, once the module has loaded
+export function installed(): boolean
+    return true
+end

@@ -1,0 +1,298 @@
+local ecs = require("tecs.ecs")
+local json = require("nupp.data.json")
+local mcp = require("tecs.mcp")
+local netadapter = require("tecs.internal.netadapter")
+local suspension = require("nupp.suspension")
+local test = require("nupp.test")
+local time = require("nupp.time")
+
+local suite = {}
+
+--- One HTTP exchange against the loopback endpoint, as a plain socket client.
+---
+--- Written here rather than reached for from `nupp.io.http`, because the peer
+--- is the server this test is driving in the same process and a client that
+--- owns a runtime of its own would need a second thing pumping it.
+local function exchange(port: integer, method: string, target: string, body: string?): (integer, string)
+    local stream = assert(netadapter.connect({host = "127.0.0.1", port = port}))
+    local payload = body or ""
+    local request = `${method} ${target} HTTP/1.1\r\nHost: 127.0.0.1\r\n`
+        .. "Accept: application/json, text/event-stream\r\n"
+        .. `Content-Type: application/json\r\nContent-Length: ${tostring(#payload)}\r\n\r\n`
+        .. payload
+    assert(stream:write(request))
+
+    local received = ""
+    local status: integer = 0
+    local length: integer = -1
+    local headEnd: integer = 0
+    while true do
+        if headEnd == 0 then
+            local found = received:find("\r\n\r\n", 1, true)
+            if found ~= nil then
+                headEnd = found + 3
+                status = math.floor(tonumber(received:match("^HTTP/1%.1 (%d+)") or 0) or 0) as integer
+                length = math.floor(tonumber(received:match("[Cc]ontent%-[Ll]ength:%s*(%d+)") or 0) or 0) as integer
+            end
+        end
+        if headEnd > 0 and #received - headEnd >= length then
+            break
+        end
+        local chunk = assert(stream:read(4096))
+        if chunk == "" then
+            break
+        end
+        received = received .. chunk
+    end
+    stream:close()
+
+    return status, received:sub(headEnd + 1)
+end
+
+--- Runs `client` while the server is polled once a millisecond beside it.
+---
+--- `suspension.all` runs both bodies as coroutines under one handler, so the
+--- client's socket waits are what let the server's polls happen and the other
+--- way round. Nothing outside this process is involved.
+local function withServer<T>(client: function(port: integer): T): T
+    local server = assert(mcp.listen(0))
+    local port = server.port
+    local finished = false
+    local answers = suspension.all({
+        function(): any
+            while not finished do
+                mcp.poll(server)
+                time.sleep(1)
+            end
+            -- One last turn, so a connection that is mid-close still moves.
+            mcp.poll(server)
+
+            return nil
+        end,
+        function(): any
+            local answer = client(port)
+            finished = true
+
+            return answer
+        end
+    })
+    mcp.destroy(server)
+
+    return answers[2] as T
+end
+
+function suite.bindsALoopbackPortAndReportsIt(): nil
+    local server = assert(mcp.listen(0))
+    test.assert(server.port > 0)
+    mcp.destroy(server)
+end
+
+function suite.refusesASecondServerOnTheSamePort(): nil
+    local first = assert(mcp.listen(0))
+    local second, why = mcp.listen(first.port)
+
+    test.assert(second == nil)
+    test.assert((why as string) ~= "")
+    mcp.destroy(first)
+end
+
+function suite.answersInitializeOverHTTPWithoutTheFrame(): nil
+    local body = withServer(function(port: integer): string
+        local status, answer = exchange(
+            port,
+            "POST",
+            "/mcp",
+            [[{"jsonrpc":"2.0","id":1,"method":"initialize"}]]
+        )
+        test.equal(status, 200)
+
+        return answer
+    end)
+
+    local response = json.decode(body, json.NULL) as {[string]: any}
+    local result = response.result as {[string]: any}
+
+    test.equal(result.protocolVersion as string, "2025-06-18")
+end
+
+function suite.roundTripsAToolCallThroughTheFrame(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    world:spawn()
+    world:spawn()
+    world:spawn()
+    world:commit()
+    mcp.bind(world, nil)
+
+    local body = withServer(function(port: integer): string
+        local status, answer = exchange(
+            port,
+            "POST",
+            "/mcp",
+            [[{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"stats","arguments":{}}}]]
+        )
+        test.equal(status, 200)
+
+        return answer
+    end)
+
+    local response = json.decode(body, json.NULL) as {[string]: any}
+    local result = (response.result as {[string]: any}).structuredContent as {[string]: any}
+
+    test.equal(response.id as integer, 9)
+    test.equal(result.entities as integer, 3)
+end
+
+function suite.reportsAFailingToolOverHTTPRatherThanClosingTheConnection(): nil
+    mcp.register({
+        name = "test.mcp.transport.raises",
+        handler = function(_arguments: {[string]: any}): {[string]: any}?
+            error("transport failure", 0)
+        end
+    })
+
+    local body = withServer(function(port: integer): string
+        local status, answer = exchange(
+            port,
+            "POST",
+            "/mcp",
+            [[{"jsonrpc":"2.0","id":3,"method":"tools/call",]]
+                .. [["params":{"name":"test.mcp.transport.raises","arguments":{}}}]]
+        )
+        test.equal(status, 200)
+
+        return answer
+    end)
+
+    local result = (json.decode(body, json.NULL) as {[string]: any}).result as {[string]: any}
+    local content = result.content as {{[string]: any}}
+
+    test.assert(result.isError == true)
+    test.equal(content[1].text as string, "transport failure")
+end
+
+function suite.servesTheRegistryListingOverHTTP(): nil
+    local body = withServer(function(port: integer): string
+        local status, answer = exchange(port, "POST", "/mcp", [[{"jsonrpc":"2.0","id":4,"method":"tools/list"}]])
+        test.equal(status, 200)
+
+        return answer
+    end)
+
+    local listed = ((json.decode(body, json.NULL) as {[string]: any}).result as {[string]: any}).tools
+    local tools = listed as {{[string]: any}}
+    local names: {[string]: boolean} = {}
+    for index = 1, #tools do
+        names[tools[index].name as string] = true
+    end
+
+    test.assert(names["ping"] == true)
+    test.assert(names["components_info"] == true)
+end
+
+function suite.refusesAnythingButPostOnTheEndpoint(): nil
+    local status = withServer(function(port: integer): integer
+        local code = exchange(port, "GET", "/mcp", nil)
+
+        return code
+    end)
+
+    test.equal(status, 405)
+end
+
+function suite.answersNotFoundOffTheEndpoint(): nil
+    local status = withServer(function(port: integer): integer
+        local code = exchange(port, "POST", "/elsewhere", "{}")
+
+        return code
+    end)
+
+    test.equal(status, 404)
+end
+
+function suite.acknowledgesANotificationWithNoBody(): nil
+    local status = withServer(function(port: integer): integer
+        local code, body = exchange(
+            port,
+            "POST",
+            "/mcp",
+            [[{"jsonrpc":"2.0","method":"notifications/initialized"}]]
+        )
+        test.equal(body, "")
+
+        return code
+    end)
+
+    test.equal(status, 202)
+end
+
+function suite.keepsOneConnectionOpenAcrossSeveralCalls(): nil
+    local world = ecs.newWorld({maxEntities = 4})
+    world:spawn()
+    world:commit()
+    mcp.bind(world, nil)
+
+    local answers = withServer(function(port: integer): {string}
+        local stream = assert(netadapter.connect({host = "127.0.0.1", port = port}))
+        local collected: {string} = {}
+        for index = 1, 3 do
+            local payload = `{"jsonrpc":"2.0","id":${tostring(index)},"method":"tools/call",`
+                .. [["params":{"name":"stats","arguments":{}}}]]
+            assert(stream:write(
+                `POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: ${tostring(#payload)}\r\n\r\n${payload}`
+            ))
+            local received = ""
+            while received:find("\r\n\r\n", 1, true) == nil or #received:gsub(".-\r\n\r\n", "", 1) < 10 do
+                local chunk = assert(stream:read(4096))
+                if chunk == "" then
+                    break
+                end
+                received = received .. chunk
+            end
+            collected[index] = received
+        end
+        stream:close()
+
+        return collected
+    end)
+
+    test.equal(#answers, 3)
+    for index = 1, 3 do
+        test.assert(answers[index]:find("HTTP/1.1 200", 1, true) == 1)
+        test.assert(answers[index]:find(`"id":${tostring(index)}`, 1, true) ~= nil)
+    end
+end
+
+function suite.blocksAWorldToolOverHTTPAfterACrash(): nil
+    local world = ecs.newWorld({maxEntities = 4})
+    mcp.bind(world, nil)
+    mcp.setCrashed("transport traceback")
+
+    local body = withServer(function(port: integer): string
+        local _status, answer = exchange(
+            port,
+            "POST",
+            "/mcp",
+            [[{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"stats","arguments":{}}}]]
+        )
+
+        return answer
+    end)
+    mcp.setCrashed(nil)
+
+    local result = (json.decode(body, json.NULL) as {[string]: any}).result as {[string]: any}
+    local content = result.content as {{[string]: any}}
+
+    test.assert(result.isError == true)
+    test.assert(result.crashed == true)
+    test.equal(content[1].text as string, "transport traceback")
+end
+
+function suite.stopsAnsweringAfterDestroy(): nil
+    local server = assert(mcp.listen(0))
+    mcp.destroy(server)
+
+    test.assert(not mcp.poll(server))
+    mcp.destroy(server)
+end
+
+return suite

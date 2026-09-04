@@ -1,0 +1,260 @@
+local ecs = require("tecs.ecs")
+local json = require("nupp.data.json")
+local mcp = require("tecs.mcp")
+local test = require("nupp.test")
+
+local suite = {}
+
+local function decode(text: string): {[string]: any}
+    return json.decode(text, json.NULL) as {[string]: any}
+end
+
+local function call(name: string, arguments: {[string]: any}?): {[string]: any}
+    local response = decode(mcp.dispatch(json.encode({
+        jsonrpc = "2.0",
+        id = 7,
+        method = "tools/call",
+        params = {name = name, arguments = arguments or json.EMPTY_OBJECT}
+    })))
+
+    return response.result as {[string]: any}
+end
+
+local function errorText(result: {[string]: any}): string
+    local content = result.content as {{[string]: any}}
+
+    return content[1].text as string
+end
+
+function suite.answersInitializeWithTheProtocolVersion(): nil
+    local response = decode(mcp.dispatch([[{"jsonrpc":"2.0","id":1,"method":"initialize"}]]))
+    local result = response.result as {[string]: any}
+
+    test.equal(response.jsonrpc as string, "2.0")
+    test.equal(result.protocolVersion as string, "2025-06-18")
+    test.equal((result.serverInfo as {[string]: any}).name as string, "tecs")
+end
+
+function suite.reportsAParseErrorForMalformedJSON(): nil
+    local response = decode(mcp.dispatch("{not json"))
+    local failure = response.error as {[string]: any}
+
+    test.equal(failure.code as integer, -32700)
+end
+
+function suite.reportsAnInvalidRequestWithNoMethod(): nil
+    local response = decode(mcp.dispatch([[{"jsonrpc":"2.0","id":2}]]))
+    local failure = response.error as {[string]: any}
+
+    test.equal(failure.code as integer, -32600)
+    test.equal(failure.message as string, "no method")
+end
+
+function suite.listsEveryBuiltInToolName(): nil
+    local response = decode(mcp.dispatch([[{"jsonrpc":"2.0","id":3,"method":"tools/list"}]]))
+    local listed = (response.result as {[string]: any}).tools as {{[string]: any}}
+    local names: {[string]: boolean} = {}
+    for index = 1, #listed do
+        names[listed[index].name as string] = true
+    end
+
+    -- Every one of these is a compatibility surface an agent already calls.
+    local expected = {
+        "ping",
+        "context",
+        "get_logs",
+        "send_event",
+        "stats",
+        "systems_list",
+        "systems_info",
+        "systems_stop",
+        "systems_start",
+        "states_info",
+        "states_push",
+        "states_pop",
+        "run_lua",
+        "clear_crash",
+        "components_info",
+        "query",
+        "info",
+        "spawn",
+        "set",
+        "modify",
+        "remove",
+        "despawn"
+    }
+    for index = 1, #expected do
+        test.assert(names[expected[index]] == true, `tools/list is missing ${expected[index]}`)
+    end
+end
+
+function suite.advertisesAnnotationsAndSchemasForABuiltInTool(): nil
+    local response = decode(mcp.dispatch([[{"jsonrpc":"2.0","id":4,"method":"tools/list"}]]))
+    local listed = (response.result as {[string]: any}).tools as {{[string]: any}}
+    local found: {[string]: any}? = nil
+    for index = 1, #listed do
+        if listed[index].name == "query" then
+            found = listed[index]
+        end
+    end
+
+    local entry = found as {[string]: any}
+    local annotations = entry.annotations as {[string]: any}
+    test.assert(annotations.readOnlyHint == true)
+    test.assert(annotations.destructiveHint == false)
+    test.assert(annotations.whenCrashedHint == false)
+
+    local schema = entry.inputSchema as {[string]: any}
+    local properties = schema.properties as {[string]: any}
+    test.assert(properties.include ~= nil)
+    test.assert(properties.limit ~= nil)
+    test.assert(properties.values ~= nil)
+    test.equal((schema.required as {string})[1], "include")
+end
+
+function suite.dispatchesARegisteredToolByName(): nil
+    mcp.register({
+        name = "test.mcp.echo",
+        description = "Answers with what it was given.",
+        readOnly = true,
+        inputSchema = {type = "object", properties = {value = {type = "string"}}},
+        handler = function(arguments: {[string]: any}): {[string]: any}?
+            return {echoed = arguments.value}
+        end
+    })
+
+    local result = call("test.mcp.echo", {value = "hello"})
+    local structured = result.structuredContent as {[string]: any}
+
+    test.equal(structured.echoed as string, "hello")
+    test.assert(result.isError == nil)
+end
+
+function suite.reportsMethodNotFoundForAnUnknownTool(): nil
+    local response = decode(mcp.dispatch(json.encode({
+        jsonrpc = "2.0",
+        id = 5,
+        method = "tools/call",
+        params = {name = "test.mcp.absent"}
+    })))
+    local failure = response.error as {[string]: any}
+
+    test.equal(failure.code as integer, -32601)
+    test.assert(failure.message as string ~= "")
+end
+
+function suite.reportsAFailingHandlerToTheAgentRatherThanRaising(): nil
+    mcp.register({
+        name = "test.mcp.raises",
+        handler = function(_arguments: {[string]: any}): {[string]: any}?
+            error("deliberate", 0)
+        end
+    })
+
+    local result = call("test.mcp.raises")
+
+    test.assert(result.isError == true)
+    test.equal(errorText(result), "deliberate")
+end
+
+function suite.rejectsArgumentsAToolRequires(): nil
+    mcp.bind(ecs.newWorld({maxEntities = 2}), nil)
+    -- The schema declares `include` required, and the handler is what enforces
+    -- it: a schema is advertised to the agent, never trusted from it.
+    local result = call("query", {include = json.EMPTY_ARRAY})
+
+    test.assert(result.isError == true)
+    test.assert(errorText(result):find("include must name at least one component", 1, true) ~= nil)
+end
+
+function suite.rejectsAnUnknownComponentNameWithTheKnownOnes(): nil
+    mcp.bind(ecs.newWorld({maxEntities = 2}), nil)
+
+    local result = call("query", {include = {"test.mcp.nothingDeclaredThis"}})
+
+    test.assert(result.isError == true)
+    test.assert(errorText(result):find("no component named", 1, true) ~= nil)
+    test.assert(errorText(result):find("known:", 1, true) ~= nil)
+end
+
+function suite.rejectsAMissingRequiredNameArgument(): nil
+    mcp.bind(ecs.newWorld({maxEntities = 2}), nil)
+
+    local result = call("systems_info", json.EMPTY_OBJECT as {[string]: any})
+
+    test.assert(result.isError == true)
+    test.assert(errorText(result):find("invalid_arguments", 1, true) ~= nil)
+end
+
+function suite.answersEveryToolThatNeedsAWorldWithWhyThereIsNone(): nil
+    mcp.bind(nil, nil)
+
+    local result = call("stats")
+
+    test.assert(result.isError == true)
+    test.assert(errorText(result):find("no world is bound", 1, true) ~= nil)
+end
+
+function suite.blocksWorldToolsAfterACrashAndKeepsPingAnswering(): nil
+    mcp.setCrashed("traceback: something broke")
+
+    local blocked = call("stats")
+    test.assert(blocked.isError == true)
+    test.assert(blocked.crashed == true)
+    test.equal(errorText(blocked), "traceback: something broke")
+
+    local alive = call("ping")
+    test.assert(alive.isError == nil)
+    local structured = alive.structuredContent as {[string]: any}
+    test.assert(structured.ok == false)
+    test.equal(structured.crashed as string, "traceback: something broke")
+
+    mcp.setCrashed(nil)
+    test.assert(mcp.crashed() == nil)
+    test.assert((call("ping").structuredContent as {[string]: any}).ok == true)
+end
+
+function suite.keepsFirstRegistrationOrderWhenAToolIsReplaced(): nil
+    mcp.register({
+        name = "test.mcp.ordered.first",
+        handler = function(_arguments: {[string]: any}): {[string]: any}?
+            return {}
+        end
+    })
+    mcp.register({
+        name = "test.mcp.ordered.second",
+        handler = function(_arguments: {[string]: any}): {[string]: any}?
+            return {}
+        end
+    })
+    mcp.register({
+        name = "test.mcp.ordered.first",
+        handler = function(_arguments: {[string]: any}): {[string]: any}?
+            return {replaced = true}
+        end
+    })
+
+    local listed = mcp.listTools()
+    local firstAt = 0
+    local secondAt = 0
+    for index = 1, #listed do
+        if listed[index].name == "test.mcp.ordered.first" then
+            firstAt = index
+        elseif listed[index].name == "test.mcp.ordered.second" then
+            secondAt = index
+        end
+    end
+
+    test.assert(firstAt > 0 and secondAt > firstAt)
+    test.assert((call("test.mcp.ordered.first").structuredContent as {[string]: any}).replaced == true)
+end
+
+function suite.raisesWhenARegistrationHasNoHandler(): nil
+    local ok = pcall(function(): nil
+        mcp.register({name = "test.mcp.incomplete"} as mcp.Tool)
+    end)
+
+    test.assert(not ok)
+end
+
+return suite
