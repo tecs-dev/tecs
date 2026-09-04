@@ -1,0 +1,97 @@
+module tecs.internal.nativelibrary
+
+--[[
+Loading for the Rust service libraries Tecs binds through the FFI.
+
+A `cdef function` declaration can name its library with a `from` clause, but
+that clause has to spell one platform's file name in a source file shared by
+three, and it binds at module load with no say in where the file is found. The
+loader path a developer would otherwise set is stripped from a protected
+process on macOS, so `DYLD_LIBRARY_PATH` is not an answer either.
+
+Loading a library into the process namespace instead lets every declaration
+name a bare symbol, and lets one search cover both a packaged install and a
+development checkout. Call `open` above the declarations that need it.
+
+```nupp
+local nativelibrary <const> = require("tecs.internal.nativelibrary")
+
+nativelibrary.open("tecs_physics", "TECS_PHYSICS_LIBRARY")
+
+cdef function tecsPhysicsStep(world: voidptr?, batch: voidptr?): uint32
+```
+]]
+
+local ffi = require("ffi")
+
+--- The directories searched under each ancestor, in order.
+---
+--- `lib` is where a packaged build puts the library and the Cargo directories
+--- are where a development checkout has it, so a package never picks up a
+--- stale build tree and a checkout needs no staging step.
+local RELATIVE: {string} = {"/lib/", "/target/release/", "/target/debug/"}
+
+--- Returns a library's file name on the running platform.
+--- @param stem the library name without prefix or extension
+--- @return the platform's file name for that library
+local function libraryFile(stem: string): string
+    if ffi.os == "Windows" then
+        return stem .. ".dll"
+    elseif ffi.os == "OSX" then
+        return "lib" .. stem .. ".dylib"
+    end
+
+    return "lib" .. stem .. ".so"
+end
+
+--- Reports whether a path names a readable file.
+--- @param path the path to test
+--- @return whether the file could be opened for reading
+local function readable(path: string): boolean
+    local handle = io.open(path, "rb")
+    if handle == nil then
+        return false
+    end
+    handle:close()
+
+    return true
+end
+
+--- Loads a Tecs native library into the process namespace.
+---
+--- The environment variable named by `override` is tried first and names an
+--- exact file. Otherwise the search walks up from this module through eight
+--- ancestors, looking under each for `lib` and then for a Cargo target
+--- directory. A plain load by file name runs last, so an installed library
+--- still resolves and so its own diagnostic is what a failure reports.
+---
+--- Loading is global, which is what lets a `cdef function` declared after this
+--- call name a bare symbol rather than a file.
+--- @param stem the library name without prefix or extension
+--- @param override the environment variable naming an exact file, if any
+--- @raises when no candidate can be loaded
+export function open(stem: string, override: string?): nil
+    if override ~= nil then
+        local named = os.getenv(override)
+        if named ~= nil then
+            ffi.load(named, true)
+
+            return
+        end
+    end
+    local file = libraryFile(stem)
+    local source = debug.getinfo(1, "S").source
+    local directory = source:match("^@(.+)[/\\][^/\\]+$") or "."
+    for _ = 0, 8 do
+        for _, relative in ipairs(RELATIVE) do
+            local candidate = directory .. relative .. file
+            if readable(candidate) then
+                ffi.load(candidate, true)
+
+                return
+            end
+        end
+        directory = directory .. "/.."
+    end
+    ffi.load(file, true)
+end

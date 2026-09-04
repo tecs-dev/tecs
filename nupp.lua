@@ -75,6 +75,7 @@ return {
                     "tecs.internal.hostcancellation",
                     "tecs.internal.idallocator",
                     "tecs.internal.inverseindex",
+                    "tecs.internal.nativelibrary",
                     "tecs.internal.mcpbindings",
                     "tecs.internal.mcpregistry",
                     "tecs.internal.mcpsandbox",

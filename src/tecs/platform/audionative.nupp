@@ -3,10 +3,11 @@ module tecs.platform.audionative
 --[[
 The `tecsaudio` binding behind the audio backend contract.
 
-Loading this module loads `libtecsaudio`, so a build that has not staged the
-library raises here rather than anywhere later. `tecs.audio` requires it through
-`pcall` for exactly that reason and falls back to
-`tecs.platform.audiobackend.silent` when it is absent.
+Loading this module loads `libtecsaudio` through
+`tecs.internal.nativelibrary`, so a build that cannot find the library raises
+here rather than anywhere later. `tecs.audio` requires it through `pcall` for
+exactly that reason and falls back to `tecs.platform.audiobackend.silent` when
+it is absent.
 
 Commands cross as one contiguous C array per flush and finished voices come back
 as a second one. Nothing in the library ever calls a Nupp function: a `cpal`
@@ -23,7 +24,10 @@ local backend <const> = assert(audionative.open(48000, 2, 32))
 ]]
 
 local audiobackend = require("tecs.platform.audiobackend")
+local nativelibrary = require("tecs.internal.nativelibrary")
 local ffilib = require("ffi")
+
+nativelibrary.open("tecsaudio", "TECS_AUDIO_LIBRARY")
 
 --- Reads a NUL-terminated C string the library owns.
 ---
@@ -62,29 +66,21 @@ end
 -- pointer lives in the closure set below rather than in a lexical scope, so
 -- there is no owner for an affine obligation to sit on.
 
-cdef function tecs_audio_open(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from"tecsaudio"
+cdef function tecs_audio_open(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr?
 
-cdef function tecs_audio_open_offline(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from"tecsaudio"
+cdef function tecs_audio_open_offline(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr?
 
-cdef function tecs_audio_close(borrows device: voidptr?) from"tecsaudio"
+cdef function tecs_audio_close(borrows device: voidptr?)
 
-cdef function tecs_audio_available(borrows device: voidptr?): int32 from"tecsaudio"
+cdef function tecs_audio_available(borrows device: voidptr?): int32
 
-cdef function tecs_audio_frequency(borrows device: voidptr?): uint32 from"tecsaudio"
+cdef function tecs_audio_frequency(borrows device: voidptr?): uint32
 
-cdef function tecs_audio_channels(borrows device: voidptr?): uint32 from"tecsaudio"
+cdef function tecs_audio_channels(borrows device: voidptr?): uint32
 
-cdef function tecs_audio_submit(
-    borrows device: voidptr?,
-    borrows commands: tecsAudioCommand*,
-    count: uint32
-) from"tecsaudio"
+cdef function tecs_audio_submit(borrows device: voidptr?, borrows commands: tecsAudioCommand*, count: uint32)
 
-cdef function tecs_audio_drain(
-    borrows device: voidptr?,
-    borrows events: tecsAudioEvent*,
-    capacity: uint32
-): uint32 from"tecsaudio"
+cdef function tecs_audio_drain(borrows device: voidptr?, borrows events: tecsAudioEvent*, capacity: uint32): uint32
 
 cdef function tecs_audio_load_clip(
     borrows device: voidptr?,
@@ -93,19 +89,19 @@ cdef function tecs_audio_load_clip(
     mode: uint32,
     streamSeconds: float,
     borrows info: tecsAudioClipInfo*
-): int32 from"tecsaudio"
+): int32
 
-cdef function tecs_audio_release_clip(borrows device: voidptr?, clip: uint32) from"tecsaudio"
+cdef function tecs_audio_release_clip(borrows device: voidptr?, clip: uint32)
 
-cdef function tecs_audio_position(borrows device: voidptr?, handle: uint32): float from"tecsaudio"
+cdef function tecs_audio_position(borrows device: voidptr?, handle: uint32): float
 
-cdef function tecs_audio_seek(borrows device: voidptr?, handle: uint32, seconds: float): int32 from"tecsaudio"
+cdef function tecs_audio_seek(borrows device: voidptr?, handle: uint32, seconds: float): int32
 
-cdef function tecs_audio_decoders(borrows device: voidptr?): cstring? from"tecsaudio"
+cdef function tecs_audio_decoders(borrows device: voidptr?): cstring?
 
-cdef function tecs_audio_last_error(borrows device: voidptr?): cstring? from"tecsaudio"
+cdef function tecs_audio_last_error(borrows device: voidptr?): cstring?
 
-cdef function tecs_audio_layout(kind: uint32): uint32 from"tecsaudio"
+cdef function tecs_audio_layout(kind: uint32): uint32
 
 --- Commands buffered before one crossing, and events pulled back in one.
 ---
