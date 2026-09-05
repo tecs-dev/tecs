@@ -101,7 +101,7 @@ jobs:
             # building them is what makes the two Nupp-to-Rust bindings
             # covered rather than reported as skipped. The loader finds the
             # Cargo target directory itself; nothing has to be staged.
-            - run: cargo build -p tecs-audio -p tecs-physics
+            - run: cargo build -p tecs-audio -p tecs-physics -p tecs-gamepad
             - run: nupp test
             - run: nupp build --target headless
             - run: nupp build --target host
