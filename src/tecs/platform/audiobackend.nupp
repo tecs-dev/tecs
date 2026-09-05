@@ -9,6 +9,12 @@ learns what Tecs decided from one array of plain commands per frame. Nothing
 crosses the seam except that array, the finished handles drained back, and the
 two flushing queries that need an answer in the same call.
 
+Recording and device naming sit here for the same reason. A recording stream has
+the playback hazard from the other side: captured frames arrive on a thread the
+Lua virtual machine never created, so they reach Nupp only by a `read` on the
+frame thread emptying a buffer the backend filled. Nothing on this contract is a
+function the backend calls.
+
 A command names its voice by the packed handle Tecs already hands to game code,
 so a backend stores no slot table of its own and an observation about a voice
 that has since been recycled is recognized as stale by the generation inside
@@ -146,6 +152,114 @@ export record Backend
     close: function(): nil
 end
 
+--- Names one physical audio device.
+---
+--- The field names are a compatibility surface: a game persists a chosen device
+--- and reads it back, so `id`, `name`, `frequency` and `channels` keep the
+--- spelling the SDL implementation gave them.
+export record Device
+    --- Read-only. Reports the device's position in the listing that produced
+    --- it, from one up. Zero is never assigned and means "the platform's
+    --- default" wherever a device is selected, so an id is only meaningful for
+    --- the listing it came from.
+    id: integer
+
+    --- Read-only. Reports the platform's display name for the device. This is
+    --- the only durable way to name a device, because an id moves when a device
+    --- is attached or removed.
+    name: string
+
+    --- Read-only. Reports the device's preferred frames per second, and zero
+    --- when it will not say.
+    frequency: integer
+
+    --- Read-only. Reports the device's preferred channels per frame, and zero
+    --- when it will not say.
+    channels: integer
+end
+
+--- Captures sound from one recording device, pulled rather than pushed.
+---
+--- Nothing arrives until a read asks for it. The backend fills a bounded buffer
+--- from its own thread and this side empties it, which is the same shape the
+--- playback seam has and for the same reason: a device thread must never enter
+--- Nupp.
+---
+--- Every field is a plain function rather than a method, so a device-free test
+--- is a record of closures.
+export record Capture
+    --- Read-only. Reports the frames per second a read answers in, which is
+    --- what the caller asked for rather than what the hardware runs at.
+    frequency: integer
+
+    --- Read-only. Reports the interleaved channels per frame a read answers
+    --- with, which is what the caller asked for rather than what the hardware
+    --- runs at.
+    channels: integer
+
+    --- Read-only. Reports the complete frames ready to read without waiting.
+    availableFrames: function(): integer
+
+    --- Read-only. Reports the frames dropped because nothing read them in time,
+    --- counted since the capture opened.
+    overruns: function(): integer
+
+    --- Read-only. Takes up to `maxFrames` frames as interleaved native-endian
+    --- float32 bytes, and returns nil with a reason when nothing could be read.
+    --- An empty string means nothing was ready and is not a failure.
+    read: function(maxFrames: integer): (string?, string?)
+
+    --- Read-only. Takes up to `maxFrames` frames into `out` as interleaved
+    --- samples, writing no more than `#out` holds, and returns the frames
+    --- written.
+    readInto: function(out: {number}, maxFrames: integer): integer
+
+    --- Read-only. Puts `frames` interleaved frames in where a device would, and
+    --- returns how many were accepted. Only a device-free capture has anything
+    --- to feed it, and it is how a test drives this contract.
+    write: function(samples: {number}, frames: integer): integer
+
+    --- Read-only. Stops the device filling the buffer, keeping what is already
+    --- in it.
+    pause: function(): (boolean, string?)
+
+    --- Read-only. Starts the device filling the buffer again.
+    resume: function(): (boolean, string?)
+
+    --- Read-only. Stops capture and closes the device. Calling it twice is
+    --- harmless, and whatever was captured and not read goes with it.
+    close: function(): nil
+end
+
+--- Names the devices attached now and opens one for recording.
+---
+--- Separate from [`Backend`](tecs.platform.audiobackend.Backend) because
+--- listing devices must not open a mixer, and because a game may want to name
+--- devices before it decides to make any sound at all.
+export record Devices
+    --- Read-only. Names every playback device attached now, as a snapshot
+    --- rather than a subscription. Returns an empty listing rather than nil
+    --- when nothing could be asked, with the reason beside it.
+    playback: function(): ({Device}, string?)
+
+    --- Read-only. Names every recording device attached now, on the same terms
+    --- as `playback`.
+    recording: function(): ({Device}, string?)
+
+    --- Read-only. Opens a recording device as interleaved float32 samples at
+    --- `frequency` and `channels`, holding `bufferFrames` frames. A non-empty
+    --- `deviceName` selects a device and wins over `device`; neither given
+    --- takes the platform's default. Returns nil and a reason when nothing
+    --- opened.
+    open: function(
+        device: integer,
+        deviceName: string?,
+        frequency: integer,
+        channels: integer,
+        bufferFrames: integer
+    ): (Capture?, string?)
+end
+
 --- Starts a voice on the named clip.
 export const PLAY: integer = 1
 
@@ -248,6 +362,37 @@ export function silent(): Backend
             return {}
         end,
         close = function(): nil
+        end
+    )
+end
+
+--- Creates a provider that names no devices and opens none.
+---
+--- What a build with no audio library gets, and what a device-free test that
+--- wants the "nothing is attached" answer reaches for. Both listings are empty
+--- with a reason, and `open` refuses rather than handing back a capture that
+--- captures nothing, because a game asking for a microphone wants to know it
+--- did not get one. That is the one place this contract does not follow
+--- `silent`, which does hand back a mixer: a game that cannot make a noise
+--- carries on, and a game that cannot hear has to be told.
+---
+--- @return a provider whose listings are empty and whose open always refuses
+export function silentDevices(): Devices
+    return new Devices(
+        playback = function(): ({Device}, string?)
+            return {}, "no audio device support in this build"
+        end,
+        recording = function(): ({Device}, string?)
+            return {}, "no audio device support in this build"
+        end,
+        open = function(
+            _device: integer,
+            _deviceName: string?,
+            _frequency: integer,
+            _channels: integer,
+            _bufferFrames: integer
+        ): (Capture?, string?)
+            return nil, "no audio device support in this build"
         end
     )
 end
