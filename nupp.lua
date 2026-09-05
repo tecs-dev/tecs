@@ -56,6 +56,7 @@ return {
                     "tecs.gfx.fonts",
                     "tecs.gfx.images",
                     "tecs.gfx.layers",
+                    "tecs.gfx.text",
                     "tecs.gfx.truetype",
                     "tecs.host",
                     "tecs.input",
