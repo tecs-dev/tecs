@@ -100,6 +100,7 @@ return {
                     "tecs.sequence",
                     "tecs.watch",
                     "tecs.internal.archetype",
+                    "tecs.internal.builtins",
                     "tecs.internal.componentids",
                     "tecs.internal.components",
                     "tecs.internal.events",

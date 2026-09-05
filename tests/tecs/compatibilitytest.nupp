@@ -139,9 +139,12 @@ function suite.ecsBuiltinComponentNames(): nil
     -- `EntityKey` is the public binding and `Key` is the registered name. The
     -- two differ deliberately, and the registered one is what persists.
     test.equal(ecs.EntityKey.componentName, "Key")
+    test.equal(ecs.Name.componentName, "Name")
     test.equal(ecs.Paused.componentName, "Paused")
     test.equal(ecs.Disabled.componentName, "Disabled")
     test.equal(ecs.Transform2D.componentName, "Transform2D")
+    test.equal(ecs.TTL.componentName, "TTL")
+    test.equal(ecs.RelativeTransform2D.componentName, "RelativeTransform2D")
 end
 
 function suite.stateComponentsTakeTheStateSuffix(): nil
@@ -193,6 +196,7 @@ function suite.physicsComponentNames(): nil
 end
 
 function suite.relationshipNames(): nil
+    test.equal(ecs.ChildOf.componentName, "ChildOf")
     test.equal(physics.ColliderOf.componentName, "ColliderOf")
     test.equal(physics.JointBodyA.componentName, "JointBodyA")
     test.equal(physics.JointBodyB.componentName, "JointBodyB")
@@ -207,6 +211,7 @@ function suite.everyEngineComponentIsRegisteredUnderItsName(): nil
         "AnimationEvents",
         "Body",
         "Camera2D",
+        "ChildOf",
         "Clip",
         "Collider",
         "ColliderOf",
@@ -220,15 +225,18 @@ function suite.everyEngineComponentIsRegisteredUnderItsName(): nil
         "Key",
         "Material",
         "Motion",
+        "Name",
         "Occluder2D",
         "Paused",
         "PhysicsDisabled",
         "PhysicsHeld",
         "PointLight2D",
+        "RelativeTransform2D",
         "Renderable2D",
         "RigidBody",
         "Sound",
         "Sprite",
+        "TTL",
         "Text",
         "TextGlyph",
         "Tint",
@@ -417,6 +425,14 @@ local function systemNames(world: ecs.World): {string}
     end
 
     return names
+end
+
+function suite.ecsBuiltinSystemNames(): nil
+    -- Every world carries these three, so no plugin call precedes the read.
+    -- `ttl` is lowercase because Teal spelled it that way, and a debug tool that
+    -- stops it names it exactly.
+    local world = ecs.newWorld()
+    containsAll(systemNames(world), {"ttl", "RelativeTransform2D", "RelativeTransformDirtySampler"})
 end
 
 function suite.audioSystemNames(): nil

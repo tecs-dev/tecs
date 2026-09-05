@@ -72,6 +72,35 @@ combined sampled-image modules shaderc produces for SDL_GPU's Vulkan binding
 contract. Packaged builds compile none of this toolchain and load the generated
 shader pack instead.
 
+### Builtin systems and the hierarchy gate
+
+The builtins a game reaches without registering anything are split across three
+modules rather than one. `tecs.internal.components` holds the definitions that
+depend on nothing, `tecs.internal.rendercomponents` holds `Transform2D`, and
+`tecs.internal.builtins` holds the two that a world has to run a system for,
+`TTL` and `RelativeTransform2D`. The split is forced: naming the world type is
+what registering a system needs, and `tecs.internal.world` requires the
+component registry, so putting the systems beside the registrations would be a
+cycle. `tecs.ecs.newWorld` calls `install` instead, which is why a world built
+through the internal module directly runs none of them.
+
+Relative transforms recompose behind a dirty gate, and the gate is sampled
+twice. The Teal implementation sampled in `RenderLast` and then again from a
+private world hook that ran after the pipeline, because a write from the `Last`
+phase would otherwise be lost when dirty marks clear at the end of the update.
+The rewrite drops the hook and samples once, from a system in `Last`, which is
+the final phase before that clear. The alternative was to keep the hook, and it
+bought nothing here: the port has no phase after `Last`, so the extra sampling
+point had nothing left to catch.
+
+The composed result lands in a scratch transform first and reaches the entity's
+column only when it differs from what is already there. Writing unconditionally
+would mark `Transform2D` dirty on every child every frame, which reopens the
+gate the next frame and turns the whole optimization into a constant cost. Teal
+depended on `float32` storage rounding the comparison; the rewrite stores
+doubles, and composition of unchanged inputs is deterministic, so exact equality
+converges the same way.
+
 ### Dependency ownership
 
 SDL3 is the only platform and GPU execution layer. It owns windows, events,

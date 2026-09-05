@@ -1,0 +1,410 @@
+module tecs.internal.builtins
+
+--[[
+The builtin components that need a system to mean anything, and the systems that
+give them meaning.
+
+`tecs.internal.components` holds the builtin definitions that depend on nothing,
+and `tecs.internal.rendercomponents` holds `Transform2D`. The two here are
+separate because they are the ones a world has to run something for: a `TTL`
+that nothing decrements never expires, and a `RelativeTransform2D` that nothing
+composes never moves its entity. `install` registers those systems, and
+`tecs.ecs.newWorld` calls it on every world it creates, so a game writes no
+registration to get them.
+
+The module cannot live in `tecs.internal.components`, which `tecs.internal.world`
+requires: naming the world type is what a system registration needs, and the
+edge would be a cycle.
+]]
+
+local archetype = require("tecs.internal.archetype")
+local components = require("tecs.internal.components")
+local entityworld = require("tecs.internal.world")
+local phases = require("tecs.internal.phases")
+local rendercomponents = require("tecs.internal.rendercomponents")
+
+const sin, cos = math.sin, math.cos
+
+-------------------------------------------------------------------------------
+-- TTL
+-------------------------------------------------------------------------------
+
+--- Counts down an entity's remaining lifetime.
+---
+--- The `ttl` system subtracts each fixed step from `remaining` and despawns the
+--- entity once it reaches zero, so a value is measured in seconds of simulated
+--- fixed time rather than wall time. A paused or disabled entity is left out of
+--- the countdown, which is what makes pausing a state hold a projectile in place
+--- rather than expiring it while nothing is drawing it.
+export record TTL
+    --- Caller-writable. Sets the lifetime the entity started with, in seconds,
+    --- which is what `percentComplete` measures against. Raising `remaining`
+    --- past this value leaves `percentComplete` negative, so refresh both when a
+    --- pickup extends a timer.
+    startingTime: number
+
+    --- Caller-writable. Sets the seconds of fixed time left before the entity is
+    --- despawned. Writing a larger value refreshes the timer.
+    remaining: number
+
+    --- Returns elapsed lifetime as a fraction from zero at spawn to one at
+    --- expiry.
+    ---
+    --- A fresh `TTL` answers zero and an expired one answers one, so a fade or a
+    --- shrink can drive straight off it. A value restored from a snapshot whose
+    --- `startingTime` is zero also answers one, because nothing distinguishes it
+    --- from having run out.
+    --- @param self the lifetime to measure
+    --- @return the completed fraction, clamped to the range zero through one
+    percentComplete: function(self: TTL): number
+end
+
+--- Returns elapsed lifetime as a fraction from zero at spawn to one at expiry.
+function TTL.percentComplete(self: TTL): number
+    const total = self.startingTime
+    if total <= 0 then
+        return 1
+    end
+    const done = 1 - (self.remaining / total)
+    if done < 0 then
+        return 0
+    end
+    if done > 1 then
+        return 1
+    end
+
+    return done
+end
+
+--- The process-wide `TTL` component definition.
+---
+--- `TTL(2.5)` starts a two-and-a-half second lifetime, and `TTL(1, 4)` restores
+--- one that has already spent three seconds of a four second budget. Naming the
+--- component with no value spawns an already-expired lifetime, which the next
+--- fixed step despawns.
+export const TTLComponent: components.TableComponent<TTL> = components.newComponent({
+    -- This persisted component name is a compatibility surface.
+    name = "TTL",
+    construct = function(remaining: number?, startingTime: number?): TTL
+        const left = remaining or 0
+        if left <= 0 then
+            error("TTL: remaining must be greater than zero", 3)
+        end
+        const total = startingTime or left
+        if total < left then
+            error("TTL: startingTime must be at least remaining", 3)
+        end
+
+        return new TTL(startingTime = total, remaining = left)
+    end,
+    default = function(): TTL
+        return new TTL(startingTime = 0, remaining = 0)
+    end,
+})
+
+-------------------------------------------------------------------------------
+-- RelativeTransform2D
+-------------------------------------------------------------------------------
+
+--- Offsets an entity from the transform of the parent it names with `ChildOf`.
+---
+--- The `RelativeTransform2D` system composes the parent's world transform with
+--- this offset and writes the result into the entity's own `Transform2D`, so
+--- every consumer downstream keeps reading one transform and knows nothing about
+--- the hierarchy. An entity needs all three of `Transform2D`, `ChildOf` and this
+--- component before anything composes it.
+export record RelativeTransform2D
+    --- Caller-writable. Sets the horizontal offset from the parent, in the
+    --- parent's rotated and scaled space.
+    x: number
+
+    --- Caller-writable. Sets the vertical offset from the parent, in the
+    --- parent's rotated and scaled space.
+    y: number
+
+    --- Caller-writable. Sets the depth offset added to the parent's depth.
+    z: number
+
+    --- Caller-writable. Sets the clockwise rotation in radians added to the
+    --- parent's rotation.
+    rotation: number
+
+    --- Caller-writable. Sets the horizontal scale multiplied by the parent's.
+    scaleX: number
+
+    --- Caller-writable. Sets the vertical scale multiplied by the parent's.
+    scaleY: number
+
+    --- Caller-writable. Sets the horizontal origin as a fraction of the entity's
+    --- width, where zero is the left edge and one the right. The builtin
+    --- composition carries this value and does not read it, because nothing in
+    --- the transform knows the entity's size; a layout module that does read it
+    --- is what gives it meaning.
+    originX: number
+
+    --- Caller-writable. Sets the vertical origin as a fraction of the entity's
+    --- height, where zero is the top edge and one the bottom. The builtin
+    --- composition carries this value and does not read it.
+    originY: number
+end
+
+--- The process-wide `RelativeTransform2D` component definition.
+export const RelativeTransform2DComponent: components.TableComponent<RelativeTransform2D> = components.newComponent({
+    -- This persisted component name is a compatibility surface.
+    name = "RelativeTransform2D",
+    construct = function(
+        x: number?,
+        y: number?,
+        z: number?,
+        rotation: number?,
+        scaleX: number?,
+        scaleY: number?,
+        originX: number?,
+        originY: number?
+    ): RelativeTransform2D
+        return new RelativeTransform2D(
+            x = x or 0,
+            y = y or 0,
+            z = z or 0,
+            rotation = rotation or 0,
+            scaleX = scaleX or 1,
+            scaleY = scaleY or 1,
+            originX = originX or 0,
+            originY = originY or 0
+        )
+    end,
+    default = function(): RelativeTransform2D
+        return new RelativeTransform2D(
+            x = 0,
+            y = 0,
+            z = 0,
+            rotation = 0,
+            scaleX = 1,
+            scaleY = 1,
+            originX = 0,
+            originY = 0
+        )
+    end,
+})
+
+-------------------------------------------------------------------------------
+-- Composition
+-------------------------------------------------------------------------------
+
+--- Writes the composition of a parent transform and a child offset into `output`.
+--- @param parent the parent's resolved world transform
+--- @param relative the child's offset from that parent
+--- @param output the transform receiving the composed result
+local function compose(
+    parent: rendercomponents.Transform2D,
+    relative: RelativeTransform2D,
+    output: rendercomponents.Transform2D
+): nil
+    const rotation = parent.rotation
+    const parentScaleX = parent.scaleX
+    const parentScaleY = parent.scaleY
+    const turnCos = cos(rotation)
+    const turnSin = sin(rotation)
+    const scaledX = relative.x * parentScaleX
+    const scaledY = relative.y * parentScaleY
+
+    output.x = parent.x + (scaledX * turnCos - scaledY * turnSin)
+    output.y = parent.y + (scaledX * turnSin + scaledY * turnCos)
+    output.z = parent.z + relative.z
+    output.layer = parent.layer
+    output.rotation = rotation + relative.rotation
+    output.scaleX = parentScaleX * relative.scaleX
+    output.scaleY = parentScaleY * relative.scaleY
+end
+
+--- Reports whether a composed result differs from what the entity already holds.
+--- @param current the entity's committed transform
+--- @param composed the freshly composed transform
+--- @return whether writing the composed value would change anything
+local function differs(current: rendercomponents.Transform2D, composed: rendercomponents.Transform2D): boolean
+    return current.x ~= composed.x
+        or current.y ~= composed.y
+        or current.z ~= composed.z
+        or current.layer ~= composed.layer
+        or current.rotation ~= composed.rotation
+        or current.scaleX ~= composed.scaleX
+        or current.scaleY ~= composed.scaleY
+end
+
+--- The per-world state one `install` builds and its three systems share.
+local record Hierarchy
+    scratch: rendercomponents.Transform2D
+    resolved: {[integer]: rendercomponents.Transform2D}
+    visiting: {[integer]: boolean}
+    gate: {components.Component}
+    pending: boolean
+end
+
+--- Returns an entity's world transform, composing its ancestors on the way.
+---
+--- The result is memoized per run, so a chain shared by many children is walked
+--- once. A composed value is written into the entity's own `Transform2D` only
+--- when it differs from what is already there, which is what keeps an idle
+--- hierarchy from marking a column dirty and reopening the gate forever.
+--- @param world the world being composed
+--- @param state the per-world composition state
+--- @param entity the entity to resolve
+--- @return the entity's world transform, or nil when it carries none
+--- @raises when `ChildOf` links the entity into a parent cycle
+local resolve: function(
+    exclusive world: entityworld.World,
+    state: Hierarchy,
+    entity: integer
+): rendercomponents.Transform2D?
+
+resolve = function(exclusive world: entityworld.World, state: Hierarchy, entity: integer): rendercomponents.Transform2D?
+    const cached = state.resolved[entity]
+    if cached ~= nil then
+        return cached
+    end
+    const transform = world:get(entity, rendercomponents.Transform2DComponent)
+    if transform == nil then
+        return nil
+    end
+    const relative = world:get(entity, RelativeTransform2DComponent)
+    if relative == nil then
+        state.resolved[entity] = transform
+        return transform
+    end
+    const link = world:get(entity, components.ChildOf)
+    if link == nil then
+        state.resolved[entity] = transform
+        return transform
+    end
+    if state.visiting[entity] then
+        error("RelativeTransform2D: ChildOf forms a parent cycle at entity " .. tostring(entity), 0)
+    end
+    state.visiting[entity] = true
+    const parent = resolve(world, state, link.target)
+    state.visiting[entity] = nil
+    if parent ~= nil then
+        const scratch = state.scratch
+        compose(parent, relative, scratch)
+        if differs(transform, scratch) then
+            transform.x = scratch.x
+            transform.y = scratch.y
+            transform.z = scratch.z
+            transform.layer = scratch.layer
+            transform.rotation = scratch.rotation
+            transform.scaleX = scratch.scaleX
+            transform.scaleY = scratch.scaleY
+            -- The write went through the live column rather than `getMut`, so
+            -- the mark is explicit and lands only on the rows that moved. An
+            -- ancestor reached through another row's chain is marked here too.
+            world:markComponentDirty(entity, rendercomponents.Transform2DComponent)
+        end
+    end
+    state.resolved[entity] = transform
+
+    return transform
+end
+
+-------------------------------------------------------------------------------
+-- Installation
+-------------------------------------------------------------------------------
+
+local installed: {[entityworld.World]: boolean} = setmetatable({}, {__mode = "k"}) as {[entityworld.World]: boolean}
+
+--- Adds the systems that expire lifetimes and compose child transforms.
+---
+--- `tecs.ecs.newWorld` calls this on every world it creates, so a game reaches
+--- `TTL` and `RelativeTransform2D` without registering anything. Installing
+--- twice on one world does nothing, which is what lets a world built through
+--- `tecs.internal.world` directly opt in later.
+---
+--- Three systems are registered. `ttl` decrements every lifetime once per fixed
+--- step and despawns what reaches zero. `RelativeTransform2D` recomposes the
+--- hierarchy in `PostUpdate`, but only when a transform, an offset or a parent
+--- link changed. `RelativeTransformDirtySampler` runs in `Last` and records
+--- whether anything changed after that recomposition, because dirty marks clear
+--- when the update returns and a write from a later phase would otherwise never
+--- reach a consumer.
+--- @param world the world receiving the builtin systems
+export function install(exclusive world: entityworld.World): nil
+    if installed[world] then
+        return
+    end
+    installed[world] = true
+
+    -- A paused or disabled entity holds its lifetime rather than spending it.
+    -- Teal spelled this `type = "logic"`; the port has no automatic exclusion,
+    -- so the same two components are named here.
+    const expiring = world:newQuery({include = {TTLComponent}, exclude = {components.Paused, components.Disabled},})
+
+    -- Compatibility surface: the debug server reports this system by name and an
+    -- agent selects on it.
+    world:addSystem({
+        name = "ttl",
+        phase = phases.FixedUpdate,
+        run = function(dt: number, exclusive running: entityworld.World): nil
+            for candidate, count in expiring:iter() do
+                const active = candidate as archetype.Archetype
+                -- Every row is written, so the column is dirty either way and
+                -- `getMut` is the honest read.
+                const lifetimes: {TTL} = assert(active:getMut(TTLComponent))
+                const entities = active.entities
+                for row = 1, count as integer do
+                    const lifetime = lifetimes[row]
+                    lifetime.remaining = lifetime.remaining - dt
+                    if lifetime.remaining <= 0 then
+                        running:despawn(entities[row])
+                    end
+                end
+            end
+        end,
+    })
+
+    const state = new Hierarchy(
+        scratch = rendercomponents.Transform2DComponent.defaultFactory(),
+        resolved = {},
+        visiting = {},
+        gate = {
+            rendercomponents.Transform2DComponent as components.Component,
+            RelativeTransform2DComponent as components.Component,
+            components.ChildOf as components.Component,
+        },
+        pending = false
+    )
+    const hierarchy = world:newQuery({
+        include = {RelativeTransform2DComponent, components.ChildOf, rendercomponents.Transform2DComponent},
+        exclude = {components.Disabled},
+    })
+
+    -- Compatibility surface: the debug server reports this system by name.
+    world:addSystem({
+        name = "RelativeTransform2D",
+        phase = phases.PostUpdate,
+        run = function(_dt: number, exclusive running: entityworld.World): nil
+            if not state.pending and not entityworld.anyDirty(running, state.gate) then
+                return
+            end
+            state.pending = false
+            table.clear(state.resolved)
+            -- A run that raised on a parent cycle left its trail behind, and a
+            -- stale entry would raise on the next run for a hierarchy that is
+            -- now sound.
+            table.clear(state.visiting)
+            for candidate, count in hierarchy:iter() do
+                const active = candidate as archetype.Archetype
+                const entities = active.entities
+                for row = 1, count as integer do
+                    resolve(running, state, entities[row])
+                end
+            end
+        end,
+    })
+
+    -- Compatibility surface: the debug server reports this system by name.
+    world:addSystem({
+        name = "RelativeTransformDirtySampler",
+        phase = phases.Last,
+        run = function(_dt: number, exclusive running: entityworld.World): nil
+            state.pending = entityworld.anyDirty(running, state.gate)
+        end,
+    })
+end

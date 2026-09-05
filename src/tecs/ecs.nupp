@@ -10,6 +10,7 @@ immediately, and `commit` publishes structural changes.
 
 local idallocator = require("tecs.internal.idallocator")
 local archetype = require("tecs.internal.archetype")
+local builtins = require("tecs.internal.builtins")
 local components = require("tecs.internal.components")
 local entityworld = require("tecs.internal.world")
 local events = require("tecs.internal.events")
@@ -144,17 +145,54 @@ export const OnDespawn = events.OnDespawn
 --- public name.
 export const EntityKey = components.Key
 
+--- Names an entity for a human reader.
+---
+--- A name is neither indexed nor unique. `EntityKey` is what a lookup resolves
+--- through; this is what a debug overlay prints.
+export const Name = components.Name
+
 --- Marks entities paused by a state policy.
 export const Paused = components.Paused
 
 --- Marks entities disabled by a state policy.
 export const Disabled = components.Disabled
 
+--- Relates one child entity to its parent.
+---
+--- `world:spawn(ChildOf(parent))` places an entity under `parent`, and
+--- `world:set(child, ChildOf(other))` reparents it at the next barrier. The
+--- relationship is exclusive, reverse indexed and cascading: a child has one
+--- parent, `world:relationshipSources(ChildOf, parent)` answers with that
+--- parent's children, and despawning a parent despawns the tree beneath it.
+export const ChildOf = components.ChildOf
+
 --- Places an entity in the two-dimensional world.
 export type Transform2D = rendercomponents.Transform2D
 
 --- Constructs the shared two-dimensional transform component.
 export const Transform2D = rendercomponents.Transform2DComponent
+
+--- Counts down an entity's remaining lifetime.
+export type TTL = builtins.TTL
+
+--- Constructs a lifetime that despawns its entity when it runs out.
+---
+--- `world:spawn(TTL(0.5))` gives an entity half a second of fixed time. The
+--- builtin `ttl` system spends it one fixed step at a time and despawns the
+--- entity at zero, and `ttl:percentComplete()` reports how much of the original
+--- budget is gone.
+export const TTL = builtins.TTLComponent
+
+--- Offsets an entity from the transform of the parent it names with `ChildOf`.
+export type RelativeTransform2D = builtins.RelativeTransform2D
+
+--- Constructs an offset from a parent's transform.
+---
+--- Spawn it beside `Transform2D` and `ChildOf`. The builtin
+--- `RelativeTransform2D` system composes the parent's world transform with the
+--- offset and writes the result into the entity's own `Transform2D`, so a
+--- renderer, a query, or a physics body keeps reading one transform.
+export const RelativeTransform2D = builtins.RelativeTransform2DComponent
 
 --- Fires after a state becomes active.
 export const StateEnter = events.StateEnter
@@ -180,17 +218,25 @@ export const DEFAULT_TIMESTEP: number = entityworld.DEFAULT_TIMESTEP
 --- The per-frame fixed-step limit used when `newWorld` receives no override.
 export const DEFAULT_FIXED_MAX_STEPS: integer = entityworld.DEFAULT_FIXED_MAX_STEPS
 
---- Creates an independent empty world.
+--- Creates an independent empty world carrying the builtin systems.
+---
+--- The world arrives with `ttl`, `RelativeTransform2D` and
+--- `RelativeTransformDirtySampler` already registered, which is what makes a
+--- `TTL` expire and a `RelativeTransform2D` move its entity without a game
+--- installing anything.
 --- @param config the world settings, or nil for defaults
 --- @return the empty world
 --- @raises when a capacity or fixed-clock option is invalid
 export function newWorld(config: WorldConfig?): World
-    return entityworld.new(
+    const value = entityworld.new(
         config and config.maxEntities,
         config and config.timestep,
         config and config.fixedMaxSteps,
         config and config.fixedOverload
     )
+    builtins.install(value)
+
+    return value
 end
 
 --- Creates and registers a marker component with no per-entity value.
