@@ -4,6 +4,7 @@ members = [
     "native/rust/build-support",
     "native/rust/physics",
     "native/rust/tecs-audio",
+    "native/rust/tecs-gamepad",
     "native/rust/winit-host",
     "xtask",
 ]
@@ -28,6 +29,7 @@ data-url = "0.3.2"
 draco_decoder = "0.0.29"
 fastnoise-lite = { version = "1.1.1", default-features = false, features = ["f64", "std"] }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+gilrs = "0.11.2"
 glam = "0.33.2"
 gltf = { version = "1.4.1", default-features = false, features = ["import", "utils", "names", "extensions", "KHR_materials_unlit", "KHR_texture_transform"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
