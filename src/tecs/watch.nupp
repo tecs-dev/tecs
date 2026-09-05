@@ -1,0 +1,521 @@
+module tecs.watch
+
+--[[
+Watches content for changes and hands settled ones to reload handlers.
+
+```nupp
+local watch <const> = require("tecs.watch")
+
+watch.on("shader", function(change: watch.Change): nil
+    print("reload " .. change.path)
+end)
+watch.add(files.assetPath("shaders/lit.wgsl"))
+watch.install({intervalSeconds = 0.25})
+```
+
+A host advances the watcher by calling `poll` once per turn and `dispatch` once
+per logical update. `poll` looks at the watched paths when the interval has
+elapsed and queues what has settled; `dispatch` runs the handlers over that
+queue. Keeping the two apart is what stops a handler from running inside a
+half-completed phase: a reload replaces a resource other systems are reading,
+so it belongs at a point the frame has declared, not wherever a poll happened to
+land.
+
+## Settling
+
+An editor commonly saves by truncating and rewriting, or by writing a temporary
+file and renaming it over the target. A watcher that dispatched the first change
+it saw would hand a reload handler half a file. So a change is dispatched only
+after the same size and modification time have been observed `settle` extra
+times, and a path that is missing, empty, or a directory when a scan lands is
+treated as a save in progress rather than as a change.
+
+A path that changes and changes back inside the settle window dispatches
+nothing, because the bytes on disk are the bytes that were already there.
+
+## What is watched
+
+Every watched path is registered by name through `add`. The SDL implementation
+instead adopted whatever the process had read, because its own `files.read`
+recorded each path and the watcher polled that set. The rewrite reads content
+through `nupp.io.files`, which records nothing and should not start, so the
+caller that loaded a file is the one that says it wants the file watched. That
+also removes the `root` bound the old configuration needed: a set nobody chose
+had to be fenced, and a set named one path at a time does not.
+
+## The queue
+
+Settled changes wait in a bounded queue, and repeated changes to one path
+coalesce while they wait. `capacity` bounds distinct pending paths; an overflow
+is logged and left for a later scan rather than growing without limit. A handler
+that raises reaches the log and does not stop the rest of the batch, because a
+handler raising has said the file is not usable yet, which is the same answer as
+waiting for the next save.
+
+## Polling rather than platform notification
+
+This polls `nupp.io.files.info` and does not use a platform change-notification
+service. `notify`, wrapped as a fourth Rust service, was the alternative, and it
+loses on three counts. A notification says a write happened, not that the writer
+finished, so the settle policy above still has to stat the file and the service
+buys nothing the poll does not already pay for. The watched set is what a game
+has loaded, which is dozens to low hundreds of paths, and one
+`nupp.io.files.info` measures at 1.0 microseconds on the machine this was
+written on: a hundred paths at two polls a second costs 200 microseconds per
+second, which is 0.02 percent of one core. And a notification arrives on a
+thread the Lua virtual machine never created, so it would have to cross the same
+drain-a-buffer seam the gamepad and audio services cross, for an answer that
+still needs the stat.
+]]
+
+local files = require("nupp.io.files")
+local log = require("tecs.log")
+local time = require("nupp.time")
+
+--- One settled content change.
+export record Change
+    --- Read-only. Names the changed path, exactly as it was registered.
+    path: string
+
+    --- Read-only. Names the content kind the path was registered under. The
+    --- built-in loaders use `"image"`, `"sound"`, `"font"`, `"shader"`,
+    --- `"model"` and `"document"`, which are the `tecs.assets` kind names.
+    kind: string
+end
+
+--- Receives one settled change.
+export type ChangeHandler = function(change: Change): nil
+
+--- Reads one path's size and modification time.
+---
+--- A path that is missing, or that has become a directory, answers `-1, -1`
+--- rather than raising: some editors save by renaming a temporary over the
+--- target, so a scan landing in the gap has to read that as not settled.
+export type Source = function(path: string): (integer, number)
+
+--- Settings copied by `install`.
+---
+--- `intervalSeconds` sets the delay between polls and defaults to 0.5.
+--- `settle` requires that many extra matching scans after a change is first
+--- seen and defaults to 1, so one scan observes and the next confirms; zero
+--- queues immediately. `capacity` bounds distinct pending paths and defaults to
+--- 1024. `clock` reads seconds from a monotonic origin and defaults to
+--- `nupp.time`, and `source` reads one path's state and defaults to
+--- `nupp.io.files.info`. The last two exist for a test or a headless tool that
+--- drives its own time and its own filesystem; a game supplies neither.
+export type Config = {
+    intervalSeconds: number?,
+    settle: integer?,
+    capacity: integer?,
+    clock: (function(): number)?,
+    source: Source?
+}
+
+--- Seconds between polls. Fast enough that a save is picked up before a hand
+--- reaches the window, slow enough that the poll is not on a frame's path.
+local DEFAULT_INTERVAL: number = 0.5
+
+--- Scans a change must repeat before it is queued. One means a change is seen
+--- twice, which is what makes a rewrite in progress wait.
+local DEFAULT_SETTLE: integer = 1
+
+--- Distinct pending paths the queue holds before it refuses more.
+local DEFAULT_CAPACITY: integer = 1024
+
+-- Compatibility surface. Content kind names are what a reload handler is
+-- registered under and what the debug tools report, so they keep the spelling
+-- the SDL implementation recorded and the spelling `tecs.assets` declares.
+-- Adding a name here is safe; changing one is a migration, not a rename.
+
+--- Read-only. Names the kind a file registered without one is watched as.
+export const DOCUMENT = "document"
+
+--- Read-only. Names the kind a shader source is watched as.
+export const SHADER = "shader"
+
+--- What a document's extension makes it instead.
+---
+--- The load path decides every other kind, because something asked for an image
+--- as an image or for a document as a font's metrics. A registration that named
+--- no kind cannot know what wanted the file, so this is the one place a suffix
+--- decides, and it decides only what nothing named. `glsl` is what the SDL
+--- implementation mapped; `wgsl` is beside it because the rewrite's shaders are
+--- WGSL and a shader has to reload as a shader under both.
+local DOCUMENT_KINDS: {[string]: string} = {glsl = SHADER, wgsl = SHADER}
+
+--- One watched path, and how sure the watcher is about its current state.
+local record Entry
+    --- What kind this path reloads as.
+    kind: string
+
+    --- The state last accepted, which is what a change is measured against.
+    size: integer
+
+    stamp: number
+
+    --- The state the last scan saw, and how many scans have agreed on it.
+    pendingSize: integer
+
+    pendingStamp: number
+    steady: integer
+end
+
+local logger = log.get(log.WATCH)
+
+local handlers: {[string]: ChangeHandler?} = {}
+local entries: {[string]: Entry} = {}
+local running: boolean = false
+local interval: number = DEFAULT_INTERVAL
+local settleCount: integer = DEFAULT_SETTLE
+local capacity: integer = DEFAULT_CAPACITY
+local lastPoll: number = 0
+local dispatchedCount: integer = 0
+local queue: {Change} = {}
+local queued: {[string]: boolean} = {}
+
+--- Reads one path through `nupp.io.files`, the default `Source`.
+--- @param path the path to describe
+--- @return the byte length, or -1 when nothing usable is there
+--- @return seconds since the Unix epoch, or -1 when nothing usable is there
+local function defaultSource(path: string): (integer, number)
+    local info = files.info(path)
+    if info == nil or info.kind ~= "file" then
+        return -1, -1
+    end
+
+    return info.size, info.modified
+end
+
+--- Reads the monotonic clock in seconds, the default `Config.clock`.
+--- @return seconds since this process's clock origin
+local function defaultClock(): number
+    return time.now() / 1000
+end
+
+local source: Source = defaultSource
+local clock: function(): number = defaultClock
+
+--- Returns what a path reloads as, given the kind it was registered under.
+--- @param path the registered path
+--- @param registered the kind the caller named, or the document kind
+--- @return the kind a change to this path dispatches under
+local function kindOf(path: string, registered: string): string
+    if registered ~= DOCUMENT then
+        return registered
+    end
+    local suffix = path:match("%.([%a%d]+)$")
+    if suffix == nil then
+        return DOCUMENT
+    end
+
+    return DOCUMENT_KINDS[suffix:lower()] or DOCUMENT
+end
+
+--- Registers a path to watch, and reports whether it was newly registered.
+---
+--- The path's current state becomes the baseline, so a file registered on frame
+--- ten does not dispatch on frame eleven. Registering a path already watched
+--- moves its kind and leaves its baseline alone, which is what a second loader
+--- naming the same file should do.
+---
+--- Registration does not require an installed watcher. A loader registers what
+--- it loaded whenever it loads it, and `install` takes the whole set up.
+---
+--- @param path the file to watch
+--- @param kind the content kind a change dispatches under, defaulting to
+---     `"document"` and to `"shader"` for a `.glsl` or `.wgsl` suffix
+--- @return whether this call added the path rather than updating it
+--- @raises when path is empty
+export function add(path: string, kind: string?): boolean
+    if path == "" then
+        error("tecs.watch.add: a path is required", 2)
+    end
+    local named = kindOf(path, kind or DOCUMENT)
+    local held = entries[path]
+    if held ~= nil then
+        held.kind = named
+
+        return false
+    end
+    local size, stamp = source(path)
+    entries[path] = new Entry(kind = named, size = size, stamp = stamp, pendingSize = -1, pendingStamp = -1, steady = 0)
+
+    return true
+end
+
+--- Stops watching one path and forgets its state.
+---
+--- A change already queued for the path still dispatches, because it settled
+--- while the path was watched and a handler that has been promised a reload
+--- gets one.
+---
+--- @param path the file to stop watching
+--- @return whether the path was being watched
+export function forget(path: string): boolean
+    if entries[path] == nil then
+        return false
+    end
+    entries[path] = nil
+
+    return true
+end
+
+--- Registers the handler for a content kind.
+---
+--- Re-registering a kind replaces its handler, and nil removes it. Handlers
+--- outlive `install` and `uninstall`, so a build that stops and starts watching
+--- registers them once.
+---
+--- @param kind the content kind to register under
+--- @param handler the handler to run, or nil to remove the current one
+--- @raises when kind is empty
+export function on(kind: string, handler: ChangeHandler?): nil
+    if kind == "" then
+        error("tecs.watch.on: a handler needs a kind to be registered under", 2)
+    end
+    handlers[kind] = handler
+end
+
+--- Returns the content kinds that have a handler, in sorted order.
+--- @return a fresh caller-owned list
+export function kinds(): {string}
+    local names: {string} = {}
+    for kind, handler in pairs(handlers) do
+        if handler ~= nil then
+            names[#names + 1] = kind
+        end
+    end
+    table.sort(names)
+
+    return names
+end
+
+--- Returns the watched paths, in sorted order.
+--- @return a fresh caller-owned list
+export function watching(): {string}
+    local list: {string} = {}
+    for path in pairs(entries) do
+        list[#list + 1] = path
+    end
+    table.sort(list)
+
+    return list
+end
+
+--- Returns the watched paths whose latest change has not settled, sorted.
+--- @return a fresh caller-owned list
+export function unsettled(): {string}
+    local list: {string} = {}
+    for path, entry in pairs(entries) do
+        if entry.pendingSize >= 0 then
+            list[#list + 1] = path
+        end
+    end
+    table.sort(list)
+
+    return list
+end
+
+--- Returns how many changes have reached a handler since `install`.
+--- @return the cumulative count of handler calls that returned
+export function dispatched(): integer
+    return dispatchedCount
+end
+
+--- Returns how many settled changes are waiting for `dispatch`.
+--- @return the number of distinct queued paths
+export function pending(): integer
+    return #queue
+end
+
+--- Returns whether the watcher is running.
+--- @return true after `install` and before `uninstall`
+export function isInstalled(): boolean
+    return running
+end
+
+--- Starts watching, taking every registered path's current state as its
+--- baseline.
+---
+--- Changes made before this call do not dispatch, which is what lets a build
+--- register paths as it loads them and install once everything is loaded.
+---
+--- @param config the polling options, or nil for the documented defaults
+--- @raises when settle is negative or capacity is not a positive integer
+export function install(config: Config?): nil
+    local given = config
+    interval = given ~= nil and given.intervalSeconds or DEFAULT_INTERVAL
+    settleCount = given ~= nil and given.settle or DEFAULT_SETTLE
+    capacity = given ~= nil and given.capacity or DEFAULT_CAPACITY
+    if settleCount < 0 then
+        error("tecs.watch.install: settle counts scans, so it cannot be negative", 2)
+    end
+    if capacity < 1 or capacity % 1 ~= 0 then
+        error("tecs.watch.install: capacity must be a positive integer", 2)
+    end
+    source = given ~= nil and given.source or defaultSource
+    clock = given ~= nil and given.clock or defaultClock
+    queue = {}
+    queued = {}
+    dispatchedCount = 0
+    for path, entry in pairs(entries) do
+        local size, stamp = source(path)
+        entry.size = size
+        entry.stamp = stamp
+        entry.pendingSize = -1
+        entry.pendingStamp = -1
+        entry.steady = 0
+    end
+    running = true
+    lastPoll = clock()
+end
+
+--- Stops watching and drops whatever was queued.
+---
+--- Registered paths and handlers survive, so a later `install` resumes with the
+--- same set and takes a fresh baseline.
+export function uninstall(): nil
+    running = false
+    queue = {}
+    queued = {}
+end
+
+--- Queues one settled change, and reports whether the queue took it.
+--- @param path the changed path
+--- @param entry the watched path's state
+--- @return whether the change is now queued
+local function enqueue(path: string, entry: Entry): boolean
+    if queued[path] then
+        return true
+    end
+    if #queue >= capacity then
+        logger:error("the watch queue is full; retaining '%s' for a later scan", path)
+
+        return false
+    end
+    queue[#queue + 1] = new Change(path = path, kind = entry.kind)
+    queued[path] = true
+
+    return true
+end
+
+--- Looks at every watched path once, whatever the interval says.
+---
+--- Call this directly when a headless tool or a test controls the timing. A
+--- change that has now settled is queued rather than dispatched, because the
+--- handler runs where the frame says it runs.
+---
+--- @return how many changes this scan queued, and zero when nothing is running
+export function scan(): integer
+    if not running then
+        return 0
+    end
+    local settled: integer = 0
+    for path, entry in pairs(entries) do
+        local size, stamp = source(path)
+        if size <= 0 then
+            -- Missing, a directory, or empty: a save in progress rather than a
+            -- state to reload from. The next scan looks again.
+            entry.pendingSize = -1
+            entry.pendingStamp = -1
+            entry.steady = 0
+        elseif size ~= entry.size or stamp ~= entry.stamp then
+            if size == entry.pendingSize and stamp == entry.pendingStamp then
+                entry.steady = entry.steady + 1
+            else
+                entry.pendingSize = size
+                entry.pendingStamp = stamp
+                entry.steady = 0
+            end
+            if entry.steady >= settleCount and enqueue(path, entry) then
+                entry.size = size
+                entry.stamp = stamp
+                entry.pendingSize = -1
+                entry.pendingStamp = -1
+                entry.steady = 0
+                settled = settled + 1
+            end
+        elseif entry.pendingSize >= 0 then
+            -- Changed and then changed back inside the settle window, which is
+            -- a save that produced the bytes that were already there.
+            entry.pendingSize = -1
+            entry.pendingStamp = -1
+            entry.steady = 0
+        end
+    end
+
+    return settled
+end
+
+--- Scans when the interval has elapsed, and does nothing otherwise.
+---
+--- This is what a host calls once per turn. It never dispatches, so it is safe
+--- anywhere in a turn.
+---
+--- @return how many changes the scan queued, and zero when it was too early
+export function poll(): integer
+    if not running then
+        return 0
+    end
+    local now = clock()
+    if now - lastPoll < interval then
+        return 0
+    end
+    lastPoll = now
+
+    return scan()
+end
+
+--- Runs the registered handlers over every queued change.
+---
+--- Call this once per logical update, at a point the frame has declared. A
+--- handler that raises is logged and the batch continues, because one file that
+--- is not usable yet says nothing about the next.
+---
+--- @return how many handlers ran and returned
+export function dispatch(): integer
+    local batch = queue
+    if #batch == 0 then
+        return 0
+    end
+    queue = {}
+    queued = {}
+    local fired: integer = 0
+    for index = 1, #batch do
+        local change = batch[index]
+        local handler = handlers[change.kind]
+        if handler ~= nil then
+            local succeeded, failure = pcall(function(): nil
+                handler(change)
+            end)
+            if succeeded then
+                logger:info("reloaded '%s' as %s", change.path, change.kind)
+                fired = fired + 1
+            else
+                logger:error("reloading '%s' failed: %s", change.path, tostring(failure))
+            end
+        end
+    end
+    dispatchedCount = dispatchedCount + fired
+
+    return fired
+end
+
+--- Forgets every path, handler and queued change, and stops watching.
+---
+--- A test that installs the watcher needs this between cases. A game does not:
+--- `uninstall` already stops the polling and keeps what was registered.
+export function reset(): nil
+    running = false
+    handlers = {}
+    entries = {}
+    queue = {}
+    queued = {}
+    dispatchedCount = 0
+    interval = DEFAULT_INTERVAL
+    settleCount = DEFAULT_SETTLE
+    capacity = DEFAULT_CAPACITY
+    source = defaultSource
+    clock = defaultClock
+    lastPoll = 0
+end

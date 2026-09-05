@@ -1,0 +1,365 @@
+local disk = require("nupp.io.files")
+local test = require("nupp.test")
+local watch = require("tecs.watch")
+
+local suite = {}
+
+--- One fake filesystem and one fake clock, so a case drives both.
+---
+--- Nothing here sleeps and nothing here writes, which is what lets the settle
+--- policy be exercised at the scan rather than at the second.
+local record World
+    state: {[string]: {number}}
+    seconds: number
+end
+
+local scene: World = new World(state = {}, seconds = 0)
+
+--- Puts one path's size and modification time where a scan will read them.
+--- @param path the path to describe
+--- @param size the byte length, or -1 for a path with nothing usable at it
+--- @param stamp the modification time in seconds
+local function put(path: string, size: integer, stamp: number): nil
+    scene.state[path] = {size, stamp}
+end
+
+--- Reads the fake filesystem, standing in for `nupp.io.files.info`.
+local function fakeSource(path: string): (integer, number)
+    local held = scene.state[path]
+    if held == nil then
+        return -1, -1
+    end
+
+    return held[1] as integer, held[2]
+end
+
+--- Reads the fake clock, in seconds.
+local function fakeClock(): number
+    return scene.seconds
+end
+
+--- Starts a watcher over the fake world with the given settle count.
+--- @param settle how many extra agreeing scans a change needs
+--- @param capacity the queue bound, or nil for the default
+local function start(settle: integer, capacity: integer?): nil
+    watch.install({settle = settle, capacity = capacity, source = fakeSource, clock = fakeClock})
+end
+
+--- Empties the module and the fake world between cases.
+local function fresh(): nil
+    watch.reset()
+    scene.state = {}
+    scene.seconds = 0
+end
+
+function suite.queuesNothingUntilAChangeHasBeenSeenTwice(): nil
+    fresh()
+    put("a.wgsl", 10, 100)
+    watch.add("a.wgsl")
+    start(1)
+
+    -- Nothing has moved yet.
+    test.equal(watch.scan(), 0)
+
+    put("a.wgsl", 20, 101)
+    test.equal(watch.scan(), 0)
+    test.equal(#watch.unsettled(), 1)
+    test.equal(watch.unsettled()[1], "a.wgsl")
+
+    -- The second agreeing scan is what settles it.
+    test.equal(watch.scan(), 1)
+    test.equal(watch.pending(), 1)
+    test.equal(#watch.unsettled(), 0)
+end
+
+function suite.restartsSettlingWhenAFileChangesTwiceInsideTheWindow(): nil
+    fresh()
+    put("level.json", 10, 100)
+    watch.add("level.json")
+    start(2)
+
+    put("level.json", 20, 101)
+    test.equal(watch.scan(), 0)
+    test.equal(watch.scan(), 0)
+
+    -- The writer is still going, so the count starts over rather than
+    -- dispatching a file that is half written.
+    put("level.json", 30, 102)
+    test.equal(watch.scan(), 0)
+    test.equal(watch.scan(), 0)
+    test.equal(watch.pending(), 0)
+
+    test.equal(watch.scan(), 1)
+    test.equal(watch.pending(), 1)
+end
+
+function suite.queuesImmediatelyWhenNothingHasToSettle(): nil
+    fresh()
+    put("a.wgsl", 10, 100)
+    watch.add("a.wgsl")
+    start(0)
+
+    put("a.wgsl", 11, 101)
+    test.equal(watch.scan(), 1)
+    test.equal(watch.pending(), 1)
+end
+
+function suite.queuesNothingForASaveThatProducedTheSameBytes(): nil
+    fresh()
+    put("a.wgsl", 10, 100)
+    watch.add("a.wgsl")
+    start(1)
+
+    put("a.wgsl", 12, 101)
+    test.equal(watch.scan(), 0)
+    test.equal(#watch.unsettled(), 1)
+
+    -- The editor put the original bytes back before the window closed.
+    put("a.wgsl", 10, 100)
+    test.equal(watch.scan(), 0)
+    test.equal(#watch.unsettled(), 0)
+    test.equal(watch.pending(), 0)
+end
+
+function suite.treatsAMissingOrEmptyPathAsASaveInProgress(): nil
+    fresh()
+    put("a.wgsl", 10, 100)
+    watch.add("a.wgsl")
+    start(0)
+
+    put("a.wgsl", 0, 101)
+    test.equal(watch.scan(), 0)
+
+    scene.state["a.wgsl"] = nil
+    test.equal(watch.scan(), 0)
+    test.equal(watch.pending(), 0)
+
+    put("a.wgsl", 15, 102)
+    test.equal(watch.scan(), 1)
+end
+
+function suite.coalescesRepeatedChangesToOnePathWhileTheyWait(): nil
+    fresh()
+    put("a.wgsl", 10, 100)
+    watch.add("a.wgsl")
+    start(0)
+
+    put("a.wgsl", 11, 101)
+    test.equal(watch.scan(), 1)
+    put("a.wgsl", 12, 102)
+    test.equal(watch.scan(), 1)
+    test.equal(watch.pending(), 1)
+end
+
+function suite.holdsAnOverflowingChangeForALaterScan(): nil
+    fresh()
+    put("one.wgsl", 10, 100)
+    put("two.wgsl", 10, 100)
+    watch.add("one.wgsl")
+    watch.add("two.wgsl")
+    start(0, 1)
+
+    put("one.wgsl", 11, 101)
+    put("two.wgsl", 11, 101)
+    test.equal(watch.scan(), 1)
+    test.equal(watch.pending(), 1)
+
+    -- The change the queue refused is still a change, so it is still waiting.
+    local seen = 0
+    watch.on("shader", function(_change: watch.Change): nil
+        seen = seen + 1
+    end)
+    test.equal(watch.dispatch(), 1)
+    test.equal(seen, 1)
+    test.equal(watch.scan(), 1)
+    test.equal(watch.dispatch(), 1)
+    test.equal(seen, 2)
+end
+
+function suite.scansOnlyWhenThePollIntervalHasElapsed(): nil
+    fresh()
+    put("a.wgsl", 10, 100)
+    watch.add("a.wgsl")
+    watch.install({settle = 0, intervalSeconds = 0.5, source = fakeSource, clock = fakeClock})
+
+    put("a.wgsl", 11, 101)
+    scene.seconds = 0.4
+    test.equal(watch.poll(), 0)
+    test.equal(watch.pending(), 0)
+
+    scene.seconds = 0.51
+    test.equal(watch.poll(), 1)
+    test.equal(watch.pending(), 1)
+end
+
+function suite.startsFromTheStateEveryWatchedPathIsInWhenItStarts(): nil
+    fresh()
+    put("a.wgsl", 10, 100)
+    watch.add("a.wgsl")
+
+    -- The file moved before the watcher started, which is not a reload.
+    put("a.wgsl", 99, 999)
+    start(0)
+    test.equal(watch.scan(), 0)
+end
+
+function suite.stopsScanningAndKeepsWhatWasRegistered(): nil
+    fresh()
+    put("a.wgsl", 10, 100)
+    watch.add("a.wgsl")
+    watch.on("shader", function(_change: watch.Change): nil
+    end)
+    start(0)
+    test.assert(watch.isInstalled())
+
+    put("a.wgsl", 11, 101)
+    test.equal(watch.scan(), 1)
+    watch.uninstall()
+
+    test.assert(not watch.isInstalled())
+    test.equal(watch.pending(), 0)
+    test.equal(watch.scan(), 0)
+    test.equal(watch.poll(), 0)
+    test.equal(#watch.watching(), 1)
+    test.equal(#watch.kinds(), 1)
+
+    -- A second installation resumes with the same set and a fresh baseline.
+    start(0)
+    test.equal(watch.scan(), 0)
+    put("a.wgsl", 12, 102)
+    test.equal(watch.scan(), 1)
+end
+
+function suite.registersEachPathOnceAndForgetsOnRequest(): nil
+    fresh()
+    put("a.wgsl", 10, 100)
+    test.assert(watch.add("a.wgsl"))
+    test.assert(not watch.add("a.wgsl", "shader"))
+    test.equal(#watch.watching(), 1)
+
+    test.assert(watch.forget("a.wgsl"))
+    test.assert(not watch.forget("a.wgsl"))
+    test.equal(#watch.watching(), 0)
+    test.assert(not pcall(watch.add, ""))
+end
+
+function suite.namesAShaderFromItsSuffixAndTakesAnyKindTheCallerGives(): nil
+    fresh()
+    put("lit.wgsl", 10, 100)
+    put("old.glsl", 10, 100)
+    put("level.json", 10, 100)
+    put("hero.png", 10, 100)
+    watch.add("lit.wgsl")
+    watch.add("old.glsl")
+    watch.add("level.json")
+    watch.add("hero.png", "image")
+    start(0)
+
+    local seen: {string} = {}
+    watch.on("shader", function(change: watch.Change): nil
+        seen[#seen + 1] = change.kind .. ":" .. change.path
+    end)
+    watch.on("document", function(change: watch.Change): nil
+        seen[#seen + 1] = change.kind .. ":" .. change.path
+    end)
+    watch.on("image", function(change: watch.Change): nil
+        seen[#seen + 1] = change.kind .. ":" .. change.path
+    end)
+
+    put("lit.wgsl", 11, 101)
+    put("old.glsl", 11, 101)
+    put("level.json", 11, 101)
+    put("hero.png", 11, 101)
+    test.equal(watch.scan(), 4)
+    test.equal(watch.dispatch(), 4)
+    test.equal(watch.dispatched(), 4)
+
+    table.sort(seen)
+    test.equal(seen[1], "document:level.json")
+    test.equal(seen[2], "image:hero.png")
+    test.equal(seen[3], "shader:lit.wgsl")
+    test.equal(seen[4], "shader:old.glsl")
+end
+
+function suite.keepsGoingWhenOneHandlerRaises(): nil
+    fresh()
+    put("one.wgsl", 10, 100)
+    put("two.json", 10, 100)
+    watch.add("one.wgsl")
+    watch.add("two.json")
+    start(0)
+
+    local reached = 0
+    watch.on("shader", function(_change: watch.Change): nil
+        error("this file is not finished")
+    end)
+    watch.on("document", function(_change: watch.Change): nil
+        reached = reached + 1
+    end)
+
+    put("one.wgsl", 11, 101)
+    put("two.json", 11, 101)
+    test.equal(watch.scan(), 2)
+
+    -- The raising handler is not counted, and the other one still ran.
+    test.equal(watch.dispatch(), 1)
+    test.equal(reached, 1)
+    test.equal(watch.dispatched(), 1)
+end
+
+function suite.dispatchesNothingForAKindWithNoHandler(): nil
+    fresh()
+    put("a.wgsl", 10, 100)
+    watch.add("a.wgsl")
+    start(0)
+
+    put("a.wgsl", 11, 101)
+    test.equal(watch.scan(), 1)
+    test.equal(watch.dispatch(), 0)
+    test.equal(watch.pending(), 0)
+end
+
+function suite.removesAHandlerWhenNoneIsGiven(): nil
+    fresh()
+    watch.on("shader", function(_change: watch.Change): nil
+    end)
+    test.equal(#watch.kinds(), 1)
+    watch.on("shader", nil)
+    test.equal(#watch.kinds(), 0)
+    test.assert(not pcall(watch.on, "", nil))
+end
+
+function suite.refusesAConfigurationNoScanCouldHonor(): nil
+    fresh()
+    test.assert(not pcall(watch.install, {settle = -1}))
+    test.assert(not pcall(watch.install, {capacity = 0}))
+    test.assert(not pcall(watch.install, {capacity = 1.5 as integer}))
+end
+
+function suite.readsARealFileThroughTheDefaultSource(): nil
+    fresh()
+    do
+        local scratch = assert(disk.createTemporaryDirectory(new disk.TemporaryOptions(prefix = "tecs-watch-")))
+        local path = scratch:toString() .. "/shader.wgsl"
+        assert(disk.write(path, "one"))
+
+        watch.add(path)
+        watch.install({settle = 0, intervalSeconds = 0})
+        test.equal(watch.scan(), 0)
+
+        assert(disk.write(path, "a longer body than the first"))
+        test.equal(watch.scan(), 1)
+
+        local seen = ""
+        watch.on("shader", function(change: watch.Change): nil
+            seen = change.path
+        end)
+        test.equal(watch.dispatch(), 1)
+        test.equal(seen, path)
+
+        assert(disk.remove(path))
+    end
+    fresh()
+end
+
+return suite
