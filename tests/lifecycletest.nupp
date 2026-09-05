@@ -137,7 +137,8 @@ function suite.reportsCoreWorldStatistics(): nil
     test.equal(stats.entities, 1)
     test.equal(stats.archetypes, 2)
     test.equal(stats.components, 1)
-    test.equal(stats.systems, 1)
+    -- The three builtin systems every world carries, plus the one above.
+    test.equal(stats.systems, 4)
 end
 
 return suite

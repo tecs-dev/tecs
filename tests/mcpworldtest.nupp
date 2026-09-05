@@ -238,9 +238,10 @@ function suite.listsAndControlsTheSystemsTheWorldRuns(): nil
     world:addSystem({name = "test.mcp.Spin", phase = ecs.phases.Update, run = noop})
     world:addSystem({name = "test.mcp.Draw", phase = ecs.phases.Last, run = noop})
 
+    -- The two above plus the three builtin systems every world carries.
     local listed = structured("systems_list")
-    test.equal(listed.registered as integer, 2)
-    test.equal(listed.total as integer, 2)
+    test.equal(listed.registered as integer, 5)
+    test.equal(listed.total as integer, 5)
 
     local narrowed = structured("systems_list", {phase = "Update"})
     test.equal(narrowed.total as integer, 1)
@@ -308,7 +309,8 @@ function suite.countsWhatTheWorldHolds(): nil
     local answer = structured("stats")
 
     test.equal(answer.entities as integer, 2)
-    test.equal(answer.systems as integer, 1)
+    -- The three builtin systems every world carries, plus the one above.
+    test.equal(answer.systems as integer, 4)
     test.assert((answer.message as string):find("2 entities", 1, true) == 1)
 end
 

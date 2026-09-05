@@ -645,6 +645,32 @@ function World.markComponentDirty(exclusive self: World, id: integer, component:
     self.archetypes[archetypeId]:markComponentDirty(component)
 end
 
+--- Reports whether any archetype holds a dirty column for one of these components.
+---
+--- A gate that recomputes derived state needs to know that something anywhere
+--- changed, not that a particular query matched, because the entity that moved
+--- may live in an archetype the derived query never sees. A parent carrying only
+--- `Transform2D` is exactly that case. The walk covers every archetype, since
+--- the port keeps dirty marks on the archetype rather than in a world-level
+--- list.
+--- @param world the world to inspect
+--- @param values the components whose changed columns open the gate
+--- @return whether at least one archetype reports one of them dirty
+export function anyDirty(borrows world: World, values: {components.Component}): boolean
+    for index = 1, world.archetypeCount do
+        local source = world.archetypes[index]
+        if source:anyComponentDirty() then
+            for valueIndex = 1, #values do
+                if source:isComponentDirty(values[valueIndex]) then
+                    return true
+                end
+            end
+        end
+    end
+
+    return false
+end
+
 local function collectRelationshipSource(source: integer, context: any): nil
     local result = context as {integer}
     result[#result + 1] = source

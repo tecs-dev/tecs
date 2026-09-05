@@ -1,0 +1,355 @@
+--[[
+The ECS builtins every world carries: `Name`, `ChildOf`, `TTL` and
+`RelativeTransform2D`.
+
+The suite reaches them through `tecs.ecs` rather than through the internal
+module that registers them, because what a game gets from `ecs.newWorld` without
+installing anything is the property under test.
+]]
+
+local ecs = require("tecs.ecs")
+local test = require("nupp.test")
+
+local suite = {}
+
+--- Asserts that two lengths agree to within a tolerance composition can produce.
+local function near(actual: number, expected: number, message: string?): nil
+    const drift = actual - expected
+    test.assert(
+        drift < 1e-9 and drift > -1e-9,
+        (message or "value") .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual)
+    )
+end
+
+--- Returns a world whose fixed step is a tenth of a second.
+---
+--- `TTL` is spent by the fixed clock, so a whole timestep keeps the arithmetic
+--- exact and one `update` call worth one step.
+local function tickingWorld(): ecs.World
+    return ecs.newWorld({maxEntities = 64, timestep = 0.1})
+end
+
+-------------------------------------------------------------------------------
+-- Name
+-------------------------------------------------------------------------------
+
+function suite.readsAndRewritesAnEntityName(): nil
+    const world = ecs.newWorld()
+    const entity = world:spawn(ecs.Name("player"))
+    world:commit()
+
+    test.equal(world:get(entity, ecs.Name), "player")
+
+    world:set(entity, ecs.Name("player two"))
+    world:commit()
+
+    test.equal(world:get(entity, ecs.Name), "player two")
+end
+
+function suite.letsTwoEntitiesShareOneName(): nil
+    const world = ecs.newWorld()
+    const named = world:newQuery({include = {ecs.Name}})
+    world:spawn(ecs.Name("crate"))
+    world:spawn(ecs.Name("crate"))
+    world:commit()
+
+    local found = 0
+    for candidate, count in named:iter() do
+        const names: {string} = assert(assert(candidate):get(ecs.Name))
+        for row = 1, count as integer do
+            if names[row] == "crate" then
+                found = found + 1
+            end
+        end
+    end
+
+    test.equal(found, 2)
+end
+
+-------------------------------------------------------------------------------
+-- ChildOf
+-------------------------------------------------------------------------------
+
+function suite.reportsAParentAndItsChildren(): nil
+    const world = ecs.newWorld()
+    const parent = world:spawn()
+    const first = world:spawn(ecs.ChildOf(parent))
+    const second = world:spawn(ecs.ChildOf(parent))
+    world:commit()
+
+    test.equal(assert(world:get(first, ecs.ChildOf)).target, parent)
+    const children = world:relationshipSources(ecs.ChildOf, parent)
+    test.equal(#children, 2)
+    test.assert(children[1] == first or children[2] == first)
+    test.assert(children[1] == second or children[2] == second)
+end
+
+function suite.cascadesADespawnThroughAGrandchild(): nil
+    const world = ecs.newWorld()
+    const parent = world:spawn()
+    const child = world:spawn(ecs.ChildOf(parent))
+    const grandchild = world:spawn(ecs.ChildOf(child))
+    world:commit()
+
+    world:despawn(parent)
+    world:commit()
+
+    test.assert(not world:isAlive(parent))
+    test.assert(not world:isAlive(child))
+    test.assert(not world:isAlive(grandchild))
+    test.equal(world.liveCount, 0)
+end
+
+function suite.reparentsAChildAtTheNextBarrier(): nil
+    const world = ecs.newWorld()
+    const first = world:spawn()
+    const second = world:spawn()
+    const child = world:spawn(ecs.ChildOf(first))
+    world:commit()
+
+    world:set(child, ecs.ChildOf(second))
+    test.equal(assert(world:get(child, ecs.ChildOf)).target, first)
+    world:commit()
+
+    test.equal(assert(world:get(child, ecs.ChildOf)).target, second)
+    test.equal(#world:relationshipSources(ecs.ChildOf, first), 0)
+    test.equal(world:relationshipSources(ecs.ChildOf, second)[1], child)
+
+    -- A reparented child no longer follows the parent it left.
+    world:despawn(first)
+    world:commit()
+    test.assert(world:isAlive(child))
+end
+
+-------------------------------------------------------------------------------
+-- TTL
+-------------------------------------------------------------------------------
+
+function suite.despawnsAnEntityWhoseLifetimeRunsOut(): nil
+    const world = tickingWorld()
+    const entity = world:spawn(ecs.TTL(0.25))
+    world:commit()
+
+    world:update(0.1)
+    test.assert(world:isAlive(entity))
+    near(assert(world:get(entity, ecs.TTL)).remaining, 0.15, "remaining")
+
+    world:update(0.1)
+    test.assert(world:isAlive(entity))
+
+    world:update(0.1)
+    test.assert(not world:isAlive(entity))
+end
+
+function suite.keepsAnEntityWhoseLifetimeIsRefreshed(): nil
+    const world = tickingWorld()
+    const entity = world:spawn(ecs.TTL(0.25))
+    world:commit()
+
+    world:update(0.1)
+    assert(world:getMut(entity, ecs.TTL)).remaining = 1.0
+
+    world:update(0.1)
+    world:update(0.1)
+    world:update(0.1)
+
+    test.assert(world:isAlive(entity))
+    near(assert(world:get(entity, ecs.TTL)).remaining, 0.7, "refreshed remaining")
+end
+
+function suite.holdsTheLifetimeOfAPausedEntity(): nil
+    const world = tickingWorld()
+    const entity = world:spawn(ecs.TTL(0.25), ecs.Paused)
+    world:commit()
+
+    world:update(0.1)
+    world:update(0.1)
+    world:update(0.1)
+
+    test.assert(world:isAlive(entity))
+    near(assert(world:get(entity, ecs.TTL)).remaining, 0.25, "paused remaining")
+end
+
+function suite.reportsCompletionAtBothEnds(): nil
+    const fresh = ecs.TTL(4).value
+    near(fresh:percentComplete(), 0, "fresh")
+
+    const partial = ecs.TTL(1, 4).value
+    near(partial:percentComplete(), 0.75, "partial")
+
+    fresh.remaining = 0
+    near(fresh:percentComplete(), 1, "expired")
+
+    -- A refresh past the original budget clamps rather than reporting a
+    -- negative fraction, and a value with no budget at all reads as finished.
+    fresh.remaining = 8
+    near(fresh:percentComplete(), 0, "refreshed past the budget")
+    const bare = ecs.TTL.defaultFactory()
+    near(bare:percentComplete(), 1, "no budget")
+end
+
+function suite.refusesALifetimeThatCannotCountDown(): nil
+    test.raises(
+        function(): nil
+            ecs.TTL(0)
+        end,
+        "greater than zero"
+    )
+    test.raises(
+        function(): nil
+            ecs.TTL(4, 2)
+        end,
+        "at least remaining"
+    )
+end
+
+-------------------------------------------------------------------------------
+-- RelativeTransform2D
+-------------------------------------------------------------------------------
+
+--- Returns a world holding `root`, its child and its grandchild.
+---
+--- The root sits at (10, 20). The child is offset by (5, 0) and the grandchild
+--- by another (0, 3), so a composition failure shows up as a coordinate rather
+--- than as a missing component.
+local function hierarchyWorld(): ecs.World, integer, integer, integer
+    const world = ecs.newWorld({maxEntities = 64})
+    const root = world:spawn(ecs.Transform2D(10, 20))
+    const child = world:spawn(ecs.Transform2D(), ecs.RelativeTransform2D(5, 0), ecs.ChildOf(root))
+    const grandchild = world:spawn(ecs.Transform2D(), ecs.RelativeTransform2D(0, 3), ecs.ChildOf(child))
+    world:commit()
+
+    return world, root, child, grandchild
+end
+
+function suite.composesAChildAndAGrandchildAgainstTheirParents(): nil
+    const world, _root, child, grandchild = hierarchyWorld()
+
+    world:update(0)
+
+    const childTransform = assert(world:get(child, ecs.Transform2D))
+    near(childTransform.x, 15, "child x")
+    near(childTransform.y, 20, "child y")
+
+    const grandchildTransform = assert(world:get(grandchild, ecs.Transform2D))
+    near(grandchildTransform.x, 15, "grandchild x")
+    near(grandchildTransform.y, 23, "grandchild y")
+end
+
+function suite.turnsAndScalesAChildWithItsParent(): nil
+    const world = ecs.newWorld({maxEntities = 16})
+    const root = world:spawn(ecs.Transform2D(0, 0, 0, 3, math.pi / 2, 2, 2))
+    const child = world:spawn(ecs.Transform2D(), ecs.RelativeTransform2D(1, 0, 0, 0, 0.5, 0.5), ecs.ChildOf(root))
+    world:commit()
+
+    world:update(0)
+
+    const composed = assert(world:get(child, ecs.Transform2D))
+    -- A quarter turn sends the parent-space offset (2, 0) onto (0, 2).
+    near(composed.x, 0, "rotated x")
+    near(composed.y, 2, "rotated y")
+    near(composed.rotation, math.pi / 2, "rotation")
+    near(composed.scaleX, 1, "scaleX")
+    near(composed.scaleY, 1, "scaleY")
+    -- The layer comes from the parent, so a whole tree draws together.
+    test.equal(composed.layer, 3)
+end
+
+function suite.followsAParentThatMovesAndMarksTheChildDirty(): nil
+    const world, root, child, grandchild = hierarchyWorld()
+    const composed = world:newQuery({include = {ecs.RelativeTransform2D}})
+
+    -- Two updates: the first composes the spawned hierarchy, the second lets the
+    -- gate settle so nothing is left marked.
+    world:update(0)
+    world:update(0)
+
+    -- An idle hierarchy recomposes to the same values, so it marks nothing and
+    -- the gate closes rather than recomputing every frame forever.
+    world:runPhase(ecs.phases.PostUpdate)
+    for candidate in composed:iter() do
+        test.assert(not assert(candidate):isComponentDirty(ecs.Transform2D), "an idle hierarchy marked a column")
+    end
+
+    assert(world:getMut(root, ecs.Transform2D)).x = 110
+    world:runPhase(ecs.phases.PostUpdate)
+
+    near(assert(world:get(child, ecs.Transform2D)).x, 115, "moved child x")
+    near(assert(world:get(grandchild, ecs.Transform2D)).x, 115, "moved grandchild x")
+
+    local marked = 0
+    for candidate in composed:iter() do
+        if assert(candidate):isComponentDirty(ecs.Transform2D) then
+            marked = marked + 1
+        end
+    end
+    test.assert(marked > 0, "a moved parent left its children unmarked")
+end
+
+function suite.leavesAnEntityWithNoParentAlone(): nil
+    const world = ecs.newWorld({maxEntities = 16})
+    const orphan = world:spawn(ecs.Transform2D(7, 8), ecs.RelativeTransform2D(100, 100))
+    world:commit()
+
+    world:update(0)
+
+    const transform = assert(world:get(orphan, ecs.Transform2D))
+    near(transform.x, 7, "orphan x")
+    near(transform.y, 8, "orphan y")
+end
+
+function suite.reportsAParentCycleRatherThanRecursingForever(): nil
+    const world = ecs.newWorld({maxEntities = 16})
+    const first = world:spawn(ecs.Transform2D(), ecs.RelativeTransform2D(1, 0))
+    const second = world:spawn(ecs.Transform2D(), ecs.RelativeTransform2D(1, 0), ecs.ChildOf(first))
+    world:set(first, ecs.ChildOf(second))
+    world:commit()
+
+    test.raises(
+        function(): nil
+            world:update(0)
+        end,
+        "cycle"
+    )
+end
+
+-------------------------------------------------------------------------------
+-- Snapshots
+-------------------------------------------------------------------------------
+
+function suite.carriesEveryBuiltinThroughASnapshot(): nil
+    const source = ecs.newWorld({maxEntities = 64})
+    const parent = source:spawn(ecs.Name("root"), ecs.Transform2D(4, 5))
+    const child = source:spawn(
+        ecs.Name("limb"),
+        ecs.Transform2D(),
+        ecs.RelativeTransform2D(2, 1),
+        ecs.ChildOf(parent),
+        ecs.TTL(1, 4)
+    )
+    source:commit()
+
+    const restored = ecs.newWorld({maxEntities = 64})
+    restored:loadSnapshot(source:saveSnapshot())
+
+    test.equal(restored:get(parent, ecs.Name), "root")
+    test.equal(restored:get(child, ecs.Name), "limb")
+    test.equal(assert(restored:get(child, ecs.ChildOf)).target, parent)
+    test.equal(restored:relationshipSources(ecs.ChildOf, parent)[1], child)
+
+    const offset = assert(restored:get(child, ecs.RelativeTransform2D))
+    near(offset.x, 2, "restored offset x")
+    near(offset.y, 1, "restored offset y")
+
+    const lifetime = assert(restored:get(child, ecs.TTL))
+    near(lifetime.remaining, 1, "restored remaining")
+    near(lifetime.startingTime, 4, "restored startingTime")
+    -- The method survives the round trip, which is what says the restored value
+    -- is a `TTL` rather than a bare table with the right fields.
+    near(lifetime:percentComplete(), 0.75, "restored completion")
+
+    restored:update(0)
+    near(assert(restored:get(child, ecs.Transform2D)).x, 6, "restored composition")
+end
+
+return suite

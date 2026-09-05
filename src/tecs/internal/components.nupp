@@ -396,6 +396,32 @@ end
 --- `World.byKey` a lookup rather than a search.
 export const Key: ScalarComponent<string> = newScalarComponent({name = "Key", kind = "string"})
 
+--- Names an entity for a human reader.
+---
+--- Compatibility surface: a snapshot records a component by name, so the stored
+--- spelling is `Name` and must stay that way.
+---
+--- A name is neither indexed nor unique, and two entities may share one. Use
+--- `Key` when a lookup has to resolve exactly one entity.
+export const Name: ScalarComponent<string> = newScalarComponent({name = "Name", kind = "string"})
+
+--- Relates one child entity to its parent.
+---
+--- Compatibility surface: a snapshot records a relationship by name, so the
+--- stored spelling is `ChildOf` and must stay that way.
+---
+--- The relationship is exclusive, so a child has one parent and setting a new
+--- target reparents it at the next barrier rather than adding a second edge. It
+--- is reverse indexed, which is what makes `World.relationshipSources` a lookup
+--- of a parent's children rather than a scan. It cascades, so despawning a
+--- parent despawns every descendant beneath it in the same barrier.
+export const ChildOf: RelationshipComponent = newRelationship({
+    name = "ChildOf",
+    exclusive = true,
+    reverseIndex = true,
+    cascadeDelete = true,
+})
+
 --- Marks an entity whose state is paused.
 export const Paused: TagComponent = newTagComponent({name = "Paused"})
 

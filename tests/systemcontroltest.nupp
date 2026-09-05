@@ -6,13 +6,34 @@ local suite = {}
 local function noop(_dt: number, exclusive _world: ecs.World): nil
 end
 
+-- Every world `ecs.newWorld` builds arrives carrying the builtin systems, so a
+-- suite about registration control counts and lists around them rather than
+-- assuming a fresh world runs nothing.
+local BUILTIN_SYSTEM_COUNT = 3
+local BUILTIN_SYSTEMS: {
+    [string]: boolean
+} = {ttl = true, RelativeTransform2D = true, RelativeTransformDirtySampler = true,}
+
+--- Returns the systems the suite registered, in execution order.
+local function ownSystems(borrows value: ecs.World): {ecs.SystemInfo}
+    local listed = value:listSystems()
+    local result: {ecs.SystemInfo} = {}
+    for index = 1, #listed do
+        if not BUILTIN_SYSTEMS[listed[index].name] then
+            result[#result + 1] = listed[index]
+        end
+    end
+
+    return result
+end
+
 function suite.listsSystemsInExecutionOrder(): nil
     local value = ecs.newWorld()
     value:addSystem({name = "update.second", phase = ecs.phases.Update, run = noop})
     value:addSystem({name = "first.first", phase = ecs.phases.First, run = noop})
     value:addSystem({name = "update.first", phase = ecs.phases.Update, run = noop})
 
-    local listed = value:listSystems()
+    local listed = ownSystems(value)
 
     test.equal(#listed, 3)
     test.equal(listed[1].name, "first.first")
@@ -33,7 +54,7 @@ function suite.reportsGeneratedNamesAndGates(): nil
         end,
     })
 
-    local listed = value:listSystems()
+    local listed = ownSystems(value)
 
     test.equal(listed[1].name, generated)
     test.assert(listed[1].hasRunIf)
@@ -55,8 +76,8 @@ function suite.disablesAndReenablesSystemsIdempotently(): nil
     test.assert(value:setSystemEnabled("controlled", false))
     value:update(0)
     test.equal(calls, 0)
-    test.assert(not value:listSystems()[1].enabled)
-    test.equal(value:getStats().systems, 1)
+    test.assert(not ownSystems(value)[1].enabled)
+    test.equal(value:getStats().systems, BUILTIN_SYSTEM_COUNT + 1)
 
     test.assert(value:setSystemEnabled("controlled", true))
     test.assert(value:setSystemEnabled("controlled", true))
@@ -71,8 +92,8 @@ function suite.removesADisabledSystem(): nil
 
     test.assert(value:removeSystem("removed"))
 
-    test.equal(#value:listSystems(), 0)
-    test.equal(value:getStats().systems, 0)
+    test.equal(#ownSystems(value), 0)
+    test.equal(value:getStats().systems, BUILTIN_SYSTEM_COUNT)
 end
 
 function suite.returnsAReasonForAnUnknownSystem(): nil
