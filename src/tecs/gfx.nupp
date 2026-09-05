@@ -26,12 +26,15 @@ world:spawn(
 `tecs.gfx.images` owns image identity and residency, `tecs.gfx.clips` owns the
 target-pixel regions `Clip` selects, `tecs.gfx.sheet` and `tecs.gfx.animation`
 cut an image into frames and play them, `tecs.gfx.fonts` owns font identity and
-the glyph atlas, and `tecs.gfx.text` lays a string out into glyph entities that
-draw through the same textured path a sprite does.
+the glyph atlas, `tecs.gfx.text` lays a string out into glyph entities that draw
+through the same textured path a sprite does, `tecs.gpu.materials` numbers the
+materials a `Material` selects, and `tecs.gpu.passes` declares the render passes
+and render targets a frame is drawn through.
 ]]
 
 local animation = require("tecs.gfx.animation")
 local clips = require("tecs.gfx.clips")
+local materials = require("tecs.gpu.materials")
 local rendercomponents = require("tecs.internal.rendercomponents")
 local fonts = require("tecs.gfx.fonts")
 local text = require("tecs.gfx.text")
@@ -100,3 +103,10 @@ export const newText = text.newText
 
 --- Marks an entity as one glyph `tecs.gfx.text` placed for a `Text`.
 export const TextGlyph = text.TextGlyph
+
+--- A material selection stored on a renderable entity.
+export type Material = materials.Material
+
+--- Constructs a material selection, defaulting to `textured` at parameter
+--- one quarter.
+export const Material = materials.MaterialComponent

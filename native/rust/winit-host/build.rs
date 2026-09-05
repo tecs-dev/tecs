@@ -52,6 +52,12 @@ fn target_os() -> String {
 ///
 /// `native/rust/build-support/src/nupp.rs` stages the same set for
 /// `cargo xtask nupp run`. Keep the two lists together.
+// Every Tecs component needs both beyond `base`. `native-files` is what
+// `tecs.gpu.materials` reaches for, globbing a material root so the ids it
+// assigns and the ids the prebuilt dispatch answers to come from one rule over
+// one set of files, and `native-net` arrives with the I/O module extraction
+// builds its packet through. A host staged without them refuses to load the
+// component rather than failing later.
 const HOST_FEATURES: &str = "base,native-files,native-net";
 
 /// Cargo's environment for a build script, which a nested unrelated build must

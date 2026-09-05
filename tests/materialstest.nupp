@@ -1,0 +1,106 @@
+local ecs = require("tecs.ecs")
+local gfx = require("tecs.gfx")
+local materials = require("tecs.gpu.materials")
+local test = require("nupp.test")
+
+local suite = {}
+
+function suite.numbersTheBuiltInsFromSortedOrder(): nil
+    materials.reset()
+    -- `textured` holds zero because an instance with no `Material` writes a
+    -- zero, and every other name follows alphabetically. These names are a
+    -- compatibility surface: a snapshot stores one and resolves it again.
+    test.equal(materials.id("textured"), 0)
+    test.equal(
+        table.concat(materials.names(), ","),
+        "textured,capsule,circle,ellipse,frame,glyph,glyphalpha,line,pie,ring,rounded,star,triangle"
+    )
+    test.equal(materials.count(), 13)
+    test.equal(materials.name(0), "textured")
+    test.equal(materials.name(materials.id("ring")), "ring")
+    test.equal(materials.name(99), nil)
+    test.equal(materials.find("nothing"), nil)
+end
+
+function suite.raisesOnANameTheBuildHasNot(): nil
+    materials.reset()
+    test.raises(function(): nil
+        materials.id("nothing")
+    end, "no material named 'nothing'")
+    test.raises(function(): nil
+        materials.addRoot("")
+    end, "root path cannot be empty")
+    test.raises(function(): nil
+        materials.define("")
+    end, "material name cannot be empty")
+end
+
+function suite.renumbersWhenADefinitionJoinsTheSet(): nil
+    materials.reset()
+    local capsule = materials.id("capsule")
+    local ring = materials.id("ring")
+    materials.define("materialstest.zigzag")
+    -- The new name sorts between `line` and `pie`, so every id after it moves
+    -- and every id before it stays. That is why a snapshot stores the name.
+    test.equal(materials.id("capsule"), capsule)
+    test.equal(materials.id("ring"), ring + 1)
+    test.equal(materials.count(), 14)
+    materials.reset()
+    test.equal(materials.id("ring"), ring)
+    test.equal(materials.find("materialstest.zigzag"), nil)
+end
+
+function suite.readsMaterialFilesFromAddedRoots(): nil
+    materials.reset()
+    local directory = assert(nupp.io.files.createTemporaryDirectory())
+    local root = directory:toString()
+    assert(nupp.io.files.write(root .. "/materialstest.zigzag.wgsl", "fn material() {}"))
+    -- A file that is not a material is ignored, because the glob is the rule
+    -- and the pack is built from the same one.
+    assert(nupp.io.files.write(root .. "/notes.txt", "ignored"))
+
+    materials.addRoot(root)
+    test.equal(materials.count(), 14)
+    test.equal(materials.name(materials.id("materialstest.zigzag")), "materialstest.zigzag")
+    test.equal(materials.find("notes"), nil)
+
+    materials.reset()
+    directory:drop()
+end
+
+function suite.storesTheNameRatherThanTheNumber(): nil
+    materials.reset()
+    local ring = materials.id("ring")
+    local world = ecs.newWorld({maxEntities = 2})
+    local entity = world:spawn(gfx.Material(ring, 0.75))
+    world:commit()
+
+    local snapshot = world:saveSnapshot()
+    world:loadSnapshot(snapshot)
+    local restored: gfx.Material = assert(world:get(entity, gfx.Material))
+    test.equal(restored.id, ring)
+    test.equal(restored.param, 0.75)
+
+    -- The snapshot writes the name rather than the number, so a build whose
+    -- material set renumbered still resolves the same material.
+    local wrote = false
+    for index = 1, #snapshot.componentTable do
+        if snapshot.componentTable[index].name == "Material" then
+            wrote = true
+        end
+    end
+    test.assert(wrote, "the component is stored under its established name")
+end
+
+function suite.defaultsAnEntityWithNoMaterial(): nil
+    materials.reset()
+    local world = ecs.newWorld({maxEntities = 2})
+    local entity = world:spawn(gfx.Material())
+    world:commit()
+
+    local value: gfx.Material = assert(world:get(entity, gfx.Material))
+    test.equal(value.id, 0)
+    test.equal(value.param, 0.25)
+end
+
+return suite

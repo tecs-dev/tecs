@@ -1,6 +1,15 @@
 mod bridge;
+#[cfg(test)]
+mod culltests;
+#[cfg(test)]
+mod drawtests;
+mod graph;
 mod graphics;
+mod packet;
+#[cfg(test)]
+mod pipelinetests;
 mod sdk;
+mod shaderpack;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -636,6 +645,16 @@ fn parse_config() -> Result<Config> {
 }
 
 fn run() -> Result<()> {
+    // The shader pack is built rather than run, so it is answered before the
+    // window configuration is even parsed. A release consumes the file this
+    // writes and never reads a material directory of its own.
+    let mut arguments = std::env::args_os().skip(1);
+    if arguments
+        .next()
+        .is_some_and(|value| value == *"--pack-shaders")
+    {
+        return pack_shaders(arguments.collect());
+    }
     let config = parse_config()?;
     if config.headless {
         return run_headless(config);
@@ -646,6 +665,26 @@ fn run() -> Result<()> {
     event_loop
         .run_app(&mut app)
         .context("run the winit event loop")
+}
+
+/// Assembles the material dispatch into a shader pack a release loads.
+///
+/// `--pack-shaders <materials directory> <output file>`. This is the packaging
+/// step, and it is the only path in this binary that reads a material file.
+fn pack_shaders(arguments: Vec<std::ffi::OsString>) -> Result<()> {
+    let [materials, output] = arguments.as_slice() else {
+        return Err(anyhow!(
+            "--pack-shaders takes a material directory and an output file"
+        ));
+    };
+    let pack = shaderpack::ShaderPack::assemble(std::path::Path::new(materials))?;
+    pack.write(std::path::Path::new(output))?;
+    println!(
+        "{} materials: {}",
+        pack.materials().len(),
+        pack.materials().join(", ")
+    );
+    Ok(())
 }
 
 fn run_headless(config: Config) -> Result<()> {

@@ -67,6 +67,8 @@ return {
                     "tecs.gfx.sheet",
                     "tecs.gfx.text",
                     "tecs.gfx.truetype",
+                    "tecs.gpu.materials",
+                    "tecs.gpu.passes",
                     "tecs.host",
                     "tecs.input",
                     "tecs.mcp",

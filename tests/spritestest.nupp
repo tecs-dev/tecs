@@ -37,11 +37,10 @@ function suite.drawsACameraAndTwoImagesThroughItsEntry(): nil
     const reader = nupp.io.newScalarReader(host.renderPacket(session))
     test.equal(reader:readUint32(), framepacket.MAGIC)
     test.equal(reader:readUint32(), framepacket.VERSION)
-    reader:skip(8)
+    reader:skip(20)
     const batches = reader:readUint32() as integer
     reader:skip(4)
     test.equal(reader:readUint32(), 600)
-    test.equal(reader:readUint32(), 0)
     test.equal(reader:readFloat32(), 800)
     test.equal(reader:readFloat32(), 450)
     -- The camera moved off the field center on the first frame, so the packet

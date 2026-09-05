@@ -1,0 +1,315 @@
+module tecs.gpu.materials
+
+--[[
+Material identity, numbering, and the component that selects one.
+
+A material decides a fragment's color, coverage, surface normal, and lighting
+response. It is authored as a WGSL file under a material root, and every
+material found is folded into one generated fragment shader that dispatches on
+the id an instance carries. This module owns the names and the numbering; the
+backend owns the compiled dispatch.
+
+```nupp
+const materials = tecs.gpu.materials
+
+world:spawn(
+    tecs.ecs.Transform2D(120, 80, 1, 0, 0, 64, 64),
+    tecs.gfx.Material(materials.id("rounded"), 0.25),
+    tecs.gfx.Tint(0.2, 0.6, 1.0, 1.0),
+    tecs.gfx.Renderable2D
+)
+```
+
+An entity carrying no `Material` draws through `textured`, which holds id zero
+for exactly that reason. Every other name takes an id from sorted order, so
+adding or removing a material renumbers the ones after it. Persisted state
+therefore stores the name and resolves it again, which is what the component's
+own snapshot does.
+
+`Material.param` supplies one scalar from zero to one. The built-ins read it as
+follows:
+
+- `ellipse` uses the height fraction.
+- `ring` uses the inner-radius fraction.
+- `rounded` uses the corner-radius fraction.
+- `frame` and `line` use a thickness fraction.
+- `capsule` uses a height fraction.
+- `pie` uses a full-turn sweep fraction.
+- `star` uses valley depth.
+- `glyph` uses the distance-field range.
+- `textured`, `circle`, `glyphalpha`, and `triangle` ignore it.
+
+# Authoring a material
+
+A `.wgsl` file under a material root defines one `material` function:
+
+```wgsl
+fn material(frag: MaterialInput) -> MaterialOutput {
+    var result = materialDefaults();
+    let radius = mix(0.02, 0.20, frag.param);
+    result.albedo = textureSample(image, imageSampler, frag.uv) * frag.color;
+    result.coverage = -sdRoundedBox(frag.local, vec2(0.5), radius);
+    result.lit = 1.0;
+    return result;
+}
+```
+
+`frag.local` runs from -0.5 to 0.5 inside the quad. `frag.uv`, `frag.color`,
+and `frag.param` carry the image coordinates, tint, and instance parameter.
+`frag.blended` says whether the fragment reaches a pass that blends it. Start
+from `materialDefaults`, then set `albedo`, `normal`, `orm`, `lit`, `emission`,
+and `coverage`.
+
+Coverage above zero keeps a fragment; zero or below discards it. The deferred
+lane does not blend partial coverage: a tint alpha below one routes the
+instance to the blended lane instead. A material that resolves an edge by
+discarding puts the edge in alpha where `frag.blended` is set, which is what
+`textured` does.
+
+# Adding materials to a build
+
+`addRoot` names a directory this module globs for `*.wgsl`. The same directory
+is read by the build step that produces the shader pack, so the ids this module
+assigns and the ids the compiled dispatch answers to come from one rule applied
+to one set of files. A root added after the pack was built renumbers the set
+and the backend rejects an id its dispatch does not carry, rather than drawing
+the wrong material.
+
+Runtime assembly and reload are deliberately absent. A release links no shader
+assembler and loads a prebuilt pack, so a changed material body is a rebuild.
+]]
+
+local components = require("tecs.internal.components")
+local files = nupp.io.files
+
+--- Takes id zero, because an instance with no `Material` writes a zero.
+---
+--- This name is a compatibility surface: it is what a snapshot with no
+--- material resolves to and what the generated dispatch numbers from.
+export const DEFAULT: string = "textured"
+
+--- The materials the engine ships, which are compiled into every build.
+---
+--- Every one of these names is a compatibility surface. A game asks for one by
+--- name and a snapshot writes one, so they keep their established spelling.
+--- The list is unsorted here; `install` sorts it with whatever a root adds.
+const BUILTINS: {
+    string
+} = {
+    "capsule",
+    "circle",
+    "ellipse",
+    "frame",
+    "glyph",
+    "glyphalpha",
+    "line",
+    "pie",
+    "ring",
+    "rounded",
+    "star",
+    "textured",
+    "triangle",
+}
+
+--- Selects one material for a renderable entity.
+export record Material
+    --- Caller-writable. Selects a material by an id `id` returned. Zero draws
+    --- through `textured`.
+    id: integer
+
+    --- Caller-writable. Passes a value from zero to one to the material. What
+    --- it means is the material's business.
+    param: number
+end
+
+local roots: {string} = {}
+local extra: {[string]: boolean} = {}
+local order: {string} = {}
+local idByName: {[string]: integer} = {}
+local installed = false
+
+--- Adds a directory to search before the ones already known.
+---
+--- The directory is read by `install` rather than here, so adding a root costs
+--- nothing until the next name is resolved. A game's own material of a given
+--- name does not replace an engine one: two files with the same stem are one
+--- material, and the build that produces the dispatch decides which body wins.
+--- @param path a directory holding `*.wgsl` material files, with or without a
+---     trailing separator
+--- @raises when the path is empty
+export function addRoot(path: string): nil
+    if path == "" then
+        error("materials: a root path cannot be empty", 2)
+    end
+    const normalized = path:sub(-1) == "/" and path or path .. "/"
+    table.insert(roots, 1, normalized)
+    installed = false
+end
+
+--- Reads every root and assigns ids. Idempotent.
+---
+--- Resolving a name installs first, so a game rarely calls this. Adding a root
+--- puts it back on.
+--- @raises when a root cannot be listed
+export function install(): nil
+    if installed then
+        return
+    end
+    installed = true
+
+    local found: {[string]: boolean} = {}
+    for index = 1, #BUILTINS do
+        found[BUILTINS[index]] = true
+    end
+    for defined in pairs(extra) do
+        found[defined] = true
+    end
+    for index = 1, #roots do
+        const root = roots[index]
+        const matches = files.glob(root .. "*.wgsl")
+        if matches ~= nil then
+            for slot = 1, #matches do
+                const path = matches[slot]
+                const stem = path:match("([^/\\]+)%.wgsl$")
+                if stem ~= nil then
+                    found[stem] = true
+                end
+            end
+        end
+    end
+
+    local rest: {string} = {}
+    for candidate in pairs(found) do
+        if candidate ~= DEFAULT then
+            rest[#rest + 1] = candidate
+        end
+    end
+    table.sort(rest)
+
+    order = {DEFAULT}
+    for index = 1, #rest do
+        order[index + 1] = rest[index]
+    end
+    idByName = {}
+    for index = 1, #order do
+        idByName[order[index]] = index - 1
+    end
+end
+
+--- Registers a material name that no root supplies.
+---
+--- A generated material a build writes into the pack without writing a file is
+--- what this is for. It renumbers the set on the next `install`, exactly as
+--- adding a file does.
+--- @param name the material's name, matching the name the pack's dispatch uses
+--- @raises when the name is empty
+export function define(name: string): nil
+    if name == "" then
+        error("materials: a material name cannot be empty", 2)
+    end
+    extra[name] = true
+    installed = false
+end
+
+--- Returns the id an instance carries to select a material, or nil.
+--- @param name the material's file name without its extension
+--- @return the id, or nil when nothing carries that name
+export function find(name: string): integer?
+    install()
+
+    return idByName[name]
+end
+
+--- Returns the id an instance carries to select a material.
+--- @param name the material's file name without its extension
+--- @return the id, counting from zero
+--- @raises when nothing carries the name, listing what the build has, because
+---     a misspelled material is a build mistake rather than a runtime state
+export function id(name: string): integer
+    const found = find(name)
+    if found == nil then
+        error("materials: no material named '" .. name .. "'; found " .. table.concat(order, ", "), 2)
+    end
+
+    return found
+end
+
+--- Returns the material name an id selects.
+---
+--- This is what a snapshot writes in place of the number, since an id holds
+--- only for the set of files the build was made from.
+--- @param value an id as an instance carries it
+--- @return the name, or nil when nothing carries that id
+export function name(value: integer): string?
+    install()
+
+    return order[value + 1]
+end
+
+--- Returns how many materials the build numbers.
+---
+--- The backend rejects an instance whose material id reaches this, so a packet
+--- built against a larger set than the pack holds fails rather than drawing
+--- the wrong material.
+--- @return the count, so the valid ids run from zero to one below it
+export function count(): integer
+    install()
+
+    return #order
+end
+
+--- Returns every material name in id order.
+--- @return a fresh list the caller owns, indexed from one while the ids it
+---     describes count from zero
+export function names(): {string}
+    install()
+    local list: {string} = {}
+    for index = 1, #order do
+        list[index] = order[index]
+    end
+
+    return list
+end
+
+--- Forgets every root and definition, so a test starts from the built-ins.
+export function reset(): nil
+    roots = {}
+    extra = {}
+    order = {}
+    idByName = {}
+    installed = false
+end
+
+--- The process-wide `Material` component definition.
+export const MaterialComponent: components.TableComponent<Material> = components.newComponent({
+    -- This persisted component name is a compatibility surface, and so are the
+    -- `material` and `param` keys the snapshot below writes. A snapshot stores
+    -- the material by name because an id holds only for one build's file set.
+    name = "Material",
+    construct = function(value: integer?, param: number?): Material
+        return new Material(id = value or 0, param = param or 0.25)
+    end,
+    default = function(): Material
+        return new Material(id = 0, param = 0.25)
+    end,
+    save = function(value: Material): any
+        return {material = name(value.id), param = value.param}
+    end,
+    load = function(value: any): Material
+        const stored = value as {[string]: any}
+        const storedName = stored.material as string?
+        local resolved: integer = 0
+        if storedName ~= nil and storedName ~= "" then
+            const found = find(storedName)
+            -- Neither the default nor a skipped component. Both of those load
+            -- without a word and draw the entity through a shader nobody asked
+            -- for, which is the failure a name is written to prevent.
+            if found == nil then
+                error("materials: the snapshot names material '" .. storedName .. "', which this build does not carry")
+            end
+            resolved = found
+        end
+
+        return new Material(id = resolved, param = (stored.param as number?) or 0.25)
+    end,
+})

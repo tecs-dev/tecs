@@ -2,11 +2,15 @@ local ecs = require("tecs.ecs")
 local framepacket = require("tecs.internal.framepacket")
 local gfx = require("tecs.gfx")
 local images = require("tecs.gfx.images")
+local materials = require("tecs.gpu.materials")
+local passes = require("tecs.gpu.passes")
 local test = require("nupp.test")
 
 local suite = {}
 
 local record Header
+    graphBytes: integer
+    graphRevision: integer
     batches: integer
     instances: integer
     targetWidth: number
@@ -20,22 +24,28 @@ end
 local record Batch
     image: integer
     sampler: integer
+    lane: integer
     first: integer
     count: integer
 end
 
---- Reads the fixed v2 header and holds the packet to every constant in it.
+--- Reads the fixed v3 header, holds the packet to every constant in it, and
+--- steps past the graph section so the batch table is next.
 local function header(borrows reader: nupp.io.ScalarReader): Header
     test.equal(reader:readUint32(), framepacket.MAGIC)
     test.equal(reader:readUint32(), framepacket.VERSION)
     test.equal(reader:readUint32(), framepacket.HEADER_SIZE)
+    test.equal(reader:readUint32(), 0)
+    local revision = reader:readUint32()
+    local graphBytes = reader:readUint32()
     test.equal(reader:readUint32(), framepacket.BATCH_STRIDE)
     local batches = reader:readUint32()
     test.equal(reader:readUint32(), framepacket.INSTANCE_STRIDE)
     local instances = reader:readUint32()
-    test.equal(reader:readUint32(), 0)
 
-    return new Header(
+    local read = new Header(
+        graphBytes = graphBytes as integer,
+        graphRevision = revision as integer,
         batches = batches as integer,
         instances = instances as integer,
         targetWidth = reader:readFloat32(),
@@ -45,12 +55,16 @@ local function header(borrows reader: nupp.io.ScalarReader): Header
         zoom = reader:readFloat32(),
         rotation = reader:readFloat32()
     )
+    reader:skip(read.graphBytes)
+
+    return read
 end
 
 local function batch(borrows reader: nupp.io.ScalarReader): Batch
     return new Batch(
         image = reader:readUint32() as integer,
         sampler = reader:readUint32() as integer,
+        lane = reader:readUint32() as integer,
         first = reader:readUint32() as integer,
         count = reader:readUint32() as integer
     )
@@ -60,9 +74,9 @@ end
 local function instance(borrows reader: nupp.io.ScalarReader): number, number, number
     local x = reader:readFloat32()
     local y = reader:readFloat32()
-    reader:skip(12)
+    reader:skip(4)
     local depth = reader:readFloat32()
-    reader:skip(32)
+    reader:skip(64)
 
     return x, y, depth
 end
@@ -85,6 +99,7 @@ function suite.exposesTheMinimumDrawableComponents(): nil
         ecs.Transform2D(10, 20, 3, 4, 0.25, 30, 40),
         gfx.Tint(0.1, 0.2, 0.3, 0.4),
         gfx.Sprite(7, 0.25, 0.5, 0.75, 1),
+        gfx.Material(materials.id("rounded"), 0.5),
         gfx.Renderable2D
     )
     local eye = world:spawn(gfx.Camera2D(5, 6, 2, 0.5), gfx.ActiveCamera)
@@ -93,6 +108,7 @@ function suite.exposesTheMinimumDrawableComponents(): nil
     local transform: ecs.Transform2D = assert(world:get(entity, ecs.Transform2D))
     local tint: gfx.Tint = assert(world:get(entity, gfx.Tint))
     local sprite: gfx.Sprite = assert(world:get(entity, gfx.Sprite))
+    local material: gfx.Material = assert(world:get(entity, gfx.Material))
     local camera: gfx.Camera2D = assert(world:get(eye, gfx.Camera2D))
     test.equal(transform.x, 10)
     test.equal(transform.layer, 4)
@@ -100,6 +116,8 @@ function suite.exposesTheMinimumDrawableComponents(): nil
     test.equal(tint.a, 0.4)
     test.equal(sprite.image, 7)
     test.equal(sprite.u1, 0.75)
+    test.equal(material.id, materials.id("rounded"))
+    test.equal(material.param, 0.5)
     test.equal(camera.zoom, 2)
     test.assert(world:has(entity, gfx.Renderable2D))
     test.assert(world:has(eye, gfx.ActiveCamera))
@@ -209,7 +227,7 @@ function suite.encodesOneOrderedBatchForRust(): nil
     local world = ecs.newWorld({maxEntities = 3})
     local extractor = framepacket.new(world)
     world:spawn(ecs.Transform2D(200, 100, 0, 2, 0, 20, 30), gfx.Tint(1, 0, 0, 1), gfx.Renderable2D)
-    world:spawn(ecs.Transform2D(50, 60, 0, 1, 0.5, 70, 80), gfx.Tint(0, 1, 0, 0.5), gfx.Renderable2D)
+    world:spawn(ecs.Transform2D(50, 60, 0, 1, 0.5, 70, 80), gfx.Tint(0, 1, 0, 1), gfx.Renderable2D)
     world:spawn(ecs.Transform2D(1, 2, 0, 0, 0, 3, 4), gfx.Tint(1, 1, 1, 1))
     world:commit()
 
@@ -218,11 +236,12 @@ function suite.encodesOneOrderedBatchForRust(): nil
     test.equal(read.batches, 1)
     test.equal(read.instances, 2)
 
-    -- Untextured rows share the fallback image and its nearest clamped sampler,
-    -- so one run covers the scene.
+    -- Untextured opaque rows share the fallback image, its nearest clamped
+    -- sampler, and the opaque lane, so one run covers the scene.
     local only = batch(reader)
     test.equal(only.image, 0)
     test.equal(only.sampler, 0)
+    test.equal(only.lane, framepacket.LANE_OPAQUE)
     test.equal(only.first, 0)
     test.equal(only.count, 2)
 
@@ -230,17 +249,23 @@ function suite.encodesOneOrderedBatchForRust(): nil
     test.equal(reader:readFloat32(), 50)
     test.equal(reader:readFloat32(), 60)
     test.equal(reader:readFloat32(), 0.5)
+    local farDepth = reader:readFloat32()
     test.equal(reader:readFloat32(), 70)
     test.equal(reader:readFloat32(), 80)
-    local farDepth = reader:readFloat32()
+    test.equal(reader:readFloat32(), 0.25)
     test.equal(reader:readFloat32(), 0)
     test.equal(reader:readFloat32(), 0)
-    test.equal(reader:readFloat32(), 1)
-    test.equal(reader:readFloat32(), 1)
     test.equal(reader:readFloat32(), 0)
     test.equal(reader:readFloat32(), 1)
+    test.equal(reader:readFloat32(), 1)
     test.equal(reader:readFloat32(), 0)
-    test.equal(reader:readFloat32(), 0.5)
+    test.equal(reader:readFloat32(), 1)
+    test.equal(reader:readFloat32(), 0)
+    test.equal(reader:readFloat32(), 1)
+    test.equal(reader:readUint32(), 0)
+    test.equal(reader:readUint32(), 0)
+    test.equal(reader:readUint32(), 0)
+    test.equal(reader:readUint32(), 0)
 
     local nearX, nearY, nearDepth = instance(reader)
     test.equal(nearX, 200)
@@ -248,6 +273,96 @@ function suite.encodesOneOrderedBatchForRust(): nil
     test.assert(nearDepth < farDepth, "a higher layer draws nearer")
     test.assert(reader:atEnd())
     reader:drop()
+end
+
+function suite.splitsBatchesOnTheBlendedLane(): nil
+    local world = ecs.newWorld({maxEntities = 4})
+    local extractor = framepacket.new(world)
+    -- One image, one sampler, and two lanes. A run breaks on the lane so that
+    -- every batch belongs to one visible list.
+    world:spawn(ecs.Transform2D(1, 1, 0, 1, 0, 1, 1), gfx.Tint(1, 1, 1, 1), gfx.Renderable2D)
+    world:spawn(ecs.Transform2D(2, 1, 0, 2, 0, 1, 1), gfx.Tint(1, 1, 1, 0.5), gfx.Renderable2D)
+    world:spawn(ecs.Transform2D(3, 1, 0, 3, 0, 1, 1), gfx.Tint(1, 1, 1, 0.25), gfx.Renderable2D)
+    world:spawn(ecs.Transform2D(4, 1, 0, 4, 0, 1, 1), gfx.Tint(1, 1, 1, 1), gfx.Renderable2D)
+    world:commit()
+
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
+    local read = header(reader)
+    test.equal(read.instances, 4)
+    test.equal(read.batches, 3)
+
+    local opaque = batch(reader)
+    test.equal(opaque.lane, framepacket.LANE_OPAQUE)
+    test.equal(opaque.first, 0)
+    test.equal(opaque.count, 1)
+
+    local blended = batch(reader)
+    test.equal(blended.lane, framepacket.LANE_BLEND)
+    test.equal(blended.first, 1)
+    test.equal(blended.count, 2)
+
+    local nearest = batch(reader)
+    test.equal(nearest.lane, framepacket.LANE_OPAQUE)
+    test.equal(nearest.first, 3)
+    test.equal(nearest.count, 1)
+    reader:drop()
+end
+
+function suite.carriesTheMaterialAndItsParameter(): nil
+    local world = ecs.newWorld({maxEntities = 3})
+    local extractor = framepacket.new(world)
+    local ring = materials.id("ring")
+    world:spawn(ecs.Transform2D(1, 1, 0, 1, 0, 1, 1), gfx.Tint(), gfx.Material(ring, 0.75), gfx.Renderable2D)
+    -- An entity with no `Material` draws through `textured` at id zero.
+    world:spawn(ecs.Transform2D(2, 1, 0, 2, 0, 1, 1), gfx.Tint(), gfx.Renderable2D)
+    world:commit()
+
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
+    test.equal(header(reader).instances, 2)
+    test.equal(batch(reader).count, 2)
+
+    reader:skip(24)
+    test.equal(reader:readFloat32(), 0.75)
+    reader:skip(36)
+    test.equal(reader:readUint32(), ring)
+    test.equal(reader:readUint32(), 0)
+    reader:skip(8)
+
+    reader:skip(24)
+    test.equal(reader:readFloat32(), 0.25)
+    reader:skip(36)
+    test.equal(reader:readUint32(), 0)
+    reader:drop()
+end
+
+function suite.rejectsAMaterialTheBuildDoesNotCarry(): nil
+    local world = ecs.newWorld({maxEntities = 2})
+    local extractor = framepacket.new(world)
+    world:spawn(ecs.Transform2D(1, 1, 0, 1, 0, 1, 1), gfx.Tint(), gfx.Material(9999, 0.5), gfx.Renderable2D)
+    world:commit()
+
+    test.raises(function(): nil
+        extractor:packet(640, 360)
+    end, "is not one this build carries")
+end
+
+function suite.carriesTheDeclaredGraphInEveryPacket(): nil
+    local world = ecs.newWorld({maxEntities = 1})
+    local extractor = framepacket.new(world)
+    world:commit()
+
+    local section = passes.section()
+    local reader = nupp.io.newScalarReader(extractor:packet(320, 200))
+    local read = header(reader)
+    test.equal(read.graphBytes, #section)
+    test.equal(read.graphRevision, passes.revision())
+    reader:drop()
+
+    -- The declaration rides in every packet rather than being sent once, so a
+    -- backend that lost its device rebuilds from the next frame.
+    local again = nupp.io.newScalarReader(extractor:packet(320, 200))
+    test.equal(header(again).graphBytes, #section)
+    again:drop()
 end
 
 function suite.ordersEqualDepthsByEntityId(): nil
@@ -337,7 +452,7 @@ function suite.carriesSpriteIdentityAndSamplerIntoBatches(): nil
     test.equal(stoneBatch.count, 1)
 
     -- The first sprite's UV rectangle survives the crossing intact.
-    reader:skip(24)
+    reader:skip(32)
     test.equal(reader:readFloat32(), 0)
     test.equal(reader:readFloat32(), 0)
     test.equal(reader:readFloat32(), 0.5)
@@ -386,7 +501,10 @@ function suite.keepsTransparentRowsInBackToFrontOrder(): nil
 
     local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
     test.equal(header(reader).instances, 3)
-    test.equal(batch(reader).count, 3)
+    -- The opaque row is farthest and leads, then the two blended ones follow in
+    -- one run of their own lane.
+    test.equal(batch(reader).count, 1)
+    test.equal(batch(reader).count, 2)
     local firstX, _, firstDepth = instance(reader)
     local secondX, _, secondDepth = instance(reader)
     local thirdX, _, thirdDepth = instance(reader)
@@ -403,7 +521,7 @@ function suite.encodesAnEmptyScene(): nil
     world:commit()
 
     local packed = extractor:packet(16, 9)
-    test.equal(#packed, framepacket.HEADER_SIZE as integer)
+    test.equal(#packed, (framepacket.HEADER_SIZE as integer) + #passes.section())
     local reader = nupp.io.newScalarReader(packed)
     local read = header(reader)
     test.equal(read.batches, 0)
