@@ -1,0 +1,644 @@
+module tecs.gfx.fonts
+
+--[[
+Font identity, glyph metrics, and the atlas that carries glyphs to the backend.
+
+A game names a font once and every text that selects it shares the atlas that
+font fills. `newTTF` opens the file and reads its metrics; a glyph is
+rasterized and packed the first time something asks for it, and the atlas
+crosses to the backend as one ordinary `tecs.gfx.images` upload.
+
+```nupp
+local fonts = require("tecs.gfx.fonts")
+
+const font, reason = fonts.newTTF({source = "assets/fonts/JetBrainsMono-ExtraBold.ttf"})
+assert(font, reason)
+
+const glyph = fonts.glyph(font, 0x41)
+const image = fonts.imageOf(font)
+```
+
+Every metric this module returns is in em units, so multiplying one by a text's
+em size gives world units. That keeps one atlas usable at every displayed size
+and keeps the layout in `tecs.gfx.text` free of the raster's own resolution.
+
+The default `"sdf"` raster stores a signed distance field, which scales without
+regenerating glyphs. Choose a `size` near the largest ordinary on-screen size.
+An `"alpha"` raster stores direct coverage instead and draws correctly through
+a plain textured quad; a distance field needs a shader that recovers coverage
+by smoothstepping around the half-way value, so a backend without one draws an
+`"sdf"` font as a soft gradient rather than as text.
+
+Residency is observed rather than waited on, exactly as an image's is.
+`imageOf` queues whatever the atlas gained since the last call and answers with
+the id; `tecs.gfx.images.stateOf` on that id then reports where the upload
+stands.
+]]
+
+local images = require("tecs.gfx.images")
+local truetype = require("tecs.gfx.truetype")
+local files = require("nupp.io.files")
+
+const ceil = math.ceil
+const char = string.char
+const concat = table.concat
+
+--- Selects how a font's glyph images are stored.
+---
+--- These identifiers reach a game's font configuration and match the raster
+--- names the Teal implementation carried, so they are a compatibility surface.
+export type Raster = "sdf" | "alpha"
+
+--- The options `newTTF` accepts.
+export type TTFOptions = {
+    source: string?,
+    bytes: string?,
+    name: string?,
+    size: number?,
+    raster: Raster?
+}
+
+--- The point size a font rasterizes at when the caller names none.
+export const DEFAULT_SIZE: number = 48.0
+
+--- The texels a distance field reaches on each side of an outline.
+---
+--- The same number is the padding around every glyph, because the field has to
+--- have somewhere to run before the region ends. A wider spread costs atlas
+--- room and buys a thicker outline or glow; four texels carry an ordinary
+--- antialiased edge at any size the atlas is used at.
+export const SDF_SPREAD: integer = 4
+
+--- The texels of empty margin around an alpha glyph.
+---
+--- Coverage does not extend past the outline, so one texel is enough to stop a
+--- linear sample at the region's edge from reaching its neighbour.
+const ALPHA_PADDING: integer = 1
+
+--- The smallest and largest square atlas the packer will build.
+const MIN_ATLAS: integer = 256
+
+const MAX_ATLAS: integer = 4096
+
+--- One glyph's place in the atlas and its box relative to the pen.
+---
+--- The four plane edges are in em units with y increasing downward from the
+--- baseline, so a glyph drawn at em size `s` with its pen at `x, y` covers
+--- `x + left * s` to `x + right * s` horizontally. A glyph with no ink, which
+--- is what a space is, reports four zeroes and no atlas region.
+export record Glyph
+    --- Read-only. Reports the face's glyph index, which is zero for the
+    --- `.notdef` glyph a font draws for a character it does not carry.
+    index: integer
+
+    --- Read-only. Reports the horizontal advance in em units.
+    advance: number
+
+    --- Read-only. Reports the left edge of the drawn box in em units.
+    left: number
+
+    --- Read-only. Reports the top edge of the drawn box in em units, above the
+    --- baseline and so usually negative.
+    top: number
+
+    --- Read-only. Reports the right edge of the drawn box in em units.
+    right: number
+
+    --- Read-only. Reports the bottom edge of the drawn box in em units.
+    bottom: number
+
+    --- Read-only. Reports the left edge of the atlas region, from zero to one.
+    u0: number
+
+    --- Read-only. Reports the top edge of the atlas region, from zero to one.
+    v0: number
+
+    --- Read-only. Reports the right edge of the atlas region, from zero to one.
+    u1: number
+
+    --- Read-only. Reports the bottom edge of the atlas region, from zero to one.
+    v1: number
+
+    --- Read-only. Reports the region width in atlas texels, which is zero for
+    --- a glyph with no ink.
+    width: integer
+
+    --- Read-only. Reports the region height in atlas texels.
+    height: integer
+
+    private atlasX: integer
+    private atlasY: integer
+    private coverage: {integer}
+end
+
+--- A loaded font and the atlas its glyphs live in.
+---
+--- Immutable in everything a game reads. The atlas behind it grows as glyphs
+--- are asked for, which is why `imageOf` rather than a stored id is what
+--- extraction reads.
+export record Font
+    --- Read-only. Reports the identity a snapshot stores and `find` resolves.
+    name: string
+
+    --- Read-only. Reports the path the bytes were read from, or the empty
+    --- string for a font handed over as bytes.
+    source: string
+
+    --- Read-only. Reports the point size glyphs are rasterized at. It is not
+    --- the size text is drawn at.
+    size: number
+
+    --- Read-only. Reports whether the atlas holds a distance field or direct
+    --- coverage.
+    raster: Raster
+
+    --- Read-only. Reports the distance from the baseline to the top of the
+    --- typographic ascent, in em units.
+    ascent: number
+
+    --- Read-only. Reports the distance from the baseline to the bottom of the
+    --- typographic descent, in em units. It is negative in every ordinary font.
+    descent: number
+
+    --- Read-only. Reports the extra leading between two lines, in em units.
+    lineGap: number
+
+    --- Read-only. Reports the baseline-to-baseline distance in em units, which
+    --- is the ascent less the descent plus the leading.
+    lineHeight: number
+
+    private face: truetype.Face
+    private padding: integer
+    private scale: number
+    private cells: {[integer]: Glyph}
+    private ordered: {Glyph}
+    private atlasWidth: integer
+    private atlasHeight: integer
+    private shelfX: integer
+    private shelfY: integer
+    private shelfHeight: integer
+    private rows: {string}
+    private rowDirty: {boolean}
+    private changed: boolean
+    private uploaded: boolean
+    private imageId: integer
+end
+
+--- Every loaded font by identity.
+---
+--- A later font loaded under a name replaces what that name resolves to, while
+--- a `Text` already holding the earlier font keeps drawing through it.
+local byName: {[string]: Font} = {}
+
+--- How many times any font's atlas has been laid out again.
+---
+--- Growing an atlas moves every region in it, so a `Sprite` written from a
+--- region before the growth samples the wrong texels afterwards. This counter
+--- is what lets `tecs.gfx.text` notice and place its glyphs again.
+local repacks: integer = 0
+
+--- The four bytes one field or coverage value becomes, by value.
+---
+--- White with the value in alpha, so a tint multiplies straight through and a
+--- backend needs to know nothing about the atlas being a font.
+local texels: {string} = {}
+
+for value = 0, 255 do
+    texels[value + 1] = char(255, 255, 255, value)
+end
+
+--- The name the atlas is uploaded under.
+---
+--- A glyph entity stores this through its `Sprite`, and a snapshot stores a
+--- sprite's image by name, so the prefix is a compatibility surface.
+--- @param name the font identity
+--- @return the image name, which is stable for the life of the font
+export function atlasNameOf(name: string): string
+    return "tecs.font:" .. name
+end
+
+--- Returns the smallest power of two at least as large as `value`.
+local function roundUp(value: integer): integer
+    local size = MIN_ATLAS
+    while size < value and size < MAX_ATLAS do
+        size = size * 2
+    end
+
+    return size
+end
+
+--- Marks every row one glyph's region touches for rebuilding.
+local function soil(font: Font, top: integer, height: integer): nil
+    const dirty = font.rowDirty
+    for row = top, top + height - 1 do
+        dirty[row + 1] = true
+    end
+    font.changed = true
+end
+
+--- Writes one glyph's texels into the atlas rows.
+local function blit(font: Font, glyph: Glyph): nil
+    if glyph.width == 0 then
+        return
+    end
+    const rows = font.rows
+    const coverage = glyph.coverage
+    for line = 0, glyph.height - 1 do
+        const index = glyph.atlasY + line + 1
+        const existing = rows[index]
+        const cut = glyph.atlasX * 4
+        local middle: {string} = {}
+        for column = 1, glyph.width do
+            middle[column] = texels[coverage[line * glyph.width + column] + 1]
+        end
+        rows[index] = existing:sub(1, cut) .. concat(middle) .. existing:sub(cut + glyph.width * 4 + 1)
+    end
+    soil(font, glyph.atlasY, glyph.height)
+end
+
+--- Recomputes one glyph's texture coordinates for the current atlas size.
+local function project(font: Font, glyph: Glyph): nil
+    if glyph.width == 0 then
+        glyph.u0, glyph.v0, glyph.u1, glyph.v1 = 0.0, 0.0, 0.0, 0.0
+
+        return
+    end
+    const width = font.atlasWidth
+    const height = font.atlasHeight
+    glyph.u0 = glyph.atlasX / width
+    glyph.v0 = glyph.atlasY / height
+    glyph.u1 = (glyph.atlasX + glyph.width) / width
+    glyph.v1 = (glyph.atlasY + glyph.height) / height
+end
+
+--- Empties every atlas row to transparent black.
+local function blankRows(font: Font): nil
+    const blank = texels[1]:rep(font.atlasWidth)
+    local rows: {string} = {}
+    local dirty: {boolean} = {}
+    for row = 1, font.atlasHeight do
+        rows[row] = blank
+        dirty[row] = true
+    end
+    font.rows = rows
+    font.rowDirty = dirty
+    font.changed = true
+end
+
+--- Places one glyph on the shelf packer, growing the atlas when it will not fit.
+---
+--- Growth repacks the glyphs already resident rather than dropping them, and it
+--- writes the new place into the same `Glyph` records, so a caller holding one
+--- from before the growth keeps a correct region.
+--- @return whether the glyph found a place
+local function place(font: Font, glyph: Glyph): boolean
+    const width = glyph.width
+    const height = glyph.height
+    if width == 0 then
+        return true
+    end
+    if width > font.atlasWidth then
+        return false
+    end
+    if font.shelfX + width > font.atlasWidth then
+        font.shelfX = 0
+        font.shelfY = font.shelfY + font.shelfHeight
+        font.shelfHeight = 0
+    end
+    if font.shelfY + height > font.atlasHeight then
+        return false
+    end
+    glyph.atlasX = font.shelfX
+    glyph.atlasY = font.shelfY
+    font.shelfX = font.shelfX + width
+    if height > font.shelfHeight then
+        font.shelfHeight = height
+    end
+    project(font, glyph)
+    blit(font, glyph)
+
+    return true
+end
+
+--- Doubles the atlas and lays every resident glyph out again.
+--- @return whether the atlas grew
+local function grow(font: Font): boolean
+    if font.atlasWidth >= MAX_ATLAS then
+        return false
+    end
+    font.atlasWidth = font.atlasWidth * 2
+    font.atlasHeight = font.atlasHeight * 2
+    font.shelfX = 0
+    font.shelfY = 0
+    font.shelfHeight = 0
+    repacks = repacks + 1
+    blankRows(font)
+    const ordered = font.ordered
+    for index = 1, #ordered do
+        place(font, ordered[index])
+    end
+
+    return true
+end
+
+--- Rasterizes one glyph and packs it, or answers an inkless glyph.
+local function build(font: Font, codepoint: integer): Glyph
+    const face = font.face
+    const index = face:glyphIndex(codepoint)
+    const upem = face.unitsPerEm
+    const scale = font.scale
+    const padding = font.padding
+    const advance = face:advanceOf(index) / upem
+    const contours, minX, minY, maxX, maxY = truetype.outline(face, index, scale)
+
+    local glyph = new Glyph(
+        index = index,
+        advance = advance,
+        left = 0.0,
+        top = 0.0,
+        right = 0.0,
+        bottom = 0.0,
+        u0 = 0.0,
+        v0 = 0.0,
+        u1 = 0.0,
+        v1 = 0.0,
+        width = 0,
+        height = 0,
+        atlasX = 0,
+        atlasY = 0,
+        coverage = {}
+    )
+    if #contours == 0 then
+        return glyph
+    end
+
+    const width = ceil((maxX - minX) * scale) as integer + padding * 2
+    const height = ceil((maxY - minY) * scale) as integer + padding * 2
+    const marginX = padding / scale
+    const marginY = padding / scale
+    const originX = minX - marginX
+    const originY = maxY + marginY
+    const coverage = truetype.rasterize(contours, width, height, originX, originY, scale)
+    glyph.width = width
+    glyph.height = height
+    glyph.coverage = font.raster == "sdf" and truetype.distanceField(coverage, width, height, SDF_SPREAD) or coverage
+    -- The box is the rasterized region, which is the outline plus its margin,
+    -- expressed against the pen with y running down the way a transform does.
+    glyph.left = originX / upem
+    glyph.top = -originY / upem
+    glyph.right = (originX + width / scale) / upem
+    glyph.bottom = (-originY + height / scale) / upem
+
+    return glyph
+end
+
+--- Reads a font's bytes and its metrics.
+---
+--- Loading a name a font already holds replaces what that name resolves to. A
+--- `Text` already carrying the earlier font keeps it, so a reload changes what
+--- new text picks up rather than what old text draws.
+--- @param options the source path or `bytes`, the identity, the raster point
+---     size, and the raster mode; `name` defaults to `source`, `size` to
+---     `DEFAULT_SIZE`, and `raster` to `"sdf"`
+--- @return the font, or nil when the file could not be read or parsed
+--- @return why the font could not be loaded, when unsuccessful
+--- @raises when neither `source` nor `bytes` is given, when the size is not
+---     greater than zero, or when the raster is not one of its declared values
+export function newTTF(options: TTFOptions): Font?, string?
+    const source = options.source
+    local bytes = options.bytes
+    if bytes == nil and (source == nil or source == "") then
+        error("gfx.fonts.newTTF: a font needs a `source` path or `bytes`", 2)
+    end
+    const size = options.size or DEFAULT_SIZE
+    if not (size > 0.0) then
+        error("gfx.fonts.newTTF: a font `size` must be greater than zero", 2)
+    end
+    const raster = options.raster or "sdf"
+    if raster ~= "sdf" and raster ~= "alpha" then
+        error("gfx.fonts.newTTF: a font `raster` must be 'sdf' or 'alpha'", 2)
+    end
+    const name = options.name or source or ""
+    if name == "" then
+        error("gfx.fonts.newTTF: a font handed over as `bytes` needs a `name`", 2)
+    end
+
+    if bytes == nil then
+        local read, reason = files.read(source as string)
+        if read == nil then
+            return nil, "gfx.fonts.newTTF: " .. (reason or "the font could not be read")
+        end
+        bytes = read
+    end
+    const face, failure = truetype.parse(bytes as string)
+    if face == nil then
+        return nil, "gfx.fonts.newTTF: " .. (failure or "the font could not be parsed")
+    end
+
+    const padding = raster == "sdf" and SDF_SPREAD or ALPHA_PADDING
+    const upem = (face as truetype.Face).unitsPerEm
+    const ascent = (face as truetype.Face).ascender / upem
+    const descent = (face as truetype.Face).descender / upem
+    const leading = (face as truetype.Face).lineGap / upem
+    -- Enough room for a full Latin repertoire at the requested size, rounded up
+    -- to a power of two. A font that outruns it doubles the atlas rather than
+    -- dropping glyphs.
+    const cell = ceil(size) as integer + padding * 2
+    const side = roundUp(ceil(math.sqrt(128.0) * cell) as integer)
+
+    local font = new Font(
+        name = name,
+        source = source or "",
+        size = size,
+        raster = raster,
+        ascent = ascent,
+        descent = descent,
+        lineGap = leading,
+        lineHeight = ascent - descent + leading,
+        face = face as truetype.Face,
+        padding = padding,
+        scale = size / upem,
+        cells = {},
+        ordered = {},
+        atlasWidth = side,
+        atlasHeight = side,
+        shelfX = 0,
+        shelfY = 0,
+        shelfHeight = 0,
+        rows = {},
+        rowDirty = {},
+        changed = false,
+        uploaded = false,
+        imageId = images.id(atlasNameOf(name))
+    )
+    blankRows(font)
+    byName[name] = font
+
+    return font, nil
+end
+
+--- Returns the font one name resolves to.
+--- @param name the font identity
+--- @return the font, or nil when nothing has been loaded under that name
+export function find(name: string): Font?
+    return byName[name]
+end
+
+--- Returns the glyph one codepoint selects, making it resident on first use.
+---
+--- A codepoint the font does not carry answers with the face's `.notdef`
+--- glyph, which is the box a font draws for a missing character, rather than
+--- with nil. A codepoint with no ink, which is what a space is, answers with a
+--- glyph whose advance is set and whose region is empty.
+---
+--- The returned record is the font's own and is updated in place when the
+--- atlas grows. Read what you need from it rather than keeping it across
+--- frames.
+--- @param font the loaded font
+--- @param codepoint the Unicode scalar to draw
+--- @return the glyph, whose plane box and advance are in em units
+export function glyph(font: Font, codepoint: integer): Glyph
+    local held = font.cells[codepoint]
+    if held ~= nil then
+        return held
+    end
+    local built = build(font, codepoint)
+    font.cells[codepoint] = built
+    font.ordered[#font.ordered + 1] = built
+    if not place(font, built) then
+        if grow(font) then
+            place(font, built)
+        else
+            -- The atlas cannot hold this glyph and cannot grow. Drawing
+            -- nothing beats drawing another glyph's texels.
+            built.width = 0
+            built.height = 0
+            project(font, built)
+        end
+    end
+
+    return built
+end
+
+--- Returns the glyph index one codepoint selects.
+--- @param font the loaded font
+--- @param codepoint the Unicode scalar to look up
+--- @return the face's glyph index, which is zero for a codepoint the font does
+---     not carry
+export function glyphIndexOf(font: Font, codepoint: integer): integer
+    return font.face:glyphIndex(codepoint)
+end
+
+--- Reports whether the font carries a glyph for one codepoint.
+--- @param font the loaded font
+--- @param codepoint the Unicode scalar to look up
+--- @return whether the font maps it to anything but `.notdef`
+export function hasGlyph(font: Font, codepoint: integer): boolean
+    return font.face:glyphIndex(codepoint) ~= 0
+end
+
+--- Returns one codepoint's horizontal advance in em units.
+---
+--- Reads the horizontal metrics directly, so it costs nothing and makes no
+--- glyph resident. Measuring a string that will never be drawn goes through
+--- here rather than through `glyph`.
+--- @param font the loaded font
+--- @param codepoint the Unicode scalar to measure
+--- @return the advance in em units
+export function advanceOf(font: Font, codepoint: integer): number
+    const face = font.face
+
+    return face:advanceOf(face:glyphIndex(codepoint)) / face.unitsPerEm
+end
+
+--- Returns the kerning between two codepoints in em units.
+---
+--- Only a format-zero `kern` table is read. A font that carries its kerning in
+--- `GPOS` alone reports zero for every pair, which lays the text out on its
+--- advance widths.
+--- @param font the loaded font
+--- @param left the Unicode scalar on the left
+--- @param right the Unicode scalar on the right
+--- @return the adjustment to add after the left glyph's advance, in em units
+export function kerningOf(font: Font, left: integer, right: integer): number
+    const face = font.face
+
+    return face:kerningOf(face:glyphIndex(left), face:glyphIndex(right)) / face.unitsPerEm
+end
+
+--- Returns how many times any atlas has been laid out again.
+---
+--- Growing an atlas moves every region in it, so anything holding a texture
+--- coordinate read from a `Glyph` compares this against what it last saw and
+--- reads the regions again when the two differ.
+--- @return a count that only increases, shared by every loaded font
+export function epoch(): integer
+    return repacks
+end
+
+--- Returns the atlas dimensions in texels.
+--- @param font the loaded font
+--- @return the width, then the height, both powers of two
+export function atlasSize(font: Font): integer, integer
+    return font.atlasWidth, font.atlasHeight
+end
+
+--- Returns how many glyphs the atlas holds.
+---
+--- Counts every glyph asked for, including the inkless ones that occupy no
+--- region, because each of those cost a lookup and a metric.
+--- @param font the loaded font
+--- @return the resident glyph count
+export function residentGlyphs(font: Font): integer
+    return #font.ordered
+end
+
+--- Returns the atlas image id, queuing whatever the atlas gained.
+---
+--- The id is permanent, so a caller may store it. Residency is not: call this
+--- once per frame that might have added a glyph and let
+--- `tecs.gfx.images.stateOf` report where the upload stands.
+--- @param font the loaded font
+--- @return the process-wide image id the atlas uploads under
+export function imageOf(font: Font): integer
+    if not font.changed and font.uploaded then
+        return font.imageId
+    end
+    const rows = font.rows
+    font.changed = false
+    font.uploaded = true
+    for row = 1, font.atlasHeight do
+        font.rowDirty[row] = false
+    end
+    images.upload({
+        name = atlasNameOf(font.name),
+        width = font.atlasWidth,
+        height = font.atlasHeight,
+        pixels = concat(rows),
+        filter = "linear",
+        address = "clamp",
+    })
+
+    return font.imageId
+end
+
+--- Drops the atlas from the backend.
+---
+--- The glyphs stay packed and the id survives, so the next `imageOf` makes the
+--- same atlas resident again under the same id. Text drawn in between samples
+--- the backend's white fallback.
+--- @param font the loaded font
+--- @return whether a release was queued, which is false before the first upload
+--- @return why nothing was queued, when unsuccessful
+export function release(font: Font): boolean, string?
+    if not font.uploaded then
+        return false, "gfx.fonts.release: " .. font.name .. " has not been uploaded"
+    end
+    const released, reason = images.release(atlasNameOf(font.name))
+    if not released then
+        return false, reason
+    end
+    font.uploaded = false
+
+    return true, nil
+end

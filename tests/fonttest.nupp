@@ -1,0 +1,278 @@
+local files = require("nupp.io.files")
+local fonts = require("tecs.gfx.fonts")
+local images = require("tecs.gfx.images")
+local test = require("nupp.test")
+
+local suite = {}
+
+const SOURCE = "assets/fonts/JetBrainsMono-ExtraBold.ttf"
+
+local bytes: string? = nil
+
+--- Reads the font file once and hands the same bytes to every test, so a test
+--- that wants its own font identity pays for the parse and not the read.
+local function source(): string
+    if bytes == nil then
+        const read, reason = files.read(SOURCE)
+        test.assert(read, reason)
+        bytes = read
+    end
+
+    return bytes as string
+end
+
+local function load(name: string, raster: fonts.Raster?, size: number?): fonts.Font
+    const font, reason = fonts.newTTF({bytes = source(), name = name, raster = raster, size = size})
+    test.assert(font, reason)
+
+    return font as fonts.Font
+end
+
+--- Empties the process-wide image queue so one test only sees its own commands.
+local function drained(): nil
+    images.drain()
+end
+
+function suite.readsVerticalMetricsInEmUnits(): nil
+    const font = load("fonttest/metrics")
+    test.equal(font.name, "fonttest/metrics")
+    test.equal(font.source, "")
+    test.equal(font.size, fonts.DEFAULT_SIZE)
+    test.equal(font.raster, "sdf")
+    test.assert(font.ascent > 0.0 and font.ascent < 2.0, "the ascent is a fraction of an em")
+    test.assert(font.descent < 0.0, "the descent falls below the baseline")
+    test.assert(font.lineGap >= 0.0, "the leading is never negative")
+    test.equal(font.lineHeight, font.ascent - font.descent + font.lineGap)
+end
+
+function suite.rejectsOptionsThatCannotNameAFont(): nil
+    test.raises(function(): nil
+        fonts.newTTF({})
+    end, "`source` path or `bytes`")
+    test.raises(function(): nil
+        fonts.newTTF({bytes = source(), name = "fonttest/bad", size = 0})
+    end, "greater than zero")
+    test.raises(function(): nil
+        fonts.newTTF({bytes = source(), name = "fonttest/bad", raster = "outline" as fonts.Raster})
+    end, "'sdf' or 'alpha'")
+    test.raises(function(): nil
+        fonts.newTTF({bytes = source()})
+    end, "needs a `name`")
+end
+
+function suite.reportsWhyBytesCouldNotBeParsed(): nil
+    const font, reason = fonts.newTTF({bytes = "this is not a font", name = "fonttest/garbage"})
+    test.equal(font, nil)
+    test.matches(reason as string, "newTTF")
+    test.equal(fonts.find("fonttest/garbage"), nil)
+end
+
+function suite.resolvesALoadedFontByName(): nil
+    const font = load("fonttest/named")
+    test.equal(fonts.find("fonttest/named"), font)
+    test.equal(fonts.find("fonttest/never-loaded"), nil)
+end
+
+function suite.readsAdvancesAndKerningWithoutMakingGlyphsResident(): nil
+    const font = load("fonttest/advances")
+    const advance = fonts.advanceOf(font, 0x41)
+    test.assert(advance > 0.0 and advance < 2.0, "an advance is a fraction of an em")
+    -- JetBrains Mono is monospaced, so every glyph advances by the same width.
+    test.equal(fonts.advanceOf(font, 0x57), advance)
+    test.equal(fonts.advanceOf(font, 0x20), advance)
+    -- A monospaced face carries no kerning to apply.
+    test.equal(fonts.kerningOf(font, 0x41, 0x56), 0.0)
+    test.equal(fonts.residentGlyphs(font), 0)
+end
+
+function suite.answersAMissingCodepointWithTheNotdefGlyph(): nil
+    const font = load("fonttest/missing")
+    test.assert(fonts.hasGlyph(font, 0x41), "a text font carries capital A")
+    -- A private-use codepoint no text font maps.
+    test.equal(fonts.hasGlyph(font, 0xe000), false)
+    test.equal(fonts.glyphIndexOf(font, 0xe000), 0)
+
+    const glyph = fonts.glyph(font, 0xe000)
+    test.equal(glyph.index, 0)
+    -- The face draws `.notdef` as a box, so the missing glyph occupies the
+    -- atlas exactly as a letter does rather than silently disappearing.
+    test.assert(glyph.width > 0, "notdef carries ink")
+    test.assert(glyph.right > glyph.left, "notdef covers a positive box")
+end
+
+function suite.givesAnInklessGlyphAnAdvanceAndNoRegion(): nil
+    const font = load("fonttest/space")
+    const glyph = fonts.glyph(font, 0x20)
+    test.assert(glyph.advance > 0.0, "a space still advances the pen")
+    test.equal(glyph.width, 0)
+    test.equal(glyph.height, 0)
+    test.equal(glyph.u0, 0.0)
+    test.equal(glyph.u1, 0.0)
+end
+
+function suite.packsGlyphsIntoTheAtlasOnFirstUse(): nil
+    const font = load("fonttest/packing")
+    test.equal(fonts.residentGlyphs(font), 0)
+    const first = fonts.glyph(font, 0x41)
+    test.equal(fonts.residentGlyphs(font), 1)
+    -- Asking again answers the same record rather than rasterizing again.
+    test.equal(fonts.glyph(font, 0x41), first)
+    test.equal(fonts.residentGlyphs(font), 1)
+
+    const second = fonts.glyph(font, 0x42)
+    test.equal(fonts.residentGlyphs(font), 2)
+    test.assert(second.u0 >= first.u1, "two glyphs do not overlap on one shelf")
+
+    const width, height = fonts.atlasSize(font)
+    test.equal(width, height)
+    test.assert(width >= 256, "the atlas is at least the smallest page")
+    for _, glyph in ipairs({first, second}) do
+        test.assert(glyph.u0 >= 0.0 and glyph.u1 <= 1.0, "a region stays inside the atlas")
+        test.assert(glyph.v0 >= 0.0 and glyph.v1 <= 1.0, "a region stays inside the atlas")
+        test.assert(glyph.u1 > glyph.u0 and glyph.v1 > glyph.v0, "a region covers a positive area")
+    end
+end
+
+function suite.uploadsTheAtlasAsOneRgba8ImageUnderItsFontName(): nil
+    drained()
+    const font = load("fonttest/upload")
+    fonts.glyph(font, 0x41)
+    const image = fonts.imageOf(font)
+    test.equal(images.nameOf(image), fonts.atlasNameOf("fonttest/upload"))
+    test.equal(images.stateOf(image), "pending")
+
+    const commands = images.drain()
+    test.equal(#commands, 1)
+    const command = commands[1]
+    test.assert(command is images.UploadImageCommand)
+    if command is images.UploadImageCommand then
+        const width, height = fonts.atlasSize(font)
+        test.equal(command.image, image)
+        test.equal(command.width, width)
+        test.equal(command.height, height)
+        test.equal(command.format, "rgba8")
+        test.equal(#command.pixels, width * height * 4)
+        images.complete(command.image, command.serial, true, nil)
+    end
+    test.equal(images.stateOf(image), "resident")
+
+    -- Nothing changed, so a second call queues nothing and answers the same id.
+    test.equal(fonts.imageOf(font), image)
+    test.equal(#images.drain(), 0)
+
+    -- A new glyph changes the atlas, so the next call queues a replacement.
+    fonts.glyph(font, 0x42)
+    test.equal(fonts.imageOf(font), image)
+    test.equal(#images.drain(), 1)
+end
+
+function suite.releasesTheAtlasAndMakesItResidentAgain(): nil
+    drained()
+    const font = load("fonttest/release")
+    test.equal(fonts.release(font), false)
+    const released, reason = fonts.release(font)
+    test.equal(released, false)
+    test.matches(reason as string, "has not been uploaded")
+
+    fonts.glyph(font, 0x41)
+    const image = fonts.imageOf(font)
+    const queued = images.drain()
+    images.complete(image, queued[1].serial, true, nil)
+    test.equal(images.stateOf(image), "resident")
+
+    test.equal(fonts.release(font), true)
+    test.equal(images.stateOf(image), "released")
+    const commands = images.drain()
+    test.equal(#commands, 1)
+    test.assert(commands[1] is images.ReleaseImageCommand)
+
+    -- The id survives the release, so the atlas comes back under it.
+    test.equal(fonts.imageOf(font), image)
+    test.equal(images.stateOf(image), "pending")
+    test.equal(#images.drain(), 1)
+end
+
+function suite.writesTheAtlasAsWhiteTexelsCarryingTheFieldInAlpha(): nil
+    drained()
+    const font = load("fonttest/texels", "alpha", 24)
+    fonts.glyph(font, 0x48)
+    fonts.imageOf(font)
+    const commands = images.drain()
+    const command = commands[1]
+    test.assert(command is images.UploadImageCommand)
+    if command is images.UploadImageCommand then
+        local ink: integer = 0
+        for index = 1, #command.pixels, 4 do
+            const r, g, b, a = command.pixels:byte(index, index + 3)
+            test.equal(r, 255)
+            test.equal(g, 255)
+            test.equal(b, 255)
+            if a > 0 then
+                ink = ink + 1
+            end
+        end
+        test.assert(ink > 0, "a capital H writes coverage into the atlas")
+    end
+end
+
+function suite.growsTheAtlasAndMovesEveryRegionWithIt(): nil
+    -- Eight points makes the smallest page hold a couple of hundred glyphs,
+    -- so a few hundred codepoints outgrow it without a slow rasterization.
+    const font = load("fonttest/growth", "alpha", 8)
+    const before = fonts.epoch()
+    const first = fonts.glyph(font, 0x41)
+    const startWidth = fonts.atlasSize(font)
+    -- The right edge rather than the left: the first glyph packed sits at
+    -- zero on both pages, and it is the atlas width underneath that changed.
+    const startU1 = first.u1
+
+    local codepoint: integer = 0x21
+    while fonts.atlasSize(font) == startWidth and codepoint < 0x500 do
+        fonts.glyph(font, codepoint)
+        codepoint = codepoint + 1
+    end
+    const width, height = fonts.atlasSize(font)
+    test.assert(width > startWidth, "the atlas outgrew its first page")
+    test.equal(width, startWidth * 2)
+    test.equal(height, width)
+    test.assert(fonts.epoch() > before, "a repack is reported")
+
+    -- The record handed out before the growth is the one that was updated, so
+    -- a caller holding it reads the new place rather than the old one.
+    test.equal(fonts.glyph(font, 0x41), first)
+    test.notEqual(first.u1, startU1)
+    test.assert(first.u1 > first.u0 and first.v1 > first.v0, "the moved region is still positive")
+    test.assert(first.u1 <= 1.0 and first.v1 <= 1.0, "the moved region is inside the atlas")
+end
+
+function suite.buildsTheSameAtlasBytesEveryRun(): nil
+    drained()
+    const first = load("fonttest/repeat-a", "alpha", 20)
+    const second = load("fonttest/repeat-b", "alpha", 20)
+    for _, codepoint in ipairs({0x41, 0x67, 0x40, 0x20}) do
+        fonts.glyph(first, codepoint as integer)
+        fonts.glyph(second, codepoint as integer)
+    end
+    fonts.imageOf(first)
+    fonts.imageOf(second)
+    const commands = images.drain()
+    test.equal(#commands, 2)
+    const left = commands[1]
+    const right = commands[2]
+    test.assert(left is images.UploadImageCommand and right is images.UploadImageCommand)
+    if left is images.UploadImageCommand and right is images.UploadImageCommand then
+        test.equal(left.width, right.width)
+        test.equal(left.pixels, right.pixels)
+    end
+    for _, codepoint in ipairs({0x41, 0x67, 0x40, 0x20}) do
+        const one = fonts.glyph(first, codepoint as integer)
+        const other = fonts.glyph(second, codepoint as integer)
+        test.equal(one.u0, other.u0)
+        test.equal(one.v0, other.v0)
+        test.equal(one.left, other.left)
+        test.equal(one.top, other.top)
+        test.equal(one.advance, other.advance)
+    end
+end
+
+return suite

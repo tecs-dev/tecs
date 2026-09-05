@@ -53,6 +53,7 @@ return {
                     "tecs.data",
                     "tecs.events",
                     "tecs.gfx",
+                    "tecs.gfx.fonts",
                     "tecs.gfx.images",
                     "tecs.gfx.layers",
                     "tecs.gfx.truetype",
