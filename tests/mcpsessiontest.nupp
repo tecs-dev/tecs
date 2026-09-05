@@ -3,7 +3,7 @@ local ecs = require("tecs.ecs")
 local json = require("nupp.data.json")
 local mcp = require("tecs.mcp")
 local netadapter = require("tecs.internal.netadapter")
-local suspension = require("nupp.suspension")
+local tasks = require("nupp.tasks")
 local test = require("nupp.test")
 local time = require("nupp.time")
 
@@ -116,7 +116,7 @@ local MAX_TURNS: integer = 4000
 --- @raises whatever the agent or the poller raised
 local function withSession<T>(server: mcp.Server, port: integer, agent: function(port: integer): T): T
     local finished = false
-    local answers, failures = suspension.gather({
+    local answers, failures = tasks.gather({
         function(): any
             local turns = 0
             while not finished and turns < MAX_TURNS do

@@ -2,7 +2,7 @@ local ecs = require("tecs.ecs")
 local json = require("nupp.data.json")
 local mcp = require("tecs.mcp")
 local netadapter = require("tecs.internal.netadapter")
-local suspension = require("nupp.suspension")
+local tasks = require("nupp.tasks")
 local test = require("nupp.test")
 local time = require("nupp.time")
 
@@ -51,14 +51,14 @@ end
 
 --- Runs `client` while the server is polled once a millisecond beside it.
 ---
---- `suspension.all` runs both bodies as coroutines under one handler, so the
+--- `tasks.gather` runs both bodies as coroutines under one handler, so the
 --- client's socket waits are what let the server's polls happen and the other
 --- way round. Nothing outside this process is involved.
 local function withServer<T>(client: function(port: integer): T): T
     local server = assert(mcp.listen(0))
     local port = server.port
     local finished = false
-    local answers = suspension.all({
+    local answers, failures = tasks.gather({
         function(): any
             while not finished do
                 mcp.poll(server)
@@ -77,6 +77,11 @@ local function withServer<T>(client: function(port: integer): T): T
         end
     })
     mcp.destroy(server)
+    for index = 1, 2 do
+        if failures[index] ~= nil then
+            error(failures[index], 0)
+        end
+    end
 
     return answers[2] as T
 end
