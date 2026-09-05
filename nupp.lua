@@ -167,12 +167,10 @@ return {
                 entries = {"tecs.host", "nativesmoke"},
                 exports = nativesmokeExports,
             },
-            -- The Nupp half of the documentation. Tealdoc renders the Teal
-            -- half and cannot render this one: it resolves a module only
-            -- through `src/<name>.tl` or `src/<name>/init.tl`, so it can
-            -- neither read a Nupp declaration nor project one onto a page. The
-            -- two sites collapse into one when the Teal implementation is
-            -- deleted. `docs/nupp/index.md` says which carries what.
+            -- The documentation site: the handwritten pages under `docs/`
+            -- with the API reference generated from the same declaration
+            -- docblocks the checker reads, so a signature has no second copy
+            -- to drift from.
             --
             -- `description` here is the site's meta description rather than
             -- this target's blurb, which is why it describes Tecs and not the
@@ -181,12 +179,15 @@ return {
                 kind = "docs",
                 sources = {"src"},
                 format = "site",
-                outDir = "out/nupp-docs",
-                title = "Tecs API",
+                outDir = "out/docs",
+                title = "Tecs",
                 name = "Tecs",
                 description = "Typed entity component system and game engine, in Nupp.",
                 github = "https://github.com/mtdowling/tecs",
-                pages = {{glob = "docs/nupp/**.md"}},
+                logo = "images/logo.svg",
+                favicon = "images/favicon.svg",
+                public = "docs/public",
+                pages = {{glob = "docs/**.md"}},
             },
         },
     },
