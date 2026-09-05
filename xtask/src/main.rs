@@ -11,6 +11,7 @@ use tecs_build_support::command;
 use tecs_build_support::docs;
 use tecs_build_support::formatting;
 use tecs_build_support::nupp;
+use tecs_build_support::nupppackage::{self, Preset as NuppPreset};
 use tecs_build_support::package::{self, Options as PackageCheckOptions};
 use tecs_build_support::payload::{self, Root};
 use tecs_build_support::presets::{host_default, Preset, PRESETS};
@@ -173,6 +174,27 @@ enum NuppTask {
     },
     /// Render the Nupp documentation into a scratch directory and verify it.
     DocsCheck,
+    /// List the Nupp packaging presets and what each one produces.
+    Presets,
+    /// Build and install a relocatable release tree into out/nupp-package.
+    Package {
+        #[arg(long)]
+        preset: Option<NuppPreset>,
+        /// A component target to install, repeatable. Defaults to the showcase
+        /// and the native smoke component.
+        #[arg(long = "component")]
+        components: Vec<String>,
+    },
+    /// Verify that an installed Nupp package is complete and relocatable.
+    CheckPackage {
+        #[arg(default_value = nupppackage::OUTPUT)]
+        prefix: PathBuf,
+    },
+    /// Install a clean release, check it, and run it from a relocated copy.
+    TestPackage {
+        #[arg(long)]
+        preset: Option<NuppPreset>,
+    },
     /// Check, format-check, test, and build everything on the Nupp path.
     Verify,
 }
@@ -401,6 +423,16 @@ fn main() -> Result<()> {
                 println!("built {}", output.display());
             }
             NuppTask::DocsCheck => nupp::documentation_check(&root)?,
+            NuppTask::Presets => nupppackage::list(),
+            NuppTask::Package { preset, components } => {
+                let preset = preset.map_or_else(nupppackage::host_default, Ok)?;
+                let prefix = nupppackage::install(&root, preset, &components)?;
+                println!("installed {}", prefix.display());
+            }
+            NuppTask::CheckPackage { prefix } => nupppackage::check(&root.join(prefix))?,
+            NuppTask::TestPackage { preset } => {
+                nupppackage::test(&root, preset.map_or_else(nupppackage::host_default, Ok)?)?;
+            }
             NuppTask::Verify => nupp::verify(&root)?,
         },
         Task::DocsCheck => docs::check(&root)?,

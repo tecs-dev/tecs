@@ -4,6 +4,7 @@ pub mod command;
 pub mod docs;
 pub mod formatting;
 pub mod nupp;
+pub mod nupppackage;
 pub mod package;
 pub mod payload;
 pub mod presets;
