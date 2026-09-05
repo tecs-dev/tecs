@@ -1,0 +1,171 @@
+--- Steady-state archetype-signature operations.
+---
+--- This is the Nupp counterpart of the Teal `bitset` benchmark, and it is
+--- deliberately not a port of it. The Teal ECS identifies an archetype by a
+--- `tecs.utils.Bitset` and answers a query by testing one bitset against
+--- another, so `bench/bitset.tl` measures `set`, `setRange`, `clear`, `scan`,
+--- `containsAll` and `overlaps`. The Nupp ECS has no bitset: an archetype is
+--- identified by the canonical comma-joined component-id string that
+--- `archetype.signatureOf` produces, membership is a hash lookup in
+--- `componentIds`, and a query is `query.matches` walking its include and
+--- exclude lists. Those are the operations that occupy the same place in the
+--- frame, so those are what this measures. No row here has a numerically
+--- comparable Teal row; what is comparable is the whole, which is what the ECS
+--- pays per structural change and per query registration.
+---
+--- Every row repeats its operation `BENCH_SIGNATURE_ITERATIONS` times inside
+--- one timed window. A membership test is tens of nanoseconds and the clock
+--- reports milliseconds, so timing one call reports zero and says nothing; the
+--- inner count is what makes the row a measurement. The table is therefore
+--- milliseconds per window, and the ns/op lines below it divide that by the
+--- operations the window performed.
+---
+---   BENCH_SIGNATURE_COMPONENTS  Components per archetype. Defaults to 64.
+---   BENCH_SIGNATURE_FILTER      Components per query side. Defaults to 8.
+---   BENCH_SIGNATURE_ITERATIONS  Repetitions inside one window. Defaults to 200.
+---   BENCH_SIGNATURE_WARMUP      Untimed windows. Defaults to 20.
+---   BENCH_SIGNATURE_SAMPLES     Timed windows. Defaults to 61.
+
+local archetype = require("tecs.internal.archetype")
+
+local components = require("tecs.internal.components")
+local harness = require("tecsbench.harness")
+local query = require("tecs.internal.query")
+
+const COMPONENTS = harness.count("BENCH_SIGNATURE_COMPONENTS", 64)
+const FILTER = harness.count("BENCH_SIGNATURE_FILTER", 8)
+const ITERATIONS = harness.count("BENCH_SIGNATURE_ITERATIONS", 200)
+const WARMUP = harness.optionalCount("BENCH_SIGNATURE_WARMUP", 20)
+const SAMPLES = harness.count("BENCH_SIGNATURE_SAMPLES", 61)
+if FILTER > COMPONENTS then
+    error("bench: BENCH_SIGNATURE_FILTER cannot exceed BENCH_SIGNATURE_COMPONENTS", 0)
+end
+
+--- Registers the fixture's components once, outside every timed window.
+---
+--- Registration is process-wide and a name may be declared only once, so this
+--- cannot run inside a repetition.
+local function declare(prefix: string, count: integer): {components.Component}
+    local values: {components.Component} = {}
+    for index = 1, count do
+        values[index] = components.newTagComponent({name = "bench.Signature" .. prefix .. tostring(index)})
+    end
+
+    return values
+end
+
+const PRESENT = declare("Present", COMPONENTS)
+const ABSENT = declare("Absent", FILTER)
+
+--- The signature is canonical, so this shuffled array produces the same string
+--- as the sorted one. Sorting is part of what is being measured, and handing
+--- `signatureOf` an already sorted array would measure its best case only.
+const SHUFFLED: {components.Component} = {}
+
+for index = 1, COMPONENTS do
+    SHUFFLED[index] = PRESENT[(index * 37) % COMPONENTS + 1]
+end
+
+const INCLUDE: {components.Component} = {}
+for index = 1, FILTER do
+    INCLUDE[index] = PRESENT[index * (COMPONENTS // FILTER)]
+end
+
+--- Distinct archetypes the membership and match rows cycle through.
+---
+--- One archetype and one query would make every repetition inside a window
+--- loop-invariant, and LuaJIT hoists an invariant pure call out of the loop it
+--- is meant to be measured in. Cycling defeats that: the call reads a
+--- different archetype each time, so the loop measures the operation rather
+--- than one execution of it. `VARIANTS` is not a fixture size worth
+--- configuring, so it is a constant.
+const VARIANTS = 8
+
+const MATCHING: {archetype.Archetype} = {}
+for index = 1, VARIANTS do
+    MATCHING[index] = archetype.new(index, PRESENT)
+end
+const INCLUDING = query.new({include = INCLUDE})
+const EXCLUDING = query.new({include = INCLUDE, exclude = ABSENT})
+
+--- One stage and the operations one window of it performs.
+local record Row
+    stage: harness.Stage
+    operations: integer
+end
+
+const rows: {Row} = {}
+
+--- Measures one operation and records how many of them a window performed.
+--- @param name the report row's label
+--- @param perCall the operations one call of `run` performs
+--- @param run the operation, called `ITERATIONS` times per window
+local function bench(name: string, perCall: integer, run: function(variant: archetype.Archetype): nil): nil
+    const stage = harness.newStage(name)
+    harness.measure(stage, WARMUP, SAMPLES, function(): nil
+        for index = 1, ITERATIONS do
+            run(MATCHING[index % VARIANTS + 1])
+        end
+    end)
+    rows[#rows + 1] = new Row(stage = stage, operations = ITERATIONS * perCall)
+end
+
+bench("signatureOf", COMPONENTS, function(_variant: archetype.Archetype): nil
+    if archetype.signatureOf(SHUFFLED) == "" then
+        error("bench: signatureOf produced nothing", 0)
+    end
+end)
+
+bench("new", COMPONENTS, function(_variant: archetype.Archetype): nil
+    if #archetype.new(2, PRESENT).components ~= COMPONENTS then
+        error("bench: new lost components", 0)
+    end
+end)
+
+bench("has", COMPONENTS + FILTER, function(variant: archetype.Archetype): nil
+    for index = 1, COMPONENTS do
+        if not archetype.has(variant, PRESENT[index]) then
+            error("bench: has missed a member", 0)
+        end
+    end
+    for index = 1, FILTER do
+        if archetype.has(variant, ABSENT[index]) then
+            error("bench: has found a nonmember", 0)
+        end
+    end
+end)
+
+bench("matchInclude", FILTER, function(variant: archetype.Archetype): nil
+    if not query.matches(INCLUDING, variant) then
+        error("bench: matches rejected a matching archetype", 0)
+    end
+end)
+
+bench("matchExclude", FILTER * 2, function(variant: archetype.Archetype): nil
+    if not query.matches(EXCLUDING, variant) then
+        error("bench: matches rejected an archetype its excludes miss", 0)
+    end
+end)
+
+const stages: {harness.Stage} = {}
+for index = 1, #rows do
+    stages[index] = rows[index].stage
+end
+
+print(
+    (
+        "signature: %d components per archetype, %d per query side, %d iterations per window, %d windows after %d warmup"
+    ):format(COMPONENTS, FILTER, ITERATIONS, SAMPLES, WARMUP)
+)
+print(harness.format(stages))
+for index = 1, #rows do
+    const row = rows[index]
+    const summary = harness.report(row.stage)
+    if summary ~= nil then
+        print(
+            (
+                "signature %-13s %8.1f ns/op over %d operations"
+            ):format(summary.name, summary.p50 * 1.0e6 / row.operations, row.operations)
+        )
+    end
+end

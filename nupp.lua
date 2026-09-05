@@ -41,8 +41,9 @@ return {
     -- never read a test file. Two suites called `suspension.gather` and
     -- `suspension.all`, neither of which exists, and both passed review: the
     -- checker was never pointed at them, and the test runner's build cache
-    -- kept serving artifacts compiled before the calls were wrong.
-    include = {"src", "examples/nupp", "tests"},
+    -- kept serving artifacts compiled before the calls were wrong. `bench/nupp`
+    -- is included for the same reason: the Teal tree checks `bench/` too.
+    include = {"src", "examples/nupp", "tests", "bench/nupp"},
 
     build = {
         outDir = "out/nupp",
@@ -128,6 +129,27 @@ return {
                 description = "Build the camera and textured sprite Nupp example",
                 entries = {"tecs.host", "sprites"},
                 exports = spritesExports,
+            },
+            -- The Nupp half of the documentation. Tealdoc renders the Teal
+            -- half and cannot render this one: it resolves a module only
+            -- through `src/<name>.tl` or `src/<name>/init.tl`, so it can
+            -- neither read a Nupp declaration nor project one onto a page. The
+            -- two sites collapse into one when the Teal implementation is
+            -- deleted. `docs/nupp/index.md` says which carries what.
+            --
+            -- `description` here is the site's meta description rather than
+            -- this target's blurb, which is why it describes Tecs and not the
+            -- render.
+            docs = {
+                kind = "docs",
+                sources = {"src"},
+                format = "site",
+                outDir = "out/nupp-docs",
+                title = "Tecs API",
+                name = "Tecs",
+                description = "Typed entity component system and game engine, in Nupp.",
+                github = "https://github.com/mtdowling/tecs",
+                pages = {{glob = "docs/nupp/**.md"}},
             },
         },
     },

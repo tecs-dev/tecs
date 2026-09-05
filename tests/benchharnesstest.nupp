@@ -1,0 +1,100 @@
+local harness = require("tecsbench.harness")
+local test = require("nupp.test")
+local suite = {}
+
+--- Builds a stage holding exactly the given samples.
+local function stageOf(name: string, samples: {number}): harness.Stage
+    const stage = harness.newStage(name)
+    for index = 1, #samples do
+        harness.mark(stage, samples[index])
+    end
+
+    return stage
+end
+
+function suite.rejectsAnEmptyStageName(): nil
+    test.raises(function(): nil
+        harness.newStage("")
+    end, "must not be empty")
+end
+
+function suite.reportsNothingForAStageWithNoSamples(): nil
+    test.equal(harness.report(harness.newStage("empty")), nil)
+    test.equal(harness.format({harness.newStage("empty")}), "")
+end
+
+function suite.readsPercentilesByNearestRank(): nil
+    -- Ten samples, so the fiftieth percentile is the fifth and the
+    -- ninety-fifth is the tenth. Every reported value is one that was
+    -- observed, which is the property the Teal report has as well.
+    const row = assert(harness.report(stageOf("ranks", {10, 1, 9, 2, 8, 3, 7, 4, 6, 5})))
+    test.equal(row.p50, 5)
+    test.equal(row.p95, 10)
+    test.equal(row.p99, 10)
+    test.equal(row.max, 10)
+    test.equal(row.mean, 5.5)
+    test.equal(row.samples, 10)
+end
+
+function suite.readsASingleSampleAsEveryPercentile(): nil
+    const row = assert(harness.report(stageOf("one", {4})))
+    test.equal(row.p50, 4)
+    test.equal(row.p95, 4)
+    test.equal(row.max, 4)
+    test.equal(row.samples, 1)
+end
+
+function suite.clearsSamplesWithoutLosingTheStage(): nil
+    const stage = stageOf("cleared", {1, 2, 3})
+    harness.reset(stage)
+    test.equal(harness.report(stage), nil)
+    harness.mark(stage, 7)
+    test.equal(assert(harness.report(stage)).p50, 7)
+end
+
+function suite.formatsOneRowPerRecordedStage(): nil
+    const lines: {string} = {}
+    for line in harness.format({stageOf("first", {1}), harness.newStage("silent"), stageOf("last", {2})}):gmatch("[^\n]+") do
+        lines[#lines + 1] = line
+    end
+    test.equal(#lines, 4)
+    test.assert(lines[1]:find("stage", 1, true) == 1)
+    test.assert(lines[3]:find("first", 1, true) == 1)
+    test.assert(lines[4]:find("last", 1, true) == 1)
+end
+
+function suite.runsWarmupUntimedAndRecordsEverySample(): nil
+    local calls = 0
+    const stage = harness.newStage("counted")
+    harness.measure(stage, 3, 5, function(): nil
+        calls = calls + 1
+    end)
+    test.equal(calls, 8)
+    test.equal(assert(harness.report(stage)).samples, 5)
+end
+
+function suite.runsPrepareOutsideEveryTimedWindow(): nil
+    local prepared = 0
+    const stage = harness.newStage("prepared")
+    harness.measure(stage, 2, 4, function(): nil end, function(): nil
+        prepared = prepared + 1
+    end)
+    test.equal(prepared, 6)
+end
+
+function suite.rejectsANonPositiveSampleCount(): nil
+    test.raises(function(): nil
+        harness.measure(harness.newStage("none"), 0, 0, function(): nil end)
+    end, "samples must be positive")
+end
+
+function suite.readsFixtureSizesFromTheEnvironment(): nil
+    -- The variables are unset in a test process, so each falls back. The
+    -- rejection paths below are what a mistyped benchmark invocation hits.
+    test.equal(harness.count("BENCH_HARNESS_ABSENT", 7), 7)
+    test.equal(harness.optionalCount("BENCH_HARNESS_ABSENT", 0), 0)
+    test.equal(harness.amount("BENCH_HARNESS_ABSENT", 1.5), 1.5)
+    test.equal(harness.text("BENCH_HARNESS_ABSENT", "frame"), "frame")
+end
+
+return suite

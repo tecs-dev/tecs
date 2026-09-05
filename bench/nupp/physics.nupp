@@ -1,0 +1,212 @@
+--- Steady-state physics load through the batched Rust contract.
+---
+--- The scene is `bench/physics.tl`'s: a closed 1280x720 box with four static
+--- walls, dynamic bodies dropped in waves onto a 96-column grid, and four jets
+--- that keep the pile churning so the solver never settles into a cheap state.
+--- Closed rather than open-topped, because the jets would otherwise eject
+--- bodies and drain the load. Every third body is round. The wave schedule is
+--- counted in frames rather than seconds, so both sides of a comparison see the
+--- same scene.
+---
+--- This measures the fixed step and nothing else, which is what M5's gate needs
+--- and what the Teal benchmark cannot isolate. `bench/physics.tl` runs a window
+--- and reports a `frame` row that includes extraction, acquire, record and
+--- submit; the rows to read it against are its `simulate`, `physics.step` and
+--- `physics.sync` rows, which are the same work this one times. Nothing here
+--- renders, so no extraction or upload cost is included on either side of that
+--- comparison.
+---
+--- `dt` is the world's fixed timestep exactly, so each frame runs exactly one
+--- fixed step and the cost per frame does not depend on how fast the frames
+--- arrive. The Teal benchmark pins `dt` through `time.provider` for the same
+--- reason.
+---
+--- The blowers apply their impulse through the entity-addressed
+--- `physics.applyImpulse`. Teal reaches the row-level `physics.applyImpulseTo`
+--- to skip a `world:get` per body, and the Nupp API has no such entry point, so
+--- this pays the lookup the public API charges. That is the API boundary a
+--- game actually calls, which is what the plan asks to be measured.
+---
+---   BENCH_BODIES        Dynamic bodies in total. Defaults to 4000.
+---   BENCH_WAVES         Waves the bodies arrive in. Defaults to 8.
+---   BENCH_WAVE_FRAMES   Frames between waves. Defaults to 45.
+---   BENCH_BLOWER        Jet force. Defaults to 900.
+---   BENCH_BLOWER_RADIUS Jet radius in pixels. Defaults to 220.
+---   BENCH_SIZE          Body half-extent in pixels. Defaults to 3.
+---   BENCH_WORKERS       Solver worker threads. Defaults to 0.
+---   BENCH_WARMUP        Untimed frames. Defaults to waves * waveFrames + 240.
+---   BENCH_FRAMES        Timed frames. Defaults to 900.
+
+local ecs = require("tecs.ecs")
+
+local harness = require("tecsbench.harness")
+local physics = require("tecs.physics")
+local time = require("nupp.time")
+
+const BODIES = harness.count("BENCH_BODIES", 4000)
+const WAVES = harness.count("BENCH_WAVES", 8)
+const WAVE_FRAMES = harness.count("BENCH_WAVE_FRAMES", 45)
+const BLOWER_FORCE = harness.amount("BENCH_BLOWER", 900.0)
+const BLOWER_RADIUS = harness.amount("BENCH_BLOWER_RADIUS", 220.0)
+const SIZE = harness.amount("BENCH_SIZE", 3.0)
+const WORKERS = harness.optionalCount("BENCH_WORKERS", 0)
+const WARMUP = harness.optionalCount("BENCH_WARMUP", WAVES * WAVE_FRAMES + 240)
+const FRAMES = harness.count("BENCH_FRAMES", 900)
+
+const WIDTH = 1280.0
+const HEIGHT = 720.0
+const WALL = 20.0
+const COLUMNS = 96
+const RADIUS_SQUARED = BLOWER_RADIUS * BLOWER_RADIUS
+
+const world = ecs.newWorld({maxEntities = BODIES + 1024})
+physics.install(world, {gravity = {0.0, 900.0}, workerCount = WORKERS})
+
+--- One jet's position and normalized direction.
+local record Jet
+    x: number
+    y: number
+    dx: number
+    dy: number
+end
+
+--- Normalizes a jet's direction so the force is a magnitude rather than a
+--- product of its components.
+local function jet(x: number, y: number, dx: number, dy: number): Jet
+    const length = math.sqrt(dx * dx + dy * dy)
+
+    return new Jet(x = x, y = y, dx = dx / length, dy = dy / length)
+end
+
+const JETS: {
+    Jet
+} = {
+    jet(WIDTH * 0.18, HEIGHT * 0.20, 1.0, 0.30),
+    jet(WIDTH * 0.82, HEIGHT * 0.20, -0.30, 1.0),
+    jet(WIDTH * 0.82, HEIGHT * 0.78, -1.0, -0.30),
+    jet(WIDTH * 0.18, HEIGHT * 0.78, 0.30, -1.0),
+}
+
+--- Builds the four static walls that close the box.
+local function buildContainer(exclusive value: ecs.World): nil
+    const halfWidth = WIDTH * 0.5 - WALL
+    const halfHeight = HEIGHT * 0.5 - WALL
+    const walls: {
+        {number}
+    } = {
+        {WIDTH * 0.5, HEIGHT - WALL, halfWidth, WALL},
+        {WIDTH * 0.5, WALL, halfWidth, WALL},
+        {WALL, HEIGHT * 0.5, WALL, halfHeight},
+        {WIDTH - WALL, HEIGHT * 0.5, WALL, halfHeight},
+    }
+    for index = 1, #walls do
+        const wall = walls[index]
+        const entity = value:spawn(ecs.Transform2D(wall[1], wall[2]))
+        physics.attach(value, entity, {kind = "static", halfWidth = wall[3], halfHeight = wall[4]})
+    end
+end
+
+--- Drops one wave of bodies onto the interior grid.
+local function dropWave(exclusive value: ecs.World, count: integer): integer
+    const minX = WALL * 2.0
+    const maxX = WIDTH - WALL * 2.0
+    const minY = WALL * 2.0
+    const spacing = (maxX - minX) / COLUMNS
+    local spawned: integer = 0
+    for index = 1, count do
+        const column = index % COLUMNS
+        const row = index // COLUMNS
+        const x = minX + column * spacing + math.random() * spacing
+        const y = minY + row * SIZE * 2.5 + math.random() * SIZE
+        const entity = value:spawn(ecs.Transform2D(x, y))
+        -- Every third body is round, matching the Teal scene's mix.
+        if index % 3 == 0 then
+            physics.attach(value, entity, {radius = SIZE, density = 1.0, friction = 0.3, restitution = 0.1,})
+        else
+            physics.attach(value, entity, {
+                halfWidth = SIZE,
+                halfHeight = SIZE,
+                density = 1.0,
+                friction = 0.3,
+                restitution = 0.1,
+            })
+        end
+        spawned = spawned + 1
+    end
+
+    return spawned
+end
+
+math.randomseed(42)
+buildContainer(world)
+
+const bodies = world:newQuery({include = {ecs.Transform2D, physics.RigidBody}})
+const perWave = BODIES // WAVES
+local spawned: integer = 0
+
+world:addSystem({
+    name = "bench.Blowers",
+    phase = ecs.phases.FixedUpdate,
+    run = function(_dt: number): nil
+        -- One sixtieth of a second of force, as the Teal scene applies it.
+        const strength = BLOWER_FORCE / 60.0
+        for candidate, count in bodies:iter() do
+            const archetype = assert(candidate)
+            -- `get`, not `getMut`: the blower reads positions and never writes
+            -- a transform, and taking the mutable column would mark it dirty
+            -- for every consumer downstream.
+            const transforms: {ecs.Transform2D} = assert(archetype:get(ecs.Transform2D))
+            const entities = archetype.entities
+            for row = 1, count as integer do
+                const transform = transforms[row]
+                for index = 1, #JETS do
+                    const source = JETS[index]
+                    const dx = transform.x - source.x
+                    const dy = transform.y - source.y
+                    const distance = dx * dx + dy * dy
+                    if distance < RADIUS_SQUARED then
+                        const falloff = 1.0 - distance / RADIUS_SQUARED
+                        physics.applyImpulse(
+                            world,
+                            entities[row],
+                            source.dx * strength * falloff,
+                            source.dy * strength * falloff
+                        )
+                    end
+                end
+            end
+        end
+    end,
+})
+
+const timestep = select(1, world:getFixedTiming())
+const update = harness.newStage("update")
+const setupStarted = time.now()
+for frame = 0, WARMUP + FRAMES - 1 do
+    if frame % WAVE_FRAMES == 0 and spawned < BODIES then
+        local remaining: integer = BODIES - spawned
+        if perWave < remaining then
+            remaining = perWave
+        end
+        spawned = spawned + dropWave(world, remaining)
+    end
+    const started = time.now()
+    world:update(timestep)
+    if frame >= WARMUP then
+        harness.mark(update, time.now() - started)
+    end
+end
+const totalMilliseconds = time.now() - setupStarted
+
+print(
+    (
+        "physics: %d bodies in %d waves, %d frames apart, measuring %d after %d warmup"
+    ):format(BODIES, WAVES, WAVE_FRAMES, FRAMES, WARMUP)
+)
+print(
+    (
+        "%d bodies spawned, %d workers, one %.4f s fixed step per frame, %.0f ms wall total"
+    ):format(spawned, WORKERS, timestep, totalMilliseconds)
+)
+print(harness.format({update}))
+world:shutdown()
