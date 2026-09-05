@@ -14,8 +14,17 @@ fn main() {
     );
     println!("cargo:rustc-link-search=native={}", sdk.display());
     println!("cargo:rustc-link-lib=static=nupp");
+    // The static library carries a reference to the embedding library beside
+    // it, so a binary that links cleanly still aborts at startup unless the
+    // loader can find that. Recording the SDK as a run path is what makes
+    // `cargo run` and `cargo test` work in a checkout that exports nothing.
+    // This host is a development executable; whoever packages one relinks it
+    // against a staged prefix rather than against a build cache.
+    if !target_os().contains("windows") {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", sdk.display());
+    }
 
-    let target = env::var("TARGET").expect("Cargo sets TARGET");
+    let target = target_os();
     if !target.contains("windows") {
         println!("cargo:rustc-link-lib=m");
         println!("cargo:rustc-link-lib=pthread");
@@ -23,6 +32,11 @@ fn main() {
     if !target.contains("windows") && !target.contains("apple") {
         println!("cargo:rustc-link-lib=dl");
     }
+}
+
+/// The target triple Cargo is building for.
+fn target_os() -> String {
+    env::var("TARGET").expect("Cargo sets TARGET")
 }
 
 /// The Nupp host features a Tecs component needs at load time.

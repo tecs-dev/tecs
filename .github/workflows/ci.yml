@@ -146,20 +146,15 @@ jobs:
               run: cargo fmt -p tecs-winit-host -- --check
             - working-directory: tecs
               run: cargo clippy -p tecs-winit-host --all-targets -- -D warnings
-            # The host binary carries an `@rpath` reference to the embedding
-            # library, so a test binary that linked cleanly still aborts at
-            # startup unless the SDK is on the loader path.
+            # No loader path is exported here. The build script records the
+            # SDK as a run path, because the static library references the
+            # embedding library beside it and a binary that linked cleanly
+            # otherwise aborts at startup.
             - working-directory: tecs
-              env:
-                  DYLD_LIBRARY_PATH: ${{ env.NUPP_SDK }}
               run: cargo test -p tecs-winit-host
             - working-directory: tecs
-              env:
-                  DYLD_LIBRARY_PATH: ${{ env.NUPP_SDK }}
               run: cargo run -p tecs-winit-host -- --headless --frames 1
             - working-directory: tecs
-              env:
-                  DYLD_LIBRARY_PATH: ${{ env.NUPP_SDK }}
               run: cargo run -p tecs-winit-host -- --component out/nupp/flatcolor.nuppc --entry flatcolor.create --headless --frames 2
 
     docs:

@@ -301,31 +301,13 @@ fn default_entry(target: &str) -> String {
 
 /// Puts the Nupp SDK on a Cargo child's environment.
 ///
-/// `NUPP_SDK` is what `native/rust/winit-host/build.rs` links against. The
-/// loader path matters separately and for a different reason: the host binary
-/// carries an `@rpath` reference to `libnupp.dylib`, so a run or a test that
-/// links fine still aborts at startup without it. Setting both here is what
-/// makes `cargo xtask nupp run` work in a checkout where neither is exported.
+/// `NUPP_SDK` is what `native/rust/winit-host/build.rs` links against, and
+/// setting it here skips the staging call that build script would otherwise
+/// make. Nothing is added to the loader path: that build script records the SDK
+/// as a run path, so a host binary finds the embedding library on its own.
 pub fn apply_sdk(command: &mut Command, root: &Path) {
-    let Some(sdk) = sdk(root) else {
-        return;
-    };
-    command.env("NUPP_SDK", &sdk);
-    let variable = if cfg!(target_os = "macos") {
-        "DYLD_LIBRARY_PATH"
-    } else {
-        "LD_LIBRARY_PATH"
-    };
-    match std::env::var_os(variable) {
-        Some(existing) => {
-            let mut value = sdk.clone().into_os_string();
-            value.push(if cfg!(windows) { ";" } else { ":" });
-            value.push(existing);
-            command.env(variable, value);
-        }
-        None => {
-            command.env(variable, &sdk);
-        }
+    if let Some(sdk) = sdk(root) {
+        command.env("NUPP_SDK", sdk);
     }
 }
 
