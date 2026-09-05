@@ -409,6 +409,45 @@ Use `cargo xtask presets` to list available targets. Packaged presets build
 pinned dependencies for distributable releases; development presets use the
 system libraries.
 
+### Packaging the Nupp path
+
+`cargo xtask nupp package`, `check-package` and `test-package` are the release
+half of the Nupp rewrite, and `cargo xtask nupp presets` lists its matrix:
+macOS arm64, Linux x64 and Windows x64, each with a development preset and a
+release preset. They write `out/nupp-package` rather than `out/package`,
+because the two implementations are still parallel and neither install may
+overwrite the other.
+
+A release records its loader-relative run path when it links, rather than being
+relocated after. The alternative was to link against the staged Nupp SDK as a
+checkout does and then rewrite the result, and it lost on its tools:
+`install_name_tool` ships with the Xcode command-line tools that a macOS build
+already needs, but the Linux equivalent is `patchelf`, which is a dependency
+this tree does not otherwise have and would have to install on every builder.
+Passing the packager's run path to the host's build script costs one
+environment variable and no tool at all.
+
+One post-link edit survives on macOS, and only there. Cargo gives a `cdylib`
+the absolute path it wrote it to as its install name, so a copied service
+library still names the Cargo target directory it came from. The obvious fix,
+a per-crate `-install_name` link argument, loses because Cargo applies
+`RUSTFLAGS` to a whole invocation: three different install names would mean
+three builds that each invalidate the last one's cache. Rewriting three
+finished files is cheaper than rebuilding the graph three times.
+
+Release licensing is generated rather than curated. The Nupp host's resolved
+graph is around 150 Cargo packages against the Teal path's much smaller one,
+and roughly half are named nowhere in `THIRD_PARTY_NOTICES.md`. Instead of
+hand-writing entries for them, a package installs `cargo-licenses.txt` beside
+`cargo-dependencies.txt`, carrying the SPDX expression Cargo metadata records
+for every package in the inventory, and `check-package` refuses an install
+where an entry has no answer. Curated prose says why a dependency is there;
+this says what it is licensed under, which is the part that must be complete.
+
+Packaging is native only. The Nupp toolchain stages an embedding library for
+the machine it runs on, so there is nothing to cross-link a Windows release
+against on a Mac, and each platform builds its own.
+
 ## Documentation
 
 The API reference and guides live in [`docs/`](docs/). Serve them locally with

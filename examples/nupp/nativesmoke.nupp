@@ -1,0 +1,69 @@
+module nativesmoke
+
+--[[
+The component an installed release runs to prove its native services resolve.
+
+`tecs.input`, `tecs.audio` and `tecs.physics` all reach their Rust service
+through a guarded `require`, so a package that ships no library degrades to a
+silent fallback rather than failing. That is right for a game and wrong for a
+release test, which is why this component requires the three binding modules
+directly and raises when one cannot be loaded.
+
+Loading a binding module is all this does. Each one calls
+`tecs.internal.nativelibrary.open` at its top, so the search that has to find
+`lib/` beside the installed executable runs before any device is touched, and
+nothing here opens a speaker, a controller or a physics world.
+
+```sh
+tecs-host --component nativesmoke.nuppc --entry nativesmoke.create \
+    --headless --frames 1
+```
+]]
+
+local application = require("tecs.application")
+local host = require("tecs.host")
+
+--- The binding modules a release has to be able to load, with the library each
+--- one names.
+---
+--- The library stems are the compatibility surface `nativelibrary.open` is
+--- called with, and they are spelled here only so a failure names the file a
+--- packager has to go and find.
+const SERVICES: {
+    {string}
+} = {
+    {"tecs.platform.audionative", "tecsaudio"},
+    {"tecs.platform.gamepadnative", "tecsgamepad"},
+    {"tecs.physics.rapier", "tecs_physics"},
+}
+
+--- Loads every native binding module and raises on the first that fails.
+--- @raises when a binding module cannot be loaded, naming its library
+local function install(exclusive _app: application.Application): nil
+    for index = 1, #SERVICES do
+        const entry = SERVICES[index]
+        const loaded, failure = pcall(require, entry[1])
+        if not loaded then
+            error(("nativesmoke: %s did not load %s: %s"):format(entry[1], entry[2], tostring(failure)))
+        end
+        print(("nativesmoke: %s loaded %s"):format(entry[1], entry[2]))
+    end
+    print("nativesmoke: every native service resolved")
+end
+
+--- Creates the smoke session through its statically linked plugin.
+--- @param title the desktop title
+--- @param width the initial logical width
+--- @param height the initial logical height
+--- @param debug whether guarded application failures may be cleared
+--- @param maxFrames an optional positive frame limit
+--- @return the session retained by the Rust host
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): host.Session
+    return host.createWithPlugin(install, title or "Tecs native smoke", width, height, debug, maxFrames)
+end

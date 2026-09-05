@@ -59,7 +59,8 @@ const WINDOWS_SYSTEM_LIBRARIES: &[&str] = &[
     "winmm.dll",
     "ws2_32.dll",
 ];
-const COMPILER_LIBRARY_NAMES: &[&str] = &["shaderc", "spirvcross", "spirv-cross", "dxcompiler"];
+pub(crate) const COMPILER_LIBRARY_NAMES: &[&str] =
+    &["shaderc", "spirvcross", "spirv-cross", "dxcompiler"];
 const COMPILER_CARGO_PACKAGES: &[&str] = &[
     "shaderc",
     "shaderc-sys",
@@ -120,7 +121,7 @@ pub struct Options<'a> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Platform {
+pub(crate) enum Platform {
     Linux,
     Macos,
     Windows,
@@ -363,7 +364,7 @@ pub fn check(options: &Options<'_>) -> Result<()> {
     Ok(())
 }
 
-fn binaries(prefix: &Path) -> Result<Vec<PathBuf>> {
+pub(crate) fn binaries(prefix: &Path) -> Result<Vec<PathBuf>> {
     let mut binaries: Vec<_> = WalkDir::new(prefix)
         .into_iter()
         .collect::<Result<Vec<_>, _>>()?
@@ -384,7 +385,7 @@ fn binaries(prefix: &Path) -> Result<Vec<PathBuf>> {
     Ok(binaries)
 }
 
-fn is_shared_library(path: &Path) -> bool {
+pub(crate) fn is_shared_library(path: &Path) -> bool {
     let name = path
         .file_name()
         .and_then(OsStr::to_str)
@@ -501,7 +502,7 @@ fn check_licenses(
     Ok(())
 }
 
-fn references(binary: &Path, platform: Platform) -> Result<(Vec<String>, Vec<String>)> {
+pub(crate) fn references(binary: &Path, platform: Platform) -> Result<(Vec<String>, Vec<String>)> {
     match platform {
         Platform::Macos => macho_references(binary),
         Platform::Windows => pe_references(binary),
@@ -576,7 +577,7 @@ fn checked_output(command: &mut Command, description: &str) -> Result<Output> {
     }
 }
 
-fn platform_from_build_info(build_info: &str) -> Result<Platform> {
+pub(crate) fn platform_from_build_info(build_info: &str) -> Result<Platform> {
     let system = build_info
         .lines()
         .find_map(|line| line.strip_prefix("system="))
@@ -589,13 +590,13 @@ fn platform_from_build_info(build_info: &str) -> Result<Platform> {
     }
 }
 
-fn display_name(path: &Path) -> &str {
+pub(crate) fn display_name(path: &Path) -> &str {
     path.file_name()
         .and_then(OsStr::to_str)
         .unwrap_or("<binary>")
 }
 
-fn is_system_library(platform: Platform, library: &str) -> bool {
+pub(crate) fn is_system_library(platform: Platform, library: &str) -> bool {
     match platform {
         Platform::Macos => MACOS_SYSTEM_PREFIXES
             .iter()
@@ -610,11 +611,11 @@ fn is_system_library(platform: Platform, library: &str) -> bool {
     }
 }
 
-fn contained_search_path(prefix: &Path, binary: &Path, rpath: &str) -> bool {
+pub(crate) fn contained_search_path(prefix: &Path, binary: &Path, rpath: &str) -> bool {
     resolved_search_path(prefix, binary, rpath).is_some()
 }
 
-fn resolved_search_path(prefix: &Path, binary: &Path, rpath: &str) -> Option<PathBuf> {
+pub(crate) fn resolved_search_path(prefix: &Path, binary: &Path, rpath: &str) -> Option<PathBuf> {
     let (base, relative) = if let Some(relative) = rpath.strip_prefix("$ORIGIN") {
         (binary.parent().unwrap_or(prefix).to_path_buf(), relative)
     } else if let Some(relative) = rpath.strip_prefix("@loader_path") {
@@ -626,7 +627,7 @@ fn resolved_search_path(prefix: &Path, binary: &Path, rpath: &str) -> Option<Pat
     lexical_path_within(prefix, &base, relative)
 }
 
-fn dependency_is_reachable(
+pub(crate) fn dependency_is_reachable(
     prefix: &Path,
     binary: &Path,
     rpaths: &[String],
