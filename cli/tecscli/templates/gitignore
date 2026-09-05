@@ -1,7 +1,0 @@
-# Compiled Lua, staged assets and the build manifest.
-build/
-
-# What a packaged game is assembled into.
-dist/
-
-.DS_Store
