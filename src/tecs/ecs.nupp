@@ -133,6 +133,17 @@ export const OnSpawn = events.OnSpawn
 --- Fires at the entity address and address zero immediately before removal.
 export const OnDespawn = events.OnDespawn
 
+--- Stores a durable unique name for one entity.
+---
+--- A key names at most one live entity, and `World.byKey` answers with the
+--- entity holding it. Claiming a key another live entity already holds raises,
+--- since nothing later could resolve which of the two a lookup means.
+---
+--- The component is registered under the name `Key`, which is what a snapshot
+--- records. That spelling is a compatibility surface and does not follow this
+--- public name.
+export const EntityKey = components.Key
+
 --- Marks entities paused by a state policy.
 export const Paused = components.Paused
 

@@ -384,6 +384,18 @@ export function relationships(): {RelationshipComponent}
     return registeredRelationships
 end
 
+--- Stores a durable unique name for one entity.
+---
+--- Compatibility surface: the component is named `Key` rather than
+--- `EntityKey`, which is the name the public module publishes it under. A
+--- snapshot records the component name, so the stored spelling is `Key` and
+--- must stay that way however the public name reads.
+---
+--- At most one live entity may carry a given key. The world maintains a
+--- key-to-entity index and rejects a second claim, which is what makes
+--- `World.byKey` a lookup rather than a search.
+export const Key: ScalarComponent<string> = newScalarComponent({name = "Key", kind = "string"})
+
 --- Marks an entity whose state is paused.
 export const Paused: TagComponent = newTagComponent({name = "Paused"})
 

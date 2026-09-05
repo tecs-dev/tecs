@@ -1,0 +1,101 @@
+local test = require("nupp.test")
+local ecs = require("tecs.ecs")
+local suite = {}
+
+function suite.findsALiveEntityByItsDurableKey(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    local player = world:spawn(ecs.EntityKey("player"))
+    world:commit()
+    test.equal(world:byKey("player") as integer, player)
+    test.equal(world:requireKey("player"), player)
+end
+
+function suite.reportsNoEntityForAnUnclaimedKey(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    world:spawn(ecs.EntityKey("player"))
+    world:commit()
+    test.assert(world:byKey("boss") == nil)
+end
+
+function suite.raisesWhenARequiredKeyHasNoEntity(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    local ok = pcall(function(): nil
+        world:requireKey("absent")
+    end)
+    test.assert(not ok)
+end
+
+function suite.refusesAKeyASecondLiveEntityClaims(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    world:spawn(ecs.EntityKey("player"))
+    world:commit()
+    world:spawn(ecs.EntityKey("player"))
+    local ok = pcall(function(): nil
+        world:commit()
+    end)
+    test.assert(not ok)
+end
+
+function suite.refusesAnEmptyKey(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    world:spawn(ecs.EntityKey(""))
+    local ok = pcall(function(): nil
+        world:commit()
+    end)
+    test.assert(not ok)
+end
+
+function suite.releasesAKeyWhenItsEntityDespawns(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    local player = world:spawn(ecs.EntityKey("player"))
+    world:commit()
+    world:despawn(player)
+    world:commit()
+    test.assert(world:byKey("player") == nil)
+    local reclaimed = world:spawn(ecs.EntityKey("player"))
+    world:commit()
+    test.equal(world:byKey("player") as integer, reclaimed)
+end
+
+function suite.movesTheIndexWhenAnEntityChangesItsKey(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    local player = world:spawn(ecs.EntityKey("player"))
+    world:commit()
+    world:set(player, ecs.EntityKey("hero"))
+    world:commit()
+    test.assert(world:byKey("player") == nil)
+    test.equal(world:byKey("hero") as integer, player)
+end
+
+function suite.releasesAKeyWhenTheComponentIsRemoved(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    local player = world:spawn(ecs.EntityKey("player"))
+    world:commit()
+    world:remove(player, ecs.EntityKey)
+    world:commit()
+    test.assert(world:byKey("player") == nil)
+end
+
+function suite.dropsEveryKeyWhenEntitiesAreCleared(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    world:spawn(ecs.EntityKey("player"))
+    world:commit()
+    world:clearEntities()
+    test.assert(world:byKey("player") == nil)
+end
+
+function suite.rebuildsTheIndexAcrossASnapshotRoundTrip(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    local player = world:spawn(ecs.EntityKey("player"))
+    world:commit()
+    local snapshot = world:saveSnapshot()
+    local restored = ecs.newWorld({maxEntities = 8})
+    restored:loadSnapshot(snapshot)
+    test.equal(restored:byKey("player") as integer, player)
+end
+
+function suite.storesTheKeyComponentUnderItsCompatibilityName(): nil
+    test.equal(ecs.EntityKey.componentName, "Key")
+end
+
+return suite

@@ -213,6 +213,7 @@ export record World
     private pendingDespawnBySlot: {[integer]: boolean}
     private queries: {query.Query}
     private relationshipIndexes: {[integer]: inverseindex.InverseIndex}
+    private keyIndex: {[string]: integer}
     private systems: {RegisteredSystem}
     private systemNames: {[string]: RegisteredSystem}
     private anonymousSystemCount: integer
@@ -246,6 +247,8 @@ export record World
     spawnAt: function(exclusive self: World, id: integer, ...: components.Input): nil
     isAlive: function(borrows self: World, id: integer): boolean
     has: function(borrows self: World, id: integer, component: components.Component): boolean
+    byKey: function(borrows self: World, key: string): integer?
+    requireKey: function(borrows self: World, key: string): integer
     get: function<C is components.Component>(borrows self: World, id: integer, component: C): C.Value?
     getMut: function<C is components.Component>(exclusive self: World, id: integer, component: C): C.Value?
     markComponentDirty: function(exclusive self: World, id: integer, component: components.Component): nil
@@ -341,6 +344,7 @@ export function new(
         pendingDespawnBySlot = {},
         queries = {},
         relationshipIndexes = {},
+        keyIndex = {},
         systems = {},
         systemNames = {},
         anonymousSystemCount = 0,
@@ -877,6 +881,37 @@ local function relationshipIndex(
     return index
 end
 
+--- Claims a durable key for one entity.
+---
+--- A key names at most one live entity, so a claim on a key another entity
+--- already holds is a programmer error rather than a silent reassignment: the
+--- two entities disagree about which one `byKey` should answer with, and
+--- nothing later can resolve that.
+--- @param world the world holding the index
+--- @param entity the entity claiming the key
+--- @param key the durable key
+--- @raises when the key is empty or another live entity holds it
+local function claimKey(exclusive world: World, entity: integer, key: string): nil
+    if key == "" then
+        error("world: an entity key must not be empty", 3)
+    end
+    local current = world.keyIndex[key]
+    if current ~= nil and current ~= entity then
+        error("world: key '" .. key .. "' is already claimed by entity " .. tostring(current), 3)
+    end
+    world.keyIndex[key] = entity
+end
+
+--- Releases a key an entity holds, if it still holds it.
+--- @param world the world holding the index
+--- @param entity the entity releasing the key
+--- @param key the durable key
+local function releaseKey(exclusive world: World, entity: integer, key: string): nil
+    if world.keyIndex[key] == entity then
+        world.keyIndex[key] = nil
+    end
+end
+
 local function linkOutgoing(exclusive world: World, source: archetype.Archetype, row: integer, entity: integer): nil
     for index = 1, #source.components do
         local relationship = components.asRelationship(source.components[index])
@@ -886,6 +921,10 @@ local function linkOutgoing(exclusive world: World, source: archetype.Archetype,
                 relationshipIndex(world, relationship):link(entity, value.target)
             end
         end
+    end
+    local key = archetype.valueAt(source, row, components.Key)
+    if key ~= nil then
+        claimKey(world, entity, key as string)
     end
 end
 
@@ -898,6 +937,10 @@ local function unlinkOutgoing(exclusive world: World, source: archetype.Archetyp
                 relationshipIndex(world, relationship):unlink(entity, value.target)
             end
         end
+    end
+    local key = archetype.valueAt(source, row, components.Key)
+    if key ~= nil then
+        releaseKey(world, entity, key as string)
     end
 end
 
@@ -929,6 +972,14 @@ local function publishMove(exclusive world: World, pending: PendingMove): nil
                     local inverse = relationshipIndex(world, relationship)
                     inverse:unlink(id, previous.target)
                     inverse:link(id, replacement.target)
+                end
+            end
+            if componentId == components.Key.componentId then
+                local previous = stored[row + 1] as string
+                local replacement = raw as string
+                if previous ~= replacement then
+                    claimKey(world, id, replacement)
+                    releaseKey(world, id, previous)
                 end
             end
             stored[row + 1] = raw
@@ -1062,6 +1113,7 @@ function World.clearEntities(exclusive self: World): nil
     self.pendingDespawns = {}
     self.pendingDespawnBySlot = {}
     self.relationshipIndexes = {}
+    self.keyIndex = {}
     local worldObservers = self.observers[0]
     self.observers = {}
     self.observerCount = 0
@@ -1072,6 +1124,31 @@ function World.clearEntities(exclusive self: World): nil
         end
     end
     self.liveCount = 0
+end
+
+--- Returns the live entity carrying one durable key.
+--- @param self the world to search
+--- @param key the durable key
+--- @return the entity, or nil when no live entity carries the key
+function World.byKey(borrows self: World, key: string): integer?
+    return self.keyIndex[key]
+end
+
+--- Returns the live entity carrying one durable key, or raises.
+---
+--- Use this where a missing key means the caller built the world wrong, and
+--- `byKey` where its absence is an ordinary answer.
+--- @param self the world to search
+--- @param key the durable key
+--- @return the entity carrying the key
+--- @raises when no live entity carries the key
+function World.requireKey(borrows self: World, key: string): integer
+    local id = self.keyIndex[key]
+    if id == nil then
+        error("world: no entity with key '" .. key .. "'", 2)
+    end
+
+    return id
 end
 
 local function stateEntities(borrows world: World, component: components.Component): {integer}
