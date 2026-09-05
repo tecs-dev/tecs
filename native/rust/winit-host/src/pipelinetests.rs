@@ -13,8 +13,9 @@ use std::borrow::Cow;
 use std::path::Path;
 
 use wgpu::{
-    DeviceDescriptor, ErrorFilter, Instance, InstanceDescriptor, ShaderModuleDescriptor,
-    ShaderSource, TextureFormat,
+    BindGroupDescriptor, BindGroupEntry, BufferDescriptor, BufferUsages, ComputePipelineDescriptor,
+    DeviceDescriptor, ErrorFilter, Instance, InstanceDescriptor, PipelineCompilationOptions,
+    PipelineLayoutDescriptor, ShaderModuleDescriptor, ShaderSource, TextureFormat,
 };
 
 use crate::graph::{
@@ -23,6 +24,9 @@ use crate::graph::{
 };
 use crate::graphics::{build_passes, cast_source, instance_source, Body, Gate, Layouts};
 use crate::shaderpack::ShaderPack;
+
+const CULL_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/cull.wgsl");
+const LIGHTBIN_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/lightbin.wgsl");
 
 fn engine_pack() -> ShaderPack {
     let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -210,4 +214,132 @@ fn rebuilds_pipelines_for_a_different_swapchain_format() {
         let error = pollster::block_on(scope.pop());
         assert!(error.is_none(), "{format:?}: {error:?}");
     }
+}
+
+#[test]
+fn builds_the_compute_pipelines_against_the_layouts_a_frame_binds() {
+    let Some((device, _queue)) = open() else {
+        eprintln!("no wgpu adapter; skipping the pipeline tests");
+        return;
+    };
+    // The cull and the binning are the two places a shader's bindings and the
+    // frame's own layout can drift apart without a test noticing: nothing else
+    // builds these pipelines against `Layouts`, and a mismatch is a device that
+    // refuses the pipeline on the first frame of a game rather than here.
+    let scope = device.push_error_scope(ErrorFilter::Validation);
+    let layouts = Layouts::new(&device);
+
+    let cull = device.create_shader_module(ShaderModuleDescriptor {
+        label: Some("tecs cull"),
+        source: ShaderSource::Wgsl(Cow::Borrowed(CULL_WGSL)),
+    });
+    let cull_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("tecs cull pipeline layout"),
+        bind_group_layouts: &[Some(&layouts.cull)],
+        immediate_size: 0,
+    });
+    for entry in [
+        "markMain",
+        "scanMain",
+        "compactMain",
+        "argsMain",
+        "castMain",
+    ] {
+        let _ = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some(entry),
+            layout: Some(&cull_layout),
+            module: &cull,
+            entry_point: Some(entry),
+            compilation_options: PipelineCompilationOptions::default(),
+            cache: None,
+        });
+    }
+
+    let bin = device.create_shader_module(ShaderModuleDescriptor {
+        label: Some("tecs light bin"),
+        source: ShaderSource::Wgsl(Cow::Borrowed(LIGHTBIN_WGSL)),
+    });
+    let bin_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("tecs light bin pipeline layout"),
+        bind_group_layouts: &[Some(&layouts.bin)],
+        immediate_size: 0,
+    });
+    let _ = device.create_compute_pipeline(&ComputePipelineDescriptor {
+        label: Some("binMain"),
+        layout: Some(&bin_layout),
+        module: &bin,
+        entry_point: Some("binMain"),
+        compilation_options: PipelineCompilationOptions::default(),
+        cache: None,
+    });
+
+    // And the groups themselves, which is the other half: a layout that builds a
+    // pipeline can still hold a count or a kind the frame cannot fill.
+    let storage = |size: u64| {
+        device.create_buffer(&BufferDescriptor {
+            label: None,
+            size,
+            usage: BufferUsages::STORAGE | BufferUsages::INDIRECT,
+            mapped_at_creation: false,
+        })
+    };
+    let uniform = |size: u64| {
+        device.create_buffer(&BufferDescriptor {
+            label: None,
+            size,
+            usage: BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        })
+    };
+    let buffers: Vec<wgpu::Buffer> = (0..7).map(|_| storage(1024)).collect();
+    let cull_uniform = uniform(64);
+    let lights = storage(1024);
+    let mut entries: Vec<BindGroupEntry> = buffers
+        .iter()
+        .enumerate()
+        .map(|(binding, buffer)| BindGroupEntry {
+            binding: binding as u32,
+            resource: buffer.as_entire_binding(),
+        })
+        .collect();
+    entries.push(BindGroupEntry {
+        binding: 7,
+        resource: cull_uniform.as_entire_binding(),
+    });
+    entries.push(BindGroupEntry {
+        binding: 8,
+        resource: lights.as_entire_binding(),
+    });
+    let _ = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("tecs cull bind group"),
+        layout: &layouts.cull,
+        entries: &entries,
+    });
+
+    let bin_uniform = uniform(32);
+    let _ = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("tecs light bin bind group"),
+        layout: &layouts.bin,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: lights.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: buffers[0].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: buffers[1].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 3,
+                resource: bin_uniform.as_entire_binding(),
+            },
+        ],
+    });
+
+    let error = pollster::block_on(scope.pop());
+    assert!(error.is_none(), "{error:?}");
 }
