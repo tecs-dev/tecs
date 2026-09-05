@@ -110,17 +110,43 @@ pub struct Bridge {
     exports: Exports,
 }
 
+/// Everything a managed session needs to exist.
+///
+/// The fields travel together because they are one decision the caller has
+/// already made, and passing them as one borrowed descriptor keeps each call
+/// site reading as the configuration it came from rather than as an ordered
+/// list of eight values whose order nothing checks.
+pub struct SessionOptions<'a> {
+    /// The running host executable, which the Nupp runtime resolves against.
+    pub executable: &'a Path,
+    /// The compiled Nupp component to load.
+    pub component: &'a Path,
+    /// The exported session constructor the game selected.
+    pub entry: &'a str,
+    /// The desktop window title.
+    pub title: &'a str,
+    /// The initial logical width.
+    pub width: u32,
+    /// The initial logical height.
+    pub height: u32,
+    /// Whether a guarded application failure may be cleared.
+    pub debug: bool,
+    /// An optional positive frame limit for a bounded run.
+    pub max_frames: Option<u32>,
+}
+
 impl Bridge {
-    pub fn load(
-        executable: &Path,
-        component_path: &Path,
-        entry_export: &str,
-        title: &str,
-        width: u32,
-        height: u32,
-        debug: bool,
-        max_frames: Option<u32>,
-    ) -> Result<Self> {
+    pub fn load(options: &SessionOptions<'_>) -> Result<Self> {
+        let SessionOptions {
+            executable,
+            component: component_path,
+            entry: entry_export,
+            title,
+            width,
+            height,
+            debug,
+            max_frames,
+        } = *options;
         let mut runtime = HostRuntime::new(executable).context("create the Nupp runtime")?;
         let bytes = std::fs::read(component_path)
             .with_context(|| format!("read Nupp component {}", component_path.display()))?;
@@ -475,7 +501,7 @@ impl Bridge {
         let mut passed = Vec::with_capacity(arguments.len() + 1);
         passed.push(ManagedValue::Handle(self.session));
         passed.extend_from_slice(arguments);
-        self.runtime.call(export, &passed).map_err(Into::into)
+        self.runtime.call(export, &passed)
     }
 }
 

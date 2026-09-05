@@ -634,8 +634,8 @@ fn parse_packet(bytes: &[u8]) -> Result<RenderPacket<'_>> {
     }
 
     let instances = &bytes[PACKET_HEADER_SIZE + batch_bytes..];
-    for chunk in instances.chunks_exact(4) {
-        let value = f32::from_ne_bytes(chunk.try_into().expect("four-byte chunk"));
+    for chunk in instances.as_chunks::<4>().0 {
+        let value = f32::from_ne_bytes(*chunk);
         if !value.is_finite() {
             bail!("render packet contains a non-finite instance value");
         }
@@ -786,7 +786,7 @@ mod tests {
     fn rejects_an_old_version() {
         let mut builder = valid();
         builder.header[1] = 1;
-        let error = parse_packet(&builder.build()).err().expect("rejected");
+        let error = parse_packet(&builder.build()).expect_err("rejected");
         assert!(error.to_string().contains("version 1 is not supported"));
     }
 
@@ -794,7 +794,7 @@ mod tests {
     fn rejects_a_foreign_header_size() {
         let mut builder = valid();
         builder.header[2] = 24;
-        let error = parse_packet(&builder.build()).err().expect("rejected");
+        let error = parse_packet(&builder.build()).expect_err("rejected");
         assert!(error.to_string().contains("header size 24"));
     }
 
@@ -802,7 +802,7 @@ mod tests {
     fn rejects_reserved_flags() {
         let mut builder = valid();
         builder.header[7] = 1;
-        let error = parse_packet(&builder.build()).err().expect("rejected");
+        let error = parse_packet(&builder.build()).expect_err("rejected");
         assert!(error.to_string().contains("reserved flags"));
     }
 
@@ -810,7 +810,7 @@ mod tests {
     fn rejects_a_truncated_batch_table() {
         let mut bytes = valid().build();
         bytes.truncate(bytes.len() - 4);
-        let error = parse_packet(&bytes).err().expect("rejected");
+        let error = parse_packet(&bytes).expect_err("rejected");
         assert!(error.to_string().contains("header declares"));
     }
 
@@ -821,21 +821,21 @@ mod tests {
             .batch(0, 0, 0, 1)
             .batch(1, 0, 2, 1)
             .build();
-        let error = parse_packet(&bytes).err().expect("rejected");
+        let error = parse_packet(&bytes).expect_err("rejected");
         assert!(error.to_string().contains("starts at 2 rather than 1"));
     }
 
     #[test]
     fn rejects_batches_that_do_not_cover_every_instance() {
         let bytes = PacketBuilder::new().instances(3).batch(0, 0, 0, 2).build();
-        let error = parse_packet(&bytes).err().expect("rejected");
+        let error = parse_packet(&bytes).expect_err("rejected");
         assert!(error.to_string().contains("cover 2 of 3 instances"));
     }
 
     #[test]
     fn rejects_an_empty_batch() {
         let bytes = PacketBuilder::new().instances(1).batch(0, 0, 0, 0).build();
-        let error = parse_packet(&bytes).err().expect("rejected");
+        let error = parse_packet(&bytes).expect_err("rejected");
         assert!(error.to_string().contains("draws no instances"));
     }
 
@@ -845,7 +845,7 @@ mod tests {
             .instances(1)
             .batch(0, SAMPLER_COUNT, 0, 1)
             .build();
-        let error = parse_packet(&bytes).err().expect("rejected");
+        let error = parse_packet(&bytes).expect_err("rejected");
         assert!(error.to_string().contains("unknown sampler"));
     }
 
@@ -853,14 +853,14 @@ mod tests {
     fn rejects_a_camera_that_cannot_project() {
         let mut builder = valid();
         builder.camera[2] = 0.0;
-        let error = parse_packet(&builder.build()).err().expect("rejected");
+        let error = parse_packet(&builder.build()).expect_err("rejected");
         assert!(error
             .to_string()
             .contains("zoom 0 is not greater than zero"));
 
         let mut turned = valid();
         turned.camera[3] = f32::NAN;
-        let error = parse_packet(&turned.build()).err().expect("rejected");
+        let error = parse_packet(&turned.build()).expect_err("rejected");
         assert!(error
             .to_string()
             .contains("camera value that is not finite"));
@@ -870,7 +870,7 @@ mod tests {
     fn rejects_a_target_with_no_area() {
         let mut builder = valid();
         builder.target[1] = 0.0;
-        let error = parse_packet(&builder.build()).err().expect("rejected");
+        let error = parse_packet(&builder.build()).expect_err("rejected");
         assert!(error.to_string().contains("invalid render target"));
     }
 
@@ -878,7 +878,7 @@ mod tests {
     fn rejects_non_finite_gpu_values() {
         let mut builder = valid();
         builder.instances[5] = f32::NAN;
-        let error = parse_packet(&builder.build()).err().expect("rejected");
+        let error = parse_packet(&builder.build()).expect_err("rejected");
         assert!(error.to_string().contains("non-finite"));
     }
 }

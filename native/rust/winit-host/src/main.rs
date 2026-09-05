@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
-use bridge::{Bridge, FrameState, ImageCommand, WindowCommand, WindowState};
+use bridge::{Bridge, FrameState, ImageCommand, SessionOptions, WindowCommand, WindowState};
 use graphics::Graphics;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
@@ -51,16 +51,16 @@ struct App {
 impl App {
     fn new(config: Config) -> Result<Self> {
         let executable = std::env::current_exe().context("find the Tecs host executable")?;
-        let mut bridge = Bridge::load(
-            &executable,
-            &config.component,
-            &config.entry,
-            &config.title,
-            config.width,
-            config.height,
-            config.debug,
-            config.max_frames,
-        )?;
+        let mut bridge = Bridge::load(&SessionOptions {
+            executable: &executable,
+            component: &config.component,
+            entry: &config.entry,
+            title: &config.title,
+            width: config.width,
+            height: config.height,
+            debug: config.debug,
+            max_frames: config.max_frames,
+        })?;
         bridge.init().context("initialize the Tecs application")?;
         let now = Instant::now();
         Ok(Self {
@@ -650,23 +650,18 @@ fn run() -> Result<()> {
 
 fn run_headless(config: Config) -> Result<()> {
     let executable = std::env::current_exe().context("find the Tecs host executable")?;
-    let mut bridge = Bridge::load(
-        &executable,
-        &config.component,
-        &config.entry,
-        &config.title,
-        config.width,
-        config.height,
-        config.debug,
-        Some(config.max_frames.unwrap_or(1)),
-    )?;
+    let mut bridge = Bridge::load(&SessionOptions {
+        executable: &executable,
+        component: &config.component,
+        entry: &config.entry,
+        title: &config.title,
+        width: config.width,
+        height: config.height,
+        debug: config.debug,
+        max_frames: Some(config.max_frames.unwrap_or(1)),
+    })?;
     bridge.init().context("initialize the Tecs application")?;
-    loop {
-        match bridge.iterate(0.0)? {
-            FrameState::Parked | FrameState::Continue => {}
-            FrameState::Stopped => break,
-        }
-    }
+    while !matches!(bridge.iterate(0.0)?, FrameState::Stopped) {}
     bridge.shutdown()
 }
 
