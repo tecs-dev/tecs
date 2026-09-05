@@ -55,6 +55,46 @@ version of each, so installing them is itself a way out of the gate.
 ignored and per checkout, so a new worktree needs it and needs nothing from
 Homebrew; `vendor/cjson` is the one tracked thing under there.
 
+### The Nupp rewrite
+
+The rewrite lives beside the Teal implementation and has its own half of the
+build. `cargo xtask nupp` is that half; nothing under it touches the Teal path,
+and nothing on the Teal path builds a Nupp module.
+
+```bash
+cargo xtask nupp targets      # List the targets nupp.lua configures
+cargo xtask nupp check        # Type-check every Nupp source, strictly
+cargo xtask nupp format       # Format Nupp sources in place
+cargo xtask nupp format-check # Report unformatted Nupp sources
+cargo xtask nupp test         # Build and run the Nupp test suites
+cargo xtask nupp build --target flatcolor
+cargo xtask nupp bench shapes # Run a Nupp benchmark from bench/nupp
+cargo xtask nupp run flatcolor -- --frames 120
+cargo xtask nupp verify       # Everything above, plus the Rust host
+```
+
+`cargo xtask nupp run` builds a component target and runs it through the Rust
+`winit` host. That host is selectable and is not the default: the Teal
+implementation is still what ships, and the migration plan defers the switch
+until the whole platform matrix passes.
+
+Both `run` and the host's own `cargo build` need a Nupp embedding SDK, which
+`native/rust/winit-host/build.rs` stages through the Nupp compiler's
+`scripts/toolchain` in a checkout beside this one. Set `NUPP_SDK` to a staged
+one to skip that, and `NUPP` to select a compiler other than the sibling
+checkout or the one on `PATH`.
+
+Two things about that SDK are worth knowing before they cost an afternoon. It is
+staged for a named feature set, and the runtime refuses to load a component
+whose declared features the library lacks, which reads as a load failure in a
+host that built cleanly. And staging it runs the Nupp project's own Cargo build,
+whose minimum compiler is newer than this tree's `rust-toolchain.toml` pin, so
+the staging call clears the Cargo environment it would otherwise inherit.
+
+The Nupp benchmarks are in `bench/nupp`, and `signature` rather than `bitset` is
+the archetype-signature one, because the Nupp ECS has no bitset. `latency` has
+no Nupp counterpart yet.
+
 `--preset` selects the target and defaults to the host development preset. A development preset resolves
 dependencies from the system, which is convenient and not shippable. A packaged preset builds pinned revisions
 from source. `cargo xtask check-package` is the gate on the difference, and only a packaged install can pass it.

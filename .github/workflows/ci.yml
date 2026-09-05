@@ -20,11 +20,19 @@ jobs:
         steps:
             - uses: actions/checkout@v4
             - run: cargo fmt --all -- --check
-            - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+            # `tecs-winit-host` is excluded from everything that builds it here.
+            # Its build script links `libnupp.a` out of a Nupp embedding SDK,
+            # and staging one needs the Nupp compiler's own checkout and a
+            # compiler newer than `rust-toolchain.toml` pins. Neither is present
+            # on this job, so the crate's build script fails before Clippy sees
+            # a line of it. The `nupp-host` job installs both and covers the
+            # crate there. `cargo fmt` needs no build, so it still covers the
+            # whole workspace.
+            - run: cargo clippy --locked --workspace --exclude tecs-winit-host --all-targets -- -D warnings
             - if: runner.os == 'Windows'
-              run: cargo check --locked --workspace --all-targets
+              run: cargo check --locked --workspace --exclude tecs-winit-host --all-targets
             - if: runner.os != 'Windows'
-              run: cargo test --locked --workspace --all-targets
+              run: cargo test --locked --workspace --exclude tecs-winit-host --all-targets
 
     engine:
         runs-on: macos-15
@@ -84,6 +92,11 @@ jobs:
                   echo /opt/nupp >> "$GITHUB_PATH"
             - run: nupp fmt --check
             - run: nupp check --strict
+            # The benchmarks are Nupp programs under an include root, so the two
+            # checks above already cover them. Compiling one proves it still
+            # runs, which a type check does not: a benchmark that raises during
+            # setup type-checks fine.
+            - run: nupp run -O2 bench/nupp/signature.nupp
             # The native service tests skip when their library is absent, so
             # building them is what makes the two Nupp-to-Rust bindings
             # covered rather than reported as skipped. The loader finds the
@@ -100,12 +113,48 @@ jobs:
         env:
             NUPP_VERSION: v0.0.1
         steps:
+            # Two checkouts side by side. The Nupp compiler release installed by
+            # Homebrew ships no `libnupp.a`, so it cannot satisfy
+            # `native/rust/winit-host/build.rs`; the embedding SDK is staged by
+            # the compiler's own `scripts/toolchain`, which only a source
+            # checkout has. `build.rs` searches every ancestor for
+            # `nupp/scripts/toolchain`, so `tecs/` beside `nupp/` is the layout
+            # it resolves.
             - uses: actions/checkout@v4
+              with:
+                  path: tecs
+            - uses: actions/checkout@v4
+              with:
+                  repository: nupp-lang/nupp
+                  ref: ${{ env.NUPP_VERSION }}
+                  path: nupp
             - run: brew install nupp-lang/tap/nupp
-            - run: nupp build --target flatcolor
-            - run: cargo check -p tecs-winit-host
-            - run: cargo test -p tecs-winit-host
-            - run: cargo run -p tecs-winit-host -- --headless --frames 1
+            - name: Stage the Nupp embedding SDK
+              working-directory: tecs
+              run: echo "NUPP_SDK=$(../nupp/scripts/toolchain host-library base,native-files,native-net | tail -1)" >> "$GITHUB_ENV"
+            - working-directory: tecs
+              run: nupp build --target host
+            - working-directory: tecs
+              run: nupp build --target flatcolor
+            - working-directory: tecs
+              run: cargo fmt -p tecs-winit-host -- --check
+            - working-directory: tecs
+              run: cargo clippy -p tecs-winit-host --all-targets -- -D warnings
+            # The host binary carries an `@rpath` reference to the embedding
+            # library, so a test binary that linked cleanly still aborts at
+            # startup unless the SDK is on the loader path.
+            - working-directory: tecs
+              env:
+                  DYLD_LIBRARY_PATH: ${{ env.NUPP_SDK }}
+              run: cargo test -p tecs-winit-host
+            - working-directory: tecs
+              env:
+                  DYLD_LIBRARY_PATH: ${{ env.NUPP_SDK }}
+              run: cargo run -p tecs-winit-host -- --headless --frames 1
+            - working-directory: tecs
+              env:
+                  DYLD_LIBRARY_PATH: ${{ env.NUPP_SDK }}
+              run: cargo run -p tecs-winit-host -- --component out/nupp/flatcolor.nuppc --entry flatcolor.create --headless --frames 2
 
     docs:
         runs-on: macos-15

@@ -25,16 +25,52 @@ fn main() {
     }
 }
 
+/// The Nupp host features a Tecs component needs at load time.
+///
+/// A component declares the host features its payload reaches for, and the
+/// runtime refuses to load one whose features the embedding library was not
+/// built with. `base` alone was enough while `tecs.host` reached for neither,
+/// and it stopped being enough the moment the tree gained a module that opens a
+/// file or a socket: `tecs.internal.nativelibrary` searches the filesystem for
+/// a native service, and `tecs.mcp` listens. The failure is a refusal to load
+/// the component, not a link error, so it appears at run time in a host that
+/// built cleanly.
+///
+/// `native/rust/build-support/src/nupp.rs` stages the same set for
+/// `cargo xtask nupp run`. Keep the two lists together.
+const HOST_FEATURES: &str = "base,native-files,native-net";
+
+/// Cargo's environment for a build script, which a nested unrelated build must
+/// not inherit.
+///
+/// The Nupp toolchain script runs its own Cargo build of the embedding library,
+/// and that project has its own minimum compiler. Leaving these set makes the
+/// nested build run under this tree's `rust-toolchain.toml` pin, which is older
+/// than Nupp's minimum, so the SDK fails to stage with a version error about
+/// packages that are not in this workspace at all. The nested build resolves
+/// its own toolchain when these are gone.
+const INHERITED_CARGO_VARIABLES: [&str; 5] = [
+    "RUSTUP_TOOLCHAIN",
+    "RUSTC",
+    "RUSTC_WRAPPER",
+    "CARGO",
+    "CARGO_ENCODED_RUSTFLAGS",
+];
+
 fn stage_sdk() -> PathBuf {
     let script = find_toolchain();
-    let output = Command::new(&script)
+    let mut command = Command::new(&script);
+    for variable in INHERITED_CARGO_VARIABLES {
+        command.env_remove(variable);
+    }
+    let output = command
         .arg("host-library")
-        .arg("base")
+        .arg(HOST_FEATURES)
         .output()
         .unwrap_or_else(|error| panic!("cannot run {}: {error}", script.display()));
     if !output.status.success() {
         panic!(
-            "{} host-library base failed:\n{}",
+            "{} host-library {HOST_FEATURES} failed:\n{}",
             script.display(),
             String::from_utf8_lossy(&output.stderr)
         );

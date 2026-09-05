@@ -10,6 +10,7 @@ use tecs_build_support::cdef::{self, Options as CdefOptions};
 use tecs_build_support::command;
 use tecs_build_support::docs;
 use tecs_build_support::formatting;
+use tecs_build_support::nupp;
 use tecs_build_support::package::{self, Options as PackageCheckOptions};
 use tecs_build_support::payload::{self, Root};
 use tecs_build_support::presets::{host_default, Preset, PRESETS};
@@ -108,6 +109,11 @@ enum Task {
         #[arg(long)]
         teal_types: Option<PathBuf>,
     },
+    /// Build, check, test, and run the Nupp rewrite and its Rust host.
+    Nupp {
+        #[command(subcommand)]
+        command: NuppTask,
+    },
     /// Verify documentation metadata, pages, and links by rendering the site.
     DocsCheck,
     /// Serve the documentation site, rebuilding it on a change.
@@ -122,6 +128,46 @@ enum Task {
         #[command(subcommand)]
         generator: Generator,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum NuppTask {
+    /// List the Nupp manifest's configured targets and tasks.
+    Targets,
+    /// Type-check every Nupp source under the manifest's include roots.
+    Check,
+    /// Format every Nupp source in place.
+    Format,
+    /// Report Nupp sources that are not formatted.
+    FormatCheck,
+    /// Build and run the Nupp test suites.
+    Test,
+    /// Build one configured Nupp target.
+    Build {
+        #[arg(long, default_value = nupp::DEFAULT_TARGET)]
+        target: String,
+    },
+    /// Run a Nupp benchmark from bench/nupp.
+    Bench {
+        name: String,
+        #[arg(last = true)]
+        arguments: Vec<OsString>,
+    },
+    /// Build a Nupp component target and run it through the Rust winit host.
+    ///
+    /// The winit host is a development executable and is deliberately not the
+    /// default one: the Teal implementation is still the shipping path.
+    Run {
+        #[arg(default_value = nupp::DEFAULT_COMPONENT)]
+        target: String,
+        /// The exported session constructor, defaulting to `<target>.create`.
+        #[arg(long)]
+        entry: Option<String>,
+        #[arg(last = true)]
+        arguments: Vec<OsString>,
+    },
+    /// Check, format-check, test, and build everything on the Nupp path.
+    Verify,
 }
 
 #[derive(Debug, Subcommand)]
@@ -327,6 +373,24 @@ fn main() -> Result<()> {
                 teal_types: Some(&teal_types),
             })?;
         }
+        Task::Nupp { command } => match command {
+            NuppTask::Targets => nupp::targets(&root)?,
+            NuppTask::Check => nupp::check(&root)?,
+            NuppTask::Format => nupp::format(&root, false)?,
+            NuppTask::FormatCheck => nupp::format(&root, true)?,
+            NuppTask::Test => nupp::test(&root)?,
+            NuppTask::Build { target } => {
+                let output = nupp::build(&root, &target)?;
+                println!("built {} into {}", target, output.display());
+            }
+            NuppTask::Bench { name, arguments } => nupp::benchmark(&root, &name, &arguments)?,
+            NuppTask::Run {
+                target,
+                entry,
+                arguments,
+            } => nupp::host(&root, &target, entry.as_deref(), &arguments)?,
+            NuppTask::Verify => nupp::verify(&root)?,
+        },
         Task::DocsCheck => docs::check(&root)?,
         Task::DocsDev { port } => docs::serve(&root, port)?,
         Task::DocsBuild => {
