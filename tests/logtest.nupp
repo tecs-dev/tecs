@@ -11,6 +11,9 @@ local record Line
 end
 
 --- Runs `body` with every line captured, then puts back what it displaced.
+--- @param body what to run against the captured lines
+--- @return the lines it emitted, in order
+--- @raises whatever `body` raised, after the sink and level are restored
 local function capture(body: function(lines: {Line}): nil): {Line}
     local lines: {Line} = {}
     local previousLevel = nupplog.level("debug")
