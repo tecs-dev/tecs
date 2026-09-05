@@ -103,4 +103,142 @@ function suite.reportsTheFinestDepthStepItsExtentsAllow(): nil
     end, "greater than zero")
 end
 
+function suite.placesScreenSpaceContentsAtTheirOwnPixels(): nil
+    layers.configure(2, {sort = "z", screenSpace = true})
+    test.assert(layers.isScreenSpace(2), "the layer reports its own space")
+
+    -- The camera is read for a world layer and for nothing else, so moving it,
+    -- zooming it, and turning it all leave a heads-up display exactly where it
+    -- was authored.
+    const x, y = layers.place(2, 40, 30, 0, 0, 1, 0, 800, 600)
+    test.equal(x, 40)
+    test.equal(y, 30)
+
+    const movedX, movedY = layers.place(2, 40, 30, 5000, -900, 4, 1.2, 800, 600)
+    test.equal(movedX, 40)
+    test.equal(movedY, 30)
+end
+
+function suite.stretchesVirtualCoordinatesOntoTheTarget(): nil
+    layers.configure(3, {sort = "z", virtualCoords = true})
+    test.assert(not layers.isScreenSpace(3), "virtual coordinates are not screen pixels")
+
+    const width, height = layers.virtualSize()
+    const x, y = layers.place(3, width * 0.5, height * 0.25, 900, 900, 3, 0.5, 800, 600)
+    test.equal(x, 400)
+    test.equal(y, 150)
+
+    layers.setVirtualSize(400, 300)
+    const halfX, halfY = layers.place(3, 400, 300, 0, 0, 1, 0, 800, 600)
+    test.equal(halfX, 800)
+    test.equal(halfY, 600)
+    layers.setVirtualSize(width, height)
+
+    test.raises(function(): nil
+        layers.setVirtualSize(0, 300)
+    end, "greater than zero")
+end
+
+function suite.placesAWorldLayerThroughTheCamera(): nil
+    layers.configure(4, {sort = "topdown"})
+
+    -- The view center lands on the middle of the target, and a world unit is
+    -- worth the zoom in pixels.
+    const centerX, centerY = layers.place(4, 100, 100, 100, 100, 2, 0, 800, 600)
+    test.equal(centerX, 400)
+    test.equal(centerY, 300)
+
+    const offsetX, offsetY = layers.place(4, 110, 105, 100, 100, 2, 0, 800, 600)
+    test.equal(offsetX, 420)
+    test.equal(offsetY, 310)
+end
+
+function suite.driftsAParallaxLayerBehindTheCamera(): nil
+    layers.configure(5, {sort = "topdown", parallax = 0.5})
+    test.equal(layers.parallaxOf(5), 0.5)
+
+    -- A layer moving with the world leaves the target when the camera does; one
+    -- at half parallax gives up half that distance, which is what puts a
+    -- background behind the scene without a second camera.
+    const still = layers.place(5, 0, 0, 0, 0, 1, 0, 800, 600)
+    const drifted = layers.place(5, 0, 0, 100, 0, 1, 0, 800, 600)
+    test.equal(still, 400)
+    test.equal(drifted, 350)
+
+    layers.configure(5, {sort = "topdown"})
+    const carried = layers.place(5, 0, 0, 100, 0, 1, 0, 800, 600)
+    test.equal(carried, 300)
+end
+
+function suite.keepsDrawnSizeOnALayerThatIgnoresZoom(): nil
+    layers.configure(6, {sort = "z", ignoreZoom = true})
+
+    -- The camera's position still carries the contents, so ten world units
+    -- right of the view center stays ten pixels right of the middle whatever
+    -- the zoom is.
+    const near = layers.place(6, 10, 0, 0, 0, 1, 0, 800, 600)
+    const far = layers.place(6, 10, 0, 0, 0, 4, 0, 800, 600)
+    test.equal(near, 410)
+    test.equal(far, 410)
+
+    const moved = layers.place(6, 10, 0, 100, 0, 4, 0, 800, 600)
+    test.equal(moved, 310)
+end
+
+function suite.reportsTheEntryARendererPacks(): nil
+    layers.configure(9, {sort = "z", screenSpace = true, ignoreZoom = true, unlit = true, overlay = true})
+    const mode, parallaxOffset, zoomFlag, litFlag = layers.entryOf(9)
+    test.equal(mode, layers.MODE_SCREEN)
+    test.equal(parallaxOffset, 0.0)
+    test.equal(zoomFlag, 1.0)
+    test.equal(litFlag, 0.0)
+    test.assert(layers.isOverlay(9), "the layer takes the forward lane")
+
+    -- A configuration replaces the layer rather than amending it, so what was
+    -- not said again goes back to its default.
+    layers.configure(9, {sort = "z"})
+    const plainMode, plainOffset, plainZoom, plainLit = layers.entryOf(9)
+    test.equal(plainMode, layers.MODE_CAMERA)
+    test.equal(plainOffset, 0.0)
+    test.equal(plainZoom, 0.0)
+    test.equal(plainLit, 1.0)
+    test.assert(not layers.isOverlay(9), "overlay went back to its default")
+end
+
+function suite.cullsOnlyTheLayersTheViewRectangleDescribes(): nil
+    layers.configure(3, {sort = "z", virtualCoords = true})
+    test.assert(layers.viewCulled(1), "an unconfigured layer is culled against the view")
+
+    layers.configure(2, {sort = "z", screenSpace = true})
+    test.assert(not layers.viewCulled(2), "screen pixels have no world bound to test")
+    test.assert(not layers.viewCulled(3), "virtual coordinates have no world bound to test")
+
+    layers.configure(5, {sort = "topdown", parallax = 0.5})
+    test.assert(not layers.viewCulled(5), "parallax draws away from the world bound")
+
+    layers.configure(6, {sort = "z", ignoreZoom = true})
+    test.assert(not layers.viewCulled(6), "ignoring zoom draws away from the world bound")
+
+    layers.configure(6, {sort = "z"})
+    test.assert(layers.viewCulled(6), "a plain world layer keeps exact culling")
+end
+
+function suite.answersDefaultsForALayerOutsideTheTable(): nil
+    const mode, offset, zoom, lit = layers.entryOf(layers.MAX + 1)
+    test.equal(mode, layers.MODE_CAMERA)
+    test.equal(offset, 0.0)
+    test.equal(zoom, 0.0)
+    test.equal(lit, 1.0)
+    test.assert(layers.viewCulled(0), "an unknown layer is culled")
+    test.assert(not layers.isScreenSpace(0), "an unknown layer is not screen space")
+    test.assert(not layers.isOverlay(0), "an unknown layer is not an overlay")
+    test.equal(layers.parallaxOf(0), 1.0)
+end
+
+function suite.rejectsALayerAskingForTwoFixedSpaces(): nil
+    test.raises(function(): nil
+        layers.configure(7, {sort = "z", screenSpace = true, virtualCoords = true})
+    end, "not both")
+end
+
 return suite

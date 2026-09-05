@@ -22,10 +22,14 @@ world:spawn(
 )
 ```
 
-`tecs.gfx.layers` decides the order those entities draw in, and
-`tecs.gfx.images` owns image identity and residency.
+`tecs.gfx.layers` decides the order and placement of those entities,
+`tecs.gfx.images` owns image identity and residency, `tecs.gfx.clips` owns the
+target-pixel regions `Clip` selects, and `tecs.gfx.sheet` and
+`tecs.gfx.animation` cut an image into frames and play them.
 ]]
 
+local animation = require("tecs.gfx.animation")
+local clips = require("tecs.gfx.clips")
 local rendercomponents = require("tecs.internal.rendercomponents")
 
 --- A four-channel color stored on a renderable entity.
@@ -56,3 +60,20 @@ export const ActiveCamera = rendercomponents.ActiveCamera
 
 --- Marks an entity as contributing geometry to the two-dimensional scene.
 export const Renderable2D = rendercomponents.Renderable2D
+
+--- A clip region selected by a renderable entity.
+export type Clip = clips.Clip
+
+--- Constructs a clip selecting a region set with `tecs.gfx.clips.setRegion`.
+export const Clip = clips.ClipComponent
+
+--- Sprite-sheet playback state stored on an entity.
+export type Animation = animation.Animation
+
+--- Constructs playback state directly. Prefer `tecs.gfx.animation.of`, which
+--- resolves a sheet and a tag name for you.
+export const Animation = animation.AnimationComponent
+
+--- Requests `tecs.gfx.animation.Completed` and `tecs.gfx.animation.Looped` for
+--- one entity.
+export const AnimationEvents = animation.AnimationEvents

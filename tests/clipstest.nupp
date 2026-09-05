@@ -1,0 +1,110 @@
+local clips = require("tecs.gfx.clips")
+local ecs = require("tecs.ecs")
+local gfx = require("tecs.gfx")
+local test = require("nupp.test")
+
+local suite = {}
+
+function suite.storesARegionAsItsBounds(): nil
+    clips.setRegion(1, {x = 16, y = 32, width = 320, height = 180})
+    const left, top, right, bottom = clips.regionOf(1)
+    test.equal(left, 16)
+    test.equal(top, 32)
+    test.equal(right, 336)
+    test.equal(bottom, 212)
+end
+
+function suite.keepsOnlyThePixelsInsideARegion(): nil
+    clips.setRegion(2, {x = 100, y = 100, width = 50, height = 50})
+    test.assert(clips.contains(2, 100, 100), "the top left corner is inside")
+    test.assert(clips.contains(2, 150, 150), "the bottom right corner is inside")
+    test.assert(clips.contains(2, 125, 125), "the middle is inside")
+    test.assert(not clips.contains(2, 99, 125), "left of the region is outside")
+    test.assert(not clips.contains(2, 151, 125), "right of the region is outside")
+    test.assert(not clips.contains(2, 125, 99), "above the region is outside")
+    test.assert(not clips.contains(2, 125, 151), "below the region is outside")
+end
+
+function suite.cullsABoundThatMissesItsRegionEntirely(): nil
+    clips.setRegion(3, {x = 200, y = 200, width = 100, height = 100})
+
+    -- A quad that lands nowhere near the panel contributes nothing, so a caller
+    -- may drop it before it reaches the backend.
+    test.assert(clips.culls(3, 0, 0, 100, 100), "a bound left of and above the region is culled")
+    test.assert(clips.culls(3, 400, 200, 500, 300), "a bound right of the region is culled")
+    test.assert(clips.culls(3, 200, 400, 300, 500), "a bound below the region is culled")
+
+    -- One that overlaps is kept whole, because the region decides the rest of it
+    -- per fragment.
+    test.assert(not clips.culls(3, 150, 150, 250, 250), "a partly overlapping bound survives")
+    test.assert(not clips.culls(3, 0, 0, 1000, 1000), "a bound containing the region survives")
+    test.assert(not clips.culls(3, 300, 300, 400, 400), "a bound touching the corner survives")
+end
+
+function suite.clipsNothingUnderRegionZero(): nil
+    test.assert(clips.contains(0, -1e9, 1e9), "region zero keeps every pixel")
+    test.assert(not clips.culls(0, -1e9, -1e9, 1e9, 1e9), "region zero culls nothing")
+    test.assert(not clips.culls(clips.MAX, 0, 0, 1, 1), "a region outside the table culls nothing")
+end
+
+function suite.clearsARegionBackToUnbounded(): nil
+    clips.setRegion(4, {x = 0, y = 0, width = 1, height = 1})
+    test.assert(clips.culls(4, 100, 100, 200, 200), "the small region culls the far bound")
+
+    -- An entity still pointing at a cleared region draws whole rather than
+    -- disappearing.
+    clips.clearRegion(4)
+    test.assert(not clips.culls(4, 100, 100, 200, 200), "the cleared region culls nothing")
+    test.assert(clips.contains(4, 1e6, -1e6), "the cleared region keeps every pixel")
+
+    -- Clearing one nobody set is not an error.
+    clips.clearRegion(200)
+end
+
+function suite.refusesToSetRegionZeroOrOneOutsideTheTable(): nil
+    test.raises(function(): nil
+        clips.setRegion(0, {x = 0, y = 0, width = 1, height = 1})
+    end, "numbered 1 to")
+    test.raises(function(): nil
+        clips.setRegion(clips.MAX, {x = 0, y = 0, width = 1, height = 1})
+    end, "numbered 1 to")
+    test.raises(function(): nil
+        clips.clearRegion(0)
+    end, "numbered 1 to")
+    test.raises(function(): nil
+        clips.setRegion(5, {x = 0, y = 0, width = -1, height = 1})
+    end, "no negative size")
+end
+
+function suite.reportsARegionRevision(): nil
+    const before = clips.revision()
+    clips.setRegion(6, {x = 1, y = 2, width = 3, height = 4})
+    const afterSet = clips.revision()
+    test.assert(afterSet > before, "setting a region moves the revision")
+    clips.clearRegion(6)
+    test.assert(clips.revision() > afterSet, "clearing a region moves the revision")
+end
+
+function suite.spawnsAnEntityCarryingAClipIndex(): nil
+    const world = ecs.newWorld()
+    const entity = world:spawn(ecs.Transform2D(0, 0), gfx.Clip(7))
+    world:commit()
+
+    const value = assert(world:get(entity, gfx.Clip))
+    test.equal(value.index, 7)
+
+    -- Absence is the common case, so an entity without the component names no
+    -- region at all.
+    const plain = world:spawn(ecs.Transform2D(0, 0))
+    world:commit()
+    test.assert(not world:has(plain, gfx.Clip), "the component is the opt-in")
+end
+
+function suite.defaultsToNoClipping(): nil
+    const world = ecs.newWorld()
+    const entity = world:spawn(gfx.Clip)
+    world:commit()
+    test.equal(assert(world:get(entity, gfx.Clip)).index, 0)
+end
+
+return suite

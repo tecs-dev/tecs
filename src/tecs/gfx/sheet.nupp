@@ -1,0 +1,1376 @@
+module tecs.gfx.sheet
+
+--[[
+A sprite sheet divides one image into frames, tags, and slices.
+
+Aseprite supplies the model: each frame carries its own duration, tags play
+inclusive spans in a direction, and slices carry rectangles, nine-slice
+centers, and pivots that may move between frames. `fromAseprite` reads its JSON
+export into the same interface `grid`, `rects`, and `build` produce.
+
+```nupp
+const sheet = tecs.gfx.sheet
+
+const hero = sheet.grid({
+    name = "game.hero",
+    imageWidth = 256,
+    imageHeight = 32,
+    frameWidth = 32,
+    frameHeight = 32,
+    tags = {idle = {from = 1, to = 4}, run = {from = 5, to = 8}},
+})
+
+hero:bind(tecs.gfx.images.id("sprites/hero"))
+
+world:spawn(
+    tecs.ecs.Transform2D(64, 64, 0, 1, 0, 32, 32),
+    tecs.gfx.Tint(1, 1, 1, 1),
+    hero:sprite(),
+    tecs.gfx.Renderable2D
+)
+```
+
+Frames count from one in sheet order. Tag zero is the whole sheet playing
+forward, which is what an animation naming no tag plays.
+
+`bind` resolves the sheet's pixel rectangles against a `tecs.gfx.images` id, so
+`sprite` and `uv` then answer the region a
+[`Sprite`](tealdoc:tecs.gfx.Sprite) samples. A sheet is usable before that:
+until it is bound, a frame's region is its plain fraction of the image.
+
+A sheet name is a snapshot compatibility surface. Every entity playing the
+sheet shares its registered frame, tag, slice, and timing data.
+
+# Pivots
+
+`pivotOf` answers a slice's pivot as a fraction of its frame, which is what an
+attachment point on a hand, a muzzle, or a pair of feet is measured in. No
+component carries one: a frame packet places a quad by its center, so a pivot
+is a number a game reads rather than something the renderer applies. The render
+lane owns adding a quad origin, and a pivot becomes a component when it does.
+]]
+
+local components = require("tecs.internal.components")
+local rendercomponents = require("tecs.internal.rendercomponents")
+local json = require("nupp.data.json")
+local log = require("nupp.log")
+
+-- "tecs.gfx" is the category the graphics modules already log under, and a
+-- logger name is configuration a developer filters on rather than an
+-- identifier, so this shares theirs instead of opening one for sheets.
+local LOGGER = log.named("tecs.gfx")
+
+const floor = math.floor
+
+--- The milliseconds a frame is held when nothing says otherwise, which is what
+--- Aseprite writes for a frame nobody retimed.
+export const DEFAULT_DURATION: number = 100.0
+
+--- Selects how a tag walks its span.
+---
+--- `pingpong` plays forward and then back without repeating either end, so a
+--- three-frame tag is 1, 2, 3, 2 and then round again.
+---
+--- These identifiers reach an Aseprite export and configuration a developer
+--- writes, so they are a compatibility surface.
+export type Direction = "forward" | "reverse" | "pingpong"
+
+--- Defines one frame's pixel rectangle and duration.
+---
+--- `x` and `y` default to zero, and `duration` to `DEFAULT_DURATION`
+--- milliseconds. These keys are the sheet format's own and are a compatibility
+--- surface.
+export type Rect = {
+    x: number?,
+    y: number?,
+    w: number,
+    h: number,
+    duration: number?
+}
+
+--- Defines an inclusive frame span and its playback direction.
+---
+--- Aseprite calls this a frame tag, and a tag's name is what an animation asks
+--- for. `direction` defaults to `"forward"`. These keys are the sheet format's
+--- own and are a compatibility surface.
+export type Tag = {
+    from: integer,
+    to: integer,
+    direction: Direction?
+}
+
+--- Defines where a slice sits from one frame onward and which points it
+--- carries.
+---
+--- A slice holds a key until the next one, so a slice that never moves is one
+--- key at frame one. A nil `centerX` means the slice names no nine-slice
+--- center, and a nil `pivotX` means it names no pivot. These keys are the
+--- sheet format's own and are a compatibility surface.
+export type SliceKey = {
+    frame: integer?,
+    x: number?,
+    y: number?,
+    w: number?,
+    h: number?,
+    centerX: number?,
+    centerY: number?,
+    centerW: number?,
+    centerH: number?,
+    pivotX: number?,
+    pivotY: number?
+}
+
+--- Represents a named region that moves across frames.
+---
+--- Aseprite's slices carry hitboxes, attachment points, and nine-patch
+--- borders. Tecs reads pivots out of them; everything else is the game's to
+--- use. These keys are the sheet format's own and are a compatibility surface.
+export type Slice = {
+    name: string,
+    data: string?,
+    keys: {SliceKey}
+}
+
+--- Configures a sheet cut into a uniform grid.
+export type GridOptions = {
+    name: string,
+    imageWidth: number,
+    imageHeight: number,
+    frameWidth: number,
+    frameHeight: number,
+    margin: number?,
+    spacing: number?,
+    columns: integer?,
+    rows: integer?,
+    count: integer?,
+    duration: number?,
+    tags: {[string]: Tag}?,
+    slices: {Slice}?
+}
+
+--- Configures a sheet cut into explicitly listed rectangles.
+export type RectsOptions = {
+    name: string,
+    imageWidth: number,
+    imageHeight: number,
+    frames: {Rect},
+    tags: {[string]: Tag}?,
+    slices: {Slice}?
+}
+
+--- Configures a sheet read from an Aseprite JSON export.
+export type AsepriteOptions = {
+    name: string?,
+    json: any
+}
+
+--- Bumped whenever a frame's region moves, which is registration and `bind`.
+local generation: integer = 0
+
+--- Represents an image divided into frames.
+export record Sheet
+    --- Read-only. Reports the registered name a snapshot stores.
+    name: string
+
+    --- Read-only. Reports the registration index an `Animation` carries.
+    --- Construction assigns an id once and never reuses it.
+    id: integer
+
+    --- Read-only. Reports the number of frames, which is the largest index
+    --- `rect`, `uv`, and `sprite` accept.
+    count: integer
+
+    --- Read-only. Reports the source image width in pixels. Frame rectangles
+    --- are measured in it, so binding to an image of another size places
+    --- frames wrongly.
+    imageWidth: number
+
+    --- Read-only. Reports the source image height in pixels.
+    imageHeight: number
+
+    --- Engine-owned. Stores each frame's pixel rectangle, four numbers a
+    --- frame. Ordinary game code should call `rect`.
+    private rects: {number}
+
+    --- Engine-owned. Stores each frame's duration in seconds. Construction
+    --- converts the authored milliseconds once so playback never divides.
+    private durations: {number}
+
+    --- Engine-owned. Stores each frame's region, four numbers a frame.
+    private uvs: {number}
+
+    private tagFrom: {[integer]: integer}
+    private tagTo: {[integer]: integer}
+    private tagDirection: {[integer]: Direction}
+    private tagNames: {string}
+    private tagIds: {[string]: integer}
+
+    --- Engine-owned. Stores the frame shown at each step of a tag's cycle,
+    --- which is what collapses the three directions into one lookup: the
+    --- direction decides the order once, when the sheet is built.
+    private tagOrder: {[integer]: {integer}}
+
+    --- Engine-owned. Stores the elapsed seconds each step of a tag's cycle
+    --- ends on.
+    private tagTiming: {[integer]: {number}}
+
+    private tagCycle: {[integer]: number}
+    private sliceList: {Slice}
+    private sliceIds: {[string]: integer}
+    private image: integer
+    private originU: number
+    private originV: number
+    private scaleU: number
+    private scaleV: number
+
+    rect: function(self: Sheet, frame: integer): (number, number, number, number)
+    duration: function(self: Sheet, frame: integer): number
+    uv: function(self: Sheet, frame: integer): (number, number, number, number)
+    hasTag: function(self: Sheet, name: string): boolean
+    tag: function(self: Sheet, name: string): (integer, integer, Direction)
+    tagId: function(self: Sheet, name: string?): integer
+    tagName: function(self: Sheet, id: integer): string
+    tagCount: function(self: Sheet): integer
+    cycle: function(self: Sheet, id: integer): number
+    frameAt: function(self: Sheet, id: integer, time: number): integer
+    slice: function(self: Sheet, name: string): Slice?
+    sliceId: function(self: Sheet, name: string?): integer
+    sliceName: function(self: Sheet, id: integer): string
+    sliceKeyAt: function(self: Sheet, id: integer, frame: integer): SliceKey?
+    pivotOf: function(self: Sheet, id: integer, frame: integer): (number, number)
+    boundImage: function(self: Sheet): integer
+    bind: function(self: Sheet, image: integer, u0: number?, v0: number?, u1: number?, v1: number?): Sheet
+    sprite: function(self: Sheet, frame: integer?): components.TableInstance<rendercomponents.Sprite>
+end
+
+--- Builds a sheet one frame, tag, and slice at a time.
+---
+--- What every constructor here goes through, and what an importer for a format
+--- nothing else reads writes into.
+export record Builder
+    private sheet: Sheet
+    private tags: {[string]: Tag}
+    private slices: {Slice}
+
+    frame: function(self: Builder, x: number, y: number, w: number, h: number, duration: number?): Builder
+    tag: function(self: Builder, name: string, from: integer, to: integer, direction: Direction?): Builder
+    slice: function(
+        self: Builder,
+        name: string,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        pivotX: number?,
+        pivotY: number?
+    ): Builder
+    sliceKeys: function(self: Builder, name: string, data: string?, keys: {SliceKey}): Builder
+    finish: function(self: Builder): Sheet
+end
+
+--- Sheets by registration index and by name.
+---
+--- An id is what an `Animation` carries, because a component column holds a
+--- number rather than a table. A name is what a snapshot carries, for the
+--- reason an image's name rather than its id is: an index depends on the order
+--- sheets were built in, and a save read by a run that builds them in another
+--- order would point at the wrong picture.
+local sheetsById: {[integer]: Sheet} = {}
+
+local sheetsByName: {[string]: Sheet} = {}
+local sheetCount: integer = 0
+
+--- The sheet a name held immediately before the one it holds now.
+---
+--- Building under a taken name replaces what `byName` answers, which is the
+--- documented behavior and the wrong one for a file exported twice. `replace`
+--- is the reverse of it and has to know what was displaced, and only
+--- registration is in a position to say.
+local displaced: {[string]: Sheet} = {}
+
+-------------------------------------------------------------------------------
+-- Frames
+-------------------------------------------------------------------------------
+
+--- Fails on a frame index the sheet does not carry.
+--- @raises when the frame is below one or past the sheet's frame count
+local function checkFrame(self: Sheet, frame: integer, caller: string): nil
+    if frame < 1 or frame > self.count then
+        error("gfx.sheet." .. caller .. ": sheet '" .. self.name .. "' has no frame " .. tostring(frame), 3)
+    end
+end
+
+--- Returns a frame's pixel rectangle.
+--- @param self the sheet to read
+--- @param frame the frame index, from one to `count`
+--- @return the left edge, then the top, then the width, then the height, in the
+---     pixels of the image the sheet was cut from
+--- @raises when the frame is outside the sheet, because that is a sheet and an
+---     animation disagreeing rather than something to paper over
+function Sheet.rect(self: Sheet, frame: integer): number, number, number, number
+    checkFrame(self, frame, "rect")
+    const base = (frame - 1) * 4
+    const rects = self.rects
+
+    return rects[base + 1], rects[base + 2], rects[base + 3], rects[base + 4]
+end
+
+--- Returns how long a frame stays visible.
+--- @param self the sheet to read
+--- @param frame the frame index, from one to `count`
+--- @return the authored frame duration in seconds
+--- @raises when the frame is outside the sheet
+function Sheet.duration(self: Sheet, frame: integer): number
+    checkFrame(self, frame, "duration")
+
+    return self.durations[frame]
+end
+
+--- Returns a frame's region.
+---
+--- Fractions of the image before `bind`, and of the bound image's region after
+--- it, which is what a [`Sprite`](tealdoc:tecs.gfx.Sprite) samples.
+--- @param self the sheet to read
+--- @param frame the frame index, from one to `count`
+--- @return the region's left edge, then its top, then its right, then its bottom
+--- @raises when the frame is outside the sheet
+function Sheet.uv(self: Sheet, frame: integer): number, number, number, number
+    checkFrame(self, frame, "uv")
+    const base = (frame - 1) * 4
+    const uvs = self.uvs
+
+    return uvs[base + 1], uvs[base + 2], uvs[base + 3], uvs[base + 4]
+end
+
+-------------------------------------------------------------------------------
+-- Tags
+-------------------------------------------------------------------------------
+
+--- Returns whether the sheet carries a tag.
+--- @param self the sheet to read
+--- @param name the tag name to look for
+--- @return whether `tag` would answer for that name
+function Sheet.hasTag(self: Sheet, name: string): boolean
+    return self.tagIds[name] ~= nil
+end
+
+--- Returns a named tag's span and direction.
+--- @param self the sheet to read
+--- @param name a tag this sheet was built with
+--- @return the tag's first frame index, then its last, then its direction
+--- @raises when the sheet carries no such tag, because the alternative is an
+---     animation silently playing the whole sheet on a typo
+function Sheet.tag(self: Sheet, name: string): integer, integer, Direction
+    const id = self.tagIds[name]
+    if id == nil then
+        error("gfx.sheet.tag: sheet '" .. self.name .. "' has no tag '" .. tostring(name) .. "'", 2)
+    end
+
+    return assert(self.tagFrom[id]), assert(self.tagTo[id]), assert(self.tagDirection[id])
+end
+
+--- Unknown tag names already reported, keyed by the sheet's id and then the
+--- name.
+---
+--- A sheet's tag names are fixed once it is registered, because `replace`
+--- refuses a build that would renumber them, so an entry here never goes stale
+--- and a name reported once stays reported.
+local reportedTags: {[integer]: {[string]: boolean}} = {}
+
+--- Reports a tag name the sheet does not carry, once per sheet and name.
+local function reportUnknownTag(self: Sheet, name: string): nil
+    local seen = reportedTags[self.id]
+    if seen == nil then
+        seen = {}
+        reportedTags[self.id] = seen
+    elseif seen[name] then
+        return
+    end
+    seen[name] = true
+
+    LOGGER:error(
+        "sheet '%s' has no tag '%s', so the whole sheet animates in place of the frames that name asked for; "
+        .. "it carries %s",
+        self.name,
+        name,
+        #self.tagNames > 0 and table.concat(self.tagNames, ", ") or "no tags"
+    )
+end
+
+--- Returns the index a tag name represents, or zero when the sheet has none.
+---
+--- Zero reads as the whole sheet rather than as nothing, so an animation
+--- naming no tag plays every frame in order.
+---
+--- A name the sheet does not carry is reported at error level under the
+--- `tecs.gfx` logger and then treated as the whole sheet, because zero is a
+--- plausible wrong answer rather than a visible failure. The report names the
+--- sheet, the name asked for, and the tags the sheet does carry, once per sheet
+--- and name however often the name is asked. Call `hasTag` instead when a
+--- name's absence is expected and ordinary.
+--- @param self the sheet to read
+--- @param name a tag name, or nil or the empty string for the whole sheet; the
+---     empty string is what a snapshot stores for tag zero, so neither it nor
+---     nil is reported
+--- @return the index an `Animation` carries, which belongs to this sheet alone:
+---     ids follow tag names in sorted order, so the same name in another sheet
+---     has another number
+function Sheet.tagId(self: Sheet, name: string?): integer
+    if name == nil or name == "" then
+        return 0
+    end
+    const id = self.tagIds[name]
+    if id ~= nil then
+        return id
+    end
+    reportUnknownTag(self, name)
+
+    return 0
+end
+
+--- Returns the name a tag index represents.
+--- @param self the sheet to read
+--- @param id an index from `tagId`; zero and anything the sheet does not carry
+---     answer the empty string
+--- @return the tag's name, which is what a snapshot writes in place of the index
+function Sheet.tagName(self: Sheet, id: integer): string
+    if id < 1 then
+        return ""
+    end
+
+    return self.tagNames[id] ?? ""
+end
+
+--- Returns how many named tags the sheet carries.
+--- @param self the sheet to read
+--- @return the count, not counting tag zero, which is the whole sheet
+function Sheet.tagCount(self: Sheet): integer
+    return #self.tagNames
+end
+
+--- Returns the duration of one tag cycle.
+--- @param self the sheet to read
+--- @param id a tag index, or zero for the whole sheet
+--- @return the sum of the durations of the frames the cycle visits, in seconds,
+---     which for a pingpong tag counts the frames it passes twice twice
+function Sheet.cycle(self: Sheet, id: integer): number
+    return self.tagCycle[id] ?? 0.0
+end
+
+--- Returns the frame a tag shows at a point in its cycle.
+--- @param self the sheet to read
+--- @param id a tag index, or zero for the whole sheet
+--- @param time the seconds into the cycle; outside it this clamps rather than
+---     wrapping, because wrapping is the caller's decision about looping
+--- @return a frame index into the whole sheet, counting from one
+function Sheet.frameAt(self: Sheet, id: integer, time: number): integer
+    const order = self.tagOrder[id]
+    if order == nil then
+        return 1
+    end
+
+    -- A linear scan, because a tag is a handful of steps and the comparison is
+    -- against a number already in cache. A binary search costs more branches
+    -- than it saves at these lengths.
+    const timing = assert(self.tagTiming[id])
+    const steps = #order
+    for step = 1, steps do
+        if time <= timing[step] then
+            return order[step]
+        end
+    end
+
+    return order[steps]
+end
+
+-------------------------------------------------------------------------------
+-- Slices
+-------------------------------------------------------------------------------
+
+--- Returns a slice by name.
+--- @param self the sheet to read
+--- @param name the slice name
+--- @return the slice, which is a view onto the sheet's own table and must not be
+---     mutated, or nil when the sheet carries no such slice
+function Sheet.slice(self: Sheet, name: string): Slice?
+    const id = self.sliceIds[name]
+    if id == nil then
+        return nil
+    end
+
+    return self.sliceList[id]
+end
+
+--- Returns the index a slice name represents, or zero when the sheet has none.
+--- @param self the sheet to read
+--- @param name the slice name, or nil
+--- @return the index, which stands in for the name wherever a number is stored,
+---     for the reason a tag id does
+function Sheet.sliceId(self: Sheet, name: string?): integer
+    if name == nil then
+        return 0
+    end
+
+    return self.sliceIds[name] ?? 0
+end
+
+--- Returns the name a slice index represents.
+--- @param self the sheet to read
+--- @param id a slice index from `sliceId`
+--- @return the slice name, or the empty string when the index names none
+function Sheet.sliceName(self: Sheet, id: integer): string
+    if id < 1 then
+        return ""
+    end
+    const entry = self.sliceList[id]
+    if entry == nil then
+        return ""
+    end
+
+    return entry.name
+end
+
+--- Returns the slice key in effect on a frame.
+---
+--- A slice holds a key until the next one, so this answers the last key at or
+--- before the frame rather than only an exact match.
+--- @param self the sheet to read
+--- @param id a slice index from `sliceId`; zero answers nil
+--- @param frame a frame index
+--- @return the key, which is a view onto the sheet's own table, or nil when the
+---     slice has no key at or before that frame
+function Sheet.sliceKeyAt(self: Sheet, id: integer, frame: integer): SliceKey?
+    if id < 1 then
+        return nil
+    end
+    const entry = self.sliceList[id]
+    if entry == nil then
+        return nil
+    end
+
+    const keys = entry.keys
+    local found: SliceKey? = nil
+    for index = 1, #keys do
+        const key = keys[index]
+        if (key.frame ?? 1) > frame then
+            break
+        end
+        found = key
+    end
+
+    return found
+end
+
+--- Returns a slice's pivot as a fraction of its frame.
+---
+--- Aseprite writes a pivot in the slice's own pixels, so this adds the slice's
+--- origin and divides by the frame, which is the number a quad wants: nothing
+--- downstream has to know the sheet's pixel sizes.
+---
+--- A slice with a center but no pivot answers the center's middle, and a slice
+--- with neither answers the middle of its own rectangle. Zero, a slice the
+--- sheet does not carry, and a frame it has no key for all answer the middle of
+--- the frame, which is where a quad sits with no pivot at all.
+--- @param self the sheet to read
+--- @param id a slice index from `sliceId`
+--- @param frame a frame index
+--- @return the pivot's x, then its y, each a fraction of the frame from its top
+---     left corner
+function Sheet.pivotOf(self: Sheet, id: integer, frame: integer): number, number
+    const key = self:sliceKeyAt(id, frame)
+    if key == nil or frame < 1 or frame > self.count then
+        return 0.5, 0.5
+    end
+
+    const base = (frame - 1) * 4
+    const width = self.rects[base + 3]
+    const height = self.rects[base + 4]
+    if width <= 0.0 or height <= 0.0 then
+        return 0.5, 0.5
+    end
+
+    local x = key.pivotX
+    local y = key.pivotY
+    if x == nil or y == nil then
+        -- A nine-patch names a center rather than a pivot, and the middle of
+        -- that center is the point the patch is anchored on. Failing both, the
+        -- middle of the slice's own rectangle is the only point it names.
+        const centerX = key.centerX
+        if centerX ~= nil then
+            x = centerX + (key.centerW ?? 0.0) * 0.5
+            y = (key.centerY ?? 0.0) + (key.centerH ?? 0.0) * 0.5
+        else
+            x = (key.w ?? 0.0) * 0.5
+            y = (key.h ?? 0.0) * 0.5
+        end
+    end
+
+    return ((key.x ?? 0.0) + x) / width, ((key.y ?? 0.0) + y) / height
+end
+
+-------------------------------------------------------------------------------
+-- Binding to an image
+-------------------------------------------------------------------------------
+
+--- Recomputes every frame's region from its pixel rectangle and the current
+--- scale.
+local function rescale(self: Sheet): nil
+    const rects = self.rects
+    const uvs = self.uvs
+    const width = self.imageWidth
+    const height = self.imageHeight
+    const originU = self.originU
+    const originV = self.originV
+    const scaleU = self.scaleU
+    const scaleV = self.scaleV
+    for index = 1, self.count do
+        const base = (index - 1) * 4
+        const x = rects[base + 1]
+        const y = rects[base + 2]
+        uvs[base + 1] = originU + x / width * scaleU
+        uvs[base + 2] = originV + y / height * scaleV
+        uvs[base + 3] = originU + (x + rects[base + 3]) / width * scaleU
+        uvs[base + 4] = originV + (y + rects[base + 4]) / height * scaleV
+    end
+end
+
+--- Returns the image this sheet was last bound to.
+--- @param self the sheet to read
+--- @return the `tecs.gfx.images` id, or zero when nothing has bound the sheet
+function Sheet.boundImage(self: Sheet): integer
+    return self.image
+end
+
+--- Resolves the sheet's frames against an image.
+---
+--- The optional region names the part of the image the sheet occupies, which
+--- is what an atlas packer places it at, and defaults to the whole image. Frame
+--- rectangles are scaled into it, so passing a region smaller than the sheet
+--- describes places the frames inside that region rather than across the image.
+---
+--- Binding again rescales from the pixel rectangles rather than from the
+--- previous result, so re-registering an image accumulates no scaling error.
+--- Entities already carrying regions from an earlier bind keep them: a rebind
+--- updates no existing [`Sprite`](tealdoc:tecs.gfx.Sprite).
+--- @param self the sheet to bind
+--- @param image the `tecs.gfx.images` id the frames are sampled from
+--- @param u0 the region's left edge as a fraction of the image, defaulting to zero
+--- @param v0 the region's top edge, defaulting to zero
+--- @param u1 the region's right edge, defaulting to one
+--- @param v1 the region's bottom edge, defaulting to one
+--- @return the sheet, so a caller can chain
+function Sheet.bind(self: Sheet, image: integer, u0: number?, v0: number?, u1: number?, v1: number?): Sheet
+    self.image = image
+    self.originU = u0 ?? 0.0
+    self.originV = v0 ?? 0.0
+    self.scaleU = (u1 ?? 1.0) - self.originU
+    self.scaleV = (v1 ?? 1.0) - self.originV
+    rescale(self)
+    -- Every frame's region just moved, so anything that copied them is stale.
+    generation = generation + 1
+
+    return self
+end
+
+--- Creates a sprite showing one frame, ready to spawn.
+---
+--- Meaningful after `bind`, since before it the sheet names no image and the
+--- quad samples the backend's white fallback.
+--- @param self the sheet to read
+--- @param frame the frame to show, from one to `count`, defaulting to one
+--- @return a fresh [`Sprite`](tealdoc:tecs.gfx.Sprite) value ready to spawn, which
+---     the caller owns rather than a view onto the sheet
+--- @raises when the frame is outside the sheet
+function Sheet.sprite(self: Sheet, frame: integer?): components.TableInstance<rendercomponents.Sprite>
+    const index = frame ?? 1
+    checkFrame(self, index, "sprite")
+    const base = (index - 1) * 4
+    const uvs = self.uvs
+
+    return rendercomponents.SpriteComponent(self.image, uvs[base + 1], uvs[base + 2], uvs[base + 3], uvs[base + 4])
+end
+
+-------------------------------------------------------------------------------
+-- Registration
+-------------------------------------------------------------------------------
+
+--- Returns how many times any sheet's frames have changed.
+---
+--- Bumped by registration and by `bind`, both of which move where a frame's
+--- region points. Anything holding a copy of those regions compares this
+--- against what it copied at rather than being told, which keeps the dependency
+--- running one way: a sheet knows nothing about who read it.
+--- @return a count that only ever rises
+export function revision(): integer
+    return generation
+end
+
+--- Returns the sheet a registration index names.
+--- @param id an `id` from a sheet this process built; ids are assigned in build
+---     order, so one is meaningful only within a run
+--- @return the sheet, or nil when nothing was built under the id
+export function byId(id: integer): Sheet?
+    if id < 1 then
+        return nil
+    end
+
+    return sheetsById[id]
+end
+
+--- Returns the sheet a name names.
+---
+--- Building a second sheet under a taken name replaces what this returns, so a
+--- reload points new entities at the new sheet. Entities already carrying the
+--- old id keep drawing the old one, which is what stops a reload pulling a
+--- frame out from under them.
+--- @param name the name a sheet was built under
+--- @return the sheet most recently registered under the name, or nil
+export function byName(name: string): Sheet?
+    return sheetsByName[name]
+end
+
+--- Writes the order and timing of one tag.
+---
+--- The direction is spent here rather than at every step of playback: what
+--- comes out is the frames in the order they are shown and the second each one
+--- ends on, so a lookup is a scan of numbers and never a branch on direction.
+local function planTag(self: Sheet, id: integer, from: integer, to: integer, direction: Direction): nil
+    const durations = self.durations
+    local order: {integer} = {}
+    local timing: {number} = {}
+    local elapsed = 0.0
+    local steps: integer = 0
+
+    local function step(frame: integer): nil
+        steps = steps + 1
+        elapsed = elapsed + durations[frame]
+        order[steps] = frame
+        timing[steps] = elapsed
+    end
+
+    if direction == "reverse" then
+        for frame = to, from, -1 do
+            step(frame)
+        end
+    else
+        for frame = from, to do
+            step(frame)
+        end
+        if direction == "pingpong" and to > from then
+            -- Neither end is repeated, so a three-frame tag is 1, 2, 3, 2 and
+            -- the cycle is five frames long rather than six.
+            for frame = to - 1, from + 1, -1 do
+                step(frame)
+            end
+        end
+    end
+
+    self.tagOrder[id] = order
+    self.tagTiming[id] = timing
+    self.tagCycle[id] = elapsed
+end
+
+--- Assigns tags to a sheet under construction.
+---
+--- Ids follow the names in sorted order rather than the order `pairs` happens
+--- to hand them over, so the same table produces the same ids on every run.
+--- Index zero is the whole sheet forward and is always planned, since that is
+--- what an animation naming no tag plays.
+--- @raises when a tag's span falls outside the sheet's frames or names a
+---     direction that is not one of the three
+local function addTags(self: Sheet, tags: {[string]: Tag}?, level: integer): nil
+    self.tagFrom[0] = 1
+    self.tagTo[0] = self.count
+    self.tagDirection[0] = "forward"
+    planTag(self, 0, 1, self.count, "forward")
+    if tags == nil then
+        return
+    end
+
+    local names: {string} = {}
+    for name in pairs(tags) do
+        names[#names + 1] = name
+    end
+    table.sort(names)
+
+    for index = 1, #names do
+        const name = names[index]
+        const span = assert(tags[name])
+        const from = span.from
+        const to = span.to
+        if from < 1 or to > self.count or from > to then
+            error(
+                "gfx.sheet: tag '" .. name .. "' of sheet '" .. self.name .. "' spans " .. tostring(
+                    from
+                ) .. " to " .. tostring(to) .. ", outside its " .. tostring(self.count) .. " frames",
+                level
+            )
+        end
+        const direction = span.direction ?? "forward"
+        if direction ~= "forward" and direction ~= "reverse" and direction ~= "pingpong" then
+            error(
+                "gfx.sheet: tag '" .. name .. "' of sheet '" .. self.name .. "' has no direction '" .. tostring(
+                    direction
+                ) .. "'",
+                level
+            )
+        end
+        self.tagFrom[index] = from
+        self.tagTo[index] = to
+        self.tagDirection[index] = direction
+        self.tagNames[index] = name
+        self.tagIds[name] = index
+        planTag(self, index, from, to, direction)
+    end
+end
+
+--- Assigns slices, in the order they were given.
+--- @raises when a slice has no name or carries no keys
+local function addSlices(self: Sheet, slices: {Slice}?, level: integer): nil
+    if slices == nil then
+        return
+    end
+
+    for index = 1, #slices do
+        const entry = slices[index]
+        if entry.name == "" then
+            error("gfx.sheet: slice " .. tostring(index) .. " of sheet '" .. self.name .. "' has no name", level)
+        end
+        if #entry.keys < 1 then
+            error("gfx.sheet: slice '" .. entry.name .. "' of sheet '" .. self.name .. "' has no keys", level)
+        end
+        self.sliceList[index] = entry
+        self.sliceIds[entry.name] = index
+    end
+end
+
+--- Fields every sheet needs whatever cut its frames.
+--- @raises when the name is empty or either image dimension is not positive
+local function newSheet(name: string, imageWidth: number, imageHeight: number, level: integer): Sheet
+    if name == "" then
+        error("gfx.sheet: a sheet needs a name", level)
+    end
+    if imageWidth <= 0.0 or imageHeight <= 0.0 then
+        error("gfx.sheet: sheet '" .. name .. "' needs the pixel size of its image", level)
+    end
+
+    return new Sheet(
+        name = name,
+        id = 0,
+        count = 0,
+        imageWidth = imageWidth,
+        imageHeight = imageHeight,
+        rects = {},
+        durations = {},
+        uvs = {},
+        tagFrom = {},
+        tagTo = {},
+        tagDirection = {},
+        tagNames = {},
+        tagIds = {},
+        tagOrder = {},
+        tagTiming = {},
+        tagCycle = {},
+        sliceList = {},
+        sliceIds = {},
+        -- Unbound, a frame's region is its plain fraction of the image, which
+        -- is what a sheet can say without a renderer.
+        image = 0,
+        originU = 0.0,
+        originV = 0.0,
+        scaleU = 1.0,
+        scaleV = 1.0
+    )
+end
+
+--- Registers a finished sheet and hands back its id.
+--- @raises when the sheet has no frames, or when a tag or slice is malformed
+local function register(self: Sheet, tags: {[string]: Tag}?, slices: {Slice}?, level: integer): Sheet
+    if self.count < 1 then
+        error("gfx.sheet: sheet '" .. self.name .. "' has no frames", level)
+    end
+    addTags(self, tags, level + 1)
+    addSlices(self, slices, level + 1)
+    rescale(self)
+    sheetCount = sheetCount + 1
+    self.id = sheetCount
+    sheetsById[sheetCount] = self
+    const previous = sheetsByName[self.name]
+    if previous ~= nil then
+        displaced[self.name] = previous
+    end
+    sheetsByName[self.name] = self
+    generation = generation + 1
+
+    return self
+end
+
+--- Returns whether two name-to-index maps hand out the same indices.
+---
+--- A name that appeared or went away is looked for before one that merely
+--- moved, because adding a tag renumbers every tag after it alphabetically and
+--- the name a refusal should carry is the one that was edited rather than the
+--- first one the edit pushed along.
+local function sameIndices(before: {[string]: integer}, after: {[string]: integer}): boolean, string
+    for name in pairs(before) do
+        if after[name] == nil then
+            return false, name
+        end
+    end
+    for name in pairs(after) do
+        if before[name] == nil then
+            return false, name
+        end
+    end
+    for name, id in pairs(before) do
+        if after[name] ~= id then
+            return false, name
+        end
+    end
+
+    return true, ""
+end
+
+--- Folds a freshly built sheet into the one already registered under its name,
+--- keeping the old sheet's id.
+---
+--- The reverse of what building under a taken name does, and it exists because
+--- a reload wants the reverse. Building again answers new entities with the new
+--- sheet and leaves every entity already playing on the old one, which is right
+--- for two sheets that happen to share a name and wrong for one file that was
+--- re-exported. This overwrites in place instead, so an `Animation` holding the
+--- id continues and shows the new frames on its next step without the world
+--- changing.
+---
+--- The refusals exist because a component holds an index into this sheet, so
+--- anything this refuses is a change that would renumber one. Tag ids follow
+--- the tag names in sorted order and slice ids follow the slices, so adding,
+--- removing, or renaming either is a restart. Frames are free to change: an
+--- entity carries a tag and a time, and each step resolves its frame from the
+--- cycle.
+---
+--- Replacement keeps the live sheet's bind and rescales the new frames against
+--- it, so a caller need not bind again.
+---
+--- The sheet handed in is spent. Its id resolves to the live sheet rather than
+--- to itself, because the two share their frame tables once the fold is done
+--- and only one of them may be bound.
+--- @param built a sheet from any constructor here, registered moments ago under
+---     a name something else already held
+--- @return the live sheet, or nil and the refusal reason
+export function replace(built: Sheet): Sheet?, string?
+    -- What the name held before this build took it, since building is what
+    -- registers and `built` has already taken the name by the time it arrives.
+    const live = displaced[built.name]
+    if live == nil or live == built then
+        return nil, "no sheet is registered as '" .. built.name .. "', so there is nothing to replace"
+    end
+
+    -- Checked before anything is written, so a refusal leaves the live sheet
+    -- exactly as it was rather than part way through.
+    local ok, moved = sameIndices(live.tagIds, built.tagIds)
+    if not ok then
+        sheetsByName[built.name] = live
+        return nil, "sheet '"
+            .. built.name
+            .. "' would renumber its tags at '"
+            .. moved
+            .. "', and an Animation already holds a tag index"
+    end
+    ok, moved = sameIndices(live.sliceIds, built.sliceIds)
+    if not ok then
+        sheetsByName[built.name] = live
+        return nil, "sheet '"
+            .. built.name
+            .. "' would renumber its slices at '"
+            .. moved
+            .. "', and a slice index is already held"
+    end
+
+    live.count = built.count
+    live.imageWidth = built.imageWidth
+    live.imageHeight = built.imageHeight
+    live.rects = built.rects
+    live.durations = built.durations
+    live.uvs = built.uvs
+    live.tagFrom = built.tagFrom
+    live.tagTo = built.tagTo
+    live.tagDirection = built.tagDirection
+    live.tagNames = built.tagNames
+    live.tagIds = built.tagIds
+    live.tagOrder = built.tagOrder
+    live.tagTiming = built.tagTiming
+    live.tagCycle = built.tagCycle
+    live.sliceList = built.sliceList
+    live.sliceIds = built.sliceIds
+
+    -- The bind is the live sheet's and is kept: a re-export of the same image
+    -- lands on the region that image already holds, so the frames are rescaled
+    -- against it rather than waiting for a second `bind`.
+    rescale(live)
+
+    -- Both the name and the id the build took now answer the live sheet. The id
+    -- is not given back, because an id is handed out once and never reused;
+    -- what it does is resolve to the sheet its frames ended up in, so anything
+    -- that read the build's id between the build and this call is pointed at
+    -- the right one. It also takes the build out of the registry, which
+    -- matters: the two share their frame tables now, and a `bind` on one would
+    -- write through the other.
+    sheetsByName[built.name] = live
+    sheetsById[built.id] = live
+    displaced[built.name] = nil
+
+    return live, nil
+end
+
+-------------------------------------------------------------------------------
+-- Builder
+-------------------------------------------------------------------------------
+
+--- Creates a builder for a sheet the other constructors cannot describe.
+---
+--- The model is what the builder writes, so an atlas from any tool reaches the
+--- same sheet an Aseprite export does. Frames, tags, and slices are added in
+--- any order, and `finish` registers the result.
+--- @param name the name to register the finished sheet under
+--- @param imageWidth the width in pixels of the image the frames are cut from
+--- @param imageHeight the height in pixels of that image
+--- @return a builder whose methods chain
+--- @raises when the name is empty or either dimension is not positive
+export function build(name: string, imageWidth: number, imageHeight: number): Builder
+    return new Builder(sheet = newSheet(name, imageWidth, imageHeight, 3), tags = {}, slices = {})
+end
+
+--- Appends a frame to the sheet under construction.
+--- @param self the builder to append to
+--- @param x the frame's left edge in the image, in pixels
+--- @param y the frame's top edge in pixels
+--- @param w the frame width in pixels, which must be positive
+--- @param h the frame height in pixels, which must be positive
+--- @param duration the milliseconds the frame is held, defaulting to
+---     `DEFAULT_DURATION`
+--- @return the builder
+--- @raises when the frame has no positive size
+function Builder.frame(self: Builder, x: number, y: number, w: number, h: number, duration: number?): Builder
+    const target = self.sheet
+    if w <= 0.0 or h <= 0.0 then
+        error(
+            "gfx.sheet: frame " .. tostring(
+                target.count + 1
+            ) .. " of sheet '" .. target.name .. "' has no positive size",
+            2
+        )
+    end
+    const index = target.count + 1
+    const base = (index - 1) * 4
+    const rects = target.rects
+    rects[base + 1] = x
+    rects[base + 2] = y
+    rects[base + 3] = w
+    rects[base + 4] = h
+    -- Seconds from here on. The model is authored in milliseconds because
+    -- Aseprite is; playback runs on a step measured in seconds and should not
+    -- divide once per row to find that out.
+    target.durations[index] = (duration ?? DEFAULT_DURATION) / 1000.0
+    target.count = index
+
+    return self
+end
+
+--- Names an inclusive frame span and its playback direction.
+--- @param self the builder to add to
+--- @param name what an animation asks for
+--- @param from the first frame, counting from one
+--- @param to the last frame, inclusive
+--- @param direction the playback direction, defaulting to `"forward"`
+--- @return the builder
+--- @raises when the name is empty
+function Builder.tag(self: Builder, name: string, from: integer, to: integer, direction: Direction?): Builder
+    if name == "" then
+        error("gfx.sheet: a tag needs a name", 2)
+    end
+    self.tags[name] = {from = from, to = to, direction = direction}
+
+    return self
+end
+
+--- Adds a fixed slice carrying one pivot.
+--- @param self the builder to add to
+--- @param name what a caller names to take its pivot from
+--- @param x the slice's left edge within a frame, in pixels
+--- @param y the slice's top edge in pixels
+--- @param w the slice width in pixels
+--- @param h the slice height in pixels
+--- @param pivotX the pivot within the slice, in the slice's own pixels; omitted,
+---     the slice carries no pivot and its middle stands in
+--- @param pivotY the pivot's vertical position in the slice's own pixels
+--- @return the builder
+function Builder.slice(
+    self: Builder,
+    name: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    pivotX: number?,
+    pivotY: number?
+): Builder
+    return self:sliceKeys(name, nil, {{frame = 1, x = x, y = y, w = w, h = h, pivotX = pivotX, pivotY = pivotY}})
+end
+
+--- Adds a slice from explicit keys, which is what an importer writes.
+--- @param self the builder to add to
+--- @param name the slice's name
+--- @param data free text to carry alongside it, or nil for none
+--- @param keys the keys in frame order, at least one
+--- @return the builder
+function Builder.sliceKeys(self: Builder, name: string, data: string?, keys: {SliceKey}): Builder
+    self.slices[#self.slices + 1] = {name = name, data = data ?? "", keys = keys}
+
+    return self
+end
+
+--- Registers and returns the finished sheet.
+--- @param self the builder to finish
+--- @return the registered sheet, carrying an `id`
+--- @raises when the sheet has no frames, when a tag's span falls outside them,
+---     or when a slice has no name or no keys
+function Builder.finish(self: Builder): Sheet
+    return register(self.sheet, self.tags, self.slices, 2)
+end
+
+-------------------------------------------------------------------------------
+-- Constructors
+-------------------------------------------------------------------------------
+
+--- Creates a sheet whose frames form a uniform grid.
+---
+--- Margin surrounds the grid and spacing separates the cells, so a cell's left
+--- edge is `margin + column * (frameWidth + spacing)`. Both default to zero,
+--- which is an image cut with nothing between its cells. Frames come out in
+--- row-major order.
+--- @param options the image size, the cell size, and the optional grid shape,
+---     tags, and slices
+--- @return the finished sheet, already registered under its name and carrying an
+---     `id`
+--- @raises on a missing name, a non-positive image or frame size, a grid that
+---     fits no cells, or a `count` past what the grid holds
+export function grid(options: GridOptions): Sheet
+    const self = newSheet(options.name, options.imageWidth, options.imageHeight, 2)
+
+    const frameWidth = options.frameWidth
+    const frameHeight = options.frameHeight
+    if frameWidth <= 0.0 or frameHeight <= 0.0 then
+        error("gfx.sheet.grid: sheet '" .. self.name .. "' needs a positive frame size", 2)
+    end
+
+    const margin = options.margin ?? 0.0
+    const spacing = options.spacing ?? 0.0
+
+    -- The last cell in a row has no spacing after it, so the spacing is added
+    -- back once before dividing rather than subtracted from every cell.
+    const columns = options.columns ?? floor((self.imageWidth - 2.0 * margin + spacing) / (frameWidth + spacing))
+    const rows = options.rows ?? floor((self.imageHeight - 2.0 * margin + spacing) / (frameHeight + spacing))
+    if columns < 1 or rows < 1 then
+        error(
+            "gfx.sheet.grid: sheet '" .. self.name .. "' fits no " .. tostring(
+                frameWidth
+            ) .. "x" .. tostring(
+                frameHeight
+            ) .. " cells in " .. tostring(self.imageWidth) .. "x" .. tostring(self.imageHeight) .. " pixels",
+            2
+        )
+    end
+
+    const count = options.count ?? columns * rows
+    if count < 1 or count > columns * rows then
+        error(
+            "gfx.sheet.grid: sheet '" .. self.name .. "' asks for " .. tostring(
+                count
+            ) .. " frames from a " .. tostring(columns) .. "x" .. tostring(rows) .. " grid",
+            2
+        )
+    end
+
+    const duration = (options.duration ?? DEFAULT_DURATION) / 1000.0
+    const rects = self.rects
+    for index = 1, count do
+        const column = (index - 1) % columns
+        const row = floor((index - 1) / columns)
+        const base = (index - 1) * 4
+        rects[base + 1] = margin + column * (frameWidth + spacing)
+        rects[base + 2] = margin + row * (frameHeight + spacing)
+        rects[base + 3] = frameWidth
+        rects[base + 4] = frameHeight
+        self.durations[index] = duration
+    end
+    self.count = count
+
+    return register(self, options.tags, options.slices, 2)
+end
+
+--- Creates a sheet from explicitly listed frame rectangles.
+---
+--- For an image no grid describes: frames of differing sizes, or an atlas whose
+--- cells a packing tool placed. Rectangles are not checked against the image, so
+--- one running off the edge samples whatever the image holds there.
+--- @param options the image size, the frame list, and the optional tags and slices
+--- @return the finished sheet, already registered under its name and carrying an
+---     `id`
+--- @raises on a missing name, a non-positive image size, an empty frame list, or
+---     a frame with no positive size
+export function rects(options: RectsOptions): Sheet
+    const self = newSheet(options.name, options.imageWidth, options.imageHeight, 2)
+
+    const frames = options.frames
+    if #frames < 1 then
+        error("gfx.sheet.rects: sheet '" .. self.name .. "' lists no frames", 2)
+    end
+
+    const store = self.rects
+    for index = 1, #frames do
+        const frame = frames[index]
+        if frame.w <= 0.0 or frame.h <= 0.0 then
+            error(
+                "gfx.sheet.rects: frame " .. tostring(index) .. " of sheet '" .. self.name .. "' has no positive size",
+                2
+            )
+        end
+        const base = (index - 1) * 4
+        store[base + 1] = frame.x ?? 0.0
+        store[base + 2] = frame.y ?? 0.0
+        store[base + 3] = frame.w
+        store[base + 4] = frame.h
+        self.durations[index] = (frame.duration ?? DEFAULT_DURATION) / 1000.0
+    end
+    self.count = #frames
+
+    return register(self, options.tags, options.slices, 2)
+end
+
+-------------------------------------------------------------------------------
+-- Aseprite JSON
+-------------------------------------------------------------------------------
+
+--- Returns the export's frames as a list, whichever of the two layouts it used.
+---
+--- Aseprite writes an array when the export is told to, and otherwise an object
+--- keyed by the frame's name. The names carry the frame number, so sorting them
+--- is what puts the object's frames back in order.
+--- @raises when the export names no frames at all
+local function asepriteFrames(export: {[string]: any}, level: integer): {{[string]: any}}
+    const raw = export.frames
+    if raw == nil then
+        error("gfx.sheet.fromAseprite: the export names no frames", level)
+    end
+
+    const list = raw as {{[string]: any}}
+    if #list > 0 then
+        return list
+    end
+
+    const keyed = raw as {[string]: {[string]: any}}
+    local names: {string} = {}
+    for name in pairs(keyed) do
+        names[#names + 1] = name
+    end
+    table.sort(names)
+
+    local ordered: {{[string]: any}} = {}
+    for index = 1, #names do
+        ordered[index] = assert(keyed[names[index]])
+    end
+
+    return ordered
+end
+
+--- Creates a sheet from an Aseprite JSON export.
+---
+--- One reader in front of the model rather than a second model: frames, their
+--- durations, frame tags with their directions, and slices with their keys all
+--- land in the sheet the builder writes.
+---
+--- The reader accepts Aseprite's array layout and its object layout, sorting
+--- the latter by frame name. It ignores `spriteSourceSize`, so export with
+--- trimming off.
+--- @param options the export as JSON text or an already-decoded table, and the
+---     name to register it under; the name defaults to the export's image name
+--- @return the finished sheet, already registered
+--- @raises when the export is not readable, when it names no image and the
+---     caller supplied no name, or when a frame carries no rectangle
+export function fromAseprite(options: AsepriteOptions): Sheet
+    local source = options.json
+    if source is string then
+        source = json.decode(source)
+    end
+    if source == nil then
+        error("gfx.sheet.fromAseprite: an Aseprite sheet needs the export to read", 2)
+    end
+    const export = source as {[string]: any}
+
+    const meta = (export.meta ?? {}) as {[string]: any}
+    const size = (meta.size ?? {}) as {[string]: number}
+    const name = options.name ?? (meta.image as string?)
+    if name == nil or name == "" then
+        error("gfx.sheet.fromAseprite: the export names no image, so the sheet needs a name of its own", 2)
+    end
+
+    const builder = build(name, size.w ?? 0.0, size.h ?? 0.0)
+
+    const frames = asepriteFrames(export, 2)
+    for index = 1, #frames do
+        const entry = frames[index]
+        const rect = (entry.frame ?? {}) as {[string]: number}
+        if rect.w == nil or rect.h == nil then
+            error("gfx.sheet.fromAseprite: frame " .. tostring(index) .. " of the export has no rectangle", 2)
+        end
+        builder:frame(rect.x ?? 0.0, rect.y ?? 0.0, rect.w, rect.h, entry.duration as number?)
+    end
+
+    -- Aseprite counts frames from zero and this model counts from one, so the
+    -- span moves by one at the boundary and nowhere else.
+    const tags = (meta.frameTags ?? {}) as {{[string]: any}}
+    for index = 1, #tags do
+        const entry = tags[index]
+        const from = entry.from as integer?
+        const to = entry.to as integer?
+        if from == nil or to == nil then
+            error("gfx.sheet.fromAseprite: frame tag " .. tostring(index) .. " of the export has no span", 2)
+        end
+        builder:tag(entry.name as string, from + 1, to + 1, entry.direction as Direction?)
+    end
+
+    const slices = (meta.slices ?? {}) as {{[string]: any}}
+    for index = 1, #slices do
+        const entry = slices[index]
+        const raw = (entry.keys ?? {}) as {{[string]: any}}
+        local keys: {SliceKey} = {}
+        for at = 1, #raw do
+            const key = raw[at]
+            const rect = (key.bounds ?? {}) as {[string]: number}
+            local built: SliceKey = {
+                frame = (key.frame as integer? ?? 0) + 1,
+                x = rect.x ?? 0.0,
+                y = rect.y ?? 0.0,
+                w = rect.w ?? 0.0,
+                h = rect.h ?? 0.0,
+            }
+            const center = key.center as {[string]: number}?
+            if center ~= nil then
+                built.centerX = center.x ?? 0.0
+                built.centerY = center.y ?? 0.0
+                built.centerW = center.w ?? 0.0
+                built.centerH = center.h ?? 0.0
+            end
+            const pivot = key.pivot as {[string]: number}?
+            if pivot ~= nil then
+                built.pivotX = pivot.x ?? 0.0
+                built.pivotY = pivot.y ?? 0.0
+            end
+            keys[at] = built
+        end
+        builder:sliceKeys(entry.name as string, entry.data as string?, keys)
+    end
+
+    return builder:finish()
+end
