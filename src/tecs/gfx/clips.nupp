@@ -1,0 +1,211 @@
+module tecs.gfx.clips
+
+--[[
+Target-pixel clip regions and the component that selects one.
+
+A clip region is one rectangle in render-target pixels. An entity carrying
+`Clip` keeps the fragments that land inside the region it names and loses the
+ones that do not, whatever placed them there: a panel occupies a part of the
+window whether its contents are positioned by the camera, in screen pixels, or
+in virtual coordinates, and one rectangle is right for all three.
+
+```nupp
+const clips = tecs.gfx.clips
+
+clips.setRegion(1, {x = 16, y = 16, width = 320, height = 180})
+
+world:spawn(
+    tecs.ecs.Transform2D(64, 64, 0, 1, 0, 32, 32),
+    tecs.gfx.Tint(1, 1, 1, 1),
+    tecs.gfx.Clip(1),
+    tecs.gfx.Renderable2D
+)
+```
+
+Region zero is not a region and cannot be set. It is what an entity says when
+it wants no clipping at all, and it is what `Clip` defaults to.
+
+Nesting belongs to whoever hands the indices out. A region is one rectangle, so
+a panel inside a panel is set up as the intersection of the two rather than as
+two regions an entity sits in at once.
+
+The table is process-wide, in the same way component identity is, because one
+process drives one renderer.
+
+# Reach
+
+`culls` and `contains` answer against the table this module holds, so a game,
+an input layer, and a debug tool all test the same rectangles. Extraction does
+not yet drop a clipped entity: packet version 2 carries no clip index, so a
+`Clip` reaching the backend selects nothing there. The render lane adds that
+carriage, and until it does the region table is what a caller tests against
+itself.
+]]
+
+local ecs = require("tecs.ecs")
+
+--- The number of clip slots the table holds.
+---
+--- Regions run from one to `MAX - 1`, because zero is the entity saying it
+--- wants no clipping. A renderer packs the whole table into one uniform, so
+--- this is the size of that uniform rather than a soft limit.
+export const MAX: integer = 256
+
+--- Half the extent a cleared region reaches, which is far enough that no
+--- target pixel falls outside it.
+const UNBOUNDED = 1e30
+
+--- Defines one clip rectangle in render-target pixels, measured from the top
+--- left corner.
+export type Region = {
+    x: number,
+    y: number,
+    width: number,
+    height: number
+}
+
+--- Restricts an entity's fragments to one clip region.
+---
+--- A component rather than a field on every renderable, because presence is
+--- the opt-in and absence is the common case.
+export record Clip
+    --- Caller-writable. Selects a region set with `setRegion`, from one to
+    --- `MAX - 1`. Zero, the default, means no clipping.
+    index: integer
+end
+
+--- The process-wide `Clip` component definition.
+export const ClipComponent: ecs.TableComponent<Clip> = ecs.newComponent({
+    -- This persisted component name is a compatibility surface, and so is the
+    -- `index` key the default snapshot codec writes under it.
+    name = "Clip",
+    construct = function(index: integer?): Clip
+        return new Clip(index = index ?? 0)
+    end,
+    default = function(): Clip
+        return new Clip(index = 0)
+    end,
+})
+
+--- Region bounds as left, top, right, bottom, one region every four entries
+--- from index times four.
+---
+--- Stored as bounds rather than as a position and a size, because that is what
+--- every comparison wants and the alternative redoes the addition per test.
+local bounds: {number} = {}
+
+for index = 0, MAX - 1 do
+    const base = index * 4
+    bounds[base + 1] = -UNBOUNDED
+    bounds[base + 2] = -UNBOUNDED
+    bounds[base + 3] = UNBOUNDED
+    bounds[base + 4] = UNBOUNDED
+end
+
+local generation: integer = 0
+
+local function checkIndex(index: integer, caller: string): nil
+    if index < 1 or index >= MAX then
+        error(
+            "gfx.clips." .. caller .. ": a clip region is numbered 1 to " .. tostring(
+                MAX - 1
+            ) .. ", not " .. tostring(index),
+            3
+        )
+    end
+end
+
+--- Points one region at a rectangle in target pixels.
+---
+--- Replaces whatever the region held rather than intersecting with it, so a
+--- caller reusing an index across frames writes the whole rectangle each time.
+--- @param index the region to set, from one to `MAX - 1`
+--- @param region the rectangle in target pixels, measured from the top left
+--- @raises when the index is zero or outside the table, or when the rectangle
+---     has a negative width or height
+export function setRegion(index: integer, region: Region): nil
+    checkIndex(index, "setRegion")
+    if region.width < 0.0 or region.height < 0.0 then
+        error("gfx.clips.setRegion: a clip region has no negative size", 2)
+    end
+    const base = index * 4
+    bounds[base + 1] = region.x
+    bounds[base + 2] = region.y
+    bounds[base + 3] = region.x + region.width
+    bounds[base + 4] = region.y + region.height
+    generation = generation + 1
+end
+
+--- Stops one region clipping anything.
+---
+--- The region goes back to what it was before anyone set it, so an entity still
+--- pointing at it draws whole rather than disappearing. Whoever hands indices
+--- out and takes them back therefore leaves nothing behind that silently
+--- removes content.
+--- @param index the region to clear, from one to `MAX - 1`; clearing one nobody
+---     set is not an error
+--- @raises when the index is zero or outside the table
+export function clearRegion(index: integer): nil
+    checkIndex(index, "clearRegion")
+    const base = index * 4
+    bounds[base + 1] = -UNBOUNDED
+    bounds[base + 2] = -UNBOUNDED
+    bounds[base + 3] = UNBOUNDED
+    bounds[base + 4] = UNBOUNDED
+    generation = generation + 1
+end
+
+--- Returns one region's bounds in target pixels.
+--- @param index the region to read; zero, and anything outside the table,
+---     answers the bounds of a region that clips nothing
+--- @return the left edge, then the top, then the right, then the bottom
+export function regionOf(index: integer): number, number, number, number
+    if index < 0 or index >= MAX then
+        return -UNBOUNDED, -UNBOUNDED, UNBOUNDED, UNBOUNDED
+    end
+    const base = index * 4
+
+    return bounds[base + 1], bounds[base + 2], bounds[base + 3], bounds[base + 4]
+end
+
+--- Returns whether one target pixel survives a region.
+--- @param index the region to test against; zero keeps every pixel
+--- @param x the pixels from the target's left edge
+--- @param y the pixels from the target's top edge
+--- @return whether a fragment at that pixel is kept
+export function contains(index: integer, x: number, y: number): boolean
+    if index <= 0 or index >= MAX then
+        return true
+    end
+    const base = index * 4
+
+    return x >= bounds[base + 1] and y >= bounds[base + 2] and x <= bounds[base + 3] and y <= bounds[base + 4]
+end
+
+--- Returns whether a region removes every fragment of one target-pixel bound.
+---
+--- The cull half of clipping: a quad whose bound misses its region entirely
+--- contributes nothing, so a caller may drop it before it reaches the backend.
+--- A bound that only partly overlaps is kept whole, because the region decides
+--- the rest per fragment.
+--- @param index the region to test against; zero culls nothing
+--- @param minX the bound's left edge in target pixels
+--- @param minY the bound's top edge in target pixels
+--- @param maxX the bound's right edge in target pixels
+--- @param maxY the bound's bottom edge in target pixels
+--- @return whether the bound lies entirely outside the region
+export function culls(index: integer, minX: number, minY: number, maxX: number, maxY: number): boolean
+    if index <= 0 or index >= MAX then
+        return false
+    end
+    const base = index * 4
+
+    return maxX < bounds[base + 1] or maxY < bounds[base + 2] or minX > bounds[base + 3] or minY > bounds[base + 4]
+end
+
+--- Returns the region table's revision.
+--- @return a count starting at zero that only rises, so a consumer holding a
+---     packed copy can tell whether its copy is still the answer
+export function revision(): integer
+    return generation
+end
