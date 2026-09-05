@@ -29,7 +29,7 @@ local gamepadbackend = require("tecs.platform.gamepadbackend")
 local gfx = require("tecs.gfx")
 local input = require("tecs.input")
 local layers = require("tecs.gfx.layers")
-local log = require("tecs.log")
+local nupplog = require("nupp.log")
 local materials = require("tecs.gpu.materials")
 local mcp = require("tecs.mcp")
 local passes = require("tecs.gpu.passes")
@@ -302,21 +302,29 @@ end
 -- Logger names
 --
 -- The unit a developer types into a filter, so it is configuration rather than
--- an identifier.
+-- an identifier. Tecs no longer wraps logging: a module names its logger to
+-- `nupp.log.named` directly, so the names live at those call sites and there
+-- is no table here to compare against. `nupp.log` exposes no way to read the
+-- registered names back, so this asserts the one thing it can: a name stamps
+-- the line it is given to.
 -------------------------------------------------------------------------------
 
-function suite.loggerNames(): nil
-    test.equal(log.APP, "tecs.app")
-    test.equal(log.ASSETS, "tecs.assets")
-    test.equal(log.AUDIO, "tecs.audio")
-    test.equal(log.GFX, "tecs.gfx")
-    test.equal(log.GPU, "tecs.gpu")
-    test.equal(log.HTTP, "tecs.http")
-    test.equal(log.MCP, "tecs.mcp")
-    test.equal(log.PROFILE, "tecs.profile")
-    test.equal(log.SEQUENCE, "tecs.sequence")
-    test.equal(log.WATCH, "tecs.watch")
-    test.equal(log.WORLD, "tecs.world")
+function suite.aLoggerNameStampsItsLines(): nil
+    local seen: {string} = {}
+    local previousLevel = nupplog.level("debug")
+    local previousSink = nupplog.sink(function(
+        _severity: integer,
+        module: string,
+        _line: integer,
+        _message: string
+    ): nil
+        seen[#seen + 1] = module
+    end)
+    nupplog.named("tecs.audio"):info("probe")
+    nupplog.sink(previousSink)
+    nupplog.level(previousLevel)
+    test.equal(#seen, 1)
+    test.equal(seen[1], "tecs.audio")
 end
 
 -------------------------------------------------------------------------------
@@ -938,8 +946,10 @@ function suite.mouseButtonNames(): nil
     test.equal(state:mouseDown("left"), false)
     test.equal(state:mouseDown("middle"), false)
     test.equal(state:mouseDown("right"), false)
-    -- The SDL implementation spelled these two `x1` and `x2`. The rewrite
-    -- renamed them; the numeric codes four and five did not move.
+    -- `winit` spells these `Back` and `Forward` where SDL spelled them `x1`
+    -- and `x2`. A device vocabulary follows the library reporting it, so this
+    -- records a deliberate break rather than a name to preserve. The numeric
+    -- codes four and five did not move, which is why both still answer.
     test.equal(state:mouseDown("back"), false)
     test.equal(state:mouseDown("forward"), false)
     test.equal(state:mouseDown(4), false)

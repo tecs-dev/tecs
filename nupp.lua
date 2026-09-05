@@ -87,7 +87,6 @@ return {
                     "tecs.gpu.passes",
                     "tecs.host",
                     "tecs.input",
-                    "tecs.log",
                     "tecs.mcp",
                     "tecs.physics",
                     "tecs.physics.contract",

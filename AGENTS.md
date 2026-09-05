@@ -185,6 +185,24 @@ tecs/
 
 ## Core Architecture Notes
 
+### Tecs defers to Nupp
+
+**Where Nupp provides a facility, Tecs uses it directly and wraps nothing.** Not a thin module
+around it, not a constant table naming its arguments, not a re-export for convenience. A wrapper
+costs a file, a name, and a second place to look, and it earns that back only by adding behavior
+Nupp does not have.
+
+The logging module is the worked example, and it is worked the wrong way twice. It existed to add a
+per-name threshold Nupp does not offer, which is a real thing to add; then seven modules reached
+past it to `nupp.log` anyway and the threshold it existed for stopped reaching them, so the wrapper
+was costing a file and delivering nothing. It is gone, and every module names its logger to
+`nupp.log.named`. Filtering is `nupp.log`'s process level until Nupp has more, and if per-name
+filtering is worth having it is worth having in Nupp, where every program gets it.
+
+Read this as the general rule the "not a line-for-line port" instruction implies: tasks,
+suspension, workers, bytes, files, paths, JSON, networking, time, random and logging are Nupp's.
+What survives the crossing is what is Tecs-specific, and a module that only forwards is not.
+
 ### The dependency rule
 
 `tecs` is what a game reaches, and every public name on it is `tecs.<module>.<thing>`: `tecs.ecs.newWorld`,
@@ -510,6 +528,18 @@ tidying it.
 
 Renaming one of these is a migration, not a rename. It needs an explicit path from the old value and
 validation that finds state written under it, and neither is in scope for a namespace change.
+
+**A device vocabulary is the exception, and follows the library that reports it.** Key names,
+mouse button names and gamepad button and axis names came from SDL and now come from `winit` and
+`gilrs`, so `x1` is `back`, `A` is `KeyA` and `Left` is `ArrowLeft`. A binding saved by an SDL build
+does not survive that, and no migration is provided: the alternative is a translation table that
+exists only to preserve the vocabulary of a library the engine no longer links, maintained forever
+against two upstreams. The numeric codes never moved, so what changed is the spelling.
+
+Two consequences worth stating. A name that no current library can report is not published, however
+long SDL published it, because a button nothing can press is the same empty promise as a logger
+nothing writes through. And a vocabulary that comes from a dependency's `Debug` implementation is
+pinned by a test, because a bump can otherwise rename a key with nothing here failing to build.
 
 ### Performance
 

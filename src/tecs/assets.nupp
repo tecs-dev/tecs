@@ -69,7 +69,7 @@ leaves the resident payload exactly as it was and answers `false, reason`.
 
 local files = require("nupp.io.files")
 local suspension = require("nupp.suspension")
-local log = require("tecs.log")
+local log = require("nupp.log")
 
 --- Where one acquisition stands.
 export type Status = "pending" | "ready" | "failed"
@@ -243,7 +243,7 @@ export record Assets
     shutdown: function(exclusive self: Assets): nil
 end
 
-local logger = log.get(log.ASSETS)
+local logger = log.named("tecs.assets")
 
 -------------------------------------------------------------------------------
 -- Jobs supplied by this module

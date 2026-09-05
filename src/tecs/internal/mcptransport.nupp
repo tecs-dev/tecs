@@ -25,14 +25,14 @@ server value ordinary rather than affine out through `tecs.mcp`.
 ]]
 
 local json = require("nupp.data.json")
-local log = require("tecs.log")
+local log = require("nupp.log")
 local suspension = require("nupp.suspension")
 local net = require("nupp.io.net")
 local registry = require("tecs.internal.mcpregistry")
 
 -- The externally typed logger name is `tecs.mcp`, independent of the module
 -- path it is created from. Do not rename this compatibility surface.
-local logger = log.get(log.MCP)
+local logger = log.named("tecs.mcp")
 
 --- The sentinel a parked connection raises when `destroy` unwinds it.
 local SHUTDOWN = "tecs.mcp: the server stopped"

@@ -70,7 +70,7 @@ still needs the stat.
 ]]
 
 local files = require("nupp.io.files")
-local log = require("tecs.log")
+local log = require("nupp.log")
 local time = require("nupp.time")
 
 --- One settled content change.
@@ -161,7 +161,7 @@ local record Entry
     steady: integer
 end
 
-local logger = log.get(log.WATCH)
+local logger = log.named("tecs.watch")
 
 local handlers: {[string]: ChangeHandler?} = {}
 local entries: {[string]: Entry} = {}

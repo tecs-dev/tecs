@@ -592,6 +592,16 @@ fn normalized(value: f64, extent: u32) -> f64 {
     value / f64::from(extent)
 }
 
+/// Names a physical key for the Nupp side.
+///
+/// The vocabulary is `winit`'s own: `KeyA`, `ArrowLeft`, `ShiftLeft`. It is
+/// deliberately not SDL's, which spelled the same keys `A`, `Left` and
+/// `Left Shift`, because the names a game binds against should be the ones the
+/// library reporting them uses.
+///
+/// It comes from a `Debug` implementation in a dependency, so a `winit` bump
+/// could rename a key with nothing here failing to compile. `key_names_are_
+/// winit_spellings` pins a sample against that.
 fn physical_key_name(key: PhysicalKey) -> String {
     match key {
         PhysicalKey::Code(code) => format!("{code:?}"),
@@ -790,6 +800,33 @@ fn run_headless(config: Config) -> Result<()> {
         return Err(anyhow!("Nupp application crashed: {failure}"));
     }
     bridge.shutdown()
+}
+
+#[cfg(test)]
+mod keynametests {
+    use super::physical_key_name;
+    use winit::keyboard::{KeyCode, PhysicalKey};
+
+    /// The key vocabulary a game binds against comes from a dependency's
+    /// `Debug` implementation, so a bump can rename one with nothing here
+    /// failing to build. These are the shapes a binding actually uses: a
+    /// letter, a digit, an arrow, a modifier, a function key and a named key.
+    #[test]
+    fn key_names_are_winit_spellings() {
+        for (code, name) in [
+            (KeyCode::KeyA, "KeyA"),
+            (KeyCode::Digit1, "Digit1"),
+            (KeyCode::ArrowLeft, "ArrowLeft"),
+            (KeyCode::ShiftLeft, "ShiftLeft"),
+            (KeyCode::ControlLeft, "ControlLeft"),
+            (KeyCode::F1, "F1"),
+            (KeyCode::Escape, "Escape"),
+            (KeyCode::Space, "Space"),
+            (KeyCode::Enter, "Enter"),
+        ] {
+            assert_eq!(physical_key_name(PhysicalKey::Code(code)), name);
+        }
+    }
 }
 
 fn main() {

@@ -19,7 +19,7 @@ module walks is sorted first, so a subtree is torn down and a signal is
 delivered the same way on every run.
 ]]
 
-local log = require("tecs.log")
+local log = require("nupp.log")
 local entityworld = require("tecs.internal.world")
 local sequenceregistry = require("tecs.internal.sequenceregistry")
 local sequencetypes = require("tecs.internal.sequencetypes")
@@ -27,7 +27,7 @@ local wakeheap = require("tecs.internal.wakeheap")
 
 -- This logger name is a compatibility surface: it is the unit a developer
 -- filters on rather than an identifier this tree may move.
-local logger = log.get(log.SEQUENCE)
+local logger = log.named("tecs.sequence")
 
 --- The exclusive upper bound on an arena slot, and the multiplier a handle
 --- packs a generation by. A handle is `slot + generation * SLOT_LIMIT`, so it

@@ -67,12 +67,12 @@ chooses its own art.
 local data = require("tecs.data")
 local ecs = require("tecs.ecs")
 local gamepadbackend = require("tecs.platform.gamepadbackend")
-local log = require("tecs.log")
+local log = require("nupp.log")
 local platformevents = require("tecs.platform.events")
 
 --- Compatibility surface: a developer types this logger name into a filter, so
 --- it is configuration rather than an identifier and does not move.
-local LOGGER = log.get(log.INPUT)
+local LOGGER = log.named("tecs.input")
 
 --- A position in the input capture stack.
 export record Layer
@@ -82,14 +82,25 @@ export record Layer
 end
 
 --- A conventional pointer button name.
+---
+--- These are `winit`'s names, not SDL's, which spelled the last two `x1` and
+--- `x2`. Device vocabularies follow the library that reports them: the numeric
+--- codes never moved, so what changed is the spelling a binding uses, and a
+--- binding saved by an SDL build does not survive the move. That is a
+--- deliberate break rather than an oversight.
 export type MouseButton = "left" | "middle" | "right" | "back" | "forward"
 
 --- A positional gamepad button name.
 ---
---- Compatibility surface: these are the names the Teal implementation
---- published, so a saved binding and a game keep working across the move. They
---- are positional rather than Xbox-only on purpose: the hardware label is a
+--- These are what `gilrs` reports, spelled as Tecs publishes them. They are
+--- positional rather than Xbox-only on purpose: the hardware label is a
 --- separate question, and one this engine no longer answers.
+---
+--- SDL published twelve more that no name here covers: `misc1` through
+--- `misc6` and the four paddles. `gilrs` has no counterpart for any of them,
+--- so a game cannot read them however they are spelled, and naming a button
+--- nothing can report would be the same empty promise as naming a logger
+--- nothing writes through.
 export type GamepadButton = "south"
     | "east"
     | "west"
