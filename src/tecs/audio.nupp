@@ -61,6 +61,29 @@ handle. The audio pass starts it, follows the writable playback fields, and
 stops it when the component or the entity disappears. Write through
 `world:getMut`.
 
+## Devices and recording
+
+`playbackDevices` and `recordingDevices` name what is attached now, and
+`openMicrophone` opens one for capture. A [`Microphone`](tecs.audio.Microphone)
+is pulled rather than pushed: the backend fills a bounded buffer from its own
+thread and `read` empties it on the frame thread, so nothing a device thread
+runs ever enters Nupp.
+
+```nupp
+local audio <const> = require("tecs.audio")
+
+for _, device in ipairs(audio.recordingDevices()) do
+    print(device.id, device.name, device.frequency, device.channels)
+end
+
+local microphone <const> = assert(audio.openMicrophone({channels = 1}))
+local block <const> = assert(microphone:read())
+microphone:destroy()
+```
+
+Listing devices opens no mixer and no microphone, and opening a microphone opens
+no mixer, so a game that only wants to name devices pays for nothing else.
+
 ## The frame
 
 `update` is not a world system, and `install` deliberately does not add one.
@@ -93,6 +116,19 @@ local DEFAULT_MAX_VOICES: integer = 32
 --- enough that no sound effect reaches it and short enough that no piece of
 --- music misses it.
 local DEFAULT_STREAM_SECONDS: number = 10
+
+--- Frames per second a microphone captures at unless configured otherwise.
+local DEFAULT_CAPTURE_FREQUENCY: integer = 48000
+
+--- Channels a microphone captures unless configured otherwise. One, because a
+--- microphone is one microphone and a game that wants a stereo pair asks.
+local DEFAULT_CAPTURE_CHANNELS: integer = 1
+
+--- Channels a microphone may be asked for. The ceiling is the one the SDL
+--- implementation published, and its refusal message is a compatibility
+--- surface, so it stays where it was even though the capture path itself
+--- carries fewer.
+local MAX_CAPTURE_CHANNELS: integer = 32
 
 --- Slots a voice handle reserves for its index. The rest of the handle is a
 --- generation, so a handle whose slot has been finished and reused refers to
@@ -607,6 +643,111 @@ export record VoiceInfo
     --- Read-only. Reports the last right-speaker gain sent. It has no meaning
     --- unless `stereo`.
     right: number
+end
+
+--- Names one physical audio device.
+---
+--- Re-exported from the backend contract so a game reaches it as
+--- `tecs.audio.Device`, which is where the SDL implementation published it.
+export type Device = audiobackend.Device
+
+--- Configures `openMicrophone`.
+export type MicrophoneConfig = {
+    --- Caller-writable. Selects a physical device by the `id` a
+    --- [`Device`](tecs.audio.Device) from `recordingDevices` reported. Omitted
+    --- or zero uses the system's current default. An id names a position in
+    --- the listing that produced it, so a game keeping a choice across runs
+    --- keeps `deviceName` instead.
+    device: integer?,
+
+    --- Caller-writable. Selects a physical device by the `name` a
+    --- [`Device`](tecs.audio.Device) reported, and wins over `device`. This is
+    --- the durable way to name a device, because a name survives a run and an
+    --- id moves when something is attached or removed.
+    deviceName: string?,
+
+    --- Caller-writable. Sets the frames per second `read` answers in, and
+    --- defaults to 48000. The backend converts the device's own rate, so this
+    --- is what arrives rather than what the hardware runs at.
+    frequency: integer?,
+
+    --- Caller-writable. Sets the interleaved channels `read` answers with, and
+    --- defaults to one. The backend folds or spreads the device's own channels
+    --- to reach it. The native backend carries at most eight, so a count above
+    --- that and inside the accepted range is refused with a reason rather than
+    --- raised.
+    channels: integer?,
+
+    --- Caller-writable. Sets how many frames the capture holds before the
+    --- oldest are dropped, and defaults to one second at `frequency`.
+    bufferFrames: integer?,
+
+    --- Caller-writable. Supplies the device provider instead of resolving the
+    --- native one, which is what a device-free test uses.
+    devices: audiobackend.Devices?
+}
+
+--- An open recording device, pulled rather than pushed.
+---
+--- Capture is running by the time one of these exists and the backend's own
+--- thread is filling a buffer behind it. Nothing arrives until `read` asks, and
+--- nothing that thread runs enters Nupp: a device thread is one the Lua virtual
+--- machine never created, so the frames cross by this side emptying a buffer
+--- rather than by anything calling in.
+---
+--- The buffer is bounded, which is the one behavior the SDL implementation had
+--- and this does not. SDL grew its capture stream without limit, so a game that
+--- stopped reading paid in memory and in latency forever. This drops the oldest
+--- frames instead and counts them in `overruns`, because the recent second is
+--- what a game that fell behind actually wants.
+export record Microphone
+    --- Read-only. Reports the frames per second `read` answers in. This is the
+    --- requested value, not the device's own.
+    frequency: integer
+
+    --- Read-only. Reports the interleaved channels per frame `read` answers
+    --- with. This is the requested value, not the device's own.
+    channels: integer
+
+    private capture: audiobackend.Capture?
+
+    --- Read-only. Reports the complete sample frames ready to read without
+    --- waiting, so a partly arrived frame is not counted. Zero once destroyed,
+    --- rather than an error.
+    availableFrames: function(borrows self: Microphone): integer
+
+    --- Read-only. Reports the frames dropped because nothing read them in time,
+    --- counted since the microphone opened. Zero once destroyed.
+    overruns: function(borrows self: Microphone): integer
+
+    --- Read-only. Pulls up to `maxFrames` complete frames as interleaved
+    --- native-endian float32 samples, `channels * 4` bytes per frame. Omitting
+    --- `maxFrames` takes everything ready now, and a limit above what is ready
+    --- takes what is ready rather than waiting. An empty string means nothing
+    --- was ready and is not a failure. Returns nil and the reason for a
+    --- destroyed microphone or a backend failure, and raises when `maxFrames`
+    --- is not a non-negative integer.
+    read: function(exclusive self: Microphone, maxFrames: integer?): (string?, string?)
+
+    --- Read-only. Pulls up to `maxFrames` complete frames into `out` as
+    --- interleaved samples from index one, writing no more frames than `out`
+    --- holds, and returns how many it wrote. This is the allocation-free form
+    --- of `read`, for a game draining a microphone every frame.
+    readInto: function(exclusive self: Microphone, out: {number}, maxFrames: integer?): integer
+
+    --- Read-only. Stops the device filling the buffer, keeping whatever is
+    --- already in it. Pausing one already paused succeeds; a destroyed
+    --- microphone reports false with a reason.
+    pause: function(exclusive self: Microphone): (boolean, string?)
+
+    --- Read-only. Starts the device filling the buffer again after `pause`. A
+    --- destroyed microphone reports false with a reason.
+    resume: function(exclusive self: Microphone): (boolean, string?)
+
+    --- Read-only. Stops capture and closes the recording device. Safe more than
+    --- once. Whatever was captured and not yet read is discarded with the
+    --- buffer, so a last `read` belongs before this rather than after.
+    destroy: function(exclusive self: Microphone): nil
 end
 
 --- One output and the voices sounding on it.
@@ -2215,4 +2356,212 @@ export function install(exclusive world: ecs.World, config: Config?): Audio
     })
 
     return mixer
+end
+
+--- The native device provider, resolved once and kept.
+---
+--- Resolving it loads `libtecsaudio` and builds a record of closures. It opens
+--- nothing and lists nothing, so this is safe to do on a machine with no sound
+--- and safe to do before a game has decided whether it wants any.
+local resolvedDevices: {audiobackend.Devices} = {}
+
+--- Returns the provider a call should use.
+---
+--- @param given the provider a caller supplied, or nil to resolve the native one
+--- @return the caller's provider, the native one, or the silent fallback
+local function providerFor(given: audiobackend.Devices?): audiobackend.Devices
+    if given ~= nil then
+        return given
+    end
+    local existing = resolvedDevices[1]
+    if existing ~= nil then
+        return existing
+    end
+    local resolved: audiobackend.Devices? = nil
+    local loaded, native = pcall(require, "tecs.platform.audionative")
+    if loaded then
+        resolved = (native as {[string]: any}).devices() as audiobackend.Devices?
+    else
+        LOGGER:info("no audio devices: %s", tostring(native))
+    end
+    if resolved == nil then
+        resolved = audiobackend.silentDevices()
+    end
+    resolvedDevices[1] = resolved
+
+    return resolved
+end
+
+--- Names the playback devices attached now.
+---
+--- A snapshot rather than a subscription: devices come and go while a game
+--- runs, so an id held across a hotplug may name nothing. A
+--- [`Device`](tecs.audio.Device) `name` is what survives a run.
+---
+--- @param devices the provider to ask, or nil for the platform's own
+--- @return the devices, listed afresh each call and the caller's to keep. Empty
+---     rather than nil when nothing could be asked, so a caller that only
+---     iterates needs no nil check.
+--- @return the reason, when something went wrong. Nil on success, including for
+---     a machine that genuinely has no playback device.
+export function playbackDevices(devices: audiobackend.Devices?): ({Device}, string?)
+    return providerFor(devices).playback()
+end
+
+--- Names the recording devices attached now.
+---
+--- @param devices the provider to ask, or nil for the platform's own
+--- @return the devices, read as `playbackDevices` reads its own
+--- @return the reason, when something went wrong
+export function recordingDevices(devices: audiobackend.Devices?): ({Device}, string?)
+    return providerFor(devices).recording()
+end
+
+--- Opens a microphone as interleaved native-endian 32-bit float samples.
+---
+--- No callback is installed anywhere. The backend's own thread fills a bounded
+--- buffer and the game pulls completed frames from the frame thread with
+--- [`Microphone.read`](tecs.audio.Microphone), because a device thread is one
+--- the Lua virtual machine never created and entering Nupp from it is
+--- undefined.
+---
+--- @param config the settings, or nil to open the system's current default
+---     recording device at 48000 Hz in mono with a one-second buffer
+--- @return an open microphone, already recording: capture is running before
+---     this returns, so frames accumulate from here whether or not anything
+---     reads them. Nil on failure, with the reason beside it, and nothing is
+---     left open in that case.
+--- @return the reason, when the first return is nil
+--- @raises when `frequency` is not a positive integer, when `channels` is not
+---     an integer from 1 to 32, or when `bufferFrames` is not a positive
+---     integer
+export function openMicrophone(config: MicrophoneConfig?): (Microphone?, string?)
+    local frequency = (config and config.frequency) or DEFAULT_CAPTURE_FREQUENCY
+    local channels = (config and config.channels) or DEFAULT_CAPTURE_CHANNELS
+    if frequency < 1 then
+        -- These two refusals are compatibility surfaces: the SDL implementation
+        -- published them word for word, so the wording stays even though the
+        -- house rule moved them from a returned reason to a raise. Neither
+        -- checks that the value is whole any more, because `integer` is its own
+        -- type here and a fractional one is refused before the call runs.
+        error("tecs.audio.openMicrophone: microphone frequency must be a positive integer", 2)
+    end
+    if channels < 1 or channels > MAX_CAPTURE_CHANNELS then
+        error("tecs.audio.openMicrophone: microphone channels must be an integer from 1 to 32", 2)
+    end
+    local bufferFrames = (config and config.bufferFrames) or frequency
+    if bufferFrames < 1 then
+        error("tecs.audio.openMicrophone: bufferFrames must be a positive integer", 2)
+    end
+
+    local provider = providerFor(config and config.devices)
+    local capture, reason = provider.open(
+        (config and config.device) or 0,
+        config and config.deviceName,
+        frequency,
+        channels,
+        bufferFrames
+    )
+    if capture == nil then
+        return nil, reason or "no recording device opened"
+    end
+
+    return new Microphone(frequency = capture.frequency, channels = capture.channels, capture = capture)
+end
+
+function Microphone.availableFrames(borrows self: Microphone): integer
+    local capture = self.capture
+    if capture == nil then
+        return 0
+    end
+
+    return capture.availableFrames()
+end
+
+function Microphone.overruns(borrows self: Microphone): integer
+    local capture = self.capture
+    if capture == nil then
+        return 0
+    end
+
+    return capture.overruns()
+end
+
+--- Returns how many frames a call should take, given what is ready.
+---
+--- @param ready the frames the capture has
+--- @param maxFrames the caller's ceiling, or nil for everything ready
+--- @return the frames to take
+--- @raises when `maxFrames` is not a non-negative integer
+local function capped(ready: integer, maxFrames: integer?): integer
+    if maxFrames == nil then
+        return ready
+    end
+    if maxFrames < 0 then
+        -- Another compatibility surface, kept word for word. The SDL
+        -- implementation also had to check that the value was whole, and this
+        -- one does not: `integer` is its own type here, so a fractional count
+        -- is refused before the call runs.
+        error("maxFrames must be a non-negative integer", 3)
+    end
+    if maxFrames < ready then
+        return maxFrames
+    end
+
+    return ready
+end
+
+function Microphone.read(exclusive self: Microphone, maxFrames: integer?): (string?, string?)
+    local capture = self.capture
+    if capture == nil then
+        -- This reason is a compatibility surface: the SDL implementation
+        -- returned it word for word.
+        return nil, "microphone is destroyed"
+    end
+    local frames = capped(capture.availableFrames(), maxFrames)
+    if frames == 0 then
+        return ""
+    end
+
+    return capture.read(frames)
+end
+
+function Microphone.readInto(exclusive self: Microphone, out: {number}, maxFrames: integer?): integer
+    local capture = self.capture
+    if capture == nil then
+        return 0
+    end
+    local frames = capped(capture.availableFrames(), maxFrames)
+    if frames == 0 then
+        return 0
+    end
+
+    return capture.readInto(out, frames)
+end
+
+function Microphone.pause(exclusive self: Microphone): (boolean, string?)
+    local capture = self.capture
+    if capture == nil then
+        return false, "microphone is destroyed"
+    end
+
+    return capture.pause()
+end
+
+function Microphone.resume(exclusive self: Microphone): (boolean, string?)
+    local capture = self.capture
+    if capture == nil then
+        return false, "microphone is destroyed"
+    end
+
+    return capture.resume()
+end
+
+function Microphone.destroy(exclusive self: Microphone): nil
+    local capture = self.capture
+    if capture == nil then
+        return
+    end
+    self.capture = nil
+    capture.close()
 end

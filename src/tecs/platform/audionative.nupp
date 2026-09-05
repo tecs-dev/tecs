@@ -35,6 +35,16 @@ nativelibrary.open("tecsaudio", "TECS_AUDIO_LIBRARY")
 --- uses rather than reaching for `any` at each call site.
 local readCString: function(value: cstring?): string = ffilib.string as any
 
+--- Reads `length` bytes from memory the library filled.
+---
+--- The captured samples are the one raw block on this seam, and they carry
+--- zeroes, so the length has to come from the call rather than from a
+--- terminator.
+local readBytes: function(value: any, length: integer): string = ffilib.string as any
+
+--- Bytes one interleaved sample occupies, which the C ABI fixes at four.
+local BYTES_PER_SAMPLE: integer = 4
+
 cdef struct tecsAudioCommand
     kind: uint32
     handle: uint32
@@ -58,6 +68,20 @@ end
 cdef struct tecsAudioClipInfo
     duration: float
     resident: int32
+end
+
+--- One captured sample, so a block of them can be a `carray`.
+---
+--- `carray` takes a struct type, and the captured samples are bare floats, so
+--- the block is declared as an array of one-field structs instead. A struct
+--- holding one float has that float's size and alignment under every ABI this
+--- tree targets, so `tecsAudioSample*` and `float*` describe the same memory
+--- and the library's own declaration stays `float*`. Nothing about the layout
+--- is negotiable, which is why this is not in `tecs_audio_layout`: the C ABI
+--- fixes a float at four bytes and there is no second description to drift
+--- from.
+cdef struct tecsAudioSample
+    value: float
 end
 
 -- Every entry point takes the device as a borrow, including `tecs_audio_close`.
@@ -102,6 +126,73 @@ cdef function tecs_audio_decoders(borrows device: voidptr?): cstring?
 cdef function tecs_audio_last_error(borrows device: voidptr?): cstring?
 
 cdef function tecs_audio_layout(kind: uint32): uint32
+
+-- Device listing and recording. Neither a listing nor a capture crosses as a
+-- struct: a device name has no fixed width worth choosing, and a capture is a
+-- handle. So these add nothing for `layoutMismatch` to compare, and the
+-- interleaved float samples a read produces are the one raw block, which the C
+-- ABI already fixes at four bytes each.
+
+cdef function tecs_audio_open_error(): cstring?
+
+cdef function tecs_audio_devices(recording: uint32): voidptr?
+
+cdef function tecs_audio_devices_count(borrows list: voidptr?): uint32
+
+cdef function tecs_audio_devices_id(borrows list: voidptr?, index: uint32): uint32
+
+cdef function tecs_audio_devices_name(borrows list: voidptr?, index: uint32): cstring?
+
+cdef function tecs_audio_devices_frequency(borrows list: voidptr?, index: uint32): uint32
+
+cdef function tecs_audio_devices_channels(borrows list: voidptr?, index: uint32): uint32
+
+cdef function tecs_audio_devices_free(borrows list: voidptr?)
+
+cdef function tecs_audio_open_microphone(
+    device: uint32,
+    name: cstring?,
+    frequency: uint32,
+    channels: uint32,
+    bufferFrames: uint32
+): voidptr?
+
+cdef function tecs_audio_open_microphone_offline(frequency: uint32, channels: uint32, bufferFrames: uint32): voidptr?
+
+cdef function tecs_audio_microphone_close(borrows microphone: voidptr?)
+
+cdef function tecs_audio_microphone_frequency(borrows microphone: voidptr?): uint32
+
+cdef function tecs_audio_microphone_channels(borrows microphone: voidptr?): uint32
+
+cdef function tecs_audio_microphone_available(borrows microphone: voidptr?): uint32
+
+cdef function tecs_audio_microphone_overruns(borrows microphone: voidptr?): uint32
+
+-- The library declares these two as `float *`. They are declared here as
+-- `tecsAudioSample *`, which is the same memory: `carray` needs a struct type,
+-- and LuaJIT refuses to convert an array of one-field structs to a pointer to
+-- its field even though the two describe identical bytes. Naming the struct on
+-- both sides of the call is what makes the conversion legal without a cast that
+-- would hide a real mismatch.
+
+cdef function tecs_audio_microphone_read(
+    borrows microphone: voidptr?,
+    borrows out: tecsAudioSample*,
+    maxFrames: uint32
+): int32
+
+cdef function tecs_audio_microphone_write(
+    borrows microphone: voidptr?,
+    borrows samples: tecsAudioSample*,
+    frames: uint32
+): uint32
+
+cdef function tecs_audio_microphone_pause(borrows microphone: voidptr?): int32
+
+cdef function tecs_audio_microphone_resume(borrows microphone: voidptr?): int32
+
+cdef function tecs_audio_microphone_last_error(borrows microphone: voidptr?): cstring?
 
 --- Commands buffered before one crossing, and events pulled back in one.
 ---
@@ -344,4 +435,317 @@ export function openOffline(frequency: integer, channels: integer, maxVoices: in
     end
 
     return wrap(device)
+end
+
+--- Returns the reason the library left after a failing enumeration or open.
+---
+--- Those two calls answer with a handle rather than with a device, so the
+--- library has nothing to hang a reason off and keeps one process-wide slot
+--- instead. It is read immediately, before anything else can replace it.
+---
+--- @param fallback the reason to use when the library left none
+--- @return the library's reason, or `fallback`
+local function openReason(fallback: string): string
+    local message = tecs_audio_open_error()
+    if message == nil then
+        return fallback
+    end
+    local text = readCString(message)
+    if text == "" then
+        return fallback
+    end
+
+    return text
+end
+
+--- Names every device of one direction and frees the library's listing.
+---
+--- @param recording whether to name recording devices rather than playback ones
+--- @return the devices, empty rather than nil when the host produced none
+--- @return the reason, when the listing is empty because something failed
+local function listDevices(recording: boolean): ({audiobackend.Device}, string?)
+    local list = tecs_audio_devices((recording and 1 or 0) as uint32)
+    if list == nil then
+        return {}, openReason("tecsaudio listed no devices")
+    end
+    local count = tecs_audio_devices_count(list) as integer
+    local out: {audiobackend.Device} = {}
+    for index = 0, count - 1 do
+        local slot = index as uint32
+        local named = tecs_audio_devices_name(list, slot)
+        local name = ""
+        if named ~= nil then
+            name = readCString(named)
+        end
+        out[
+            index + 1
+        ] = new audiobackend.Device(
+            id = tecs_audio_devices_id(list, slot) as integer,
+            name = name,
+            frequency = tecs_audio_devices_frequency(list, slot) as integer,
+            channels = tecs_audio_devices_channels(list, slot) as integer
+        )
+    end
+    tecs_audio_devices_free(list)
+
+    return out
+end
+
+--- Wraps an open library capture in the backend contract.
+---
+--- The sample block is allocated once, sized to the whole ring, because no read
+--- can produce more frames than the ring holds and a capture drained every
+--- frame must not allocate to do it.
+local function wrapCapture(
+    microphone: voidptr?,
+    frequency: integer,
+    channels: integer,
+    bufferFrames: integer
+): audiobackend.Capture
+    local width = channels
+    if width < 1 then
+        width = 1
+    end
+    local capacityFrames = bufferFrames
+    if capacityFrames < 1 then
+        capacityFrames = 1
+    end
+    local samples = carray(tecsAudioSample, capacityFrames * width)
+    -- A boxed flag rather than a captured boolean, because every call below has
+    -- to refuse after `close` frees the handle and a freed pointer reached
+    -- again is not a diagnosable failure.
+    local closed = {false}
+
+    local function reason(fallback: string): string
+        local message = tecs_audio_microphone_last_error(microphone)
+        if message == nil then
+            return fallback
+        end
+        local text = readCString(message)
+        if text == "" then
+            return fallback
+        end
+
+        return text
+    end
+
+    --- Moves at most `maxFrames` frames into the sample block.
+    --- @param maxFrames the greatest number of frames to take
+    --- @return the frames written, or a negative number when the read failed
+    local function take(maxFrames: integer): integer
+        local wanted = maxFrames
+        if wanted > capacityFrames then
+            wanted = capacityFrames
+        end
+        if wanted < 1 then
+            return 0
+        end
+
+        return tecs_audio_microphone_read(microphone, samples, wanted as uint32) as integer
+    end
+
+    local function read(maxFrames: integer): (string?, string?)
+        if closed[1] then
+            return nil, "the capture is closed"
+        end
+        local frames = take(maxFrames)
+        if frames < 0 then
+            return nil, reason("tecsaudio could not read the capture")
+        end
+        if frames == 0 then
+            return ""
+        end
+
+        return readBytes(samples, frames * width * BYTES_PER_SAMPLE)
+    end
+
+    local function readInto(out: {number}, maxFrames: integer): integer
+        if closed[1] then
+            return 0
+        end
+        local fits = #out // width
+        local wanted = maxFrames
+        if wanted > fits then
+            wanted = fits
+        end
+        local frames = take(wanted)
+        if frames < 1 then
+            return 0
+        end
+        -- The block holds `capacityFrames * width` samples and the read above
+        -- was bounded by both, which is the fact the checker cannot read off an
+        -- `ffi.new` handle.
+        unsafe do
+            for index = 0, frames * width - 1 do
+                out[index + 1] = samples[index].value as number
+            end
+        end
+
+        return frames
+    end
+
+    local function write(source: {number}, frames: integer): integer
+        if closed[1] then
+            return 0
+        end
+        local remaining = frames
+        local offset: integer = 0
+        local total: integer = 0
+        while remaining > 0 do
+            local chunk = remaining
+            if chunk > capacityFrames then
+                chunk = capacityFrames
+            end
+            unsafe do
+                for index = 0, chunk * width - 1 do
+                    samples[index].value = nupp.math.f32.narrow(source[offset + index + 1])
+                end
+            end
+            local accepted = tecs_audio_microphone_write(microphone, samples, chunk as uint32) as integer
+            total = total + accepted
+            if accepted < chunk then
+                return total
+            end
+            offset = offset + chunk * width
+            remaining = remaining - chunk
+        end
+
+        return total
+    end
+
+    return new audiobackend.Capture(
+        frequency = frequency,
+        channels = width,
+        availableFrames = function(): integer
+            if closed[1] then
+                return 0
+            end
+
+            return tecs_audio_microphone_available(microphone) as integer
+        end,
+        overruns = function(): integer
+            if closed[1] then
+                return 0
+            end
+
+            return tecs_audio_microphone_overruns(microphone) as integer
+        end,
+        read = read,
+        readInto = readInto,
+        write = write,
+        pause = function(): (boolean, string?)
+            if closed[1] then
+                return false, "the capture is closed"
+            end
+            if tecs_audio_microphone_pause(microphone) == 0 then
+                return false, reason("tecsaudio could not pause the capture")
+            end
+
+            return true
+        end,
+        resume = function(): (boolean, string?)
+            if closed[1] then
+                return false, "the capture is closed"
+            end
+            if tecs_audio_microphone_resume(microphone) == 0 then
+                return false, reason("tecsaudio could not resume the capture")
+            end
+
+            return true
+        end,
+        close = function(): nil
+            if closed[1] then
+                return
+            end
+            closed[1] = true
+            tecs_audio_microphone_close(microphone)
+        end
+    )
+end
+
+--- Returns the device provider backed by the library.
+---
+--- Building it opens nothing and lists nothing: every call on the returned
+--- record reaches the platform, and none of them runs here. That matters
+--- because listing devices goes through the same platform machinery an open
+--- goes through, so resolving a provider has to stay clear of it.
+---
+--- @return a provider naming the platform's devices and opening its microphones
+export function devices(): audiobackend.Devices
+    return new audiobackend.Devices(
+        playback = function(): ({audiobackend.Device}, string?)
+            return listDevices(false)
+        end,
+        recording = function(): ({audiobackend.Device}, string?)
+            return listDevices(true)
+        end,
+        open = function(
+            device: integer,
+            deviceName: string?,
+            frequency: integer,
+            channels: integer,
+            bufferFrames: integer
+        ): (audiobackend.Capture?, string?)
+            local microphone = tecs_audio_open_microphone(
+                device as uint32,
+                deviceName,
+                frequency as uint32,
+                channels as uint32,
+                bufferFrames as uint32
+            )
+            if microphone == nil then
+                return nil, openReason("tecsaudio opened no microphone")
+            end
+
+            return wrapCapture(
+                microphone,
+                tecs_audio_microphone_frequency(microphone) as integer,
+                tecs_audio_microphone_channels(microphone) as integer,
+                bufferFrames
+            )
+        end
+    )
+end
+
+--- Returns a provider whose captures touch no recording device.
+---
+--- Its listings are empty, and `open` answers with a capture whose frames the
+--- caller supplies through `write`. This is what a test that has to prove the
+--- capture seam reaches for, and it is deliberately not what `tecs.audio`
+--- resolves: opening a real recording device can block inside the platform's
+--- audio daemon, and a headless suite must not be able to.
+---
+--- @return a provider naming no devices and opening device-free captures
+export function offlineDevices(): audiobackend.Devices
+    return new audiobackend.Devices(
+        playback = function(): ({audiobackend.Device}, string?)
+            return {}, "an offline provider names no devices"
+        end,
+        recording = function(): ({audiobackend.Device}, string?)
+            return {}, "an offline provider names no devices"
+        end,
+        open = function(
+            _device: integer,
+            _deviceName: string?,
+            frequency: integer,
+            channels: integer,
+            bufferFrames: integer
+        ): (audiobackend.Capture?, string?)
+            local microphone = tecs_audio_open_microphone_offline(
+                frequency as uint32,
+                channels as uint32,
+                bufferFrames as uint32
+            )
+            if microphone == nil then
+                return nil, openReason("tecsaudio opened no offline capture")
+            end
+
+            return wrapCapture(
+                microphone,
+                tecs_audio_microphone_frequency(microphone) as integer,
+                tecs_audio_microphone_channels(microphone) as integer,
+                bufferFrames
+            )
+        end
+    )
 end

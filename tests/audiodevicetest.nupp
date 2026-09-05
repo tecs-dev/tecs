@@ -1,0 +1,513 @@
+local audio = require("tecs.audio")
+local audiobackend = require("tecs.platform.audiobackend")
+local test = require("nupp.test")
+
+local suite = {}
+
+--- Bytes one interleaved sample occupies, which the C ABI fixes at four.
+local BYTES_PER_SAMPLE: integer = 4
+
+--- A device provider that captures nothing and remembers what it was asked.
+---
+--- The capture behind it is a bounded ring written in Nupp, so the drain, the
+--- overrun and the close all happen here rather than in a library. That is the
+--- point: this suite proves the contract without a recording device, and no
+--- headless suite may reach one.
+local record Stub
+    devices: audiobackend.Devices
+    capture: audiobackend.Capture
+    listed: {audiobackend.Device}
+    opens: {integer}
+    closed: {boolean}
+    refusal: {string}
+end
+
+--- Builds a capture holding `capacityFrames` frames, dropping the oldest.
+---
+--- `read` answers with the right number of bytes rather than with real samples,
+--- because a Nupp test cannot pack float32 without reaching for the FFI. The
+--- values themselves are checked through `readInto` here and over the real
+--- library in the native cases below.
+local function newStubCapture(
+    frequency: integer,
+    channels: integer,
+    capacityFrames: integer,
+    closed: {boolean}
+): audiobackend.Capture
+    local held: {number} = {}
+    local dropped = {0}
+    local paused = {false}
+
+    local function frameCount(): integer
+        return #held // channels
+    end
+
+    local function take(maxFrames: integer): integer
+        local frames = frameCount()
+        if maxFrames < frames then
+            frames = maxFrames
+        end
+
+        return frames
+    end
+
+    return new audiobackend.Capture(
+        frequency = frequency,
+        channels = channels,
+        availableFrames = function(): integer
+            if closed[1] then
+                return 0
+            end
+
+            return frameCount()
+        end,
+        overruns = function(): integer
+            return dropped[1]
+        end,
+        read = function(maxFrames: integer): (string?, string?)
+            if closed[1] then
+                return nil, "the capture is closed"
+            end
+            local frames = take(maxFrames)
+            for _ = 1, frames * channels do
+                table.remove(held, 1)
+            end
+
+            return ("\0"):rep(frames * channels * BYTES_PER_SAMPLE)
+        end,
+        readInto = function(out: {number}, maxFrames: integer): integer
+            if closed[1] then
+                return 0
+            end
+            local fits = #out // channels
+            local frames = take(maxFrames)
+            if frames > fits then
+                frames = fits
+            end
+            for index = 1, frames * channels do
+                out[index] = held[1]
+                table.remove(held, 1)
+            end
+
+            return frames
+        end,
+        write = function(samples: {number}, frames: integer): integer
+            if closed[1] or paused[1] then
+                return 0
+            end
+            for index = 1, frames * channels do
+                held[#held + 1] = samples[index]
+            end
+            while frameCount() > capacityFrames do
+                for _ = 1, channels do
+                    table.remove(held, 1)
+                end
+                dropped[1] = dropped[1] + 1
+            end
+
+            return frames
+        end,
+        pause = function(): (boolean, string?)
+            if closed[1] then
+                return false, "the capture is closed"
+            end
+            paused[1] = true
+
+            return true
+        end,
+        resume = function(): (boolean, string?)
+            if closed[1] then
+                return false, "the capture is closed"
+            end
+            paused[1] = false
+
+            return true
+        end,
+        close = function(): nil
+            closed[1] = true
+            for index = #held, 1, -1 do
+                held[index] = nil
+            end
+        end
+    )
+end
+
+local function newStub(listed: {audiobackend.Device}, capacityFrames: integer): Stub
+    local closed = {false}
+    local opens = {0}
+    local refusal = {""}
+    local capture = newStubCapture(48000, 1, capacityFrames, closed)
+
+    local devices = new audiobackend.Devices(
+        playback = function(): ({audiobackend.Device}, string?)
+            return listed
+        end,
+        recording = function(): ({audiobackend.Device}, string?)
+            return listed
+        end,
+        open = function(
+            _device: integer,
+            _deviceName: string?,
+            _frequency: integer,
+            _channels: integer,
+            _bufferFrames: integer
+        ): (audiobackend.Capture?, string?)
+            if refusal[1] ~= "" then
+                return nil, refusal[1]
+            end
+            opens[1] = opens[1] + 1
+
+            return capture
+        end
+    )
+
+    return new Stub(
+        devices = devices,
+        capture = capture,
+        listed = listed,
+        opens = opens,
+        closed = closed,
+        refusal = refusal
+    )
+end
+
+function suite.namesNothingWhenNoDeviceIsAttached(): nil
+    local silent = audiobackend.silentDevices()
+    local playback, playbackReason = audio.playbackDevices(silent)
+    test.equal(#playback, 0)
+    test.assert(#assert(playbackReason) > 0)
+
+    local recording, recordingReason = audio.recordingDevices(silent)
+    test.equal(#recording, 0)
+    test.assert(#assert(recordingReason) > 0)
+end
+
+function suite.reportsEveryFieldTheListingCarries(): nil
+    local stub = newStub(
+        {
+            new audiobackend.Device(id = 1, name = "Built-in Microphone", frequency = 48000, channels = 1),
+            new audiobackend.Device(id = 2, name = "USB Audio", frequency = 44100, channels = 2),
+        },
+        16
+    )
+
+    local listed, reason = audio.recordingDevices(stub.devices)
+    test.equal(reason, nil)
+    test.equal(#listed, 2)
+    test.equal(listed[1].id, 1)
+    test.equal(listed[1].name, "Built-in Microphone")
+    test.equal(listed[1].frequency, 48000)
+    test.equal(listed[1].channels, 1)
+    test.equal(listed[2].name, "USB Audio")
+    test.equal(listed[2].channels, 2)
+end
+
+function suite.refusesAMicrophoneThatIsNotThere(): nil
+    local microphone, reason = audio.openMicrophone({devices = audiobackend.silentDevices()})
+    test.equal(microphone, nil)
+    test.assert(#assert(reason) > 0)
+end
+
+function suite.carriesTheBackendReasonWhenAnOpenFails(): nil
+    local stub = newStub({}, 16)
+    stub.refusal[1] = "no recording device named 'Ghost'"
+    local microphone, reason = audio.openMicrophone({deviceName = "Ghost", devices = stub.devices})
+    test.equal(microphone, nil)
+    test.equal(reason, "no recording device named 'Ghost'")
+    test.equal(stub.opens[1], 0)
+end
+
+function suite.reportsTheLayoutTheCaptureSettledOn(): nil
+    local stub = newStub({}, 16)
+    local microphone = assert(audio.openMicrophone({devices = stub.devices}))
+    test.equal(microphone.frequency, 48000)
+    test.equal(microphone.channels, 1)
+    test.equal(stub.opens[1], 1)
+    microphone:destroy()
+end
+
+function suite.drainsTheFramesTheDeviceCaptured(): nil
+    local stub = newStub({}, 16)
+    local microphone = assert(audio.openMicrophone({devices = stub.devices}))
+    test.equal(microphone:availableFrames(), 0)
+    test.equal(assert(microphone:read()), "")
+
+    stub.capture.write({0.25, 0.5, 0.75}, 3)
+    test.equal(microphone:availableFrames(), 3)
+
+    local out: {number} = {0, 0, 0, 0}
+    test.equal(microphone:readInto(out), 3)
+    test.equal(out[1], 0.25)
+    test.equal(out[2], 0.5)
+    test.equal(out[3], 0.75)
+    test.equal(microphone:availableFrames(), 0)
+    microphone:destroy()
+end
+
+function suite.takesOnlyWhatAReadAskedFor(): nil
+    local stub = newStub({}, 16)
+    local microphone = assert(audio.openMicrophone({devices = stub.devices}))
+    stub.capture.write({1, 2, 3, 4}, 4)
+
+    local block = assert(microphone:read(2))
+    test.equal(#block, 2 * 1 * BYTES_PER_SAMPLE)
+    test.equal(microphone:availableFrames(), 2)
+
+    -- A ceiling above what is ready takes what is ready rather than waiting.
+    local rest = assert(microphone:read(64))
+    test.equal(#rest, 2 * 1 * BYTES_PER_SAMPLE)
+    test.equal(microphone:availableFrames(), 0)
+
+    -- Zero is allowed and takes nothing.
+    test.equal(assert(microphone:read(0)), "")
+    microphone:destroy()
+end
+
+function suite.writesNoMoreFramesThanTheTargetHolds(): nil
+    local stub = newStub({}, 16)
+    local microphone = assert(audio.openMicrophone({devices = stub.devices}))
+    stub.capture.write({1, 2, 3, 4}, 4)
+
+    local out: {number} = {0, 0}
+    test.equal(microphone:readInto(out), 2)
+    test.equal(out[1], 1)
+    test.equal(out[2], 2)
+    test.equal(microphone:availableFrames(), 2)
+    microphone:destroy()
+end
+
+function suite.dropsTheOldestFramesWhenNothingReads(): nil
+    local stub = newStub({}, 4)
+    local microphone = assert(audio.openMicrophone({devices = stub.devices, bufferFrames = 4}))
+    stub.capture.write({1, 2, 3, 4, 5, 6}, 6)
+
+    test.equal(microphone:availableFrames(), 4)
+    test.equal(microphone:overruns(), 2)
+
+    local out: {number} = {0, 0, 0, 0}
+    test.equal(microphone:readInto(out), 4)
+    -- The newest four survive, which is what a game that fell behind wants.
+    test.equal(out[1], 3)
+    test.equal(out[4], 6)
+    microphone:destroy()
+end
+
+function suite.holdsWhatWasCapturedAcrossAPause(): nil
+    local stub = newStub({}, 16)
+    local microphone = assert(audio.openMicrophone({devices = stub.devices}))
+    stub.capture.write({1, 2}, 2)
+
+    test.assert(microphone:pause())
+    test.equal(stub.capture.write({3}, 1), 0)
+    test.equal(microphone:availableFrames(), 2)
+
+    test.assert(microphone:resume())
+    test.equal(stub.capture.write({3}, 1), 1)
+    test.equal(microphone:availableFrames(), 3)
+    microphone:destroy()
+end
+
+function suite.answersEveryCallOnceDestroyed(): nil
+    local stub = newStub({}, 16)
+    local microphone = assert(audio.openMicrophone({devices = stub.devices}))
+    stub.capture.write({1, 2}, 2)
+    microphone:destroy()
+
+    test.assert(stub.closed[1])
+    test.equal(microphone:availableFrames(), 0)
+    test.equal(microphone:overruns(), 0)
+
+    local block, reason = microphone:read()
+    test.equal(block, nil)
+    test.equal(reason, "microphone is destroyed")
+
+    local out: {number} = {0, 0}
+    test.equal(microphone:readInto(out), 0)
+
+    local paused, pauseReason = microphone:pause()
+    test.assert(not paused)
+    test.equal(pauseReason, "microphone is destroyed")
+
+    local resumed, resumeReason = microphone:resume()
+    test.assert(not resumed)
+    test.equal(resumeReason, "microphone is destroyed")
+
+    -- Destroying twice is the same as destroying once.
+    microphone:destroy()
+end
+
+function suite.rejectsALayoutTheCaptureCannotHave(): nil
+    local stub = newStub({}, 16)
+    test.raises(
+        function(): nil
+            audio.openMicrophone({frequency = 0, devices = stub.devices})
+        end,
+        "microphone frequency must be a positive integer"
+    )
+    test.raises(
+        function(): nil
+            audio.openMicrophone({channels = 33, devices = stub.devices})
+        end,
+        "microphone channels must be an integer from 1 to 32"
+    )
+    test.raises(
+        function(): nil
+            audio.openMicrophone({bufferFrames = 0, devices = stub.devices})
+        end,
+        "bufferFrames must be a positive integer"
+    )
+    test.equal(stub.opens[1], 0)
+end
+
+function suite.rejectsAFrameCeilingThatIsNotAWholeCount(): nil
+    local stub = newStub({}, 16)
+    local microphone = assert(audio.openMicrophone({devices = stub.devices}))
+    test.raises(
+        function(): nil
+            microphone:read(-1)
+        end,
+        "maxFrames must be a non%-negative integer"
+    )
+    test.raises(
+        function(): nil
+            local out: {number} = {0}
+            microphone:readInto(out, -1)
+        end,
+        "maxFrames must be a non%-negative integer"
+    )
+    microphone:destroy()
+end
+
+--- Returns the native binding, or skips when the build has not staged
+--- `libtecsaudio` where the dynamic loader will find it.
+---
+--- Every case below uses the device-free provider. Opening a real recording
+--- device reaches the same platform machinery an output open does, and on macOS
+--- that can block inside the audio daemon on a machine whose daemon is wedged
+--- or restricted, so a headless suite must not be able to stop there. Naming
+--- devices is treated as carrying the same exposure and is not called here
+--- either.
+local function binding(): {[string]: any}
+    local ok, loaded = pcall(require, "tecs.platform.audionative")
+    if not ok then
+        test.skip("libtecsaudio is not on the loader path: " .. tostring(loaded))
+    end
+
+    return loaded as {[string]: any}
+end
+
+--- Opens a device-free native capture, skipping when the library refused.
+local function openedCapture(channels: integer, bufferFrames: integer): audiobackend.Capture
+    local native = binding()
+    local provider = native.offlineDevices() as audiobackend.Devices
+    local capture, reason = provider.open(0, nil, 48000, channels, bufferFrames)
+    if capture == nil then
+        test.skip("libtecsaudio opened no capture: " .. tostring(reason))
+    end
+
+    return capture as audiobackend.Capture
+end
+
+function suite.namesNoDeviceThroughTheOfflineProvider(): nil
+    local native = binding()
+    local provider = native.offlineDevices() as audiobackend.Devices
+    local listed, reason = provider.recording()
+    test.equal(#listed, 0)
+    test.assert(#assert(reason) > 0)
+end
+
+function suite.carriesCapturedSamplesBackOverTheLibrary(): nil
+    local capture = openedCapture(1, 8)
+    test.equal(capture.frequency, 48000)
+    test.equal(capture.channels, 1)
+    test.equal(capture.availableFrames(), 0)
+
+    test.equal(capture.write({0.25, -0.5, 0.75}, 3), 3)
+    test.equal(capture.availableFrames(), 3)
+
+    local out: {number} = {0, 0, 0, 0}
+    test.equal(capture.readInto(out, 4), 3)
+    test.equal(out[1], 0.25)
+    test.equal(out[2], -0.5)
+    test.equal(out[3], 0.75)
+    test.equal(capture.availableFrames(), 0)
+    capture.close()
+end
+
+function suite.answersAReadWithFourBytesPerSample(): nil
+    local capture = openedCapture(2, 8)
+    test.equal(capture.channels, 2)
+    test.equal(capture.write({0.5, 0.25, -0.5, -0.25}, 2), 2)
+
+    local block = assert(capture.read(2))
+    test.equal(#block, 2 * 2 * BYTES_PER_SAMPLE)
+    test.equal(capture.availableFrames(), 0)
+    test.equal(assert(capture.read(4)), "")
+    capture.close()
+end
+
+function suite.countsWhatTheLibraryOverran(): nil
+    local capture = openedCapture(1, 2)
+    test.equal(capture.write({1, 2, 3, 4}, 4), 4)
+    test.equal(capture.availableFrames(), 2)
+    test.equal(capture.overruns(), 2)
+
+    local out: {number} = {0, 0}
+    test.equal(capture.readInto(out, 2), 2)
+    test.equal(out[1], 3)
+    test.equal(out[2], 4)
+    capture.close()
+end
+
+function suite.refusesEveryCallOnACaptureThatWasClosed(): nil
+    local capture = openedCapture(1, 4)
+    capture.write({1, 2}, 2)
+    capture.close()
+
+    test.equal(capture.availableFrames(), 0)
+    test.equal(capture.overruns(), 0)
+    test.equal(capture.write({3}, 1), 0)
+    test.equal(capture.readInto({0}, 1), 0)
+
+    local block, reason = capture.read(1)
+    test.equal(block, nil)
+    test.assert(#assert(reason) > 0)
+
+    local paused, pauseReason = capture.pause()
+    test.assert(not paused)
+    test.assert(#assert(pauseReason) > 0)
+
+    -- Closing twice must not reach a freed handle.
+    capture.close()
+end
+
+function suite.holdsWhatTheLibraryCapturedAcrossAPause(): nil
+    local capture = openedCapture(1, 8)
+    capture.write({1, 2}, 2)
+    test.assert(capture.pause())
+    test.equal(capture.write({3}, 1), 0)
+    test.equal(capture.availableFrames(), 2)
+
+    test.assert(capture.resume())
+    test.equal(capture.write({3}, 1), 1)
+    test.equal(capture.availableFrames(), 3)
+    capture.close()
+end
+
+function suite.drivesAMicrophoneOverTheOfflineProvider(): nil
+    local native = binding()
+    local provider = native.offlineDevices() as audiobackend.Devices
+    local microphone, reason = audio.openMicrophone({devices = provider, channels = 1, bufferFrames = 4})
+    if microphone == nil then
+        test.skip("libtecsaudio opened no capture: " .. tostring(reason))
+    end
+
+    local opened = microphone as audio.Microphone
+    test.equal(opened.frequency, 48000)
+    test.equal(opened.channels, 1)
+    test.equal(opened:availableFrames(), 0)
+    test.equal(assert(opened:read()), "")
+    opened:destroy()
+end
+
+return suite
