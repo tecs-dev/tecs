@@ -1,0 +1,855 @@
+module tecs.assets
+
+--[[
+Acquires assets without blocking the host, and owns what a caller holds.
+
+A load returns the asset. There is no future, no promise and no callback in the
+game-facing signature: a request that cannot answer at once parks its coroutine
+through `nupp.suspension` and resumes with the answer, so the same call reads the
+same way inside a frame system and inside a startup script.
+
+```nupp
+local assets <const> = require("tecs.assets")
+
+local loader = assets.newAssets()
+local handle, reason = loader:request(assets.bytes, "levels/one.json")
+if handle == nil then
+    return nil, reason
+end
+local text <const> = handle:value() as string
+handle:release()
+```
+
+Inside a system the same two lines suspend the logical update rather than the
+thread, and the host renders the frames that pass while the file is read. Where
+no suspension handler is installed, the built-in driver runs the readiness pumps
+on this thread and the call still returns the asset.
+
+## What this module owns, and what it does not
+
+This is orchestration: requesting, sharing an acquisition between callers that
+want the same thing, counting holds, replacing a payload in place and reporting
+a failure to the call that asked for it. Reading bytes, decoding pixels,
+uploading a texture and freeing a native allocation belong to a
+[`Kind`](tealdoc:tecs.assets.Kind), which supplies a
+[`Job`](tealdoc:tecs.assets.Job) per acquisition and a `release` for the payload
+it produced. A GPU service registers a kind whose job issues its own upload
+command; nothing about textures is written here.
+
+## Failure
+
+An invalid argument raises at the call: an empty path, a released handle, a
+loader that has shut down. A load that could not produce its asset answers
+`nil, reason` from `request`, whether it failed before parking or hours later.
+The readiness pump never raises a load failure of its own, because the call that
+asked for the asset is the only place the reason means anything; the pump
+resumes that call and lets it return the pair its signature promises.
+
+## Holds and residency
+
+A [`Handle`](tealdoc:tecs.assets.Handle) is a hold, not a cache entry. Two
+requests for one path that overlap share one acquisition and receive holds on
+one handle, because decoding the same file twice at once duplicates work without
+producing another result. A request made after the first settles acquires again:
+nothing here retains a settled asset behind the caller's back, and the payload
+lives exactly as long as the holds on it.
+
+`release` gives up one hold, and the last one frees the payload through the
+kind. Releasing a handle already down to nothing does nothing, so a shutdown
+path need not know whether something else got there first.
+
+## Replacement
+
+`reload` acquires the same path again and swaps the result into a handle every
+holder already has, then frees what it displaced. The handle's identity does not
+change and its `revision` advances, which is what a consumer holding device
+state keyed on the handle watches to know its copy is stale. A failed reload
+leaves the resident payload exactly as it was and answers `false, reason`.
+]]
+
+local files = require("nupp.io.files")
+local suspension = require("nupp.suspension")
+local log = require("tecs.log")
+
+--- Where one acquisition stands.
+export type Status = "pending" | "ready" | "failed"
+
+--- One acquisition in progress, owned by the kind that opened it.
+---
+--- A job is driven by the loader's readiness pump, never by the caller. It runs
+--- on whatever the kind uses underneath: a file read, a worker channel, a native
+--- service reply. Nothing here assumes which.
+export record Job
+    --- Advances the acquisition and reports where it stands.
+    ---
+    --- Answers `"pending"` alone while the work continues, `"ready"` and the
+    --- payload once it is done, or `"failed"` and a non-empty reason. The loader
+    --- stops calling it after the first answer that is not `"pending"`, and the
+    --- payload it hands back becomes the loader's to free through the kind.
+    poll: function(): (Status, any?, string?)
+
+    --- Abandons the acquisition and frees anything it holds.
+    ---
+    --- The loader calls it at most once, and only for a job that has not
+    --- answered `"ready"` or `"failed"`. It must not raise.
+    cancel: function(): nil
+end
+
+--- How one class of asset is acquired and freed.
+---
+--- A payload is whatever the kind's job produced, so this layer types it as
+--- `any` and the caller casts once at `value`. A phantom type parameter would
+--- move that cast rather than check it, and the loader would still be handing
+--- back what the job supplied.
+export record Kind
+    --- Read-only. Contains the content kind name this asset is recorded under,
+    --- which is the string file watching and tooling filter on.
+    name: string
+
+    --- Read-only. Begins one acquisition of `path`.
+    ---
+    --- Answers the job that will produce the payload, or `nil, reason` where the
+    --- acquisition cannot start at all. A refusal here reaches the requesting
+    --- call without parking it.
+    open: function(path: string): (Job?, string?)
+
+    --- Read-only. Frees one payload after its last hold goes. Nil where the
+    --- collector owns the payload outright, which is true of a plain Lua string.
+    release: (function(value: any): nil)?
+end
+
+-- Compatibility surface. Content kind names are what a file-watching filter and
+-- the debug tools name, so they keep the spelling the SDL implementation
+-- recorded through `content.note` even though the loader around them is new.
+
+--- Read-only. Names the content kind of a file loaded without interpretation.
+export const DOCUMENT = "document"
+
+--- Read-only. Names the content kind of a decoded image.
+export const IMAGE = "image"
+
+--- Read-only. Names the content kind of a loaded sound.
+export const SOUND = "sound"
+
+--- Read-only. Names the content kind of a loaded font.
+export const FONT = "font"
+
+--- Read-only. Names the content kind of a loaded shader.
+export const SHADER = "shader"
+
+--- Read-only. Names the content kind of a decoded model scene.
+export const MODEL = "model"
+
+--- A caller's hold on one acquired asset.
+---
+--- Handles are shared: every caller whose request joined one acquisition gets
+--- this same object, and the payload lives until the last of them releases it.
+export record Handle
+    --- Read-only. Contains the requested path unchanged. The loader does not
+    --- resolve it, so it is whatever the caller passed.
+    path: string
+
+    --- Read-only. Contains the content kind name this asset was acquired under.
+    kind: string
+
+    --- Engine-owned. Counts the callers holding this payload. Ordinary game code
+    --- reads `holds` instead.
+    private refs: integer
+
+    --- Engine-owned. Holds the acquired payload until the last release, and nil
+    --- after it. Ordinary game code reads `value` instead.
+    private payload: any?
+
+    --- Engine-owned. Counts the replacements this handle has taken. Ordinary
+    --- game code reads `revision` instead.
+    private replacements: integer
+
+    --- Engine-owned. Frees the payload at the last release, or nil where the
+    --- collector owns it.
+    private free: (function(value: any): nil)?
+
+    --- Engine-owned. Names the loader that counts this handle as resident.
+    private owner: Assets
+
+    value: function(borrows self: Handle): any?
+    resident: function(borrows self: Handle): boolean
+    revision: function(borrows self: Handle): integer
+    holds: function(borrows self: Handle): integer
+    retain: function(exclusive self: Handle): nil
+    release: function(exclusive self: Handle): nil
+end
+
+--- One caller waiting on one acquisition.
+local record Waiter
+    live: boolean
+    claimed: boolean
+    resume: (function(boolean): nil)?
+end
+
+--- One acquisition, and the callers waiting on it.
+local record Entry
+    owner: Assets
+    key: string
+    path: string
+    kindName: string
+    job: Job
+    free: (function(value: any): nil)?
+    status: Status
+    payload: any?
+    reason: string?
+    handle: Handle?
+    waiters: {Waiter}
+end
+
+--- A loader: the acquisitions in flight, the holds they produced, and the
+--- readiness pump that advances them.
+---
+--- One loader per application. Two loaders share nothing, which is what makes a
+--- test able to shut one down without disturbing anything else in the process.
+export record Assets
+    --- Engine-owned. Indexes acquisitions in flight by kind and path so two
+    --- overlapping requests share one. Ordinary game code reads `pending`.
+    private entries: {[string]: Entry}
+
+    --- Engine-owned. Holds the same acquisitions in a stable order the readiness
+    --- pump walks without allocating.
+    private order: {Entry}
+
+    --- Engine-owned. Counts acquisitions in flight.
+    private inFlight: integer
+
+    --- Engine-owned. Counts handles still holding a payload.
+    private residentCount: integer
+
+    --- Engine-owned. Numbers private replacement acquisitions so two reloads
+    --- never share an entry.
+    private serial: integer
+
+    --- Engine-owned. Holds the callers parked in `drain`.
+    private drainers: {Waiter}
+
+    --- Engine-owned. Holds the registered readiness pump until shutdown.
+    private pump: suspension.Source?
+
+    --- Engine-owned. Reports whether this loader still accepts requests.
+    private open: boolean
+
+    request: function(exclusive self: Assets, kind: Kind, path: string): (Handle?, string?)
+    reload: function(exclusive self: Assets, kind: Kind, handle: Handle): (boolean, string?)
+    drain: function(exclusive self: Assets): (boolean, string?)
+    pending: function(borrows self: Assets): integer
+    resident: function(borrows self: Assets): integer
+    running: function(borrows self: Assets): boolean
+    shutdown: function(exclusive self: Assets): nil
+end
+
+local logger = log.get(log.ASSETS)
+
+-------------------------------------------------------------------------------
+-- Jobs supplied by this module
+-------------------------------------------------------------------------------
+
+--- Begins a complete file read that settles on the readiness pump.
+---
+--- The read itself runs in the pump's pass rather than in the requesting call,
+--- so a request for a file parks and resumes exactly as one for a decoded asset
+--- does. A kind that needs the bytes before it can do its own work composes this
+--- job rather than reading the file inline.
+---
+--- @param path the file to read
+--- @return the job that answers the complete bytes
+--- @return a failure reason, when the read cannot be started
+export function readJob(path: string): (Job?, string?)
+    if path == "" then
+        return nil, "a file read needs a path"
+    end
+    local finished = false
+
+    return new Job(
+        poll = function(): (Status, any?, string?)
+            if finished then
+                return "pending"
+            end
+            finished = true
+            local bytes, reason = files.read(path)
+            if bytes == nil then
+                return "failed", nil, reason or ("cannot read " .. path)
+            end
+
+            return "ready", bytes
+        end,
+        cancel = function(): nil
+            finished = true
+        end
+    )
+end
+
+--- Reads a complete file into a binary-safe string without interpreting it.
+---
+--- A handle of this kind carries a `string`, so `handle:value() as string` is
+--- the cast its caller writes. The collector owns the string and the kind frees
+--- nothing. Releasing the handle still matters: it is what tells the loader the
+--- asset is no longer resident.
+export const bytes: Kind = new Kind(name = DOCUMENT, open = readJob, release = nil)
+
+-------------------------------------------------------------------------------
+-- Entries
+-------------------------------------------------------------------------------
+
+local function freePayload(entry: Entry): nil
+    local payload = entry.payload
+    entry.payload = nil
+    if payload == nil then
+        return
+    end
+    local free = entry.free
+    if free ~= nil then
+        free(payload)
+    end
+end
+
+--- Counts the waiters that have not abandoned this acquisition.
+local function liveWaiters(entry: Entry): integer
+    local count: integer = 0
+    local waiters = entry.waiters
+    for index = 1, #waiters do
+        if waiters[index].live then
+            count = count + 1
+        end
+    end
+
+    return count
+end
+
+local function wake(waiter: Waiter): nil
+    local resume = waiter.resume
+    if resume == nil then
+        return
+    end
+    waiter.resume = nil
+    resume(true)
+end
+
+--- Detaches a settled or abandoned acquisition from the loader.
+local function forget(self: Assets, entry: Entry): nil
+    if self.entries[entry.key] ~= entry then
+        return
+    end
+    self.entries[entry.key] = nil
+    local order = self.order
+    for index = #order, 1, -1 do
+        if order[index] == entry then
+            order[index] = order[#order]
+            order[#order] = nil
+            break
+        end
+    end
+    self.inFlight = self.inFlight - 1
+end
+
+--- Records one acquisition's outcome and wakes everyone waiting on it.
+---
+--- A ready payload becomes one handle holding one reference per live waiter. An
+--- acquisition every waiter abandoned is freed here rather than leaked to a
+--- handle nobody will release.
+local function settle(self: Assets, entry: Entry, status: Status, payload: any?, reason: string?): nil
+    entry.status = status
+    entry.payload = payload
+    entry.reason = reason
+    if status == "ready" then
+        local holders = liveWaiters(entry)
+        if holders == 0 then
+            freePayload(entry)
+        else
+            local handle = new Handle(
+                path = entry.path,
+                kind = entry.kindName,
+                refs = holders,
+                payload = payload,
+                replacements = 0,
+                free = entry.free,
+                owner = self
+            )
+            entry.handle = handle
+            entry.payload = nil
+            self.residentCount = self.residentCount + 1
+        end
+    else
+        logger:debug("%s load failed: %s: %s", entry.kindName, entry.path, reason or "failed")
+    end
+    local waiters = entry.waiters
+    for index = 1, #waiters do
+        wake(waiters[index])
+    end
+end
+
+--- Hands one settled acquisition to one waiter.
+local function claim(entry: Entry, waiter: Waiter): (Handle?, string?)
+    waiter.claimed = true
+    waiter.live = false
+    if entry.status == "ready" then
+        local handle = entry.handle
+        if handle == nil then
+            return nil, "the asset was released before this caller took it"
+        end
+
+        return handle
+    elseif entry.status == "failed" then
+        return nil, entry.reason or "the asset could not be loaded"
+    else
+        return nil, "the acquisition did not settle"
+    end
+end
+
+--- Gives up one waiter's place in an acquisition without taking its result.
+---
+--- Reached when a park is abandoned: the host stopped, a task scope was
+--- cancelled, or the surrounding suspension extent ended. A waiter that had
+--- already been given a hold gives it back, because the call that would have
+--- taken it is unwinding instead of returning.
+local function abandon(self: Assets, entry: Entry, waiter: Waiter): nil
+    if waiter.claimed or not waiter.live then
+        return
+    end
+    waiter.live = false
+    waiter.resume = nil
+    local handle = entry.handle
+    if handle ~= nil then
+        handle:release()
+
+        return
+    end
+    if entry.status ~= "pending" or liveWaiters(entry) > 0 then
+        return
+    end
+    forget(self, entry)
+    entry.job.cancel()
+end
+
+--- Advances every acquisition in flight and settles the ones that answered.
+local function drive(self: Assets): integer
+    if self.inFlight == 0 then
+        return 0
+    end
+    local settled: integer = 0
+    local order = self.order
+    for index = #order, 1, -1 do
+        local entry = order[index]
+        if entry.status == "pending" then
+            local status, payload, reason = entry.job.poll()
+            if status ~= "pending" then
+                forget(self, entry)
+                settle(self, entry, status, payload, reason)
+                settled = settled + 1
+            end
+        end
+    end
+    if self.inFlight == 0 and #self.drainers > 0 then
+        local waiting = self.drainers
+        self.drainers = {}
+        for index = 1, #waiting do
+            wake(waiting[index])
+        end
+    end
+
+    return settled
+end
+
+--- Registers `waiter` on `entry` and parks until the acquisition settles.
+---
+--- The value the park carries is only a wake signal. The outcome lives on the
+--- entry, so a caller resumed by the pump reads the same settled acquisition a
+--- caller that never parked reads.
+---
+--- The loader reaches this through `entry.owner` rather than through a
+--- parameter, because the cancellation this answers with outlives the call and
+--- may therefore capture nothing the caller only lent it.
+local function park(entry: Entry, waiter: Waiter, pump: suspension.Source?, operation: string): nil
+    suspension.suspend(operation, function(resume: function(boolean), context: suspension.Context): (function()?)
+        if waiter.claimed or not waiter.live or entry.status ~= "pending" then
+            resume(true)
+
+            return nil
+        end
+        waiter.resume = resume
+        if pump ~= nil then
+            context:uses(pump)
+        end
+
+        return function(): nil
+            abandon(entry.owner, entry, waiter)
+        end
+    end)
+end
+
+-------------------------------------------------------------------------------
+-- The loader
+-------------------------------------------------------------------------------
+
+--- Creates a loader with nothing in flight and its readiness pump registered.
+---
+--- The pump reports itself inactive while nothing is in flight, so a program
+--- with no suspension handler never sleeps on a loader that has no work.
+---
+--- @return the running loader
+export function newAssets(): Assets
+    local loader = new Assets(
+        entries = {},
+        order = {},
+        inFlight = 0,
+        residentCount = 0,
+        serial = 0,
+        drainers = {},
+        pump = nil,
+        open = true
+    )
+    loader.pump = suspension.source(
+        "tecs.assets",
+        10,
+        function(): integer
+            return drive(loader)
+        end,
+        nil,
+        function(_: suspension.Source): boolean
+            return loader.inFlight > 0
+        end
+    )
+
+    return loader
+end
+
+--- Requests one asset and returns the caller's hold on it.
+---
+--- The call suspends only while the acquisition is pending. Two overlapping
+--- requests for one kind and path share the acquisition and receive holds on one
+--- handle; a request made after the first settles acquires again.
+---
+--- @param self the running loader
+--- @param kind how this class of asset is acquired and freed
+--- @param path the asset path, passed to the kind unchanged
+--- @return the caller's hold, which it releases when its consumer has taken
+---   ownership
+--- @return a failure reason, when the asset could not be acquired
+--- @raises when the path is empty or the loader has shut down
+function Assets.request(exclusive self: Assets, kind: Kind, path: string): (Handle?, string?)
+    if not self.open then
+        error("assets.request: the loader has shut down", 2)
+    end
+    if path == "" then
+        error("assets.request: path must not be empty", 2)
+    end
+    local key = kind.name .. "\0" .. path
+    local entry = self.entries[key]
+    if entry == nil then
+        local job, reason = kind.open(path)
+        if job == nil then
+            return nil, reason or ("cannot load " .. path)
+        end
+        entry = new Entry(
+            owner = self,
+            key = key,
+            path = path,
+            kindName = kind.name,
+            job = job,
+            free = kind.release,
+            status = "pending",
+            payload = nil,
+            reason = nil,
+            handle = nil,
+            waiters = {}
+        )
+        self.entries[key] = entry
+        self.order[#self.order + 1] = entry
+        self.inFlight = self.inFlight + 1
+    end
+    local waiter = new Waiter(live = true, claimed = false, resume = nil)
+    entry.waiters[#entry.waiters + 1] = waiter
+    if entry.status == "pending" then
+        park(entry, waiter, self.pump, "tecs.assets.request")
+    end
+
+    return claim(entry, waiter)
+end
+
+--- Acquires an asset again and replaces what a handle already holds.
+---
+--- Every holder sees the new payload through the handle it already has, and the
+--- handle's `revision` advances so a consumer keyed on it can tell its own copy
+--- is stale. The displaced payload is freed through the kind once the swap has
+--- happened. A failed acquisition changes nothing and reports why.
+---
+--- @param self the running loader
+--- @param kind how this class of asset is acquired and freed
+--- @param handle the resident handle to replace in place
+--- @return whether the handle now holds a newly acquired payload
+--- @return a failure reason, when the acquisition failed
+--- @raises when the loader has shut down, the handle is released, or the handle
+---   belongs to another loader or another kind
+function Assets.reload(exclusive self: Assets, kind: Kind, handle: Handle): (boolean, string?)
+    if not self.open then
+        error("assets.reload: the loader has shut down", 2)
+    end
+    if handle.owner ~= self then
+        error("assets.reload: the handle belongs to another loader", 2)
+    end
+    if handle.kind ~= kind.name then
+        error("assets.reload: the handle was acquired as " .. handle.kind, 2)
+    end
+    if handle.refs <= 0 then
+        error("assets.reload: the handle has been released", 2)
+    end
+    local job, reason = kind.open(handle.path)
+    if job == nil then
+        return false, reason or ("cannot load " .. handle.path)
+    end
+    -- A replacement never shares an acquisition: it ends in a swap into one
+    -- named handle rather than in a handle of its own, and two callers cannot
+    -- both perform that swap on one payload.
+    self.serial = self.serial + 1
+    local entry = new Entry(
+        owner = self,
+        key = kind.name .. "\0" .. handle.path .. "\0replace\0" .. tostring(self.serial),
+        path = handle.path,
+        kindName = kind.name,
+        job = job,
+        free = kind.release,
+        status = "pending",
+        payload = nil,
+        reason = nil,
+        handle = nil,
+        waiters = {}
+    )
+    self.entries[entry.key] = entry
+    self.order[#self.order + 1] = entry
+    self.inFlight = self.inFlight + 1
+    local waiter = new Waiter(live = true, claimed = false, resume = nil)
+    entry.waiters[#entry.waiters + 1] = waiter
+    if entry.status == "pending" then
+        park(entry, waiter, self.pump, "tecs.assets.reload")
+    end
+    local replacement, failure = claim(entry, waiter)
+    if replacement == nil then
+        return false, failure or "the asset could not be reloaded"
+    end
+    local acquired = replacement.payload
+    replacement.payload = nil
+    replacement.refs = 0
+    self.residentCount = self.residentCount - 1
+    if handle.refs <= 0 then
+        -- Every hold went while the replacement was in flight, so there is
+        -- nothing left to swap into and the new payload is freed instead of
+        -- being written into a handle nobody will release.
+        local free = kind.release
+        if free ~= nil and acquired ~= nil then
+            free(acquired)
+        end
+
+        return false, "the handle was released while the replacement was loading"
+    end
+    local displaced = handle.payload
+    handle.payload = acquired
+    handle.replacements = handle.replacements + 1
+    if displaced ~= nil then
+        local free = handle.free
+        if free ~= nil then
+            free(displaced)
+        end
+    end
+
+    return true
+end
+
+--- Suspends until nothing is in flight.
+---
+--- This is the startup and shutdown barrier, and it waits on every acquisition
+--- this loader owns rather than only the caller's. It returns at once when
+--- nothing is pending.
+---
+--- @param self the running loader
+--- @return whether the loader drained
+--- @return a failure reason, when the loader shut down while draining
+--- @raises when the loader has already shut down
+function Assets.drain(exclusive self: Assets): (boolean, string?)
+    if not self.open then
+        error("assets.drain: the loader has shut down", 2)
+    end
+    while self.inFlight > 0 do
+        local waiter = new Waiter(live = true, claimed = false, resume = nil)
+        self.drainers[#self.drainers + 1] = waiter
+        local pump = self.pump
+        -- The loop condition above already read the count, and nothing runs
+        -- between there and here, so the subscription re-reads nothing and
+        -- captures only values it owns.
+        suspension.suspend("tecs.assets.drain", function(
+            resume: function(boolean),
+            context: suspension.Context
+        ): (function()?)
+            waiter.resume = resume
+            if pump ~= nil then
+                context:uses(pump)
+            end
+
+            return function(): nil
+                waiter.live = false
+                waiter.resume = nil
+            end
+        end)
+        if not self.open then
+            return false, "the loader shut down while draining"
+        end
+    end
+
+    return true
+end
+
+--- Returns the number of acquisitions still in flight.
+---
+--- @param self the loader to inspect
+--- @return every acquisition this loader owns, including replacements, and not
+---   only one caller's
+function Assets.pending(borrows self: Assets): integer
+    return self.inFlight
+end
+
+--- Returns the number of handles still holding a payload.
+---
+--- @param self the loader to inspect
+--- @return the count of handles with at least one hold left
+function Assets.resident(borrows self: Assets): integer
+    return self.residentCount
+end
+
+--- Reports whether this loader still accepts requests.
+---
+--- @param self the loader to inspect
+--- @return false once `shutdown` has run
+function Assets.running(borrows self: Assets): boolean
+    return self.open
+end
+
+--- Stops the loader and reports the stop to every parked caller.
+---
+--- Every acquisition in flight is cancelled and every parked request resumes and
+--- returns `nil, reason` from the call that asked for the asset, rather than
+--- raising somewhere the reason means nothing. Handles that already settled keep
+--- their payloads and still release correctly, so this frees nothing a caller
+--- still holds.
+---
+--- Calling it twice does nothing the second time.
+---
+--- @param self the loader to stop
+function Assets.shutdown(exclusive self: Assets): nil
+    if not self.open then
+        return
+    end
+    self.open = false
+    local pump = self.pump
+    if pump ~= nil then
+        self.pump = nil
+        pump:release()
+    end
+    local order = self.order
+    self.order = {}
+    self.entries = {}
+    self.inFlight = 0
+    for index = 1, #order do
+        local entry = order[index]
+        if entry.status == "pending" then
+            entry.status = "failed"
+            entry.reason = "the loader shut down while the asset was loading"
+            entry.job.cancel()
+            local waiters = entry.waiters
+            for position = 1, #waiters do
+                wake(waiters[position])
+            end
+        end
+    end
+    local waiting = self.drainers
+    self.drainers = {}
+    for index = 1, #waiting do
+        wake(waiting[index])
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Handles
+-------------------------------------------------------------------------------
+
+--- Returns the payload this handle holds.
+---
+--- The kind that acquired it decides what this is, so the caller casts once:
+--- `handle:value() as Image`. Nothing below checks that cast.
+---
+--- @param self the handle to read
+--- @return the payload, or nil once the last hold has gone
+function Handle.value(borrows self: Handle): any?
+    return self.payload
+end
+
+--- Reports whether the payload is still in memory.
+---
+--- @param self the handle to test
+--- @return whether at least one hold remains
+function Handle.resident(borrows self: Handle): boolean
+    return self.refs > 0
+end
+
+--- Returns how many times this handle's payload has been replaced.
+---
+--- A consumer that keeps device state derived from the payload stores the
+--- revision beside it and re-derives when the two differ.
+---
+--- @param self the handle to read
+--- @return zero for a handle that has never been reloaded
+function Handle.revision(borrows self: Handle): integer
+    return self.replacements
+end
+
+--- Returns the number of callers holding this payload.
+---
+--- @param self the handle to read
+--- @return the remaining hold count, which is zero once the payload is freed
+function Handle.holds(borrows self: Handle): integer
+    return self.refs
+end
+
+--- Takes one more hold on this payload.
+---
+--- Call it when passing a handle somewhere with a lifetime of its own, so the
+--- two owners release independently.
+---
+--- @param self the handle to hold
+--- @raises when the payload has already been freed
+function Handle.retain(exclusive self: Handle): nil
+    if self.refs <= 0 then
+        error("assets.retain: the handle has been released", 2)
+    end
+    self.refs = self.refs + 1
+end
+
+--- Gives up this caller's hold, and frees the payload at the last one.
+---
+--- Call it once whatever needed the asset has taken ownership. Releasing a
+--- handle already down to nothing does nothing, so a shutdown path need not know
+--- whether something else got there first.
+---
+--- @param self the handle to release
+function Handle.release(exclusive self: Handle): nil
+    if self.refs <= 0 then
+        return
+    end
+    self.refs = self.refs - 1
+    if self.refs > 0 then
+        return
+    end
+    local payload = self.payload
+    self.payload = nil
+    self.owner.residentCount = self.owner.residentCount - 1
+    if payload == nil then
+        return
+    end
+    local free = self.free
+    if free ~= nil then
+        free(payload)
+    end
+end

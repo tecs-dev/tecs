@@ -1,0 +1,635 @@
+local files = require("nupp.io.files")
+local suspension = require("nupp.suspension")
+local test = require("nupp.test")
+local assets = require("tecs.assets")
+local framepump = require("tecs.internal.framepump")
+local hostcancellation = require("tecs.internal.hostcancellation")
+local suite = {}
+
+--- A payload a scripted kind hands out, so a test can watch it being freed.
+local record Payload
+    text: string
+    freed: boolean
+end
+
+--- One scripted acquisition, driven by the test rather than by the world.
+local record Script
+    --- How many readiness passes remain before this acquisition settles.
+    passes: integer
+
+    --- What the acquisition produces, or nil when it fails.
+    payload: Payload?
+
+    --- Why it failed, when it produces nothing.
+    reason: string?
+
+    --- Whether the loader cancelled it before it settled.
+    cancelled: boolean
+
+    --- How many times the loader polled it.
+    polls: integer
+end
+
+--- A kind whose acquisitions the test scripts, plus the scripts it handed out.
+local record Scripted
+    kind: assets.Kind
+    scripts: {[string]: Script}
+    freed: {string}
+    opened: integer
+    refuse: string?
+end
+
+--- Builds a kind that settles after a scripted number of readiness passes.
+local function scripted(name: string): Scripted
+    local self = new Scripted(kind = nil as assets.Kind, scripts = {}, freed = {}, opened = 0, refuse = nil)
+    self.kind = new assets.Kind(
+        name = name,
+        open = function(path: string): (assets.Job?, string?)
+            self.opened = self.opened + 1
+            local refusal = self.refuse
+            if refusal ~= nil then
+                return nil, refusal
+            end
+            local script = self.scripts[path]
+            if script == nil then
+                script = new Script(passes = 1, payload = nil, reason = nil, cancelled = false, polls = 0)
+                script.payload = new Payload(text = path, freed = false)
+                self.scripts[path] = script
+            end
+
+            return new assets.Job(
+                poll = function(): (assets.Status, any?, string?)
+                    script.polls = script.polls + 1
+                    if script.passes > 0 then
+                        script.passes = script.passes - 1
+
+                        return "pending"
+                    end
+                    local payload = script.payload
+                    if payload == nil then
+                        return "failed", nil, script.reason or "scripted failure"
+                    end
+
+                    return "ready", payload
+                end,
+                cancel = function(): nil
+                    script.cancelled = true
+                end
+            )
+        end,
+        release = function(value: any): nil
+            local payload = value as Payload
+            payload.freed = true
+            self.freed[#self.freed + 1] = payload.text
+        end
+    )
+
+    return self
+end
+
+--- Arranges for `path` to fail after `passes` readiness passes.
+local function fails(self: Scripted, path: string, passes: integer, reason: string): nil
+    self.scripts[path] = new Script(passes = passes, payload = nil, reason = reason, cancelled = false, polls = 0)
+end
+
+--- Arranges for `path` to succeed after `passes` readiness passes.
+local function succeeds(self: Scripted, path: string, passes: integer): Script
+    local script = new Script(passes = passes, payload = nil, reason = nil, cancelled = false, polls = 0)
+    script.payload = new Payload(text = path, freed = false)
+    self.scripts[path] = script
+
+    return script
+end
+
+--- Runs `body` under a frame pump, polling until it finishes.
+---
+--- This is the host's own scheduler, so a request that parks here parks exactly
+--- as one inside a world update does. `turns` bounds the loop so a test that
+--- deadlocks fails rather than hangs.
+local function underPump(body: function(): boolean, turns: integer?): (boolean, integer)
+    local pump = framepump.newPump()
+    local state = framepump.start(pump, body)
+    local passes: integer = 0
+    local limit = turns or 64
+    while state == "parked" and passes < limit do
+        passes = passes + 1
+        state = framepump.poll(pump)
+    end
+    test.assert(state ~= "parked", "the operation never finished")
+
+    return state == "continue", passes
+end
+
+-------------------------------------------------------------------------------
+-- Requesting
+-------------------------------------------------------------------------------
+
+function suite.returnsTheAssetFromTheCallThatAskedForIt(): nil
+    local kind = scripted("test.asset")
+    local loader = assets.newAssets()
+    local held: Payload? = nil
+    underPump(function(): boolean
+        local handle, reason = loader:request(kind.kind, "hero.png")
+        test.assert(handle ~= nil, reason or "no handle")
+        held = (handle as assets.Handle):value() as Payload
+
+        return true
+    end)
+    test.equal((held as Payload).text, "hero.png")
+    test.equal(loader:pending(), 0)
+    loader:shutdown()
+end
+
+function suite.parksUntilTheAcquisitionSettles(): nil
+    local kind = scripted("test.asset")
+    local script = succeeds(kind, "slow.png", 3)
+    local loader = assets.newAssets()
+    local _, passes = underPump(function(): boolean
+        local handle = loader:request(kind.kind, "slow.png")
+        test.assert(handle ~= nil)
+        local held = handle as assets.Handle
+        held:release()
+
+        return true
+    end)
+    test.assert(passes >= 3, "the request resumed before its acquisition settled")
+    test.assert(script.polls >= 4, "the acquisition was not driven by the readiness pump")
+    loader:shutdown()
+end
+
+function suite.reportsAFailureAtTheOriginatingCall(): nil
+    local kind = scripted("test.asset")
+    fails(kind, "missing.png", 2, "no such file")
+    local loader = assets.newAssets()
+    local answer: string? = nil
+    underPump(function(): boolean
+        local handle, reason = loader:request(kind.kind, "missing.png")
+        test.assert(handle == nil, "a failed load produced a handle")
+        answer = reason
+
+        return true
+    end)
+    -- The pump discovered the failure two turns after the call, and still the
+    -- reason arrived as the second return value of the call that asked.
+    test.equal(answer as string, "no such file")
+    test.equal(loader:pending(), 0)
+    test.equal(loader:resident(), 0)
+    loader:shutdown()
+end
+
+function suite.reportsARefusedAcquisitionWithoutParking(): nil
+    local kind = scripted("test.asset")
+    kind.refuse = "the kind is not installed"
+    local loader = assets.newAssets()
+    local handle, reason = loader:request(kind.kind, "hero.png")
+    test.assert(handle == nil)
+    test.equal(reason as string, "the kind is not installed")
+    test.equal(loader:pending(), 0)
+    loader:shutdown()
+end
+
+function suite.sharesOneAcquisitionBetweenOverlappingRequests(): nil
+    local kind = scripted("test.asset")
+    succeeds(kind, "shared.png", 2)
+    local loader = assets.newAssets()
+    local first: assets.Handle? = nil
+    local second: assets.Handle? = nil
+    local pump = framepump.newPump()
+    local outer = framepump.start(pump, function(): boolean
+        first = loader:request(kind.kind, "shared.png")
+
+        return true
+    end)
+    test.equal(outer as string, "parked")
+    -- A second request while the first is parked joins the same acquisition.
+    local inner = framepump.newPump()
+    framepump.start(inner, function(): boolean
+        second = loader:request(kind.kind, "shared.png")
+
+        return true
+    end)
+    for _ = 1, 8 do
+        if framepump.parked(pump) then
+            framepump.poll(pump)
+        end
+        if framepump.parked(inner) then
+            framepump.poll(inner)
+        end
+    end
+    test.assert(first ~= nil and second ~= nil, "a shared request never settled")
+    test.assert((first as assets.Handle) == (second as assets.Handle))
+    test.equal(kind.opened, 1)
+    test.equal((first as assets.Handle):holds(), 2)
+    loader:shutdown()
+end
+
+function suite.acquiresAgainAfterTheFirstRequestSettles(): nil
+    local kind = scripted("test.asset")
+    local loader = assets.newAssets()
+    underPump(function(): boolean
+        local first = loader:request(kind.kind, "again.png")
+        test.assert(first ~= nil)
+        local held = first as assets.Handle
+        held:release()
+        local second = loader:request(kind.kind, "again.png")
+        test.assert(second ~= nil)
+        local reacquired = second as assets.Handle
+        test.assert(held ~= reacquired)
+        reacquired:release()
+
+        return true
+    end)
+    test.equal(kind.opened, 2)
+    loader:shutdown()
+end
+
+function suite.refusesAnEmptyPathAndAClosedLoader(): nil
+    local kind = scripted("test.asset")
+    local loader = assets.newAssets()
+    test.raises(
+        function(): nil
+            loader:request(kind.kind, "")
+        end,
+        "must not be empty"
+    )
+    loader:shutdown()
+    test.raises(
+        function(): nil
+            loader:request(kind.kind, "hero.png")
+        end,
+        "shut down"
+    )
+end
+
+-------------------------------------------------------------------------------
+-- Holds
+-------------------------------------------------------------------------------
+
+function suite.freesThePayloadAtTheLastRelease(): nil
+    local kind = scripted("test.asset")
+    local loader = assets.newAssets()
+    local handle: assets.Handle? = nil
+    underPump(function(): boolean
+        handle = loader:request(kind.kind, "held.png")
+
+        return true
+    end)
+    local held = handle as assets.Handle
+    held:retain()
+    test.equal(held:holds(), 2)
+    test.equal(loader:resident(), 1)
+    held:release()
+    test.assert(held:resident(), "the payload went with the first of two holds")
+    test.assert((held:value() as Payload).freed == false)
+    held:release()
+    test.assert(not held:resident())
+    test.assert(held:value() == nil)
+    test.equal(#kind.freed, 1)
+    test.equal(kind.freed[1], "held.png")
+    test.equal(loader:resident(), 0)
+    -- Releasing what is already down to nothing frees nothing a second time.
+    held:release()
+    test.equal(#kind.freed, 1)
+    loader:shutdown()
+end
+
+function suite.refusesToRetainAReleasedHandle(): nil
+    local kind = scripted("test.asset")
+    local loader = assets.newAssets()
+    local handle: assets.Handle? = nil
+    underPump(function(): boolean
+        handle = loader:request(kind.kind, "gone.png")
+
+        return true
+    end)
+    local held = handle as assets.Handle
+    held:release()
+    test.raises(
+        function(): nil
+            held:retain()
+        end,
+        "released"
+    )
+    loader:shutdown()
+end
+
+-------------------------------------------------------------------------------
+-- Replacement
+-------------------------------------------------------------------------------
+
+function suite.replacesAResidentPayloadInPlace(): nil
+    local kind = scripted("test.asset")
+    local loader = assets.newAssets()
+    local handle: assets.Handle? = nil
+    underPump(function(): boolean
+        handle = loader:request(kind.kind, "sprite.png")
+
+        return true
+    end)
+    local held = handle as assets.Handle
+    local original = held:value() as Payload
+    test.equal(held:revision(), 0)
+    local replacement = succeeds(kind, "sprite.png", 2)
+    local swapped = false
+    underPump(function(): boolean
+        swapped = loader:reload(kind.kind, held)
+
+        return true
+    end)
+    test.assert(swapped, "the reload reported failure")
+    test.assert(held:value() as Payload == replacement.payload as Payload)
+    test.equal(held:revision(), 1)
+    test.equal(held:holds(), 1)
+    test.assert(original.freed, "the displaced payload was not freed")
+    test.equal(loader:resident(), 1)
+    loader:shutdown()
+end
+
+function suite.keepsTheResidentPayloadWhenAReplacementFails(): nil
+    local kind = scripted("test.asset")
+    local loader = assets.newAssets()
+    local handle: assets.Handle? = nil
+    underPump(function(): boolean
+        handle = loader:request(kind.kind, "sprite.png")
+
+        return true
+    end)
+    local held = handle as assets.Handle
+    local original = held:value() as Payload
+    fails(kind, "sprite.png", 1, "the file was truncated")
+    local swapped = true
+    local reason: string? = nil
+    underPump(function(): boolean
+        swapped, reason = loader:reload(kind.kind, held)
+
+        return true
+    end)
+    test.assert(not swapped)
+    test.equal(reason as string, "the file was truncated")
+    test.assert(held:value() as Payload == original)
+    test.assert(not original.freed)
+    test.equal(held:revision(), 0)
+    loader:shutdown()
+end
+
+function suite.refusesToReplaceAHandleItDoesNotOwn(): nil
+    local kind = scripted("test.asset")
+    local other = scripted("test.other")
+    local loader = assets.newAssets()
+    local elsewhere = assets.newAssets()
+    local handle: assets.Handle? = nil
+    underPump(function(): boolean
+        handle = loader:request(kind.kind, "sprite.png")
+
+        return true
+    end)
+    local held = handle as assets.Handle
+    test.raises(
+        function(): nil
+            elsewhere:reload(kind.kind, held)
+        end,
+        "another loader"
+    )
+    test.raises(
+        function(): nil
+            loader:reload(other.kind, held)
+        end,
+        "acquired as"
+    )
+    held:release()
+    test.raises(
+        function(): nil
+            loader:reload(kind.kind, held)
+        end,
+        "released"
+    )
+    loader:shutdown()
+    elsewhere:shutdown()
+end
+
+-------------------------------------------------------------------------------
+-- Cancellation
+-------------------------------------------------------------------------------
+
+function suite.cancelsAnInFlightRequestWhenTheHostStops(): nil
+    local kind = scripted("test.asset")
+    local script = succeeds(kind, "slow.png", 8)
+    local loader = assets.newAssets()
+    local pump = framepump.newPump()
+    local unwound = false
+    local state = framepump.start(pump, function(): boolean
+        local succeeded, failure = pcall(function(): nil
+            loader:request(kind.kind, "slow.png")
+        end)
+        if not succeeded and hostcancellation.is(failure) then
+            unwound = true
+        end
+
+        return true
+    end)
+    test.equal(state as string, "parked")
+    framepump.poll(pump)
+    test.equal(loader:pending(), 1)
+    framepump.cancel(pump)
+    test.assert(unwound, "the parked request did not unwind through host cancellation")
+    test.assert(script.cancelled, "the acquisition was left running")
+    test.equal(loader:pending(), 0)
+    test.equal(loader:resident(), 0)
+    loader:shutdown()
+end
+
+function suite.keepsASharedAcquisitionWhenOneCallerGivesUp(): nil
+    local kind = scripted("test.asset")
+    local script = succeeds(kind, "shared.png", 4)
+    local loader = assets.newAssets()
+    local staying: assets.Handle? = nil
+    local stay = framepump.newPump()
+    framepump.start(stay, function(): boolean
+        staying = loader:request(kind.kind, "shared.png")
+
+        return true
+    end)
+    local leaving = framepump.newPump()
+    framepump.start(leaving, function(): boolean
+        local succeeded = pcall(function(): nil
+            loader:request(kind.kind, "shared.png")
+        end)
+        test.assert(not succeeded, "the abandoned request returned")
+
+        return true
+    end)
+    framepump.cancel(leaving)
+    test.assert(not script.cancelled, "one caller leaving stopped the shared acquisition")
+    test.equal(loader:pending(), 1)
+    for _ = 1, 8 do
+        if framepump.parked(stay) then
+            framepump.poll(stay)
+        end
+    end
+    test.assert(staying ~= nil, "the remaining caller never received the asset")
+    test.equal((staying as assets.Handle):holds(), 1)
+    loader:shutdown()
+end
+
+function suite.freesAnAcquisitionEveryCallerAbandoned(): nil
+    local kind = scripted("test.asset")
+    succeeds(kind, "orphan.png", 2)
+    local loader = assets.newAssets()
+    local pump = framepump.newPump()
+    framepump.start(pump, function(): boolean
+        pcall(function(): nil
+            loader:request(kind.kind, "orphan.png")
+        end)
+
+        return true
+    end)
+    framepump.cancel(pump)
+    test.equal(loader:pending(), 0)
+    test.equal(loader:resident(), 0)
+    -- Nothing settled, so nothing was allocated to free.
+    test.equal(#kind.freed, 0)
+    loader:shutdown()
+end
+
+function suite.resumesParkedRequestsWhenTheLoaderShutsDown(): nil
+    local kind = scripted("test.asset")
+    succeeds(kind, "slow.png", 8)
+    local loader = assets.newAssets()
+    local reason: string? = nil
+    local pump = framepump.newPump()
+    local state = framepump.start(pump, function(): boolean
+        local handle, failure = loader:request(kind.kind, "slow.png")
+        test.assert(handle == nil, "a shut-down loader produced a handle")
+        reason = failure
+
+        return true
+    end)
+    test.equal(state as string, "parked")
+    loader:shutdown()
+    -- Shutdown resumes the call that owns the outcome rather than raising in the
+    -- pump, so the reason arrives where the caller asked for the asset.
+    test.equal(framepump.poll(pump) as string, "continue")
+    test.matches(reason as string, "shut down")
+end
+
+-------------------------------------------------------------------------------
+-- Draining
+-------------------------------------------------------------------------------
+
+function suite.drainsEveryAcquisitionInFlight(): nil
+    local kind = scripted("test.asset")
+    succeeds(kind, "one.png", 2)
+    succeeds(kind, "two.png", 5)
+    local loader = assets.newAssets()
+    local first = framepump.newPump()
+    local second = framepump.newPump()
+    framepump.start(first, function(): boolean
+        loader:request(kind.kind, "one.png")
+
+        return true
+    end)
+    framepump.start(second, function(): boolean
+        loader:request(kind.kind, "two.png")
+
+        return true
+    end)
+    test.equal(loader:pending(), 2)
+    local drained = false
+    local drainer = framepump.newPump()
+    local state = framepump.start(drainer, function(): boolean
+        drained = loader:drain()
+
+        return true
+    end)
+    local turns = 0
+    while state == "parked" and turns < 16 do
+        turns = turns + 1
+        state = framepump.poll(drainer)
+        if framepump.parked(first) then
+            framepump.poll(first)
+        end
+        if framepump.parked(second) then
+            framepump.poll(second)
+        end
+    end
+    test.assert(drained, "drain did not report a clean drain")
+    test.equal(loader:pending(), 0)
+    loader:shutdown()
+end
+
+function suite.drainsAtOnceWhenNothingIsPending(): nil
+    local loader = assets.newAssets()
+    local drained = false
+    underPump(function(): boolean
+        drained = loader:drain()
+
+        return true
+    end)
+    test.assert(drained)
+    loader:shutdown()
+end
+
+-------------------------------------------------------------------------------
+-- The bundled file kind
+-------------------------------------------------------------------------------
+
+function suite.readsAFileThroughTheDocumentKind(): nil
+    local temporary = assert(files.createTemporaryFile(new files.TemporaryOptions(suffix = ".asset")))
+    local path = temporary:toString()
+    assert(files.write(path, "level one"))
+    local loader = assets.newAssets()
+    local text: string? = nil
+    underPump(function(): boolean
+        local handle, reason = loader:request(assets.bytes, path)
+        test.assert(handle ~= nil, reason or "no handle")
+        local held = handle as assets.Handle
+        text = held:value() as string
+        held:release()
+
+        return true
+    end)
+    test.equal(text as string, "level one")
+    loader:shutdown()
+    temporary:close()
+end
+
+function suite.reportsAMissingFileToTheCallerThatAskedForIt(): nil
+    local loader = assets.newAssets()
+    local reason: string? = nil
+    underPump(function(): boolean
+        local handle, failure = loader:request(assets.bytes, "tests/no/such/asset.bin")
+        test.assert(handle == nil)
+        reason = failure
+
+        return true
+    end)
+    test.assert(reason ~= nil and (reason as string) ~= "", "a missing file reported no reason")
+    loader:shutdown()
+end
+
+function suite.namesTheContentKindsFileWatchingFiltersOn(): nil
+    -- Compatibility surface. These are the strings a watcher filter and the debug
+    -- tools name, so the test spells them out rather than reading the constants
+    -- back through themselves.
+    test.equal(assets.DOCUMENT, "document")
+    test.equal(assets.IMAGE, "image")
+    test.equal(assets.SOUND, "sound")
+    test.equal(assets.FONT, "font")
+    test.equal(assets.SHADER, "shader")
+    test.equal(assets.MODEL, "model")
+    test.equal(assets.bytes.name, "document")
+end
+
+function suite.stopsPollingOnceTheLoaderShutsDown(): nil
+    local loader = assets.newAssets()
+    loader:shutdown()
+    test.assert(not loader:running())
+    -- The readiness pump is released with the loader, so a later host pass drives
+    -- nothing on its behalf.
+    suspension.poll()
+    test.equal(loader:pending(), 0)
+    -- Shutting down twice is shutting down once.
+    loader:shutdown()
+end
+
+return suite
