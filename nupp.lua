@@ -55,6 +55,7 @@ return {
                     "tecs.gfx",
                     "tecs.gfx.images",
                     "tecs.gfx.layers",
+                    "tecs.gfx.truetype",
                     "tecs.host",
                     "tecs.input",
                     "tecs.mcp",

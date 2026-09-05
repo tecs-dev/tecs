@@ -1,0 +1,1068 @@
+module tecs.gfx.truetype
+
+--[[
+TrueType outlines, metrics, coverage rasterization, and signed distance fields.
+
+A face is parsed once from the bytes of a `.ttf` or `.ttc`-free single-font
+file and answers three questions: which glyph a codepoint selects, what that
+glyph advances, and where its outline runs. `rasterize` turns one outline into
+an antialiased coverage bitmap and `distanceField` turns that bitmap into the
+field a distance-field text shader samples.
+
+```nupp
+const truetype = require("tecs.gfx.truetype")
+
+const face, reason = truetype.parse(bytes)
+assert(face, reason)
+
+const glyph = face:glyphIndex(0x41)
+const contours = truetype.outline(face, glyph, 48.0 / face.unitsPerEm)
+```
+
+Everything here works in font units until a scale is supplied. A font unit is
+one of `unitsPerEm` divisions of the em square, so dividing by `unitsPerEm`
+gives em units and multiplying those by a point size gives pixels.
+
+Only the `glyf` outline format is read. A face whose outlines live in a `CFF `
+table, which is what an OpenType font built from PostScript curves carries,
+parses to a failure reason rather than to empty glyphs. Kerning comes from a
+format-zero `kern` table when one is present; `GPOS` positioning is not read,
+so a font that kerns only through `GPOS` lays out with its advance widths
+alone.
+]]
+
+const byte = string.byte
+const floor = math.floor
+const ceil = math.ceil
+const sqrt = math.sqrt
+const min = math.min
+const max = math.max
+
+--- The deepest a composite glyph may nest before parsing gives up.
+---
+--- A font with a deeper chain is malformed; a font with a cycle would
+--- otherwise recurse until the stack ran out.
+const MAX_COMPONENT_DEPTH: integer = 8
+
+--- Sub-scanlines the rasterizer samples per pixel row.
+---
+--- Coverage across a row is computed exactly, so the only sampling is
+--- vertical. Four rows put the worst-case error on a near-horizontal edge
+--- below an eighth of a texel, which is invisible once the field is filtered.
+const SUBSAMPLES: integer = 4
+
+local function u8(bytes: string, at: integer): integer
+    return byte(bytes, at) as integer
+end
+
+local function u16(bytes: string, at: integer): integer
+    const high, low = byte(bytes, at, at + 1)
+
+    return (high as integer) * 256 + (low as integer)
+end
+
+local function i16(bytes: string, at: integer): integer
+    const value = u16(bytes, at)
+
+    return value >= 0x8000 and value - 0x10000 or value
+end
+
+local function u32(bytes: string, at: integer): integer
+    const a, b, c, d = byte(bytes, at, at + 3)
+
+    return (((a as integer) * 256 + (b as integer)) * 256 + (c as integer)) * 256 + (d as integer)
+end
+
+--- A parsed font file.
+---
+--- Immutable once `parse` returns, apart from the kerning table it fills in on
+--- first use.
+export record Face
+    --- Read-only. Reports the em square's divisions, which every font unit in
+    --- this face is one of.
+    unitsPerEm: integer
+
+    --- Read-only. Reports the distance from the baseline to the top of the
+    --- typographic ascent, in font units.
+    ascender: integer
+
+    --- Read-only. Reports the distance from the baseline to the bottom of the
+    --- typographic descent, in font units. It is negative in every ordinary
+    --- font.
+    descender: integer
+
+    --- Read-only. Reports the extra leading between two lines, in font units.
+    lineGap: integer
+
+    --- Read-only. Reports how many glyphs the face holds, including `.notdef`
+    --- at index zero.
+    numGlyphs: integer
+
+    private bytes: string
+    private locaAt: integer
+    private locaLong: boolean
+    private glyfAt: integer
+    private hmtxAt: integer
+    private hMetrics: integer
+    private cmapAt: integer
+    private cmapFormat: integer
+    private kernAt: integer
+    private kernPairs: {[integer]: number}?
+
+    glyphIndex: function(borrows self: Face, codepoint: integer): integer
+    advanceOf: function(borrows self: Face, glyph: integer): number
+    bearingOf: function(borrows self: Face, glyph: integer): number
+    kerningOf: function(exclusive self: Face, left: integer, right: integer): number
+end
+
+--- Returns the byte offset and length of one table, or zero for both.
+local function tableOf(bytes: string, tag: string): integer, integer
+    const numTables = u16(bytes, 5)
+    for index = 0, numTables - 1 do
+        const record = 13 + index * 16
+        if bytes:sub(record, record + 3) == tag then
+            return u32(bytes, record + 8), u32(bytes, record + 12)
+        end
+    end
+
+    return 0, 0
+end
+
+--- Chooses the character map subtable with the widest coverage.
+---
+--- A Unicode full-repertoire subtable wins over a basic-multilingual-plane
+--- one, which wins over a symbol subtable, because a face that carries several
+--- carries them in that order of completeness.
+local function selectCmap(bytes: string, cmapAt: integer): integer, integer
+    const numTables = u16(bytes, cmapAt + 2)
+    local best: integer = 0
+    local bestRank: integer = -1
+    for index = 0, numTables - 1 do
+        const record = cmapAt + 4 + index * 8
+        const platform = u16(bytes, record)
+        const encoding = u16(bytes, record + 2)
+        const subtable = cmapAt + u32(bytes, record + 4)
+        local rank: integer = -1
+        if platform == 3 and encoding == 10 then
+            rank = 4
+        elseif platform == 0 and encoding >= 4 then
+            rank = 3
+        elseif platform == 3 and encoding == 1 then
+            rank = 2
+        elseif platform == 0 then
+            rank = 1
+        elseif platform == 3 and encoding == 0 then
+            rank = 0
+        end
+        if rank > bestRank then
+            bestRank = rank
+            best = subtable
+        end
+    end
+    if best == 0 then
+        return 0, 0
+    end
+
+    return best, u16(bytes, best)
+end
+
+--- Parses a single-font TrueType file.
+--- @param bytes the complete contents of a `.ttf` or `.otf` file
+--- @return the face, or nil when the bytes are not a readable TrueType font
+--- @return why the bytes were rejected, when unsuccessful
+export function parse(bytes: string): Face?, string?
+    if #bytes < 12 then
+        return nil, "truetype.parse: the font is shorter than its table directory"
+    end
+    const version = u32(bytes, 1)
+    if version == 0x74746366 then
+        return nil, "truetype.parse: a font collection holds several faces and is not supported"
+    elseif version == 0x4f54544f then
+        return nil, "truetype.parse: a CFF outline font is not supported; use a glyf-based TrueType font"
+    end
+    if version ~= 0x00010000 and version ~= 0x74727565 then
+        return nil, "truetype.parse: the file does not open with a TrueType version"
+    end
+
+    const headAt, headLength = tableOf(bytes, "head")
+    if headAt == 0 or headLength < 54 then
+        return nil, "truetype.parse: the font carries no head table"
+    end
+    const hheaAt, hheaLength = tableOf(bytes, "hhea")
+    if hheaAt == 0 or hheaLength < 36 then
+        return nil, "truetype.parse: the font carries no hhea table"
+    end
+    const maxpAt, maxpLength = tableOf(bytes, "maxp")
+    if maxpAt == 0 or maxpLength < 6 then
+        return nil, "truetype.parse: the font carries no maxp table"
+    end
+    const hmtxAt = tableOf(bytes, "hmtx")
+    if hmtxAt == 0 then
+        return nil, "truetype.parse: the font carries no hmtx table"
+    end
+    const locaAt = tableOf(bytes, "loca")
+    const glyfAt = tableOf(bytes, "glyf")
+    if locaAt == 0 or glyfAt == 0 then
+        return nil, "truetype.parse: the font carries no glyf outlines"
+    end
+    const cmapAt = tableOf(bytes, "cmap")
+    if cmapAt == 0 then
+        return nil, "truetype.parse: the font carries no cmap table"
+    end
+
+    const unitsPerEm = u16(bytes, headAt + 19)
+    if unitsPerEm == 0 then
+        return nil, "truetype.parse: the head table reports zero units per em"
+    end
+    const cmapSubtable, cmapFormat = selectCmap(bytes, cmapAt + 1)
+    if cmapSubtable == 0 then
+        return nil, "truetype.parse: the cmap table carries no readable subtable"
+    end
+    const kernAt = tableOf(bytes, "kern")
+
+    return new Face(
+        unitsPerEm = unitsPerEm,
+        ascender = i16(bytes, hheaAt + 5),
+        descender = i16(bytes, hheaAt + 7),
+        lineGap = i16(bytes, hheaAt + 9),
+        numGlyphs = u16(bytes, maxpAt + 5),
+        bytes = bytes,
+        locaAt = locaAt + 1,
+        locaLong = i16(bytes, headAt + 51) ~= 0,
+        glyfAt = glyfAt + 1,
+        hmtxAt = hmtxAt + 1,
+        hMetrics = u16(bytes, hheaAt + 35),
+        cmapAt = cmapSubtable,
+        cmapFormat = cmapFormat,
+        kernAt = kernAt,
+        kernPairs = nil
+    ), nil
+end
+
+local function lookupFormat4(bytes: string, at: integer, codepoint: integer): integer
+    if codepoint > 0xffff then
+        return 0
+    end
+    const segments = u16(bytes, at + 6) // 2
+    const endCodes = at + 14
+    const startCodes = endCodes + segments * 2 + 2
+    const deltas = startCodes + segments * 2
+    const ranges = deltas + segments * 2
+    for segment = 0, segments - 1 do
+        if codepoint <= u16(bytes, endCodes + segment * 2) then
+            const start = u16(bytes, startCodes + segment * 2)
+            if codepoint < start then
+                return 0
+            end
+            const rangeOffset = u16(bytes, ranges + segment * 2)
+            if rangeOffset == 0 then
+                return (codepoint + i16(bytes, deltas + segment * 2)) % 65536
+            end
+            const glyphAt = ranges + segment * 2 + rangeOffset + (codepoint - start) * 2
+            const glyph = u16(bytes, glyphAt)
+            if glyph == 0 then
+                return 0
+            end
+
+            return (glyph + i16(bytes, deltas + segment * 2)) % 65536
+        end
+    end
+
+    return 0
+end
+
+local function lookupFormat12(bytes: string, at: integer, codepoint: integer): integer
+    const groups = u32(bytes, at + 12)
+    local low: integer = 0
+    local high: integer = groups - 1
+    while low <= high do
+        const middle = (low + high) // 2
+        const group = at + 16 + middle * 12
+        const first = u32(bytes, group)
+        const last = u32(bytes, group + 4)
+        if codepoint < first then
+            high = middle - 1
+        elseif codepoint > last then
+            low = middle + 1
+        else
+            return u32(bytes, group + 8) + codepoint - first
+        end
+    end
+
+    return 0
+end
+
+--- Returns the glyph one codepoint selects.
+---
+--- Zero is the `.notdef` glyph rather than an error, which is the glyph a font
+--- draws for a character it does not carry, so a caller renders it instead of
+--- branching.
+--- @param self the parsed face
+--- @param codepoint the Unicode scalar to look up
+--- @return the glyph index, which is zero for a codepoint the face does not map
+function Face.glyphIndex(borrows self: Face, codepoint: integer): integer
+    const bytes = self.bytes
+    const at = self.cmapAt
+    local glyph: integer = 0
+    if self.cmapFormat == 4 then
+        glyph = lookupFormat4(bytes, at, codepoint)
+    elseif self.cmapFormat == 12 then
+        glyph = lookupFormat12(bytes, at, codepoint)
+    elseif self.cmapFormat == 6 then
+        const first = u16(bytes, at + 6)
+        const count = u16(bytes, at + 8)
+        if codepoint >= first and codepoint < first + count then
+            glyph = u16(bytes, at + 10 + (codepoint - first) * 2)
+        end
+    elseif self.cmapFormat == 0 then
+        if codepoint >= 0 and codepoint < 256 then
+            glyph = u8(bytes, at + 6 + codepoint)
+        end
+    end
+    if glyph >= self.numGlyphs then
+        return 0
+    end
+
+    return glyph
+end
+
+--- Returns one glyph's horizontal advance in font units.
+--- @param self the parsed face
+--- @param glyph the glyph index
+--- @return the advance width, which is the last metric's width for a glyph
+---     past the horizontal metric count
+function Face.advanceOf(borrows self: Face, glyph: integer): number
+    const metrics = self.hMetrics
+    if metrics == 0 then
+        return 0.0
+    end
+    const index = glyph < metrics and glyph or metrics - 1
+
+    return u16(self.bytes, self.hmtxAt + index * 4)
+end
+
+--- Returns one glyph's left side bearing in font units.
+--- @param self the parsed face
+--- @param glyph the glyph index
+--- @return the distance from the pen to the outline's left edge
+function Face.bearingOf(borrows self: Face, glyph: integer): number
+    const metrics = self.hMetrics
+    if metrics == 0 then
+        return 0.0
+    end
+    if glyph < metrics then
+        return i16(self.bytes, self.hmtxAt + glyph * 4 + 2)
+    end
+
+    return i16(self.bytes, self.hmtxAt + metrics * 4 + (glyph - metrics) * 2)
+end
+
+--- Reads every format-zero kerning pair into one map.
+local function readKerning(borrows self: Face): {[integer]: number}
+    local entries: {[integer]: number} = {}
+    const at = self.kernAt
+    if at == 0 then
+        return entries
+    end
+    const bytes = self.bytes
+    const base = at + 1
+    const tables = u16(bytes, base + 2)
+    local subtable = base + 4
+    for _ = 1, tables do
+        const length = u16(bytes, subtable + 2)
+        const coverage = u16(bytes, subtable + 4)
+        -- The low byte holds the format and bit zero of the high byte says the
+        -- values are horizontal, which is the only direction laid out here.
+        if coverage % 256 == 0 and (coverage // 256) % 2 == 1 then
+            const count = u16(bytes, subtable + 6)
+            for index = 0, count - 1 do
+                const entry = subtable + 14 + index * 6
+                entries[u16(bytes, entry) * 65536 + u16(bytes, entry + 2)] = i16(bytes, entry + 4)
+            end
+        end
+        if length == 0 then
+            break
+        end
+        subtable = subtable + length
+    end
+
+    return entries
+end
+
+--- Returns the kerning between two glyphs in font units.
+---
+--- Reads the pairs on first use and keeps them, because a face that kerns is
+--- asked about most of its adjacent pairs within one line of text.
+--- @param self the parsed face
+--- @param left the glyph on the left
+--- @param right the glyph on the right
+--- @return the adjustment to add to the left glyph's advance, which is zero
+---     for an unkerned pair and for a face with no format-zero kern table
+function Face.kerningOf(exclusive self: Face, left: integer, right: integer): number
+    local entries = self.kernPairs
+    if entries == nil then
+        entries = readKerning(self)
+        self.kernPairs = entries
+    end
+
+    return entries[left * 65536 + right] or 0.0
+end
+
+--- Returns where one glyph's outline data starts and ends inside `glyf`.
+local function glyphRange(self: Face, glyph: integer): integer, integer
+    if glyph < 0 or glyph >= self.numGlyphs then
+        return 0, 0
+    end
+    const bytes = self.bytes
+    local first: integer
+    local last: integer
+    if self.locaLong then
+        first = u32(bytes, self.locaAt + glyph * 4)
+        last = u32(bytes, self.locaAt + glyph * 4 + 4)
+    else
+        first = u16(bytes, self.locaAt + glyph * 2) * 2
+        last = u16(bytes, self.locaAt + glyph * 2 + 2) * 2
+    end
+    if last <= first then
+        return 0, 0
+    end
+
+    return self.glyfAt + first, self.glyfAt + last
+end
+
+--- One glyph outline, as closed contours of flattened points.
+---
+--- Each contour is a flat array of alternating x and y in font units, with y
+--- increasing upward the way the font file stores it. The last point joins the
+--- first; the closing segment is not repeated.
+export type Outline = {{number}}
+
+--- How many line segments one quadratic is flattened into.
+---
+--- The control polygon's length in device pixels decides it, so a curve that
+--- covers two texels costs two segments and one that sweeps a whole glyph
+--- costs a dozen. The count is a function of the scale alone, so the same
+--- glyph at the same size flattens identically every run.
+local function segmentsFor(length: number): integer
+    if length <= 1.0 then
+        return 2
+    end
+    const count = ceil(sqrt(length * 2.0))
+    if count < 2 then
+        return 2
+    end
+    if count > 16 then
+        return 16
+    end
+
+    return count as integer
+end
+
+--- Appends one quadratic's interior points, leaving the endpoint to the caller.
+local function flatten(
+    into: {number},
+    x0: number,
+    y0: number,
+    cx: number,
+    cy: number,
+    x1: number,
+    y1: number,
+    scale: number
+): nil
+    const span = (math.abs(cx - x0) + math.abs(cy - y0) + math.abs(x1 - cx) + math.abs(y1 - cy)) * scale
+    const steps = segmentsFor(span)
+    for step = 1, steps - 1 do
+        const t = step / steps
+        const inverse = 1.0 - t
+        const a = inverse * inverse
+        const b = 2.0 * inverse * t
+        const c = t * t
+        into[#into + 1] = a * x0 + b * cx + c * x1
+        into[#into + 1] = a * y0 + b * cy + c * y1
+    end
+end
+
+local appendGlyph: function(
+    self: Face,
+    glyph: integer,
+    out: Outline,
+    scale: number,
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+    depth: integer
+): nil
+
+--- Reads one simple glyph's contours, transformed by the caller's matrix.
+local function appendSimple(
+    self: Face,
+    at: integer,
+    contours: integer,
+    out: Outline,
+    scale: number,
+    ma: number,
+    mb: number,
+    mc: number,
+    md: number,
+    me: number,
+    mf: number
+): nil
+    const bytes = self.bytes
+    local ends: {integer} = {}
+    for index = 1, contours do
+        ends[index] = u16(bytes, at + 10 + (index - 1) * 2)
+    end
+    const points = ends[contours] + 1
+    if points <= 0 then
+        return
+    end
+    local cursor = at + 10 + contours * 2
+    cursor = cursor + 2 + u16(bytes, cursor)
+
+    local flags: {integer} = {}
+    local index: integer = 1
+    while index <= points do
+        const flag = u8(bytes, cursor)
+        cursor = cursor + 1
+        flags[index] = flag
+        index = index + 1
+        if flag % 16 >= 8 then
+            local repeats = u8(bytes, cursor)
+            cursor = cursor + 1
+            while repeats > 0 and index <= points do
+                flags[index] = flag
+                index = index + 1
+                repeats = repeats - 1
+            end
+        end
+    end
+
+    local xs: {number} = {}
+    local value: number = 0.0
+    for point = 1, points do
+        const flag = flags[point]
+        if flag % 4 >= 2 then
+            const delta = u8(bytes, cursor)
+            cursor = cursor + 1
+            value = value + (flag % 32 >= 16 and delta or -delta)
+        elseif flag % 32 < 16 then
+            value = value + i16(bytes, cursor)
+            cursor = cursor + 2
+        end
+        xs[point] = value
+    end
+
+    local ys: {number} = {}
+    value = 0.0
+    for point = 1, points do
+        const flag = flags[point]
+        if flag % 8 >= 4 then
+            const delta = u8(bytes, cursor)
+            cursor = cursor + 1
+            value = value + (flag % 64 >= 32 and delta or -delta)
+        elseif flag % 64 < 32 then
+            value = value + i16(bytes, cursor)
+            cursor = cursor + 2
+        end
+        ys[point] = value
+    end
+
+    local first: integer = 1
+    for contour = 1, contours do
+        const last: integer = ends[contour] + 1
+        if last >= first then
+            local shape: {number} = {}
+            -- A contour may open on an off-curve point, in which case the
+            -- start is the implied midpoint between it and the last point.
+            local startX: number
+            local startY: number
+            const firstOn = flags[first] % 2 == 1
+            if firstOn then
+                startX, startY = xs[first], ys[first]
+            elseif flags[last] % 2 == 1 then
+                startX, startY = xs[last], ys[last]
+            else
+                startX = (xs[first] + xs[last]) * 0.5
+                startY = (ys[first] + ys[last]) * 0.5
+            end
+            shape[1] = ma * startX + mc * startY + me
+            shape[2] = mb * startX + md * startY + mf
+
+            local cursorX = startX
+            local cursorY = startY
+            local pendingX: number = 0.0
+            local pendingY: number = 0.0
+            local pending = false
+            const total: integer = last - first + 1
+            const begin: integer = firstOn and 1 or 0
+            for step = begin, total - 1 do
+                const point: integer = first + step
+                const px = xs[point]
+                const py = ys[point]
+                if flags[point] % 2 == 1 then
+                    if pending then
+                        flatten(shape, cursorX, cursorY, pendingX, pendingY, px, py, scale)
+                        pending = false
+                    end
+                    shape[#shape + 1] = px
+                    shape[#shape + 1] = py
+                    cursorX, cursorY = px, py
+                elseif pending then
+                    const midX = (pendingX + px) * 0.5
+                    const midY = (pendingY + py) * 0.5
+                    flatten(shape, cursorX, cursorY, pendingX, pendingY, midX, midY, scale)
+                    shape[#shape + 1] = midX
+                    shape[#shape + 1] = midY
+                    cursorX, cursorY = midX, midY
+                    pendingX, pendingY = px, py
+                else
+                    pendingX, pendingY = px, py
+                    pending = true
+                end
+            end
+            if pending then
+                flatten(shape, cursorX, cursorY, pendingX, pendingY, startX, startY, scale)
+            end
+            -- The transform is applied to every point once the contour is
+            -- flattened, so a composite component's scale never changes how
+            -- finely its curves were cut.
+            if ma ~= 1.0 or mb ~= 0.0 or mc ~= 0.0 or md ~= 1.0 or me ~= 0.0 or mf ~= 0.0 then
+                for offset = 3, #shape - 1, 2 do
+                    const px = shape[offset]
+                    const py = shape[offset + 1]
+                    shape[offset] = ma * px + mc * py + me
+                    shape[offset + 1] = mb * px + md * py + mf
+                end
+            end
+            if #shape >= 6 then
+                out[#out + 1] = shape
+            end
+        end
+        first = ends[contour] + 2
+    end
+end
+
+--- Reads one composite glyph's components.
+local function appendComposite(
+    self: Face,
+    at: integer,
+    limit: integer,
+    out: Outline,
+    scale: number,
+    ma: number,
+    mb: number,
+    mc: number,
+    md: number,
+    me: number,
+    mf: number,
+    depth: integer
+): nil
+    const bytes = self.bytes
+    local cursor = at + 10
+    while cursor + 3 <= limit do
+        const flags = u16(bytes, cursor)
+        const component = u16(bytes, cursor + 2)
+        cursor = cursor + 4
+        local dx: number = 0.0
+        local dy: number = 0.0
+        if flags % 2 == 1 then
+            dx = i16(bytes, cursor)
+            dy = i16(bytes, cursor + 2)
+            cursor = cursor + 4
+        else
+            const first = u8(bytes, cursor)
+            const second = u8(bytes, cursor + 1)
+            dx = first >= 128 and first - 256 or first
+            dy = second >= 128 and second - 256 or second
+            cursor = cursor + 2
+        end
+        -- Only the point-matching form leaves the arguments as point indices,
+        -- and it is rare enough that placing the component at the origin is
+        -- better than refusing the glyph.
+        if (flags // 2) % 2 == 0 then
+            dx, dy = 0.0, 0.0
+        end
+        local a: number = 1.0
+        local b: number = 0.0
+        local c: number = 0.0
+        local d: number = 1.0
+        if (flags // 8) % 2 == 1 then
+            a = i16(bytes, cursor) / 16384.0
+            d = a
+            cursor = cursor + 2
+        elseif (flags // 64) % 2 == 1 then
+            a = i16(bytes, cursor) / 16384.0
+            d = i16(bytes, cursor + 2) / 16384.0
+            cursor = cursor + 4
+        elseif (flags // 128) % 2 == 1 then
+            a = i16(bytes, cursor) / 16384.0
+            b = i16(bytes, cursor + 2) / 16384.0
+            c = i16(bytes, cursor + 4) / 16384.0
+            d = i16(bytes, cursor + 6) / 16384.0
+            cursor = cursor + 8
+        end
+        appendGlyph(
+            self,
+            component,
+            out,
+            scale,
+            a * ma + b * mc,
+            a * mb + b * md,
+            c * ma + d * mc,
+            c * mb + d * md,
+            dx * ma + dy * mc + me,
+            dx * mb + dy * md + mf,
+            depth + 1
+        )
+        if (flags // 32) % 2 == 0 then
+            return
+        end
+    end
+end
+
+appendGlyph = function(
+    self: Face,
+    glyph: integer,
+    out: Outline,
+    scale: number,
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+    depth: integer
+): nil
+    if depth > MAX_COMPONENT_DEPTH then
+        return
+    end
+    const at, limit = glyphRange(self, glyph)
+    if at == 0 then
+        return
+    end
+    const contours = i16(self.bytes, at)
+    if contours > 0 then
+        appendSimple(self, at, contours, out, scale, a, b, c, d, e, f)
+    elseif contours < 0 then
+        appendComposite(self, at, limit, out, scale, a, b, c, d, e, f, depth)
+    end
+end
+
+--- Returns one glyph's flattened outline and its bounding box.
+---
+--- The box comes from the flattened points rather than from the glyph header,
+--- so it encloses exactly what `rasterize` will fill. An empty glyph, which is
+--- what a space is, returns no contours and a zero box.
+--- @param self the parsed face
+--- @param glyph the glyph index
+--- @param scale the font units to pixels factor the flattening is tuned for
+--- @return the contours, in font units with y increasing upward
+--- @return the smallest x, then the smallest y, then the largest x, then the
+---     largest y, all in font units
+export function outline(self: Face, glyph: integer, scale: number): Outline, number, number, number, number
+    local out: Outline = {}
+    appendGlyph(self, glyph, out, scale, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0)
+    if #out == 0 then
+        return out, 0.0, 0.0, 0.0, 0.0
+    end
+    local minX: number = math.huge
+    local minY: number = math.huge
+    local maxX: number = -math.huge
+    local maxY: number = -math.huge
+    for index = 1, #out do
+        const shape = out[index]
+        for offset = 1, #shape - 1, 2 do
+            const x = shape[offset]
+            const y = shape[offset + 1]
+            minX = min(minX, x)
+            maxX = max(maxX, x)
+            minY = min(minY, y)
+            maxY = max(maxY, y)
+        end
+    end
+
+    return out, minX, minY, maxX, maxY
+end
+
+--- Fills one outline into an antialiased coverage bitmap.
+---
+--- The bitmap runs left to right and top to bottom, so it uploads as image
+--- rows without a flip. Font y increases upward and texel y increases
+--- downward, which is the only place the two conventions meet.
+--- @param contours the flattened contours, in font units
+--- @param width the bitmap width in texels, which must be positive
+--- @param height the bitmap height in texels, which must be positive
+--- @param originX the font-unit x that lands on the bitmap's left edge
+--- @param originY the font-unit y that lands on the bitmap's top edge
+--- @param scale the font units to texels factor
+--- @return a `width` times `height` array of coverage from zero to 255, indexed
+---     from one, which the caller owns
+export function rasterize(
+    contours: Outline,
+    width: integer,
+    height: integer,
+    originX: number,
+    originY: number,
+    scale: number
+): {integer}
+    if width < 1 or height < 1 then
+        error("truetype.rasterize: the bitmap dimensions must be positive", 2)
+    end
+    local coverage: {integer} = {}
+    for index = 1, width * height do
+        coverage[index] = 0
+    end
+    if #contours == 0 then
+        return coverage
+    end
+
+    -- Every edge, as its two endpoints in texel space with y running down.
+    -- Horizontal edges contribute no crossings and are dropped here rather
+    -- than tested inside the scanline loop.
+    local ax: {number} = {}
+    local ay: {number} = {}
+    local bx: {number} = {}
+    local by: {number} = {}
+    local edges: integer = 0
+    for index = 1, #contours do
+        const shape = contours[index]
+        const points = #shape // 2
+        for point = 1, points do
+            const nextPoint = point < points and point + 1 or 1
+            const x0 = (shape[point * 2 - 1] - originX) * scale
+            const y0 = (originY - shape[point * 2]) * scale
+            const x1 = (shape[nextPoint * 2 - 1] - originX) * scale
+            const y1 = (originY - shape[nextPoint * 2]) * scale
+            if y0 ~= y1 then
+                edges = edges + 1
+                ax[edges] = x0
+                ay[edges] = y0
+                bx[edges] = x1
+                by[edges] = y1
+            end
+        end
+    end
+    if edges == 0 then
+        return coverage
+    end
+
+    local accumulated: {number} = {}
+    for index = 1, width do
+        accumulated[index] = 0.0
+    end
+    local crossX: {number} = {}
+    local crossWind: {integer} = {}
+    const share = 1.0 / SUBSAMPLES
+
+    for row = 0, height - 1 do
+        for index = 1, width do
+            accumulated[index] = 0.0
+        end
+        for sub = 0, SUBSAMPLES - 1 do
+            const sampleY = row + (sub + 0.5) * share
+            local hits: integer = 0
+            for edge = 1, edges do
+                const y0 = ay[edge]
+                const y1 = by[edge]
+                if (y0 <= sampleY and y1 > sampleY) or (y1 <= sampleY and y0 > sampleY) then
+                    hits = hits + 1
+                    crossX[hits] = ax[edge] + (sampleY - y0) / (y1 - y0) * (bx[edge] - ax[edge])
+                    crossWind[hits] = y1 > y0 and 1 or -1
+                end
+            end
+            if hits > 1 then
+                -- Insertion sort keeps the two parallel arrays together and is
+                -- the right shape here: a scanline crosses a handful of edges
+                -- and they arrive nearly ordered.
+                for index = 2, hits do
+                    const keyX = crossX[index]
+                    const keyWind = crossWind[index]
+                    local slot = index - 1
+                    while slot >= 1 and crossX[slot] > keyX do
+                        crossX[slot + 1] = crossX[slot]
+                        crossWind[slot + 1] = crossWind[slot]
+                        slot = slot - 1
+                    end
+                    crossX[slot + 1] = keyX
+                    crossWind[slot + 1] = keyWind
+                end
+                local winding: integer = 0
+                local spanStart: number = 0.0
+                for index = 1, hits do
+                    const previous = winding
+                    winding = winding + crossWind[index]
+                    if previous == 0 and winding ~= 0 then
+                        spanStart = crossX[index]
+                    elseif previous ~= 0 and winding == 0 then
+                        local left = spanStart
+                        local right = crossX[index]
+                        if left < 0.0 then
+                            left = 0.0
+                        end
+                        if right > width then
+                            right = width
+                        end
+                        if right > left then
+                            const firstTexel = floor(left) as integer
+                            const lastTexel = ceil(right) as integer - 1
+                            for texel = firstTexel, lastTexel do
+                                const lower = texel > left and texel or left
+                                const upper = (texel + 1) < right and (texel + 1) or right
+                                if upper > lower then
+                                    accumulated[texel + 1] = accumulated[texel + 1] + (upper - lower) * share
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        const base = row * width
+        for column = 1, width do
+            const value = accumulated[column]
+            if value > 0.0 then
+                const scaled = floor(value * 255.0 + 0.5) as integer
+                coverage[base + column] = scaled > 255 and 255 or scaled
+            end
+        end
+    end
+
+    return coverage
+end
+
+--- Turns one coverage bitmap into a signed distance field.
+---
+--- The field is stored the way a distance-field shader expects it: `0.5` sits
+--- on the outline, values above it are inside, and one texel of distance is
+--- `0.5 / spread` of the stored range. A shader recovers coverage by
+--- smoothstepping around `0.5`.
+---
+--- Distance comes from a two-pass sequential Euclidean transform over the
+--- thresholded coverage, which is exact for the texel centers it visits and
+--- within a fraction of a texel elsewhere. That is well inside what a spread
+--- of several texels can represent.
+--- @param coverage the bitmap `rasterize` produced
+--- @param width the bitmap width in texels
+--- @param height the bitmap height in texels
+--- @param spread the distance in texels the field reaches on each side of the
+---     outline, which must be positive
+--- @return a `width` times `height` array of field values from zero to 255,
+---     indexed from one, which the caller owns
+export function distanceField(coverage: {integer}, width: integer, height: integer, spread: number): {integer}
+    if width < 1 or height < 1 then
+        error("truetype.distanceField: the bitmap dimensions must be positive", 2)
+    end
+    if not (spread > 0.0) then
+        error("truetype.distanceField: the spread must be greater than zero", 2)
+    end
+    const cells = width * height
+    const far = (width + height) * 2.0
+    -- One distance per cell to the nearest filled texel and one to the nearest
+    -- empty texel. Subtracting the second from the first is what makes the
+    -- field signed: it is positive outside the glyph and negative inside.
+    local toInside: {number} = {}
+    local toOutside: {number} = {}
+    for index = 1, cells do
+        if coverage[index] >= 128 then
+            toInside[index] = 0.0
+            toOutside[index] = far
+        else
+            toInside[index] = far
+            toOutside[index] = 0.0
+        end
+    end
+
+    local function sweep(field: {number}): nil
+        -- Forward pass over the four already-visited neighbours, then a
+        -- backward pass over the other four. Diagonal steps cost the square
+        -- root of two, which is what makes the result Euclidean rather than
+        -- a chessboard metric.
+        const diagonal = 1.4142135623730951
+        for row = 0, height - 1 do
+            const base = row * width
+            for column = 1, width do
+                const index = base + column
+                local best = field[index]
+                if column > 1 then
+                    const candidate = field[index - 1] + 1.0
+                    if candidate < best then
+                        best = candidate
+                    end
+                end
+                if row > 0 then
+                    const candidate = field[index - width] + 1.0
+                    if candidate < best then
+                        best = candidate
+                    end
+                    if column > 1 then
+                        const diagonalUp = field[index - width - 1] + diagonal
+                        if diagonalUp < best then
+                            best = diagonalUp
+                        end
+                    end
+                    if column < width then
+                        const diagonalUp = field[index - width + 1] + diagonal
+                        if diagonalUp < best then
+                            best = diagonalUp
+                        end
+                    end
+                end
+                field[index] = best
+            end
+        end
+        for row = height - 1, 0, -1 do
+            const base = row * width
+            for column = width, 1, -1 do
+                const index = base + column
+                local best = field[index]
+                if column < width then
+                    const candidate = field[index + 1] + 1.0
+                    if candidate < best then
+                        best = candidate
+                    end
+                end
+                if row < height - 1 then
+                    const candidate = field[index + width] + 1.0
+                    if candidate < best then
+                        best = candidate
+                    end
+                    if column < width then
+                        const diagonalDown = field[index + width + 1] + diagonal
+                        if diagonalDown < best then
+                            best = diagonalDown
+                        end
+                    end
+                    if column > 1 then
+                        const diagonalDown = field[index + width - 1] + diagonal
+                        if diagonalDown < best then
+                            best = diagonalDown
+                        end
+                    end
+                end
+                field[index] = best
+            end
+        end
+    end
+
+    sweep(toInside)
+    sweep(toOutside)
+
+    local field: {integer} = {}
+    for index = 1, cells do
+        -- Positive outside the glyph and negative inside, so half a range
+        -- either side of the outline lands on the stored half-way value.
+        const signed = toInside[index] - toOutside[index]
+        local value = 0.5 - signed / (spread * 2.0)
+        if value < 0.0 then
+            value = 0.0
+        elseif value > 1.0 then
+            value = 1.0
+        end
+        field[index] = floor(value * 255.0 + 0.5) as integer
+    end
+
+    return field
+end
