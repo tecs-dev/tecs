@@ -38,29 +38,18 @@ fn engine_pack() -> ShaderPack {
     ShaderPack::assemble(&directory).expect("the engine material set assembles")
 }
 
-#[test]
-fn draws_the_instance_the_compaction_chose() {
-    let Some(harness) = Harness::open() else {
-        eprintln!("no wgpu adapter; skipping the draw tests");
-        return;
-    };
+/// Runs the cull and the geometry pass over one scene and returns the albedo
+/// attachment as RGBA8 rows.
+fn render(harness: &Harness, instances: &[TestInstance]) -> Vec<u8> {
     let device = &harness.device;
     let scope = device.push_error_scope(ErrorFilter::Validation);
-
-    // Two quads: one over the middle of the target and one far outside the
-    // view. The cull drops the second, so the draw is one instance long and
-    // what lands in the middle is the first one's tint.
-    let instances = vec![
-        TestInstance::opaque(0.0, 0.0),
-        TestInstance::opaque(100_000.0, 0.0),
-    ];
     let batches = vec![TestBatch {
         lane: LANE_OPAQUE,
         first: 0,
-        count: 2,
+        count: instances.len() as u32,
     }];
     let view = [-2.0, -2.0, 2.0, 2.0];
-    let culled = harness.dispatch(&instances, &batches, view, 8);
+    let culled = harness.dispatch(instances, &batches, view, 8);
 
     let layouts = Layouts::new(device);
     let module = device.create_shader_module(ShaderModuleDescriptor {
@@ -316,18 +305,89 @@ fn draws_the_instance_the_compaction_chose() {
     let error = pollster::block_on(scope.pop());
     assert!(error.is_none(), "{error:?}");
 
-    let center = ((SIZE / 2) * SIZE + SIZE / 2) as usize * 4;
+    pixels
+}
+
+/// The texel at the middle of the target, where every quad here covers.
+fn center(pixels: &[u8]) -> [u8; 4] {
+    let at = ((SIZE / 2) * SIZE + SIZE / 2) as usize * 4;
+    pixels[at..at + 4].try_into().expect("four channels")
+}
+
+/// A texel just inside the quad's corner, which a circle inscribed in the quad
+/// does not reach.
+fn corner(pixels: &[u8]) -> [u8; 4] {
+    // The quad spans the middle half of the target, so this is one texel inside
+    // its top left corner and well outside a circle inscribed in it.
+    let x = SIZE / 4 + 1;
+    let y = SIZE / 4 + 1;
+    let at = (y * SIZE + x) as usize * 4;
+    pixels[at..at + 4].try_into().expect("four channels")
+}
+
+#[test]
+fn draws_the_instance_the_compaction_chose() {
+    let Some(harness) = Harness::open() else {
+        eprintln!("no wgpu adapter; skipping the draw tests");
+        return;
+    };
+    // Two quads: one over the middle of the target and one far outside the
+    // view. The cull drops the second, so the draw is one instance long and
+    // what lands in the middle is the first one's tint.
+    let pixels = render(
+        &harness,
+        &[
+            TestInstance::opaque(0.0, 0.0),
+            TestInstance::opaque(100_000.0, 0.0),
+        ],
+    );
     assert_eq!(
-        &pixels[center..center + 4],
-        &[255, 255, 255, 255],
+        center(&pixels),
+        [255, 255, 255, 255],
         "the surviving instance covers the middle of the target"
     );
-    // A corner outside the quad keeps the attachment's clear, which is what
+    // A texel outside the quad keeps the attachment's clear, which is what
     // proves the draw is bounded by the geometry rather than covering the
     // target the way a fullscreen pass would.
+    assert_eq!(&pixels[0..4], [0, 0, 0, 0], "the clear survives outside it");
+}
+
+#[test]
+fn dispatches_to_the_material_the_instance_names() {
+    let Some(harness) = Harness::open() else {
+        eprintln!("no wgpu adapter; skipping the draw tests");
+        return;
+    };
+    let pack = engine_pack();
+    let circle = pack
+        .materials()
+        .iter()
+        .position(|name| name == "circle")
+        .expect("the engine set has a circle") as u32;
+
+    // The default material covers the whole quad, so its corner is drawn.
+    let textured = render(&harness, &[TestInstance::opaque(0.0, 0.0)]);
+    assert_eq!(center(&textured), [255, 255, 255, 255]);
     assert_eq!(
-        &pixels[0..4],
-        &[0, 0, 0, 0],
-        "the clear survives outside it"
+        corner(&textured),
+        [255, 255, 255, 255],
+        "`textured` covers the quad's corner"
+    );
+
+    // `circle` returns a coverage its corner fails, so the same geometry with a
+    // different material id keeps the clear there. Nothing but the id differs
+    // between the two draws, so the dispatch is what decided it.
+    let inscribed = render(
+        &harness,
+        &[TestInstance {
+            material: circle,
+            ..TestInstance::opaque(0.0, 0.0)
+        }],
+    );
+    assert_eq!(center(&inscribed), [255, 255, 255, 255]);
+    assert_eq!(
+        corner(&inscribed),
+        [0, 0, 0, 0],
+        "`circle` discards the quad's corner"
     );
 }

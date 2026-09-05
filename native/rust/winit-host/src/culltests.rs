@@ -36,6 +36,8 @@ pub struct TestInstance {
     pub scale: f32,
     pub lane: u32,
     pub color: [f32; 4],
+    pub material: u32,
+    pub param: f32,
 }
 
 impl TestInstance {
@@ -47,6 +49,8 @@ impl TestInstance {
             scale: 2.0,
             lane: LANE_OPAQUE,
             color: [1.0, 1.0, 1.0, 1.0],
+            material: 0,
+            param: 0.25,
         }
     }
 
@@ -67,6 +71,8 @@ impl TestInstance {
         for (lane, channel) in self.color.iter().enumerate() {
             words[12 + lane] = channel.to_bits();
         }
+        words[6] = self.param.to_bits();
+        words[16] = self.material;
         words[17] = self.lane;
         let mut bytes = [0_u8; INSTANCE_STRIDE];
         for (index, word) in words.iter().enumerate() {

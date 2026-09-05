@@ -36,6 +36,7 @@ use winit::window::Window;
 
 use crate::graph::{
     parse_graph, ClearMode, DepthMode, Graph, Input, TargetAllocator, TargetFormat, TargetStore,
+    MAX_OUTPUTS,
 };
 use crate::packet::{
     parse_packet, Batch, INSTANCE_STRIDE, LANE_BLEND, LANE_COUNT, LANE_OPAQUE, SAMPLER_COUNT,
@@ -917,9 +918,15 @@ impl Graphics {
         }
 
         for (index, spec) in graph.passes().iter().enumerate() {
-            let mut attachments: Vec<Option<RenderPassColorAttachment>> = Vec::new();
+            // On the stack rather than in a vector, because a frame walks
+            // every pass and a per-pass allocation is a per-frame allocation.
+            // An attachment borrows a target view, so the array cannot be kept
+            // on the pass between frames either.
+            let mut storage: [Option<RenderPassColorAttachment>; MAX_OUTPUTS] =
+                [const { None }; MAX_OUTPUTS];
+            let count = spec.outputs.len().max(1);
             if spec.outputs.is_empty() {
-                attachments.push(Some(RenderPassColorAttachment {
+                storage[0] = Some(RenderPassColorAttachment {
                     view: &swapchain,
                     depth_slice: None,
                     resolve_target: None,
@@ -927,10 +934,10 @@ impl Graphics {
                         load: load_op(spec.clear, None),
                         store: StoreOp::Store,
                     },
-                }));
+                });
             } else {
-                for output in &spec.outputs {
-                    attachments.push(Some(RenderPassColorAttachment {
+                for (slot, output) in spec.outputs.iter().enumerate() {
+                    storage[slot] = Some(RenderPassColorAttachment {
                         view: &self.targets.target(*output).view,
                         depth_slice: None,
                         resolve_target: None,
@@ -938,9 +945,10 @@ impl Graphics {
                             load: load_op(spec.clear, graph.targets()[*output].clear),
                             store: StoreOp::Store,
                         },
-                    }));
+                    });
                 }
             }
+            let attachments = &storage[..count];
             let depth_attachment =
                 (spec.depth != DepthMode::None).then(|| RenderPassDepthStencilAttachment {
                     view: &self
@@ -965,7 +973,7 @@ impl Graphics {
             let runtime = &self.passes[index];
             let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
                 label: Some(spec.name.as_str()),
-                color_attachments: &attachments,
+                color_attachments: attachments,
                 depth_stencil_attachment: depth_attachment,
                 ..Default::default()
             });

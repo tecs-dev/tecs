@@ -19,6 +19,10 @@ use anyhow::{bail, Context, Result};
 /// compatibility surface shared with `tecs.gpu.passes.DEPTH`.
 pub const DEPTH_NAME: &str = "depth";
 
+/// How many color attachments one pass may write. WebGPU guarantees eight, and
+/// the frame builds a pass's attachments on the stack against this bound.
+pub const MAX_OUTPUTS: usize = 8;
+
 /// The formats a target may be declared in. The wire codes are a compatibility
 /// surface shared with `tecs.gpu.passes`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -268,6 +272,12 @@ pub fn parse_graph(bytes: &[u8]) -> Result<Graph> {
                 );
             }
             outputs.push(index);
+        }
+        if outputs.len() > MAX_OUTPUTS {
+            bail!(
+                "render graph pass '{name}' writes {} targets, and a pass may write {MAX_OUTPUTS}",
+                outputs.len()
+            );
         }
 
         if depth != DepthMode::None {
