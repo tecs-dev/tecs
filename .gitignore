@@ -5,12 +5,6 @@
 /out/
 /build/
 /target/
-/assets/external/
-
-# Development dependencies installed into the tree. The vendored C sources
-# under vendor/cjson are ours to carry, so they are exempt.
-/vendor/*
-!/vendor/cjson/
 
 .mcp.json
 
