@@ -204,6 +204,7 @@ registry.register({
 --- @raises when the kind is not one the host boundary translates
 local function buildEvent(kind: string, arguments: {[string]: any}): platformevents.Event
     local window = math.floor(tonumber(arguments.window) or tonumber(arguments.which) or 0) as integer
+    local device = math.floor(tonumber(arguments.which) or 0) as integer
     local x = tonumber(arguments.x) or 0
     local y = tonumber(arguments.y) or 0
     local flipped = arguments.flipped == true
@@ -269,6 +270,41 @@ local function buildEvent(kind: string, arguments: {[string]: any}): platformeve
         )
     elseif kind == "textInput" then
         return platformevents.text(arguments.text as string? or "", window)
+    elseif kind == "fingerDown" or kind == "fingerUp" or kind == "fingerMotion" or kind == "fingerCanceled" then
+        local finger = arguments.finger as string?
+        if finger == nil or finger == "" then
+            error("finger is required for the finger kinds", 0)
+        end
+
+        return platformevents.touch(
+            kind,
+            arguments.touchDevice as string? or "",
+            finger,
+            x,
+            y,
+            tonumber(arguments.normalX),
+            tonumber(arguments.normalY),
+            tonumber(arguments.pressure),
+            tonumber(arguments.dx),
+            tonumber(arguments.dy),
+            window
+        )
+    elseif kind == "gamepadAdded" or kind == "gamepadRemoved" then
+        -- A gamepad belongs to no window, so `which` names the device here and
+        -- the window alias above does not apply.
+        return platformevents.gamepadDevice(kind == "gamepadAdded", device)
+    elseif kind == "gamepadButtonDown" or kind == "gamepadButtonUp" then
+        return platformevents.gamepadButton(
+            kind == "gamepadButtonDown",
+            device,
+            math.floor(tonumber(arguments.button) or 1) as integer
+        )
+    elseif kind == "gamepadAxis" then
+        return platformevents.gamepadAxis(
+            device,
+            math.floor(tonumber(arguments.axis) or 1) as integer,
+            tonumber(arguments.value) or 0
+        )
     end
 
     error(`no event kind named '${kind}'; call with no kind to list them`, 0)
@@ -281,6 +317,13 @@ registry.register({
     -- for events the `winit` boundary does not translate, `scancode`,
     -- `penState`, `scale`, `recording`, `data1` and `data2`, are gone with the
     -- events that carried them rather than accepted and ignored.
+    --
+    -- `finger`, `touchDevice`, `normalX`, `normalY`, `pressure`, `axis` and
+    -- `value` arrive with the touch and gamepad kinds. Each is spelled as the
+    -- field the Teal event record published, because that is the name a person
+    -- reading a recording or the event reference already knows; the Teal tool
+    -- itself exposed none of them, so it could list `gamepadAxis` among its
+    -- kinds and then not let anyone push one.
     name = "send_event",
     description = "Pushes an event into the input stream, as if it had come from the platform.",
     destructive = true,
@@ -316,7 +359,18 @@ registry.register({
             height = {type = "integer", description = "For windowResized and windowScaleChanged."},
             scaleFactor = {type = "number", description = "For windowResized and windowScaleChanged."},
             window = {type = "integer", description = "The window the event is about."},
-            which = {type = "integer", description = "The window the event is about. An alias of window."}
+            which = {
+                type = "integer",
+                description = "The window the event is about, as an alias of "
+                .. "window, and the device for the gamepad kinds."
+            },
+            finger = {type = "string", description = "Required for the finger kinds."},
+            touchDevice = {type = "string", description = "Touch surface identity, for the finger kinds."},
+            normalX = {type = "number", description = "Position across the surface, zero to one."},
+            normalY = {type = "number", description = "Position down the surface, zero to one."},
+            pressure = {type = "number", description = "Reported pressure, zero to one."},
+            axis = {type = "integer", description = "Axis code, for gamepadAxis."},
+            value = {type = "number", description = "Axis reading, for gamepadAxis."}
         }
     },
     handler = function(arguments: {[string]: any}): {[string]: any}?
