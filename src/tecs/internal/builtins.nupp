@@ -152,6 +152,10 @@ end
 export const RelativeTransform2DComponent: components.TableComponent<RelativeTransform2D> = components.newComponent({
     -- This persisted component name is a compatibility surface.
     name = "RelativeTransform2D",
+    -- A relative transform composes onto a local one, so an entity carrying
+    -- only this would be skipped by the system that reads both. Naming the
+    -- requirement makes adding either one add the pair.
+    requires = {rendercomponents.Transform2DComponent},
     construct = function(
         x: number?,
         y: number?,

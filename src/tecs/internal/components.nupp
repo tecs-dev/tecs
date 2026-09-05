@@ -101,7 +101,8 @@ export type Input = Component | ScalarInstance<any> | TableInstance<any> | Relat
 --- Options for a marker component with no per-entity value.
 export type TagComponentOptions = {
     name: string,
-    transient: boolean?
+    transient: boolean?,
+    requires: {Component}?
 }
 
 --- Options for a number-valued scalar component.
@@ -142,7 +143,8 @@ export type TableComponentOptions<T> = {
     default: function(): T,
     save: (function(value: T): any)?,
     load: (function(value: any): T)?,
-    transient: boolean?
+    transient: boolean?,
+    requires: {Component}?
 }
 
 --- Options for an exclusive target relationship.
@@ -181,6 +183,64 @@ RelationshipComponent.__call = function(self: RelationshipComponent, target: int
     return new RelationshipInstance(componentType = self, value = new RelationshipValue(target = target))
 end
 
+--- What each component pulls in with it, by component id.
+---
+--- A component may name others it cannot be meaningful without, and a mutation
+--- that adds it adds those too. `RelativeTransform2D` names `Transform2D`
+--- because a relative transform composes onto a local one, and an entity
+--- carrying only the first would be silently skipped by the system that reads
+--- both.
+local requiredBy: {[integer]: {Component}} = {}
+
+--- The flattened transitive closure of each component's requirements, built on
+--- first use because most components have none and a spawn should not pay for
+--- the walk twice.
+local closureBy: {[integer]: {Component}} = {}
+
+--- Records what a component requires, replacing any earlier list.
+--- @param component the component that pulls the others in
+--- @param required what it pulls in, which may itself require more
+export function setRequires(component: Component, required: {Component}): nil
+    requiredBy[component.componentId] = required
+    closureBy = {}
+end
+
+--- Returns everything a component pulls in, transitively and deduplicated.
+---
+--- The list excludes the component itself and is the caller's to read, not to
+--- keep: it is cached and shared. A cycle terminates, since a component
+--- already visited is not walked again.
+--- @param component the component to resolve
+--- @return the components a mutation adding this one must also add
+export function requiresClosure(component: Component): {Component}
+    local cached = closureBy[component.componentId]
+    if cached ~= nil then
+        return cached
+    end
+    local entries: {Component} = {}
+    local seen: {[integer]: boolean} = {[component.componentId] = true}
+    local pending: {Component} = {component}
+    local index: integer = 1
+    while index <= #pending do
+        local current = pending[index]
+        index = index + 1
+        local direct = requiredBy[current.componentId]
+        if direct ~= nil then
+            for position = 1, #direct do
+                local required = direct[position]
+                if not seen[required.componentId] then
+                    seen[required.componentId] = true
+                    entries[#entries + 1] = required
+                    pending[#pending + 1] = required
+                end
+            end
+        end
+    end
+    closureBy[component.componentId] = entries
+
+    return entries
+end
+
 --- Creates and permanently registers a tag component.
 --- @param options the process-unique component name and snapshot policy
 --- @return the registered component
@@ -188,7 +248,7 @@ end
 export function newTagComponent(options: TagComponentOptions): TagComponent
     local name = options.name
     validateName(name, "newTagComponent")
-    return register(
+    local component = register(
         new TagComponent(
             componentId = componentids.allocate(),
             componentName = name,
@@ -196,6 +256,12 @@ export function newTagComponent(options: TagComponentOptions): TagComponent
             transient = options.transient == true
         )
     )
+    local required = options.requires
+    if required ~= nil then
+        setRequires(component, required)
+    end
+
+    return component
 end
 
 local function createScalar<T>(
@@ -286,6 +352,10 @@ export function newComponent<T>(options: TableComponentOptions<T>): TableCompone
     -- concrete implementor, so the registry erases only at this storage seam.
     registeredByName[component.componentName] = component as Component
     registeredById[component.componentId] = component as Component
+    local required = options.requires
+    if required ~= nil then
+        setRequires(component as Component, required)
+    end
 
     return component
 end

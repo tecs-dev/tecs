@@ -401,6 +401,33 @@ local function reserve(exclusive world: World, id: integer, target: archetype.Ar
     world.pendingSpawnBySlot[slot] = pending
 end
 
+--- Adds everything the named components pull in with them.
+---
+--- A component may name others it cannot be meaningful without, and adding it
+--- adds those too, so the entity lands in an archetype that carries all of
+--- them and the systems reading the pair actually match it. A component
+--- already named keeps the value the caller supplied for it; one added here
+--- takes its own default, which is what a column written without a value gets
+--- anyway.
+--- @param definitions the component list to extend in place
+local function expandRequires(exclusive definitions: {components.Component}): nil
+    local present: {[integer]: boolean} = {}
+    for index = 1, #definitions do
+        present[definitions[index].componentId] = true
+    end
+    local named = #definitions
+    for index = 1, named do
+        local required = components.requiresClosure(definitions[index])
+        for position = 1, #required do
+            local component = required[position]
+            if not present[component.componentId] then
+                present[component.componentId] = true
+                definitions[#definitions + 1] = component
+            end
+        end
+    end
+end
+
 local function collectInputs(values: {components.Input}): {components.Component}, {[integer]: any}
     local definitions: {components.Component} = {}
     local supplied: {[integer]: any} = {}
@@ -416,6 +443,8 @@ local function collectInputs(values: {components.Input}): {components.Component}
             supplied[component.componentId] = raw
         end
     end
+
+    expandRequires(definitions)
 
     return definitions, supplied
 end
@@ -478,6 +507,11 @@ local function withComponent(
     end
     if include then
         values[#values + 1] = component
+        -- Adding a component adds what it pulls in, the same as a spawn that
+        -- names it. Removing one does not take them away again: another
+        -- component may want the same thing, and a caller that added the
+        -- requirement itself did not ask for it to leave.
+        expandRequires(values)
     end
 
     return values

@@ -352,4 +352,44 @@ function suite.carriesEveryBuiltinThroughASnapshot(): nil
     near(assert(restored:get(child, ecs.Transform2D)).x, 6, "restored composition")
 end
 
+function suite.spawningARelativeTransformAddsTheLocalOne(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    local entity = world:spawn(ecs.RelativeTransform2D(5, 7))
+    world:commit()
+    test.assert(world:has(entity, ecs.Transform2D), "the local transform was not added")
+    local local2D = assert(world:get(entity, ecs.Transform2D))
+    test.equal(local2D.x, 0)
+end
+
+function suite.addingARelativeTransformLaterAddsTheLocalOne(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    local entity = world:spawn()
+    world:commit()
+    world:set(entity, ecs.RelativeTransform2D(3, 4))
+    world:commit()
+    test.assert(world:has(entity, ecs.Transform2D), "the local transform was not added by set")
+end
+
+function suite.aSuppliedRequirementKeepsItsValue(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    local entity = world:spawn(ecs.Transform2D(11, 22), ecs.RelativeTransform2D(1, 2))
+    world:commit()
+    local local2D = assert(world:get(entity, ecs.Transform2D))
+    test.equal(local2D.x, 11)
+    test.equal(local2D.y, 22)
+end
+
+function suite.aRequiredComponentComposesThroughTheHierarchy(): nil
+    -- The point of the requirement: the composing system reads both, so an
+    -- entity spawned with only the relative one has to still be matched.
+    local world = ecs.newWorld({maxEntities = 8})
+    local parent = world:spawn(ecs.Transform2D(100, 200))
+    local child = world:spawn(ecs.RelativeTransform2D(10, 20), ecs.ChildOf(parent))
+    world:commit()
+    world:update(0)
+    local composed = assert(world:get(child, ecs.Transform2D))
+    test.equal(composed.x, 110)
+    test.equal(composed.y, 220)
+end
+
 return suite
