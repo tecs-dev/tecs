@@ -24,13 +24,17 @@ world:spawn(
 
 `tecs.gfx.layers` decides the order and placement of those entities,
 `tecs.gfx.images` owns image identity and residency, `tecs.gfx.clips` owns the
-target-pixel regions `Clip` selects, and `tecs.gfx.sheet` and
-`tecs.gfx.animation` cut an image into frames and play them.
+target-pixel regions `Clip` selects, `tecs.gfx.sheet` and `tecs.gfx.animation`
+cut an image into frames and play them, `tecs.gfx.fonts` owns font identity and
+the glyph atlas, and `tecs.gfx.text` lays a string out into glyph entities that
+draw through the same textured path a sprite does.
 ]]
 
 local animation = require("tecs.gfx.animation")
 local clips = require("tecs.gfx.clips")
 local rendercomponents = require("tecs.internal.rendercomponents")
+local fonts = require("tecs.gfx.fonts")
+local text = require("tecs.gfx.text")
 
 --- A four-channel color stored on a renderable entity.
 export type Tint = rendercomponents.Tint
@@ -77,3 +81,22 @@ export const Animation = animation.AnimationComponent
 --- Requests `tecs.gfx.animation.Completed` and `tecs.gfx.animation.Looped` for
 --- one entity.
 export const AnimationEvents = animation.AnimationEvents
+
+--- A loaded font and the atlas its glyphs live in.
+export type Font = fonts.Font
+
+--- A string laid out into glyph entities.
+export type Text = text.Text
+
+--- Loads a TrueType font and reads its metrics.
+export const newTTF = fonts.newTTF
+
+--- Constructs a text whose omitted fields default to an empty left-aligned
+--- string at em size sixteen with no wrapping.
+export const Text = text.TextComponent
+
+--- Builds a text value that belongs to no entity, for measurement.
+export const newText = text.newText
+
+--- Marks an entity as one glyph `tecs.gfx.text` placed for a `Text`.
+export const TextGlyph = text.TextGlyph

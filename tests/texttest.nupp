@@ -1,0 +1,491 @@
+local ecs = require("tecs.ecs")
+local files = require("nupp.io.files")
+local fonts = require("tecs.gfx.fonts")
+local gfx = require("tecs.gfx")
+local images = require("tecs.gfx.images")
+local test = require("nupp.test")
+local text = require("tecs.gfx.text")
+
+local suite = {}
+
+const SOURCE = "assets/fonts/JetBrainsMono-ExtraBold.ttf"
+
+local shared: fonts.Font? = nil
+
+--- One monospaced font every layout test measures against.
+---
+--- Monospaced is what makes an assertion about a width exact rather than
+--- approximate: every glyph advances the same, so a line of `n` characters is
+--- `n` advances wide whatever the characters are.
+local function font(): fonts.Font
+    if shared == nil then
+        const bytes, reason = files.read(SOURCE)
+        test.assert(bytes, reason)
+        const loaded, failure = fonts.newTTF({bytes = bytes as string, name = "texttest/mono", size = 24})
+        test.assert(loaded, failure)
+        shared = loaded
+    end
+
+    return shared as fonts.Font
+end
+
+--- The width of one character at em size `size`, in world units.
+local function unit(size: number): number
+    return fonts.advanceOf(font(), 0x41) * size
+end
+
+local function newWorld(): ecs.World
+    const world = ecs.newWorld({maxEntities = 512})
+    text.install(world)
+
+    return world
+end
+
+--- Reads every glyph entity of one text as a flat list of quads.
+local function quads(borrows world: ecs.World, entity: integer): {number}
+    local out: {number} = {}
+    const held = text.glyphsOf(world, entity)
+    for index = 1, #held do
+        const x, y, width, height = text.glyphAt(world, entity, index)
+        out[#out + 1] = x as number
+        out[#out + 1] = y as number
+        out[#out + 1] = width as number
+        out[#out + 1] = height as number
+    end
+
+    return out
+end
+
+local function close(actual: number, expected: number, message: string): nil
+    test.assert(math.abs(actual - expected) < 0.001, message .. ": " .. tostring(actual) .. " vs " .. tostring(expected))
+end
+
+-------------------------------------------------------------------------------
+-- Measurement
+-------------------------------------------------------------------------------
+
+function suite.measuresAMonospacedLineAsItsAdvancesAcross(): nil
+    const item = text.newText("abcd", font(), 20)
+    const width, height = text.measureText(item)
+    close(width, unit(20) * 4, "four characters are four advances wide")
+    close(height, font().lineHeight * 20, "one line is one line box tall")
+end
+
+function suite.measuresNothingWithoutAFontAndNothingForAnEmptyString(): nil
+    const fontless = text.newText("hello", nil, 20)
+    const width, height = text.measureText(fontless)
+    test.equal(width, 0.0)
+    test.equal(height, 0.0)
+
+    const empty = text.newText("", font(), 20)
+    const emptyWidth, emptyHeight = text.measureText(empty)
+    test.equal(emptyWidth, 0.0)
+    -- An empty string is still one line box, which is what keeps an empty
+    -- label the same height as a filled one.
+    close(emptyHeight, font().lineHeight * 20, "an empty string is one line tall")
+end
+
+function suite.countsEveryExplicitNewlineAsALineBox(): nil
+    const item = text.newText("ab\ncdef\ng", font(), 16)
+    const width, height = text.measureText(item)
+    close(width, unit(16) * 4, "the block is as wide as its widest line")
+    close(height, font().lineHeight * 16 * 3, "three lines are three line boxes")
+
+    -- A trailing newline opens a line, so the block gains a box.
+    const trailing = text.newText("ab\n", font(), 16)
+    const _, trailingHeight = text.measureText(trailing)
+    close(trailingHeight, font().lineHeight * 16 * 2, "a trailing newline opens a line")
+end
+
+function suite.wrapsBetweenWordsAtTheGivenWidth(): nil
+    const size = 16.0
+    const step = unit(size)
+    -- Room for six characters, so "alpha beta" breaks after "alpha".
+    const item = text.newText("alpha beta", font(), size, "left", step * 6)
+    const width, height = text.measureText(item)
+    close(width, step * 5, "the wrapped block is as wide as its widest word")
+    close(height, font().lineHeight * size * 2, "wrapping opened a second line")
+
+    -- Wide enough for the whole run, so nothing breaks.
+    const wide = text.newText("alpha beta", font(), size, "left", step * 20)
+    const wideWidth, wideHeight = text.measureText(wide)
+    close(wideWidth, step * 10, "an unwrapped line keeps its spaces")
+    close(wideHeight, font().lineHeight * size, "an unwrapped run is one line")
+end
+
+function suite.letsAWordWiderThanTheWrapWidthOverflow(): nil
+    const size = 16.0
+    const step = unit(size)
+    const item = text.newText("extraordinarily", font(), size, "left", step * 4)
+    const width, height = text.measureText(item)
+    close(width, step * 15, "a single word is never split")
+    close(height, font().lineHeight * size, "an unsplittable word stays on one line")
+end
+
+function suite.overridesTheAuthoredWrapWidthForOneMeasurementOnly(): nil
+    const size = 16.0
+    const step = unit(size)
+    const item = text.newText("alpha beta", font(), size, "left", 0)
+    const wrapped = text.measureText(item, step * 6)
+    close(wrapped, step * 5, "the override wrapped the measurement")
+    test.equal(item.wrapWidth, 0.0)
+    const unwrapped = text.measureText(item)
+    close(unwrapped, step * 10, "the authored value is untouched")
+end
+
+function suite.reportsThePreferredAndMinimumContentWidths(): nil
+    const size = 16.0
+    const step = unit(size)
+    const item = text.newText("alpha extraordinarily be", font(), size, "left", step * 4)
+    const preferred, height, minimum = text.measureIntrinsic(item)
+    close(preferred, step * 24, "the preferred width ignores wrapping")
+    close(height, font().lineHeight * size, "the preferred height is one line")
+    close(minimum, step * 15, "the minimum content width is the widest word")
+end
+
+-------------------------------------------------------------------------------
+-- Placement
+-------------------------------------------------------------------------------
+
+function suite.placesOneGlyphEntityPerDrawnCharacter(): nil
+    const world = newWorld()
+    -- One repeated letter, so the distance between two glyph centres is
+    -- exactly the advance rather than the advance plus a bearing difference.
+    const entity = world:spawn(ecs.Transform2D(100, 50), gfx.Tint(1, 0.5, 0.25, 1), gfx.Text("aa a", font(), 20))
+    world:update(0)
+
+    -- Three drawn glyphs: the space carries an advance and no ink.
+    const held = text.glyphsOf(world, entity)
+    test.equal(#held, 3)
+    for index = 1, #held do
+        test.assert(world:has(held[index], gfx.TextGlyph), "a placed glyph carries the tag")
+        test.assert(world:has(held[index], gfx.Renderable2D), "a placed glyph is renderable")
+        const tint = world:get(held[index], gfx.Tint)
+        test.equal((tint as gfx.Tint).r, 1.0)
+        test.equal((tint as gfx.Tint).g, 0.5)
+        const sprite = world:get(held[index], gfx.Sprite)
+        test.equal((sprite as gfx.Sprite).image, fonts.imageOf(font()))
+    end
+
+    const item = world:get(entity, gfx.Text) as text.Text
+    close(item.width, unit(20) * 4, "the laid-out width covers the space")
+    -- The glyphs march to the right of the entity's position.
+    const first = text.glyphAt(world, entity, 1)
+    const third = text.glyphAt(world, entity, 3)
+    test.assert((first as number) > 100.0, "the block starts at the entity")
+    close((third as number) - (first as number), unit(20) * 3, "the third glyph is three advances along")
+end
+
+function suite.drawsNothingForAnEmptyStringOrAMissingFont(): nil
+    const world = newWorld()
+    const empty = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("", font(), 20))
+    const fontless = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("hello", nil, 20))
+    world:update(0)
+
+    test.equal(#text.glyphsOf(world, empty), 0)
+    test.equal(#text.glyphsOf(world, fontless), 0)
+    test.equal(text.glyphAt(world, empty, 1), nil)
+    const item = world:get(fontless, gfx.Text) as text.Text
+    test.equal(item.width, 0.0)
+end
+
+function suite.drawsTheMissingGlyphBoxForAnUnmappedCodepoint(): nil
+    const world = newWorld()
+    -- One private-use codepoint no text font maps, encoded as UTF-8.
+    const entity = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("\238\128\128", font(), 20))
+    world:update(0)
+
+    const held = text.glyphsOf(world, entity)
+    test.equal(#held, 1)
+    const _x, _y, width, height = text.glyphAt(world, entity, 1)
+    test.assert((width as number) > 0.0, "notdef draws a box")
+    test.assert((height as number) > 0.0, "notdef draws a box")
+end
+
+function suite.movesEachLineWithinTheBlockForCenterAndRightAlignment(): nil
+    const size = 20.0
+    const step = unit(size)
+    local lefts: {number} = {}
+    for _, align in ipairs({"left", "center", "right"}) do
+        const world = newWorld()
+        const entity = world:spawn(
+            ecs.Transform2D(0, 0),
+            gfx.Tint(1, 1, 1, 1),
+            gfx.Text("ab\nabcdef", font(), size, align as text.Align)
+        )
+        world:update(0)
+        const x = text.glyphAt(world, entity, 1)
+        lefts[#lefts + 1] = x as number
+    end
+
+    -- The short line is four advances narrower than the block, so centering
+    -- moves it two and right alignment moves it four.
+    close(lefts[2] - lefts[1], step * 2, "centering splits the room left over")
+    close(lefts[3] - lefts[1], step * 4, "right alignment spends all of it")
+end
+
+function suite.composesTheEntityTransformIntoEveryGlyph(): nil
+    const size = 20.0
+    const world = newWorld()
+    const plain = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("ab", font(), size))
+    const scaled = world:spawn(
+        ecs.Transform2D(0, 0, 0, 1, 0, 2, 2),
+        gfx.Tint(1, 1, 1, 1),
+        gfx.Text("ab", font(), size)
+    )
+    const turned = world:spawn(
+        ecs.Transform2D(0, 0, 0, 1, math.pi * 0.5, 1, 1),
+        gfx.Tint(1, 1, 1, 1),
+        gfx.Text("ab", font(), size)
+    )
+    world:update(0)
+
+    const px, py, pw, ph = text.glyphAt(world, plain, 1)
+    const sx, sy, sw, sh = text.glyphAt(world, scaled, 1)
+    close(sx as number, (px as number) * 2, "scale doubles the offset")
+    close(sy as number, (py as number) * 2, "scale doubles the offset")
+    close(sw as number, (pw as number) * 2, "scale doubles the quad")
+    close(sh as number, (ph as number) * 2, "scale doubles the quad")
+
+    -- A quarter turn sends the block's rightward run downward.
+    const tx, ty = text.glyphAt(world, turned, 1)
+    close(tx as number, -(py as number), "a quarter turn maps y onto minus x")
+    close(ty as number, px as number, "a quarter turn maps x onto y")
+    const transform = world:get(text.glyphsOf(world, turned)[1], ecs.Transform2D)
+    close((transform as ecs.Transform2D).rotation, math.pi * 0.5, "a glyph turns with its block")
+end
+
+function suite.carriesTheLayerAndHeightOntoEveryGlyph(): nil
+    const world = newWorld()
+    const entity = world:spawn(
+        ecs.Transform2D(0, 0, 0.25, 7, 0, 1, 1),
+        gfx.Tint(1, 1, 1, 1),
+        gfx.Text("ab", font(), 20)
+    )
+    world:update(0)
+    for _, glyph in ipairs(text.glyphsOf(world, entity)) do
+        const transform = world:get(glyph as integer, ecs.Transform2D) as ecs.Transform2D
+        test.equal(transform.layer, 7)
+        test.equal(transform.z, 0.25)
+    end
+end
+
+-------------------------------------------------------------------------------
+-- The dirty gate and ownership
+-------------------------------------------------------------------------------
+
+function suite.laysOutOnlyWhatChanged(): nil
+    const world = newWorld()
+    const first = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("one", font(), 20))
+    const second = world:spawn(ecs.Transform2D(0, 40), gfx.Tint(1, 1, 1, 1), gfx.Text("two", font(), 20))
+    world:update(0)
+    test.equal(text.layouts(world), 2)
+
+    -- Nothing changed, so nothing is laid out again.
+    world:update(0)
+    test.equal(text.layouts(world), 2)
+
+    const item = world:getMut(first, gfx.Text) as text.Text
+    item.text = "one more"
+    world:update(0)
+    test.equal(text.layouts(world), 3)
+    test.equal(#text.glyphsOf(world, first), 7)
+    test.equal(#text.glyphsOf(world, second), 3)
+
+    -- Moving the block rebuilds it, because a glyph carries an absolute place.
+    const transform = world:getMut(second, ecs.Transform2D) as ecs.Transform2D
+    transform.x = 25.0
+    world:update(0)
+    test.equal(text.layouts(world), 4)
+    const x = text.glyphAt(world, second, 1)
+    test.assert((x as number) > 25.0, "the moved block moved its glyphs")
+end
+
+function suite.reusesGlyphEntitiesWhenTheLengthHolds(): nil
+    const world = newWorld()
+    const entity = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("abc", font(), 20))
+    world:update(0)
+    const before = text.glyphsOf(world, entity)
+
+    const item = world:getMut(entity, gfx.Text) as text.Text
+    item.text = "xyz"
+    world:update(0)
+    const after = text.glyphsOf(world, entity)
+    test.equal(#after, #before)
+    for index = 1, #before do
+        test.equal(after[index], before[index])
+    end
+
+    -- A shorter string hands the surplus back.
+    const again = world:getMut(entity, gfx.Text) as text.Text
+    again.text = "x"
+    world:update(0)
+    test.equal(#text.glyphsOf(world, entity), 1)
+    test.equal(world:isAlive(before[2]), false)
+    test.equal(world:isAlive(before[3]), false)
+end
+
+function suite.despawnsTheGlyphsWhenTheTextGoesAway(): nil
+    const world = newWorld()
+    const entity = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("abc", font(), 20))
+    world:update(0)
+    const held = text.glyphsOf(world, entity)
+    test.equal(#held, 3)
+
+    world:despawn(entity)
+    world:update(0)
+    for index = 1, #held do
+        test.equal(world:isAlive(held[index]), false)
+    end
+    test.equal(#text.glyphsOf(world, entity), 0)
+end
+
+function suite.sweepsGlyphsWhoseTextLostItsComponent(): nil
+    const world = newWorld()
+    const entity = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("abc", font(), 20))
+    world:update(0)
+    const held = text.glyphsOf(world, entity)
+
+    -- Removing a component is not observed, so only the sweep finds these.
+    world:remove(entity, gfx.Text)
+    world:commit()
+    world:update(0)
+    for index = 1, #held do
+        test.equal(world:isAlive(held[index]), false)
+    end
+end
+
+function suite.despawnsGlyphEntitiesNoLiveTextOwns(): nil
+    const world = newWorld()
+    world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("ab", font(), 20))
+    -- A snapshot load restores glyph entities the same way this spawns one,
+    -- with no text owning it.
+    const orphan = world:spawn(
+        ecs.Transform2D(5, 5, 0, 1, 0, 4, 4),
+        gfx.Tint(1, 1, 1, 1),
+        gfx.Sprite(1),
+        gfx.Renderable2D,
+        gfx.TextGlyph
+    )
+    world:commit()
+    world:update(0)
+    test.equal(world:isAlive(orphan), false)
+end
+
+function suite.placesEveryTextAgainWhenAnAtlasIsRepacked(): nil
+    const bytes, reason = files.read(SOURCE)
+    test.assert(bytes, reason)
+    const small, failure = fonts.newTTF({
+        bytes = bytes as string,
+        name = "texttest/growth",
+        raster = "alpha",
+        size = 8,
+    })
+    test.assert(small, failure)
+    const tiny = small as fonts.Font
+
+    const world = newWorld()
+    const entity = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("A", tiny, 20))
+    world:update(0)
+    const glyph = text.glyphsOf(world, entity)[1]
+    const before = (world:get(glyph, gfx.Sprite) as gfx.Sprite).u1
+    const laidOut = text.layouts(world)
+
+    -- Fill the page until it doubles, which moves the region the sprite above
+    -- is pointing at.
+    const startWidth = fonts.atlasSize(tiny)
+    local codepoint: integer = 0x21
+    while fonts.atlasSize(tiny) == startWidth and codepoint < 0x500 do
+        fonts.glyph(tiny, codepoint)
+        codepoint = codepoint + 1
+    end
+    test.assert(fonts.atlasSize(tiny) > startWidth, "the atlas outgrew its first page")
+
+    world:update(0)
+    test.assert(text.layouts(world) > laidOut, "the repack forced a layout")
+    const after = (world:get(glyph, gfx.Sprite) as gfx.Sprite).u1
+    test.notEqual(after, before)
+end
+
+function suite.buildsTheSameGlyphsForTheSameTextEveryRun(): nil
+    local runs: {{number}} = {}
+    for _ = 1, 3 do
+        const world = newWorld()
+        const entity = world:spawn(
+            ecs.Transform2D(17.5, 9.25, 0, 3, 0.3, 1.5, 1.5),
+            gfx.Tint(0.2, 0.4, 0.6, 0.8),
+            gfx.Text("Wave two\nships text", font(), 18, "center", 120)
+        )
+        world:update(0)
+        runs[#runs + 1] = quads(world, entity)
+    end
+    test.assert(#runs[1] > 0, "the sample text drew something")
+    for run = 2, #runs do
+        test.equal(#runs[run], #runs[1])
+        for index = 1, #runs[1] do
+            test.equal(runs[run][index], runs[1][index])
+        end
+    end
+end
+
+function suite.snapshotsTheAuthoredFieldsAndResolvesTheFontByName(): nil
+    const world = newWorld()
+    world:spawn(ecs.Transform2D(4, 4), gfx.Tint(1, 1, 1, 1), gfx.Text("save me", font(), 21, "right", 90))
+    world:update(0)
+    const snapshot = world:saveSnapshot()
+
+    const restored = newWorld()
+    restored:loadSnapshot(snapshot)
+    restored:update(0)
+    local seen: integer = 0
+    const found = restored:newQuery({include = {gfx.Text}})
+    for candidate, count in found:iter() do
+        const column = candidate:get(gfx.Text) as {text.Text}
+        for index = 1, count as integer do
+            seen = seen + 1
+            const item = column[index]
+            test.equal(item.text, "save me")
+            test.equal(item.size, 21.0)
+            test.equal(item.align, "right")
+            test.equal(item.wrapWidth, 90.0)
+            test.equal(item.font, font())
+        end
+    end
+    test.equal(seen, 1)
+end
+
+function suite.reportsWhetherTheAtlasHasReachedTheBackend(): nil
+    const world = newWorld()
+    const entity = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("ready", font(), 20))
+    world:update(0)
+    const item = world:get(entity, gfx.Text) as text.Text
+    const image = fonts.imageOf(font())
+    if images.stateOf(image) ~= "resident" then
+        test.equal(text.isReady(item), false)
+        for _, command in ipairs(images.drain()) do
+            images.complete((command as images.UploadImageCommand).image, command.serial, true, nil)
+        end
+    end
+    test.equal(text.isReady(item), true)
+    test.equal(text.isReady(text.newText("no font", nil, 20)), false)
+end
+
+function suite.rejectsAnAlignmentAndAWrapWidthTheLayoutCannotUse(): nil
+    test.raises(function(): nil
+        text.newText("hi", font(), 20, "middle" as text.Align)
+    end, "is not an alignment")
+    test.raises(function(): nil
+        text.newText("hi", font(), 20, "left", -1)
+    end, "cannot be negative")
+    test.raises(function(): nil
+        gfx.Text("hi", font(), 20, "middle" as text.Align)
+    end, "is not an alignment")
+end
+
+function suite.roundsACoordinateForAScreenSpaceLabel(): nil
+    test.equal(text.snap(10.4), 10.0)
+    test.equal(text.snap(10.5), 11.0)
+    test.equal(text.snap(-3.2), -3.0)
+end
+
+return suite

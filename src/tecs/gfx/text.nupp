@@ -1,0 +1,982 @@
+module tecs.gfx.text
+
+--[[
+Shaped text as entities in the rendered world.
+
+A `Text` names a font and a string. `Transform2D` places its top-left corner
+and `Tint` colors every glyph. The layout system turns one text into one glyph
+entity per drawn character, each an ordinary textured quad sampling the font's
+atlas, so text moves, layers, and draws through exactly the path a sprite does.
+
+```nupp
+local ecs = require("tecs.ecs")
+local gfx = require("tecs.gfx")
+local fonts = require("tecs.gfx.fonts")
+local text = require("tecs.gfx.text")
+
+const font = assert(fonts.newTTF({source = "assets/fonts/JetBrainsMono-ExtraBold.ttf"}))
+text.install(world)
+
+world:spawn(
+    ecs.Transform2D(24, 24),
+    gfx.Tint(0.92, 0.96, 1.0, 1.0),
+    gfx.Text("tecs\n1200 entities", font, 28, "center")
+)
+```
+
+Write text fields through `world:getMut`. A write through `world:get` leaves
+the column clean and the drawn glyphs stale.
+
+# Layout
+
+Text supports explicit newlines, left, center, and right alignment, and
+wrapping to a width. It does not anchor outside the top-left corner or style
+individual glyphs. Alignment moves each line within the widest line of the
+block, and wrapping breaks between words, letting a single word wider than the
+wrap width overflow rather than splitting it.
+
+`Transform2D` on a text entity scales the whole block: the glyph quads take
+their size from `Text.size`, and `scaleX` and `scaleY` multiply what comes out.
+That is the one place a `Transform2D` means a factor rather than a size in
+world units.
+
+# Glyph entities
+
+Every drawn character is an entity carrying `Transform2D`, `Tint`, `Sprite`,
+`Renderable2D`, and the `TextGlyph` tag. They belong to the layout system:
+spawning, despawning, or writing one by hand is undone the next time its text
+changes. A snapshot stores them like any other entity, and the layout system
+despawns the restored ones on its next run because no live text owns them, so a
+loaded world rebuilds its text rather than doubling it.
+]]
+
+local ecs = require("tecs.ecs")
+local archetype = require("tecs.internal.archetype")
+local components = require("tecs.internal.components")
+local data = require("tecs.data")
+local fonts = require("tecs.gfx.fonts")
+local images = require("tecs.gfx.images")
+local query = require("tecs.internal.query")
+local rendercomponents = require("tecs.internal.rendercomponents")
+
+const utf8 = nupp.data.utf8
+const cos, sin = math.cos, math.sin
+const floor = math.floor
+
+--- Selects where a line sits within the widest line of its block.
+---
+--- These identifiers are stored in a snapshot and are a compatibility surface.
+export type Align = "left" | "center" | "right"
+
+--- How far a line moves within the block, as a fraction of the room left over.
+const WEIGHTS: {[string]: number} = {left = 0.0, center = 0.5, right = 1.0}
+
+--- Lays a string out into glyph entities.
+---
+--- The entity's `Transform2D` places the top-left corner of the text block and
+--- orients and scales the whole of it, and its `Tint` colors every glyph. Both
+--- are ordinary components on an ordinary entity, so a text moves, tweens, and
+--- layers like anything else.
+export record Text
+    --- Caller-writable. Sets the laid-out string. A newline starts a line and
+    --- `wrapWidth` may introduce further breaks.
+    text: string
+
+    --- Caller-writable. Selects the font that supplies the glyphs. Without one,
+    --- the text draws nothing.
+    font: fonts.Font?
+
+    --- Caller-writable. Sets the em size in world units.
+    size: number
+
+    --- Caller-writable. Selects the alignment within the block's widest line.
+    align: Align
+
+    --- Caller-writable. Sets the maximum line width in world units. Zero
+    --- disables wrapping.
+    wrapWidth: number
+
+    --- Engine-owned. Reports the width of the last layout in world units,
+    --- before the `Transform2D` scale. Assigning it has no effect.
+    width: number
+
+    --- Engine-owned. Reports the height of the last layout in world units, on
+    --- the same terms. Assigning it has no effect.
+    height: number
+end
+
+--- What one text was last laid out from.
+---
+--- The archetype dirty flags say a column changed; this says whether this row
+--- did, so a scene that moves one label of a hundred lays out one of them.
+local record Built
+    text: string
+    font: fonts.Font?
+    size: number
+    align: string
+    wrapWidth: number
+    r: number
+    g: number
+    b: number
+    a: number
+    x: number
+    y: number
+    z: number
+    layer: integer
+    rotation: number
+    scaleX: number
+    scaleY: number
+end
+
+--- What the layout system holds for one world.
+local record Install
+    texts: query.Query
+    glyphs: query.Query
+    owned: {[integer]: {integer}}
+    built: {[integer]: Built}
+    resident: {[integer]: boolean}
+    residentCount: integer
+    ownerCount: integer
+    sweptResident: integer
+    sweptOwners: integer
+    sweptTagged: integer
+    epoch: integer
+    layouts: integer
+end
+
+--- Builds a text value that belongs to no entity.
+---
+--- `measureText` and `measureIntrinsic` take one of these, so a caller sizes a
+--- layout before spawning anything. Spawning goes through `Text` itself, which
+--- is the component and builds the same value.
+--- @param value the string to lay out, defaulting to empty
+--- @param font the font supplying the glyphs, or nil to draw nothing
+--- @param size the em size in world units, defaulting to sixteen
+--- @param align the alignment, defaulting to `"left"`
+--- @param wrapWidth the maximum line width in world units, defaulting to zero,
+---     which disables wrapping
+--- @return the text value, which the caller owns
+--- @raises when the alignment is not one of its declared values, or when the
+---     wrap width is negative
+export function newText(value: string?, font: fonts.Font?, size: number?, align: Align?, wrapWidth: number?): Text
+    const chosen = align or "left"
+    if WEIGHTS[chosen as string] == nil then
+        error("gfx.text.newText: '" .. tostring(align) .. "' is not an alignment; use left, center or right", 2)
+    end
+    const wrap = wrapWidth or 0.0
+    if wrap < 0.0 then
+        error("gfx.text.newText: wrapWidth cannot be negative", 2)
+    end
+
+    return new Text(
+        text = value or "",
+        font = font,
+        size = size or 16.0,
+        align = chosen,
+        wrapWidth = wrap,
+        width = 0.0,
+        height = 0.0
+    )
+end
+
+--- The process-wide `Text` component definition.
+---
+--- The component name and the `text`, `font`, `size`, `align`, and `wrapWidth`
+--- snapshot keys are a compatibility surface. A snapshot stores the font by
+--- name, because a font is a shared table rather than a value.
+export const TextComponent: components.TableComponent<Text> = ecs.newComponent({
+    name = "Text",
+    construct = function(value: string?, font: fonts.Font?, size: number?, align: Align?, wrapWidth: number?): Text
+        return newText(value, font, size, align, wrapWidth)
+    end,
+    default = function(): Text
+        return new Text(text = "", font = nil, size = 16.0, align = "left", wrapWidth = 0.0, width = 0.0, height = 0.0)
+    end,
+    save = function(value: Text): any
+        return {
+            text = value.text,
+            font = value.font and (value.font as fonts.Font).name or nil,
+            size = value.size,
+            align = value.align,
+            wrapWidth = value.wrapWidth,
+        }
+    end,
+    load = function(value: any): Text
+        const stored = value as {[string]: any}
+        -- A font that was never loaded in this process leaves the text without
+        -- one, which lays out nothing rather than failing the load.
+        const name = stored.font as string?
+        const align = (stored.align as string?) or "left"
+
+        return new Text(
+            text = (stored.text as string?) or "",
+            font = name ~= nil and fonts.find(name) or nil,
+            size = (stored.size as number?) or 16.0,
+            align = WEIGHTS[align] ~= nil and align as Align or "left",
+            wrapWidth = (stored.wrapWidth as number?) or 0.0,
+            width = 0.0,
+            height = 0.0
+        )
+    end,
+})
+
+--- Marks an entity as one glyph the layout system owns.
+---
+--- Game code neither adds nor removes it. It is public so a query can exclude
+--- the glyphs a text produced, and its name is a compatibility surface.
+export const TextGlyph: components.Component = ecs.newTagComponent({name = "TextGlyph"})
+
+--- The world resource the layout system keeps its ownership tables in.
+---
+--- The key name reaches the resource registry and is a compatibility surface.
+local stateKey: data.Key<Install> = data.newKey("tecs.text.state", nil)
+
+-------------------------------------------------------------------------------
+-- Shaping
+-------------------------------------------------------------------------------
+
+--- The decoded string, one codepoint per entry, reused across every layout.
+local points: {integer} = {}
+
+--- Each codepoint's advance in em units, and the kerning that follows it.
+local advances: {number} = {}
+
+local kerns: {number} = {}
+
+--- Each laid-out line's first and last codepoint and its width in em units.
+--- A line's range excludes the whitespace that wrapping consumed.
+local lineFirst: {integer} = {}
+
+local lineLast: {integer} = {}
+
+local lineWidth: {number} = {}
+
+local pointCount: integer = 0
+
+local lineCount: integer = 0
+
+local function isBreakingSpace(codepoint: integer): boolean
+    return codepoint == 32 or codepoint == 9
+end
+
+--- Decodes the string and reads every advance and kerning pair.
+local function decode(font: fonts.Font, value: string): nil
+    local count: integer = 0
+    local at: integer = 1
+    while true do
+        const codepoint, nextAt = utf8.decodeAt(value, at)
+        if codepoint == nil then
+            break
+        end
+        count = count + 1
+        points[count] = codepoint as integer
+        advances[count] = fonts.advanceOf(font, codepoint as integer)
+        at = nextAt
+    end
+    pointCount = count
+    for index = 1, count - 1 do
+        kerns[index] = fonts.kerningOf(font, points[index], points[index + 1])
+    end
+    if count > 0 then
+        kerns[count] = 0.0
+    end
+end
+
+--- Returns the em width of the codepoints from `first` through `last`.
+local function runWidth(first: integer, last: integer): number
+    local width: number = 0.0
+    for index = first, last do
+        width = width + advances[index]
+        if index < last then
+            width = width + kerns[index]
+        end
+    end
+
+    return width
+end
+
+--- Records one laid-out line, dropping the whitespace it ends with.
+local function emitLine(first: integer, last: integer): nil
+    local stop = last
+    while stop >= first and isBreakingSpace(points[stop]) do
+        stop = stop - 1
+    end
+    lineCount = lineCount + 1
+    lineFirst[lineCount] = first
+    lineLast[lineCount] = stop
+    lineWidth[lineCount] = stop >= first and runWidth(first, stop) or 0.0
+end
+
+--- Breaks one source line into laid-out lines at the wrap width.
+---
+--- Greedy and word-based: a word that does not fit starts a line of its own,
+--- and a word wider than the wrap width overflows rather than splitting.
+local function wrapLine(first: integer, last: integer, limit: number): nil
+    if limit <= 0.0 or last < first then
+        emitLine(first, last)
+
+        return
+    end
+    local lineStart: integer = first
+    local index: integer = first
+    local lastFit: integer = 0
+    while index <= last do
+        -- One word, then the whitespace that follows it. The run is placed
+        -- whole, so a break can only fall between two of them.
+        local wordEnd: integer = index
+        while wordEnd <= last and not isBreakingSpace(points[wordEnd]) do
+            wordEnd = wordEnd + 1
+        end
+        local spaceEnd: integer = wordEnd
+        while spaceEnd <= last and isBreakingSpace(points[spaceEnd]) do
+            spaceEnd = spaceEnd + 1
+        end
+        const wordLast: integer = wordEnd - 1
+        if wordLast >= index and lastFit >= lineStart and runWidth(lineStart, wordLast) > limit then
+            emitLine(lineStart, lastFit)
+            lineStart = index
+        end
+        lastFit = wordLast >= index and wordLast or lastFit
+        index = spaceEnd
+    end
+    emitLine(lineStart, last)
+end
+
+--- Shapes one string into lines, in em units.
+--- @return the widest line's width and the block height, both in em units
+local function shape(font: fonts.Font, value: string, wrapWidth: number, size: number): number, number
+    lineCount = 0
+    decode(font, value)
+    const limit = size > 0.0 and wrapWidth > 0.0 and wrapWidth / size or 0.0
+
+    local start: integer = 1
+    for index = 1, pointCount do
+        if points[index] == 10 then
+            local stop = index - 1
+            if stop >= start and points[stop] == 13 then
+                stop = stop - 1
+            end
+            wrapLine(start, stop, limit)
+            start = index + 1
+        end
+    end
+    wrapLine(start, pointCount, limit)
+
+    local widest: number = 0.0
+    for index = 1, lineCount do
+        if lineWidth[index] > widest then
+            widest = lineWidth[index]
+        end
+    end
+
+    return widest, lineCount * font.lineHeight
+end
+
+--- Returns a text item's width and height in world units.
+---
+--- Runs the same shaping the layout system runs, without touching an entity or
+--- making a glyph resident.
+--- @param item a text value to read, which need not belong to an entity
+--- @param wrapWidth overrides `item.wrapWidth` for this measurement alone,
+---     without changing the authored value
+--- @return the width at `item.size`, before the `Transform2D` scale, which is
+---     zero without a font
+--- @return the height on the same terms, counting complete line boxes
+export function measureText(item: Text, wrapWidth: number?): number, number
+    const font = item.font
+    if font == nil then
+        return 0.0, 0.0
+    end
+    const width, height = shape(font, item.text, wrapWidth or item.wrapWidth, item.size)
+
+    return width * item.size, height * item.size
+end
+
+--- Returns the preferred and minimum-content metrics for a text item.
+---
+--- The minimum-content width is the widest single word, which is the narrowest
+--- a wrapping layout can be made without splitting one.
+--- @param item a text value with a font
+--- @return the preferred width, with wrapping disabled
+--- @return the preferred height, with wrapping disabled
+--- @return the minimum-content width
+export function measureIntrinsic(item: Text): number, number, number
+    const font = item.font
+    if font == nil then
+        return 0.0, 0.0, 0.0
+    end
+    const width, height = shape(font, item.text, 0.0, item.size)
+    local narrowest: number = 0.0
+    for line = 1, lineCount do
+        local index = lineFirst[line]
+        const last = lineLast[line]
+        while index <= last do
+            local wordEnd = index
+            while wordEnd <= last and not isBreakingSpace(points[wordEnd]) do
+                wordEnd = wordEnd + 1
+            end
+            if wordEnd > index then
+                const run = runWidth(index, wordEnd - 1)
+                if run > narrowest then
+                    narrowest = run
+                end
+            end
+            index = wordEnd + 1
+        end
+    end
+
+    return width * item.size, height * item.size, narrowest * item.size
+end
+
+-------------------------------------------------------------------------------
+-- Placement
+-------------------------------------------------------------------------------
+
+--- One placed glyph's world quad and atlas region, filled by `place`.
+local placedX: {number} = {}
+
+local placedY: {number} = {}
+
+local placedW: {number} = {}
+
+local placedH: {number} = {}
+
+local placedU0: {number} = {}
+
+local placedV0: {number} = {}
+
+local placedU1: {number} = {}
+
+local placedV1: {number} = {}
+
+local placedCount: integer = 0
+
+--- Turns one shaped text into world-space quads.
+---
+--- Composes the text's own transform into every glyph, because a glyph entity
+--- carries an absolute position rather than a parent.
+--- @return the number of placed glyphs
+local function place(item: Text, font: fonts.Font, transform: rendercomponents.Transform2D): integer
+    const size = item.size
+    const width, height = shape(font, item.text, item.wrapWidth, size)
+    item.width = width * size
+    item.height = height * size
+
+    const weight = WEIGHTS[item.align as string] or 0.0
+    const rotation = transform.rotation
+    const turnX = cos(rotation)
+    const turnY = sin(rotation)
+    const blockX = transform.scaleX
+    const blockY = transform.scaleY
+    const originX = transform.x
+    const originY = transform.y
+
+    -- Residency first, for the whole string. Making a glyph resident may grow
+    -- the atlas, which moves every region already in it, so nothing is read
+    -- until everything is present.
+    for line = 1, lineCount do
+        for index = lineFirst[line], lineLast[line] do
+            fonts.glyph(font, points[index])
+        end
+    end
+
+    local placed: integer = 0
+    const lineHeight = font.lineHeight
+    for line = 1, lineCount do
+        const first = lineFirst[line]
+        const last = lineLast[line]
+        local pen = (width - lineWidth[line]) * weight
+        const baseline = font.ascent + (line - 1) * lineHeight
+        for index = first, last do
+            const codepoint = points[index]
+            const glyph = fonts.glyph(font, codepoint)
+            if glyph.width > 0 then
+                const localX = (pen + glyph.left) * size
+                const localY = (baseline + glyph.top) * size
+                const localW = (glyph.right - glyph.left) * size
+                const localH = (glyph.bottom - glyph.top) * size
+                -- The quad's centre, because an instance is placed by its
+                -- middle rather than by its corner.
+                const centreX = (localX + localW * 0.5) * blockX
+                const centreY = (localY + localH * 0.5) * blockY
+                placed = placed + 1
+                placedX[placed] = originX + centreX * turnX - centreY * turnY
+                placedY[placed] = originY + centreX * turnY + centreY * turnX
+                placedW[placed] = localW * blockX
+                placedH[placed] = localH * blockY
+                placedU0[placed] = glyph.u0
+                placedV0[placed] = glyph.v0
+                placedU1[placed] = glyph.u1
+                placedV1[placed] = glyph.v1
+            end
+            pen = pen + advances[index]
+            if index < last then
+                pen = pen + kerns[index]
+            end
+        end
+    end
+    placedCount = placed
+
+    return placed
+end
+
+-------------------------------------------------------------------------------
+-- The layout system
+-------------------------------------------------------------------------------
+
+local function stateFor(exclusive world: ecs.World): Install
+    local existing = world.resources[stateKey]
+    if existing ~= nil then
+        return existing
+    end
+    const created = new Install(
+        texts = world:newQuery({
+            include = {TextComponent, rendercomponents.Transform2DComponent}
+        }),
+        glyphs = world:newQuery({
+            include = {TextGlyph}
+        }),
+        owned = {},
+        built = {},
+        resident = {},
+        residentCount = 0,
+        ownerCount = 0,
+        sweptResident = 0,
+        sweptOwners = 0,
+        sweptTagged = 0,
+        epoch = fonts.epoch(),
+        layouts = 0
+    )
+    world.resources[stateKey] = created
+
+    return created
+end
+
+--- Reports whether `item` differs from what its glyphs were built from.
+local function stale(
+    built: Built?,
+    item: Text,
+    transform: rendercomponents.Transform2D,
+    tint: rendercomponents.Tint?
+): boolean
+    if built == nil then
+        return true
+    end
+    if built.text ~= item.text
+        or built.font ~= item.font
+        or built.size ~= item.size
+        or built.align ~= item.align
+        or built.wrapWidth ~= item.wrapWidth
+    then
+        return true
+    end
+    -- A glyph carries an absolute position, so the transform the text was laid
+    -- out at is part of what its glyphs were built from.
+    if built.x ~= transform.x
+        or built.y ~= transform.y
+        or built.z ~= transform.z
+        or built.layer ~= transform.layer
+        or built.rotation ~= transform.rotation
+        or built.scaleX ~= transform.scaleX
+        or built.scaleY ~= transform.scaleY
+    then
+        return true
+    end
+    if tint == nil then
+        return built.r ~= 1.0 or built.g ~= 1.0 or built.b ~= 1.0 or built.a ~= 1.0
+    end
+
+    return built.r ~= tint.r or built.g ~= tint.g or built.b ~= tint.b or built.a ~= tint.a
+end
+
+--- Records what one text was laid out from.
+local function remember(
+    state: Install,
+    entity: integer,
+    item: Text,
+    transform: rendercomponents.Transform2D,
+    r: number,
+    g: number,
+    b: number,
+    a: number
+): nil
+    local built = state.built[entity]
+    if built == nil then
+        built = new Built(
+            text = "",
+            font = nil,
+            size = 0.0,
+            align = "",
+            wrapWidth = 0.0,
+            r = 0.0,
+            g = 0.0,
+            b = 0.0,
+            a = 0.0,
+            x = 0.0,
+            y = 0.0,
+            z = 0.0,
+            layer = 0,
+            rotation = 0.0,
+            scaleX = 0.0,
+            scaleY = 0.0
+        )
+        state.built[entity] = built
+    end
+    built.text = item.text
+    built.font = item.font
+    built.size = item.size
+    built.align = item.align
+    built.wrapWidth = item.wrapWidth
+    built.r, built.g, built.b, built.a = r, g, b, a
+    built.x, built.y, built.z = transform.x, transform.y, transform.z
+    built.layer = transform.layer
+    built.rotation = transform.rotation
+    built.scaleX, built.scaleY = transform.scaleX, transform.scaleY
+end
+
+--- Drops one glyph entity and the record that it was owned.
+local function discard(exclusive world: ecs.World, state: Install, glyph: integer): nil
+    if state.resident[glyph] then
+        state.resident[glyph] = nil
+        state.residentCount = state.residentCount - 1
+    end
+    world:despawn(glyph)
+end
+
+--- Hands back every glyph entity one text owns.
+local function releaseGlyphs(exclusive world: ecs.World, state: Install, entity: integer): nil
+    const held = state.owned[entity]
+    if held == nil then
+        return
+    end
+    for index = 1, #held do
+        discard(world, state, held[index])
+    end
+    state.owned[entity] = nil
+    state.built[entity] = nil
+    state.ownerCount = state.ownerCount - 1
+end
+
+--- Writes the placed quads into one text's glyph entities.
+---
+--- Reuses the entities the text already holds, spawns what it is short, and
+--- despawns what it no longer needs, so a label whose string keeps its length
+--- costs no structural change at all.
+local function publish(
+    exclusive world: ecs.World,
+    state: Install,
+    entity: integer,
+    image: integer,
+    z: number,
+    layer: integer,
+    rotation: number,
+    r: number,
+    g: number,
+    b: number,
+    a: number
+): nil
+    local held = state.owned[entity]
+    if held == nil then
+        held = {}
+        state.owned[entity] = held
+        state.ownerCount = state.ownerCount + 1
+    end
+    const count = placedCount
+    for index = 1, count do
+        const existing = held[index]
+        if existing ~= nil and world:isAlive(existing) then
+            const transform = world:getMut(existing, rendercomponents.Transform2DComponent)
+            if transform ~= nil then
+                transform.x = placedX[index]
+                transform.y = placedY[index]
+                transform.z = z
+                transform.layer = layer
+                transform.rotation = rotation
+                transform.scaleX = placedW[index]
+                transform.scaleY = placedH[index]
+            end
+            const tint = world:getMut(existing, rendercomponents.TintComponent)
+            if tint ~= nil then
+                tint.r, tint.g, tint.b, tint.a = r, g, b, a
+            end
+            const sprite = world:getMut(existing, rendercomponents.SpriteComponent)
+            if sprite ~= nil then
+                sprite.image = image
+                sprite.u0 = placedU0[index]
+                sprite.v0 = placedV0[index]
+                sprite.u1 = placedU1[index]
+                sprite.v1 = placedV1[index]
+            end
+        else
+            const spawned = world:spawn(
+                rendercomponents.Transform2DComponent(
+                    placedX[index],
+                    placedY[index],
+                    z,
+                    layer,
+                    rotation,
+                    placedW[index],
+                    placedH[index]
+                ),
+                rendercomponents.TintComponent(r, g, b, a),
+                rendercomponents.SpriteComponent(
+                    image,
+                    placedU0[index],
+                    placedV0[index],
+                    placedU1[index],
+                    placedV1[index]
+                ),
+                rendercomponents.Renderable2D,
+                TextGlyph
+            )
+            held[index] = spawned
+            state.resident[spawned] = true
+            state.residentCount = state.residentCount + 1
+        end
+    end
+    for index = #held, count + 1, -1 do
+        discard(world, state, held[index])
+        held[index] = nil
+    end
+end
+
+--- Despawns every glyph entity no live text owns.
+---
+--- Removing a component is not observed and a snapshot load replaces the world
+--- wholesale, so a glyph can outlive the text that placed it. Walking the tag
+--- is what finds those.
+local function sweep(exclusive world: ecs.World, state: Install, tagged: integer): nil
+    const owned: {[integer]: boolean} = {}
+    for entity, held in pairs(state.owned) do
+        if world:isAlive(entity) and world:get(entity, TextComponent) ~= nil then
+            for index = 1, #held do
+                owned[held[index]] = true
+            end
+        else
+            releaseGlyphs(world, state, entity)
+        end
+    end
+    local orphans: {integer} = {}
+    for candidate, count in state.glyphs:iter() do
+        const active = candidate as archetype.Archetype
+        for index = 1, count as integer do
+            const glyph = active.entities[index]
+            if not owned[glyph] then
+                orphans[#orphans + 1] = glyph
+            end
+        end
+    end
+    for index = 1, #orphans do
+        discard(world, state, orphans[index])
+    end
+    state.sweptResident = state.residentCount
+    state.sweptOwners = state.ownerCount
+    state.sweptTagged = tagged
+end
+
+--- Lays every stale text out again.
+local function run(exclusive world: ecs.World, state: Install): nil
+    -- Growing an atlas moves every region in it, so every text placed before
+    -- the growth is holding texture coordinates that no longer point at its
+    -- glyphs. Growth is rare, so the answer is to place everything again
+    -- rather than to track which font each text drew through.
+    const epoch = fonts.epoch()
+    const repacked = epoch ~= state.epoch
+    state.epoch = epoch
+
+    local live: integer = 0
+    for candidate, count in state.texts:iter() do
+        const active = candidate as archetype.Archetype
+        const rows = count as integer
+        live = live + rows
+        if repacked or active:isComponentDirty(
+            TextComponent
+        ) or active:isComponentDirty(
+            rendercomponents.TintComponent
+        ) or active:isComponentDirty(rendercomponents.Transform2DComponent) then
+            const column: {Text} = assert(active:get(TextComponent))
+            const transforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
+            -- Absent on a text nobody tinted, which is one test for the whole
+            -- archetype rather than one per row.
+            const tints = active:get(rendercomponents.TintComponent) as {rendercomponents.Tint}?
+            for index = 1, rows do
+                const entity = active.entities[index]
+                const item = column[index]
+                const transform = transforms[index]
+                const tint = tints ~= nil and tints[index] or nil
+                if repacked or stale(state.built[entity], item, transform, tint) then
+                    local r, g, b, a = 1.0, 1.0, 1.0, 1.0
+                    if tint ~= nil then
+                        r, g, b, a = tint.r, tint.g, tint.b, tint.a
+                    end
+                    const font = item.font
+                    if font == nil then
+                        item.width = 0.0
+                        item.height = 0.0
+                        placedCount = 0
+                        publish(world, state, entity, 0, 0.0, 1, 0.0, r, g, b, a)
+                    else
+                        place(item, font, transform)
+                        publish(
+                            world,
+                            state,
+                            entity,
+                            fonts.imageOf(font),
+                            transform.z,
+                            transform.layer,
+                            transform.rotation,
+                            r,
+                            g,
+                            b,
+                            a
+                        )
+                    end
+                    remember(state, entity, item, transform, r, g, b, a)
+                    state.layouts = state.layouts + 1
+                end
+            end
+        end
+    end
+    -- Two ways a glyph outlives the text that placed it. More owners than the
+    -- query sees means a text lost its `Text` or was disabled, which nothing
+    -- reports; more tagged entities than this world spawned means a snapshot
+    -- restored somebody else's glyphs. The counts the last sweep saw are
+    -- remembered, so a scene that keeps texts out of the query is walked once
+    -- rather than every frame.
+    local tagged: integer = 0
+    for _, count in state.glyphs:iter() do
+        tagged = tagged + (count as integer)
+    end
+    if (
+        state.ownerCount > live or tagged ~= state.residentCount
+    ) and (
+        state.residentCount ~= state.sweptResident
+        or state.ownerCount ~= state.sweptOwners
+        or tagged ~= state.sweptTagged
+    ) then
+        sweep(world, state, tagged)
+    end
+end
+
+--- Installs text layout into a world.
+---
+--- Installing twice does nothing, so a world may install it directly rather
+--- than relying on the application having done so.
+--- @param world the world receiving the layout system and its ownership tables
+export function install(exclusive world: ecs.World): nil
+    if world.resources[stateKey] ~= nil then
+        return
+    end
+    const state = stateFor(world)
+
+    -- This system name is a compatibility surface: the debug server reports it
+    -- and an agent selects on it.
+    world:addSystem({
+        name = "tecs.TextLayout",
+        phase = ecs.phases.PostUpdate,
+        commitAfter = true,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            run(running, state)
+        end,
+    })
+
+    -- A glyph entity outlives its text otherwise: nothing else knows the
+    -- entities are free, and they keep being drawn where the text was.
+    world:observe(
+        0,
+        ecs.OnDespawn,
+        function(event: ecs.EntityLifecycle, exclusive running: ecs.World): nil
+            releaseGlyphs(running, state, event.entity)
+        end,
+        "tecs.TextLayout"
+    )
+end
+
+--- Returns how many texts a world has laid out.
+---
+--- Counts rows laid out rather than frames, so a scene whose text is settled
+--- leaves it still. A test asserts on that to prove the dirty gate holds.
+--- @param world the world to inspect
+--- @return a count that only increases, or zero before installation
+export function layouts(borrows world: ecs.World): integer
+    const state = world.resources[stateKey]
+
+    return state ~= nil and (state as Install).layouts or 0
+end
+
+--- Returns the glyph entities one text owns, in drawn order.
+--- @param world the world that contains the text entity
+--- @param entity an entity carrying `Text`
+--- @return a fresh array the caller owns, empty for a text with no glyphs
+export function glyphsOf(borrows world: ecs.World, entity: integer): {integer}
+    const state = world.resources[stateKey]
+    local out: {integer} = {}
+    if state == nil then
+        return out
+    end
+    const held = (state as Install).owned[entity]
+    if held == nil then
+        return out
+    end
+    for index = 1, #held do
+        out[index] = held[index]
+    end
+
+    return out
+end
+
+--- Returns one drawn glyph's world centre and size.
+---
+--- Reads the glyph entity rather than laying the text out again, so it reports
+--- the placement that is being drawn.
+--- @param world the world that contains the text entity
+--- @param entity an entity carrying `Text`
+--- @param index a one-based drawn-glyph index; whitespace takes no index
+--- @return the world x of the glyph centre, or nil when no such glyph exists
+--- @return the world y of the glyph centre, or nil with the first return
+--- @return the glyph width in world units, or nil with the first return
+--- @return the glyph height in world units, or nil with the first return
+export function glyphAt(borrows world: ecs.World, entity: integer, index: integer): number?, number?, number?, number?
+    const state = world.resources[stateKey]
+    if state == nil then
+        return nil, nil, nil, nil
+    end
+    const held = (state as Install).owned[entity]
+    if held == nil or index < 1 or index > #held then
+        return nil, nil, nil, nil
+    end
+    const transform = world:get(held[index], rendercomponents.Transform2DComponent)
+    if transform == nil then
+        return nil, nil, nil, nil
+    end
+
+    return transform.x, transform.y, transform.scaleX, transform.scaleY
+end
+
+--- Reports whether a text's atlas has reached the backend.
+---
+--- Extraction draws a glyph whose atlas is not resident against the backend's
+--- white fallback, which is a solid block rather than a letter, so a caller
+--- that must not show that waits on this. Asking queues whatever the atlas
+--- gained, exactly as `tecs.gfx.fonts.imageOf` does.
+--- @param item the text to inspect
+--- @return whether the font's atlas is resident, which is false without a font
+export function isReady(item: Text): boolean
+    const font = item.font
+    if font == nil then
+        return false
+    end
+
+    return images.stateOf(fonts.imageOf(font)) == "resident"
+end
+
+--- Rounds a world coordinate to the nearest whole unit.
+---
+--- An alpha-raster font drawn at its loaded size lines its texels up with the
+--- target's only when the block's origin is whole, so a screen-space label
+--- snaps its position through this before writing it.
+--- @param value the coordinate to snap
+--- @return the nearest whole value, with a half rounding away from zero
+export function snap(value: number): number
+    return floor(value + 0.5)
+end

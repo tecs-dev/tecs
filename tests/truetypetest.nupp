@@ -1,0 +1,156 @@
+local files = require("nupp.io.files")
+local test = require("nupp.test")
+local truetype = require("tecs.gfx.truetype")
+
+local suite = {}
+
+--- The font every test in this file reads, loaded once.
+---
+--- It is tracked in the repository, so a missing file is a broken checkout
+--- rather than a reason to skip.
+const SOURCE = "assets/fonts/JetBrainsMono-ExtraBold.ttf"
+
+local cached: truetype.Face? = nil
+
+local function face(): truetype.Face
+    if cached ~= nil then
+        return cached
+    end
+    const bytes, reason = files.read(SOURCE)
+    test.assert(bytes, reason)
+    const parsed, failure = truetype.parse(bytes as string)
+    test.assert(parsed, failure)
+    cached = parsed
+
+    return parsed as truetype.Face
+end
+
+function suite.parsesTheHeadAndHorizontalMetricTables(): nil
+    const parsed = face()
+    test.assert(parsed.unitsPerEm > 0, "a face divides the em square")
+    test.assert(parsed.ascender > 0, "the ascender rises above the baseline")
+    test.assert(parsed.descender < 0, "the descender falls below the baseline")
+    test.assert(parsed.numGlyphs > 100, "a text font carries more than a hundred glyphs")
+end
+
+function suite.rejectsBytesThatAreNotATrueTypeFont(): nil
+    const parsed, reason = truetype.parse("not a font at all")
+    test.equal(parsed, nil)
+    test.matches(reason as string, "TrueType version")
+
+    const short, shortReason = truetype.parse("abc")
+    test.equal(short, nil)
+    test.matches(shortReason as string, "table directory")
+end
+
+function suite.mapsCodepointsToGlyphsAndUnmappedOnesToNotdef(): nil
+    const parsed = face()
+    const letter = parsed:glyphIndex(0x41)
+    test.assert(letter > 0, "a font carries capital A")
+    test.notEqual(parsed:glyphIndex(0x42), letter)
+
+    -- A private-use codepoint no text font maps resolves to `.notdef`, which
+    -- is what a caller draws rather than branching on a missing glyph.
+    test.equal(parsed:glyphIndex(0xe000), 0)
+end
+
+function suite.reportsMonospacedAdvancesAndOutlineExtents(): nil
+    const parsed = face()
+    const letter = parsed:glyphIndex(0x41)
+    const advance = parsed:advanceOf(letter)
+    test.assert(advance > 0, "a letter advances the pen")
+    -- JetBrains Mono is monospaced, so every letter advances by the same width.
+    test.equal(parsed:advanceOf(parsed:glyphIndex(0x57)), advance)
+    test.equal(parsed:advanceOf(parsed:glyphIndex(0x69)), advance)
+
+    const scale = 32.0 / parsed.unitsPerEm
+    const contours, minX, minY, maxX, maxY = truetype.outline(parsed, letter, scale)
+    test.assert(#contours > 0, "a capital A has an outline")
+    test.assert(maxX > minX and maxY > minY, "the outline encloses a positive box")
+
+    -- A space carries an advance and no ink at all.
+    const space = parsed:glyphIndex(0x20)
+    const empty = truetype.outline(parsed, space, scale)
+    test.equal(#empty, 0)
+    test.assert(parsed:advanceOf(space) > 0, "a space still advances the pen")
+end
+
+function suite.rasterizesCoverageInsideTheGlyphAndNotOutside(): nil
+    const parsed = face()
+    const letter = parsed:glyphIndex(0x48)
+    const scale = 48.0 / parsed.unitsPerEm
+    const contours, minX, minY, maxX, maxY = truetype.outline(parsed, letter, scale)
+    const width = math.ceil((maxX - minX) * scale) as integer + 2
+    const height = math.ceil((maxY - minY) * scale) as integer + 2
+    const coverage = truetype.rasterize(contours, width, height, minX - 1.0 / scale, maxY + 1.0 / scale, scale)
+    test.equal(#coverage, width * height)
+
+    local ink: integer = 0
+    for index = 1, #coverage do
+        const value = coverage[index]
+        test.assert(value >= 0 and value <= 255, "coverage stays in one byte")
+        if value > 0 then
+            ink = ink + 1
+        end
+    end
+    test.assert(ink > 0, "a capital H covers some texels")
+    test.assert(ink < width * height, "a capital H leaves some texels empty")
+
+    -- The border the caller reserved is outside every contour.
+    test.equal(coverage[1], 0)
+    test.equal(coverage[width], 0)
+    test.equal(coverage[width * height], 0)
+end
+
+function suite.rasterizesTheSameGlyphIdenticallyEveryRun(): nil
+    const parsed = face()
+    const letter = parsed:glyphIndex(0x67)
+    const scale = 24.0 / parsed.unitsPerEm
+    const contours, minX, _minY, _maxX, maxY = truetype.outline(parsed, letter, scale)
+    const first = truetype.rasterize(contours, 32, 32, minX, maxY, scale)
+    const second = truetype.rasterize(contours, 32, 32, minX, maxY, scale)
+    for index = 1, #first do
+        test.equal(second[index], first[index])
+    end
+end
+
+function suite.buildsASignedFieldThatCrossesTheOutline(): nil
+    const parsed = face()
+    const letter = parsed:glyphIndex(0x4f)
+    const scale = 32.0 / parsed.unitsPerEm
+    const contours, minX, minY, maxX, maxY = truetype.outline(parsed, letter, scale)
+    const padding = 4
+    const width = math.ceil((maxX - minX) * scale) as integer + padding * 2
+    const height = math.ceil((maxY - minY) * scale) as integer + padding * 2
+    const originX = minX - padding / scale
+    const originY = maxY + padding / scale
+    const coverage = truetype.rasterize(contours, width, height, originX, originY, scale)
+    const field = truetype.distanceField(coverage, width, height, padding)
+    test.equal(#field, width * height)
+
+    -- A corner is far outside the glyph and the field bottoms out there, while
+    -- the stroke's centre is inside and rises above the half-way crossing.
+    test.equal(field[1], 0)
+    local inside: integer = 0
+    for index = 1, #field do
+        if field[index] > 128 then
+            inside = inside + 1
+        end
+    end
+    test.assert(inside > 0, "the field marks the glyph's interior")
+
+    -- The letter O is a ring, so its centre texel is outside the outline.
+    const middle = (height // 2) * width + (width // 2) + 1
+    test.assert(field[middle] < 128, "the counter of an O is outside the field")
+end
+
+function suite.rejectsFieldAndRasterDimensionsThatAreNotPositive(): nil
+    test.raises(function(): nil
+        truetype.rasterize({}, 0, 4, 0.0, 0.0, 1.0)
+    end, "dimensions must be positive")
+    test.raises(function(): nil
+        truetype.distanceField({0}, 1, 1, 0.0)
+    end, "spread must be greater than zero")
+end
+
+return suite
