@@ -338,6 +338,42 @@ update. Watcher changes use the same bounded Ingress boundary. The scheduler
 therefore commits a phase once and extraction never observes half of an
 external batch.
 
+## Platform services the rewrite does not carry
+
+Three services the SDL implementation shipped are settled differently in the
+Nupp rewrite, and the reasoning is here because the absence is what a reader
+will notice.
+
+`tecs.io.filters` is dropped rather than ported. Its deflate, inflate, hex and
+iconv transforms had one named consumer, HTTP response compression, and
+`nupp.io.http` decompresses natively; every format Tecs owns is uncompressed,
+and what those formats do need is already `nupp.data`: base64, CRC-32, SHA-256,
+FNV-1a and UTF-8 validation. The two alternatives lose on cost. A Rust service
+would be a native library with an ABI, a packaging entry and a per-platform
+build for a facility nothing calls. A Nupp implementation would put a DEFLATE
+codec in a game engine's repository, maintained here, competing with the one
+every language runtime already ships. A general facility Nupp supplies does not
+get a Tecs copy, and a general facility Nupp lacks is a request to Nupp.
+
+`tecs.watch` polls `nupp.io.files.info` rather than binding a platform
+change-notification service such as `notify`. A notification says a write
+happened, not that the writer finished, so the settle policy has to stat the
+file anyway; the watched set is what a game loaded, and one stat measures at
+1.0 microseconds, so a hundred paths at two polls a second costs 0.02 percent
+of one core; and a notification arrives on a thread the Lua virtual machine
+never created, so it would cross the same drain-a-buffer seam the gamepad and
+audio services cross for an answer that still needs the stat.
+
+`tecs.workers` has no counterpart. `nupp.workers` supplies the isolated states,
+the channels, the request and reply correlation and the cooperative wait that
+module existed to provide, and no engine subsystem is left that needs one:
+whole-file I/O already settles on `nupp.io.files`' own worker lane, and image
+decoding belongs to the Rust host. Worker support is also a property of the
+build rather than of the engine, since Nupp runs workers only in a binary
+target with the compiler-owned stub, which neither the module target nor a game
+component is. A game that needs isolated parallel work reaches `nupp.workers`
+directly once its target can carry one.
+
 ## Build
 
 Cargo and `xtask` own the build, generated bindings, tests, and packaging.

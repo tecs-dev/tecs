@@ -4,6 +4,7 @@ module tecs.watch
 Watches content for changes and hands settled ones to reload handlers.
 
 ```nupp
+local files <const> = require("tecs.files")
 local watch <const> = require("tecs.watch")
 
 watch.on("shader", function(change: watch.Change): nil
