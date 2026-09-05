@@ -120,6 +120,17 @@ local function withPad(fake: Fake): input.Input
     return state
 end
 
+function suite.readsNoDeviceUntilItIsGivenASource(): nil
+    -- Constructing input state must not start the platform's device
+    -- enumeration, or a suite would change its answer when somebody plugged a
+    -- controller in.
+    local state = input.newInput()
+    state:beginFrame()
+    test.equal(#state:pollDevices(), 0)
+    state:refreshDevices()
+    test.equal(#state:gamepads(), 0)
+end
+
 function suite.behavesWithNoDeviceAttached(): nil
     local state = input.newInput(gamepadbackend.none())
     state:beginFrame()

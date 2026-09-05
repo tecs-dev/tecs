@@ -478,8 +478,15 @@ local function axisCode(axis: GamepadAxis | integer): integer
 end
 
 --- Creates empty input state with the readable base layer.
---- @param backend the gamepad source, defaulting to the process-wide one
---- @return a standalone input state suitable for an application or headless test
+---
+--- The state reads no device unless it is given a source. Constructing input
+--- state by hand is what a test and a headless tool do, and neither should
+--- start the platform's device enumeration as a side effect: on macOS that is a
+--- run loop on a thread of its own, and a suite whose result changes when
+--- somebody plugs a controller in is worse than one that reads no controller at
+--- all. `install` is the call that reaches real hardware.
+--- @param backend the gamepad source, defaulting to no devices at all
+--- @return a standalone input state
 export function newInput(backend: gamepadbackend.Backend?): Input
     local base = new Layer(name = "base", blocking = true, index = 1)
     local buffer: {gamepadbackend.Event} = {}
@@ -512,7 +519,7 @@ export function newInput(backend: gamepadbackend.Backend?): Input
         enterFixedSystem = nil,
         exitFixedSystem = nil,
         pollSystem = nil,
-        backend = backend ?? devices(),
+        backend = backend ?? gamepadbackend.none(),
         pads = {},
         padList = {},
         padEvents = buffer,
@@ -962,9 +969,11 @@ end
 
 --- Retires every device and forgets every finger.
 ---
---- Engine-owned. The application calls this during shutdown; ordinary game code
---- must not. The process-wide gamepad source outlives one input state and is
---- deliberately not closed here, because another world may still be reading it.
+--- Engine-owned. A host tearing a world down early calls this; ordinary game
+--- code must not. `tecs.application` does not call it, and nothing leaks when
+--- nobody does: the state dies with its world, and the process-wide gamepad
+--- source is deliberately left open here because another world may still be
+--- reading it.
 --- @param self the input state being shut down
 function Input.destroy(exclusive self: Input): nil
     local pads = self.padList
@@ -1085,15 +1094,21 @@ end
 --- Three systems come with it. Two consume the fixed-step latched edges, and
 --- `tecs.PollGamepads` runs in `Ingress`, ahead of everything a game schedules,
 --- so a controller read anywhere in the frame answers from this frame.
+---
+--- This is the call that reaches real hardware. The platform's device source is
+--- opened once per process and shared, because opening it per world would give
+--- one controller two identities on two hot-plug streams; a build with no
+--- `libtecsgamepad` gets the device-free source and says so once in the log.
 --- @param world the world whose fixed steps consume latched edges
---- @param backend the gamepad source, defaulting to the process-wide one
+--- @param backend the gamepad source, defaulting to the process-wide platform
+---     one
 --- @return the new input state, also available through `of`
 --- @raises when the world already owns input state
 export function install(exclusive world: ecs.World, backend: gamepadbackend.Backend?): Input
     if world.resources[worldInputKey] ~= nil then
         error("input.install: world input state is already installed", 2)
     end
-    local state = newInput(backend)
+    local state = newInput(backend ?? devices())
     world.resources[worldInputKey] = state
     -- Compatibility surface: system names are what the debug server reports
     -- and what an agent selects on.
