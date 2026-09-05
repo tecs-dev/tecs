@@ -1,0 +1,212 @@
+local nupplog = require("nupp.log")
+local test = require("nupp.test")
+local log = require("tecs.log")
+local suite = {}
+
+--- One captured line, as a sink receives it.
+local record Line
+    level: integer
+    logger: string
+    message: string
+end
+
+--- Runs `body` with every line captured, then puts back what it displaced.
+local function capture(body: function(lines: {Line}): nil): {Line}
+    local lines: {Line} = {}
+    local previousLevel = nupplog.level("debug")
+    local previousSink = nupplog.sink(function(level: integer, module: string, _: integer, message: string): nil
+        lines[#lines + 1] = new Line(level = level, logger = module, message = message)
+    end)
+    local succeeded, failure = pcall(function(): nil
+        body(lines)
+    end)
+    nupplog.sink(previousSink)
+    nupplog.level(previousLevel)
+    log.resetLevels()
+    if not succeeded then
+        error(failure, 0)
+    end
+
+    return lines
+end
+
+function suite.returnsTheSameLoggerForAName(): nil
+    local first = log.get("test.log.identity")
+    local second = log.get("test.log.identity")
+    test.assert(first == second)
+    test.equal(first.name, "test.log.identity")
+end
+
+function suite.treatsTwoSpellingsAsTwoLoggers(): nil
+    local lower = log.get("test.log.case")
+    local upper = log.get("test.log.CASE")
+    test.assert(lower ~= upper)
+end
+
+function suite.refusesAnEmptyName(): nil
+    test.raises(
+        function(): nil
+            log.get("")
+        end,
+        "must not be empty"
+    )
+end
+
+function suite.writesTheLoggerNameOnEveryLine(): nil
+    local lines = capture(function(_: {Line}): nil
+        log.get("test.log.name"):warn("wave %d", 3)
+    end)
+    test.equal(#lines, 1)
+    test.equal(lines[1].logger, "test.log.name")
+    test.equal(lines[1].message, "wave 3")
+end
+
+function suite.carriesTheEngineCategoryNames(): nil
+    -- Compatibility surface. These spellings are what a developer filters on and
+    -- what tooling reports, so the test names them literally rather than reading
+    -- the constants back through themselves.
+    test.equal(log.APP, "tecs.app")
+    test.equal(log.ASSETS, "tecs.assets")
+    test.equal(log.AUDIO, "tecs.audio")
+    test.equal(log.GFX, "tecs.gfx")
+    test.equal(log.GPU, "tecs.gpu")
+    test.equal(log.HTTP, "tecs.http")
+    test.equal(log.MCP, "tecs.mcp")
+    test.equal(log.PROFILE, "tecs.profile")
+    test.equal(log.SEQUENCE, "tecs.sequence")
+    test.equal(log.WATCH, "tecs.watch")
+    test.equal(log.WORLD, "tecs.world")
+end
+
+function suite.listsOnlyTheNamesSomethingAskedFor(): nil
+    log.get("test.log.listed")
+    local names = log.loggers()
+    local found = false
+    for index = 1, #names do
+        if names[index] == "test.log.listed" then
+            found = true
+        end
+        if names[index] == "test.log.never.requested" then
+            test.assert(false, "an unrequested name was listed")
+        end
+    end
+    test.assert(found, "a requested name was missing")
+end
+
+function suite.followsTheProcessThresholdByDefault(): nil
+    local lines = capture(function(_: {Line}): nil
+        local logger = log.get("test.log.follows")
+        nupplog.level("warn")
+        logger:info("dropped")
+        nupplog.level("debug")
+        logger:info("kept")
+    end)
+    test.equal(#lines, 1)
+    test.equal(lines[1].message, "kept")
+end
+
+function suite.raisesTheLevelOfOneLoggerOnly(): nil
+    local lines = capture(function(_: {Line}): nil
+        local loud = log.get("test.log.loud")
+        local quiet = log.get("test.log.quiet")
+        nupplog.level("warn")
+        loud:setLevel("debug")
+        loud:debug("detail")
+        quiet:debug("detail")
+    end)
+    test.equal(#lines, 1)
+    test.equal(lines[1].logger, "test.log.loud")
+end
+
+function suite.silencesOneLoggerBelowTheProcessThreshold(): nil
+    local lines = capture(function(_: {Line}): nil
+        local muted = log.get("test.log.muted")
+        local other = log.get("test.log.other")
+        muted:setLevel("off")
+        muted:error("suppressed")
+        other:error("emitted")
+    end)
+    test.equal(#lines, 1)
+    test.equal(lines[1].logger, "test.log.other")
+end
+
+function suite.reportsWhatALoggerWouldEmit(): nil
+    capture(function(_: {Line}): nil
+        local logger = log.get("test.log.enabled")
+        nupplog.level("warn")
+        test.assert(logger:enabled("error"))
+        test.assert(logger:enabled("warn"))
+        test.assert(not logger:enabled("info"))
+        test.assert(not logger:enabled("off"))
+        logger:setLevel("info")
+        test.assert(logger:enabled("info"))
+        test.assert(not logger:enabled("debug"))
+    end)
+end
+
+function suite.readsBackTheThresholdItWasGiven(): nil
+    capture(function(_: {Line}): nil
+        local logger = log.get("test.log.readback")
+        nupplog.level("warn")
+        test.equal(logger:getLevel() as string, "warn")
+        logger:setLevel("debug")
+        test.equal(logger:getLevel() as string, "debug")
+        logger:setLevel(nil)
+        test.equal(logger:getLevel() as string, "warn")
+    end)
+end
+
+function suite.setsALevelByNameWithoutRegisteringUnknownOnes(): nil
+    local lines = capture(function(_: {Line}): nil
+        log.get("test.log.byname")
+        nupplog.level("warn")
+        test.assert(log.setLevel("test.log.byname", "debug"))
+        test.assert(not log.setLevel("test.log.typo", "debug"))
+        log.get("test.log.byname"):debug("emitted")
+    end)
+    test.equal(#lines, 1)
+    test.equal(lines[1].logger, "test.log.byname")
+    local names = log.loggers()
+    for index = 1, #names do
+        test.assert(names[index] ~= "test.log.typo", "an unknown name was registered")
+    end
+end
+
+function suite.refusesALevelThatIsNotOneOfTheFive(): nil
+    local logger = log.get("test.log.badlevel")
+    -- The SDL implementation's seventh priority, which the five-level contract
+    -- underneath cannot carry and which therefore raises rather than silencing.
+    local retired: string = "critical"
+    test.raises(
+        function(): nil
+            logger:setLevel(retired as log.Level)
+        end,
+        "no level named"
+    )
+end
+
+function suite.rendersFormatArgumentsOnlyWhenEmitted(): nil
+    local rendered = 0
+    local lines = capture(function(_: {Line}): nil
+        local logger = log.get("test.log.render")
+        nupplog.level("warn")
+        local function describe(): string
+            rendered = rendered + 1
+
+            return "state"
+        end
+
+        if logger:enabled("debug") then
+            logger:debug("%s", describe())
+        end
+        logger:setLevel("debug")
+        if logger:enabled("debug") then
+            logger:debug("%s", describe())
+        end
+    end)
+    test.equal(rendered, 1)
+    test.equal(#lines, 1)
+    test.equal(lines[1].message, "state")
+end
+
+return suite

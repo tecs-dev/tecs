@@ -54,6 +54,7 @@ return {
                 description = "Build the headless Tecs rewrite",
                 entries = {
                     "tecs.application",
+                    "tecs.assets",
                     "tecs.audio",
                     "tecs.ecs",
                     "tecs.data",
@@ -71,6 +72,7 @@ return {
                     "tecs.gpu.passes",
                     "tecs.host",
                     "tecs.input",
+                    "tecs.log",
                     "tecs.mcp",
                     "tecs.physics",
                     "tecs.physics.contract",
