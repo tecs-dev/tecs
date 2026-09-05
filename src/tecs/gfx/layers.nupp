@@ -1,7 +1,7 @@
 module tecs.gfx.layers
 
 --[[
-Depth bands and the order two-dimensional entities draw in.
+Depth bands, sorting, coordinate spaces, parallax, and lighting.
 
 A layer occupies one of sixteen depth bands. Entities sort inside their own
 band and never against another band, so a heads-up display on layer 8 covers a
@@ -11,8 +11,8 @@ one depth from zero to one, with zero nearest.
 ```nupp
 const layers = tecs.gfx.layers
 
-layers.configure(1, {sort = "topdown"})
-layers.configure(8, {sort = "z"})
+layers.configure(1, {sort = "topdown", parallax = 0.4})
+layers.configure(8, {sort = "z", screenSpace = true, unlit = true, overlay = true})
 
 world:spawn(
     tecs.ecs.Transform2D(16, 16, 0, 8, 0, 96, 24),
@@ -31,10 +31,19 @@ between two worlds in it.
 reaching past an extent still draws, resting on the edge, and stops sorting
 against its neighbors there.
 
-The positioning options an earlier implementation carried on a layer, screen
-space, virtual coordinates, parallax, zoom independence, lighting, and the
-forward overlay lane, are not declared here. This module holds the depth
-contract alone.
+# Coordinate spaces
+
+World coordinates are the default. `screenSpace` measures a position in target
+pixels and ignores the camera, which is what a heads-up display wants.
+`virtualCoords` measures it in the one authored resolution `setVirtualSize`
+names and stretches that resolution to fill the target. `ignoreZoom` follows
+the camera's position while keeping the drawn size, and `parallax` scales how
+far the camera carries the contents. `place` resolves all four into one target
+pixel, and one layer cannot combine `screenSpace` with `virtualCoords`.
+
+`unlit` marks contents that bypass scene lighting, and `overlay` marks contents
+that always take the sorted forward lane. Both reach a renderer through
+`entryOf` and `isOverlay` rather than changing anything this module computes.
 ]]
 
 --- The number of bands that divide the depth range.
@@ -53,8 +62,18 @@ export type Sort = "topdown" | "z" | "isometric"
 --- Defines everything a layer decides about its contents.
 ---
 --- A field left out takes its default, so this says what a layer is rather
---- than amending what it was.
-export type Config = {sort: Sort}
+--- than amending what it was. `sort` is the one field a caller must set;
+--- `screenSpace`, `ignoreZoom`, `virtualCoords`, `unlit`, and `overlay`
+--- default to false, and `parallax` defaults to one.
+export type Config = {
+    sort: Sort,
+    screenSpace: boolean?,
+    ignoreZoom: boolean?,
+    virtualCoords: boolean?,
+    unlit: boolean?,
+    overlay: boolean?,
+    parallax: number?
+}
 
 --- Sorts lower screen positions in front and breaks ties with height.
 export const SORT_TOPDOWN: integer = 0
@@ -64,6 +83,20 @@ export const SORT_Z: integer = 1
 
 --- Sorts by x plus y plus height for a diamond grid.
 export const SORT_ISOMETRIC: integer = 2
+
+--- Positions contents in world units, through the camera.
+---
+--- This value is the first component of what `entryOf` reports, which a
+--- renderer packs into a uniform the vertex stage compares against, so it is a
+--- compatibility surface rather than an identifier this tree renumbers.
+export const MODE_CAMERA: number = 0.0
+
+--- Positions contents in target pixels, ignoring the camera.
+export const MODE_SCREEN: number = 1.0
+
+--- Positions contents in the authored virtual resolution, stretched to the
+--- target.
+export const MODE_VIRTUAL: number = 2.0
 
 --- How much of its band a sort spreads across, leaving a sliver so the far
 --- end of one band never reaches the near end of the next.
@@ -80,15 +113,46 @@ const TOPDOWN_Y_SHARE = 0.3
 --- normalized height, each zero to one.
 const ISOMETRIC_RANGE = 3.0
 
+const sin, cos = math.sin, math.cos
+
 local sortIds: {[string]: integer} = {topdown = SORT_TOPDOWN, z = SORT_Z, isometric = SORT_ISOMETRIC,}
 
+--- Per-layer state, one array a column, because the four float columns are
+--- what a renderer packs into a uniform.
+---
+--- Defaults are what a scene wants before anyone has said otherwise: sorted
+--- top-down, positioned by the camera, moving with the world, lit, and culled
+--- against the camera's view.
 local sorts: {integer} = {}
+
+local modes: {number} = {}
+
+--- What the camera's position is multiplied by before it is added to a world
+--- position: one minus parallax, which is zero when contents move with the
+--- world and so costs an unconditional add nothing.
+local parallaxOffsets: {number} = {}
+
+local parallaxFactors: {number} = {}
+local zoomFlags: {number} = {}
+local litFlags: {number} = {}
+local overlayFlags: {boolean} = {}
+local culledByView: {boolean} = {}
+
 for index = 1, MAX do
     sorts[index] = SORT_TOPDOWN
+    modes[index] = MODE_CAMERA
+    parallaxOffsets[index] = 0.0
+    parallaxFactors[index] = 1.0
+    zoomFlags[index] = 0.0
+    litFlags[index] = 1.0
+    overlayFlags[index] = false
+    culledByView[index] = true
 end
 
 local maxZ = 1000.0
 local maxY = 10000.0
+local virtualWidth = 1920.0
+local virtualHeight = 1080.0
 local generation: integer = 0
 
 --- A normalized sort term, with anything past either end resting on it.
@@ -116,7 +180,8 @@ end
 --- omitted field takes its default instead of keeping its previous value.
 --- @param layer the band to configure, from one to `MAX`
 --- @param config the complete replacement configuration
---- @raises when the layer is outside the band range or the sort is unknown
+--- @raises when the layer is outside the band range, when the sort is unknown,
+---     or when one layer asks for screen pixels and virtual coordinates at once
 export function configure(layer: integer, config: Config): nil
     if layer < 1 or layer > MAX then
         error("gfx.layers.configure: layer " .. tostring(layer) .. " is outside 1.." .. tostring(MAX), 2)
@@ -125,7 +190,28 @@ export function configure(layer: integer, config: Config): nil
     if sort == nil then
         error("gfx.layers.configure: '" .. tostring(config.sort) .. "' is not a sort mode", 2)
     end
+    if config.screenSpace == true and config.virtualCoords == true then
+        error("gfx.layers.configure: a layer is positioned in screen pixels or in virtual coordinates, not both", 2)
+    end
+
+    const parallax = config.parallax ?? 1.0
+    local mode = MODE_CAMERA
+    if config.screenSpace == true then
+        mode = MODE_SCREEN
+    elseif config.virtualCoords == true then
+        mode = MODE_VIRTUAL
+    end
+
     sorts[layer] = sort
+    modes[layer] = mode
+    parallaxOffsets[layer] = 1.0 - parallax
+    parallaxFactors[layer] = parallax
+    zoomFlags[layer] = config.ignoreZoom == true and 1.0 or 0.0
+    litFlags[layer] = config.unlit == true and 0.0 or 1.0
+    overlayFlags[layer] = config.overlay == true
+    -- The cull tests a world rectangle against a world bound, which only means
+    -- something where the camera places the contents where the bound says.
+    culledByView[layer] = mode == MODE_CAMERA and parallax == 1.0 and config.ignoreZoom ~= true
     generation = generation + 1
 end
 
@@ -167,6 +253,168 @@ export function setExtents(highestZ: number, halfExtent: number): nil
     maxZ = highestZ
     maxY = halfExtent
     generation = generation + 1
+end
+
+--- Returns the authored resolution every virtual-coordinate layer is measured
+--- in.
+--- @return the authored width, then the authored height, both in virtual units
+export function virtualSize(): number, number
+    return virtualWidth, virtualHeight
+end
+
+--- Replaces the authored resolution every virtual-coordinate layer is measured
+--- in.
+---
+--- One resolution serves every such layer, because a game has one authored
+--- layout size. `place` scales it to fill the target, so the layout keeps its
+--- internal proportions at any window size and stretches with the window's
+--- aspect. It neither letterboxes nor preserves square pixels.
+--- @param width the authored width in virtual units
+--- @param height the authored height in virtual units
+--- @raises when either dimension is not greater than zero
+export function setVirtualSize(width: number, height: number): nil
+    if not (width > 0.0) or not (height > 0.0) then
+        error("gfx.layers.setVirtualSize: both dimensions must be greater than zero", 2)
+    end
+    virtualWidth = width
+    virtualHeight = height
+    generation = generation + 1
+end
+
+--- Returns the four numbers that position and light one layer.
+---
+--- A consumer packs these together when `revision` changes rather than reading
+--- them per frame, which is why they come back together.
+--- @param layer the band to read; outside one to `MAX` this answers the
+---     defaults an unconfigured layer carries rather than raising
+--- @return the positioning mode, then the camera position's multiplier, then
+---     one when the layer ignores zoom, then one when the layer is lit
+export function entryOf(layer: integer): number, number, number, number
+    if layer < 1 or layer > MAX then
+        return MODE_CAMERA, 0.0, 0.0, 1.0
+    end
+
+    return modes[layer], parallaxOffsets[layer], zoomFlags[layer], litFlags[layer]
+end
+
+--- Returns whether the camera's view rectangle decides if a layer draws.
+---
+--- False on a layer the camera does not place where its world bound says.
+--- Screen-space and virtual-coordinate contents have no world position for the
+--- view to test, and parallax and zoom independence draw them somewhere the
+--- bound does not describe. Extraction gives those contents a bound every view
+--- contains, so they draw whatever the camera is looking at, and a layer using
+--- none of these modes keeps exact culling.
+--- @param layer the band to read; outside one to `MAX` this answers true, as an
+---     unconfigured layer does
+--- @return whether extraction should write this layer's real world bound
+export function viewCulled(layer: integer): boolean
+    if layer < 1 or layer > MAX then
+        return true
+    end
+
+    return culledByView[layer]
+end
+
+--- Returns whether a layer measures positions in target pixels.
+--- @param layer the band to read; outside one to `MAX` this answers false, as an
+---     unconfigured layer does
+--- @return whether `configure` selected `screenSpace` for the layer
+export function isScreenSpace(layer: integer): boolean
+    if layer < 1 or layer > MAX then
+        return false
+    end
+
+    return modes[layer] == MODE_SCREEN
+end
+
+--- Returns whether a layer always takes the sorted forward lane.
+--- @param layer the band to read; outside one to `MAX` this answers false, as an
+---     unconfigured layer does
+--- @return whether `configure` selected `overlay` for the layer
+export function isOverlay(layer: integer): boolean
+    if layer < 1 or layer > MAX then
+        return false
+    end
+
+    return overlayFlags[layer]
+end
+
+--- Returns how much of the camera's movement a layer's contents take.
+--- @param layer the band to read; outside one to `MAX` this answers one, as an
+---     unconfigured layer does
+--- @return the parallax factor, one moving contents with the world and a half
+---     drifting them at half speed
+export function parallaxOf(layer: integer): number
+    if layer < 1 or layer > MAX then
+        return 1.0
+    end
+
+    return parallaxFactors[layer]
+end
+
+--- Returns where one authored position lands on the render target.
+---
+--- The one place the four positioning modes are resolved, so a caller placing
+--- geometry and a caller hit-testing it cannot disagree. A camera layer turns
+--- and scales the position about the view center, taking parallax before the
+--- turn and dropping the zoom afterwards when the layer ignores it. A
+--- screen-space layer answers the position unchanged, and a virtual layer
+--- scales the authored resolution onto the target.
+--- @param layer the band whose mode decides what the position means; outside one
+---     to `MAX` this places through the camera, as an unconfigured layer does
+--- @param x the authored horizontal position, in world units, target pixels, or
+---     virtual units according to the layer's mode
+--- @param y the authored vertical position, running down in every mode
+--- @param cameraX the view center's world x, read only by a camera layer
+--- @param cameraY the view center's world y, read only by a camera layer
+--- @param zoom the camera's zoom, read only by a camera layer that does not
+---     ignore it
+--- @param rotation the camera's rotation in radians, read only by a camera layer
+--- @param width the render target width in pixels
+--- @param height the render target height in pixels
+--- @return the pixels from the target's left edge, then the pixels from its top
+---     edge; neither is clamped to the target
+export function place(
+    layer: integer,
+    x: number,
+    y: number,
+    cameraX: number,
+    cameraY: number,
+    zoom: number,
+    rotation: number,
+    width: number,
+    height: number
+): number, number
+    local index = layer
+    if index < 1 then
+        index = 1
+    elseif index > MAX then
+        index = MAX
+    end
+
+    const mode = modes[index]
+    if mode == MODE_SCREEN then
+        return x, y
+    end
+    if mode == MODE_VIRTUAL then
+        return x * width / virtualWidth, y * height / virtualHeight
+    end
+
+    -- Parallax shifts the position instead of building a second camera. The
+    -- projection is affine, so moving a point by (1 - parallax) times the view
+    -- center scales how far the camera carried it and changes nothing else.
+    const offset = parallaxOffsets[index]
+    const dx = x + offset * cameraX - cameraX
+    const dy = y + offset * cameraY - cameraY
+    const c = cos(rotation)
+    const s = sin(rotation)
+    -- A layer that ignores zoom keeps the camera's position and rotation and
+    -- drops its scale, which is the drawn size staying put while the contents
+    -- move with the world.
+    const scale = zoomFlags[index] ~= 0.0 and 1.0 or zoom
+
+    return width * 0.5 + (dx * c + dy * s) * scale, height * 0.5 + (-dx * s + dy * c) * scale
 end
 
 --- Returns the two terms `depthIn` takes, resolved once for one layer.
