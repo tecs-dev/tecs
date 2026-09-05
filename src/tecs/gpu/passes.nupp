@@ -46,6 +46,38 @@ graph down and rebuilding it when a game changes its tuning, which would take
 every pass a game inserted with it; a backend skipping a pass whose flag is
 clear costs nothing and keeps every name a game placed something beside valid
 for the life of the process.
+
+# Post-processing, tiled maps, and multiple cameras
+
+These three were left for an explicit decision rather than carried across on
+sight, and this module is where two of the three are answered.
+
+**General post-processing is retained as this declaration and nothing more.**
+A game adds a pass at a named seam, the backend allocates and clears its targets
+and runs it, and the engine's own bloom chain is three such passes. What a game
+cannot yet do is supply the fragment body: `insertPassBefore` places a pass and
+the backend has a body only for the names it implements, so a game's own pass
+begins, clears, and draws nothing. Closing that means `PassSpec` growing a field
+that carries WGSL, the section carrying it, and the backend compiling untrusted
+shader text, which is a contract worth designing rather than guessing. Until
+then a game's post-process is a clear.
+
+**Tiled maps are intentionally removed.** There was nothing to port: the Teal
+implementation had none either. A tile is already an entity with a transform and
+a sprite, consecutive tiles sharing an image already collapse into one indirect
+draw, and the ones off screen are already culled, so what a tile-map subsystem
+would add is a compressed authoring format and a chunked spatial index. Neither
+is a rendering concern, and inventing both to answer a feature nothing asked for
+would be inventing a format this engine then has to keep.
+
+**Multiple cameras are deferred with a stated contract.** The Teal renderer
+extracted once and then reculled, shaded, and composited per view through shared
+buffers. The ported path carries one view: the packet's header holds one camera
+and the cull tests one rectangle. Carrying the feature across means a view table
+in the packet, a view index in the cull's uniform, and a composite that sets a
+viewport per view, which is a packet version and a second cull dispatch rather
+than an addition. Nothing in the ported examples or tests needs it, so it is not
+built; `forwardView` is left undeclared as the target name it would take.
 ]]
 
 --- Names the shared depth attachment, which is not a declarable target.
