@@ -22,8 +22,8 @@ use wgpu::{
 
 use crate::culltests::{Harness, TestBatch, TestInstance};
 use crate::graph::{parse_graph, tests::deferred};
-use crate::graphics::{build_passes, instance_source, Layouts};
-use crate::packet::LANE_OPAQUE;
+use crate::graphics::{build_passes, cast_source, instance_source, Layouts};
+use crate::packet::{LANE_OPAQUE, SCENE_FLOATS};
 use crate::shaderpack::ShaderPack;
 
 /// Wide enough that one row of RGBA8 is exactly the copy alignment, so the
@@ -52,15 +52,21 @@ fn render(harness: &Harness, instances: &[TestInstance]) -> Vec<u8> {
     let culled = harness.dispatch(instances, &batches, view, 8);
 
     let layouts = Layouts::new(device);
+    let pack = engine_pack();
     let module = device.create_shader_module(ShaderModuleDescriptor {
         label: Some("tecs instance"),
-        source: ShaderSource::Wgsl(Cow::Owned(instance_source(&engine_pack()))),
+        source: ShaderSource::Wgsl(Cow::Owned(instance_source(&pack))),
+    });
+    let casts = device.create_shader_module(ShaderModuleDescriptor {
+        label: Some("tecs cast"),
+        source: ShaderSource::Wgsl(Cow::Owned(cast_source(&pack))),
     });
     let graph = parse_graph(&deferred()).expect("the deferred graph decodes");
     let passes = build_passes(
         device,
         &layouts,
         &module,
+        &casts,
         &graph,
         TextureFormat::Bgra8UnormSrgb,
     )
@@ -107,10 +113,13 @@ fn render(harness: &Harness, instances: &[TestInstance]) -> Vec<u8> {
 
     // The view the packet's header describes, in the layout the scene uniform
     // takes: the target size, the camera, its zoom and its rotation.
-    let scene = [SIZE as f32, SIZE as f32, 0.0, 0.0, 16.0, 0.0, 0.0, 0.0];
+    let mut scene = [0.0_f32; SCENE_FLOATS];
+    scene[0] = SIZE as f32;
+    scene[1] = SIZE as f32;
+    scene[4] = 16.0;
     let scene_buffer = device.create_buffer(&BufferDescriptor {
         label: Some("scene"),
-        size: 32,
+        size: std::mem::size_of_val(&scene) as u64,
         usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
