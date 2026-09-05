@@ -1,0 +1,435 @@
+local ecs = require("tecs.ecs")
+local gamepadbackend = require("tecs.platform.gamepadbackend")
+local input = require("tecs.input")
+local platformevents = require("tecs.platform.events")
+local test = require("nupp.test")
+
+local suite = {}
+
+--- A scriptable gamepad source, so every case here runs with no controller.
+local record Fake
+    backend: gamepadbackend.Backend
+    push: function(kind: integer, device: integer, code: integer, value: number?): nil
+    attach: function(id: integer): nil
+    detach: function(id: integer): nil
+    rumbles: function(): integer
+end
+
+local function newFake(): Fake
+    local pending: {gamepadbackend.Event} = {}
+    local attached: {integer} = {}
+    local shaken: integer = 0
+
+    local function indexOf(id: integer): integer
+        for index = 1, #attached do
+            if attached[index] == id then
+                return index
+            end
+        end
+
+        return 0
+    end
+
+    local backend = new gamepadbackend.Backend(
+        available = true,
+        poll = function(): integer
+            return #pending
+        end,
+        drain = function(out: {gamepadbackend.Event}): integer
+            local written: integer = 0
+            while written < #out and #pending > 0 do
+                local source = table.remove(pending, 1)
+                written = written + 1
+                local target = out[written]
+                target.kind = source.kind
+                target.device = source.device
+                target.code = source.code
+                target.value = source.value
+            end
+
+            return written
+        end,
+        attached = function(): {integer}
+            local copy: {integer} = {}
+            for index = 1, #attached do
+                copy[index] = attached[index]
+            end
+
+            return copy
+        end,
+        info = function(device: integer): gamepadbackend.Info
+            if indexOf(device) == 0 then
+                return gamepadbackend.missing()
+            end
+
+            return new gamepadbackend.Info(connected = true, forceFeedback = true, power = "onBattery", percent = 42)
+        end,
+        hasButton = function(_device: integer, code: integer): boolean
+            return code == 1
+        end,
+        hasAxis = function(_device: integer, code: integer): boolean
+            return code == 1
+        end,
+        name = function(device: integer): string
+            return "Fake Pad " .. tostring(device)
+        end,
+        guid = function(device: integer): string
+            return "0000000000000000000000000000000" .. tostring(device)
+        end,
+        rumble = function(_device: integer, _low: number, _high: number, _seconds: number): boolean
+            shaken = shaken + 1
+
+            return true
+        end,
+        close = function(): nil
+        end
+    )
+
+    return new Fake(
+        backend = backend,
+        push = function(kind: integer, device: integer, code: integer, value: number?): nil
+            pending[
+                #pending + 1
+            ] = new gamepadbackend.Event(kind = kind, device = device, code = code, value = value ?? 0)
+        end,
+        attach = function(id: integer): nil
+            if indexOf(id) == 0 then
+                attached[#attached + 1] = id
+            end
+        end,
+        detach = function(id: integer): nil
+            local at = indexOf(id)
+            if at ~= 0 then
+                table.remove(attached, at)
+            end
+        end,
+        rumbles = function(): integer
+            return shaken
+        end
+    )
+end
+
+--- Attaches one device and returns the input state already holding it.
+local function withPad(fake: Fake): input.Input
+    local state = input.newInput(fake.backend)
+    fake.attach(1)
+    fake.push(gamepadbackend.KIND_ADDED, 1, 0)
+    state:beginFrame()
+    state:pollDevices()
+
+    return state
+end
+
+function suite.readsNoDeviceUntilItIsGivenASource(): nil
+    -- Constructing input state must not start the platform's device
+    -- enumeration, or a suite would change its answer when somebody plugged a
+    -- controller in.
+    local state = input.newInput()
+    state:beginFrame()
+    test.equal(#state:pollDevices(), 0)
+    state:refreshDevices()
+    test.equal(#state:gamepads(), 0)
+end
+
+function suite.behavesWithNoDeviceAttached(): nil
+    local state = input.newInput(gamepadbackend.none())
+    state:beginFrame()
+    local produced = state:pollDevices()
+    test.equal(#produced, 0)
+    test.equal(#state:gamepads(), 0)
+    test.assert(state:gamepad(1) == nil)
+    test.assert(state:gamepadById(7) == nil)
+    state:refreshDevices()
+    test.equal(#state:gamepads(), 0)
+end
+
+function suite.opensADeviceTheBackendReports(): nil
+    local fake = newFake()
+    local state = withPad(fake)
+    local pad = state:gamepad(1)
+    test.assert(pad ~= nil)
+    test.equal(assert(pad).id, 1)
+    test.assert(assert(pad).connected)
+    test.equal(assert(pad).name, "Fake Pad 1")
+    test.equal(assert(pad).guid, "00000000000000000000000000000001")
+    test.assert(state:gamepadById(1) == pad)
+end
+
+function suite.translatesEveryObservationIntoAPlatformEvent(): nil
+    local fake = newFake()
+    local state = input.newInput(fake.backend)
+    fake.push(gamepadbackend.KIND_ADDED, 3, 0)
+    fake.push(gamepadbackend.KIND_BUTTON_DOWN, 3, 1)
+    fake.push(gamepadbackend.KIND_BUTTON_UP, 3, 1)
+    fake.push(gamepadbackend.KIND_AXIS, 3, 2, -0.75)
+    fake.push(gamepadbackend.KIND_REMOVED, 3, 0)
+    state:beginFrame()
+    local produced = state:pollDevices()
+
+    local seen: {string} = {}
+    for index = 1, #produced do
+        local event = produced[index]
+        if event is platformevents.GamepadDeviceEvent then
+            seen[index] = event.kind
+            test.equal(event.which, 3)
+        elseif event is platformevents.GamepadButtonEvent then
+            seen[index] = event.kind
+            test.equal(event.button, 1)
+        elseif event is platformevents.GamepadAxisEvent then
+            seen[index] = event.kind
+            test.equal(event.axis, 2)
+            test.equal(event.value, -0.75)
+        end
+    end
+    test.equal(#seen, 5)
+    test.equal(seen[1], "gamepadAdded")
+    test.equal(seen[2], "gamepadButtonDown")
+    test.equal(seen[3], "gamepadButtonUp")
+    test.equal(seen[4], "gamepadAxis")
+    test.equal(seen[5], "gamepadRemoved")
+end
+
+function suite.foldsButtonPressAndReleaseEdges(): nil
+    local fake = newFake()
+    local state = withPad(fake)
+    local pad = assert(state:gamepad(1))
+
+    fake.push(gamepadbackend.KIND_BUTTON_DOWN, 1, 1)
+    state:beginFrame()
+    state:pollDevices()
+    test.assert(pad:buttonDown("south"))
+    test.assert(pad:buttonPressed("south"))
+    test.assert(not pad:buttonReleased("south"))
+
+    state:beginFrame()
+    state:pollDevices()
+    test.assert(pad:buttonDown("south"))
+    test.assert(not pad:buttonPressed("south"))
+
+    fake.push(gamepadbackend.KIND_BUTTON_UP, 1, 1)
+    state:beginFrame()
+    state:pollDevices()
+    test.assert(not pad:buttonDown("south"))
+    test.assert(pad:buttonReleased("south"))
+end
+
+function suite.latchesGamepadEdgesUntilAFixedStep(): nil
+    local fake = newFake()
+    local state = withPad(fake)
+    local pad = assert(state:gamepad(1))
+
+    fake.push(gamepadbackend.KIND_BUTTON_DOWN, 1, 7)
+    state:beginFrame()
+    state:pollDevices()
+    fake.push(gamepadbackend.KIND_BUTTON_UP, 1, 7)
+    state:beginFrame()
+    state:pollDevices()
+    test.assert(not pad:buttonPressed("start"))
+
+    state:enterFixedPhase()
+    test.assert(pad:buttonPressed("start"))
+    test.assert(pad:buttonReleased("start"))
+    state:exitFixedPhase()
+
+    state:enterFixedPhase()
+    test.assert(not pad:buttonPressed("start"))
+    test.assert(not pad:buttonReleased("start"))
+    state:exitFixedPhase()
+end
+
+function suite.appliesTheDeadzoneAndAnOverride(): nil
+    local fake = newFake()
+    local state = withPad(fake)
+    local pad = assert(state:gamepad(1))
+
+    fake.push(gamepadbackend.KIND_AXIS, 1, 1, 0.1)
+    state:beginFrame()
+    state:pollDevices()
+    test.equal(pad:axis("leftX"), 0)
+    test.equal(pad:axis("leftX", 0.05), 0.1)
+
+    fake.push(gamepadbackend.KIND_AXIS, 1, 1, -0.5)
+    state:beginFrame()
+    state:pollDevices()
+    test.equal(pad:axis("leftX"), -0.5)
+    test.equal(pad:axis("rightY"), 0)
+end
+
+function suite.hidesGamepadsBehindABlockingLayer(): nil
+    local fake = newFake()
+    local state = withPad(fake)
+    local pad = assert(state:gamepad(1))
+
+    fake.push(gamepadbackend.KIND_BUTTON_DOWN, 1, 12)
+    state:beginFrame()
+    state:pollDevices()
+    test.assert(pad:buttonDown("dpadUp"))
+
+    local overlay = state:pushLayer("menu")
+    test.assert(not pad:buttonDown("dpadUp"))
+    test.assert(pad:buttonDown("dpadUp", overlay))
+    -- Pushing a blocking layer clears pending edges without inventing a
+    -- release for a button still physically held.
+    test.assert(not pad:buttonPressed("dpadUp", overlay))
+    test.assert(not pad:buttonReleased("dpadUp", overlay))
+
+    state:popLayer()
+    test.assert(pad:buttonDown("dpadUp"))
+end
+
+function suite.retiresADeviceAndLeavesItsReferenceHarmless(): nil
+    local fake = newFake()
+    local state = withPad(fake)
+    local pad = assert(state:gamepad(1))
+
+    fake.push(gamepadbackend.KIND_BUTTON_DOWN, 1, 1)
+    state:beginFrame()
+    state:pollDevices()
+    test.assert(pad:buttonDown("south"))
+
+    fake.detach(1)
+    fake.push(gamepadbackend.KIND_REMOVED, 1, 0)
+    state:beginFrame()
+    state:pollDevices()
+
+    test.equal(#state:gamepads(), 0)
+    test.assert(state:gamepadById(1) == nil)
+    test.assert(not pad.connected)
+    test.assert(not pad:buttonDown("south"))
+    test.equal(pad:axis("leftX"), 0)
+    test.assert(not pad:hasButton("south"))
+    test.assert(not pad:rumble(1, 1, 0.2))
+    local level, percent = pad:power()
+    test.equal(level, "unknown")
+    test.equal(percent, -1)
+end
+
+function suite.reconnectingUnderOneIdentifierCreatesANewGamepad(): nil
+    local fake = newFake()
+    local state = withPad(fake)
+    local first = assert(state:gamepad(1))
+
+    fake.push(gamepadbackend.KIND_ADDED, 1, 0)
+    state:beginFrame()
+    state:pollDevices()
+
+    local second = assert(state:gamepad(1))
+    test.assert(second ~= first)
+    test.assert(not first.connected)
+    test.assert(second.connected)
+    test.equal(#state:gamepads(), 1)
+end
+
+function suite.reconcilesTheDeviceListAgainstThePlatform(): nil
+    local fake = newFake()
+    local state = input.newInput(fake.backend)
+    fake.attach(4)
+    fake.attach(9)
+    state:refreshDevices()
+    test.equal(#state:gamepads(), 2)
+    test.assert(state:gamepadById(4) ~= nil)
+    test.assert(state:gamepadById(9) ~= nil)
+
+    fake.detach(4)
+    state:refreshDevices()
+    test.equal(#state:gamepads(), 1)
+    test.assert(state:gamepadById(4) == nil)
+    test.assert(state:gamepadById(9) ~= nil)
+end
+
+function suite.releasesEveryHeldControlWhenTheWindowLosesFocus(): nil
+    local fake = newFake()
+    local state = withPad(fake)
+    local pad = assert(state:gamepad(1))
+
+    fake.push(gamepadbackend.KIND_BUTTON_DOWN, 1, 1)
+    fake.push(gamepadbackend.KIND_AXIS, 1, 1, 0.9)
+    state:beginFrame()
+    state:pollDevices()
+    test.assert(pad:buttonDown("south"))
+
+    state:handleEvent(platformevents.focused(false))
+    test.assert(not pad:buttonDown("south"))
+    test.assert(pad:buttonReleased("south"))
+    test.equal(pad:axis("leftX"), 0)
+end
+
+function suite.reportsCapabilitiesPowerAndRumbleThroughTheBackend(): nil
+    local fake = newFake()
+    local state = withPad(fake)
+    local pad = assert(state:gamepad(1))
+
+    test.assert(pad:hasButton("south"))
+    test.assert(not pad:hasButton("north"))
+    test.assert(pad:hasAxis("leftX"))
+    test.assert(not pad:hasAxis("rightX"))
+
+    local level, percent = pad:power()
+    test.equal(level, "onBattery")
+    test.equal(percent, 42)
+
+    test.assert(pad:rumble(0.5, 1, 0.25))
+    test.equal(fake.rumbles(), 1)
+end
+
+function suite.raisesForAControlNameItDoesNotDeclare(): nil
+    local fake = newFake()
+    local state = withPad(fake)
+    local pad = assert(state:gamepad(1))
+
+    test.raises(
+        function(): nil
+            local _ = pad:buttonDown("triangle" as input.GamepadButton)
+        end,
+        "unknown gamepad button"
+    )
+    test.raises(
+        function(): nil
+            local _ = pad:axis("throttle" as input.GamepadAxis)
+        end,
+        "unknown gamepad axis"
+    )
+    test.raises(
+        function(): nil
+            local _ = pad:buttonDown(0)
+        end,
+        "must be positive"
+    )
+end
+
+function suite.pollsGamepadsThroughTheInstalledSystem(): nil
+    local fake = newFake()
+    local world = ecs.newWorld()
+    local state = input.install(world, fake.backend)
+
+    local observed = 0
+    world:observe(0, platformevents.on.gamepadButtonDown, function(
+        event: platformevents.GamepadButtonEvent,
+        exclusive _running: ecs.World
+    ): nil
+        observed = observed + event.button
+    end)
+
+    fake.attach(1)
+    fake.push(gamepadbackend.KIND_ADDED, 1, 0)
+    fake.push(gamepadbackend.KIND_BUTTON_DOWN, 1, 4)
+    state:beginFrame()
+    world:update(0)
+
+    local pad = assert(state:gamepad(1))
+    test.assert(pad:buttonDown("north"))
+    test.equal(observed, 4)
+end
+
+function suite.forgetsEveryDeviceOnShutdown(): nil
+    local fake = newFake()
+    local state = withPad(fake)
+    local pad = assert(state:gamepad(1))
+
+    state:destroy()
+    test.equal(#state:gamepads(), 0)
+    test.assert(state:gamepadById(1) == nil)
+    test.assert(not pad.connected)
+end
+
+return suite

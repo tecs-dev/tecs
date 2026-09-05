@@ -460,6 +460,70 @@ export function pushWheel(
     )
 end
 
+local function touchPhase(phase: string): "fingerDown" | "fingerUp" | "fingerMotion" | "fingerCanceled"
+    if phase == "fingerDown" or phase == "fingerUp" or phase == "fingerMotion" or phase == "fingerCanceled" then
+        return phase
+    end
+    error("host: unknown touch phase", 3)
+end
+
+--- Queues one finger's transition or movement on a touch surface.
+---
+--- `x` and `y` are in the window's logical coordinates and `normalX` and
+--- `normalY` run from zero to one across the surface. `touchDevice` and
+--- `finger` are strings rather than numbers because both are 64-bit platform
+--- identities that a Lua number would round together.
+--- @param session the host session queuing the event
+--- @param phase one of `fingerDown`, `fingerMotion`, `fingerUp` or
+---     `fingerCanceled`
+--- @param touchDevice the touch surface's opaque identity
+--- @param finger the finger's opaque identity on that surface
+--- @param x the position in logical window coordinates
+--- @param y the position in logical window coordinates
+--- @param normalX the position across the surface, from zero to one
+--- @param normalY the position down the surface, from zero to one
+--- @param pressure the reported pressure from zero to one, and zero when the
+---     surface does not measure it
+--- @param dx the movement since this finger's previous event
+--- @param dy the movement since this finger's previous event
+--- @param timestamp the host time the platform reported
+--- @param sequence the host's ordering number for this batch
+--- @raises when the phase is not one of the four kinds
+export function pushTouch(
+    exclusive session: Session,
+    phase: string,
+    touchDevice: string,
+    finger: string,
+    x: number,
+    y: number,
+    normalX: number,
+    normalY: number,
+    pressure: number,
+    dx: number,
+    dy: number,
+    timestamp: number,
+    sequence: integer
+): nil
+    append(
+        session,
+        platformevents.touch(
+            touchPhase(phase),
+            touchDevice,
+            finger,
+            x,
+            y,
+            normalX,
+            normalY,
+            pressure,
+            dx,
+            dy,
+            session.app.window:id(),
+            timestamp,
+            sequence
+        )
+    )
+end
+
 --- Queues committed input-method text.
 export function pushText(exclusive session: Session, text: string, timestamp: number, sequence: integer): nil
     append(session, platformevents.text(text, session.app.window:id(), timestamp, sequence))

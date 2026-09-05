@@ -51,6 +51,30 @@ function suite.sealsTranslatedEventsIntoOneApplicationFrame(): nil
     test.assert(host.shutdown(session))
 end
 
+function suite.queuesTouchAsOneFingerTheInputStateTracks(): nil
+    local session = host.create("host test", 640, 360, true, nil)
+    host.init(session)
+    attach(session)
+    host.pushTouch(session, "fingerDown", "screen", "9", 12, 34, 0.25, 0.5, 0.75, 0, 0, 1, 1)
+
+    test.equal(host.iterate(session, 0.1), "continue")
+
+    local held = session.app.input:touches()
+    test.equal(#held, 1)
+    test.equal(held[1].finger, "9")
+    test.equal(held[1].x, 12)
+    test.equal(held[1].normalX, 0.25)
+    test.equal(held[1].pressure, 0.75)
+
+    test.raises(
+        function(): nil
+            host.pushTouch(session, "fingerHover", "screen", "9", 0, 0, 0, 0, 0, 0, 0, 1, 2)
+        end,
+        "unknown touch phase"
+    )
+    test.assert(host.shutdown(session))
+end
+
 function suite.exposesTaggedCommandsAndCorrelatedFailures(): nil
     local session = host.create(nil, nil, nil, false, nil)
     host.init(session)

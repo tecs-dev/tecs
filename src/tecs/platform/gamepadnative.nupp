@@ -1,0 +1,303 @@
+module tecs.platform.gamepadnative
+
+--[[
+The `tecsgamepad` binding behind the gamepad backend contract.
+
+Loading this module loads `libtecsgamepad` through
+`tecs.internal.nativelibrary`, so a build that cannot find the library raises
+here rather than anywhere later. `tecs.input` requires it through `pcall` for
+exactly that reason and falls back to `tecs.platform.gamepadbackend.none` when
+it is absent, which is what makes a headless test and a machine with no
+controller support behave the same.
+
+Observations cross as one contiguous C array per drain. Nothing in the library
+ever calls a Nupp function. `gilrs` runs a thread of its own on macOS, where
+`IOHIDManager` needs a `CFRunLoop`, and entering Nupp from a thread the Lua
+virtual machine never created is undefined, so that thread posts to a channel
+the library drains on the frame thread instead. This binding therefore declares
+no function pointer anywhere.
+
+```nupp
+local gamepadnative <const> = require("tecs.platform.gamepadnative")
+
+local backend <const> = assert(gamepadnative.open())
+```
+]]
+
+local ffi = require("ffi")
+local gamepadbackend = require("tecs.platform.gamepadbackend")
+local nativelibrary = require("tecs.internal.nativelibrary")
+
+nativelibrary.open("tecsgamepad", "TECS_GAMEPAD_LIBRARY")
+
+cdef struct tecsGamepadEvent
+    kind: uint32
+    device: uint32
+    code: uint32
+    value: float
+end
+
+-- One attached device's identifier. A struct of one number rather than a bare
+-- number because `carray` allocates struct elements, and the library's own
+-- declaration matches this rather than the other way round.
+cdef struct tecsGamepadDevice
+    id: uint32
+end
+
+cdef struct tecsGamepadInfo
+    connected: int32
+    forceFeedback: int32
+    powerState: uint32
+    powerPercent: int32
+end
+
+-- Every entry point takes the context as a borrow, including
+-- `tecs_gamepad_close`. The library frees the context inside that call and the
+-- binding must not touch the pointer afterwards, which is a fact the checker
+-- cannot hold here: the pointer lives in the closure set below rather than in
+-- a lexical scope, so there is no owner for an affine obligation to sit on.
+
+cdef function tecs_gamepad_open(): voidptr?
+
+cdef function tecs_gamepad_open_detached(): voidptr?
+
+cdef function tecs_gamepad_close(borrows context: voidptr?)
+
+cdef function tecs_gamepad_available(borrows context: voidptr?): int32
+
+cdef function tecs_gamepad_poll(borrows context: voidptr?): uint32
+
+cdef function tecs_gamepad_drain(borrows context: voidptr?, borrows events: tecsGamepadEvent*, capacity: uint32): uint32
+
+cdef function tecs_gamepad_attached(
+    borrows context: voidptr?,
+    borrows devices: tecsGamepadDevice*,
+    capacity: uint32
+): uint32
+
+cdef function tecs_gamepad_info(borrows context: voidptr?, device: uint32, borrows info: tecsGamepadInfo*): int32
+
+cdef function tecs_gamepad_has(borrows context: voidptr?, device: uint32, kind: uint32, code: uint32): int32
+
+cdef function tecs_gamepad_string(borrows context: voidptr?, device: uint32, which: uint32): cstring?
+
+cdef function tecs_gamepad_rumble(
+    borrows context: voidptr?,
+    device: uint32,
+    low: float,
+    high: float,
+    seconds: float
+): int32
+
+cdef function tecs_gamepad_last_error(borrows context: voidptr?): cstring?
+
+cdef function tecs_gamepad_layout(kind: uint32): uint32
+
+--- Observations pulled back in one crossing, and the device list beside them.
+---
+--- Both arrays are allocated once and reused, because the seam is crossed every
+--- frame and a per-frame allocation on a path that exists to avoid per-device
+--- calls would give the saving straight back.
+local CAPACITY: integer = 256
+
+--- Selects the event struct in `tecs_gamepad_layout`.
+local LAYOUT_EVENT: integer = 0
+
+--- Selects the info struct in `tecs_gamepad_layout`.
+local LAYOUT_INFO: integer = 1
+
+--- Asks `tecs_gamepad_has` about a positional button.
+local HAS_BUTTON: integer = 0
+
+--- Asks `tecs_gamepad_has` about an axis.
+local HAS_AXIS: integer = 1
+
+--- Selects the device's display name in `tecs_gamepad_string`.
+local STRING_NAME: integer = 0
+
+--- Selects the identity a saved binding matches on.
+local STRING_GUID: integer = 1
+
+--- Returns the power state the library's own numbering names.
+--- @param code the library's power state number
+--- @return the compatibility-stable state string, and `"unknown"` for a number
+---     this build does not recognize
+local function powerState(code: integer): gamepadbackend.PowerState
+    if code == 1 then
+        return "noBattery"
+    elseif code == 2 then
+        return "onBattery"
+    elseif code == 3 then
+        return "charging"
+    elseif code == 4 then
+        return "charged"
+    end
+
+    return "unknown"
+end
+
+--- Reports where LuaJIT and the library disagree about a struct size.
+---
+--- Two descriptions of one memory layout can drift, and the failure a drift
+--- produces is a button read at the wrong offset rather than a call that will
+--- not link. Comparing sizes once at open is what turns that into a refusal.
+---
+--- @return the reason, or nil when every struct agrees
+local function layoutMismatch(): string?
+    local names: {string} = {"tecsGamepadEvent", "tecsGamepadInfo"}
+    local kinds: {integer} = {LAYOUT_EVENT, LAYOUT_INFO}
+    local sizes: {integer} = {ffi.sizeof<tecsGamepadEvent>(), ffi.sizeof<tecsGamepadInfo>()}
+    for index = 1, #kinds do
+        local reported = tecs_gamepad_layout(kinds[index] as uint32) as integer
+        if reported ~= sizes[index] then
+            return "libtecsgamepad reports " .. names[
+                index
+            ] .. " as " .. tostring(reported) .. " bytes and this binding declares " .. tostring(sizes[index])
+        end
+    end
+
+    return nil
+end
+
+--- Wraps an open library context in the backend contract.
+local function wrap(context: voidptr?): gamepadbackend.Backend
+    local events = carray(tecsGamepadEvent, CAPACITY)
+    local devices = carray(tecsGamepadDevice, CAPACITY)
+    local info = ffi.new<tecsGamepadInfo>()
+
+    local function readString(device: integer, which: integer): string
+        local value = tecs_gamepad_string(context, device as uint32, which as uint32)
+        if value == nil then
+            return ""
+        end
+
+        return ffi.string(value)
+    end
+
+    return new gamepadbackend.Backend(
+        available = tecs_gamepad_available(context) ~= 0,
+        poll = function(): integer
+            return tecs_gamepad_poll(context) as integer
+        end,
+        drain = function(out: {gamepadbackend.Event}): integer
+            local capacity = #out
+            if capacity > CAPACITY then
+                capacity = CAPACITY
+            end
+            local count = tecs_gamepad_drain(context, events, capacity as uint32) as integer
+            for index = 0, count - 1 do
+                -- The library answers with at most the capacity it was given,
+                -- so the read stays inside the array this call allocated.
+                unsafe do
+                    local target = out[index + 1]
+                    target.kind = events[index].kind as integer
+                    target.device = events[index].device as integer
+                    target.code = events[index].code as integer
+                    target.value = events[index].value as number
+                end
+            end
+
+            return count
+        end,
+        attached = function(): {integer}
+            local count = tecs_gamepad_attached(context, devices, CAPACITY as uint32) as integer
+            local found: {integer} = {}
+            for index = 0, count - 1 do
+                -- Bounded by the capacity handed to the call above.
+                unsafe do
+                    found[index + 1] = devices[index].id as integer
+                end
+            end
+
+            return found
+        end,
+        info = function(device: integer): gamepadbackend.Info
+            if tecs_gamepad_info(context, device as uint32, info) ~= 0 then
+                return gamepadbackend.missing()
+            end
+
+            return new gamepadbackend.Info(
+                connected = info.connected ~= 0,
+                forceFeedback = info.forceFeedback ~= 0,
+                power = powerState(info.powerState as integer),
+                percent = info.powerPercent as integer
+            )
+        end,
+        hasButton = function(device: integer, code: integer): boolean
+            return tecs_gamepad_has(context, device as uint32, HAS_BUTTON as uint32, code as uint32) ~= 0
+        end,
+        hasAxis = function(device: integer, code: integer): boolean
+            return tecs_gamepad_has(context, device as uint32, HAS_AXIS as uint32, code as uint32) ~= 0
+        end,
+        name = function(device: integer): string
+            return readString(device, STRING_NAME)
+        end,
+        guid = function(device: integer): string
+            return readString(device, STRING_GUID)
+        end,
+        rumble = function(device: integer, low: number, high: number, seconds: number): boolean
+            return tecs_gamepad_rumble(
+                context,
+                device as uint32,
+                nupp.math.f32.narrow(low),
+                nupp.math.f32.narrow(high),
+                nupp.math.f32.narrow(seconds)
+            ) == 0
+        end,
+        close = function(): nil
+            tecs_gamepad_close(context)
+        end
+    )
+end
+
+--- Returns the library's most recent failure, or a fallback.
+local function reason(context: voidptr?, fallback: string): string
+    local message = tecs_gamepad_last_error(context)
+    if message == nil then
+        return fallback
+    end
+    local text = ffi.string(message)
+    if text == "" then
+        return fallback
+    end
+
+    return text
+end
+
+--- Opens the platform's gamepad source and returns it as a backend.
+---
+--- A machine with no controller support still opens: the backend reports
+--- `available` false, answers every call, and never sees a device.
+--- @return the backend, or nil when the library opened nothing
+--- @return the reason, when the first return is nil
+export function open(): (gamepadbackend.Backend?, string?)
+    local mismatch = layoutMismatch()
+    if mismatch ~= nil then
+        return nil, mismatch
+    end
+    local context = tecs_gamepad_open()
+    if context == nil then
+        return nil, "tecsgamepad opened no context"
+    end
+
+    return wrap(context)
+end
+
+--- Opens a context with no platform source, for a deterministic native test.
+---
+--- This proves the binding itself against the real library without needing a
+--- controller plugged in, which is what a headless suite can check.
+--- @return the backend, or nil when the library opened nothing
+--- @return the reason, when the first return is nil
+export function openDetached(): (gamepadbackend.Backend?, string?)
+    local mismatch = layoutMismatch()
+    if mismatch ~= nil then
+        return nil, mismatch
+    end
+    local context = tecs_gamepad_open_detached()
+    if context == nil then
+        return nil, reason(nil, "tecsgamepad opened no context")
+    end
+
+    return wrap(context)
+end

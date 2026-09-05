@@ -1,17 +1,78 @@
 module tecs.input
 
 --[[
-Keyboard and pointer state folded from typed platform events.
+Keyboard, pointer, touch and gamepad state folded from typed platform events.
 
 Live state survives frame boundaries. Frame edges clear before each sealed host
 batch, while latched edges accumulate until the first fixed step consumes
 them. Blocking layers move capture and clear pending edges without inventing
 releases for controls that remain physically held.
+
+Gamepads reach the same fold through a different door. The keyboard, the
+pointer and touch arrive in the host's sealed batch, because the window system
+owns them; a gamepad belongs to no window, so `tecs.platform.gamepadbackend`
+is polled once a frame by the `tecs.PollGamepads` system `install` adds, and
+what it saw becomes the same typed platform events the host would have sent.
+That is why `handleEvent` is the only fold in this module: a synthetic gamepad
+event from the debug server and a real one from a controller take one path.
+
+Buttons use positional names. `"south"` is the button nearest the player on
+every pad, where `"a"` is the one nearest the player on some pads and the one
+to its right on others.
+
+```nupp
+local pad <const> = state:gamepad(1)
+if pad ~= nil and pad.connected then
+    local moveX <const> = pad:axis("leftX")
+    if pad:buttonPressed("south") then
+        print(moveX)
+    end
+end
+```
+
+## Device features and where they went
+
+The SDL implementation exposed more of a controller than any portable Rust
+source does, so each of those is decided here rather than left to be
+rediscovered.
+
+Retained: positional buttons, sticks, analog triggers, hot plug, the power
+state, and rumble. Rumble is retained conditionally, which the contract already
+allowed for: `gilrs` implements force feedback on `evdev` and XInput and not on
+`IOKit`, so `Gamepad.rumble` answers false on macOS the way it always answered
+false for a device without motors.
+
+Retained on the platforms that have it: touch, which `winit` reports on
+Windows, Linux, Android and the web and documents as unsupported on macOS,
+where there is no touch screen to report. Touch pressure comes through where the
+surface measures it and reads zero where it does not.
+
+Deferred: the pen. `winit` 0.30 translates no pen event at all, and its 0.31
+line folds pens into a unified pointer with a `Pen` kind. Waiting for that is
+cheaper and more correct than writing `NSEvent`, `WM_POINTER` and XInput2 tablet
+handling in three places for a surface with no consumer in this tree. The
+contract to restore is the eight `pen` event kinds, the `penState` argument on
+the debug server's `send_event`, and pressure, tilt and eraser state on this
+record.
+
+Removed: gamepad motion sensors, gamepad touchpads, trigger rumble, the light
+bar, the player-index slot, the hardware button label, the device family and
+device path, the remap event, and standalone motion sensors. Every one of them
+is vendor HID parsing that no cross-platform Rust crate does, and the
+positional vocabulary above is what a game actually binds against. A game that
+wants a `"cross"` glyph rather than a `"south"` name reads the pad's `name` and
+chooses its own art.
 ]]
 
 local data = require("tecs.data")
 local ecs = require("tecs.ecs")
+local gamepadbackend = require("tecs.platform.gamepadbackend")
+local log = require("nupp.log")
 local platformevents = require("tecs.platform.events")
+
+--- Compatibility surface: a developer types this logger name into a filter, so
+--- it is configuration rather than an identifier and does not move.
+local LOGGER = log.named("tecs.input")
 
 --- A position in the input capture stack.
 export record Layer
@@ -22,6 +83,116 @@ end
 
 --- A conventional pointer button name.
 export type MouseButton = "left" | "middle" | "right" | "back" | "forward"
+
+--- A positional gamepad button name.
+---
+--- Compatibility surface: these are the names the Teal implementation
+--- published, so a saved binding and a game keep working across the move. They
+--- are positional rather than Xbox-only on purpose: the hardware label is a
+--- separate question, and one this engine no longer answers.
+export type GamepadButton = "south"
+    | "east"
+    | "west"
+    | "north"
+    | "back"
+    | "guide"
+    | "start"
+    | "leftStick"
+    | "rightStick"
+    | "leftShoulder"
+    | "rightShoulder"
+    | "dpadUp"
+    | "dpadDown"
+    | "dpadLeft"
+    | "dpadRight"
+
+--- A gamepad axis name.
+---
+--- Compatibility surface: these are the names the Teal implementation
+--- published. A stick runs -1 to 1 with `leftY` and `rightY` growing downward,
+--- and a trigger runs zero to one.
+export type GamepadAxis = "leftX" | "leftY" | "rightX" | "rightY" | "leftTrigger" | "rightTrigger"
+
+--- One finger on a touch surface, from the most recent touch event.
+---
+--- Input owns and reuses every field. Callers treat the record as read-only and
+--- copy values they need to retain.
+export record Touch
+    --- Read-only. Names the touch surface's opaque identity, set when the
+    --- finger first appears.
+    device: string
+
+    --- Read-only. Names the finger's opaque identity, set when it first
+    --- appears.
+    finger: string
+
+    --- Read-only. Reports the position in logical window coordinates.
+    x: number
+
+    --- Read-only. Reports the position in logical window coordinates.
+    y: number
+
+    --- Read-only. Reports the position across the surface, from zero to one.
+    normalX: number
+
+    --- Read-only. Reports the position down the surface, from zero to one.
+    normalY: number
+
+    --- Read-only. Reports the pressure from zero to one, and zero where the
+    --- surface does not measure it.
+    pressure: number
+end
+
+--- One attached gamepad's identity, event state and outputs.
+---
+--- Input owns the object. A retained reference stays safe after the device goes
+--- away: queries answer with neutral values, `rumble` returns false, and
+--- `connected` stays false. A reconnect creates a new object rather than
+--- reviving the old one.
+export record Gamepad
+    --- Read-only. Names the device, and matches the `which` field of every
+    --- gamepad platform event about it.
+    id: integer
+
+    --- Read-only. Reports true from the moment Input opens the device until it
+    --- goes away, and false permanently afterwards.
+    connected: boolean
+
+    --- Read-only. Reports the platform's display name for the device, and an
+    --- empty string when it reports none. Saved bindings use `guid`.
+    name: string
+
+    --- Read-only. Reports the stable identity a saved binding matches on, and
+    --- an empty string when the platform reports none.
+    guid: string
+
+    private backend: gamepadbackend.Backend
+
+    --- Reads the shared layer stack. A layer blocks every device or none, so
+    --- this answers from the owning input state rather than from the pad.
+    private gateRead: function(layer: Layer?): boolean
+
+    --- Reports whether queries should answer with fixed-step latched edges.
+    private gateFixed: function(): boolean
+
+    private down: {[integer]: boolean}
+    private pressed: {[integer]: boolean}
+    private released: {[integer]: boolean}
+    private latchedPressed: {[integer]: boolean}
+    private latchedReleased: {[integer]: boolean}
+
+    --- Latest value per axis. An axis no event has mentioned reads as zero.
+    private axisValues: {[integer]: number}
+
+    buttonDown: function(borrows self: Gamepad, button: GamepadButton | integer, layer: Layer?): boolean
+    buttonPressed: function(borrows self: Gamepad, button: GamepadButton | integer, layer: Layer?): boolean
+    buttonReleased: function(borrows self: Gamepad, button: GamepadButton | integer, layer: Layer?): boolean
+    axis: function(borrows self: Gamepad, axis: GamepadAxis | integer, deadzone: number?, layer: Layer?): number
+    hasButton: function(borrows self: Gamepad, button: GamepadButton | integer): boolean
+    hasAxis: function(borrows self: Gamepad, axis: GamepadAxis | integer): boolean
+    power: function(borrows self: Gamepad): (gamepadbackend.PowerState, integer)
+    rumble: function(borrows self: Gamepad, low: number, high: number, seconds: number): boolean
+end
 
 --- Live, frame-edge, and fixed-latched keyboard and pointer input.
 export record Input
@@ -50,6 +221,15 @@ export record Input
     private layers: {Layer}
     private enterFixedSystem: ecs.System?
     private exitFixedSystem: ecs.System?
+    private pollSystem: ecs.System?
+    private backend: gamepadbackend.Backend
+    private pads: {[integer]: Gamepad}
+    private padList: {Gamepad}
+
+    --- The drain buffer, allocated once because the seam is crossed per frame.
+    private padEvents: {gamepadbackend.Event}
+
+    private fingers: {[string]: Touch}
 
     beginFrame: function(exclusive self: Input): nil
     enterFixedPhase: function(exclusive self: Input): nil
@@ -66,9 +246,134 @@ export record Input
     popLayer: function(exclusive self: Input): Layer?
     topLayer: function(borrows self: Input): Layer
     canRead: function(borrows self: Input, layer: Layer?): boolean
+    touches: function(borrows self: Input, layer: Layer?): {Touch}
+    gamepads: function(borrows self: Input): {Gamepad}
+    gamepad: function(borrows self: Input, index: integer?): Gamepad?
+    gamepadById: function(borrows self: Input, id: integer): Gamepad?
+    refreshDevices: function(exclusive self: Input): nil
+    pollDevices: function(exclusive self: Input): {platformevents.Event}
+    destroy: function(exclusive self: Input): nil
+end
+
+--- The code each positional button name resolves to.
+---
+--- The numbers are the seam's own and match `native/rust/tecs-gamepad`. The
+--- names are the compatibility surface; the numbers never left the process.
+local BUTTON_CODES: {
+    [string]: integer
+} = {
+    south = 1,
+    east = 2,
+    west = 3,
+    north = 4,
+    back = 5,
+    guide = 6,
+    start = 7,
+    leftStick = 8,
+    rightStick = 9,
+    leftShoulder = 10,
+    rightShoulder = 11,
+    dpadUp = 12,
+    dpadDown = 13,
+    dpadLeft = 14,
+    dpadRight = 15,
+}
+
+--- The code each axis name resolves to.
+local AXIS_CODES: {
+    [string]: integer
+} = {leftX = 1, leftY = 2, rightX = 3, rightY = 4, leftTrigger = 5, rightTrigger = 6,}
+
+--- The magnitude below which a stick reads as centered.
+---
+--- Hardware rests a little off center, so a game that did not subtract
+--- something here would drift. The value is the one the Teal implementation
+--- used, and `Gamepad.axis` takes an override for a game that wants its own.
+local DEFAULT_DEADZONE: number = 0.15
+
+--- The greatest number of observations one drain crossing carries.
+local DRAIN_CAPACITY: integer = 64
+
+--- The gamepad source this process reads, resolved once.
+---
+--- One per process rather than one per world, because the platform's device
+--- source is one thing and opening it twice would mean two hot-plug streams
+--- reporting the same controller under two identities.
+local sharedBackend: gamepadbackend.Backend? = nil
+
+--- Returns the process-wide gamepad source, opening it on first use.
+---
+--- A build with no `libtecsgamepad` answers with the device-free backend, in
+--- the same shape and with the same silence a machine with no controller
+--- support produces.
+--- @return the shared backend
+local function devices(): gamepadbackend.Backend
+    local existing = sharedBackend
+    if existing ~= nil then
+        return existing
+    end
+    local opened: gamepadbackend.Backend? = nil
+    local loaded, native = pcall(require, "tecs.platform.gamepadnative")
+    if loaded then
+        local backend, failure = (native as {[string]: any}).open()
+        opened = backend as gamepadbackend.Backend?
+        if opened == nil then
+            LOGGER:info("no gamepad source: %s", tostring(failure))
+        end
+    else
+        LOGGER:info("no gamepad backend: %s", tostring(native))
+    end
+    if opened == nil then
+        opened = gamepadbackend.none()
+    end
+    sharedBackend = opened
+
+    return opened
 end
 
 local worldInputKey: data.Key<Input> = data.newKey("tecs.input", nil)
+
+--- Clears one pad's frame-local edges.
+local function padBeginFrame(exclusive pad: Gamepad): nil
+    pad.pressed = {}
+    pad.released = {}
+end
+
+--- Consumes one pad's latched edges at the end of a fixed step.
+local function padExitFixed(exclusive pad: Gamepad): nil
+    pad.latchedPressed = {}
+    pad.latchedReleased = {}
+end
+
+--- Clears every edge a pad holds, in both tiers.
+local function padClearEdges(exclusive pad: Gamepad): nil
+    pad.pressed = {}
+    pad.released = {}
+    pad.latchedPressed = {}
+    pad.latchedReleased = {}
+end
+
+--- Releases everything a pad holds without inventing a physical release.
+---
+--- A control held as the window loses focus never sends its own release, so a
+--- game would read it as held until the player pressed it again somewhere the
+--- application could see.
+local function padReleaseHeld(exclusive pad: Gamepad): nil
+    for code in pairs(pad.down) do
+        pad.released[code] = true
+        pad.latchedReleased[code] = true
+    end
+    pad.down = {}
+    pad.axisValues = {}
+end
+
+--- Records that a device is gone, leaving retained references harmless.
+local function padDisconnect(exclusive pad: Gamepad): nil
+    pad.connected = false
+    pad.down = {}
+    pad.axisValues = {}
+    padClearEdges(pad)
+end
 
 local function clearEdges(exclusive input: Input): nil
     input.keysPressed = {}
@@ -86,6 +391,9 @@ local function clearEdges(exclusive input: Input): nil
     input.wheelTicksX = 0
     input.wheelTicksY = 0
     input.text = ""
+    for index = 1, #input.padList do
+        padClearEdges(input.padList[index])
+    end
 end
 
 local function readableFrom(borrows input: Input): integer
@@ -110,6 +418,10 @@ local function releaseHeld(exclusive input: Input): nil
     input.keysDown = {}
     input.mouseButtonsDown = {}
     input.modifierMask = 0
+    for index = 1, #input.padList do
+        padReleaseHeld(input.padList[index])
+    end
+    input.fingers = {}
 end
 
 local function mouseCode(button: MouseButton | integer): integer
@@ -133,10 +445,54 @@ local function mouseCode(button: MouseButton | integer): integer
     error("input: unknown mouse button", 3)
 end
 
+local function buttonCode(button: GamepadButton | integer): integer
+    if button is integer then
+        if button < 1 then
+            error("input: gamepad button must be positive", 3)
+        end
+
+        return button
+    end
+    local code = BUTTON_CODES[button]
+    if code == nil then
+        error("input: unknown gamepad button", 3)
+    end
+
+    return code
+end
+
+local function axisCode(axis: GamepadAxis | integer): integer
+    if axis is integer then
+        if axis < 1 then
+            error("input: gamepad axis must be positive", 3)
+        end
+
+        return axis
+    end
+    local code = AXIS_CODES[axis]
+    if code == nil then
+        error("input: unknown gamepad axis", 3)
+    end
+
+    return code
+end
+
 --- Creates empty input state with the readable base layer.
---- @return a standalone input state suitable for an application or headless test
-export function newInput(): Input
+---
+--- The state reads no device unless it is given a source. Constructing input
+--- state by hand is what a test and a headless tool do, and neither should
+--- start the platform's device enumeration as a side effect: on macOS that is a
+--- run loop on a thread of its own, and a suite whose result changes when
+--- somebody plugs a controller in is worse than one that reads no controller at
+--- all. `install` is the call that reaches real hardware.
+--- @param backend the gamepad source, defaulting to no devices at all
+--- @return a standalone input state
+export function newInput(backend: gamepadbackend.Backend?): Input
     local base = new Layer(name = "base", blocking = true, index = 1)
+    local buffer: {gamepadbackend.Event} = {}
+    for index = 1, DRAIN_CAPACITY do
+        buffer[index] = gamepadbackend.newEvent()
+    end
     local result = new Input(
         mouseX = 0,
         mouseY = 0,
@@ -161,13 +517,25 @@ export function newInput(): Input
         fixed = false,
         layers = {base},
         enterFixedSystem = nil,
-        exitFixedSystem = nil
+        exitFixedSystem = nil,
+        pollSystem = nil,
+        backend = backend ?? gamepadbackend.none(),
+        pads = {},
+        padList = {},
+        padEvents = buffer,
+        fingers = {}
     )
     result.enterFixedSystem = function(_dt: number, exclusive _world: ecs.World): nil
         result:enterFixedPhase()
     end
     result.exitFixedSystem = function(_dt: number, exclusive _world: ecs.World): nil
         result:exitFixedPhase()
+    end
+    result.pollSystem = function(_dt: number, exclusive world: ecs.World): nil
+        local produced = result:pollDevices()
+        for index = 1, #produced do
+            platformevents.dispatch(world, produced[index])
+        end
     end
 
     return result
@@ -187,6 +555,9 @@ function Input.beginFrame(exclusive self: Input): nil
     self.wheelTicksX = 0
     self.wheelTicksY = 0
     self.text = ""
+    for index = 1, #self.padList do
+        padBeginFrame(self.padList[index])
+    end
 end
 
 --- Selects latched edges for queries inside one fixed step.
@@ -203,6 +574,63 @@ function Input.exitFixedPhase(exclusive self: Input): nil
     self.keysLatchedReleased = {}
     self.mouseButtonsLatchedPressed = {}
     self.mouseButtonsLatchedReleased = {}
+    for index = 1, #self.padList do
+        padExitFixed(self.padList[index])
+    end
+end
+
+--- Returns the key one finger is tracked under.
+---
+--- A device and a finger are separate 64-bit identities, so two surfaces can
+--- report the same finger number at the same moment and only the pair tells
+--- them apart.
+local function fingerKey(event: platformevents.TouchEvent): string
+    return event.touchDevice .. ":" .. event.finger
+end
+
+--- Opens a device Input has not seen, or leaves the one it has.
+local function connect(exclusive self: Input, id: integer): nil
+    if self.pads[id] ~= nil then
+        return
+    end
+    local backend = self.backend
+    local pad = new Gamepad(
+        id = id,
+        connected = true,
+        name = backend.name(id),
+        guid = backend.guid(id),
+        backend = backend,
+        gateRead = function(layer: Layer?): boolean
+            return self:canRead(layer)
+        end,
+        gateFixed = function(): boolean
+            return self.fixed
+        end,
+        down = {},
+        pressed = {},
+        released = {},
+        latchedPressed = {},
+        latchedReleased = {},
+        axisValues = {}
+    )
+    self.pads[id] = pad
+    self.padList[#self.padList + 1] = pad
+end
+
+--- Retires a device, leaving any reference a game kept harmless.
+local function disconnect(exclusive self: Input, id: integer): nil
+    local pad = self.pads[id]
+    if pad == nil then
+        return
+    end
+    self.pads[id] = nil
+    for index = 1, #self.padList do
+        if self.padList[index] == pad then
+            table.remove(self.padList, index)
+            break
+        end
+    end
+    padDisconnect(pad)
 end
 
 --- Folds one translated platform event into live and edge state.
@@ -248,6 +676,58 @@ function Input.handleEvent(exclusive self: Input, event: platformevents.Event): 
         self.wheelTicksY = self.wheelTicksY + event.wheelTicksY
     elseif event is platformevents.TextEvent then
         self.text = self.text .. event.text
+    elseif event is platformevents.TouchEvent then
+        local key = fingerKey(event)
+        if event.kind == "fingerUp" or event.kind == "fingerCanceled" then
+            self.fingers[key] = nil
+        else
+            local touch = self.fingers[key]
+            if touch == nil then
+                touch = new Touch(
+                    device = event.touchDevice,
+                    finger = event.finger,
+                    x = 0,
+                    y = 0,
+                    normalX = 0,
+                    normalY = 0,
+                    pressure = 0
+                )
+                self.fingers[key] = touch
+            end
+            touch.x = event.x
+            touch.y = event.y
+            touch.normalX = event.normalX
+            touch.normalY = event.normalY
+            touch.pressure = event.pressure
+        end
+    elseif event is platformevents.GamepadDeviceEvent then
+        if event.kind == "gamepadAdded" then
+            -- A reconnect under an identifier a previous device used has to
+            -- retire that one first, or a reference a game kept would start
+            -- answering for hardware it was never given.
+            disconnect(self, event.which)
+            connect(self, event.which)
+        else
+            disconnect(self, event.which)
+        end
+    elseif event is platformevents.GamepadButtonEvent then
+        local pad = self.pads[event.which]
+        if pad ~= nil then
+            if event.down then
+                pad.down[event.button] = true
+                pad.pressed[event.button] = true
+                pad.latchedPressed[event.button] = true
+            else
+                pad.down[event.button] = nil
+                pad.released[event.button] = true
+                pad.latchedReleased[event.button] = true
+            end
+        end
+    elseif event is platformevents.GamepadAxisEvent then
+        local pad = self.pads[event.which]
+        if pad ~= nil then
+            pad.axisValues[event.axis] = event.value
+        end
     elseif event is platformevents.FocusEvent and not event.focused then
         releaseHeld(self)
     end
@@ -372,16 +852,267 @@ function Input.canRead(borrows self: Input, layer: Layer?): boolean
     return index >= readableFrom(self)
 end
 
+--- Returns every finger currently on a touch surface.
+---
+--- The list is freshly built, and the records in it are Input's and are reused
+--- as the finger moves, so a caller retaining one sees it change and a caller
+--- wanting the position it had copies the numbers out.
+--- @param self the input state to read
+--- @param layer the reading layer, or the base layer when omitted
+--- @return the fingers, in no defined order, and an empty list when the layer
+---     may not read
+function Input.touches(borrows self: Input, layer: Layer?): {Touch}
+    if not self:canRead(layer) then
+        return {}
+    end
+    local found: {Touch} = {}
+    for _, touch in pairs(self.fingers) do
+        found[#found + 1] = touch
+    end
+
+    return found
+end
+
+--- Returns the connected gamepads, in connection order.
+--- @param self the input state to read
+--- @return Input's own list. A caller may retain a gamepad from it and must not
+---     edit the list.
+function Input.gamepads(borrows self: Input): {Gamepad}
+    return self.padList
+end
+
+--- Returns one connected gamepad by connection order.
+--- @param self the input state to read
+--- @param index the one-based position, defaulting to the first gamepad
+--- @return the gamepad, or nil when that position is empty
+function Input.gamepad(borrows self: Input, index: integer?): Gamepad?
+    return self.padList[index ?? 1]
+end
+
+--- Returns one connected gamepad by device identifier.
+--- @param self the input state to read
+--- @param id the identifier a gamepad platform event carries in `which`
+--- @return the gamepad, or nil once it has gone away
+function Input.gamepadById(borrows self: Input, id: integer): Gamepad?
+    return self.pads[id]
+end
+
+--- Reconciles the device list against what the platform currently reports.
+---
+--- Engine-owned. Hot plug arrives as events, so this is the safety net for a
+--- stream that was not being drained rather than the ordinary path. It changes
+--- the device list without emitting the events an ordinary attach produces,
+--- because the world it would emit into is not this call's to reach.
+--- @param self the input state to reconcile
+function Input.refreshDevices(exclusive self: Input): nil
+    local attached = self.backend.attached()
+    local present: {[integer]: boolean} = {}
+    for index = 1, #attached do
+        present[attached[index]] = true
+        connect(self, attached[index])
+    end
+    -- Copied first, because disconnecting rewrites the list under iteration.
+    local known: {integer} = {}
+    for index = 1, #self.padList do
+        known[index] = self.padList[index].id
+    end
+    for index = 1, #known do
+        if not present[known[index]] then
+            disconnect(self, known[index])
+        end
+    end
+end
+
+--- Reads the gamepad source and folds what it saw into input state.
+---
+--- Engine-owned. The `tecs.PollGamepads` system `install` adds calls this once
+--- a frame and dispatches what comes back, so ordinary game code reads
+--- `gamepads` instead. A caller driving input without a world calls it directly
+--- and may ignore the result.
+--- @param self the input state to update
+--- @return the translated events, already folded, in the order they arrived.
+---     The list is the caller's and is empty on a frame with no device activity.
+function Input.pollDevices(exclusive self: Input): {platformevents.Event}
+    local produced: {platformevents.Event} = {}
+    local backend = self.backend
+    local buffer = self.padEvents
+    local capacity = #buffer
+    backend.poll()
+    while true do
+        local written = backend.drain(buffer)
+        for index = 1, written do
+            local observation = buffer[index]
+            local event: platformevents.Event? = nil
+            if observation.kind == gamepadbackend.KIND_ADDED then
+                event = platformevents.gamepadDevice(true, observation.device)
+            elseif observation.kind == gamepadbackend.KIND_REMOVED then
+                event = platformevents.gamepadDevice(false, observation.device)
+            elseif observation.kind == gamepadbackend.KIND_BUTTON_DOWN then
+                event = platformevents.gamepadButton(true, observation.device, observation.code)
+            elseif observation.kind == gamepadbackend.KIND_BUTTON_UP then
+                event = platformevents.gamepadButton(false, observation.device, observation.code)
+            elseif observation.kind == gamepadbackend.KIND_AXIS then
+                event = platformevents.gamepadAxis(observation.device, observation.code, observation.value)
+            end
+            if event ~= nil then
+                produced[#produced + 1] = event
+                self:handleEvent(event)
+            end
+        end
+        if written < capacity then
+            break
+        end
+    end
+
+    return produced
+end
+
+--- Retires every device and forgets every finger.
+---
+--- Engine-owned. A host tearing a world down early calls this; ordinary game
+--- code must not. `tecs.application` does not call it, and nothing leaks when
+--- nobody does: the state dies with its world, and the process-wide gamepad
+--- source is deliberately left open here because another world may still be
+--- reading it.
+--- @param self the input state being shut down
+function Input.destroy(exclusive self: Input): nil
+    local pads = self.padList
+    self.padList = {}
+    self.pads = {}
+    for index = 1, #pads do
+        padDisconnect(pads[index])
+    end
+    self.fingers = {}
+end
+
+--- Returns whether a gamepad button is held.
+--- @param self the gamepad to read
+--- @param button a positional name or a positive backend button code
+--- @param layer the reading layer, or the base layer when omitted
+--- @return whether the layer may read and the button is held
+--- @raises when the name is not one this module declares
+function Gamepad.buttonDown(borrows self: Gamepad, button: GamepadButton | integer, layer: Layer?): boolean
+    return self.gateRead(layer) and self.down[buttonCode(button)] == true
+end
+
+--- Returns whether a gamepad button went down in the active edge tier.
+--- @param self the gamepad to read
+--- @param button a positional name or a positive backend button code
+--- @param layer the reading layer, or the base layer when omitted
+--- @return whether the button was pressed
+--- @raises when the name is not one this module declares
+function Gamepad.buttonPressed(borrows self: Gamepad, button: GamepadButton | integer, layer: Layer?): boolean
+    local edges = self.gateFixed() and self.latchedPressed or self.pressed
+    return self.gateRead(layer) and edges[buttonCode(button)] == true
+end
+
+--- Returns whether a gamepad button came up in the active edge tier.
+--- @param self the gamepad to read
+--- @param button a positional name or a positive backend button code
+--- @param layer the reading layer, or the base layer when omitted
+--- @return whether the button was released
+--- @raises when the name is not one this module declares
+function Gamepad.buttonReleased(borrows self: Gamepad, button: GamepadButton | integer, layer: Layer?): boolean
+    local edges = self.gateFixed() and self.latchedReleased or self.released
+    return self.gateRead(layer) and edges[buttonCode(button)] == true
+end
+
+--- Returns an axis reading with the deadzone applied.
+---
+--- A stick runs -1 to 1 and a trigger runs zero to one. An axis no event has
+--- mentioned, and one on a device that has gone away, reads as zero.
+--- @param self the gamepad to read
+--- @param axis an axis name or a positive backend axis code
+--- @param deadzone the magnitude below which the reading is zero, defaulting to
+---     0.15
+--- @param layer the reading layer, or the base layer when omitted
+--- @return the reading, and zero when the layer may not read
+--- @raises when the name is not one this module declares
+function Gamepad.axis(borrows self: Gamepad, axis: GamepadAxis | integer, deadzone: number?, layer: Layer?): number
+    if not self.gateRead(layer) then
+        return 0
+    end
+    local value = self.axisValues[axisCode(axis)] ?? 0
+    local limit = deadzone ?? DEFAULT_DEADZONE
+    if value < limit and value > -limit then
+        return 0
+    end
+
+    return value
+end
+
+--- Reports whether the device has a button.
+--- @param self the gamepad to ask
+--- @param button a positional name or a positive backend button code
+--- @return whether the platform says the device has it, and false once the
+---     device has gone away
+--- @raises when the name is not one this module declares
+function Gamepad.hasButton(borrows self: Gamepad, button: GamepadButton | integer): boolean
+    return self.connected and self.backend.hasButton(self.id, buttonCode(button))
+end
+
+--- Reports whether the device has an axis.
+--- @param self the gamepad to ask
+--- @param axis an axis name or a positive backend axis code
+--- @return whether the platform says the device has it, and false once the
+---     device has gone away
+--- @raises when the name is not one this module declares
+function Gamepad.hasAxis(borrows self: Gamepad, axis: GamepadAxis | integer): boolean
+    return self.connected and self.backend.hasAxis(self.id, axisCode(axis))
+end
+
+--- Reports what the device says about its power source.
+--- @param self the gamepad to ask
+--- @return the state, which is `"unknown"` once the device has gone away
+--- @return the battery percentage, and -1 when the device will not say
+function Gamepad.power(borrows self: Gamepad): (gamepadbackend.PowerState, integer)
+    if not self.connected then
+        return "unknown", -1
+    end
+    local info = self.backend.info(self.id)
+
+    return info.power, info.percent
+end
+
+--- Plays one rumble effect, replacing whatever the device was playing.
+---
+--- A zero or negative duration stops the device instead. Force feedback is not
+--- available on every platform, so a false here is an ordinary answer rather
+--- than a failure a game has to handle.
+--- @param self the gamepad to shake
+--- @param low the low-frequency motor strength from zero to one
+--- @param high the high-frequency motor strength from zero to one
+--- @param seconds how long the effect runs
+--- @return whether the effect started, and false when the device has gone away
+---     or the platform has no force feedback for it
+function Gamepad.rumble(borrows self: Gamepad, low: number, high: number, seconds: number): boolean
+    return self.connected and self.backend.rumble(self.id, low, high, seconds)
+end
+
 --- Installs and returns the input state owned by one world.
+---
+--- Three systems come with it. Two consume the fixed-step latched edges, and
+--- `tecs.PollGamepads` runs in `Ingress`, ahead of everything a game schedules,
+--- so a controller read anywhere in the frame answers from this frame.
+---
+--- This is the call that reaches real hardware. The platform's device source is
+--- opened once per process and shared, because opening it per world would give
+--- one controller two identities on two hot-plug streams; a build with no
+--- `libtecsgamepad` gets the device-free source and says so once in the log.
 --- @param world the world whose fixed steps consume latched edges
+--- @param backend the gamepad source, defaulting to the process-wide platform
+---     one
 --- @return the new input state, also available through `of`
 --- @raises when the world already owns input state
-export function install(exclusive world: ecs.World): Input
+export function install(exclusive world: ecs.World, backend: gamepadbackend.Backend?): Input
     if world.resources[worldInputKey] ~= nil then
         error("input.install: world input state is already installed", 2)
     end
-    local state = newInput()
+    local state = newInput(backend ?? devices())
     world.resources[worldInputKey] = state
+    -- Compatibility surface: system names are what the debug server reports
+    -- and what an agent selects on.
+    world:addSystem({name = "tecs.PollGamepads", phase = ecs.phases.Ingress, run = assert(state.pollSystem),})
     world:addSystem({
         name = "tecs.EnterFixedInput",
         phase = ecs.phases.FixedFirst,

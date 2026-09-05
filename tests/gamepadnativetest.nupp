@@ -1,0 +1,94 @@
+local gamepadbackend = require("tecs.platform.gamepadbackend")
+local input = require("tecs.input")
+local test = require("nupp.test")
+
+local suite = {}
+
+--- Returns the native binding, or skips when the build has not staged
+--- `libtecsgamepad` where the dynamic loader will find it.
+---
+--- These are the only tests in the suite that cross into Rust, and every one of
+--- them uses the detached opener. Opening the real source starts the platform's
+--- device enumeration, and on macOS that is an `IOHIDManager` on a run loop of
+--- its own; a headless suite has no business starting one, and a machine with a
+--- controller plugged in would make these cases depend on the hardware.
+local function binding(): {[string]: any}
+    local ok, loaded = pcall(require, "tecs.platform.gamepadnative")
+    if not ok then
+        test.skip("libtecsgamepad is not on the loader path: " .. tostring(loaded))
+    end
+
+    return loaded as {[string]: any}
+end
+
+--- Opens a device-free native backend, skipping when the library refused.
+local function opened(): gamepadbackend.Backend
+    local native = binding()
+    local backend, reason = native.openDetached()
+    if backend == nil then
+        test.skip("libtecsgamepad did not open: " .. tostring(reason))
+    end
+
+    return backend as gamepadbackend.Backend
+end
+
+function suite.agreesWithTheLibraryAboutEveryStructOnTheSeam(): nil
+    -- The opener compares LuaJIT's view of each struct against the library's
+    -- before it hands anything back, so reaching a backend at all is the layout
+    -- assertion.
+    local backend = opened()
+    test.assert(not backend.available)
+    backend.close()
+end
+
+function suite.drainsNothingFromADetachedSource(): nil
+    local backend = opened()
+    test.equal(backend.poll(), 0)
+
+    local buffer: {gamepadbackend.Event} = {}
+    for index = 1, 4 do
+        buffer[index] = gamepadbackend.newEvent()
+    end
+    test.equal(backend.drain(buffer), 0)
+    test.equal(#backend.attached(), 0)
+    backend.close()
+end
+
+function suite.answersEveryQueryForADeviceThatIsNotThere(): nil
+    local backend = opened()
+    local info = backend.info(0)
+    test.assert(not info.connected)
+    test.assert(not info.forceFeedback)
+    test.equal(info.power, "unknown")
+    test.equal(info.percent, -1)
+    test.assert(not backend.hasButton(0, 1))
+    test.assert(not backend.hasAxis(0, 1))
+    test.equal(backend.name(0), "")
+    test.equal(backend.guid(0), "")
+    test.assert(not backend.rumble(0, 1, 1, 0.5))
+    backend.close()
+end
+
+function suite.drivesInputStateOverTheNativeBackend(): nil
+    local backend = opened()
+    local state = input.newInput(backend)
+    state:beginFrame()
+    test.equal(#state:pollDevices(), 0)
+    test.equal(#state:gamepads(), 0)
+    state:refreshDevices()
+    test.equal(#state:gamepads(), 0)
+    state:destroy()
+    backend.close()
+end
+
+function suite.fallsBackToNoDevicesWhenTheLibraryIsAbsent(): nil
+    -- This one needs no library: it proves the fallback rather than the
+    -- binding, so it runs on every machine.
+    local state = input.newInput(gamepadbackend.none())
+    state:beginFrame()
+    test.equal(#state:pollDevices(), 0)
+    test.equal(#state:gamepads(), 0)
+    test.assert(state:gamepad() == nil)
+end
+
+return suite

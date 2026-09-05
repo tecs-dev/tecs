@@ -1,3 +1,4 @@
+local application = require("tecs.application")
 local ecs = require("tecs.ecs")
 local json = require("nupp.data.json")
 local mcp = require("tecs.mcp")
@@ -263,6 +264,58 @@ function suite.raisesWhenARegistrationHasNoHandler(): nil
     end)
 
     test.assert(not ok)
+end
+
+--- Sends one synthetic event and returns the kind the tool reports pushing.
+local function pushed(arguments: {[string]: any}): string
+    local result = call("send_event", arguments).structuredContent as {[string]: any}
+
+    return result.pushed as string
+end
+
+function suite.pushesTouchAndGamepadEventsThroughSendEvent(): nil
+    local app = application.newApplication({window = {title = "mcp send_event"}})
+    app:init()
+    mcp.bind(app.world, app)
+
+    local kinds = call("send_event").structuredContent as {[string]: any}
+    local listed: {[string]: boolean} = {}
+    for _, name in ipairs(kinds.kinds as {string}) do
+        listed[name] = true
+    end
+    test.assert(listed.fingerDown == true)
+    test.assert(listed.gamepadAxis == true)
+
+    test.equal(
+        pushed({
+            kind = "fingerDown",
+            finger = "1",
+            touchDevice = "screen",
+            x = 8,
+            y = 9,
+            pressure = 0.5
+        }),
+        "fingerDown"
+    )
+    local held = app.input:touches()
+    test.equal(#held, 1)
+    test.equal(held[1].finger, "1")
+    test.equal(held[1].x, 8)
+
+    -- `which` names the device for the gamepad kinds and the window for
+    -- everything else, which is the split the Teal tool published.
+    test.equal(pushed({kind = "gamepadAdded", which = 4}), "gamepadAdded")
+    test.equal(pushed({kind = "gamepadButtonDown", which = 4, button = 1}), "gamepadButtonDown")
+    test.equal(pushed({kind = "gamepadAxis", which = 4, axis = 1, value = 0.8}), "gamepadAxis")
+
+    local pad = assert(app.input:gamepadById(4))
+    test.assert(pad:buttonDown("south"))
+    test.equal(pad:axis("leftX"), 0.8)
+
+    test.matches(errorText(call("send_event", {kind = "fingerMotion", x = 1, y = 1})), "finger is required")
+
+    mcp.bind(nil, nil)
+    app:shutdown()
 end
 
 return suite

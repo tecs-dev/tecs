@@ -21,6 +21,7 @@ const EXPORT_NAMES: &[&str] = &[
     "tecs.host.pushPointerButton",
     "tecs.host.pushWheel",
     "tecs.host.pushText",
+    "tecs.host.pushTouch",
     "tecs.host.nextWindowCommand",
     "tecs.host.windowCommandFailed",
     "tecs.host.renderPacket",
@@ -73,6 +74,39 @@ pub struct ImageCommand {
     pub pixels: Vec<u8>,
 }
 
+/// One finger crossing into Nupp.
+///
+/// The fields travel together because they are one observation, and twelve
+/// positional arguments at a call site is where a transposed coordinate pair
+/// hides.
+pub struct TouchEvent<'a> {
+    /// One of `fingerDown`, `fingerMotion`, `fingerUp` or `fingerCanceled`.
+    pub phase: &'a str,
+    /// The touch surface's opaque identity.
+    pub device: &'a str,
+    /// The finger's opaque identity on that surface.
+    pub finger: &'a str,
+    /// The position in logical window coordinates.
+    pub x: f64,
+    /// The position in logical window coordinates.
+    pub y: f64,
+    /// The position across the surface, from zero to one.
+    pub normal_x: f64,
+    /// The position down the surface, from zero to one.
+    pub normal_y: f64,
+    /// The reported pressure from zero to one, and zero where the surface does
+    /// not measure it.
+    pub pressure: f64,
+    /// The movement since this finger's previous event.
+    pub dx: f64,
+    /// The movement since this finger's previous event.
+    pub dy: f64,
+    /// The host time this observation carries.
+    pub timestamp: f64,
+    /// The host's ordering number for this batch.
+    pub sequence: u64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FrameState {
     Parked,
@@ -97,6 +131,7 @@ struct Exports {
     push_pointer_button: ManagedHandle,
     push_wheel: ManagedHandle,
     push_text: ManagedHandle,
+    push_touch: ManagedHandle,
     next_window_command: ManagedHandle,
     window_command_failed: ManagedHandle,
     render_packet: ManagedHandle,
@@ -427,6 +462,32 @@ impl Bridge {
         Ok(())
     }
 
+    /// Queues one finger's transition or movement on a touch surface.
+    ///
+    /// The device and finger identities cross as text because both are 64-bit
+    /// platform values, and a Lua number would round two fingers into one.
+    pub fn push_touch(&mut self, touch: &TouchEvent<'_>) -> Result<()> {
+        let export = self.exports.push_touch;
+        self.call(
+            export,
+            &[
+                text(touch.phase),
+                text(touch.device),
+                text(touch.finger),
+                ManagedValue::Number(touch.x),
+                ManagedValue::Number(touch.y),
+                ManagedValue::Number(touch.normal_x),
+                ManagedValue::Number(touch.normal_y),
+                ManagedValue::Number(touch.pressure),
+                ManagedValue::Number(touch.dx),
+                ManagedValue::Number(touch.dy),
+                ManagedValue::Number(touch.timestamp),
+                unsigned(touch.sequence),
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn next_window_command(&mut self) -> Result<Option<WindowCommand>> {
         let values = self.call(self.exports.next_window_command, &[])?;
         let Some(kind) = optional_text(&values, 0, "tecs.host.nextWindowCommand kind")? else {
@@ -527,11 +588,12 @@ impl Exports {
             push_pointer_button: handles[14],
             push_wheel: handles[15],
             push_text: handles[16],
-            next_window_command: handles[17],
-            window_command_failed: handles[18],
-            render_packet: handles[19],
-            next_image_command: handles[20],
-            image_command_result: handles[21],
+            push_touch: handles[17],
+            next_window_command: handles[18],
+            window_command_failed: handles[19],
+            render_packet: handles[20],
+            next_image_command: handles[21],
+            image_command_result: handles[22],
         })
     }
 }
