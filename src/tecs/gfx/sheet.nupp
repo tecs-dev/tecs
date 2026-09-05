@@ -35,7 +35,7 @@ forward, which is what an animation naming no tag plays.
 
 `bind` resolves the sheet's pixel rectangles against a `tecs.gfx.images` id, so
 `sprite` and `uv` then answer the region a
-[`Sprite`](tealdoc:tecs.gfx.Sprite) samples. A sheet is usable before that:
+[`Sprite`](tecs.gfx.Sprite) samples. A sheet is usable before that:
 until it is bound, a frame's region is its plain fraction of the image.
 
 A sheet name is a snapshot compatibility surface. Every entity playing the
@@ -329,7 +329,7 @@ end
 --- Returns a frame's region.
 ---
 --- Fractions of the image before `bind`, and of the bound image's region after
---- it, which is what a [`Sprite`](tealdoc:tecs.gfx.Sprite) samples.
+--- it, which is what a [`Sprite`](tecs.gfx.Sprite) samples.
 --- @param self the sheet to read
 --- @param frame the frame index, from one to `count`
 --- @return the region's left edge, then its top, then its right, then its bottom
@@ -651,7 +651,7 @@ end
 --- Binding again rescales from the pixel rectangles rather than from the
 --- previous result, so re-registering an image accumulates no scaling error.
 --- Entities already carrying regions from an earlier bind keep them: a rebind
---- updates no existing [`Sprite`](tealdoc:tecs.gfx.Sprite).
+--- updates no existing [`Sprite`](tecs.gfx.Sprite).
 --- @param self the sheet to bind
 --- @param image the `tecs.gfx.images` id the frames are sampled from
 --- @param u0 the region's left edge as a fraction of the image, defaulting to zero
@@ -678,7 +678,7 @@ end
 --- quad samples the backend's white fallback.
 --- @param self the sheet to read
 --- @param frame the frame to show, from one to `count`, defaulting to one
---- @return a fresh [`Sprite`](tealdoc:tecs.gfx.Sprite) value ready to spawn, which
+--- @return a fresh [`Sprite`](tecs.gfx.Sprite) value ready to spawn, which
 ---     the caller owns rather than a view onto the sheet
 --- @raises when the frame is outside the sheet
 function Sheet.sprite(self: Sheet, frame: integer?): components.TableInstance<rendercomponents.Sprite>

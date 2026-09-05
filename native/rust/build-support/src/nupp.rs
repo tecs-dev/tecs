@@ -1,14 +1,10 @@
-//! The Nupp half of the build: modules, game components, benchmarks, and the
-//! `winit` host that loads a component.
+//! The build: Nupp modules, game components, benchmarks, and the `winit` host
+//! that loads a component.
 //!
 //! The Nupp compiler owns compilation. This module owns finding it, finding the
 //! embedding SDK the Rust host links against, and putting the two together, so
 //! a contributor reaches one command rather than three tools and two
 //! environment variables.
-//!
-//! The `winit` host is selectable here and is not the default. The Teal
-//! implementation is still the shipping path, and the migration plan defers the
-//! switch until the whole platform matrix passes.
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
@@ -32,7 +28,7 @@ pub const DEFAULT_TARGET: &str = "headless";
 pub const BENCHMARKS: &str = "bench/nupp/tecs";
 
 /// Where the rendered Nupp documentation site is written.
-pub const DOCUMENTATION: &str = "out/nupp-docs";
+pub const DOCUMENTATION: &str = "out/docs";
 
 /// The manifest target that renders the documentation.
 const DOCUMENTATION_TARGET: &str = "docs";
@@ -154,13 +150,10 @@ pub fn targets(root: &Path) -> Result<()> {
     nupp(root, ["tasks"])
 }
 
-/// Renders the Nupp documentation site.
+/// Renders the documentation site.
 ///
 /// The Nupp compiler reads the docblocks it already checks, so the reference
-/// has no second copy of a signature to drift from. Tealdoc cannot do this
-/// half: it resolves a module only through `src/<name>.tl`, so it can neither
-/// read a Nupp declaration nor project one onto a page. The two sites collapse
-/// into one when the Teal implementation is deleted.
+/// has no second copy of a signature to drift from.
 pub fn documentation(root: &Path, output: Option<&Path>) -> Result<PathBuf> {
     let destination = output.map_or_else(|| root.join(DOCUMENTATION), Path::to_path_buf);
     nupp(
@@ -176,23 +169,7 @@ pub fn documentation(root: &Path, output: Option<&Path>) -> Result<PathBuf> {
     Ok(destination)
 }
 
-/// Renders the Nupp documentation into a scratch directory and gates it.
-///
-/// The render is the gate for the reference: a docblock the generator cannot
-/// read fails here. `scripts/check-docs-descriptions.sh` is the gate for the
-/// pages, and it is the same script `cargo xtask docs-check` runs, over the
-/// same `docs/` tree, so a Nupp page is held to what a Teal page is held to.
-pub fn documentation_check(root: &Path) -> Result<()> {
-    crate::docs::check_descriptions(root)?;
-    let scratch = tempfile::Builder::new()
-        .prefix("tecs-nupp-docs.")
-        .tempdir()?;
-    documentation(root, Some(&scratch.path().join("site")))?;
-    println!("OK: the Nupp reference renders and every page carries a description");
-    Ok(())
-}
-
-/// Runs one Nupp benchmark program.
+/// Runs one benchmark program.
 ///
 /// Benchmarks are compiled at `-O2` rather than the ad-hoc default of `-O0`,
 /// because a measurement taken at a different optimization level than the one
@@ -239,9 +216,9 @@ fn benchmark_source(root: &Path, name: &str) -> Result<PathBuf> {
         }
     }
     let listed = available.into_iter().collect::<Vec<_>>().join(", ");
-    // `bitset` and `latency` are the two Teal benchmark names with no Nupp
-    // program, and both are named by the migration plan's performance gates, so
-    // a reader who types one deserves the answer rather than a name list.
+    // `bitset` and `latency` are named by the migration plan's performance
+    // gates and have no program here, so a reader who types one deserves the
+    // answer rather than a name list.
     let note = match name {
         "bitset" => {
             "\nThe Nupp ECS has no bitset. `signature` measures the archetype \
@@ -253,14 +230,13 @@ fn benchmark_source(root: &Path, name: &str) -> Result<PathBuf> {
         }
         _ => "",
     };
-    anyhow::bail!("unknown Nupp benchmark {name:?}; expected {listed}{note}")
+    anyhow::bail!("unknown benchmark {name:?}; expected {listed}{note}")
 }
 
 /// Builds a component target and runs it through the Rust `winit` host.
 ///
-/// The host is a development executable, not the default one. It is built with
-/// Cargo in the debug profile, since what it is for right now is seeing a
-/// change work.
+/// It is built with Cargo in the debug profile, since what a run is for is
+/// seeing a change work.
 pub fn host(root: &Path, target: &str, entry: Option<&str>, arguments: &[OsString]) -> Result<()> {
     build(root, target)?;
     let component = root.join(OUTPUT).join(format!("{target}.nuppc"));
@@ -320,13 +296,17 @@ pub fn apply_sdk(command: &mut Command, root: &Path) {
 
 /// Checks, formats, tests, and builds the Rust host against a Nupp component.
 ///
-/// This is the Nupp counterpart of `cargo xtask test`, and it is separate
-/// because the two implementations are still parallel: neither suite proves
-/// anything about the other.
+/// This is what `cargo xtask test` runs before it is worth pushing: every gate
+/// in one command, in the order that fails cheapest first.
 pub fn verify(root: &Path) -> Result<()> {
     check(root)?;
-    format(root, true)?;
+    // The whole-tree format check rather than this module's `format`, because
+    // the manifest, the workflow and every page are part of the gate too, and
+    // a command called `verify` that checked one language would be the reason
+    // somebody stopped trusting it.
+    crate::formatting::apply(root, &[], true)?;
     test(root)?;
+    crate::docs::check(root)?;
     for target in [DEFAULT_TARGET, DEFAULT_COMPONENT] {
         build(root, target)?;
     }

@@ -802,6 +802,13 @@ fn run_headless(config: Config) -> Result<()> {
     bridge.shutdown()
 }
 
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("tecs-winit-host: {error:#}");
+        std::process::exit(1);
+    }
+}
+
 #[cfg(test)]
 mod keynametests {
     use super::physical_key_name;
@@ -826,12 +833,5 @@ mod keynametests {
         ] {
             assert_eq!(physical_key_name(PhysicalKey::Code(code)), name);
         }
-    }
-}
-
-fn main() {
-    if let Err(error) = run() {
-        eprintln!("tecs-winit-host: {error:#}");
-        std::process::exit(1);
     }
 }

@@ -4,7 +4,7 @@ module tecs.physics
 Rigid-body simulation as part of the world.
 
 Install physics, spawn an entity with a
-[`Transform2D`](tealdoc:tecs.ecs.Transform2D), and attach a body:
+[`Transform2D`](tecs.ecs.Transform2D), and attach a body:
 
 ```nupp
 local physics = tecs.physics
@@ -845,7 +845,7 @@ end
 --- The collider is its own entity, which makes each shape independently
 --- inspectable and mutable. Physics creates the shape at the first fixed step
 --- after its body is live, and an owner that never gains a
---- [`Body`](tealdoc:tecs.physics.Body) leaves the shape declared and
+--- [`Body`](tecs.physics.Body) leaves the shape declared and
 --- unrealized.
 --- @param world the world that owns both entities
 --- @param entity the secondary collider entity, which gains `Collider` and
@@ -864,7 +864,7 @@ end
 --- Physics creates the joint at the first fixed step after both bodies are
 --- live, so declaring the joint in the same frame as the bodies it constrains
 --- costs no extra frame. A target that never gains a
---- [`Body`](tealdoc:tecs.physics.Body) leaves the joint declared and
+--- [`Body`](tecs.physics.Body) leaves the joint declared and
 --- unrealized, which is deliberate: a spawn staged this frame is not
 --- published yet, so reading the target here would reject correct code.
 --- Destroying either body destroys the joint entity with it.

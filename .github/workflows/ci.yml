@@ -9,7 +9,6 @@ permissions:
 
 env:
     CARGO_TERM_COLOR: always
-    TECS_WERROR: "1"
 
 jobs:
     rust:
@@ -25,47 +24,14 @@ jobs:
             # and staging one needs the Nupp compiler's own checkout and a
             # compiler newer than `rust-toolchain.toml` pins. Neither is present
             # on this job, so the crate's build script fails before Clippy sees
-            # a line of it. The `nupp-host` job installs both and covers the
-            # crate there. `cargo fmt` needs no build, so it still covers the
-            # whole workspace.
+            # a line of it. The `host` job installs both and covers the crate
+            # there. `cargo fmt` needs no build, so it still covers the whole
+            # workspace.
             - run: cargo clippy --locked --workspace --exclude tecs-winit-host --all-targets -- -D warnings
             - if: runner.os == 'Windows'
               run: cargo check --locked --workspace --exclude tecs-winit-host --all-targets
             - if: runner.os != 'Windows'
               run: cargo test --locked --workspace --exclude tecs-winit-host --all-targets
-
-    engine:
-        runs-on: macos-15
-        env:
-            TECS_EXPECT_GPU_DRIVER: metal
-        steps:
-            - uses: actions/checkout@v4
-            - run: brew update
-            - run: cargo xtask deps
-            - run: cargo xtask check
-            - run: cargo xtask format-check
-            - run: cargo xtask test
-            - run: cargo xtask test-package --preset macos-arm64
-
-    engine-vulkan:
-        runs-on: ubuntu-latest
-        env:
-            LIBGL_ALWAYS_SOFTWARE: "1"
-            SDL_GPU_DRIVER: vulkan
-            TECS_EXPECT_GPU_DRIVER: vulkan
-        steps:
-            - uses: actions/checkout@v4
-            - run: |
-                  sudo apt-get update
-                  sudo apt-get install -y \
-                    build-essential cmake ninja-build pkg-config luajit xvfb \
-                    libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
-                    libgbm-dev libpulse-dev libudev-dev libvulkan-dev \
-                    libwayland-dev libx11-dev libxcursor-dev libxext-dev \
-                    libxfixes-dev libxi-dev libxkbcommon-dev libxrandr-dev \
-                    mesa-vulkan-drivers wayland-protocols
-            - run: cargo xtask dev-tools
-            - run: xvfb-run -a cargo xtask test --preset linux-x64
 
     nupp:
         strategy:
@@ -95,6 +61,16 @@ jobs:
                   echo "$PWD/bin" >> "$GITHUB_PATH"
             - working-directory: tecs
               run: nupp fmt --check
+            # The rest of the formatters, on one runner. Formatting is platform
+            # independent, and the two the suffix table dispatches to are
+            # exactly what `deps` installs, so running the whole check twice
+            # would only pay for Homebrew twice.
+            - if: runner.os == 'macOS'
+              working-directory: tecs
+              run: cargo xtask deps
+            - if: runner.os == 'macOS'
+              working-directory: tecs
+              run: cargo xtask format-check
             - working-directory: tecs
               run: nupp check --strict
             # The native service tests skip when their library is absent, so
@@ -112,7 +88,7 @@ jobs:
             - working-directory: tecs
               run: nupp build --target flatcolor
 
-    nupp-host:
+    host:
         needs: nupp
         runs-on: macos-15
         env:
@@ -160,29 +136,29 @@ jobs:
             # the suites run in the full Nupp runtime and never load a
             # component, so this is the only step that reads the reduced one.
             - working-directory: tecs
-              run: cargo xtask nupp run flatcolor -- --headless --frames 2
+              run: cargo xtask run flatcolor -- --headless --frames 2
             - working-directory: tecs
-              run: cargo xtask nupp run sprites -- --headless --frames 3
+              run: cargo xtask run sprites -- --headless --frames 3
             - working-directory: tecs
-              run: cargo xtask nupp run lighting -- --headless --frames 5
+              run: cargo xtask run lighting -- --headless --frames 5
             # Every real consumer reaches a native service through a guarded
             # require, so a host with no libraries staged looks healthy. This
             # component requires all three directly and raises on the first
             # that will not load.
             - working-directory: tecs
-              run: cargo xtask nupp run nativesmoke -- --headless --frames 2
+              run: cargo xtask run nativesmoke -- --headless --frames 2
 
-    # The release half of the Nupp path. It is separate from `nupp-host`
-    # because it proves a different thing: that half builds and runs out of a
-    # checkout, and this half builds an install that carries no path back to
-    # the checkout and still runs after it moves.
+    # The release half. It is separate from `host` because it proves a
+    # different thing: that half builds and runs out of a checkout, and this
+    # half builds an install that carries no path back to the checkout and
+    # still runs after it moves.
     #
     # Both supported Unix platforms are covered, because the run path a release
     # records is spelled differently on each and only the platform can say
     # whether its loader honours it for a library opened by name at run time.
     # Windows is not here: no runner in this workflow stages a Nupp SDK for
     # MSVC yet, so `windows-x64` is configured and unproven.
-    nupp-package:
+    package:
         needs: nupp
         strategy:
             matrix:
@@ -225,7 +201,7 @@ jobs:
             # native smoke component and the showcase from there with every
             # Tecs override removed from the environment.
             - working-directory: tecs
-              run: cargo xtask nupp test-package --preset ${{ matrix.preset }}
+              run: cargo xtask test-package --preset ${{ matrix.preset }}
             # The development preset exists to be told apart from a release.
             # Packaging one and checking it is what keeps that distinction
             # working, since a release passing the gate proves nothing if the
@@ -234,29 +210,45 @@ jobs:
             # build of the graphics stack.
             - if: runner.os == 'macOS'
               working-directory: tecs
-              run: cargo xtask nupp package --preset ${{ matrix.preset }}-dev
+              run: cargo xtask package --preset ${{ matrix.preset }}-dev
             - if: runner.os == 'macOS'
               working-directory: tecs
-              run: cargo xtask nupp check-package
+              run: cargo xtask check-package
 
+    # The site is the Nupp compiler's own render of the declarations it checks,
+    # so this job needs the compiler and nothing else. It does not need the
+    # embedding SDK: no component is built here.
     docs:
         runs-on: macos-15
         permissions:
             contents: read
             pages: write
             id-token: write
+        env:
+            NUPP_REF: b13848d0a8b9d363b7f35f43a8a4c21674ff7025
         steps:
             - uses: actions/checkout@v4
-            - run: brew update
-            - run: brew install luajit luarocks
-            - run: cargo xtask dev-tools
-            - run: cargo xtask docs-check
+              with:
+                  path: tecs
+            - uses: actions/checkout@v4
+              with:
+                  repository: nupp-lang/nupp
+                  ref: ${{ env.NUPP_REF }}
+                  path: nupp
+            - name: Build the Nupp compiler
+              working-directory: nupp
+              run: |
+                  ./bin/nupp build --target bootstrapCompiler
+                  echo "$PWD/bin" >> "$GITHUB_PATH"
+            - working-directory: tecs
+              run: cargo xtask docs-check
             - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-              run: cargo xtask docs-build
+              working-directory: tecs
+              run: cargo xtask docs
             - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
               uses: actions/upload-pages-artifact@v3
               with:
-                  path: out/docs
+                  path: tecs/out/docs
 
     deploy-docs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

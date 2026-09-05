@@ -31,8 +31,8 @@ This is orchestration: requesting, sharing an acquisition between callers that
 want the same thing, counting holds, replacing a payload in place and reporting
 a failure to the call that asked for it. Reading bytes, decoding pixels,
 uploading a texture and freeing a native allocation belong to a
-[`Kind`](tealdoc:tecs.assets.Kind), which supplies a
-[`Job`](tealdoc:tecs.assets.Job) per acquisition and a `release` for the payload
+[`Kind`](tecs.assets.Kind), which supplies a
+[`Job`](tecs.assets.Job) per acquisition and a `release` for the payload
 it produced. A GPU service registers a kind whose job issues its own upload
 command; nothing about textures is written here.
 
@@ -47,7 +47,7 @@ resumes that call and lets it return the pair its signature promises.
 
 ## Holds and residency
 
-A [`Handle`](tealdoc:tecs.assets.Handle) is a hold, not a cache entry. Two
+A [`Handle`](tecs.assets.Handle) is a hold, not a cache entry. Two
 requests for one path that overlap share one acquisition and receive holds on
 one handle, because decoding the same file twice at once duplicates work without
 producing another result. A request made after the first settles acquires again:

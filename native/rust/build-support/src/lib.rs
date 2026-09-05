@@ -1,17 +1,9 @@
-pub mod abi;
-pub mod cdef;
+pub mod binaries;
 pub mod command;
 pub mod docs;
 pub mod formatting;
 pub mod nupp;
-pub mod nupppackage;
 pub mod package;
-pub mod payload;
-pub mod presets;
-pub mod product;
-pub mod registry;
-pub mod staging;
-pub mod tooling;
 
 use std::path::{Path, PathBuf};
 

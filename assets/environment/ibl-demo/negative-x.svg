@@ -1,5 +1,0 @@
-<!-- SPDX-License-Identifier: CC0-1.0 -->
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <defs><linearGradient id="sky" x2="0" y2="1"><stop stop-color="#315789"/><stop offset=".55" stop-color="#9b5271"/><stop offset=".56" stop-color="#553b42"/><stop offset="1" stop-color="#12131d"/></linearGradient></defs>
-  <rect width="64" height="64" fill="url(#sky)"/><path d="M0 39L16 45 32 35 48 43 64 37V64H0Z" fill="#20202d"/>
-</svg>

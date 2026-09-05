@@ -1,7 +1,7 @@
-# scripts/format.py passes an explicit file list, so this is for prettier run
-# by hand or by an editor. It mirrors EXCLUDED there: trees this repository
-# carries but did not write, and data a tool emits.
-vendor/
+# `cargo xtask format` passes an explicit file list, so this is for prettier
+# run by hand or by an editor. It mirrors EXCLUDED in
+# `native/rust/build-support/src/formatting.rs`: build output, and data a tool
+# emits.
 out/
 build/
 assets/fonts/
