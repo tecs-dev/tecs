@@ -212,4 +212,35 @@ function suite.rendersFormatArgumentsOnlyWhenEmitted(): nil
     test.equal(lines[1].message, "state")
 end
 
+function suite.routesEveryEngineLoggerThroughTheNamedThreshold(): nil
+    -- The engine's logger names exist so a developer can raise one subsystem's
+    -- level without raising every subsystem's. That only works for a logger
+    -- `tecs.log.get` issued: `nupp.log.named` stamps the process threshold and
+    -- never consults the per-name one, so a module reaching past this module
+    -- makes its own name decorative. Seven of them did.
+    local lines = capture(function(_captured: {Line}): nil
+        nupplog.level("info")
+        for _, name in ipairs({
+            log.APP,
+            log.ASSETS,
+            log.AUDIO,
+            log.GFX,
+            log.GPU,
+            log.HTTP,
+            log.INPUT,
+            log.MCP,
+            log.PROFILE,
+            log.SEQUENCE,
+            log.WATCH,
+            log.WORLD,
+        }) do
+            local logger = log.get(name)
+            logger:setLevel("debug")
+            logger:debug("reached")
+            logger:setLevel(nil)
+        end
+    end)
+    test.equal(#lines, 12)
+end
+
 return suite

@@ -114,6 +114,10 @@ export const GPU = "tecs.gpu"
 --- Read-only. Names the HTTP client logger.
 export const HTTP = "tecs.http"
 
+--- Names the gameplay input log, which reports a device that could not be
+--- opened and a binding that named nothing.
+export const INPUT = "tecs.input"
+
 --- Read-only. Names the debug server logger.
 export const MCP = "tecs.mcp"
 

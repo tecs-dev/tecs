@@ -67,12 +67,12 @@ chooses its own art.
 local data = require("tecs.data")
 local ecs = require("tecs.ecs")
 local gamepadbackend = require("tecs.platform.gamepadbackend")
-local log = require("nupp.log")
+local log = require("tecs.log")
 local platformevents = require("tecs.platform.events")
 
 --- Compatibility surface: a developer types this logger name into a filter, so
 --- it is configuration rather than an identifier and does not move.
-local LOGGER = log.named("tecs.input")
+local LOGGER = log.get(log.INPUT)
 
 --- A position in the input capture stack.
 export record Layer

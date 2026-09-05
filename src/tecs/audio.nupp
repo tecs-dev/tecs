@@ -93,12 +93,12 @@ drives it from the iteration instead.
 
 local audiobackend = require("tecs.platform.audiobackend")
 local ecs = require("tecs.ecs")
-local log = require("nupp.log")
+local log = require("tecs.log")
 local random = require("nupp.data.random")
 
 --- This logger name is a compatibility surface: a developer types it into a
 --- level filter, so it does not move when its module does.
-local LOGGER = log.named("tecs.audio")
+local LOGGER = log.get(log.AUDIO)
 
 --- Frames per second the output runs at, unless configured otherwise.
 local DEFAULT_FREQUENCY: integer = 48000

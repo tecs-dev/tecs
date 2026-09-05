@@ -53,12 +53,12 @@ lane owns adding a quad origin, and a pivot becomes a component when it does.
 local components = require("tecs.internal.components")
 local rendercomponents = require("tecs.internal.rendercomponents")
 local json = require("nupp.data.json")
-local log = require("nupp.log")
+local log = require("tecs.log")
 
 -- "tecs.gfx" is the category the graphics modules already log under, and a
 -- logger name is configuration a developer filters on rather than an
 -- identifier, so this shares theirs instead of opening one for sheets.
-local LOGGER = log.named("tecs.gfx")
+local LOGGER = log.get(log.GFX)
 
 const floor = math.floor
 

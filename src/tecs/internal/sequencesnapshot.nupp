@@ -12,7 +12,7 @@ since been redefined. Programs restored this way register under their original
 name and version, leaving the newest version untouched for later `play` calls.
 ]]
 
-local log = require("nupp.log")
+local log = require("tecs.log")
 local sequencecursors = require("tecs.internal.sequencecursors")
 local sequenceprogram = require("tecs.internal.sequenceprogram")
 local sequenceregistry = require("tecs.internal.sequenceregistry")
@@ -22,7 +22,7 @@ local floor = math.floor
 
 -- This logger name is a compatibility surface: it is the unit a developer
 -- filters on rather than an identifier this tree may move.
-local logger = log.named("tecs.sequence")
+local logger = log.get(log.SEQUENCE)
 
 --- The payload layout this build writes and accepts.
 export const VERSION: integer = 1

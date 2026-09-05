@@ -16,11 +16,11 @@ should require this module directly.
 ]]
 
 local json = require("nupp.data.json")
-local log = require("nupp.log")
+local log = require("tecs.log")
 
 -- The externally typed logger name is `tecs.mcp`, independent of the module
 -- path it is created from. Do not rename this compatibility surface.
-local logger = log.named("tecs.mcp")
+local logger = log.get(log.MCP)
 
 --- The MCP protocol revision this server negotiates. The string is the
 --- specification's own and is not a Tecs identifier.
