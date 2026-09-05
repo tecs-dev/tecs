@@ -165,6 +165,12 @@ jobs:
               run: cargo xtask nupp run sprites -- --headless --frames 3
             - working-directory: tecs
               run: cargo xtask nupp run lighting -- --headless --frames 5
+            # Every real consumer reaches a native service through a guarded
+            # require, so a host with no libraries staged looks healthy. This
+            # component requires all three directly and raises on the first
+            # that will not load.
+            - working-directory: tecs
+              run: cargo xtask nupp run nativesmoke -- --headless --frames 2
 
     # The release half of the Nupp path. It is separate from `nupp-host`
     # because it proves a different thing: that half builds and runs out of a

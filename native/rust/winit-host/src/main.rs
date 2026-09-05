@@ -775,7 +775,20 @@ fn run_headless(config: Config) -> Result<()> {
         max_frames: Some(config.max_frames.unwrap_or(1)),
     })?;
     bridge.init().context("initialize the Tecs application")?;
-    while !matches!(bridge.iterate(0.0)?, FrameState::Stopped) {}
+    // The same check the windowed path makes after every frame. A guarded
+    // failure is reported through `crashed` rather than raised out of
+    // `iterate`, so without this a component that dies during install runs to
+    // its frame limit and exits zero with nothing on either stream, which is
+    // indistinguishable from success. Every smoke test in CI is headless, so
+    // this is the one place that decides whether they mean anything.
+    while !matches!(bridge.iterate(0.0)?, FrameState::Stopped) {
+        if let Some(failure) = bridge.crashed()? {
+            return Err(anyhow!("Nupp application crashed: {failure}"));
+        }
+    }
+    if let Some(failure) = bridge.crashed()? {
+        return Err(anyhow!("Nupp application crashed: {failure}"));
+    }
     bridge.shutdown()
 }
 
