@@ -2,185 +2,131 @@
 
 ## Project Overview
 
-Tecs is a typed entity component system and the game engine built around it, written in Teal for LuaJIT. The two
-were separate projects and are now one: the ECS knows what the GPU reads, and the engine is not a layer bolted on
-top of a renderer-agnostic core.
+Tecs is a typed entity component system and the game engine built around it, written in Nupp against Rust
+services. The two were separate projects and are now one: the ECS knows what the GPU reads, and the engine is
+not a layer bolted on top of a renderer-agnostic core.
 
-SDL owns the loop. An entry file returns an application and a Rust host drives it through `SDL_AppInit`,
-`SDL_AppEvent`, `SDL_AppIterate` and `SDL_AppQuit`. Everything below Lua is reached through the FFI against
-generated bindings. Rust owns the host and engine support services; generated C linker glue remains.
+The Rust host owns the loop. A game is a **component**: one compiled Nupp artifact exporting a session
+constructor, which the host selects with `--entry` and drives one frame at a time. Nothing dynamically requires
+game code, and no native window handle crosses into it. Window and events are `winit`, the GPU is `wgpu`, and
+audio, physics and gamepads are Rust services behind Tecs-owned command and observation contracts.
 
 Entities are the interface. Anything that renders or updates per frame is an entity in a world.
 
-Primary entry point:
+Primary entry points:
 
-- `src/tecs/init.tl`: the supported public API, ECS and engine together
+- `src/tecs/ecs.nupp`: the ECS a game writes and engine code requires
+- `src/tecs/host.nupp`: the managed-call bridge the Rust host drives
+- `nupp.lua`: the manifest naming every module, component target and the documentation site
 
 ## Key Commands
 
-Cargo owns the project build. The `cargo xtask` command assembles native
-dependencies, generates bindings and payloads, links products, runs checks,
-and packages releases.
+Cargo owns the project build. `cargo xtask` finds the Nupp compiler and the embedding SDK, puts the two
+together, and runs the checks, benchmarks, packaging and release gates.
 
 ```bash
-cargo xtask build          # Build the host development preset
-cargo xtask test           # Run the spec suite, headless specs first
-cargo xtask check          # Type-check Teal sources
-cargo xtask format         # Format sources in place
-cargo xtask format-check   # Report unformatted sources
-cargo xtask example ui-demo # Run the engine showcase
-cargo xtask bench shapes   # Run a native-host benchmark
-cargo xtask abi-check      # Verify generated cdefs against the C ABI
-cargo xtask shaders        # Build the shader pack
+cargo xtask deps           # Install the formatters, and report the compiler
+cargo xtask targets        # List the targets nupp.lua configures
+cargo xtask check          # Type-check every Nupp source, strictly
+cargo xtask format         # Format every supported source language in place
+cargo xtask format-check   # Report sources that are not formatted
+cargo xtask test           # Build and run the test suites
+cargo xtask build --target flatcolor
+cargo xtask run flatcolor -- --frames 120
+cargo xtask bench shapes   # Run a benchmark from bench/nupp
+cargo xtask docs           # Render the site into out/docs
+cargo xtask docs-check     # Render it into a scratch directory and gate it
+cargo xtask docs-dev       # Serve it, rebuilding on a change
+cargo xtask verify         # Everything above, plus the Rust host
+cargo xtask presets        # List the release matrix
 cargo xtask package --preset macos-arm64
-cargo xtask check-package out/package
-cargo xtask test-package --preset macos-arm64 # Verify the installed release
-cargo xtask single         # Build the one-file CLI in out/single/bin
-cargo xtask presets        # List the platform matrix
-cargo xtask deps           # Install development dependencies, then check the pins
-cargo xtask dev-tools      # Stage vendor/ only, which is what a worktree needs
+cargo xtask check-package  # Gate out/package
+cargo xtask test-package --preset macos-arm64
+cargo xtask clean
 ```
 
-`cargo xtask deps` is the one setup command, and after it a checkout builds,
-type-checks and tests with nothing done by hand. It installs the Homebrew
-packages, then stages `vendor/`: the pinned Teal compiler, Cerulean, tealdoc,
-Busted, the Scintillua lexers, and the Teal type definitions for `ffi`, `bit`,
-`string.buffer`, `table.new`, Busted and Luassert, without which
-`cargo xtask check` cannot resolve `ffi` in most of `src`. It finishes by
-holding the machine to the tree's pinned dependency versions, because four of
-the packages it installs are pinned here and Homebrew carries only the current
-version of each, so installing them is itself a way out of the gate.
+There is one implementation, so there is no subcommand naming it. A command that reads as
+`cargo xtask nupp <task>` is from before the cutover.
 
-`cargo xtask dev-tools` is the `vendor/` half alone. Everything it stages is
-ignored and per checkout, so a new worktree needs it and needs nothing from
-Homebrew; `vendor/cjson` is the one tracked thing under there.
+`cargo xtask deps` is small on purpose. It installs `stylua` and `prettier`, which Homebrew carries and this
+tree does not pin, and then says where the Nupp compiler resolved. The Rust toolchain is `rust-toolchain.toml`
+plus `rustup`, and the Nupp compiler has no formula: `NUPP` wins, then a `nupp` checkout beside this one, then
+a `nupp` on `PATH`, and the sibling beats an installed release because this tree is developed against a
+compiler newer than the published one.
 
-### The Nupp rewrite
+`cargo xtask format` runs `cargo fmt`, `nupp fmt` and the suffix-dispatched formatters together. Naming paths
+narrows it to the last of those, because neither Cargo nor the Nupp compiler takes a file list.
 
-The rewrite lives beside the Teal implementation and has its own half of the
-build. `cargo xtask nupp` is that half; nothing under it touches the Teal path,
-and nothing on the Teal path builds a Nupp module.
+`cargo xtask package` installs a relocatable release into `out/package`. A release carries `bin/tecs-host`, the
+prebuilt `bin/shaders.tecspack` and its manifest, `lib/` holding the Nupp runtime library beside `tecsaudio`,
+`tecsgamepad` and `tecs_physics`, the compiled components under `share/tecs/components`, and the notices,
+licenses and Cargo inventory under `share/tecs`. A Windows package puts every library in `bin/`, where that
+loader looks.
 
-```bash
-cargo xtask nupp targets      # List the targets nupp.lua configures
-cargo xtask nupp check        # Type-check every Nupp source, strictly
-cargo xtask nupp format       # Format Nupp sources in place
-cargo xtask nupp format-check # Report unformatted Nupp sources
-cargo xtask nupp test         # Build and run the Nupp test suites
-cargo xtask nupp build --target flatcolor
-cargo xtask nupp bench shapes # Run a Nupp benchmark from bench/nupp
-cargo xtask nupp run flatcolor -- --frames 120
-cargo xtask nupp docs         # Render the Nupp reference into out/nupp-docs
-cargo xtask nupp docs-check   # Render it into a scratch directory and gate it
-cargo xtask nupp verify       # Everything above, plus the Rust host
-cargo xtask nupp presets      # List the Nupp release matrix
-cargo xtask nupp package --preset macos-arm64
-cargo xtask nupp check-package                 # Gate out/nupp-package
-cargo xtask nupp test-package --preset macos-arm64
-```
+`cargo xtask check-package` is the gate on the difference between a development preset and a release one. A
+release records a loader-relative run path (`@executable_path/../lib`, or `$ORIGIN/../lib`) and ships compiled
+shaders; a development preset links the staged SDK where it sits and ships none, and the check reports it
+rather than passing it. `cargo xtask test-package` installs a clean release, checks it, copies it somewhere
+unrelated, and runs the native smoke component and the showcase from there with every Tecs environment
+override removed, which is the only way to find out whether an install is relocatable rather than merely tidy.
 
-`cargo xtask nupp package` installs a relocatable release into
-`out/nupp-package`, and it is the Nupp counterpart of `cargo xtask package`
-rather than a variant of it: the two write different prefixes and neither
-overwrites the other. A release carries `bin/tecs-host`, the prebuilt
-`bin/shaders.tecspack` and its manifest, `lib/` holding the Nupp runtime
-library beside `tecsaudio`, `tecsgamepad` and `tecs_physics`, the compiled
-components under `share/tecs/components`, and the notices, licenses and Cargo
-inventory under `share/tecs`. A Windows package puts every library in `bin/`,
-where that loader looks.
+Packaging is native only. The Nupp toolchain stages an embedding library for the machine it runs on, so a
+Windows release is built on Windows.
 
-`cargo xtask nupp check-package` is the gate on the difference between a
-development preset and a release one, the way `cargo xtask check-package` is
-on the Teal path. A release records a loader-relative run path
-(`@executable_path/../lib`, or `$ORIGIN/../lib`) and ships compiled shaders; a
-development preset links the staged SDK where it sits and ships none, and the
-check reports it rather than passing it. `cargo xtask nupp test-package`
-installs a clean release, checks it, copies it somewhere unrelated, and runs
-the native smoke component and the showcase from there with every Tecs
-environment override removed, which is the only way to find out whether an
-install is relocatable rather than merely tidy.
+Two things a packager learns the hard way. The three service libraries resolve in a release through the
+_executable's_ run path, not through the ancestor walk in `tecs.internal.nativelibrary`: that walk starts at
+the module's source directory, which a compiled component no longer has, so what actually finds them is a load
+by bare name reaching the loader's search of `lib/`. And a guarded plugin failure is invisible to `--headless`,
+because `run_headless` in the Rust host never calls `tecs.host.crashed`, so the smoke component prints a line
+on success and the packaging test matches that line rather than trusting the exit status.
 
-Packaging is native only. The Nupp toolchain stages an embedding library for
-the machine it runs on, so a Windows release is built on Windows.
+Both `cargo xtask run` and the host's own `cargo build` need a Nupp embedding SDK, which
+`native/rust/winit-host/build.rs` stages through the Nupp compiler's `scripts/toolchain` in a checkout beside
+this one. Set `NUPP_SDK` to a staged one to skip that.
 
-Two things a packager learns the hard way. The three service libraries resolve
-in a release through the *executable's* run path, not through the ancestor
-walk in `tecs.internal.nativelibrary`: that walk starts at the module's source
-directory, which a compiled component no longer has, so what actually finds
-them is `ffi.load` by bare name reaching the loader's search of `lib/`. And a
-guarded plugin failure is invisible to `--headless`, because `run_headless` in
-the Rust host never calls `tecs.host.crashed`, so the smoke component prints a
-line on success and the packaging test matches that line rather than trusting
-the exit status.
+Two things about that SDK are worth knowing before they cost an afternoon. It is staged for a named feature
+set, and the runtime refuses to load a component whose declared features the library lacks, which reads as a
+load failure in a host that built cleanly. And staging it runs the Nupp project's own Cargo build, whose
+minimum compiler is newer than this tree's `rust-toolchain.toml` pin, so the staging call clears the Cargo
+environment it would otherwise inherit.
 
-`cargo xtask nupp run` builds a component target and runs it through the Rust
-`winit` host. That host is selectable and is not the default: the Teal
-implementation is still what ships, and the migration plan defers the switch
-until the whole platform matrix passes.
-
-Both `run` and the host's own `cargo build` need a Nupp embedding SDK, which
-`native/rust/winit-host/build.rs` stages through the Nupp compiler's
-`scripts/toolchain` in a checkout beside this one. Set `NUPP_SDK` to a staged
-one to skip that, and `NUPP` to select a compiler other than the sibling
-checkout or the one on `PATH`.
-
-Two things about that SDK are worth knowing before they cost an afternoon. It is
-staged for a named feature set, and the runtime refuses to load a component
-whose declared features the library lacks, which reads as a load failure in a
-host that built cleanly. And staging it runs the Nupp project's own Cargo build,
-whose minimum compiler is newer than this tree's `rust-toolchain.toml` pin, so
-the staging call clears the Cargo environment it would otherwise inherit.
-
-The Nupp benchmarks are in `bench/nupp`, and `signature` rather than `bitset` is
-the archetype-signature one, because the Nupp ECS has no bitset. `latency` has
-no Nupp counterpart yet.
-
-`--preset` selects the target and defaults to the host development preset. A development preset resolves
-dependencies from the system, which is convenient and not shippable. A packaged preset builds pinned revisions
-from source. `cargo xtask check-package` is the gate on the difference, and only a packaged install can pass it.
-
-`macos-arm64-sanitize` and `linux-x64-sanitize` are development presets with AddressSanitizer and
-UndefinedBehaviorSanitizer under the C. Run the host through them with `cargo xtask example ui-demo --preset <name>` or a
-benchmark; `cargo xtask test` cannot use them, and CONTRIBUTING.md says why and what to do instead.
+Benchmarks are in `bench/nupp`, and `signature` rather than `bitset` is the archetype-signature one, because
+this ECS has no bitset. `latency` has no counterpart: nothing in Nupp pushes an event into the host queue, and
+no stage is marked inside a host turn.
 
 ## Project Structure
 
 ```text
 tecs/
 ├── src/tecs/
-│   ├── init.tl            # The public API: one module per name, ECS and engine
-│   ├── ecs.tl             # tecs.ecs, for a game and for engine code alike
-│   ├── types.tl
-│   ├── internal/          # ECS implementation
-│   ├── utils/
-│   ├── ffi/               # Generated bindings plus the Rust runtime ABI
-│   ├── gpu/               # Device, pipelines, buffers, pass graph, shaders
-│   ├── gfx/               # Camera, layers, distance-field text
-│   ├── platform/          # window, events, input backends, time, files, the OS
-│   ├── physics/           # Rapier world integration
-│   ├── sequence/          # Sequencer, with the tween runtime inside it
-│   ├── io/                # Binary contracts, files, HTTP, MCP, and watching
-│   │   └── mcp/           # Debug server: transport, tools, sandbox
-│   ├── Application.tl     # The lifecycle the host drives
-│   ├── Renderer.tl        # World to GPU, owning the two halves below
-│   ├── Extractor.tl       # World-facing: a world to a frame packet
-│   ├── Backend.tl         # Device-facing: a frame packet to a frame
-│   ├── FramePacket.tl     # What crosses between them
-│   ├── input.tl           # Gameplay input, gamepads and standalone sensors
-│   ├── audio.tl           # Clips, voices, groups, limits, the Sound component
-│   ├── components.tl      # Engine components
-│   ├── assets.tl
-│   ├── workers.tl
-│   ├── log.tl             # SDL's logging, per platform
-│   └── json.tl            # lua-cjson, with the build's own copy found
-├── native/                # Headers and generated-linker support
-├── native/rust/           # Runtime and reusable Cargo build support
-├── xtask/                 # Project build command
-├── assets/                # shaders/ and materials/, globbed at build time
-├── scripts/               # Lua and shell helpers used by the Cargo build
-├── spec/                  # Engine specs in Lua, ECS specs in Teal under spec/tecs
-├── bench/
-└── out/<preset>/          # Build output
+│   ├── ecs.nupp            # The ECS, for a game and for engine code alike
+│   ├── application.nupp    # The lifecycle a host drives
+│   ├── host.nupp           # The managed-call bridge the Rust host drives
+│   ├── internal/           # ECS, sequencer, MCP and frame-packet implementation
+│   ├── gfx/                # Components, camera, layers, images, sheets, text, lighting
+│   ├── gpu/                # Material dispatch and the declared pass graph
+│   ├── platform/           # Window, events, audio and gamepad backends
+│   ├── physics/            # Rapier contract and binding
+│   ├── input.nupp          # Gameplay input over the platform event stream
+│   ├── audio.nupp          # Clips, voices, groups, limits, the Sound component
+│   ├── sequence.nupp       # Sequencer, with the tween runtime inside it
+│   ├── assets.nupp         # Asset orchestration
+│   ├── mcp.nupp            # Debug server: transport, tools, sandbox
+│   └── events.nupp, data.nupp, files.nupp, watch.nupp
+├── native/rust/
+│   ├── winit-host/         # The application loop, the wgpu renderer, the host ABI
+│   ├── tecs-audio/         # cpal output and capture behind a batched contract
+│   ├── tecs-gamepad/       # gilrs enumeration and observations
+│   ├── physics/            # Rapier storage and stepping
+│   └── build-support/      # The build commands xtask drives
+├── xtask/                  # Project build command
+├── assets/                 # shaders/ (WGSL) and materials/, read by the host
+├── examples/nupp/          # Component entries: flatcolor, sprites, lighting, smoke
+├── tests/                  # Suites; those reaching internals live in tests/tecs
+├── bench/nupp/tecs/        # Benchmarks
+├── docs/                   # Guides, plus the generated reference
+├── nupp.lua                # The build manifest
+└── out/                    # Build output
 ```
 
 ## Core Architecture Notes
@@ -203,68 +149,68 @@ Read this as the general rule the "not a line-for-line port" instruction implies
 suspension, workers, bytes, files, paths, JSON, networking, time, random and logging are Nupp's.
 What survives the crossing is what is Tecs-specific, and a module that only forwards is not.
 
-### The dependency rule
+### The module graph
 
-`tecs` is what a game reaches, and every public name on it is `tecs.<module>.<thing>`: `tecs.ecs.newWorld`,
-`tecs.gfx.Camera2D`, `tecs.newApplication`. A module may sit inside another module, one level and no
-deeper, so `tecs.gfx.layers.configure` is also a public name and nothing goes past it. The host loads `tecs`
-before a game's first line, so a game writes no require; a headless tool or a spec writes `require("tecs")`
-and gets the same table.
+A game requires the module it needs: `tecs.ecs`, `tecs.gfx`, `tecs.application`. There is no aggregator, so
+there is no cycle to design around and no lazy resolver to keep honest. Public names are
+`tecs.<module>.<thing>`, and one level deeper where a module has children, so `tecs.gfx.layers.configure` is a
+public name and nothing goes past it.
 
-`SURFACE` in `src/tecs/init.tl` is what a name resolves through, one descriptor per name at either level.
-A descriptor with one principal module answers with that module's own table, so the record that types the
-public name is the module's own and the names one level down are hung off it on first read. A namespace
-assembled from several modules at one level cannot be typed by any of them, so `init.tl` declares a record
-for it, and that record is a second copy of signatures and docblocks the modules already carry: prefer
-one module per public name. `spec/surface_spec.lua` walks the declaration and holds the resolver to it,
-and `spec/headless_spec.lua` holds the laziness that makes the resolver worth having: naming a namespace
-loads nothing, and reading one module under it loads no sibling.
+Engine modules require `tecs.ecs` rather than anything above it, and a module that needs only a type reaches
+for the module that declares it. `tecs.ecs` is one table for both readers: the ECS a game writes and the module
+engine code requires.
 
-A subordinate module cannot require its parent. The parent names the subordinate's type, and Teal refuses
-a require cycle even through a type-only require, so anything both of them need lives below both.
+`tecs.internal.*` modules are implementation details with no stability guarantee, and the compiler enforces
+that: a module may statically import `tecs.internal.*` only if its own first namespace segment is `tecs`. That
+is why test suites reaching internals live in `tests/tecs/` with a one-line forwarder at `tests/<name>.nupp`,
+which is where discovery looks.
 
-Engine modules require `tecs.ecs` rather than `tecs`, because `tecs` is the aggregator that pulls every engine
-module in and a module `tecs` exports cannot also depend on `tecs` without making a cycle, which Teal rejects
-even through a type-only require.
-
-`tecs.ecs` is one table for both readers: the ECS a game writes, and the module engine code requires. So the
-graph runs one way, and nothing under `tecs.ecs` may require the whole. A module that needs only a type reaches
-for `tecs.types`, which sits below both.
-
-`tecs.internal.*` modules are implementation details with no stability guarantee.
+A module with children lives in `name/init.nupp`. Prefer a flat `module.nupp` when there are none.
 
 ### ECS model
 
 - Worlds own entities, components, systems, plugins, resources, queries and the state stack.
 - Queries iterate through archetypes with `query:iter()`.
-- Builtins are registered automatically and sit directly on `tecs.ecs`: `ChildOf`, `TTL`, `Paused`, `Disabled`,
-  `EntityKey` and the state transition events. `Transform` is the exception and sits at the root, as
-  `tecs.Transform2D`, because every 2D subsystem moves the same one.
+- Builtins are registered automatically and sit directly on `tecs.ecs`: `ChildOf`, `TTL`, `Name`, `Paused`,
+  `Disabled`, `EntityKey`, `RelativeTransform2D` and the state transition events. `Transform2D` sits there too,
+  because every 2D subsystem moves the same one.
+- A component names what it cannot be meaningful without, the list flattens transitively, and a spawn or a set
+  that adds the component adds them too.
 - The state model is a stack: `world:createState`, `world:pushState`, `world:popState`, `world:peekState`.
 
 ### Rendering
 
-Deferred and GPU-driven. A compute pass culls and compacts a visible list, one indirect draw consumes it, and the
-material dispatch is compiled into a single fragment shader from `assets/materials/*.glsl`. Shaders are GLSL
-compiled to SPIR-V and translated for the backend; a release consumes a prebuilt pack and links no compiler.
+Deferred and GPU-driven. A compute pass culls and compacts a visible list, one indirect draw consumes it, and
+the material dispatch is compiled into a single fragment shader from `assets/materials/*.wgsl`. Shaders are
+WGSL with no translation step; a release consumes a prebuilt pack.
 
 Compaction is an ordered three-pass scan rather than an `atomicAdd`, because draw order has to be deterministic.
 
-### Ported, and not yet
+Nupp extracts one versioned, host-endian frame packet per completed frame. Rust owns adapters, surfaces,
+resources, pipelines, submission and presentation, and validates the packet it is handed.
 
-Working: windowing, input in three tiers behind a layer stack, events, the GPU pipeline, materials, camera,
-layers, physics, workers and asset loading, logging, the debug server, sprite sheets with animation,
-sequencing with tweening merged into it, distance-field text drawn through an instance producer, audio
-on SDL3_mixer (a voice per track, groups by tag, keyed limits, fades, pitch, loop points, and streaming),
-and shadows: an occluder mask every light marches against, a drop shadow that reaches ambient, and optional bloom.
+### What is here, and what is not
 
-Not ported: general post-processing, tiled maps and multi-camera.
+Working: windowing, events, keyboard, pointer, gamepad and touch input, durable entity keys, the GPU pipeline
+with materials, camera, layers, images, clips, sprite sheets with animation, distance-field text, deferred
+lighting with occluder masks, drop shadows and optional bloom, device loss, physics over Rapier, audio playback
+and recording over `cpal`, sequencing with tweening merged into it, asset orchestration, file watching, and the
+MCP debug server.
+
+Deferred with a recorded contract: pen input, and audio device hotplug. `src/tecs/input.nupp` states what would
+have to come back.
+
+Intentionally removed: general post-processing, tiled maps, multi-camera, gamepad motion sensors and touchpads,
+trigger rumble, LED, player index, and standalone sensors. Each is recorded at its declaration or in the
+migration plan rather than silently absent.
 
 ## Development Guidelines
 
 ### Type Safety
 
-- Prefer explicit Teal typing for public APIs, plugin interfaces and shared resources.
+- Prefer explicit typing for public APIs, plugin interfaces and shared resources.
+- Ownership annotations (`exclusive`, `borrows`, `takes`) are checked, so write the one that is true rather
+  than the one that compiles.
 - Avoid `any` unless the boundary is genuinely dynamic, for example generic JSON payloads.
 - Keep casts narrow and justified.
 
@@ -302,68 +248,53 @@ the signature exposes a reason, and a direct value-only operation raises its
 operational failure at the call that requested the value. Document an
 intentional exception on its declaration.
 
-### Binding a C library that calls back
+### Binding a Rust library that would call back
 
-A C library that takes a function pointer is the one binding shape with a rule, and it is not
+A native library that takes a function pointer is the one binding shape with a rule, and it is not
 obvious, so it is written here rather than learned twice.
 
-**A Lua function reached through `ffi.cast` cannot be entered from a compiled trace, and cannot be
-entered from a thread the VM never created.** The first raises; the second is undefined. Both are
-hazards of the callee, not the caller: calling _into_ a cast function pointer from Lua is fine and
-compiles fine. What breaks is C calling back while a trace is running, which is exactly what
-happens when the C call sits in a loop hot enough to compile.
-
-That is why callbacks retained by SDL live in Rust rather than Lua. The Rust
-log sink and dialog bridge copy results into synchronized state, and the Rust
-worker owns the thread entry point. `src/tecs/workers.tl` states the rule from
-the other side: raw thread creation is deliberately not exposed, because a
-thread entry written in Lua is precisely that mistake.
+**A managed function reached through a cast cannot be entered from a compiled trace, and cannot be
+entered from a thread the virtual machine never created.** The first raises; the second is
+undefined. Both are hazards of the callee, not the caller: calling _into_ a cast function pointer is
+fine and compiles fine. What breaks is native code calling back while a trace is running, which is
+exactly what happens when the call sits in a loop hot enough to compile.
 
 So, in order of preference:
 
 1. **Let the library write into memory instead.** Many callback APIs have a buffer or a queue form,
    and it is worth looking for one before writing a callback at all.
-2. **Put the callback in Rust**, and hand results across a queue the Lua side drains.
-   This is what the three cases above do.
-3. **If a Lua callback is genuinely unavoidable**, keep the C call that triggers it off any path
-   that compiles, and say in a comment why it cannot compile. This is fragile: a loop that was cold
-   yesterday is hot after somebody calls it more often.
+2. **Put the callback in Rust**, and hand results across a queue the Nupp side drains.
+3. **If a managed callback is genuinely unavoidable**, keep the native call that triggers it off any
+   path that compiles, and say in a comment why it cannot compile. This is fragile: a loop that was
+   cold yesterday is hot after somebody calls it more often.
 
-There are currently no `ffi.cast` callbacks in Lua anywhere in `src/`. Adding the first one is a
-decision worth making deliberately.
+The three Rust services take the second path. `tecs-audio` fills a preallocated command buffer that
+Nupp flushes once per update and drains observations from on the frame thread, so the `cpal`
+callback thread can never enter Nupp. `tecs-gamepad` runs a `CFRunLoop` thread on macOS and nothing
+in it takes a function pointer. The physics service is one call per fixed step, with the managed
+side owning every buffer Rust borrows for exactly that call.
 
-### The C the tree is written in
+There are no cast callbacks anywhere in `src/`. Adding the first one is a decision worth making
+deliberately.
 
-**C99, and that is settled.** The Cargo build compiles first-party C as
-`gnu99`. The only things a later standard offers this code are `_Static_assert`
-and `_Atomic`; atomics already arrive from SDL as `SDL_AtomicInt`.
-
-The GNU extensions are load bearing on Linux. `-std=c99` defines
-`__STRICT_ANSI__`, glibc's `features.h` then leaves
-`_DEFAULT_SOURCE` and `_GNU_SOURCE` undefined, and native POSIX code may reach
-for APIs those macros gate. Moving to `c99` means writing feature-test macros
-into every file that touches a POSIX header, which buys nothing the standard pin does not already
-buy.
-
-**A header the FFI binds must stay a C subset LuaJIT can parse.** The Cargo binding generator runs the
-preprocessor over `native/*.h` and hands the result to `ffi.cdef`, which accepts less than a
-compiler does. An anonymous union, a bit-field of an unusual width, a `_Static_assert`, an attribute
-in a declaration: each of those compiles and then breaks binding generation, which fails as a module
-that will not load rather than as a header that will not compile. So the headers under `native/`
-are declarations and nothing else, and anything a binding does not need stays in the `.c`.
-
-Do not write `_Static_assert` layout checks. `cargo xtask abi-check` already does the stronger version: it
-generates a C program comparing LuaJIT's view of every record against the compiler's, checking size,
-alignment and every field offset. A static assert only checks a header against itself.
+Load a native library through `src/tecs/internal/nativelibrary.nupp`, which searches for `lib/` and then a
+Cargo target directory. Do not put a `from` clause on a `cdef function`: it binds eagerly to one platform's
+file name and only resolves where the system loader already looks. Declare bare symbols after calling
+`nativelibrary.open`. `src/tecs/physics/rapier.nupp` is the worked example.
 
 ### Testing
 
 - Add or update tests when changing behavior, fixing bugs or extending public APIs.
-- Engine specs are Lua under `spec/`; ECS specs are Teal under `spec/tecs/`. Both run through
-  `cargo xtask test`, with headless specs first in a fresh Busted process.
-- Teal specs are compiled by `scripts/compile_specs.lua`, which emits code even when a file does not type-check.
-  That is deliberate: their type errors are in the test code, and refusing to build them would take real coverage
-  away over that. `cargo xtask check` therefore covers `src`, `examples` and `bench`.
+- Suites are Nupp under `tests/`, and discovery reads `tests/*test.nupp` without recursing. A suite that
+  imports `tecs.internal.*` lives at `tests/tecs/<name>test.nupp` with a one-line forwarder where discovery
+  looks, because the checker restricts internal imports to the `tecs` namespace.
+- `tests/tecs/compatibilitytest.nupp` pins every externally typed string the tree declares. A rename fails
+  there rather than changing what a save file means. Read it as the specification of that surface.
+- `nupp check --strict` covers `src`, `examples/nupp`, `tests` and `bench/nupp`, so a test calling a function
+  that does not exist fails the gate rather than slipping through.
+- Rust tests run with `cargo test --workspace`. `cargo xtask verify` runs both halves plus the host.
+- A `src/tecs/**.nupp` module absent from the `headless` target's `entries` in `nupp.lua` is neither built nor
+  checked. A new module goes there.
 
 ### Documentation
 
@@ -377,17 +308,14 @@ a new function, a renamed or removed field, a changed default, a changed error, 
 could depend on. Internals under `internal/` are not, unless the change is visible through something
 that is.
 
-Two places, and they hold different things:
+Three places, and they hold different things:
 
-- **`docs/`** holds guides: cross-module workflows, architecture and comparisons. A module page normally
-  contains only frontmatter and its `# tecs.name` heading, so the generated reference starts at the top.
-  Do not add a handwritten module catalog, a `Modules` section or prose that belongs beside one declaration.
-  `cargo xtask docs-check` requires every page to carry a one-line `description:`, and
-  `cargo xtask docs-dev` serves the site with hot reload while you write.
-- **Teal docblocks** hold the API documentation. Each public module starts with a long `--[=[ ... ]=]`
-  doc comment containing its introduction, cross-symbol constraints and primary examples. Declaration
-  docblocks hold signatures, fields, defaults, units, ownership, nil behavior and errors. Tealdoc renders
-  both into the reference appended to the module page.
+- **Docblocks** hold the API documentation, and the generated reference is rendered from them, so a signature
+  has no second copy to drift from. This is where almost every documentation change belongs.
+- **`docs/`** holds what a declaration cannot: a workflow that crosses modules, an architecture decision, a
+  comparison. It does not restate a signature, and it carries no handwritten module catalog, because the
+  reference already has one. `cargo xtask docs-check` requires a one-line `description:` on every page and
+  refuses an em dash; `cargo xtask docs-dev` serves the site while you write.
 - **`README.md`** is the design record. It holds why, not what: the decision, the alternative that
   lost, and the constraint that forced it. A change that only adds a function needs no entry; a
   change that settles a question does.
@@ -401,38 +329,17 @@ tests prose. The only defense is the person making the change, at the time they 
 - A page that cannot be verified against the code should not be written. A gap is honest; a
   confident wrong answer is not.
 
-The Nupp rewrite documents itself the same way and through a different tool.
-Tealdoc resolves a module only through `src/<name>.tl` or `src/<name>/init.tl`,
-so it can neither read a Nupp declaration nor project one onto a page, and
-teaching it to would put a second Nupp parser inside a tool whose job ends when
-the Teal implementation is deleted. The Nupp reference is rendered from the same
-docblocks the checker reads, by `cargo xtask nupp docs`, and gated by
-`cargo xtask nupp docs-check`. Its pages are under `docs/nupp/`, which
-`cargo xtask docs-check` accepts as ordinary guide pages and holds to the same
-description, writing and link rules. `docs/nupp/index.md` says what each site
-carries and when the two collapse into one.
-
-Tealdoc discovers pages and their navigation from `docs/`. Frontmatter holds page metadata, and
-`tealdoc.site` in `tlconfig.lua` holds site settings plus the API projections that append generated
-references to module pages. Tealdoc reads module prose and declaration contracts from Teal, then
-renders generated summary tables under `Module contents` and the full type, function and value
-sections below them. A signature has no second copy to drift from.
-
-`cargo xtask docs-check` is the gate, and it holds three things: every page carries a one-line
-`description:`; the module list and discovered module pages match `src/tecs/init.tl`, with one page
-per public name and no page outliving its module; and every link and anchor in the built site
-resolves. The first is `scripts/check-docs-descriptions.sh`; the other two are the render itself,
-through the site's `before_build` hook and tealdoc's own link validation.
+`cargo xtask docs-check` is the gate, and it holds two things: the handwritten pages carry a description and
+no em dash, and the render resolves every link and anchor over the site it just wrote. A docblock the generator
+cannot read fails there too.
 
 ### Docblocks
 
-Every public module starts with a long `--[=[ ... ]=]` doc comment. Every public function,
-record and field carries a `---` docblock, and every public function carries `@param` for
-each parameter and `@return` for each return.
-
-The record that represents the module itself is the exception: its leading long comment
-already documents it, so do not repeat that prose on the returned `local record`. Public
-records declared inside the module still carry their own docblocks.
+Every public module starts with a long `--[[ ... ]]` doc comment holding its introduction, cross-symbol
+constraints and primary examples. Write `--[==[` when the prose itself contains `]]`. Every public function,
+record and field carries a `---` docblock, and every public function carries `@param` for each parameter and
+`@return` for each return. `@raises` says what makes a function raise, one line per condition, because there is
+no signature to find that out from.
 
 Write every summary and tag as a complete sentence with an actor and a verb. A function says what it does:
 `Returns the number of queued messages.` A field says who controls it and what it means:
@@ -444,67 +351,62 @@ Use active voice. Never use an em dash. Name sections for their subject, not as 
 `What this means`, `How it works` or `Why this exists`. Prefer one complete example to several paragraphs
 that narrate the same calls.
 
-An example that calls a Tecs module inside a frame or other hot loop binds that
-module to a local outside the loop. Show
-`local time <const> = tecs.platform.time` and call `time.now()` in the loop
-instead of repeatedly resolving through `tecs.platform.time`.
+An example that calls a Tecs module inside a frame or other hot loop binds that module to a local outside the
+loop, and calls through the local rather than resolving the module again on every iteration.
 
 A tag earns its place by saying what the signature cannot: units, the coordinate space, what nil
 means, what happens at a boundary, whether a returned table is the caller's to keep or a view
 onto something live, which errors are raised rather than returned. A tag that restates the
 parameter's own name is worse than no tag, because it costs a line and answers nothing.
 
-Link the first mention of a public type in each docblock. Use its Tealdoc
-declaration target when the site reads that source module:
-``[`World`](tealdoc:tecs.World)``. Use the rendered page and anchor for a type
-re-exported from a module the site does not read directly:
-``[`Transform`](/modules/ecs/#tecs.ecs.Transform)``. Use backticks without a link for
-functions, fields, constants, enum values and literal strings. Do not link
-internal types.
+Link the first mention of a public type in each docblock with the generator's cross-reference form, which is a
+Markdown link whose target is the name: ``[`Sound`](tecs.audio.Sound)``. Empty link text renders the name
+itself, so `[](tecs.ecs)` is the whole cost of a reference in passing. Do not write a path: a path resolves to
+the emitted Markdown file rather than the site route, and does so silently. Use backticks without a link for
+functions, fields, constants, enum values and literal strings. Do not link internal types.
 
 Documentation lives on the declaration, which is the record field, and the implementing function
-below does not repeat it. Two copies drift, and tealdoc reads the declaration.
+below does not repeat it. Two copies drift, and the generator reads the declaration.
 
 ### Mutation and Dirty Model
 
 The rules that prevent the most common defect class:
 
-- Reads use `archetype:get` / `world:get`; writes go through `getMut`, which marks the component's column dirty on
-  the archetype. Never `getMut` in a loop that might not write, it defeats every dirty-gated consumer.
-- Direct cdata writes through `world:get` on FFI components need an explicit
-  `world:markComponentDirty(id, Component)` or the GPU never re-syncs.
-- Dirty bits clear at the end of each `world:update`.
-- `world:batchSpawn` skips FFI defaults; set every field in the callback.
+- Reads use `archetype:get` / `world:get`; writes go through `getMut`, which marks the component's column dirty
+  on the archetype. Never `getMut` in a loop that might not write, it defeats every dirty-gated consumer.
+- An out-of-band write to a committed value needs an explicit `world:markComponentDirty(id, Component)` or the
+  GPU never re-syncs.
+- Dirty bits clear at the end of each `world:update`, after every phase has run. A consumer that has to see
+  them samples from `Last`, which is the final phase before that clear.
 - Query iteration owns no mutation scope or resource. A loop may `break`, return, raise or suspend without
   cleanup; structural mutations remain staged until the pipeline's next declared barrier.
 
 ### Code Style
 
-`STYLE.md` is the long form, and it separates what `cargo xtask format` decides from what it cannot. Layout is the
-formatter's: indentation, columns, wrapping, alignment. What is left to a person is `local` and `<const>` where
-appropriate, early returns over deep nesting, require grouping (the formatter deliberately does not sort them,
-because import order is meaningful), comments sparse and informational, and the naming rules above.
+`STYLE.md` is the long form, and it separates what `cargo xtask format` decides from what it cannot. Layout is
+the formatter's: indentation, columns, wrapping, alignment. What is left to a person is `const` where the
+binding is strong, early returns over deep nesting, require grouping (the formatter deliberately does not sort
+them, because import order is meaningful), comments sparse and informational, and the naming rules below.
 
 ### Naming
 
 - **Identifiers** (functions, methods, record fields, option keys, non-import locals): `camelCase`. No
   `snake_case`.
-- **Filenames and their import bindings** follow a class/module split:
-  - The file _is_ a class (one dominant type you construct and call methods on, including component records):
-    **PascalCase**, e.g. `Camera2D.tl` → `local Camera2D = require("tecs.gfx.Camera2D")`.
-  - The file is a _module_ containing a class or a namespace of functions: **luacase** (all lowercase, no
-    separators), e.g. `shaderpack.tl` → `local shaderpack = require("tecs.gpu.shaderpack")`. Multi-word module
-    files drop their underscores.
+- **Module files and their import bindings** are **luacase**: all lowercase, no separators, so
+  `rendercomponents.nupp` binds as `local rendercomponents = require("tecs.internal.rendercomponents")`.
+  Multi-word module files drop their underscores.
 - Prefer single-word module names where a clear one exists.
-- Prefer a flat `module.tl` over `module/init.tl` when the module is a single file.
+- Prefer a flat `module.nupp` over `module/init.nupp` when the module has no children.
 - The `require` path mirrors the filename; the local binding mirrors it too.
+- **Component and type names are PascalCase** and live inside a module rather than in a file of their own:
+  `tecs.gfx.Camera2D` is a name `src/tecs/gfx/init.nupp` exports.
 
 ### Externally typed strings are a separate compatibility surface
 
-**Reorganizing Lua namespaces must not rename persisted keys, logger categories, component names,
+**Reorganizing module namespaces must not rename persisted keys, logger categories, component names,
 event kinds, MCP tool names, or other externally typed strings.**
 
-A Lua name is reached by code this tree can see, so moving one is a rename in a single commit. These
+A module name is reached by code this tree can see, so moving one is a rename in a single commit. These
 are reached by a save file written last year, a filter a developer typed into a shell, a JSON payload
 an agent sends, or a snapshot another build wrote. Nothing here can see those call sites, so nothing
 here may move them.
@@ -513,10 +415,9 @@ What the rule covers:
 
 - **Snapshot handler keys** (`"tecs.random"`, `"tecs.physics"`, `"tecs.audio"`, `"tecs.sequence"`),
   and **component, event and relationship names**, since a snapshot names components by string. The
-  failure mode is what makes this absolute rather than a preference: `random.tl`'s `restore` falls
-  through to reseeding when it finds no state, so a renamed key loads successfully and diverges
-  rather than erroring.
-- **Logger names**, which are the unit `SDL_SetLogPriority` filters on, so they are configuration a
+  failure mode is what makes this absolute rather than a preference: a restore that falls through to
+  a default when it finds no state loads successfully and diverges rather than erroring.
+- **Logger names**, which are the unit a log threshold filters on, so they are configuration a
   developer types rather than an identifier.
 - **System names**, which the debug server reports and an agent selects on.
 - **MCP tool names**, and the argument keys of their schemas.
@@ -524,7 +425,7 @@ What the rule covers:
 
 So a module that moves keeps its strings, and they will look like oversights afterwards. Say so at
 the declaration: a comment naming the string a compatibility surface is what stops the next reader
-tidying it.
+tidying it. `tests/tecs/compatibilitytest.nupp` holds the tree to the whole set.
 
 Renaming one of these is a migration, not a rename. It needs an explicit path from the old value and
 validation that finds state written under it, and neither is in scope for a namespace change.
@@ -543,21 +444,26 @@ pinned by a test, because a bump can otherwise rename a key with nothing here fa
 
 ### Performance
 
-- Avoid allocations in hot paths.
+- Avoid allocations in hot paths. Rendering and extraction are hot.
 - Prefer archetype/query iteration patterns that work with contiguous columns.
 - Be careful when changing rendering, storage and snapshot code paths; they are performance-sensitive.
-- Benchmarks are the argument. `cargo xtask bench shapes` is a uniform loop over transforms,
-  `cargo xtask bench physics` is lumpy and
-  CPU-bound, and a frame-structure change has to be judged against both, p50 and p95 together.
-- `cargo xtask bench bitset` and `cargo xtask bench snapshot` isolate the two
-  core paths those scene benchmarks cannot: archetype-signature operations and
-  binary save/load throughput.
-- `cargo xtask bench latency` measures what neither of those can see: the wait from an event arriving to the frame that
-  reacted to it being submitted. Anything that pipelines the frame buys throughput and pays for it there.
+- Benchmarks are the argument. `cargo xtask bench shapes` is a uniform loop over transforms and
+  `cargo xtask bench physics` is lumpy and CPU-bound, and a frame-structure change has to be judged against
+  both, p50 and p95 together.
+- `cargo xtask bench signature` and `cargo xtask bench snapshot` isolate the two core paths those scene
+  benchmarks cannot: archetype signature and query matching, and binary save/load throughput.
+- A benchmark is compiled at `-O2`, because a measurement taken at a different optimization level than the one
+  that ships answers a question nobody asked.
+
+### A note on checker cost
+
+A module once cost 2093 seconds of checker CPU with a type parameter appearing in none of its record's fields.
+That is believed fixed upstream, but if a check suddenly takes minutes rather than seconds, an unused type
+parameter is still the first thing to look at.
 
 ## Related repositories
 
-Use `main` only as a parity and measurement reference. Read it through a git
-worktree and do not copy it into this tree.
+The Nupp compiler, its standard library and its documentation are the reference for the language. Read
+`nupp/docs/` and `nupp/src/nupp/` in the sibling checkout; the signatures there are the contract.
 
 Design notes live in the separate `../tecs-plans` repository.

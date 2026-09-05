@@ -4,58 +4,55 @@ Thanks for your interest in contributing!
 
 ## Getting set up
 
-One command, and it is the whole of it:
+A checkout needs three things, and only one of them is installed for you.
 
-```bash
-cargo xtask deps
-```
+**The Nupp compiler.** `cargo xtask` looks for `NUPP`, then a `nupp` checkout
+beside this one, then a `nupp` on `PATH`, in that order. The sibling checkout
+wins over an installed release because this tree is developed against a
+compiler newer than the published one, so a source checkout beside this one is
+the supported layout.
 
-That installs the Homebrew packages a development build links, then stages
-`vendor/`: the pinned Teal compiler, Cerulean, tealdoc, Busted, the Scintillua
-lexers, and the Teal type definitions for the modules this tree requires from
-outside itself. The last of those is not optional. `cargo xtask check` hands the
-compiler `vendor/share/lua/5.1` as an include directory, so a checkout missing
-them fails to resolve `ffi` in most of `src` rather than reporting a missing
-tool, and the failure looks like broken sources.
+**The Rust toolchain** `rust-toolchain.toml` pins. `rustup` fetches it on the
+first build.
 
-**`vendor/` is per checkout and ignored, so a new worktree needs it staged
-again.** Homebrew is machine-wide and already done, so that half is
-`cargo xtask dev-tools` on its own. Nothing else has to be copied by hand; if
-something does, that is the defect rather than the workaround.
+**`stylua` and `prettier`**, which format the Lua manifest and the Markdown.
+That is what `cargo xtask deps` installs, and it finishes by saying where the
+Nupp compiler resolved rather than reporting a checkout ready that is missing
+the one tool every other command starts with.
 
-`deps` finishes by holding the machine to the versions the build-support crate
-pins. It does that because it can break the gate itself: SDL3, SDL3_mixer,
-SDL3_ttf and LuaJIT are pinned here, Homebrew carries only the current version
-of each, and installing the current one is how a machine ends up outside the
-pin with every later `cargo xtask` command failing on it. Reporting that where
-it happens is the most `deps` can do, since there is no older bottle to ask for.
-When it does happen, either raise the pin deliberately, revision and version
-together, or set `TECS_ALLOW_VERSION_DRIFT=1` while working on that update.
+Running the Rust host also needs a Nupp embedding SDK.
+`native/rust/winit-host/build.rs` stages one through the compiler's
+`scripts/toolchain`, so a sibling checkout covers it; `NUPP_SDK` names a staged
+one instead. Nothing else has to be copied by hand; if something does, that is
+the defect rather than the workaround.
 
 ## Mandatory requirements
 
-- `cargo xtask test` must pass. It runs the Rust workspace tests, checks the
-  generated FFI layouts against the C compiler, then runs the Lua and Teal
-  spec suites, so this one command is the canonical test gate.
-- Add tests for new features, bug fixes, or edge cases when reasonable.
-- Add `spec/examples/<name>_spec.lua` with every top-level
-  `examples/<name>.tl`. `cargo xtask test` compiles and runs the actual example
-  through a deterministic GPU contract and rejects examples or contracts that
-  do not have a matching file.
-- **Update the generated reference for any user-facing change.** Module
-  introductions and examples live in long Teal doc comments; declaration
-  docblocks carry symbol contracts. Markdown under `docs/` carries guides that
-  span modules. A change a game can see is not done until the relevant source
-  says so. `cargo xtask docs-dev` serves the site with hot reload.
+- **`cargo xtask verify` must pass.** It runs the type check, the format check,
+  the Nupp suites, the documentation gate, the component builds, and then the
+  Rust host's own format, Clippy and test gates. It is what to run before
+  pushing, and it fails cheapest first.
+- Add tests for new features, bug fixes, or edge cases when reasonable. Suites
+  live in `tests/`, and one importing `tecs.internal.*` lives in `tests/tecs/`
+  with a forwarder where discovery looks.
+- A new externally typed string is added to
+  `tests/tecs/compatibilitytest.nupp`, which pins the whole set against
+  literals so a later rename fails rather than changing what a save file means.
+- **Update the documentation for any user-facing change.** Module
+  introductions and examples live in long `--[[ ]]` doc comments; declaration
+  docblocks carry symbol contracts, and the generated reference is rendered
+  from them. Markdown under `docs/` carries guides that span modules. A change
+  a game can see is not done until the relevant source says so.
+  `cargo xtask docs-dev` serves the site while you write.
 - **`cargo xtask docs-check` must pass.** It requires a `description:` on every
-  page, then renders the site, which is where the rest of the gate is: the
-  `before_build` hook in `tlconfig.lua` holds the pages to `src/tecs/init.tl`,
-  and tealdoc resolves every link and anchor over the HTML it just wrote. A
-  page's reference is rendered at build time from the modules the page names.
+  page and refuses an em dash, then renders the site, which is where the rest
+  of the gate is: the generator resolves every link and anchor over the output
+  it just wrote, and a docblock it cannot read fails there.
 - **Public docblocks carry `@param` and `@return`**, and they say what the
   signature cannot: units, coordinate spaces, what nil means, what happens at a
   boundary. A tag that restates the parameter's name is worse than none.
-- `cargo xtask check` and `cargo xtask format-check` must pass.
+  `@raises` says what makes a function raise, because there is no signature to
+  find that out from.
 
 ## Code style
 
@@ -65,68 +62,49 @@ with it in review.
 
 What it cannot decide is in `STYLE.md`: naming, the file and module split,
 early returns over deep nesting, and comments that say why rather than what.
-Module documentation uses long `--[=[ ... ]=]` comments. Declaration
-documentation starts with `---`.
+Module documentation uses long `--[[ ]]` comments. Declaration documentation
+starts with `---`.
 
-## Changing the C
+## Changing the Rust services
 
-The tree is C99 and stays C99. `AGENTS.md` holds why, and the rule that a
-header under `native/` has to stay a subset LuaJIT's `ffi.cdef` can parse,
-because the Cargo binding generator reads those headers rather than a
-hand-written binding.
+Four crates sit under `native/rust`: the `winit` host, and the audio, gamepad
+and physics services. Each is reached from Nupp through a batched, pull-only
+contract, and `AGENTS.md` holds the rule that shapes all of them: **the Rust
+side must never call back into a managed function pointer.** Observations come
+back by Nupp draining a buffer Rust filled.
 
-### Warnings
+The workspace gates are `cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets -- -D warnings` and
+`cargo test --workspace`. `cargo xtask verify` runs the host's share of them
+with the embedding SDK staged, which an ordinary `cargo clippy` over the whole
+workspace cannot do on a machine with no compiler checkout beside this one.
 
-Every first-party target compiles with a strict warning set, scoped so that
-nothing vendored or pinned is held to it. Locally the warnings are warnings.
-CI sets `TECS_WERROR=1`, which makes them errors, and it does that only for the
-first-party targets for the same reason the set is scoped that way: a compiler
-newer than a pinned revision turns that project's warning into this project's
-build failure.
-
-So a change that adds a warning is a change that fails CI. Fix the site rather
-than suppressing the check, and where a site is genuinely fine, write the cast
-out and say in a comment why it is exact.
-
-### Sanitizers
-
-`macos-arm64-sanitize` and `linux-x64-sanitize` build the C with
-AddressSanitizer and UndefinedBehaviorSanitizer under it. Run the host through
-them, which means the demo or any benchmark:
+## Running the host
 
 ```bash
-cargo xtask example ui-demo --preset macos-arm64-sanitize
-cargo xtask bench physics --preset macos-arm64-sanitize
+cargo xtask run flatcolor              # A window
+cargo xtask run lighting -- --frames 5 # Five frames, then exit zero
+cargo xtask run nativesmoke -- --headless --frames 2
 ```
 
-Both presets are `RelWithDebInfo`, like every other preset here. They are not a
-performance measurement: AddressSanitizer takes the address space
-the Rust host reserves for LuaJIT's machine code, so states created
-after startup compile fewer traces than they would otherwise, and the arena
-reports that by returning false rather than by failing.
+`--frames N` is what makes a graphical example usable as a smoke test, and it
+needs at least two: the first completed frame renders, and the following turn
+observes the limit.
 
-**`cargo xtask test` cannot run under them on macOS.** The spec suite runs under a
-plain interpreter that loads the instrumented libraries with `dlopen`, so the
-sanitizer runtime has to be inserted with `DYLD_INSERT_LIBRARIES`, and macOS
-strips every `DYLD_` variable when it launches a protected binary. `busted` is a
-`/bin/sh` wrapper, so the variable is gone before the interpreter starts and
-AddressSanitizer reports that its interceptors are not installed. What runs
-under the sanitizers is the host, which links the runtime directly and needs no
-variable at all. Reach the code a benchmark does not by writing an entry chunk
-and giving it to `--entry`.
+`nativesmoke` requires all three service libraries directly and raises on the
+first that will not load. Every other consumer reaches them through a guarded
+require, so a host with nothing staged otherwise looks healthy.
 
-Leak detection is off: it is unsupported on macOS arm64, and on Linux both
-LuaJIT and the graphics driver hold allocations to exit by design.
-
-### clang-tidy
-
-`.clang-tidy` holds a curated check set, and the comments in it say why each
-disabled check was disabled. It is not a gate; the compiler's warnings are.
+## Packaging
 
 ```bash
-brew install llvm    # deliberately not in `cargo xtask deps`
-clang-tidy -p out/macos-arm64-dev \
-  --extra-arg=-isysroot --extra-arg="$(xcrun --show-sdk-path)" native/*.c
+cargo xtask package --preset macos-arm64
+cargo xtask check-package
+cargo xtask test-package --preset macos-arm64
 ```
 
-The compile database comes from the build tree, which every preset writes.
+`check-package` is the gate on the difference between a development preset and
+a release one, and only a release install passes it. `test-package` copies the
+prefix elsewhere and runs it with an unrelated working directory and every
+`TECS_*`, `DYLD_*`, `LD_LIBRARY_PATH` and `NUPP_SDK` override removed, so it
+proves the package rather than the build tree.

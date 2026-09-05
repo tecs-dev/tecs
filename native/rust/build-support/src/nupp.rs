@@ -300,7 +300,11 @@ pub fn apply_sdk(command: &mut Command, root: &Path) {
 /// in one command, in the order that fails cheapest first.
 pub fn verify(root: &Path) -> Result<()> {
     check(root)?;
-    format(root, true)?;
+    // The whole-tree format check rather than this module's `format`, because
+    // the manifest, the workflow and every page are part of the gate too, and
+    // a command called `verify` that checked one language would be the reason
+    // somebody stopped trusting it.
+    crate::formatting::apply(root, &[], true)?;
     test(root)?;
     crate::docs::check(root)?;
     for target in [DEFAULT_TARGET, DEFAULT_COMPONENT] {

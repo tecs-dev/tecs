@@ -1,110 +1,47 @@
 # Tecs examples
 
-Each file is a complete application. Run one from the repository root with:
+Four of the files under `nupp/` are complete game components. Each exports a
+`create` function matching the Rust host's managed entry contract, installs its
+entities and systems through a plugin, and delegates every platform and
+rendering concern to `tecs.host`. The fifth is a script.
+
+Run one from the repository root:
 
 ```bash
-cargo xtask example ui-demo
-cargo xtask example scene3d
-cargo xtask example shadows3d
-cargo xtask example ibl3d
-cargo xtask example gltf3d
-cargo xtask example skinning3d
-cargo xtask example animated3d
-cargo xtask example morph3d
-cargo xtask fetch sponza
-cargo xtask example sponza3d
-cargo xtask fetch bistro
-cargo xtask example bistro3d
+cargo xtask run flatcolor
+cargo xtask run sprites
+cargo xtask run lighting -- --frames 120
 ```
 
-Every 3D example uses the same free-fly controls. Click its 3D view to capture
-the mouse, use WASD to move, Q and E to change height, hold Shift to sprint,
-and press Tab to release the mouse. Escape quits. In `scene3d`, the controller
-moves the primary left view while the secondary right view remains fixed for
-comparison.
+`--frames N` stops after N frames and exits zero, which is what makes a
+graphical example usable as a smoke test. It needs at least two: the first
+completed frame renders, and the following turn observes the limit.
+`--headless` runs the same component with no window.
 
-`ui-demo.tl` is the complete engine showcase. It exercises the sprite renderer,
-lighting, text, UI, input, animation, audio, and debug tools together.
+`flatcolor.nupp` spawns three tinted, rotating quads. It is the smallest
+complete entry, and the one to copy when starting a component of your own.
 
-`scene3d.tl` draws the same Cook-Torrance scene through two ordered 3D views,
-then composes one full-frame 2D HUD view above them. It also combines vertex
-colors, an emissive unlit mesh, directional shadows, fog, and bloom.
+`sprites.nupp` builds two images in the component rather than loading them,
+uploads them through `tecs.gfx.images`, and alternates them across three
+layers behind a camera. Generating the pixels keeps the example independent of
+the asset pipeline.
 
-`shadows3d.tl` combines three stabilized directional-shadow cascades with one
-shadowed point light and one shadowed spot light. Procedural pillars and their
-receiving ground make the point light's six atlas faces, the spot cone, cascade
-cross-fades, and camera-motion stability easy to inspect. Its sky uses the
-repository-owned CC0 environment faces.
+`lighting.nupp` is the showcase. It combines deferred lighting, occluder masks,
+drop shadows and bloom, and it is what a release installs and
+`cargo xtask test-package` runs from a relocated copy.
 
-`ibl3d.tl` loads six repository-owned CC0 environment faces, generates their
-mip chain on the GPU, and compares five roughness levels across metallic and
-dielectric Cook-Torrance materials. The same environment is visible as the sky
-and in reflections, so face orientation and camera-relative reflection remain
-easy to verify while moving.
+`nativesmoke.nupp` requires the audio, gamepad and physics service libraries
+directly and raises on the first that will not load. Every other consumer
+reaches them through a guarded require, so a host with nothing staged looks
+healthy; this one does not. It is a component rather than a script because a
+release ships no Nupp compiler, so the only Nupp an install can execute is one
+already compiled.
 
-`gltf3d.tl` loads a textured glTF 2.0 scene through the direct asset pipeline, registers its
-geometry, vertex colors, image, and alpha-blended metallic-roughness material with a
-transparency-enabled mesh domain, then spawns the flattened scene primitives.
-It exercises the asset-worker through GPU residency and the sorted forward
-lane in one small example.
+`physicssmoke.nupp` is the script. The test suite drives `tecs.physics` through
+a reference simulation and needs no native library, so this is the other half:
+it loads `tecs.physics.rapier`, drops a box onto a floor, and exercises the
+declarations, the layout self-check and real batched crossings against the
+built library. Its own docblock says how to run it.
 
-`skinning3d.tl` constructs a two-joint procedural strip and updates its palette
-directly. It isolates the optional GPU vertex-deformation path from file
-loading and clip sampling.
-
-`animated3d.tl` loads Robin Lamb's CC0 low-poly hero, creates an independently
-posed model instance, and cycles authored skeletal clips under a shadowed
-Cook-Torrance directional light. It demonstrates public glTF loading, PBR
-materials, animation sampling, GPU skinning, lighting, and optional
-half-resolution SSAO in one scene. Press O to compare SSAO against authored
-ambient occlusion alone. An
-instance-level placement turns the hero toward the camera, and the same scene
-places the two-target morph cube beside him with an independent animation.
-
-`morph3d.tl` loads an indexed 3D cube with two glTF morph targets and six
-face-local colors, then rotates it while cycling through tall tapered and low
-twisted silhouettes. It samples the authored weight animation into an
-instance-owned GPU vector. Geometry and clip data remain shared; only the
-changing weights belong to the instance. A directional light and receiving
-floor make the colors, changing volume, and shadow visible.
-
-`sponza3d.tl` uses the ignored large-asset cache populated by `cargo xtask
-fetch sponza`. The fetch is pinned to one Khronos glTF Sample Assets revision
-and retains the upstream notice. It also preprocesses source images into full
-BC3 mip chains in standard KTX2 containers and writes a derived glTF. The demo
-keeps those textures compressed in GPU memory and exercises double-sided
-materials, independently GPU-culled primitive chunks, Lambert point and spot
-lights, directional shadows, fog, and bloom. Running the example without that cache fails before
-opening a window and reports the fetch command. The window title reports
-rolling FPS, and the lower bloom threshold makes bright lit surfaces visibly
-spread.
-The demo treats the scene's masonry, cloth, and vegetation as diffuse surfaces
-so its fixed lamps do not become moving eye-dependent highlights.
-Both large scenes default to immediate presentation so this number is uncapped;
-set `TECS_PRESENT=vsync` to opt back into synchronized presentation.
-
-`bistro3d.tl` is the large-scene stress test. Its pinned CC BY 4.0 Amazon
-Lumberyard exterior is fetched through a reference-Draco preprocessing step,
-then retained as 132 MiB of ordinary glTF geometry and 91 MiB of 512px BC3
-KTX2 mip chains. Large-primitive splitting turns 1,591 authored primitives into
-1,593 independently GPU-cullable chunks. The demo combines an ambient-cube
-probe, Lambert local lights on matte surfaces, Cook-Torrance highlights on
-metal, wet, and glass surfaces, directional shadows, fog, and bloom. It
-derives point and authored-direction spot lights from the bounds and transforms
-of emissive street and string-light meshes, so visible fixtures illuminate
-nearby geometry. Directional shadows ground the scene without rendering the
-complete three-million-triangle model again for every decorative fixture. The
-upstream file labels every material as a non-PBR
-Phong conversion and assigns one metallic/roughness pair to the entire scene,
-so the demo classifies its named metal, wet, glass, and dielectric surfaces
-before GPU registration. The source GLB is removed after a successful import,
-and running without the cache
-reports the fetch command before a window opens.
-
-The Bistro demo moves faster than Sponza to cover the exterior's larger
-authored scale. The controller is noclip by design, so neither scene adds
-render geometry to Rapier merely for navigation. Scroll the mouse wheel up
-toward day or down toward night; ambient and probe light, the directional sun
-or moon, fog, and lamp intensity blend continuously. Its title reports FPS,
-and quarter-resolution packed-HDR bloom gives its lamps a wider glow while
-reducing the blur targets to one quarter of their former pixel count.
+A new example needs a `kind = "component"` target in `nupp.lua` naming both
+`tecs.host` and the module, with `<name>.create` added to the host's exports.

@@ -157,7 +157,7 @@ return {
                 entries = {"tecs.host", "lighting"},
                 exports = lightingExports,
             },
-            -- The component `cargo xtask nupp test-package` runs against an
+            -- The component `cargo xtask test-package` runs against an
             -- installed release. It is a component rather than a script
             -- because a package ships no Nupp compiler, so the only Nupp a
             -- release can execute is one already compiled into a component.

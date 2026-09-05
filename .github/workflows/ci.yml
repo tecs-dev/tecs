@@ -61,6 +61,16 @@ jobs:
                   echo "$PWD/bin" >> "$GITHUB_PATH"
             - working-directory: tecs
               run: nupp fmt --check
+            # The rest of the formatters, on one runner. Formatting is platform
+            # independent, and the two the suffix table dispatches to are
+            # exactly what `deps` installs, so running the whole check twice
+            # would only pay for Homebrew twice.
+            - if: runner.os == 'macOS'
+              working-directory: tecs
+              run: cargo xtask deps
+            - if: runner.os == 'macOS'
+              working-directory: tecs
+              run: cargo xtask format-check
             - working-directory: tecs
               run: nupp check --strict
             # The native service tests skip when their library is absent, so
