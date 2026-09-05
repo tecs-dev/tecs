@@ -118,6 +118,17 @@ return {
                 entries = {"tecs.host", "sprites"},
                 exports = spritesExports,
             },
+            docs = {
+                kind = "docs",
+                description = "Render the Nupp API reference and its guide pages",
+                sources = {"src"},
+                format = "site",
+                outDir = "out/nupp-docs",
+                title = "Tecs API",
+                name = "Tecs",
+                github = "https://github.com/mtdowling/tecs",
+                pages = {{glob = "docs/nupp/**.md"}},
+            },
         },
     },
 

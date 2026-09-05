@@ -166,6 +166,13 @@ enum NuppTask {
         #[arg(last = true)]
         arguments: Vec<OsString>,
     },
+    /// Render the Nupp documentation site into out/nupp-docs.
+    Docs {
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Render the Nupp documentation into a scratch directory and verify it.
+    DocsCheck,
     /// Check, format-check, test, and build everything on the Nupp path.
     Verify,
 }
@@ -389,6 +396,11 @@ fn main() -> Result<()> {
                 entry,
                 arguments,
             } => nupp::host(&root, &target, entry.as_deref(), &arguments)?,
+            NuppTask::Docs { out } => {
+                let output = nupp::documentation(&root, out.as_deref())?;
+                println!("built {}", output.display());
+            }
+            NuppTask::DocsCheck => nupp::documentation_check(&root)?,
             NuppTask::Verify => nupp::verify(&root)?,
         },
         Task::DocsCheck => docs::check(&root)?,

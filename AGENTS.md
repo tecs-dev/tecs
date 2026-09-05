@@ -70,6 +70,8 @@ cargo xtask nupp test         # Build and run the Nupp test suites
 cargo xtask nupp build --target flatcolor
 cargo xtask nupp bench shapes # Run a Nupp benchmark from bench/nupp
 cargo xtask nupp run flatcolor -- --frames 120
+cargo xtask nupp docs         # Render the Nupp reference into out/nupp-docs
+cargo xtask nupp docs-check   # Render it into a scratch directory and gate it
 cargo xtask nupp verify       # Everything above, plus the Rust host
 ```
 
@@ -342,6 +344,17 @@ tests prose. The only defense is the person making the change, at the time they 
 - Prefer linking to entry points that exist in this repo, not guessed future paths.
 - A page that cannot be verified against the code should not be written. A gap is honest; a
   confident wrong answer is not.
+
+The Nupp rewrite documents itself the same way and through a different tool.
+Tealdoc resolves a module only through `src/<name>.tl` or `src/<name>/init.tl`,
+so it can neither read a Nupp declaration nor project one onto a page, and
+teaching it to would put a second Nupp parser inside a tool whose job ends when
+the Teal implementation is deleted. The Nupp reference is rendered from the same
+docblocks the checker reads, by `cargo xtask nupp docs`, and gated by
+`cargo xtask nupp docs-check`. Its pages are under `docs/nupp/`, which
+`cargo xtask docs-check` accepts as ordinary guide pages and holds to the same
+description, writing and link rules. `docs/nupp/index.md` says what each site
+carries and when the two collapse into one.
 
 Tealdoc discovers pages and their navigation from `docs/`. Frontmatter holds page metadata, and
 `tealdoc.site` in `tlconfig.lua` holds site settings plus the API projections that append generated

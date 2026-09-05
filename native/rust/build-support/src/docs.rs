@@ -381,7 +381,7 @@ fn check_rendered_hierarchy(site: &Path) -> Result<()> {
 
 /// Requires a one-line `description:` on every page, which is what labels a
 /// page in the site's navigation and in a search result.
-fn check_descriptions(root: &Path) -> Result<()> {
+pub fn check_descriptions(root: &Path) -> Result<()> {
     let script = root.join("scripts/check-docs-descriptions.sh");
     let status = Command::new("bash")
         .arg(&script)

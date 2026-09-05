@@ -28,6 +28,12 @@ pub const DEFAULT_TARGET: &str = "headless";
 /// Where the Nupp benchmark programs live.
 pub const BENCHMARKS: &str = "bench/nupp";
 
+/// Where the rendered Nupp documentation site is written.
+pub const DOCUMENTATION: &str = "out/nupp-docs";
+
+/// The manifest target that renders the documentation.
+const DOCUMENTATION_TARGET: &str = "docs";
+
 /// The Nupp host features a Tecs component needs at load time.
 ///
 /// The runtime refuses to load a component whose declared features the
@@ -139,6 +145,44 @@ pub fn build(root: &Path, target: &str) -> Result<PathBuf> {
 /// Lists the manifest's configured targets and tasks.
 pub fn targets(root: &Path) -> Result<()> {
     nupp(root, ["tasks"])
+}
+
+/// Renders the Nupp documentation site.
+///
+/// The Nupp compiler reads the docblocks it already checks, so the reference
+/// has no second copy of a signature to drift from. Tealdoc cannot do this
+/// half: it resolves a module only through `src/<name>.tl`, so it can neither
+/// read a Nupp declaration nor project one onto a page. The two sites collapse
+/// into one when the Teal implementation is deleted.
+pub fn documentation(root: &Path, output: Option<&Path>) -> Result<PathBuf> {
+    let destination = output.map_or_else(|| root.join(DOCUMENTATION), Path::to_path_buf);
+    nupp(
+        root,
+        [
+            std::ffi::OsStr::new("build"),
+            std::ffi::OsStr::new("--target"),
+            std::ffi::OsStr::new(DOCUMENTATION_TARGET),
+            std::ffi::OsStr::new("--out-dir"),
+            destination.as_os_str(),
+        ],
+    )?;
+    Ok(destination)
+}
+
+/// Renders the Nupp documentation into a scratch directory and gates it.
+///
+/// The render is the gate for the reference: a docblock the generator cannot
+/// read fails here. `scripts/check-docs-descriptions.sh` is the gate for the
+/// pages, and it is the same script `cargo xtask docs-check` runs, over the
+/// same `docs/` tree, so a Nupp page is held to what a Teal page is held to.
+pub fn documentation_check(root: &Path) -> Result<()> {
+    crate::docs::check_descriptions(root)?;
+    let scratch = tempfile::Builder::new()
+        .prefix("tecs-nupp-docs.")
+        .tempdir()?;
+    documentation(root, Some(&scratch.path().join("site")))?;
+    println!("OK: the Nupp reference renders and every page carries a description");
+    Ok(())
 }
 
 /// Runs one Nupp benchmark program.

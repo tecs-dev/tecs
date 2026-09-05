@@ -106,6 +106,12 @@ jobs:
             - run: nupp build --target headless
             - run: nupp build --target host
             - run: nupp build --target flatcolor
+            # The Nupp reference is generated from the docblocks the checker
+            # already reads, so rendering it is what proves a docblock the
+            # generator cannot read. Tealdoc resolves a module only through
+            # `src/<name>.tl` and covers no Nupp module, so the `docs` job says
+            # nothing about this half.
+            - run: cargo run -p tecs-xtask -- nupp docs-check
 
     nupp-host:
         needs: nupp
