@@ -29,7 +29,13 @@ fn stage_sdk() -> PathBuf {
     let script = find_toolchain();
     let output = Command::new(&script)
         .arg("host-library")
-        .arg("base")
+        // Every Tecs component needs both. `native-files` is what
+        // `tecs.gpu.materials` reaches for, globbing a material root so the ids
+        // it assigns and the ids the prebuilt dispatch answers to come from one
+        // rule over one set of files, and `native-net` arrives with the I/O
+        // module extraction builds its packet through. A host staged without
+        // them refuses to load the component rather than failing later.
+        .arg("base,native-files,native-net")
         .output()
         .unwrap_or_else(|error| panic!("cannot run {}: {error}", script.display()));
     if !output.status.success() {

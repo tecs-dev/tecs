@@ -586,7 +586,10 @@ local function declareBuiltins(): nil
     -- Declared last and executed last, since passes run in declaration order
     -- and this is the one that writes the swapchain. Anything added to the
     -- seam is declared above this, not after it.
-    declarePass({name = "present", inputs = {"scene"}, outputs = {}})
+    -- The clear is the window's background, and the scene is blended over it:
+    -- a pixel nothing drew carries the albedo clear's zero alpha this far, so
+    -- what shows through is this color and a game changes it here.
+    declarePass({name = "present", inputs = {"scene"}, outputs = {}, clear = {r = 0.025, g = 0.03, b = 0.04, a = 1},})
 end
 
 --- Forgets every declaration and declares the built-in graph again.

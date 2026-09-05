@@ -111,6 +111,7 @@ pub struct Bridge {
 }
 
 impl Bridge {
+    #[allow(clippy::too_many_arguments)]
     pub fn load(
         executable: &Path,
         component_path: &Path,
@@ -475,7 +476,7 @@ impl Bridge {
         let mut passed = Vec::with_capacity(arguments.len() + 1);
         passed.push(ManagedValue::Handle(self.session));
         passed.extend_from_slice(arguments);
-        self.runtime.call(export, &passed).map_err(Into::into)
+        self.runtime.call(export, &passed)
     }
 }
 
