@@ -43,6 +43,12 @@ for index = 1, #hostExports do
 end
 lightingExports[#lightingExports + 1] = "lighting.create"
 
+local nativesmokeExports = {}
+for index = 1, #hostExports do
+    nativesmokeExports[index] = hostExports[index]
+end
+nativesmokeExports[#nativesmokeExports + 1] = "nativesmoke.create"
+
 return {
     -- `tests` is included because leaving it out meant `nupp check --strict`
     -- never read a test file. Two suites called `suspension.gather` and
@@ -148,6 +154,16 @@ return {
                 description = "Build the deferred lighting, shadow and bloom Nupp example",
                 entries = {"tecs.host", "lighting"},
                 exports = lightingExports,
+            },
+            -- The component `cargo xtask nupp test-package` runs against an
+            -- installed release. It is a component rather than a script
+            -- because a package ships no Nupp compiler, so the only Nupp a
+            -- release can execute is one already compiled into a component.
+            nativesmoke = {
+                kind = "component",
+                description = "Build the packaged native-service smoke component",
+                entries = {"tecs.host", "nativesmoke"},
+                exports = nativesmokeExports,
             },
             -- The Nupp half of the documentation. Tealdoc renders the Teal
             -- half and cannot render this one: it resolves a module only
