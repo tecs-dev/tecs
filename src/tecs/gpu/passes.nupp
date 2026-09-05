@@ -14,7 +14,7 @@ itself is harder to reason about than one that refuses to run, so a pass that
 reads a target no earlier pass writes is rejected where it is declared.
 
 ```nupp
-const passes = tecs.gfx.passes
+const passes = tecs.gpu.passes
 
 passes.declareTarget({name = "gameOverlay", format = "rgba8"})
 passes.insertPassBefore("present", {
@@ -133,7 +133,7 @@ end
 ---
 --- The module copies every field and every list, so the tables a caller builds
 --- are theirs to reuse. `inputs` names the targets the pass samples, in
---- binding order, and `tecs.gfx.passes.DEPTH` among them reads the shared
+--- binding order, and `tecs.gpu.passes.DEPTH` among them reads the shared
 --- depth attachment. `outputs` names the targets it writes, and an omitted or
 --- empty list renders to the swapchain. `depth` defaults to `"none"` and
 --- `depthClear` omitted loads what is already there. `load` makes the pass

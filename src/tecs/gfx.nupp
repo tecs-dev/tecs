@@ -23,8 +23,8 @@ world:spawn(
 ```
 
 `tecs.gfx.layers` decides the order those entities draw in, `tecs.gfx.images`
-owns image identity and residency, `tecs.gfx.materials` numbers the materials a
-`Material` selects, and `tecs.gfx.passes` declares the render passes and render
+owns image identity and residency, `tecs.gpu.materials` numbers the materials a
+`Material` selects, and `tecs.gpu.passes` declares the render passes and render
 targets a frame is drawn through.
 ]]
 

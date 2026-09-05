@@ -87,7 +87,7 @@ list and one indirect draw covers them.
 | 52     | `f32` | `g`        | Green.                                                        |
 | 56     | `f32` | `b`        | Blue.                                                         |
 | 60     | `f32` | `a`        | Alpha, multiplied into the sampled alpha.                     |
-| 64     | `u32` | `material` | A `tecs.gfx.materials` id, below the build's material count.  |
+| 64     | `u32` | `material` | A `tecs.gpu.materials` id, below the build's material count.  |
 | 68     | `u32` | `flags`    | Bit 0 set marks the blended lane, and equals the batch's.     |
 | 72     | `u32` | reserved   | Zero.                                                         |
 | 76     | `u32` | reserved   | Zero.                                                         |
