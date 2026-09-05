@@ -72,6 +72,20 @@ A timeline compiles tweens into the same runtime and keeps the same ownership,
 clock, channel, pause, and snapshot rules. Targets interpolate component
 fields. A parallel block shares a start time, and a sequential block starts
 after the one before it ends.
+
+## Authoring from data
+
+A sequence is written by calling the node constructors. The Teal engine also
+took one as plain rows, `{op = "wait", seconds = 1.5}` and the like, through a
+`defineData` that decoded them and a `dataOps` that listed the accepted step
+names. That is deliberately not here.
+
+It existed so a sequence could come from a file or a tool rather than from
+code, and nothing ever sent it one: an audit of the Teal tree found no caller
+outside its own spec. Twelve op names and fifteen row keys is a compatibility
+surface to carry forever for a decoder with no producer. A game that wants
+sequences in data can decode its own rows into these constructors and knows its
+own schema, which is the part the engine could not have guessed anyway.
 ]]
 
 local ecs = require("tecs.ecs")

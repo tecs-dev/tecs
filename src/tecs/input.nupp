@@ -47,13 +47,17 @@ Windows, Linux, Android and the web and documents as unsupported on macOS,
 where there is no touch screen to report. Touch pressure comes through where the
 surface measures it and reads zero where it does not.
 
-Deferred: the pen. `winit` 0.30 translates no pen event at all, and its 0.31
-line folds pens into a unified pointer with a `Pen` kind. Waiting for that is
-cheaper and more correct than writing `NSEvent`, `WM_POINTER` and XInput2 tablet
-handling in three places for a surface with no consumer in this tree. The
-contract to restore is the eight `pen` event kinds, the `penState` argument on
-the debug server's `send_event`, and pressure, tilt and eraser state on this
-record.
+The pen is the pointer. `winit` declares no pen event, so a stylus arrives as
+the cursor moving and its buttons as mouse buttons, and Tecs reads it that way
+rather than inventing a device the layer below does not report. A game that
+draws with a stylus reads `pointerX`, `pointerY` and the mouse buttons and gets
+what the platform sends.
+
+What that costs is what a tablet reports beyond position: pressure, tilt and
+which end of the pen is down. None of it reaches this tree, and recovering it
+means `NSEvent`, `WM_POINTER` and XInput2 tablet handling written three times
+for a surface nothing here consumes. It stays unwritten until something wants
+it, and until then a pen is a mouse that happens to be held differently.
 
 Removed: gamepad motion sensors, gamepad touchpads, trigger rumble, the light
 bar, the player-index slot, the hardware button label, the device family and
