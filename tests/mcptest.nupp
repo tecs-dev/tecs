@@ -10,12 +10,16 @@ local function decode(text: string): {[string]: any}
 end
 
 local function call(name: string, arguments: {[string]: any}?): {[string]: any}
-    local response = decode(mcp.dispatch(json.encode({
-        jsonrpc = "2.0",
-        id = 7,
-        method = "tools/call",
-        params = {name = name, arguments = arguments or json.EMPTY_OBJECT}
-    })))
+    local response = decode(
+        mcp.dispatch(
+            json.encode({
+                jsonrpc = "2.0",
+                id = 7,
+                method = "tools/call",
+                params = {name = name, arguments = arguments or json.EMPTY_OBJECT}
+            })
+        )
+    )
 
     return response.result as {[string]: any}
 end
@@ -131,12 +135,16 @@ function suite.dispatchesARegisteredToolByName(): nil
 end
 
 function suite.reportsMethodNotFoundForAnUnknownTool(): nil
-    local response = decode(mcp.dispatch(json.encode({
-        jsonrpc = "2.0",
-        id = 5,
-        method = "tools/call",
-        params = {name = "test.mcp.absent"}
-    })))
+    local response = decode(
+        mcp.dispatch(
+            json.encode({
+                jsonrpc = "2.0",
+                id = 5,
+                method = "tools/call",
+                params = {name = "test.mcp.absent"}
+            })
+        )
+    )
     local failure = response.error as {[string]: any}
 
     test.equal(failure.code as integer, -32601)

@@ -46,18 +46,30 @@ function suite.readsVerticalMetricsInEmUnits(): nil
 end
 
 function suite.rejectsOptionsThatCannotNameAFont(): nil
-    test.raises(function(): nil
-        fonts.newTTF({})
-    end, "`source` path or `bytes`")
-    test.raises(function(): nil
-        fonts.newTTF({bytes = source(), name = "fonttest/bad", size = 0})
-    end, "greater than zero")
-    test.raises(function(): nil
-        fonts.newTTF({bytes = source(), name = "fonttest/bad", raster = "outline" as fonts.Raster})
-    end, "'sdf' or 'alpha'")
-    test.raises(function(): nil
-        fonts.newTTF({bytes = source()})
-    end, "needs a `name`")
+    test.raises(
+        function(): nil
+            fonts.newTTF({})
+        end,
+        "`source` path or `bytes`"
+    )
+    test.raises(
+        function(): nil
+            fonts.newTTF({bytes = source(), name = "fonttest/bad", size = 0})
+        end,
+        "greater than zero"
+    )
+    test.raises(
+        function(): nil
+            fonts.newTTF({bytes = source(), name = "fonttest/bad", raster = "outline" as fonts.Raster})
+        end,
+        "'sdf' or 'alpha'"
+    )
+    test.raises(
+        function(): nil
+            fonts.newTTF({bytes = source()})
+        end,
+        "needs a `name`"
+    )
 end
 
 function suite.reportsWhyBytesCouldNotBeParsed(): nil

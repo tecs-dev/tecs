@@ -37,7 +37,12 @@ end
 spritesExports[#spritesExports + 1] = "sprites.create"
 
 return {
-    include = {"src", "examples/nupp"},
+    -- `tests` is included because leaving it out meant `nupp check --strict`
+    -- never read a test file. Two suites called `suspension.gather` and
+    -- `suspension.all`, neither of which exists, and both passed review: the
+    -- checker was never pointed at them, and the test runner's build cache
+    -- kept serving artifacts compiled before the calls were wrong.
+    include = {"src", "examples/nupp", "tests"},
 
     build = {
         outDir = "out/nupp",

@@ -53,10 +53,7 @@ function suite.deliversASealedEventBatchBeforeTheFrame(): nil
     })
     app:init()
 
-    local continues = app:iterate(0.25, {
-        platformevents.resized(1280, 720),
-        platformevents.focused(true),
-    })
+    local continues = app:iterate(0.25, {platformevents.resized(1280, 720), platformevents.focused(true),})
 
     test.assert(continues)
     test.equal(table.concat(delivered, ","), "windowResized,windowFocusGained")
@@ -68,7 +65,8 @@ end
 
 function suite.honorsQuitRequestsFromEvents(): nil
     local app = application.newApplication({
-        onEvent = function(_event: platformevents.Event, exclusive _running: application.Application): nil end,
+        onEvent = function(_event: platformevents.Event, exclusive _running: application.Application): nil
+        end,
     })
     app:init()
 
@@ -167,19 +165,31 @@ end
 
 function suite.rejectsInvalidHostLifecycleCalls(): nil
     local app = application.newApplication()
-    test.raises(function(): nil
-        app:iterate(0)
-    end, "created")
+    test.raises(
+        function(): nil
+            app:iterate(0)
+        end,
+        "created"
+    )
     app:init()
-    test.raises(function(): nil
-        app:init()
-    end, "already running")
-    test.raises(function(): nil
-        app:iterate(-1)
-    end, "negative number")
-    test.raises(function(): nil
-        application.newApplication({debugMaxFrames = 0})
-    end, "positive integer")
+    test.raises(
+        function(): nil
+            app:init()
+        end,
+        "already running"
+    )
+    test.raises(
+        function(): nil
+            app:iterate(-1)
+        end,
+        "negative number"
+    )
+    test.raises(
+        function(): nil
+            application.newApplication({debugMaxFrames = 0})
+        end,
+        "positive integer"
+    )
 end
 
 return suite

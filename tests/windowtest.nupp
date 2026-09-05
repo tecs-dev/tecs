@@ -68,23 +68,38 @@ function suite.validatesAndCopiesCreationOptions(): nil
 end
 
 function suite.rejectsInvalidCreationAndSizeRequests(): nil
-    test.raises(function(): nil
-        window.newWindow({width = 0})
-    end, "width must be positive")
-    test.raises(function(): nil
-        window.newWindow({x = 1})
-    end, "x and y")
-    test.raises(function(): nil
-        window.newWindow({minWidth = 10})
-    end, "minWidth and minHeight")
-    test.raises(function(): nil
-        window.newWindow({minWidth = 20, minHeight = 10, maxWidth = 10, maxHeight = 20})
-    end, "minWidth")
+    test.raises(
+        function(): nil
+            window.newWindow({width = 0})
+        end,
+        "width must be positive"
+    )
+    test.raises(
+        function(): nil
+            window.newWindow({x = 1})
+        end,
+        "x and y"
+    )
+    test.raises(
+        function(): nil
+            window.newWindow({minWidth = 10})
+        end,
+        "minWidth and minHeight"
+    )
+    test.raises(
+        function(): nil
+            window.newWindow({minWidth = 20, minHeight = 10, maxWidth = 10, maxHeight = 20})
+        end,
+        "minWidth"
+    )
 
     local handle = window.newWindow()
-    test.raises(function(): nil
-        handle:setSize(-1, 10)
-    end, "width must be positive")
+    test.raises(
+        function(): nil
+            handle:setSize(-1, 10)
+        end,
+        "width must be positive"
+    )
 end
 
 function suite.queuesTypedCommandsWithMonotonicSerials(): nil
@@ -150,12 +165,18 @@ function suite.appliesOnlyAcknowledgedHostState(): nil
     test.assert(handle:isFullscreen())
     test.assert(not handle:isCursorVisible())
 
-    test.raises(function(): nil
-        window.applyState(handle, state(8, "wrong window"))
-    end, "id changed")
-    test.raises(function(): nil
-        window.attach(handle, state(7, "again"))
-    end, "already attached")
+    test.raises(
+        function(): nil
+            window.applyState(handle, state(8, "wrong window"))
+        end,
+        "id changed"
+    )
+    test.raises(
+        function(): nil
+            window.attach(handle, state(7, "again"))
+        end,
+        "already attached"
+    )
 
     window.detach(handle)
     test.assert(not handle:isAttached())
@@ -194,12 +215,18 @@ function suite.correlatesAndConsumesHostFailures(): nil
     test.equal(failures[1].reason, "confinement is unsupported")
     test.equal(#window.takeFailures(handle), 0)
 
-    test.raises(function(): nil
-        window.reportFailure(handle, 0, "invalid")
-    end, "serial must be positive")
-    test.raises(function(): nil
-        window.reportFailure(handle, 1, "")
-    end, "reason must not be empty")
+    test.raises(
+        function(): nil
+            window.reportFailure(handle, 0, "invalid")
+        end,
+        "serial must be positive"
+    )
+    test.raises(
+        function(): nil
+            window.reportFailure(handle, 1, "")
+        end,
+        "reason must not be empty"
+    )
 end
 
 function suite.applicationFoldsWindowStateBeforeEventCallbacks(): nil

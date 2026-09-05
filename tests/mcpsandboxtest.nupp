@@ -7,12 +7,17 @@ local test = require("nupp.test")
 local suite = {}
 
 local function call(name: string, arguments: {[string]: any}): {[string]: any}
-    local response = json.decode(mcp.dispatch(json.encode({
-        jsonrpc = "2.0",
-        id = 1,
-        method = "tools/call",
-        params = {name = name, arguments = arguments}
-    })), json.NULL) as {[string]: any}
+    local response = json.decode(
+        mcp.dispatch(
+            json.encode({
+                jsonrpc = "2.0",
+                id = 1,
+                method = "tools/call",
+                params = {name = name, arguments = arguments}
+            })
+        ),
+        json.NULL
+    ) as {[string]: any}
 
     return response.result as {[string]: any}
 end
@@ -69,7 +74,8 @@ function suite.reportsASyntaxErrorRatherThanRaising(): nil
 end
 
 function suite.describesValuesJSONCannotCarry(): nil
-    local described = sandbox.describe(function(): nil end) as string
+    local described = sandbox.describe(function(): nil
+    end) as string
     test.assert(described:find("<function:", 1, true) == 1)
 
     test.equal(sandbox.describe(3) as integer, 3)

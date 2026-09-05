@@ -67,9 +67,9 @@ local function callOverHTTP(port: integer, name: string, arguments: {[string]: a
         method = "tools/call",
         params = {name = name, arguments = arguments or json.EMPTY_OBJECT}
     })
-    assert(stream:write(
-        `POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: ${tostring(#payload)}\r\n\r\n${payload}`
-    ))
+    assert(
+        stream:write(`POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: ${tostring(#payload)}\r\n\r\n${payload}`)
+    )
 
     local received = ""
     local headEnd: integer = 0
@@ -234,23 +234,33 @@ function suite.answersWhileTheApplicationIsCrashedAndResumesIt(): nil
     mcp.setCrashed(failure)
 
     -- A world tool reports the traceback rather than answering.
-    local blocked = json.decode(mcp.dispatch(json.encode({
-        jsonrpc = "2.0",
-        id = 1,
-        method = "tools/call",
-        params = {name = "stats", arguments = json.EMPTY_OBJECT}
-    })), json.NULL) as {[string]: any}
+    local blocked = json.decode(
+        mcp.dispatch(
+            json.encode({
+                jsonrpc = "2.0",
+                id = 1,
+                method = "tools/call",
+                params = {name = "stats", arguments = json.EMPTY_OBJECT}
+            })
+        ),
+        json.NULL
+    ) as {[string]: any}
     local blockedResult = blocked.result as {[string]: any}
     test.assert(blockedResult.crashed == true)
 
     -- `clear_crash` is one of the tools that survives a crash, and it lets the
     -- loop simulate again.
-    local cleared = json.decode(mcp.dispatch(json.encode({
-        jsonrpc = "2.0",
-        id = 2,
-        method = "tools/call",
-        params = {name = "clear_crash", arguments = json.EMPTY_OBJECT}
-    })), json.NULL) as {[string]: any}
+    local cleared = json.decode(
+        mcp.dispatch(
+            json.encode({
+                jsonrpc = "2.0",
+                id = 2,
+                method = "tools/call",
+                params = {name = "clear_crash", arguments = json.EMPTY_OBJECT}
+            })
+        ),
+        json.NULL
+    ) as {[string]: any}
     local resumed = (cleared.result as {[string]: any}).structuredContent as {[string]: any}
 
     test.assert(resumed.resumed == true)

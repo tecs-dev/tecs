@@ -23,24 +23,30 @@ function suite.runsTheCompleteFrameOrder(): nil
 
     value:update(0.125)
 
-    test.equal(table.concat(order, ","), table.concat({
-        "Ingress",
-        "First",
-        "PreUpdate",
-        "FixedFirst",
-        "FixedPreUpdate",
-        "FixedUpdate",
-        "FixedPostUpdate",
-        "FixedLast",
-        "Update",
-        "PostUpdate",
-        "RenderFirst",
-        "PreRender",
-        "Render",
-        "PostRender",
-        "RenderLast",
-        "Last",
-    }, ","))
+    test.equal(
+        table.concat(order, ","),
+        table.concat(
+            {
+                "Ingress",
+                "First",
+                "PreUpdate",
+                "FixedFirst",
+                "FixedPreUpdate",
+                "FixedUpdate",
+                "FixedPostUpdate",
+                "FixedLast",
+                "Update",
+                "PostUpdate",
+                "RenderFirst",
+                "PreRender",
+                "Render",
+                "PostRender",
+                "RenderLast",
+                "Last",
+            },
+            ","
+        )
+    )
 end
 
 function suite.usesTheFixedTimestepOnlyForFixedSystems(): nil
@@ -133,12 +139,18 @@ function suite.doesNotRunAFixedPhaseBeforeOneStepIsOwed(): nil
 end
 
 function suite.rejectsInvalidFixedClockOptions(): nil
-    test.raises(function(): nil
-        ecs.newWorld({timestep = 0})
-    end, "timestep")
-    test.raises(function(): nil
-        ecs.newWorld({fixedMaxSteps = 0})
-    end, "fixedMaxSteps")
+    test.raises(
+        function(): nil
+            ecs.newWorld({timestep = 0})
+        end,
+        "timestep"
+    )
+    test.raises(
+        function(): nil
+            ecs.newWorld({fixedMaxSteps = 0})
+        end,
+        "fixedMaxSteps"
+    )
 end
 
 return suite

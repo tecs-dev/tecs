@@ -20,15 +20,24 @@ end
 function suite.rejectsDuplicateUnknownAndEmptyTransitions(): nil
     local world = ecs.newWorld()
     world:createState("test.state.known")
-    test.raises(function(): nil
-        world:createState("test.state.known")
-    end, "already exists")
-    test.raises(function(): nil
-        world:pushState("test.state.unknown")
-    end, "not found")
-    test.raises(function(): nil
-        world:popState()
-    end, "empty")
+    test.raises(
+        function(): nil
+            world:createState("test.state.known")
+        end,
+        "already exists"
+    )
+    test.raises(
+        function(): nil
+            world:pushState("test.state.unknown")
+        end,
+        "not found"
+    )
+    test.raises(
+        function(): nil
+            world:popState()
+        end,
+        "empty"
+    )
 end
 
 function suite.autoTagsSpawnsAndDespawnsThemOnExit(): nil
@@ -92,8 +101,8 @@ function suite.emitsTypedStateTransitions(): nil
     test.equal(
         table.concat(seen, ","),
         "enter:test.state.events.base,blur:test.state.events.base:test.state.events.top,"
-            .. "enter:test.state.events.top,exit:test.state.events.top,"
-            .. "focus:test.state.events.base:test.state.events.top"
+        .. "enter:test.state.events.top,exit:test.state.events.top,"
+        .. "focus:test.state.events.base:test.state.events.top"
     )
 end
 

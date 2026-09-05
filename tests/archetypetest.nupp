@@ -19,17 +19,16 @@ end
 
 function suite.rejectsDuplicateComponents(): nil
     local tag = components.newTagComponent({name = "test.ArchetypeDuplicate"})
-    test.raises(function(): nil
-        archetype.signatureOf({tag, tag})
-    end, "repeats component")
+    test.raises(
+        function(): nil
+            archetype.signatureOf({tag, tag})
+        end,
+        "repeats component"
+    )
 end
 
 function suite.storesRawScalarsInDenseColumns(): nil
-    local health = components.newScalarComponent({
-        name = "test.ArchetypeHealth",
-        kind = "number",
-        default = 100
-    })
+    local health = components.newScalarComponent({name = "test.ArchetypeHealth", kind = "number", default = 100})
     local value = archetype.new(1, {health})
     archetype.append(value, 10, {[health.componentId] = 42})
     archetype.append(value, 20, {})

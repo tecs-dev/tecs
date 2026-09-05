@@ -8,6 +8,7 @@ local function drain(heap: wakeheap.Heap): {string}
         local _, _, value = wakeheap.pop(heap)
         values[#values + 1] = value as string
     end
+
     return values
 end
 

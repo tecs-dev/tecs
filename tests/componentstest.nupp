@@ -11,9 +11,12 @@ end
 
 function suite.rejectsDuplicateNames(): nil
     components.newTagComponent({name = "test.DuplicateTag"})
-    test.raises(function(): nil
-        components.newTagComponent({name = "test.DuplicateTag"})
-    end, "already registered")
+    test.raises(
+        function(): nil
+            components.newTagComponent({name = "test.DuplicateTag"})
+        end,
+        "already registered"
+    )
 end
 
 function suite.returnsAnIndependentRegistrySnapshot(): nil
@@ -26,11 +29,7 @@ function suite.returnsAnIndependentRegistrySnapshot(): nil
 end
 
 function suite.createsKindTypedScalarComponents(): nil
-    local health = components.newScalarComponent({
-        name = "test.ScalarHealth",
-        kind = "number",
-        default = 100
-    })
+    local health = components.newScalarComponent({name = "test.ScalarHealth", kind = "number", default = 100})
     local title = components.newScalarComponent({name = "test.ScalarTitle", kind = "string"})
     local enabled = components.newScalarComponent({name = "test.ScalarEnabled", kind = "boolean"})
     local amount: number = health(42).value

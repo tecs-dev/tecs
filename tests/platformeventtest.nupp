@@ -100,18 +100,30 @@ function suite.routesPointerAndTextPayloads(): nil
 end
 
 function suite.rejectsInvalidTranslatedValues(): nil
-    test.raises(function(): nil
-        platformevents.resized(-1, 720)
-    end, "dimensions")
-    test.raises(function(): nil
-        platformevents.resized(1, 1, nil, 1, nil, nil, -1, 1)
-    end, "pixel dimensions")
-    test.raises(function(): nil
-        platformevents.key(true, "")
-    end, "physicalKey")
-    test.raises(function(): nil
-        platformevents.pointerButton(true, 0, 0, 0)
-    end, "button")
+    test.raises(
+        function(): nil
+            platformevents.resized(-1, 720)
+        end,
+        "dimensions"
+    )
+    test.raises(
+        function(): nil
+            platformevents.resized(1, 1, nil, 1, nil, nil, -1, 1)
+        end,
+        "pixel dimensions"
+    )
+    test.raises(
+        function(): nil
+            platformevents.key(true, "")
+        end,
+        "physicalKey"
+    )
+    test.raises(
+        function(): nil
+            platformevents.pointerButton(true, 0, 0, 0)
+        end,
+        "button"
+    )
 end
 
 return suite

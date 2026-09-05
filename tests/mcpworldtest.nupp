@@ -25,12 +25,17 @@ local Marked = ecs.newTagComponent({name = "test.mcp.Marked"})
 local Health = ecs.newScalarComponent({name = "test.mcp.Health", kind = "number", default = 100})
 
 local function call(name: string, arguments: {[string]: any}?): {[string]: any}
-    local response = json.decode(mcp.dispatch(json.encode({
-        jsonrpc = "2.0",
-        id = 1,
-        method = "tools/call",
-        params = {name = name, arguments = arguments or json.EMPTY_OBJECT}
-    })), json.NULL) as {[string]: any}
+    local response = json.decode(
+        mcp.dispatch(
+            json.encode({
+                jsonrpc = "2.0",
+                id = 1,
+                method = "tools/call",
+                params = {name = name, arguments = arguments or json.EMPTY_OBJECT}
+            })
+        ),
+        json.NULL
+    ) as {[string]: any}
 
     return response.result as {[string]: any}
 end
@@ -160,11 +165,7 @@ function suite.replacesAComponentInFullAndReportsWhetherItWasAdded(): nil
     local entity = world:spawn(Position(1, 2))
     world:commit()
 
-    local replaced = structured("set", {
-        entity = entity,
-        component = "test.mcp.Position",
-        values = {x = 20}
-    })
+    local replaced = structured("set", {entity = entity, component = "test.mcp.Position", values = {x = 20}})
 
     test.assert(replaced.added == false)
     local value = world:get(entity, Position) as Point
@@ -183,11 +184,7 @@ function suite.changesOnlyTheNamedFields(): nil
     local entity = world:spawn(Position(1, 2))
     world:commit()
 
-    local answer = structured("modify", {
-        entity = entity,
-        component = "test.mcp.Position",
-        values = {x = 30}
-    })
+    local answer = structured("modify", {entity = entity, component = "test.mcp.Position", values = {x = 30}})
 
     test.assert(answer.skipped == false)
     local value = world:get(entity, Position) as Point
@@ -200,11 +197,7 @@ function suite.skipsAnEntityWithoutTheComponentRatherThanAddingOne(): nil
     local entity = world:spawn(Marked)
     world:commit()
 
-    local answer = structured("modify", {
-        entity = entity,
-        component = "test.mcp.Position",
-        values = {x = 1}
-    })
+    local answer = structured("modify", {entity = entity, component = "test.mcp.Position", values = {x = 1}})
 
     test.assert(answer.skipped == true)
     test.assert(not world:has(entity, Position))
@@ -215,11 +208,7 @@ function suite.refusesAModifyThatNamesNoField(): nil
     local entity = world:spawn(Position(1, 2))
     world:commit()
 
-    local result = call("modify", {
-        entity = entity,
-        component = "test.mcp.Position",
-        values = json.EMPTY_OBJECT
-    })
+    local result = call("modify", {entity = entity, component = "test.mcp.Position", values = json.EMPTY_OBJECT})
 
     test.assert(result.isError == true)
 end
@@ -241,7 +230,8 @@ function suite.removesAComponentAndDespawnsAnEntity(): nil
     test.assert(structured("despawn", {entity = entity}).skipped == true)
 end
 
-local function noop(_dt: number, exclusive _world: ecs.World): nil end
+local function noop(_dt: number, exclusive _world: ecs.World): nil
+end
 
 function suite.listsAndControlsTheSystemsTheWorldRuns(): nil
     local world = boundWorld()

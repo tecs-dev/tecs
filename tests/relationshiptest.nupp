@@ -4,13 +4,16 @@ local world = require("tecs.internal.world")
 local suite = {}
 
 function suite.requiresAReverseIndexForCascadeDeletion(): nil
-    test.raises(function(): nil
-        components.newRelationship({
-            name = "test.RelationshipInvalidCascade",
-            exclusive = true,
-            cascadeDelete = true
-        })
-    end, "requires reverseIndex")
+    test.raises(
+        function(): nil
+            components.newRelationship({
+                name = "test.RelationshipInvalidCascade",
+                exclusive = true,
+                cascadeDelete = true
+            })
+        end,
+        "requires reverseIndex"
+    )
 end
 
 function suite.storesTargetsAndBuildsAWorldLocalReverseIndex(): nil
@@ -129,10 +132,7 @@ function suite.cascadesThroughPendingSpawnsWhenAParentIsCancelled(): nil
 end
 
 function suite.matchesRelationshipComponentsInQueries(): nil
-    local follows = components.newRelationship({
-        name = "test.RelationshipQuery",
-        exclusive = true
-    })
+    local follows = components.newRelationship({name = "test.RelationshipQuery", exclusive = true})
     local value = world.new(3)
     local matching = value:newQuery({include = {follows}})
     local target = value:spawn()

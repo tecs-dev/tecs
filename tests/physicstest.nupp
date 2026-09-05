@@ -2,7 +2,7 @@ local ecs = require("tecs.ecs")
 local test = require("nupp.test")
 local contract = require("tecs.physics.contract")
 local physics = require("tecs.physics")
-local reference = require("tests.physicsreference")
+local reference = require("physicsreference")
 local suite = {}
 
 const STEP: number = 1 / 60
@@ -36,33 +36,45 @@ end
 function suite.installsOnceAndExposesItsSimulation(): nil
     local world, backend = newWorld()
     test.assert(physics.of(world) == backend.simulation)
-    test.raises(function(): nil
-        physics.install(world, {simulation = backend.simulation})
-    end, "already has a simulation")
+    test.raises(
+        function(): nil
+            physics.install(world, {simulation = backend.simulation})
+        end,
+        "already has a simulation"
+    )
 end
 
 function suite.refusesToAttachWithoutASimulation(): nil
     local world = ecs.newWorld()
     local entity = world:spawn()
-    test.raises(function(): nil
-        physics.attach(world, entity)
-    end, "no simulation")
+    test.raises(
+        function(): nil
+            physics.attach(world, entity)
+        end,
+        "no simulation"
+    )
 end
 
 function suite.rejectsAnUnknownBodyKind(): nil
     local world = newWorld()
     local entity = world:spawn()
-    test.raises(function(): nil
-        physics.attach(world, entity, {kind = "floaty"})
-    end, "unknown body kind")
+    test.raises(
+        function(): nil
+            physics.attach(world, entity, {kind = "floaty"})
+        end,
+        "unknown body kind"
+    )
 end
 
 function suite.rejectsACapsuleWithoutARadius(): nil
     local world = newWorld()
     local entity = world:spawn()
-    test.raises(function(): nil
-        physics.attach(world, entity, {capsuleLength = 10})
-    end, "positive radius")
+    test.raises(
+        function(): nil
+            physics.attach(world, entity, {capsuleLength = 10})
+        end,
+        "positive radius"
+    )
 end
 
 function suite.attachSuppliesTheComponentsABodyNeeds(): nil
@@ -512,9 +524,12 @@ function suite.rejectsAnUnknownJointKind(): nil
     physics.attach(world, arm)
     local joint = world:spawn()
     world:update(STEP)
-    test.raises(function(): nil
-        physics.attachJoint(world, joint, anchor, arm, {kind = "wobbly"})
-    end, "unknown joint kind")
+    test.raises(
+        function(): nil
+            physics.attachJoint(world, joint, anchor, arm, {kind = "wobbly"})
+        end,
+        "unknown joint kind"
+    )
 end
 
 function suite.keepsACallerSuppliedTransformWhenABodyIsAttached(): nil

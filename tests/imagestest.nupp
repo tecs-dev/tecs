@@ -20,9 +20,12 @@ function suite.internsANameToAPermanentId(): nil
 
     -- Interning is not residency. A sprite may name pixels that never arrive.
     test.equal(images.stateOf(first), "unknown")
-    test.raises(function(): nil
-        images.id("")
-    end, "must not be empty")
+    test.raises(
+        function(): nil
+            images.id("")
+        end,
+        "must not be empty"
+    )
 end
 
 function suite.queuesOneUploadCommandCarryingItsPixels(): nil
@@ -102,9 +105,12 @@ function suite.reportsWhyTheBackendRejectedAnImage(): nil
     test.equal(images.stateOf(id), "failed")
     test.equal(images.failureOf(id), "the device is out of memory")
 
-    test.raises(function(): nil
-        images.complete(id, commands[1].serial, false, nil)
-    end, "must carry a reason")
+    test.raises(
+        function(): nil
+            images.complete(id, commands[1].serial, false, nil)
+        end,
+        "must carry a reason"
+    )
 end
 
 function suite.releasesAnImageAndKeepsItsId(): nil
@@ -155,33 +161,48 @@ function suite.mapsEverySamplerCombinationToADistinctIndex(): nil
 end
 
 function suite.rejectsAnUploadItCannotDescribe(): nil
-    test.raises(function(): nil
-        images.upload({name = "", width = 1, height = 1, pixels = WHITE})
-    end, "must not be empty")
-    test.raises(function(): nil
-        images.upload({name = "imagestest/bad", width = 0, height = 1, pixels = WHITE})
-    end, "must be positive")
-    test.raises(function(): nil
-        images.upload({name = "imagestest/bad", width = 2, height = 2, pixels = WHITE})
-    end, "needs 16 RGBA8 bytes")
-    test.raises(function(): nil
-        images.upload({
-            name = "imagestest/bad",
-            width = 1,
-            height = 1,
-            pixels = WHITE,
-            filter = "smooth" as images.Filter,
-        })
-    end, "is not a filter")
-    test.raises(function(): nil
-        images.upload({
-            name = "imagestest/bad",
-            width = 1,
-            height = 1,
-            pixels = WHITE,
-            address = "wrap" as images.Address,
-        })
-    end, "is not an address mode")
+    test.raises(
+        function(): nil
+            images.upload({name = "", width = 1, height = 1, pixels = WHITE})
+        end,
+        "must not be empty"
+    )
+    test.raises(
+        function(): nil
+            images.upload({name = "imagestest/bad", width = 0, height = 1, pixels = WHITE})
+        end,
+        "must be positive"
+    )
+    test.raises(
+        function(): nil
+            images.upload({name = "imagestest/bad", width = 2, height = 2, pixels = WHITE})
+        end,
+        "needs 16 RGBA8 bytes"
+    )
+    test.raises(
+        function(): nil
+            images.upload({
+                name = "imagestest/bad",
+                width = 1,
+                height = 1,
+                pixels = WHITE,
+                filter = "smooth" as images.Filter,
+            })
+        end,
+        "is not a filter"
+    )
+    test.raises(
+        function(): nil
+            images.upload({
+                name = "imagestest/bad",
+                width = 1,
+                height = 1,
+                pixels = WHITE,
+                address = "wrap" as images.Address,
+            })
+        end,
+        "is not an address mode"
+    )
 end
 
 return suite

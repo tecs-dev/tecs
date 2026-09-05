@@ -22,10 +22,15 @@ function suite.constructsAndDeliversTypedAddressedEvents(): nil
     local message = messageEvent("test.EventMessage")
     local value = world.new(2)
     local seen: string = ""
-    value:observe(0, message, function(event: Message, exclusive running: world.World): nil
-        test.assert(running == value)
-        seen = event.text
-    end, "listener")
+    value:observe(
+        0,
+        message,
+        function(event: Message, exclusive running: world.World): nil
+            test.assert(running == value)
+            seen = event.text
+        end,
+        "listener"
+    )
     value:emit(0, message("hello"))
     test.equal(seen, "hello")
     test.equal(value.observerCount, 1)
@@ -55,13 +60,23 @@ function suite.defersNamedStopsUntilTheCurrentEmitFinishes(): nil
     local value = world.new(2)
     local firstCalls: integer = 0
     local secondCalls: integer = 0
-    value:observe(0, message, function(_event: Message, exclusive running: world.World): nil
-        firstCalls = firstCalls + 1
-        running:stopObserving(0, message, "second")
-    end, "first")
-    value:observe(0, message, function(_event: Message, exclusive _running: world.World): nil
-        secondCalls = secondCalls + 1
-    end, "second")
+    value:observe(
+        0,
+        message,
+        function(_event: Message, exclusive running: world.World): nil
+            firstCalls = firstCalls + 1
+            running:stopObserving(0, message, "second")
+        end,
+        "first"
+    )
+    value:observe(
+        0,
+        message,
+        function(_event: Message, exclusive _running: world.World): nil
+            secondCalls = secondCalls + 1
+        end,
+        "second"
+    )
     value:emit(0, message("one"))
     value:emit(0, message("two"))
     test.equal(firstCalls, 2)
@@ -103,8 +118,10 @@ function suite.clearsEntityObserversButPreservesWorldObservers(): nil
     local value = world.new(2)
     local entity = value:spawn()
     value:commit()
-    value:observe(0, message, function(_event: Message, exclusive _running: world.World): nil end)
-    value:observe(entity, message, function(_event: Message, exclusive _running: world.World): nil end)
+    value:observe(0, message, function(_event: Message, exclusive _running: world.World): nil
+    end)
+    value:observe(entity, message, function(_event: Message, exclusive _running: world.World): nil
+    end)
     value:despawn(entity)
     value:commit()
     test.assert(value:hasObservers(0, message))
@@ -115,12 +132,20 @@ end
 function suite.recoversEmitBookkeepingAfterAnObserverRaises(): nil
     local message = messageEvent("test.EventFailure")
     local value = world.new(2)
-    value:observe(0, message, function(_event: Message, exclusive _running: world.World): nil
-        error("expected observer failure")
-    end, "failing")
-    test.raises(function(): nil
-        value:emit(0, message("fail"))
-    end, "expected observer failure")
+    value:observe(
+        0,
+        message,
+        function(_event: Message, exclusive _running: world.World): nil
+            error("expected observer failure")
+        end,
+        "failing"
+    )
+    test.raises(
+        function(): nil
+            value:emit(0, message("fail"))
+        end,
+        "expected observer failure"
+    )
     test.assert(value:stopObserving(0, message, "failing"))
     test.equal(value.observerCount, 0)
 end

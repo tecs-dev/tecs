@@ -101,10 +101,7 @@ function suite.carriesBindingsParametersAndPauseHoldersAcrossALoad(): nil
     ): nil
         seen[#seen + 1] = tostring(context:entity("actor")) .. ":" .. tostring(assert(context.params).tag)
     end)
-    local program = sequence.define(uniqueName("test.carry."), {
-        sequence.waitSteps(2),
-        sequence.call("test.report"),
-    })
+    local program = sequence.define(uniqueName("test.carry."), {sequence.waitSteps(2), sequence.call("test.report"),})
     local actor = world:spawn()
     world:commit()
     local handle = sequence.play(world, program, {
@@ -172,7 +169,9 @@ function suite.restoresABranchTreeAndItsPendingJoin(): nil
         joined = true
     end)
     local program = sequence.define(uniqueName("test.branchSave."), {
-        sequence.fork({sequence.waitSteps(4)}),
+        sequence.fork({
+            sequence.waitSteps(4)
+        }),
         sequence.join(),
         sequence.call("test.joined"),
     })
@@ -201,9 +200,11 @@ function suite.resumesAnEvaluatingTimelineWhereItWas(): nil
     sequence.plugin(world)
     local actor = world:spawn(ecs.Transform2D(0, 0))
     world:commit()
-    local slide = sequence.timeline(uniqueName("test.savedSlide."), {
-        sequence.tweenTo(1, "linear", "transform.x", 100),
-    }, {clock = "fixed"})
+    local slide = sequence.timeline(
+        uniqueName("test.savedSlide."),
+        {sequence.tweenTo(1, "linear", "transform.x", 100),},
+        {clock = "fixed"}
+    )
     local handle = sequence.play(world, slide, {owner = actor})
     world:update(0.25)
     world:update(0.25)
@@ -232,9 +233,12 @@ function suite.leavesRunningPlaybacksAloneWhenAPayloadIsRejected(): nil
     local payload = assert(sequenceData(snapshot))
     payload.version = 99
 
-    test.raises(function(): nil
-        world:loadSnapshot(snapshot)
-    end, "snapshot version")
+    test.raises(
+        function(): nil
+            world:loadSnapshot(snapshot)
+        end,
+        "snapshot version"
+    )
 
     -- The payload is validated before any live cursor is touched, so the
     -- playback is exactly where it was rather than half cleared.

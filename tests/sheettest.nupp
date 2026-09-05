@@ -166,9 +166,12 @@ function suite.answersTheWholeSheetForATagItDoesNotCarry(): nil
     -- is why `tag` raises and this does not.
     test.equal(built:tagId("run"), 0)
     test.equal(built:tagId("run"), 0)
-    test.raises(function(): nil
-        built:tag("run")
-    end, "has no tag")
+    test.raises(
+        function(): nil
+            built:tag("run")
+        end,
+        "has no tag"
+    )
 end
 
 function suite.readsAPivotOutOfASliceThatMoves(): nil
@@ -176,9 +179,9 @@ function suite.readsAPivotOutOfASliceThatMoves(): nil
         :frame(0, 0, 32, 32)
         :frame(32, 0, 32, 32)
         :sliceKeys("hand", "right", {
-            {frame = 1, x = 8, y = 8, w = 8, h = 8, pivotX = 4, pivotY = 4},
-            {frame = 2, x = 16, y = 8, w = 8, h = 8, pivotX = 0, pivotY = 0},
-        })
+        {frame = 1, x = 8, y = 8, w = 8, h = 8, pivotX = 4, pivotY = 4},
+        {frame = 2, x = 16, y = 8, w = 8, h = 8, pivotX = 0, pivotY = 0},
+    })
         :slice("foot", 0, 24, 8, 8)
         :finish()
 
@@ -214,11 +217,9 @@ function suite.readsAPivotOutOfASliceThatMoves(): nil
 end
 
 function suite.takesANineSliceCenterAsItsPivot(): nil
-    const built = sheet.build(uniqueName("patch"), 32, 32)
-        :frame(0, 0, 32, 32)
-        :sliceKeys("panel", nil, {{frame = 1, x = 0, y = 0, w = 32, h = 32, centerX = 8, centerY = 8, centerW = 16,
-            centerH = 16,}})
-        :finish()
+    const built = sheet.build(uniqueName("patch"), 32, 32):frame(0, 0, 32, 32):sliceKeys("panel", nil, {
+        {frame = 1, x = 0, y = 0, w = 32, h = 32, centerX = 8, centerY = 8, centerW = 16, centerH = 16,}
+    }):finish()
 
     const x, y = built:pivotOf(built:sliceId("panel"), 1)
     test.equal(x, 0.5)
@@ -279,13 +280,7 @@ end
 
 function suite.findsARegisteredSheetByIdAndByName(): nil
     const name = uniqueName("registry")
-    const built = sheet.grid({
-        name = name,
-        imageWidth = 32,
-        imageHeight = 32,
-        frameWidth = 32,
-        frameHeight = 32,
-    })
+    const built = sheet.grid({name = name, imageWidth = 32, imageHeight = 32, frameWidth = 32, frameHeight = 32,})
     test.assert(built.id > 0, "registration hands out an id")
     test.equal(assert(sheet.byId(built.id)).name, name)
     test.equal(assert(sheet.byName(name)).id, built.id)
@@ -370,80 +365,98 @@ function suite.refusesAReExportThatWouldRenumberTags(): nil
 end
 
 function suite.rejectsASheetItCannotCut(): nil
-    test.raises(function(): nil
-        sheet.grid({
-            name = "",
-            imageWidth = 32,
-            imageHeight = 32,
-            frameWidth = 32,
-            frameHeight = 32,
-        })
-    end, "needs a name")
-    test.raises(function(): nil
-        sheet.grid({
-            name = uniqueName("bad"),
-            imageWidth = 0,
-            imageHeight = 32,
-            frameWidth = 32,
-            frameHeight = 32,
-        })
-    end, "pixel size")
-    test.raises(function(): nil
-        sheet.grid({
-            name = uniqueName("bad"),
-            imageWidth = 16,
-            imageHeight = 16,
-            frameWidth = 32,
-            frameHeight = 32,
-        })
-    end, "fits no")
-    test.raises(function(): nil
-        sheet.grid({
-            name = uniqueName("bad"),
-            imageWidth = 64,
-            imageHeight = 32,
-            frameWidth = 32,
-            frameHeight = 32,
-            count = 9,
-        })
-    end, "asks for")
-    test.raises(function(): nil
-        sheet.rects({name = uniqueName("bad"), imageWidth = 32, imageHeight = 32, frames = {}})
-    end, "lists no frames")
-    test.raises(function(): nil
-        sheet.rects({
-            name = uniqueName("bad"),
-            imageWidth = 32,
-            imageHeight = 32,
-            frames = {{x = 0, y = 0, w = 0, h = 8}},
-        })
-    end, "positive size")
-    test.raises(function(): nil
-        sheet.grid({
-            name = uniqueName("bad"),
-            imageWidth = 64,
-            imageHeight = 32,
-            frameWidth = 32,
-            frameHeight = 32,
-            tags = {idle = {from = 1, to = 9}},
-        })
-    end, "outside its")
-    test.raises(function(): nil
-        sheet.grid({
-            name = uniqueName("bad"),
-            imageWidth = 64,
-            imageHeight = 32,
-            frameWidth = 32,
-            frameHeight = 32,
-            tags = {idle = {from = 1, to = 2, direction = "sideways" as sheet.Direction}},
-        })
-    end, "no direction")
-    test.raises(function(): nil
-        sheet.build(uniqueName("bad"), 32, 32):finish()
-    end, "no frames")
-    test.raises(function(): nil
-        sheet.build(uniqueName("bad"), 32, 32):frame(0, 0, 0, 8)
-    end, "positive size")
+    test.raises(
+        function(): nil
+            sheet.grid({name = "", imageWidth = 32, imageHeight = 32, frameWidth = 32, frameHeight = 32,})
+        end,
+        "needs a name"
+    )
+    test.raises(
+        function(): nil
+            sheet.grid({name = uniqueName("bad"), imageWidth = 0, imageHeight = 32, frameWidth = 32, frameHeight = 32,})
+        end,
+        "pixel size"
+    )
+    test.raises(
+        function(): nil
+            sheet.grid({
+                name = uniqueName("bad"),
+                imageWidth = 16,
+                imageHeight = 16,
+                frameWidth = 32,
+                frameHeight = 32,
+            })
+        end,
+        "fits no"
+    )
+    test.raises(
+        function(): nil
+            sheet.grid({
+                name = uniqueName("bad"),
+                imageWidth = 64,
+                imageHeight = 32,
+                frameWidth = 32,
+                frameHeight = 32,
+                count = 9,
+            })
+        end,
+        "asks for"
+    )
+    test.raises(
+        function(): nil
+            sheet.rects({name = uniqueName("bad"), imageWidth = 32, imageHeight = 32, frames = {}})
+        end,
+        "lists no frames"
+    )
+    test.raises(
+        function(): nil
+            sheet.rects({
+                name = uniqueName("bad"),
+                imageWidth = 32,
+                imageHeight = 32,
+                frames = {{x = 0, y = 0, w = 0, h = 8}},
+            })
+        end,
+        "positive size"
+    )
+    test.raises(
+        function(): nil
+            sheet.grid({
+                name = uniqueName("bad"),
+                imageWidth = 64,
+                imageHeight = 32,
+                frameWidth = 32,
+                frameHeight = 32,
+                tags = {idle = {from = 1, to = 9}},
+            })
+        end,
+        "outside its"
+    )
+    test.raises(
+        function(): nil
+            sheet.grid({
+                name = uniqueName("bad"),
+                imageWidth = 64,
+                imageHeight = 32,
+                frameWidth = 32,
+                frameHeight = 32,
+                tags = {idle = {from = 1, to = 2, direction = "sideways" as sheet.Direction}},
+            })
+        end,
+        "no direction"
+    )
+    test.raises(
+        function(): nil
+            sheet.build(uniqueName("bad"), 32, 32):finish()
+        end,
+        "no frames"
+    )
+    test.raises(
+        function(): nil
+            sheet.build(uniqueName("bad"), 32, 32):frame(0, 0, 0, 8)
+        end,
+        "positive size"
+    )
 end
 
 function suite.raisesOnAFrameIndexTheSheetHasNot(): nil
@@ -454,30 +467,43 @@ function suite.raisesOnAFrameIndexTheSheetHasNot(): nil
         frameWidth = 32,
         frameHeight = 32,
     })
-    test.raises(function(): nil
-        built:rect(2)
-    end, "has no frame")
-    test.raises(function(): nil
-        built:uv(0)
-    end, "has no frame")
-    test.raises(function(): nil
-        built:duration(7)
-    end, "has no frame")
-    test.raises(function(): nil
-        built:sprite(3)
-    end, "has no frame")
+    test.raises(
+        function(): nil
+            built:rect(2)
+        end,
+        "has no frame"
+    )
+    test.raises(
+        function(): nil
+            built:uv(0)
+        end,
+        "has no frame"
+    )
+    test.raises(
+        function(): nil
+            built:duration(7)
+        end,
+        "has no frame"
+    )
+    test.raises(
+        function(): nil
+            built:sprite(3)
+        end,
+        "has no frame"
+    )
 end
 
 function suite.readsAnAsepriteArrayExport(): nil
     const name = uniqueName("aseprite")
     const built = sheet.fromAseprite({
         name = name,
-        json = '{"frames":[' .. '{"frame":{"x":0,"y":0,"w":16,"h":16},"duration":50},'
-            .. '{"frame":{"x":16,"y":0,"w":16,"h":16},"duration":150}],'
-            .. '"meta":{"image":"hero.png","size":{"w":32,"h":16},'
-            .. '"frameTags":[{"name":"idle","from":0,"to":1,"direction":"pingpong"}],'
-            .. '"slices":[{"name":"hand","data":"right","keys":['
-            .. '{"frame":0,"bounds":{"x":2,"y":3,"w":4,"h":5},"pivot":{"x":1,"y":1}}]}]}}',
+        json = '{"frames":['
+        .. '{"frame":{"x":0,"y":0,"w":16,"h":16},"duration":50},'
+        .. '{"frame":{"x":16,"y":0,"w":16,"h":16},"duration":150}],'
+        .. '"meta":{"image":"hero.png","size":{"w":32,"h":16},'
+        .. '"frameTags":[{"name":"idle","from":0,"to":1,"direction":"pingpong"}],'
+        .. '"slices":[{"name":"hand","data":"right","keys":['
+        .. '{"frame":0,"bounds":{"x":2,"y":3,"w":4,"h":5},"pivot":{"x":1,"y":1}}]}]}}',
     })
 
     test.equal(built.name, name)
@@ -503,9 +529,12 @@ end
 
 function suite.readsAnAsepriteObjectExportInFrameOrder(): nil
     const built = sheet.fromAseprite({
-        json = '{"frames":{' .. '"hero 1.png":{"frame":{"x":16,"y":0,"w":16,"h":16}},'
-            .. '"hero 0.png":{"frame":{"x":0,"y":0,"w":16,"h":16}}},'
-            .. '"meta":{"image":"' .. "test.aseprite.object" .. '","size":{"w":32,"h":16}}}',
+        json = '{"frames":{'
+        .. '"hero 1.png":{"frame":{"x":16,"y":0,"w":16,"h":16}},'
+        .. '"hero 0.png":{"frame":{"x":0,"y":0,"w":16,"h":16}}},'
+        .. '"meta":{"image":"'
+        .. "test.aseprite.object"
+        .. '","size":{"w":32,"h":16}}}',
     })
 
     -- The frame names carry the frame number, so sorting them is what puts the
@@ -523,31 +552,43 @@ function suite.refusesAMalformedAsepriteExport(): nil
     end)
 
     -- Valid JSON that is not an export.
-    test.raises(function(): nil
-        sheet.fromAseprite({name = uniqueName("broken"), json = '{"meta":{"size":{"w":32,"h":32}}}'})
-    end, "names no frames")
+    test.raises(
+        function(): nil
+            sheet.fromAseprite({name = uniqueName("broken"), json = '{"meta":{"size":{"w":32,"h":32}}}'})
+        end,
+        "names no frames"
+    )
 
     -- An export naming no image, with no name of its own to fall back on.
-    test.raises(function(): nil
-        sheet.fromAseprite({json = '{"frames":[],"meta":{"size":{"w":32,"h":32}}}'})
-    end, "needs a name of its own")
+    test.raises(
+        function(): nil
+            sheet.fromAseprite({json = '{"frames":[],"meta":{"size":{"w":32,"h":32}}}'})
+        end,
+        "needs a name of its own"
+    )
 
     -- A frame carrying no rectangle.
-    test.raises(function(): nil
-        sheet.fromAseprite({
-            name = uniqueName("broken"),
-            json = '{"frames":[{"duration":100}],"meta":{"size":{"w":32,"h":32}}}',
-        })
-    end, "has no rectangle")
+    test.raises(
+        function(): nil
+            sheet.fromAseprite({
+                name = uniqueName("broken"),
+                json = '{"frames":[{"duration":100}],"meta":{"size":{"w":32,"h":32}}}',
+            })
+        end,
+        "has no rectangle"
+    )
 
     -- A frame tag carrying no span.
-    test.raises(function(): nil
-        sheet.fromAseprite({
-            name = uniqueName("broken"),
-            json = '{"frames":[{"frame":{"x":0,"y":0,"w":8,"h":8}}],'
+    test.raises(
+        function(): nil
+            sheet.fromAseprite({
+                name = uniqueName("broken"),
+                json = '{"frames":[{"frame":{"x":0,"y":0,"w":8,"h":8}}],'
                 .. '"meta":{"size":{"w":32,"h":32},"frameTags":[{"name":"idle"}]}}',
-        })
-    end, "has no span")
+            })
+        end,
+        "has no span"
+    )
 end
 
 return suite

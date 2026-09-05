@@ -4,7 +4,14 @@ local suite = {}
 
 local function collect(index: inverseindex.InverseIndex, targetId: integer): {[integer]: boolean}
     local found: {[integer]: boolean} = {}
-    index:forEachSource(targetId, function(sourceId: integer, _: any): nil found[sourceId] = true end, nil)
+    index:forEachSource(
+        targetId,
+        function(sourceId: integer, _: any): nil
+            found[sourceId] = true
+        end,
+        nil
+    )
+
     return found
 end
 
@@ -37,8 +44,12 @@ function suite.reportsTargetLifetime(): nil
     local index = inverseindex.new()
     local added: {integer} = {}
     local removed: {integer} = {}
-    index.onTargetAdded = function(targetId: integer): nil added[#added + 1] = targetId end
-    index.onTargetRemoved = function(targetId: integer): nil removed[#removed + 1] = targetId end
+    index.onTargetAdded = function(targetId: integer): nil
+        added[#added + 1] = targetId
+    end
+    index.onTargetRemoved = function(targetId: integer): nil
+        removed[#removed + 1] = targetId
+    end
 
     index:link(10, 100)
     index:link(20, 100)

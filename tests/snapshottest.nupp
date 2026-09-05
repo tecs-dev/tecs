@@ -23,11 +23,7 @@ end
 function suite.roundTripsIdsComponentsRelationshipsAndStates(): nil
     local position = positionComponent("test.SnapshotPosition")
     local marker = ecs.newTagComponent({name = "test.SnapshotMarker"})
-    local parent = ecs.newRelationship({
-        name = "test.SnapshotParent",
-        exclusive = true,
-        reverseIndex = true,
-    })
+    local parent = ecs.newRelationship({name = "test.SnapshotParent", exclusive = true, reverseIndex = true,})
     local world = ecs.newWorld()
     local state = world:createState("test.snapshot.state")
     world:pushState("test.snapshot.state")
@@ -100,7 +96,10 @@ function suite.usesCustomComponentSnapshotHooks(): nil
         load = function(value: any): SnapshotPosition
             local packed = (value as {[string]: string}).packed
             local divider = assert(packed:find(":"))
-            return new SnapshotPosition(x = assert(tonumber(packed:sub(1, divider - 1))), label = packed:sub(divider + 1))
+            return new SnapshotPosition(
+                x = assert(tonumber(packed:sub(1, divider - 1))),
+                label = packed:sub(divider + 1)
+            )
         end,
     })
     local world = ecs.newWorld()
@@ -149,9 +148,12 @@ function suite.rejectsInvalidSnapshotsBeforeClearingTheWorld(): nil
     snapshot.archetypes[1].components[1] = "test.SnapshotUnknown"
     snapshot.componentTable[1].name = "test.SnapshotUnknown"
 
-    test.raises(function(): nil
-        world:loadSnapshot(snapshot)
-    end, "unknown component")
+    test.raises(
+        function(): nil
+            world:loadSnapshot(snapshot)
+        end,
+        "unknown component"
+    )
     test.assert(world:isAlive(entity))
 end
 
@@ -186,16 +188,24 @@ function suite.rejectsCyclesAndDuplicateDataKeys(): nil
     local world = ecs.newWorld()
     local cyclic: {[string]: any} = {}
     cyclic.self = cyclic
-    test.raises(function(): nil
-        world:saveSnapshot({customData = {cycle = cyclic}})
-    end, "cannot contain a cycle")
+    test.raises(
+        function(): nil
+            world:saveSnapshot({customData = {cycle = cyclic}})
+        end,
+        "cannot contain a cycle"
+    )
     world:addSnapshotHandler({
         name = "duplicate",
-        save = function(exclusive _running: ecs.World): any return 1 end,
+        save = function(exclusive _running: ecs.World): any
+            return 1
+        end,
     })
-    test.raises(function(): nil
-        world:saveSnapshot({customData = {duplicate = 2}})
-    end, "written twice")
+    test.raises(
+        function(): nil
+            world:saveSnapshot({customData = {duplicate = 2}})
+        end,
+        "written twice"
+    )
 end
 
 return suite

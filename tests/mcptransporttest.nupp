@@ -18,8 +18,9 @@ local function exchange(port: integer, method: string, target: string, body: str
     local payload = body or ""
     local request = `${method} ${target} HTTP/1.1\r\nHost: 127.0.0.1\r\n`
         .. "Accept: application/json, text/event-stream\r\n"
-        .. `Content-Type: application/json\r\nContent-Length: ${tostring(#payload)}\r\n\r\n`
-        .. payload
+        .. `Content-Type: application/json\r\nContent-Length: ${tostring(
+        #payload
+    )}\r\n\r\n` .. payload
     assert(stream:write(request))
 
     local received = ""
@@ -54,6 +55,9 @@ end
 --- `tasks.gather` runs both bodies as coroutines under one handler, so the
 --- client's socket waits are what let the server's polls happen and the other
 --- way round. Nothing outside this process is involved.
+--- @param client what to run against the bound port
+--- @return whatever `client` returned
+--- @raises the first failure either the client or the poller had
 local function withServer<T>(client: function(port: integer): T): T
     local server = assert(mcp.listen(0))
     local port = server.port
@@ -103,12 +107,7 @@ end
 
 function suite.answersInitializeOverHTTPWithoutTheFrame(): nil
     local body = withServer(function(port: integer): string
-        local status, answer = exchange(
-            port,
-            "POST",
-            "/mcp",
-            [[{"jsonrpc":"2.0","id":1,"method":"initialize"}]]
-        )
+        local status, answer = exchange(port, "POST", "/mcp", [[{"jsonrpc":"2.0","id":1,"method":"initialize"}]])
         test.equal(status, 200)
 
         return answer
@@ -161,7 +160,7 @@ function suite.reportsAFailingToolOverHTTPRatherThanClosingTheConnection(): nil
             "POST",
             "/mcp",
             [[{"jsonrpc":"2.0","id":3,"method":"tools/call",]]
-                .. [["params":{"name":"test.mcp.transport.raises","arguments":{}}}]]
+            .. [["params":{"name":"test.mcp.transport.raises","arguments":{}}}]]
         )
         test.equal(status, 200)
 
@@ -216,12 +215,7 @@ end
 
 function suite.acknowledgesANotificationWithNoBody(): nil
     local status = withServer(function(port: integer): integer
-        local code, body = exchange(
-            port,
-            "POST",
-            "/mcp",
-            [[{"jsonrpc":"2.0","method":"notifications/initialized"}]]
-        )
+        local code, body = exchange(port, "POST", "/mcp", [[{"jsonrpc":"2.0","method":"notifications/initialized"}]])
         test.equal(body, "")
 
         return code
@@ -240,11 +234,14 @@ function suite.keepsOneConnectionOpenAcrossSeveralCalls(): nil
         local stream = assert(netadapter.connect({host = "127.0.0.1", port = port}))
         local collected: {string} = {}
         for index = 1, 3 do
-            local payload = `{"jsonrpc":"2.0","id":${tostring(index)},"method":"tools/call",`
-                .. [["params":{"name":"stats","arguments":{}}}]]
-            assert(stream:write(
-                `POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: ${tostring(#payload)}\r\n\r\n${payload}`
-            ))
+            local payload = `{"jsonrpc":"2.0","id":${tostring(
+                index
+            )},"method":"tools/call",` .. [["params":{"name":"stats","arguments":{}}}]]
+            assert(
+                stream:write(
+                    `POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: ${tostring(#payload)}\r\n\r\n${payload}`
+                )
+            )
             local received = ""
             while received:find("\r\n\r\n", 1, true) == nil or #received:gsub(".-\r\n\r\n", "", 1) < 10 do
                 local chunk = assert(stream:read(4096))

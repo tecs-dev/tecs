@@ -7,7 +7,10 @@ const WIDTH = 640.0
 const HEIGHT = 360.0
 
 local function close(actual: number, expected: number, message: string): nil
-    test.assert(math.abs(actual - expected) < 1e-4, message .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
+    test.assert(
+        math.abs(actual - expected) < 1e-4,
+        message .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual)
+    )
 end
 
 --- Applies a column-major world-to-clip matrix to one world point.

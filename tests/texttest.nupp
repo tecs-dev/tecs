@@ -57,7 +57,10 @@ local function quads(borrows world: ecs.World, entity: integer): {number}
 end
 
 local function close(actual: number, expected: number, message: string): nil
-    test.assert(math.abs(actual - expected) < 0.001, message .. ": " .. tostring(actual) .. " vs " .. tostring(expected))
+    test.assert(
+        math.abs(actual - expected) < 0.001,
+        message .. ": " .. tostring(actual) .. " vs " .. tostring(expected)
+    )
 end
 
 -------------------------------------------------------------------------------
@@ -228,11 +231,7 @@ function suite.composesTheEntityTransformIntoEveryGlyph(): nil
     const size = 20.0
     const world = newWorld()
     const plain = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("ab", font(), size))
-    const scaled = world:spawn(
-        ecs.Transform2D(0, 0, 0, 1, 0, 2, 2),
-        gfx.Tint(1, 1, 1, 1),
-        gfx.Text("ab", font(), size)
-    )
+    const scaled = world:spawn(ecs.Transform2D(0, 0, 0, 1, 0, 2, 2), gfx.Tint(1, 1, 1, 1), gfx.Text("ab", font(), size))
     const turned = world:spawn(
         ecs.Transform2D(0, 0, 0, 1, math.pi * 0.5, 1, 1),
         gfx.Tint(1, 1, 1, 1),
@@ -471,15 +470,24 @@ function suite.reportsWhetherTheAtlasHasReachedTheBackend(): nil
 end
 
 function suite.rejectsAnAlignmentAndAWrapWidthTheLayoutCannotUse(): nil
-    test.raises(function(): nil
-        text.newText("hi", font(), 20, "middle" as text.Align)
-    end, "is not an alignment")
-    test.raises(function(): nil
-        text.newText("hi", font(), 20, "left", -1)
-    end, "cannot be negative")
-    test.raises(function(): nil
-        gfx.Text("hi", font(), 20, "middle" as text.Align)
-    end, "is not an alignment")
+    test.raises(
+        function(): nil
+            text.newText("hi", font(), 20, "middle" as text.Align)
+        end,
+        "is not an alignment"
+    )
+    test.raises(
+        function(): nil
+            text.newText("hi", font(), 20, "left", -1)
+        end,
+        "cannot be negative"
+    )
+    test.raises(
+        function(): nil
+            gfx.Text("hi", font(), 20, "middle" as text.Align)
+        end,
+        "is not an alignment"
+    )
 end
 
 function suite.roundsACoordinateForAScreenSpaceLabel(): nil

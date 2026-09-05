@@ -145,12 +145,18 @@ function suite.buildsASignedFieldThatCrossesTheOutline(): nil
 end
 
 function suite.rejectsFieldAndRasterDimensionsThatAreNotPositive(): nil
-    test.raises(function(): nil
-        truetype.rasterize({}, 0, 4, 0.0, 0.0, 1.0)
-    end, "dimensions must be positive")
-    test.raises(function(): nil
-        truetype.distanceField({0}, 1, 1, 0.0)
-    end, "spread must be greater than zero")
+    test.raises(
+        function(): nil
+            truetype.rasterize({}, 0, 4, 0.0, 0.0, 1.0)
+        end,
+        "dimensions must be positive"
+    )
+    test.raises(
+        function(): nil
+            truetype.distanceField({0}, 1, 1, 0.0)
+        end,
+        "spread must be greater than zero"
+    )
 end
 
 return suite

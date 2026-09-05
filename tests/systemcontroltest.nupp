@@ -3,7 +3,8 @@ local test = require("nupp.test")
 
 local suite = {}
 
-local function noop(_dt: number, exclusive _world: ecs.World): nil end
+local function noop(_dt: number, exclusive _world: ecs.World): nil
+end
 
 function suite.listsSystemsInExecutionOrder(): nil
     local value = ecs.newWorld()

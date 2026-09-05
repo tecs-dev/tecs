@@ -160,9 +160,12 @@ function suite.answersZeroForAnAbsentClip(): nil
 end
 
 function suite.rejectsAVoiceCeilingOutsideItsRange(): nil
-    test.raises(function(): nil
-        audio.newAudio({maxVoices = 0, backend = audiobackend.silent()})
-    end, "maxVoices")
+    test.raises(
+        function(): nil
+            audio.newAudio({maxVoices = 0, backend = audiobackend.silent()})
+        end,
+        "maxVoices"
+    )
 end
 
 function suite.internsClipAndGroupNamesBothWays(): nil
@@ -176,12 +179,18 @@ function suite.internsClipAndGroupNamesBothWays(): nil
     test.equal(audio.groupName(group), "interned")
     test.equal(audio.groupName(0), nil)
 
-    test.raises(function(): nil
-        audio.clipId("")
-    end, "clip path")
-    test.raises(function(): nil
-        audio.groupId("")
-    end, "group name")
+    test.raises(
+        function(): nil
+            audio.clipId("")
+        end,
+        "clip path"
+    )
+    test.raises(
+        function(): nil
+            audio.groupId("")
+        end,
+        "group name"
+    )
 end
 
 function suite.cachesOneClipPerPathAndReportsFailures(): nil
@@ -232,14 +241,7 @@ function suite.sendsOnePlayCarryingEveryStartingSetting(): nil
     local mixer = audio.newAudio({backend = recorder.backend})
     local clip = loaded(mixer)
 
-    local handle = mixer:play(clip, {
-        gain = 0.5,
-        pitch = 1.5,
-        loop = true,
-        loopStart = 2,
-        start = 1,
-        fadeIn = 0.25,
-    })
+    local handle = mixer:play(clip, {gain = 0.5, pitch = 1.5, loop = true, loopStart = 2, start = 1, fadeIn = 0.25,})
     test.assert(handle > 0)
     mixer:flush()
 
@@ -835,9 +837,12 @@ end
 function suite.refusesASecondMixerInOneWorld(): nil
     local world = ecs.newWorld()
     audio.install(world, {backend = newRecorder().backend})
-    test.raises(function(): nil
-        audio.install(world, {backend = newRecorder().backend})
-    end, "already has a mixer")
+    test.raises(
+        function(): nil
+            audio.install(world, {backend = newRecorder().backend})
+        end,
+        "already has a mixer"
+    )
 end
 
 function suite.answersTheMixerInstalledIntoAWorld(): nil

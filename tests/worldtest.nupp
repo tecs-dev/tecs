@@ -205,11 +205,7 @@ function suite.movesEntitiesIntoAndOutOfActiveQueries(): nil
 end
 
 function suite.spawnsAndReadsRawScalarValues(): nil
-    local health = components.newScalarComponent({
-        name = "test.WorldScalarHealth",
-        kind = "number",
-        default = 100
-    })
+    local health = components.newScalarComponent({name = "test.WorldScalarHealth", kind = "number", default = 100})
     local value = world.new(4)
     local explicit = value:spawn(health(42))
     local defaulted = value:spawn(health)
@@ -428,9 +424,12 @@ function suite.recoversPipelineBookkeepingAfterASystemRaises(): nil
             error("expected system failure")
         end
     })
-    test.raises(function(): nil
-        value:update(0)
-    end, "expected system failure")
+    test.raises(
+        function(): nil
+            value:update(0)
+        end,
+        "expected system failure"
+    )
     test.assert(value:removeSystem("test.system.failure"))
 
     local recovered: boolean = false

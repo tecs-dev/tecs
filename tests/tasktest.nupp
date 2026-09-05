@@ -52,9 +52,12 @@ function suite.propagatesAnUnawaitedChildFailure(): nil
         end,
     })
 
-    test.raises(function(): nil
-        value:update(0)
-    end, "expected child failure")
+    test.raises(
+        function(): nil
+            value:update(0)
+        end,
+        "expected child failure"
+    )
 end
 
 function suite.recoversWorldBookkeepingAfterAChildFailure(): nil
@@ -73,9 +76,12 @@ function suite.recoversWorldBookkeepingAfterAChildFailure(): nil
         end,
     })
 
-    test.raises(function(): nil
-        value:update(0)
-    end, "fail once")
+    test.raises(
+        function(): nil
+            value:update(0)
+        end,
+        "fail once"
+    )
     value:update(0)
 end
 

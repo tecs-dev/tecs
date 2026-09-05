@@ -142,9 +142,12 @@ function suite.tracksTheTargetThroughAResize(): nil
     test.equal(read.cameraY, 540)
     second:drop()
 
-    test.raises(function(): nil
-        extractor:packet(0, 360)
-    end, "viewport dimensions must be positive")
+    test.raises(
+        function(): nil
+            extractor:packet(0, 360)
+        end,
+        "viewport dimensions must be positive"
+    )
 end
 
 function suite.projectsThroughTheLowestActiveCamera(): nil
@@ -194,9 +197,12 @@ function suite.rejectsACameraZoomThatCannotProject(): nil
     world:spawn(gfx.Camera2D(0, 0, 0, 0), gfx.ActiveCamera)
     world:commit()
 
-    test.raises(function(): nil
-        extractor:packet(640, 360)
-    end, "zoom must be greater than zero")
+    test.raises(
+        function(): nil
+            extractor:packet(640, 360)
+        end,
+        "zoom must be greater than zero"
+    )
 end
 
 function suite.encodesOneOrderedBatchForRust(): nil

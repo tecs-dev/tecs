@@ -1,4 +1,4 @@
-module tests.physicsreference
+module physicsreference
 
 --[[
 A deterministic point-mass simulation implementing the physics crossing.
@@ -297,7 +297,9 @@ export function create(gravityY: number?): Reference
             local slotIndex = freeSlot(bodies)
             local existing = bodies[slotIndex]
             local generation = existing ~= nil and existing.generation + 1 or 0
-            bodies[slotIndex] = new Slot(
+            bodies[
+                slotIndex
+            ] = new Slot(
                 live = true,
                 generation = generation,
                 entity = command.entity,
@@ -315,7 +317,9 @@ export function create(gravityY: number?): Reference
             )
             local shapeIndex = freeLink(colliders)
             local previous = colliders[shapeIndex]
-            colliders[shapeIndex] = new Link(
+            colliders[
+                shapeIndex
+            ] = new Link(
                 live = true,
                 generation = previous ~= nil and previous.generation + 1 or 0,
                 entity = command.entity,
@@ -334,7 +338,9 @@ export function create(gravityY: number?): Reference
             else
                 local shapeIndex = freeLink(colliders)
                 local previous = colliders[shapeIndex]
-                colliders[shapeIndex] = new Link(
+                colliders[
+                    shapeIndex
+                ] = new Link(
                     live = true,
                     generation = previous ~= nil and previous.generation + 1 or 0,
                     entity = command.def.entity,
@@ -355,7 +361,9 @@ export function create(gravityY: number?): Reference
             else
                 local jointIndex = freeLink(joints)
                 local previous = joints[jointIndex]
-                joints[jointIndex] = new Link(
+                joints[
+                    jointIndex
+                ] = new Link(
                     live = true,
                     generation = previous ~= nil and previous.generation + 1 or 0,
                     entity = command.entity,
@@ -574,7 +582,11 @@ export function create(gravityY: number?): Reference
         local parts: {string} = {}
         for index = 1, #bodies do
             local slot = bodies[index]
-            parts[#parts + 1] = ("B %d %s %d %d %.17g %.17g %.17g %.17g %.17g %.17g"):format(
+            parts[
+                #parts + 1
+            ] = (
+                "B %d %s %d %d %.17g %.17g %.17g %.17g %.17g %.17g"
+            ):format(
                 index,
                 slot.live and "1" or "0",
                 slot.generation,
@@ -589,23 +601,15 @@ export function create(gravityY: number?): Reference
         end
         for index = 1, #colliders do
             local link = colliders[index]
-            parts[#parts + 1] = ("C %d %s %d %d %d"):format(
-                index,
-                link.live and "1" or "0",
-                link.generation,
-                link.entity,
-                link.owner
-            )
+            parts[
+                #parts + 1
+            ] = ("C %d %s %d %d %d"):format(index, link.live and "1" or "0", link.generation, link.entity, link.owner)
         end
         for index = 1, #joints do
             local link = joints[index]
-            parts[#parts + 1] = ("J %d %s %d %d %d"):format(
-                index,
-                link.live and "1" or "0",
-                link.generation,
-                link.entity,
-                link.owner
-            )
+            parts[
+                #parts + 1
+            ] = ("J %d %s %d %d %d"):format(index, link.live and "1" or "0", link.generation, link.entity, link.owner)
         end
 
         return table.concat(parts, "\n")
@@ -635,7 +639,9 @@ export function create(gravityY: number?): Reference
         for line in bytes:gmatch("[^\n]+") do
             local parts = fields(line)
             if parts[1] == "B" and #parts == 11 then
-                bodies[index(parts[2])] = new Slot(
+                bodies[
+                    index(parts[2])
+                ] = new Slot(
                     live = parts[3] == "1",
                     generation = index(parts[4]),
                     entity = index(parts[5]),
@@ -652,14 +658,18 @@ export function create(gravityY: number?): Reference
                     moved = true
                 )
             elseif parts[1] == "C" and #parts == 6 then
-                colliders[index(parts[2])] = new Link(
+                colliders[
+                    index(parts[2])
+                ] = new Link(
                     live = parts[3] == "1",
                     generation = index(parts[4]),
                     entity = index(parts[5]),
                     owner = index(parts[6])
                 )
             elseif parts[1] == "J" and #parts == 6 then
-                joints[index(parts[2])] = new Link(
+                joints[
+                    index(parts[2])
+                ] = new Link(
                     live = parts[3] == "1",
                     generation = index(parts[4]),
                     entity = index(parts[5]),
@@ -725,12 +735,9 @@ export function create(gravityY: number?): Reference
         simulation = simulation,
         log = log,
         pushEvent = function(entityA: integer, entityB: integer, started: boolean, sensor: boolean): nil
-            pending[#pending + 1] = new PendingEvent(
-                entityA = entityA,
-                entityB = entityB,
-                started = started,
-                sensor = sensor
-            )
+            pending[
+                #pending + 1
+            ] = new PendingEvent(entityA = entityA, entityB = entityB, started = started, sensor = sensor)
         end,
         bodyCount = function(): integer
             local total: integer = 0

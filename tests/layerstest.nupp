@@ -68,15 +68,24 @@ function suite.resolvesABandOnceForManyRows(): nil
 end
 
 function suite.rejectsAnUnknownLayerOrSort(): nil
-    test.raises(function(): nil
-        layers.configure(0, {sort = "z"})
-    end, "outside")
-    test.raises(function(): nil
-        layers.configure(layers.MAX + 1, {sort = "z"})
-    end, "outside")
-    test.raises(function(): nil
-        layers.configure(15, {sort = "sideways" as layers.Sort})
-    end, "is not a sort mode")
+    test.raises(
+        function(): nil
+            layers.configure(0, {sort = "z"})
+        end,
+        "outside"
+    )
+    test.raises(
+        function(): nil
+            layers.configure(layers.MAX + 1, {sort = "z"})
+        end,
+        "outside"
+    )
+    test.raises(
+        function(): nil
+            layers.configure(15, {sort = "sideways" as layers.Sort})
+        end,
+        "is not a sort mode"
+    )
 end
 
 function suite.reportsAConfigurationRevision(): nil
@@ -95,12 +104,18 @@ function suite.reportsTheFinestDepthStepItsExtentsAllow(): nil
     layers.setExtents(highest, half)
     test.equal(layers.resolution(), finest)
 
-    test.raises(function(): nil
-        layers.setExtents(0, half)
-    end, "greater than zero")
-    test.raises(function(): nil
-        layers.setExtents(highest, -1)
-    end, "greater than zero")
+    test.raises(
+        function(): nil
+            layers.setExtents(0, half)
+        end,
+        "greater than zero"
+    )
+    test.raises(
+        function(): nil
+            layers.setExtents(highest, -1)
+        end,
+        "greater than zero"
+    )
 end
 
 function suite.placesScreenSpaceContentsAtTheirOwnPixels(): nil
@@ -134,9 +149,12 @@ function suite.stretchesVirtualCoordinatesOntoTheTarget(): nil
     test.equal(halfY, 600)
     layers.setVirtualSize(width, height)
 
-    test.raises(function(): nil
-        layers.setVirtualSize(0, 300)
-    end, "greater than zero")
+    test.raises(
+        function(): nil
+            layers.setVirtualSize(0, 300)
+        end,
+        "greater than zero"
+    )
 end
 
 function suite.placesAWorldLayerThroughTheCamera(): nil
@@ -236,9 +254,12 @@ function suite.answersDefaultsForALayerOutsideTheTable(): nil
 end
 
 function suite.rejectsALayerAskingForTwoFixedSpaces(): nil
-    test.raises(function(): nil
-        layers.configure(7, {sort = "z", screenSpace = true, virtualCoords = true})
-    end, "not both")
+    test.raises(
+        function(): nil
+            layers.configure(7, {sort = "z", screenSpace = true, virtualCoords = true})
+        end,
+        "not both"
+    )
 end
 
 return suite

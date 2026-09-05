@@ -41,9 +41,7 @@ end
 function suite.holdsTheStartValueAtTheFirstTick(): nil
     local world = newWorld()
     local actor = newActor(world)
-    local fade = sequence.timeline(uniqueName("test.slide."), {
-        sequence.tweenTo(1, "linear", "transform.x", 100),
-    })
+    local fade = sequence.timeline(uniqueName("test.slide."), {sequence.tweenTo(1, "linear", "transform.x", 100),})
 
     sequence.play(world, fade, {owner = actor})
     -- The first update reaches the evaluating instruction with no elapsed time
@@ -56,9 +54,7 @@ end
 function suite.landsExactlyOnTheDestinationAtTheEnd(): nil
     local world = newWorld()
     local actor = newActor(world)
-    local slide = sequence.timeline(uniqueName("test.slide."), {
-        sequence.tweenTo(1, "linear", "transform.x", 100),
-    })
+    local slide = sequence.timeline(uniqueName("test.slide."), {sequence.tweenTo(1, "linear", "transform.x", 100),})
     local handle = sequence.play(world, slide, {owner = actor})
 
     world:update(0)
@@ -77,9 +73,7 @@ function suite.startsFromWhereTheEntityIsRatherThanFromCompileTime(): nil
     local actor = newActor(world)
     local transform = assert(world:getMut(actor, ecs.Transform2D))
     transform.x = 20
-    local slide = sequence.timeline(uniqueName("test.relative."), {
-        sequence.tweenTo(1, "linear", "transform.x", 40),
-    })
+    local slide = sequence.timeline(uniqueName("test.relative."), {sequence.tweenTo(1, "linear", "transform.x", 40),})
 
     sequence.play(world, slide, {owner = actor})
     world:update(0)
@@ -123,17 +117,46 @@ function suite.interpolatesEveryColorChannelTogether(): nil
 end
 
 function suite.mapsEveryBuiltInEasingCurveThroughItsEndpoints(): nil
-    local names: {string} = {
+    local names: {
+        string
+    } = {
         "linear",
-        "quadIn", "quadOut", "quadInOut", "quadOutIn",
-        "cubicIn", "cubicOut", "cubicInOut", "cubicOutIn",
-        "quartIn", "quartOut", "quartInOut", "quartOutIn",
-        "quintIn", "quintOut", "quintInOut", "quintOutIn",
-        "sineIn", "sineOut", "sineInOut", "sineOutIn",
-        "expoIn", "expoOut", "expoInOut", "expoOutIn",
-        "backIn", "backOut", "backInOut", "backOutIn",
-        "elasticIn", "elasticOut", "elasticInOut", "elasticOutIn",
-        "bounceIn", "bounceOut", "bounceInOut", "bounceOutIn",
+        "quadIn",
+        "quadOut",
+        "quadInOut",
+        "quadOutIn",
+        "cubicIn",
+        "cubicOut",
+        "cubicInOut",
+        "cubicOutIn",
+        "quartIn",
+        "quartOut",
+        "quartInOut",
+        "quartOutIn",
+        "quintIn",
+        "quintOut",
+        "quintInOut",
+        "quintOutIn",
+        "sineIn",
+        "sineOut",
+        "sineInOut",
+        "sineOutIn",
+        "expoIn",
+        "expoOut",
+        "expoInOut",
+        "expoOutIn",
+        "backIn",
+        "backOut",
+        "backInOut",
+        "backOutIn",
+        "elasticIn",
+        "elasticOut",
+        "elasticInOut",
+        "elasticOutIn",
+        "bounceIn",
+        "bounceOut",
+        "bounceInOut",
+        "bounceOutIn",
     }
     test.equal(#names, 37)
     for index = 1, #names do
@@ -144,14 +167,25 @@ function suite.mapsEveryBuiltInEasingCurveThroughItsEndpoints(): nil
 end
 
 function suite.rejectsACurveItCannotName(): nil
-    test.raises(function(): nil
-        sequence.tweenTo(1, "notACurve" as sequence.EasingName, "transform.x", 1)
-    end, "unknown easing")
-    test.raises(function(): nil
-        sequence.tweenTo(1, function(t: number): number
-            return t
-        end, "transform.x", 1)
-    end, "built%-in easing")
+    test.raises(
+        function(): nil
+            sequence.tweenTo(1, "notACurve" as sequence.EasingName, "transform.x", 1)
+        end,
+        "unknown easing"
+    )
+    test.raises(
+        function(): nil
+            sequence.tweenTo(
+                1,
+                function(t: number): number
+                    return t
+                end,
+                "transform.x",
+                1
+            )
+        end,
+        "built%-in easing"
+    )
 end
 
 function suite.runsParallelBranchesFromASharedStart(): nil
@@ -181,9 +215,7 @@ end
 function suite.repeatsALoopedTimelineItsCountedNumberOfTimes(): nil
     local world = newWorld()
     local actor = newActor(world)
-    local pulse = sequence.timeline(uniqueName("test.pulse."), {
-        sequence.tweenTo(1, "linear", "transform.x", 10),
-    })
+    local pulse = sequence.timeline(uniqueName("test.pulse."), {sequence.tweenTo(1, "linear", "transform.x", 10),})
 
     local handle = sequence.play(world, pulse, {owner = actor, params = {mode = "loop", count = 2}})
     world:update(0)
@@ -198,9 +230,7 @@ end
 function suite.returnsToTheStartOnAPingPongLeg(): nil
     local world = newWorld()
     local actor = newActor(world)
-    local swing = sequence.timeline(uniqueName("test.swing."), {
-        sequence.tweenTo(1, "linear", "transform.x", 10),
-    })
+    local swing = sequence.timeline(uniqueName("test.swing."), {sequence.tweenTo(1, "linear", "transform.x", 10),})
 
     sequence.play(world, swing, {owner = actor, params = {mode = "pingPong", count = 2}})
     world:update(0)
@@ -214,9 +244,7 @@ end
 function suite.holdsAPlaybackBackForItsDelayAndScalesItBySpeed(): nil
     local world = newWorld()
     local actor = newActor(world)
-    local slide = sequence.timeline(uniqueName("test.delayed."), {
-        sequence.tweenTo(1, "linear", "transform.x", 100),
-    })
+    local slide = sequence.timeline(uniqueName("test.delayed."), {sequence.tweenTo(1, "linear", "transform.x", 100),})
 
     sequence.play(world, slide, {owner = actor, params = {delay = 1, speed = 2}})
     world:update(0)
@@ -261,9 +289,7 @@ end
 
 function suite.completesOnItsFirstTickWithoutAnOwner(): nil
     local world = newWorld()
-    local slide = sequence.timeline(uniqueName("test.ownerless."), {
-        sequence.tweenTo(1, "linear", "transform.x", 100),
-    })
+    local slide = sequence.timeline(uniqueName("test.ownerless."), {sequence.tweenTo(1, "linear", "transform.x", 100),})
 
     local handle = sequence.play(world, slide)
     world:update(0)
@@ -307,9 +333,7 @@ function suite.playsATimelineFromASequenceAndWaitsForIt(): nil
     ): nil
         done = true
     end)
-    local slide = sequence.timeline(uniqueName("test.driven."), {
-        sequence.tweenTo(1, "linear", "transform.x", 10),
-    })
+    local slide = sequence.timeline(uniqueName("test.driven."), {sequence.tweenTo(1, "linear", "transform.x", 10),})
     local script = sequence.define(uniqueName("test.script."), {
         sequence.playTween(slide.name, sequence.bind("actor")),
         sequence.waitTween(),
@@ -331,9 +355,7 @@ end
 
 function suite.reportsTargetLostWhenTheBindingIsGone(): nil
     local world = newWorld()
-    local slide = sequence.timeline(uniqueName("test.lost."), {
-        sequence.tweenTo(1, "linear", "transform.x", 10),
-    })
+    local slide = sequence.timeline(uniqueName("test.lost."), {sequence.tweenTo(1, "linear", "transform.x", 10),})
     local script = sequence.define(uniqueName("test.lostScript."), {
         sequence.playTween(slide.name, sequence.bind("actor")),
         sequence.waitTween(),
@@ -385,18 +407,30 @@ function suite.roundTripsACompiledTimelineThroughItsPlainDataForm(): nil
 end
 
 function suite.rejectsInvalidTimelineOperations(): nil
-    test.raises(function(): nil
-        tweeneval.compile({tweeneval.to(0, "linear", "transform.x", 1)})
-    end, "greater than zero")
-    test.raises(function(): nil
-        tweeneval.compile({tweeneval.wait(-1)})
-    end, "at least zero")
-    test.raises(function(): nil
-        tweeneval.compile({tweeneval.run({tweeneval.wait(1)}, "loop")})
-    end, "finite count")
-    test.raises(function(): nil
-        sequence.timeline("test.badTimelineClock", {}, {clock = "frame"})
-    end, "clock must be")
+    test.raises(
+        function(): nil
+            tweeneval.compile({tweeneval.to(0, "linear", "transform.x", 1)})
+        end,
+        "greater than zero"
+    )
+    test.raises(
+        function(): nil
+            tweeneval.compile({tweeneval.wait(-1)})
+        end,
+        "at least zero"
+    )
+    test.raises(
+        function(): nil
+            tweeneval.compile({tweeneval.run({tweeneval.wait(1)}, "loop")})
+        end,
+        "finite count"
+    )
+    test.raises(
+        function(): nil
+            sequence.timeline("test.badTimelineClock", {}, {clock = "frame"})
+        end,
+        "clock must be"
+    )
 end
 
 return suite

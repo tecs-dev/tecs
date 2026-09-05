@@ -62,18 +62,30 @@ function suite.clearsARegionBackToUnbounded(): nil
 end
 
 function suite.refusesToSetRegionZeroOrOneOutsideTheTable(): nil
-    test.raises(function(): nil
-        clips.setRegion(0, {x = 0, y = 0, width = 1, height = 1})
-    end, "numbered 1 to")
-    test.raises(function(): nil
-        clips.setRegion(clips.MAX, {x = 0, y = 0, width = 1, height = 1})
-    end, "numbered 1 to")
-    test.raises(function(): nil
-        clips.clearRegion(0)
-    end, "numbered 1 to")
-    test.raises(function(): nil
-        clips.setRegion(5, {x = 0, y = 0, width = -1, height = 1})
-    end, "no negative size")
+    test.raises(
+        function(): nil
+            clips.setRegion(0, {x = 0, y = 0, width = 1, height = 1})
+        end,
+        "numbered 1 to"
+    )
+    test.raises(
+        function(): nil
+            clips.setRegion(clips.MAX, {x = 0, y = 0, width = 1, height = 1})
+        end,
+        "numbered 1 to"
+    )
+    test.raises(
+        function(): nil
+            clips.clearRegion(0)
+        end,
+        "numbered 1 to"
+    )
+    test.raises(
+        function(): nil
+            clips.setRegion(5, {x = 0, y = 0, width = -1, height = 1})
+        end,
+        "no negative size"
+    )
 end
 
 function suite.reportsARegionRevision(): nil

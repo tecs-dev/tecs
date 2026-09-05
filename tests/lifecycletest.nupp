@@ -29,14 +29,10 @@ function suite.runsStartupAndShutdownLeavesInOrder(): nil
     value:startup()
     value:shutdown()
 
-    test.equal(table.concat(order, ","), table.concat({
-        "PreStartup",
-        "Startup",
-        "PostStartup",
-        "PreShutdown",
-        "Shutdown",
-        "PostShutdown",
-    }, ","))
+    test.equal(
+        table.concat(order, ","),
+        table.concat({"PreStartup", "Startup", "PostStartup", "PreShutdown", "Shutdown", "PostShutdown",}, ",")
+    )
 end
 
 function suite.publishesBetweenLifecycleLeaves(): nil
@@ -67,11 +63,7 @@ function suite.settlesLifecycleChildTasks(): nil
     local answer = 0
     value:addSystem({
         phase = ecs.phases.Startup,
-        run = function(
-            _dt: number,
-            exclusive _world: ecs.World,
-            borrows scope: nupp.tasks.Scope
-        ): nil
+        run = function(_dt: number, exclusive _world: ecs.World, borrows scope: nupp.tasks.Scope): nil
             scope:spawn(function(): nil
                 answer = 42
             end)
@@ -119,9 +111,12 @@ function suite.recoversAfterALifecycleSystemRaises(): nil
             error("expected lifecycle failure")
         end,
     })
-    test.raises(function(): nil
-        value:startup()
-    end, "expected lifecycle failure")
+    test.raises(
+        function(): nil
+            value:startup()
+        end,
+        "expected lifecycle failure"
+    )
     test.assert(value:removeSystem("test.lifecycle.failure"))
     value:startup()
 end
@@ -133,7 +128,8 @@ function suite.reportsCoreWorldStatistics(): nil
     value:commit()
     value:addSystem({
         phase = ecs.phases.Update,
-        run = function(_dt: number, exclusive _world: ecs.World): nil end,
+        run = function(_dt: number, exclusive _world: ecs.World): nil
+        end,
     })
 
     local stats = value:getStats()

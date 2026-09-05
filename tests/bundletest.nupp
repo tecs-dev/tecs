@@ -66,30 +66,49 @@ function suite.validatesRequiredInputs(): nil
     local first = ecs.newTagComponent({name = "test.BundleFirst"})
     local second = ecs.newTagComponent({name = "test.BundleSecond"})
     local bundle = world:newBundle("test.bundle.validation", {required = {first, second}})
-    test.raises(function(): nil
-        bundle:spawn(first)
-    end, "Required component missing: test.BundleSecond")
-    test.raises(function(): nil
-        bundle:spawn(second, first)
-    end, "expected test.BundleFirst at position 1")
-    test.raises(function(): nil
-        bundle:spawn(first, second, first)
-    end, "too many required components")
+    test.raises(
+        function(): nil
+            bundle:spawn(first)
+        end,
+        "Required component missing: test.BundleSecond"
+    )
+    test.raises(
+        function(): nil
+            bundle:spawn(second, first)
+        end,
+        "expected test.BundleFirst at position 1"
+    )
+    test.raises(
+        function(): nil
+            bundle:spawn(first, second, first)
+        end,
+        "too many required components"
+    )
 end
 
 function suite.rejectsDuplicateAndIncorrectFactoryComponents(): nil
     local world = ecs.newWorld()
     local first = ecs.newTagComponent({name = "test.BundleDuplicate"})
     local second = ecs.newTagComponent({name = "test.BundleFactoryOther"})
-    test.raises(function(): nil
-        world:newBundle("test.bundle.duplicate", {required = {first}, with = {[first] = true}})
-    end, "Component already in bundle")
+    test.raises(
+        function(): nil
+            world:newBundle("test.bundle.duplicate", {required = {first}, with = {[first] = true}})
+        end,
+        "Component already in bundle"
+    )
     local bundle = world:newBundle("test.bundle.factory.invalid", {
-        with = {[first] = function(): ecs.ComponentInput return second end},
+        with = {
+            [first] = function(): ecs.ComponentInput
+                return second
+            end
+        },
     })
-    test.raises(function(): nil
-        bundle:spawn()
-    end, "returned another component")
+    test.raises(
+        function(): nil
+            bundle:spawn()
+        end,
+        "returned another component"
+    )
 end
 
 function suite.supportsNamedSpawnAndCallerOwnedListings(): nil
@@ -102,9 +121,12 @@ function suite.supportsNamedSpawnAndCallerOwnedListings(): nil
     local entity = world:spawnBundle("test.bundle.named", marker)
     world:commit()
     test.assert(world:has(entity, marker))
-    test.raises(function(): nil
-        world:spawnBundle("test.bundle.missing")
-    end, "Unknown bundle")
+    test.raises(
+        function(): nil
+            world:spawnBundle("test.bundle.missing")
+        end,
+        "Unknown bundle"
+    )
 end
 
 function suite.preservesBundlesAcrossEntityClears(): nil

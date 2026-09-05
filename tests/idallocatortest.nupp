@@ -103,18 +103,27 @@ end
 function suite.rejectsExhaustion(): nil
     local allocator = idallocator.new(1)
     idallocator.allocSlot(allocator)
-    test.raises(function(): nil
-        idallocator.allocSlot(allocator)
-    end, "entity ID exhaustion")
+    test.raises(
+        function(): nil
+            idallocator.allocSlot(allocator)
+        end,
+        "entity ID exhaustion"
+    )
 end
 
 function suite.rejectsInvalidCapacities(): nil
-    test.raises(function(): nil
-        idallocator.new(0)
-    end, "positive integer")
-    test.raises(function(): nil
-        idallocator.new(idallocator.absoluteMaxSlotCount + 1)
-    end, "exceeds format limit")
+    test.raises(
+        function(): nil
+            idallocator.new(0)
+        end,
+        "positive integer"
+    )
+    test.raises(
+        function(): nil
+            idallocator.new(idallocator.absoluteMaxSlotCount + 1)
+        end,
+        "exceeds format limit"
+    )
 end
 
 return suite

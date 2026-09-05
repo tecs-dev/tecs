@@ -31,10 +31,16 @@ end
 function suite.runsStepsInOrderOnTheTickAfterPlay(): nil
     local world = newWorld()
     local log: {string} = {}
-    sequence.registerAction(world, "test.first", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+    sequence.registerAction(world, "test.first", function(
+        exclusive _world: ecs.World,
+        _context: sequence.ActionContext
+    ): nil
         log[#log + 1] = "first"
     end)
-    sequence.registerAction(world, "test.second", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+    sequence.registerAction(world, "test.second", function(
+        exclusive _world: ecs.World,
+        _context: sequence.ActionContext
+    ): nil
         log[#log + 1] = "second"
     end)
     local program = sequence.define(uniqueName("test.order."), {
@@ -58,13 +64,13 @@ end
 function suite.convertsSecondsToWholeFixedSteps(): nil
     local world = newWorld()
     local ran = false
-    sequence.registerAction(world, "test.timed", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+    sequence.registerAction(world, "test.timed", function(
+        exclusive _world: ecs.World,
+        _context: sequence.ActionContext
+    ): nil
         ran = true
     end)
-    local program = sequence.define(uniqueName("test.seconds."), {
-        sequence.wait(0.5),
-        sequence.call("test.timed"),
-    })
+    local program = sequence.define(uniqueName("test.seconds."), {sequence.wait(0.5), sequence.call("test.timed"),})
 
     sequence.play(world, program)
 
@@ -78,7 +84,10 @@ end
 function suite.resolvesBindingsWhenTheInstructionRuns(): nil
     local world = newWorld()
     local seen: integer? = nil
-    sequence.registerAction(world, "test.seeBinding", function(exclusive _world: ecs.World, context: sequence.ActionContext): nil
+    sequence.registerAction(world, "test.seeBinding", function(
+        exclusive _world: ecs.World,
+        context: sequence.ActionContext
+    ): nil
         seen = context:entity("actor")
     end)
     local program = sequence.define(uniqueName("test.bind."), {sequence.call("test.seeBinding")})
@@ -94,11 +103,17 @@ end
 function suite.repeatsALoopItsCountedNumberOfTimes(): nil
     local world = newWorld()
     local runs = 0
-    sequence.registerAction(world, "test.tick", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+    sequence.registerAction(world, "test.tick", function(
+        exclusive _world: ecs.World,
+        _context: sequence.ActionContext
+    ): nil
         runs = runs + 1
     end)
     local program = sequence.define(uniqueName("test.loop."), {
-        sequence.loop(3, {sequence.call("test.tick"), sequence.waitSteps(1)}),
+        sequence.loop(3, {
+            sequence.call("test.tick"),
+            sequence.waitSteps(1)
+        }),
     })
 
     sequence.play(world, program)
@@ -130,7 +145,10 @@ end
 function suite.forksBranchesAndJoinsThemInTheSameTick(): nil
     local world = newWorld()
     local log: {string} = {}
-    sequence.registerAction(world, "test.mark", function(exclusive _world: ecs.World, context: sequence.ActionContext): nil
+    sequence.registerAction(world, "test.mark", function(
+        exclusive _world: ecs.World,
+        context: sequence.ActionContext
+    ): nil
         log[#log + 1] = context.args[1] as string
     end)
     local program = sequence.define(uniqueName("test.parallel."), {
@@ -151,7 +169,10 @@ end
 function suite.wakesASignalWaiterOnTheNextFixedStep(): nil
     local world = newWorld()
     local woke = false
-    sequence.registerAction(world, "test.woke", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+    sequence.registerAction(world, "test.woke", function(
+        exclusive _world: ecs.World,
+        _context: sequence.ActionContext
+    ): nil
         woke = true
     end)
     local program = sequence.define(uniqueName("test.signal."), {
@@ -176,7 +197,10 @@ function suite.resumesAQueryWaitWhoseConditionAlreadyHolds(): nil
     local marker = ecs.newTagComponent({name = uniqueName("test.SequenceMarker.")})
     sequence.registerQuery(world, "test.marked", {include = {marker}})
     local resumed = false
-    sequence.registerAction(world, "test.resumed", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+    sequence.registerAction(world, "test.resumed", function(
+        exclusive _world: ecs.World,
+        _context: sequence.ActionContext
+    ): nil
         resumed = true
     end)
     local program = sequence.define(uniqueName("test.query."), {
@@ -198,11 +222,17 @@ end
 function suite.cancelsAPlaybackMidSequenceAndTakesItsBranches(): nil
     local world = newWorld()
     local reached = false
-    sequence.registerAction(world, "test.reached", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+    sequence.registerAction(world, "test.reached", function(
+        exclusive _world: ecs.World,
+        _context: sequence.ActionContext
+    ): nil
         reached = true
     end)
     local program = sequence.define(uniqueName("test.cancel."), {
-        sequence.fork({sequence.waitSteps(5), sequence.call("test.reached")}),
+        sequence.fork({
+            sequence.waitSteps(5),
+            sequence.call("test.reached")
+        }),
         sequence.waitSteps(5),
         sequence.call("test.reached"),
     })
@@ -323,7 +353,10 @@ end
 
 function suite.reportsUpcomingCallsAndTheirTiming(): nil
     local world = newWorld()
-    sequence.registerAction(world, "test.noop", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+    sequence.registerAction(world, "test.noop", function(
+        exclusive _world: ecs.World,
+        _context: sequence.ActionContext
+    ): nil
     end)
     local program = sequence.define(uniqueName("test.upcoming."), {
         sequence.waitSteps(2),
@@ -356,36 +389,62 @@ function suite.disassemblesAProgramAndMarksAnAddress(): nil
 end
 
 function suite.rejectsInvalidAuthoringArguments(): nil
-    test.raises(function(): nil
-        sequence.bind("")
-    end, "binding name")
-    test.raises(function(): nil
-        sequence.wait(-1)
-    end, "non%-negative")
-    test.raises(function(): nil
-        sequence.loop(0, {sequence.join()})
-    end, "positive whole number")
-    test.raises(function(): nil
-        sequence.fork({})
-    end, "non%-empty block")
-    test.raises(function(): nil
-        sequence.define("", {})
-    end, "program name")
-    test.raises(function(): nil
-        sequence.define("test.badClock", {}, {clock = "wall" as sequence.ClockId})
-    end, "clock must be")
+    test.raises(
+        function(): nil
+            sequence.bind("")
+        end,
+        "binding name"
+    )
+    test.raises(
+        function(): nil
+            sequence.wait(-1)
+        end,
+        "non%-negative"
+    )
+    test.raises(
+        function(): nil
+            sequence.loop(0, {sequence.join()})
+        end,
+        "positive whole number"
+    )
+    test.raises(
+        function(): nil
+            sequence.fork({})
+        end,
+        "non%-empty block"
+    )
+    test.raises(
+        function(): nil
+            sequence.define("", {})
+        end,
+        "program name"
+    )
+    test.raises(
+        function(): nil
+            sequence.define("test.badClock", {}, {clock = "wall" as sequence.ClockId})
+        end,
+        "clock must be"
+    )
 end
 
 function suite.advancesTheFrameClockOncePerFrameWhateverTheFixedStepsAre(): nil
     local world = ecs.newWorld({timestep = 0.01})
     sequence.plugin(world)
     local runs = 0
-    sequence.registerAction(world, "test.perFrame", function(exclusive _world: ecs.World, _context: sequence.ActionContext): nil
+    sequence.registerAction(world, "test.perFrame", function(
+        exclusive _world: ecs.World,
+        _context: sequence.ActionContext
+    ): nil
         runs = runs + 1
     end)
     local program = sequence.define(
         uniqueName("test.frameClock."),
-        {sequence.loop(nil, {sequence.call("test.perFrame"), sequence.waitSteps(1)})},
+        {
+            sequence.loop(nil, {
+                sequence.call("test.perFrame"),
+                sequence.waitSteps(1)
+            })
+        },
         {clock = "frame"}
     )
 

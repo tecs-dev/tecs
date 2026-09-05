@@ -145,9 +145,12 @@ end
 
 function suite.refusesATagTheSheetDoesNotCarry(): nil
     const built = strip(5)
-    test.raises(function(): nil
-        animation.of(built, "swim")
-    end, "has no tag")
+    test.raises(
+        function(): nil
+            animation.of(built, "swim")
+        end,
+        "has no tag"
+    )
 end
 
 function suite.runsAtTheSpeedTheAnimationAsks(): nil
@@ -267,7 +270,9 @@ function suite.reportsCompletionOnceForASubscriber(): nil
     const entity = world:spawn(
         ecs.Transform2D(0, 0),
         built:sprite(),
-        animation.of(built, "run", {loop = false}),
+        animation.of(built, "run", {
+            loop = false
+        }),
         gfx.AnimationEvents
     )
     world:commit()
