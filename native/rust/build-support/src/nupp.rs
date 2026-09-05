@@ -199,16 +199,11 @@ pub fn documentation_check(root: &Path) -> Result<()> {
 /// that ships answers a question nobody asked.
 pub fn benchmark(root: &Path, name: &str, arguments: &[OsString]) -> Result<()> {
     let source = benchmark_source(root, name)?;
-    // Relative to the root the command runs in, because an absolute path puts
-    // the entry file outside the project's package namespace and a benchmark
-    // that imports `tecs.internal` is then refused. The same file runs when it
-    // is named relatively. Tracked upstream; keep this until it is fixed.
-    let relative = source.strip_prefix(root).unwrap_or(&source);
     let mut command = Command::new(compiler(root)?);
     command
         .arg("run")
         .arg("-O2")
-        .arg(relative)
+        .arg(&source)
         .args(arguments)
         .current_dir(root);
     let status = command

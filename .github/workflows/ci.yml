@@ -78,7 +78,7 @@ jobs:
             # is still the only tag and predates both, so a released compiler
             # cannot check this tree or load a component it builds. Move this to
             # a tag once one carries them.
-            NUPP_REF: f1cce05523f5cee9b70951d1760f0e08ebfc8ff6
+            NUPP_REF: b13848d0a8b9d363b7f35f43a8a4c21674ff7025
         steps:
             - uses: actions/checkout@v4
               with:
@@ -116,7 +116,7 @@ jobs:
         needs: nupp
         runs-on: macos-15
         env:
-            NUPP_REF: f1cce05523f5cee9b70951d1760f0e08ebfc8ff6
+            NUPP_REF: b13848d0a8b9d363b7f35f43a8a4c21674ff7025
         steps:
             # Two checkouts side by side. The Nupp compiler release installed by
             # Homebrew ships no `libnupp.a`, so it cannot satisfy
@@ -193,7 +193,7 @@ jobs:
                       preset: linux-x64
         runs-on: ${{ matrix.os }}
         env:
-            NUPP_REF: f1cce05523f5cee9b70951d1760f0e08ebfc8ff6
+            NUPP_REF: b13848d0a8b9d363b7f35f43a8a4c21674ff7025
         steps:
             - uses: actions/checkout@v4
               with:
