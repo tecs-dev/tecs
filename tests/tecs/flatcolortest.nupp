@@ -1,0 +1,52 @@
+local flatcolor = require("flatcolor")
+local framepacket = require("tecs.internal.framepacket")
+local host = require("tecs.host")
+local test = require("nupp.test")
+
+local suite = {}
+
+function suite.installsACompleteGameThroughItsEntry(): nil
+    local session = flatcolor.create(nil, 800, 450, false, 1)
+    test.assert(host.init(session))
+    test.equal(session.app.world.liveCount, 3)
+
+    local reader = nupp.io.newScalarReader(host.renderPacket(session))
+    test.equal(reader:readUint32(), framepacket.MAGIC)
+    test.equal(reader:readUint32(), framepacket.VERSION)
+    test.equal(reader:readUint32(), framepacket.HEADER_SIZE)
+    test.equal(reader:readUint32(), 0)
+    -- The graph revision, then the section's byte length, which the batch table
+    -- sits behind.
+    reader:skip(4)
+    local graphBytes = reader:readUint32() as integer
+    test.equal(reader:readUint32(), framepacket.BATCH_STRIDE)
+    -- Two of the three quads carry an alpha below one, so the scene splits into
+    -- an opaque run and a blended one.
+    test.equal(reader:readUint32(), 2)
+    test.equal(reader:readUint32(), framepacket.INSTANCE_STRIDE)
+    test.equal(reader:readUint32(), 3)
+    test.equal(reader:readFloat32(), 800)
+    test.equal(reader:readFloat32(), 450)
+    -- No camera entity, so the view centers on the target and the example's
+    -- target-pixel placement lands where it was authored.
+    test.equal(reader:readFloat32(), 400)
+    test.equal(reader:readFloat32(), 225)
+    test.equal(reader:readFloat32(), 1)
+    test.equal(reader:readFloat32(), 0)
+    -- The light table stride and its three counts, then the ambient and the
+    -- shadow and bloom tuning, which this example leaves at the defaults.
+    test.equal(reader:readUint32(), framepacket.LIGHT_STRIDE)
+    test.equal(reader:readUint32(), 0)
+    test.equal(reader:readUint32(), 0)
+    reader:skip(4 + 12 * 4)
+    reader:skip(graphBytes + 2 * (framepacket.BATCH_STRIDE as integer))
+    test.equal(reader:readFloat32(), 240)
+    test.equal(reader:readFloat32(), 225)
+    reader:drop()
+
+    test.equal(host.iterate(session, 1), "stopped")
+    test.equal(host.crashed(session), nil)
+    test.assert(host.shutdown(session))
+end
+
+return suite

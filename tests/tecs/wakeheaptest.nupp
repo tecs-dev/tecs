@@ -1,0 +1,125 @@
+local test = require("nupp.test")
+local wakeheap = require("tecs.internal.wakeheap")
+local suite = {}
+
+local function drain(heap: wakeheap.Heap): {string}
+    local values: {string} = {}
+    while wakeheap.peek(heap) ~= nil do
+        local _, _, value = wakeheap.pop(heap)
+        values[#values + 1] = value as string
+    end
+
+    return values
+end
+
+local function equalValues(actual: {string}, expected: {string}): nil
+    test.equal(#actual, #expected)
+    for index = 1, #expected do
+        test.equal(actual[index], expected[index])
+    end
+end
+
+function suite.startsEmpty(): nil
+    local heap = wakeheap.new()
+    test.equal(heap.size, 0)
+    test.equal(wakeheap.peek(heap), nil)
+    local key, sequence, value = wakeheap.pop(heap)
+    test.equal(key, nil)
+    test.equal(sequence, nil)
+    test.equal(value, nil)
+end
+
+function suite.ordersByKey(): nil
+    local heap = wakeheap.new()
+    wakeheap.push(heap, 30, 1, "c")
+    wakeheap.push(heap, 10, 2, "a")
+    wakeheap.push(heap, 20, 3, "b")
+    test.equal(wakeheap.peek(heap), 10)
+    equalValues(drain(heap), {"a", "b", "c"})
+    test.equal(heap.size, 0)
+end
+
+function suite.breaksTiesBySequence(): nil
+    local heap = wakeheap.new()
+    wakeheap.push(heap, 5, 3, "third")
+    wakeheap.push(heap, 5, 1, "first")
+    wakeheap.push(heap, 5, 2, "second")
+    equalValues(drain(heap), {"first", "second", "third"})
+end
+
+function suite.ordersMixedEntriesDeterministically(): nil
+    local heap = wakeheap.new()
+    wakeheap.push(heap, 2, 7, "2:7")
+    wakeheap.push(heap, 1, 9, "1:9")
+    wakeheap.push(heap, 2, 3, "2:3")
+    wakeheap.push(heap, 1, 4, "1:4")
+    wakeheap.push(heap, 3, 1, "3:1")
+    wakeheap.push(heap, 1, 6, "1:6")
+    equalValues(drain(heap), {"1:4", "1:6", "1:9", "2:3", "2:7", "3:1"})
+end
+
+function suite.keepsOrderAcrossInterleavedOperations(): nil
+    local heap = wakeheap.new()
+    wakeheap.push(heap, 10, 1, "a")
+    wakeheap.push(heap, 30, 2, "c")
+    local _, _, first = wakeheap.pop(heap)
+    test.equal(first, "a")
+    wakeheap.push(heap, 20, 3, "b")
+    wakeheap.push(heap, 5, 4, "sooner")
+    equalValues(drain(heap), {"sooner", "b", "c"})
+end
+
+function suite.survivesChurn(): nil
+    local heap = wakeheap.new()
+    local sequence: integer = 0
+    local expected: {integer} = {}
+    local value = 7
+    for _ = 1, 400 do
+        value = ((value * 37 + 11) % 251) as integer
+        sequence = (sequence + 1) as integer
+        wakeheap.push(heap, value, sequence, value)
+        expected[#expected + 1] = value
+        if sequence % 3 == 0 then
+            local _, _, popped = wakeheap.pop(heap)
+            local smallest = math.huge
+            for index = 1, #expected do
+                if expected[index] < smallest then
+                    smallest = expected[index]
+                end
+            end
+            test.equal(popped, smallest)
+            for index = 1, #expected do
+                if expected[index] == smallest then
+                    table.remove(expected, index)
+                    break
+                end
+            end
+        end
+    end
+    test.equal(heap.size, #expected)
+end
+
+function suite.clearsAndCanBeReused(): nil
+    local heap = wakeheap.new()
+    for index = 1, 10 do
+        wakeheap.push(heap, index, index, "value" .. tostring(index))
+    end
+    wakeheap.clear(heap)
+    test.equal(heap.size, 0)
+    test.equal(wakeheap.peek(heap), nil)
+    test.equal(heap.values[1], nil)
+    wakeheap.push(heap, 3, 1, "fresh")
+    equalValues(drain(heap), {"fresh"})
+end
+
+function suite.carriesAnyValue(): nil
+    local heap = wakeheap.new()
+    local event = {kind = "keypressed"}
+    wakeheap.push(heap, 1, 1, event)
+    local key, sequence, value = wakeheap.pop(heap)
+    test.equal(key, 1)
+    test.equal(sequence, 1)
+    test.assert(value == event, "the heap must preserve value identity")
+end
+
+return suite

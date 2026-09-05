@@ -1,0 +1,211 @@
+local ecs = require("tecs.ecs")
+local idallocator = require("tecs.internal.idallocator")
+local test = require("nupp.test")
+local suite = {}
+
+local record SnapshotPosition
+    x: number
+    label: string
+end
+
+local function positionComponent(name: string): ecs.TableComponent<SnapshotPosition>
+    return ecs.newComponent({
+        name = name,
+        construct = function(x: number, label: string): SnapshotPosition
+            return new SnapshotPosition(x = x, label = label)
+        end,
+        default = function(): SnapshotPosition
+            return new SnapshotPosition(x = 0, label = "")
+        end,
+    })
+end
+
+function suite.roundTripsIdsComponentsRelationshipsAndStates(): nil
+    local position = positionComponent("test.SnapshotPosition")
+    local marker = ecs.newTagComponent({name = "test.SnapshotMarker"})
+    local parent = ecs.newRelationship({name = "test.SnapshotParent", exclusive = true, reverseIndex = true,})
+    local world = ecs.newWorld()
+    local state = world:createState("test.snapshot.state")
+    world:pushState("test.snapshot.state")
+    local root = world:spawn(position(1, "root"))
+    local child = world:spawn(position(2, "child"), marker, parent(root))
+    world:commit()
+    local snapshot = world:saveSnapshot()
+
+    world:clearEntities()
+    local prelude = world:loadSnapshot(snapshot)
+
+    test.equal(prelude.version, 1)
+    test.equal(prelude.entityCount, 2)
+    test.assert(world:isAlive(root))
+    test.assert(world:isAlive(child))
+    test.equal(assert(world:get(child, position)).label, "child")
+    test.assert(world:has(child, marker))
+    test.equal(assert(world:get(child, parent)).target, root)
+    test.assert(world:has(root, state))
+    test.equal(world:peekState() as string, "test.snapshot.state")
+end
+
+function suite.detachesSavedRecordValuesFromTheWorld(): nil
+    local position = positionComponent("test.SnapshotDetached")
+    local world = ecs.newWorld()
+    local entity = world:spawn(position(7, "saved"))
+    world:commit()
+    local snapshot = world:saveSnapshot()
+    local live = assert(world:getMut(entity, position))
+    live.x = 99
+    live.label = "changed"
+
+    world:loadSnapshot(snapshot)
+
+    local restored = assert(world:get(entity, position))
+    test.equal(restored.x, 7)
+    test.equal(restored.label, "saved")
+end
+
+function suite.omitsTransientComponentsButKeepsTheirEntities(): nil
+    local health = ecs.newScalarComponent({name = "test.SnapshotHealth", kind = "number"})
+    local temporary = ecs.newTagComponent({name = "test.SnapshotTemporary", transient = true})
+    local world = ecs.newWorld()
+    local entity = world:spawn(health(5), temporary)
+    world:commit()
+    local snapshot = world:saveSnapshot()
+
+    world:loadSnapshot(snapshot)
+
+    test.assert(world:isAlive(entity))
+    test.equal(world:get(entity, health) as number, 5)
+    test.assert(not world:has(entity, temporary))
+    for index = 1, #snapshot.componentTable do
+        test.assert(snapshot.componentTable[index].name ~= temporary.componentName)
+    end
+end
+
+function suite.usesCustomComponentSnapshotHooks(): nil
+    local position = ecs.newComponent({
+        name = "test.SnapshotCustom",
+        construct = function(x: number, label: string): SnapshotPosition
+            return new SnapshotPosition(x = x, label = label)
+        end,
+        default = function(): SnapshotPosition
+            return new SnapshotPosition(x = 0, label = "")
+        end,
+        save = function(value: SnapshotPosition): any
+            return {packed = tostring(value.x) .. ":" .. value.label}
+        end,
+        load = function(value: any): SnapshotPosition
+            local packed = (value as {[string]: string}).packed
+            local divider = assert(packed:find(":"))
+            return new SnapshotPosition(
+                x = assert(tonumber(packed:sub(1, divider - 1))),
+                label = packed:sub(divider + 1)
+            )
+        end,
+    })
+    local world = ecs.newWorld()
+    local entity = world:spawn(position(12, "custom"))
+    world:commit()
+    local snapshot = world:saveSnapshot()
+    world:loadSnapshot(snapshot)
+    local restored = assert(world:get(entity, position))
+    test.equal(restored.x, 12)
+    test.equal(restored.label, "custom")
+end
+
+function suite.savesLoadsAndFinishesNamedHandlerData(): nil
+    local world = ecs.newWorld()
+    local current = {score = 41}
+    local loaded = 0
+    local finished = false
+    world:addSnapshotHandler({
+        name = "test.snapshot.handler",
+        save = function(exclusive _running: ecs.World): any
+            return current
+        end,
+        load = function(exclusive _running: ecs.World, value: any): nil
+            loaded = (value as {[string]: number}).score
+        end,
+        finish = function(exclusive _running: ecs.World, prelude: ecs.SnapshotPrelude): nil
+            finished = prelude.version == 1
+        end,
+    })
+    local snapshot = world:saveSnapshot({customData = {extra = {ready = true}}})
+    current.score = 99
+
+    world:loadSnapshot(snapshot)
+
+    test.equal(loaded, 41)
+    test.assert(finished)
+    test.equal(#snapshot.data, 2)
+end
+
+function suite.rejectsInvalidSnapshotsBeforeClearingTheWorld(): nil
+    local marker = ecs.newTagComponent({name = "test.SnapshotValidation"})
+    local world = ecs.newWorld()
+    local entity = world:spawn(marker)
+    world:commit()
+    local snapshot = world:saveSnapshot()
+    snapshot.archetypes[1].components[1] = "test.SnapshotUnknown"
+    snapshot.componentTable[1].name = "test.SnapshotUnknown"
+
+    test.raises(
+        function(): nil
+            world:loadSnapshot(snapshot)
+        end,
+        "unknown component"
+    )
+    test.assert(world:isAlive(entity))
+end
+
+function suite.rebuildsAllocatorHolesAfterLoading(): nil
+    local world = ecs.newWorld({maxEntities = 4})
+    local first = world:spawn()
+    local hole = world:spawn()
+    local third = world:spawn()
+    world:commit()
+    world:despawn(hole)
+    world:commit()
+    local snapshot = world:saveSnapshot()
+    world:loadSnapshot(snapshot)
+
+    local replacement = world:spawn()
+
+    test.equal(idallocator.slotOf(replacement), idallocator.slotOf(hole))
+    test.assert(world:isAlive(first))
+    test.assert(world:isAlive(third))
+end
+
+function suite.commitsPendingWorkBeforeSaving(): nil
+    local marker = ecs.newTagComponent({name = "test.SnapshotPending"})
+    local world = ecs.newWorld()
+    local entity = world:spawn(marker)
+    local snapshot = world:saveSnapshot()
+    test.assert(world:isAlive(entity))
+    test.equal(snapshot.entityCount, 1)
+end
+
+function suite.rejectsCyclesAndDuplicateDataKeys(): nil
+    local world = ecs.newWorld()
+    local cyclic: {[string]: any} = {}
+    cyclic.self = cyclic
+    test.raises(
+        function(): nil
+            world:saveSnapshot({customData = {cycle = cyclic}})
+        end,
+        "cannot contain a cycle"
+    )
+    world:addSnapshotHandler({
+        name = "duplicate",
+        save = function(exclusive _running: ecs.World): any
+            return 1
+        end,
+    })
+    test.raises(
+        function(): nil
+            world:saveSnapshot({customData = {duplicate = 2}})
+        end,
+        "written twice"
+    )
+end
+
+return suite

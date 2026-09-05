@@ -1,4 +1,4 @@
-module tecsbench.harness
+module tecs.bench.harness
 
 --[[
 Warmup, sampling, and percentile reporting shared by the Nupp benchmarks.

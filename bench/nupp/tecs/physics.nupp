@@ -39,7 +39,7 @@
 
 local ecs = require("tecs.ecs")
 
-local harness = require("tecsbench.harness")
+local harness = require("tecs.bench.harness")
 local physics = require("tecs.physics")
 local time = require("nupp.time")
 

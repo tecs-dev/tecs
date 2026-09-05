@@ -1,4 +1,4 @@
-local harness = require("tecsbench.harness")
+local harness = require("tecs.bench.harness")
 local test = require("nupp.test")
 local suite = {}
 

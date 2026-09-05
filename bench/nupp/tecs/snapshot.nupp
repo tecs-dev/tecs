@@ -23,7 +23,7 @@
 
 local ecs = require("tecs.ecs")
 
-local harness = require("tecsbench.harness")
+local harness = require("tecs.bench.harness")
 
 const COUNT = harness.count("BENCH_SNAPSHOT_COUNT", 10000)
 const WARMUP = harness.optionalCount("BENCH_SNAPSHOT_WARMUP", 5)

@@ -1,0 +1,55 @@
+local test = require("nupp.test")
+local archetype = require("tecs.internal.archetype")
+local components = require("tecs.internal.components")
+local query = require("tecs.internal.query")
+local suite = {}
+
+function suite.matchesIncludeAndExcludeConstraints(): nil
+    local visible = components.newTagComponent({name = "test.QueryVisible"})
+    local hidden = components.newTagComponent({name = "test.QueryHidden"})
+    local value = query.new({include = {visible}, exclude = {hidden}})
+    test.assert(query.matches(value, archetype.new(1, {visible})))
+    test.assert(not query.matches(value, archetype.new(2, {})))
+    test.assert(not query.matches(value, archetype.new(3, {visible, hidden})))
+end
+
+function suite.iteratesOnlyNonemptyMatches(): nil
+    local tag = components.newTagComponent({name = "test.QueryIteration"})
+    local value = query.new({include = {tag}})
+    local empty = archetype.new(1, {tag})
+    local populated = archetype.new(2, {tag})
+    populated.entities[1] = 41
+    populated.entities[2] = 42
+    query.addArchetype(value, empty)
+    query.addArchetype(value, populated)
+
+    local seen: integer = 0
+    for candidate, count in value:iter() do
+        test.assert(candidate == populated)
+        test.equal(count, 2)
+        seen = seen + 1
+    end
+    test.equal(seen, 1)
+end
+
+local record QueryPoint
+    x: number
+end
+
+function suite.exposesTypedRawColumnsOnMatchingArchetypes(): nil
+    local position = components.newComponent({
+        name = "test.QueryPosition",
+        construct = function(x: number): QueryPoint
+            return new QueryPoint(x = x)
+        end,
+        default = function(): QueryPoint
+            return new QueryPoint(x = 0)
+        end
+    })
+    local candidate = archetype.new(1, {position})
+    archetype.append(candidate, 7, {[position.componentId] = new QueryPoint(x = 11)})
+    local positions: {QueryPoint} = assert(candidate:get(position))
+    test.equal(positions[1].x, 11)
+end
+
+return suite

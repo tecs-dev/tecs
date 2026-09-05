@@ -1,0 +1,14 @@
+local test = require("nupp.test")
+local componentids = require("tecs.internal.componentids")
+local suite = {}
+
+function suite.allocatesPositiveMonotonicIds(): nil
+    local first = componentids.allocate()
+    local second = componentids.allocate()
+    local third = componentids.allocate()
+    test.assert(first > 0)
+    test.equal(second, first + 1)
+    test.equal(third, second + 1)
+end
+
+return suite

@@ -1,0 +1,447 @@
+local test = require("nupp.test")
+local components = require("tecs.internal.components")
+local idallocator = require("tecs.internal.idallocator")
+local phases = require("tecs.internal.phases")
+local world = require("tecs.internal.world")
+local suite = {}
+
+function suite.publishesSpawnsAtCommit(): nil
+    local value = world.new(4)
+    local entity = value:spawn()
+    test.assert(not value:isAlive(entity))
+    test.equal(value.liveCount, 0)
+    value:commit()
+    test.assert(value:isAlive(entity))
+    test.equal(value.liveCount, 1)
+end
+
+function suite.publishesDespawnsAtCommit(): nil
+    local value = world.new(4)
+    local entity = value:spawn()
+    value:commit()
+    value:despawn(entity)
+    test.assert(value:isAlive(entity))
+    value:commit()
+    test.assert(not value:isAlive(entity))
+    test.equal(value.liveCount, 0)
+end
+
+function suite.cancelsASpawnDespawnedBeforePublication(): nil
+    local value = world.new(2)
+    local entity = value:spawn()
+    value:despawn(entity)
+    value:commit()
+    test.assert(not value:isAlive(entity))
+    test.equal(value.liveCount, 0)
+
+    local replacement = value:spawn()
+    test.equal(idallocator.slotOf(replacement), idallocator.slotOf(entity))
+    test.assert(replacement ~= entity)
+end
+
+function suite.recyclesSlotsWithoutRevivingStaleIds(): nil
+    local value = world.new(2)
+    local first = value:spawn()
+    value:commit()
+    value:despawn(first)
+    value:commit()
+    local second = value:spawn()
+    value:commit()
+    test.equal(idallocator.slotOf(second), idallocator.slotOf(first))
+    test.assert(not value:isAlive(first))
+    test.assert(value:isAlive(second))
+
+    value:despawn(first)
+    value:commit()
+    test.assert(value:isAlive(second))
+end
+
+function suite.preservesDenseRowsAcrossSwapRemoval(): nil
+    local value = world.new(4)
+    local first = value:spawn()
+    local second = value:spawn()
+    local third = value:spawn()
+    value:commit()
+    value:despawn(second)
+    value:commit()
+    test.assert(value:isAlive(first))
+    test.assert(value:isAlive(third))
+    test.equal(value.liveCount, 2)
+end
+
+function suite.restoresExactPackedIds(): nil
+    local value = world.new(8)
+    local restored = idallocator.encodeId(6, 17)
+    value:spawnAt(restored)
+    value:commit()
+    test.assert(value:isAlive(restored))
+    local automatic = value:spawn()
+    test.equal(idallocator.slotOf(automatic), 7)
+end
+
+function suite.clearInvalidatesCommittedAndPendingIds(): nil
+    local value = world.new(4)
+    local committed = value:spawn()
+    value:commit()
+    local pending = value:spawn()
+    value:clearEntities()
+    test.assert(not value:isAlive(committed))
+    test.assert(not value:isAlive(pending))
+    test.equal(value.liveCount, 0)
+    test.equal(idallocator.slotOf(value:spawn()), 1)
+end
+
+function suite.groupsEquivalentTagSignaturesIntoOneArchetype(): nil
+    local first = components.newTagComponent({name = "test.WorldSignatureFirst"})
+    local second = components.newTagComponent({name = "test.WorldSignatureSecond"})
+    local value = world.new(4)
+    local left = value:spawn(first, second)
+    local right = value:spawn(second, first)
+    test.equal(value.archetypeCount, 2)
+    value:commit()
+    test.assert(value:has(left, first))
+    test.assert(value:has(left, second))
+    test.assert(value:has(right, first))
+    test.assert(value:has(right, second))
+end
+
+function suite.keepsTagMembershipCorrectAfterSwapRemoval(): nil
+    local tag = components.newTagComponent({name = "test.WorldSwapTag"})
+    local value = world.new(4)
+    local first = value:spawn(tag)
+    local middle = value:spawn(tag)
+    local last = value:spawn(tag)
+    value:commit()
+    value:despawn(middle)
+    value:commit()
+    test.assert(value:has(first, tag))
+    test.assert(value:has(last, tag))
+    test.assert(not value:has(middle, tag))
+end
+
+function suite.updatesReusableQueriesAsArchetypesAppear(): nil
+    local included = components.newTagComponent({name = "test.WorldQueryIncluded"})
+    local excluded = components.newTagComponent({name = "test.WorldQueryExcluded"})
+    local value = world.new(8)
+    local matching = value:newQuery({include = {included}, exclude = {excluded}})
+    value:spawn(included)
+    value:spawn(included)
+    value:spawn(included, excluded)
+    value:commit()
+
+    local archetypes: integer = 0
+    local entities: integer = 0
+    for _, count in matching:iter() do
+        archetypes = archetypes + 1
+        entities = entities + (count as integer)
+    end
+    test.equal(archetypes, 1)
+    test.equal(entities, 2)
+end
+
+function suite.queriesSkipArchetypesAfterTheirLastEntityLeaves(): nil
+    local tag = components.newTagComponent({name = "test.WorldQueryEmptied"})
+    local value = world.new(2)
+    local matching = value:newQuery({include = {tag}})
+    local entity = value:spawn(tag)
+    value:commit()
+    value:despawn(entity)
+    value:commit()
+    local seen: integer = 0
+    for _ in matching:iter() do
+        seen = seen + 1
+    end
+    test.equal(seen, 0)
+end
+
+function suite.stagesTagAddsAndRemovalsAtCommit(): nil
+    local tag = components.newTagComponent({name = "test.WorldMutationTag"})
+    local value = world.new(2)
+    local entity = value:spawn()
+    value:commit()
+    value:set(entity, tag)
+    test.assert(not value:has(entity, tag))
+    value:commit()
+    test.assert(value:has(entity, tag))
+    value:remove(entity, tag)
+    test.assert(value:has(entity, tag))
+    value:commit()
+    test.assert(not value:has(entity, tag))
+end
+
+function suite.coalescesTagChangesOnPendingSpawns(): nil
+    local kept = components.newTagComponent({name = "test.WorldPendingKept"})
+    local removed = components.newTagComponent({name = "test.WorldPendingRemoved"})
+    local value = world.new(2)
+    local entity = value:spawn(removed)
+    value:set(entity, kept)
+    value:remove(entity, removed)
+    value:commit()
+    test.assert(value:has(entity, kept))
+    test.assert(not value:has(entity, removed))
+end
+
+function suite.movesEntitiesIntoAndOutOfActiveQueries(): nil
+    local tag = components.newTagComponent({name = "test.WorldMutationQuery"})
+    local value = world.new(2)
+    local matching = value:newQuery({include = {tag}})
+    local entity = value:spawn()
+    value:commit()
+    value:set(entity, tag)
+    value:commit()
+    local included: integer = 0
+    for _, count in matching:iter() do
+        included = included + (count as integer)
+    end
+    test.equal(included, 1)
+
+    value:remove(entity, tag)
+    value:commit()
+    local afterRemoval: integer = 0
+    for _, count in matching:iter() do
+        afterRemoval = afterRemoval + (count as integer)
+    end
+    test.equal(afterRemoval, 0)
+end
+
+function suite.spawnsAndReadsRawScalarValues(): nil
+    local health = components.newScalarComponent({name = "test.WorldScalarHealth", kind = "number", default = 100})
+    local value = world.new(4)
+    local explicit = value:spawn(health(42))
+    local defaulted = value:spawn(health)
+    value:commit()
+    local explicitHealth: number? = value:get(explicit, health)
+    local defaultHealth: number? = value:get(defaulted, health)
+    test.equal(explicitHealth as number, 42)
+    test.equal(defaultHealth as number, 100)
+end
+
+function suite.stagesScalarAddsAndUpdates(): nil
+    local mana = components.newScalarComponent({name = "test.WorldScalarMana", kind = "number"})
+    local value = world.new(2)
+    local entity = value:spawn()
+    value:commit()
+    value:set(entity, mana, 50)
+    test.assert(value:get(entity, mana) == nil)
+    value:commit()
+    test.equal(value:get(entity, mana) as number, 50)
+    value:set(entity, mana(75))
+    test.equal(value:get(entity, mana) as number, 50)
+    value:commit()
+    test.equal(value:get(entity, mana) as number, 75)
+end
+
+function suite.carriesScalarsAcrossSignatureMoves(): nil
+    local health = components.newScalarComponent({name = "test.WorldMovedHealth", kind = "number"})
+    local selected = components.newTagComponent({name = "test.WorldMovedSelected"})
+    local value = world.new(3)
+    local entity = value:spawn(health(37))
+    value:commit()
+    value:set(entity, selected)
+    value:commit()
+    test.equal(value:get(entity, health) as number, 37)
+    test.assert(value:get(entity, selected) == selected)
+    value:remove(entity, selected)
+    value:commit()
+    test.equal(value:get(entity, health) as number, 37)
+end
+
+function suite.keepsScalarRowsAlignedAfterSwapRemoval(): nil
+    local score = components.newScalarComponent({name = "test.WorldSwapScore", kind = "number"})
+    local value = world.new(4)
+    local first = value:spawn(score(1))
+    local middle = value:spawn(score(2))
+    local last = value:spawn(score(3))
+    value:commit()
+    value:despawn(middle)
+    value:commit()
+    test.equal(value:get(first, score) as number, 1)
+    test.equal(value:get(last, score) as number, 3)
+end
+
+local record Position
+    x: number
+    y: number
+end
+
+function suite.spawnsUpdatesAndMovesTableComponents(): nil
+    local position = components.newComponent({
+        name = "test.WorldPosition",
+        construct = function(x: number, y: number): Position
+            return new Position(x = x, y = y)
+        end,
+        default = function(): Position
+            return new Position(x = 0, y = 0)
+        end
+    })
+    local visible = components.newTagComponent({name = "test.WorldPositionVisible"})
+    local value = world.new(3)
+    local entity = value:spawn(position(2, 5))
+    value:commit()
+    local initial: Position = assert(value:get(entity, position))
+    test.equal(initial.x, 2)
+    test.equal(initial.y, 5)
+
+    value:set(entity, visible)
+    value:commit()
+    local moved: Position = assert(value:get(entity, position))
+    test.assert(moved == initial)
+
+    value:set(entity, position(7, 9))
+    value:commit()
+    local updated: Position = assert(value:get(entity, position))
+    test.equal(updated.x, 7)
+    test.equal(updated.y, 9)
+end
+
+function suite.usesFreshTableDefaultsPerEntity(): nil
+    local state = components.newComponent({
+        name = "test.WorldDefaultPosition",
+        construct = function(x: number): Position
+            return new Position(x = x, y = 0)
+        end,
+        default = function(): Position
+            return new Position(x = 0, y = 0)
+        end
+    })
+    local value = world.new(3)
+    local first = value:spawn(state)
+    local second = value:spawn(state)
+    value:commit()
+    local left = assert(value:get(first, state))
+    local right = assert(value:get(second, state))
+    test.assert(left ~= right)
+    left.x = 12
+    test.equal(right.x, 0)
+end
+
+function suite.exposesTypedColumnsDuringQueryIteration(): nil
+    local position = components.newComponent({
+        name = "test.WorldQueriedPosition",
+        construct = function(x: number, y: number): Position
+            return new Position(x = x, y = y)
+        end,
+        default = function(): Position
+            return new Position(x = 0, y = 0)
+        end
+    })
+    local value = world.new(3)
+    local matching = value:newQuery({include = {position}})
+    local first = value:spawn(position(1, 2))
+    local second = value:spawn(position(3, 4))
+    value:commit()
+    for candidate, count in matching:iter() do
+        local active = assert(candidate)
+        local positions: {Position} = assert(active:get(position))
+        local entities = active.entities
+        for index = 1, count as integer do
+            positions[index].x = positions[index].x + 10
+            test.assert(entities[index] == first or entities[index] == second)
+        end
+    end
+    test.equal(assert(value:get(first, position)).x, 11)
+    test.equal(assert(value:get(second, position)).x, 13)
+end
+
+function suite.runsSystemsInPhaseAndRegistrationOrder(): nil
+    local value = world.new(2)
+    local order: {string} = {}
+    value:addSystem({
+        name = "test.system.update.first",
+        phase = phases.Update,
+        run = function(_dt: number, exclusive _running: world.World): nil
+            order[#order + 1] = "update-first"
+        end
+    })
+    value:addSystem({
+        name = "test.system.first",
+        phase = phases.First,
+        run = function(_dt: number, exclusive _running: world.World): nil
+            order[#order + 1] = "first"
+        end
+    })
+    value:addSystem({
+        name = "test.system.update.second",
+        phase = phases.Update,
+        run = function(_dt: number, exclusive _running: world.World): nil
+            order[#order + 1] = "update-second"
+        end
+    })
+    value:update(0.25)
+    test.equal(table.concat(order, ","), "first,update-first,update-second")
+end
+
+function suite.honorsSystemGatesAndSamePhaseBarriers(): nil
+    local marker = components.newTagComponent({name = "test.SystemBarrierMarker"})
+    local value = world.new(2)
+    local spawned: integer = 0
+    local observed: boolean = false
+    value:addSystem({
+        name = "test.system.producer",
+        phase = phases.Update,
+        commitAfter = true,
+        runIf = function(dt: number, exclusive _running: world.World, name: string): boolean
+            return dt == 0.5 and name == "test.system.producer"
+        end,
+        run = function(_dt: number, exclusive running: world.World): nil
+            spawned = running:spawn(marker)
+        end
+    })
+    value:addSystem({
+        name = "test.system.consumer",
+        phase = phases.Update,
+        run = function(_dt: number, exclusive running: world.World): nil
+            observed = running:has(spawned, marker)
+        end
+    })
+    value:update(0.5)
+    test.assert(observed)
+end
+
+function suite.removesSystemsWithoutDestabilizingDispatch(): nil
+    local value = world.new(2)
+    local calls: integer = 0
+    value:addSystem({
+        name = "test.system.removed",
+        phase = phases.Update,
+        run = function(_dt: number, exclusive running: world.World): nil
+            calls = calls + 1
+            test.assert(running:removeSystem("test.system.removed"))
+        end
+    })
+    value:update(0)
+    value:update(0)
+    test.equal(calls, 1)
+    test.equal(value.systemCount, 0)
+end
+
+function suite.recoversPipelineBookkeepingAfterASystemRaises(): nil
+    local value = world.new(2)
+    value:addSystem({
+        name = "test.system.failure",
+        phase = phases.Update,
+        run = function(_dt: number, exclusive _running: world.World): nil
+            error("expected system failure")
+        end
+    })
+    test.raises(
+        function(): nil
+            value:update(0)
+        end,
+        "expected system failure"
+    )
+    test.assert(value:removeSystem("test.system.failure"))
+
+    local recovered: boolean = false
+    value:addSystem({
+        name = "test.system.recovered",
+        phase = phases.Update,
+        run = function(_dt: number, exclusive _running: world.World): nil
+            recovered = true
+        end
+    })
+    value:update(0)
+    test.assert(recovered)
+end
+
+return suite

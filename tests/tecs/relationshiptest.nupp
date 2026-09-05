@@ -1,0 +1,150 @@
+local test = require("nupp.test")
+local components = require("tecs.internal.components")
+local world = require("tecs.internal.world")
+local suite = {}
+
+function suite.requiresAReverseIndexForCascadeDeletion(): nil
+    test.raises(
+        function(): nil
+            components.newRelationship({
+                name = "test.RelationshipInvalidCascade",
+                exclusive = true,
+                cascadeDelete = true
+            })
+        end,
+        "requires reverseIndex"
+    )
+end
+
+function suite.storesTargetsAndBuildsAWorldLocalReverseIndex(): nil
+    local childOf = components.newRelationship({
+        name = "test.RelationshipIndexed",
+        exclusive = true,
+        reverseIndex = true
+    })
+    local value = world.new(4)
+    local parent = value:spawn()
+    local child = value:spawn(childOf(parent))
+    value:commit()
+    local relationship: components.RelationshipValue = assert(value:get(child, childOf))
+    test.equal(relationship.target, parent)
+    local sources = value:relationshipSources(childOf, parent)
+    test.equal(#sources, 1)
+    test.equal(sources[1], child)
+end
+
+function suite.reparentsExclusiveRelationshipsAtTheBarrier(): nil
+    local childOf = components.newRelationship({
+        name = "test.RelationshipReparent",
+        exclusive = true,
+        reverseIndex = true
+    })
+    local value = world.new(4)
+    local firstParent = value:spawn()
+    local secondParent = value:spawn()
+    local child = value:spawn(childOf(firstParent))
+    value:commit()
+    value:set(child, childOf(secondParent))
+    test.equal(assert(value:get(child, childOf)).target, firstParent)
+    value:commit()
+    test.equal(assert(value:get(child, childOf)).target, secondParent)
+    test.equal(#value:relationshipSources(childOf, firstParent), 0)
+    test.equal(value:relationshipSources(childOf, secondParent)[1], child)
+end
+
+function suite.removesRelationshipsWithoutDespawningTheSource(): nil
+    local childOf = components.newRelationship({
+        name = "test.RelationshipRemove",
+        exclusive = true,
+        reverseIndex = true
+    })
+    local value = world.new(3)
+    local parent = value:spawn()
+    local child = value:spawn(childOf(parent))
+    value:commit()
+    value:remove(child, childOf)
+    value:commit()
+    test.assert(value:isAlive(child))
+    test.assert(value:get(child, childOf) == nil)
+    test.equal(#value:relationshipSources(childOf, parent), 0)
+end
+
+function suite.cascadeDeletesACommittedDescendantTree(): nil
+    local childOf = components.newRelationship({
+        name = "test.RelationshipCascade",
+        exclusive = true,
+        reverseIndex = true,
+        cascadeDelete = true
+    })
+    local value = world.new(5)
+    local parent = value:spawn()
+    local child = value:spawn(childOf(parent))
+    local grandchild = value:spawn(childOf(child))
+    value:commit()
+    value:despawn(parent)
+    value:commit()
+    test.assert(not value:isAlive(parent))
+    test.assert(not value:isAlive(child))
+    test.assert(not value:isAlive(grandchild))
+    test.equal(value.liveCount, 0)
+end
+
+function suite.keepsReverseIndexesIsolatedBetweenWorlds(): nil
+    local childOf = components.newRelationship({
+        name = "test.RelationshipWorldIsolation",
+        exclusive = true,
+        reverseIndex = true,
+        cascadeDelete = true
+    })
+    local first = world.new(3)
+    local second = world.new(3)
+    local firstParent = first:spawn()
+    local firstChild = first:spawn(childOf(firstParent))
+    local secondParent = second:spawn()
+    local secondChild = second:spawn(childOf(secondParent))
+    first:commit()
+    second:commit()
+    first:despawn(firstParent)
+    first:commit()
+    test.assert(not first:isAlive(firstChild))
+    test.assert(second:isAlive(secondParent))
+    test.assert(second:isAlive(secondChild))
+    test.equal(second:relationshipSources(childOf, secondParent)[1], secondChild)
+end
+
+function suite.cascadesThroughPendingSpawnsWhenAParentIsCancelled(): nil
+    local childOf = components.newRelationship({
+        name = "test.RelationshipPendingCascade",
+        exclusive = true,
+        reverseIndex = true,
+        cascadeDelete = true
+    })
+    local value = world.new(4)
+    local parent = value:spawn()
+    local child = value:spawn(childOf(parent))
+    local grandchild = value:spawn(childOf(child))
+    value:despawn(parent)
+    value:commit()
+    test.assert(not value:isAlive(parent))
+    test.assert(not value:isAlive(child))
+    test.assert(not value:isAlive(grandchild))
+    test.equal(value.liveCount, 0)
+end
+
+function suite.matchesRelationshipComponentsInQueries(): nil
+    local follows = components.newRelationship({name = "test.RelationshipQuery", exclusive = true})
+    local value = world.new(3)
+    local matching = value:newQuery({include = {follows}})
+    local target = value:spawn()
+    value:spawn(follows(target))
+    value:commit()
+    local count: integer = 0
+    for candidate, length in matching:iter() do
+        local relationships: {components.RelationshipValue} = assert(assert(candidate):get(follows))
+        test.equal(relationships[1].target, target)
+        count = count + (length as integer)
+    end
+    test.equal(count, 1)
+end
+
+return suite

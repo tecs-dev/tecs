@@ -435,9 +435,11 @@ function Server.pump(exclusive self: Server): nil
     if self.destroyed then
         return
     end
-    -- The reactor first, so a connection whose bytes arrived between frames is
-    -- runnable before anything is resumed.
-    net.pump(0)
+    -- `suspension.poll` drives every registered source, the network reactor
+    -- among them, so a connection whose bytes arrived between frames is
+    -- runnable before anything is resumed. `nupp.io.net` used to expose a pump
+    -- of its own and no longer does; the reactor is reached only through the
+    -- suspension protocol now.
     suspension.poll()
 
     local pass = self.runnable

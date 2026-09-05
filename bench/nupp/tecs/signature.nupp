@@ -29,7 +29,7 @@
 local archetype = require("tecs.internal.archetype")
 
 local components = require("tecs.internal.components")
-local harness = require("tecsbench.harness")
+local harness = require("tecs.bench.harness")
 local query = require("tecs.internal.query")
 
 const COMPONENTS = harness.count("BENCH_SIGNATURE_COMPONENTS", 64)

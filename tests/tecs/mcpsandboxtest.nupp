@@ -1,0 +1,174 @@
+local ecs = require("tecs.ecs")
+local json = require("nupp.data.json")
+local mcp = require("tecs.mcp")
+local sandbox = require("tecs.internal.mcpsandbox")
+local test = require("nupp.test")
+
+local suite = {}
+
+local function call(name: string, arguments: {[string]: any}): {[string]: any}
+    local response = json.decode(
+        mcp.dispatch(
+            json.encode({
+                jsonrpc = "2.0",
+                id = 1,
+                method = "tools/call",
+                params = {name = name, arguments = arguments}
+            })
+        ),
+        json.NULL
+    ) as {[string]: any}
+
+    return response.result as {[string]: any}
+end
+
+local function structured(result: {[string]: any}): {[string]: any}
+    return result.structuredContent as {[string]: any}
+end
+
+local function errorText(result: {[string]: any}): string
+    local content = result.content as {{[string]: any}}
+
+    return content[1].text as string
+end
+
+function suite.removesTheNamesThatDamageTheMachine(): nil
+    mcp.resetSandbox()
+
+    -- Absent on purpose. Each of these reaches the filesystem or the process
+    -- rather than the game.
+    test.assert(not sandbox.reaches("io"))
+    test.assert(not sandbox.reaches("dofile"))
+    test.assert(not sandbox.reaches("loadfile"))
+    test.assert(not sandbox.reaches("load"))
+    test.assert(not sandbox.reaches("loadstring"))
+end
+
+function suite.keepsTheNamesAnExploringAgentNeeds(): nil
+    mcp.resetSandbox()
+
+    test.assert(sandbox.reaches("pairs"))
+    test.assert(sandbox.reaches("string"))
+    test.assert(sandbox.reaches("table"))
+    test.assert(sandbox.reaches("math"))
+    -- Deliberately reachable: the sandbox is a guard rail, not a boundary.
+    test.assert(sandbox.reaches("require"))
+end
+
+function suite.passesThroughOnlyTheHarmlessHalfOfOs(): nil
+    mcp.resetSandbox()
+    local chunk = assert(sandbox.compile("return os.time ~= nil, os.execute, os.remove, os.exit"))
+    local hasTime, execute, remove, exit = chunk(nil)
+
+    test.assert(hasTime == true)
+    test.assert(execute == nil)
+    test.assert(remove == nil)
+    test.assert(exit == nil)
+end
+
+function suite.reportsASyntaxErrorRatherThanRaising(): nil
+    local chunk, reason = sandbox.compile("this is not lua at all ((")
+
+    test.assert(chunk == nil)
+    test.assert((reason as string):find("run_lua", 1, true) ~= nil)
+end
+
+function suite.describesValuesJSONCannotCarry(): nil
+    local described = sandbox.describe(function(): nil
+    end) as string
+    test.assert(described:find("<function:", 1, true) == 1)
+
+    test.equal(sandbox.describe(3) as integer, 3)
+    test.equal(sandbox.describe("text") as string, "text")
+    test.assert(sandbox.describe(nil) == json.NULL)
+    test.assert(json.isArray(sandbox.describe({})))
+end
+
+function suite.summarizesATableNestedPastTheDepthCap(): nil
+    local deep: {[string]: any} = {}
+    local cursor = deep
+    for _ = 1, 10 do
+        local next: {[string]: any} = {}
+        cursor.inner = next
+        cursor = next
+    end
+
+    local described = sandbox.describe(deep) as {[string]: any}
+    local walked = described
+    for _ = 1, 6 do
+        walked = walked.inner as {[string]: any}
+    end
+
+    test.equal(type(walked), "string")
+end
+
+function suite.runsLuaWithTheWorldInScope(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    world:spawn()
+    world:spawn()
+    world:commit()
+    mcp.bind(world, nil)
+    mcp.resetSandbox()
+
+    local result = call("run_lua", {code = "world.liveCount"})
+    local values = structured(result).values as {any}
+
+    test.equal(structured(result).returned as integer, 1)
+    test.equal(values[1] as integer, 2)
+end
+
+function suite.keepsStateBetweenCalls(): nil
+    local world = ecs.newWorld({maxEntities = 2})
+    mcp.bind(world, nil)
+    mcp.resetSandbox()
+
+    call("run_lua", {code = "stashed = 41"})
+    local result = call("run_lua", {code = "stashed + 1"})
+
+    test.equal((structured(result).values as {any})[1] as integer, 42)
+end
+
+function suite.forgetsStashedStateOnReset(): nil
+    local world = ecs.newWorld({maxEntities = 2})
+    mcp.bind(world, nil)
+    mcp.resetSandbox()
+
+    call("run_lua", {code = "stashed = 41"})
+    mcp.resetSandbox()
+    local result = call("run_lua", {code = "stashed"})
+    local values = structured(result).values as {any}
+
+    test.assert(values[1] == json.NULL)
+end
+
+function suite.refusesEmptyCode(): nil
+    local world = ecs.newWorld({maxEntities = 2})
+    mcp.bind(world, nil)
+
+    local result = call("run_lua", {code = ""})
+
+    test.assert(result.isError == true)
+    test.equal(errorText(result), "code is required")
+end
+
+function suite.reportsCodeThatDoesNotCompile(): nil
+    local world = ecs.newWorld({maxEntities = 2})
+    mcp.bind(world, nil)
+
+    local result = call("run_lua", {code = "do do do"})
+
+    test.assert(result.isError == true)
+    test.assert(errorText(result):find("does not compile", 1, true) == 1)
+end
+
+function suite.refusesToReachTheFilesystemFromTheSandbox(): nil
+    local world = ecs.newWorld({maxEntities = 2})
+    mcp.bind(world, nil)
+    mcp.resetSandbox()
+
+    local result = call("run_lua", {code = "return io == nil and os.execute == nil"})
+
+    test.assert((structured(result).values as {any})[1] == true)
+end
+
+return suite

@@ -26,7 +26,10 @@ pub const OUTPUT: &str = "out/nupp";
 pub const DEFAULT_TARGET: &str = "headless";
 
 /// Where the Nupp benchmark programs live.
-pub const BENCHMARKS: &str = "bench/nupp";
+// Benchmarks live under the `tecs` namespace because several reach
+// `tecs.internal` modules, which the checker restricts to importers whose
+// first namespace segment matches.
+pub const BENCHMARKS: &str = "bench/nupp/tecs";
 
 /// Where the rendered Nupp documentation site is written.
 pub const DOCUMENTATION: &str = "out/nupp-docs";
