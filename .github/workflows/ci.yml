@@ -73,51 +73,50 @@ jobs:
                 os: [macos-15, ubuntu-latest]
         runs-on: ${{ matrix.os }}
         env:
-            # Provisional pin. The rewrite is developed against a 0.0.2-dev
-            # compiler and v0.0.1 is the only published release, so this has
-            # not been proven to check the tree. Move it to 0.0.2 as soon as
-            # that ships, and treat a failure here as the pin being behind
-            # rather than as a defect in the tree.
-            NUPP_VERSION: v0.0.1
+            # A commit, not a release. The tree needs `Carry standard modules in
+            # components` and `Carry seam providers in components`, and v0.0.1
+            # is still the only tag and predates both, so a released compiler
+            # cannot check this tree or load a component it builds. Move this to
+            # a tag once one carries them.
+            NUPP_REF: f1cce05523f5cee9b70951d1760f0e08ebfc8ff6
         steps:
             - uses: actions/checkout@v4
-            - if: runner.os == 'macOS'
-              run: brew install nupp-lang/tap/nupp
-            - if: runner.os == 'Linux'
+              with:
+                  path: tecs
+            - uses: actions/checkout@v4
+              with:
+                  repository: nupp-lang/nupp
+                  ref: ${{ env.NUPP_REF }}
+                  path: nupp
+            - name: Build the Nupp compiler
+              working-directory: nupp
               run: |
-                  curl -fsSL -o nupp.tar.gz \
-                    "https://github.com/nupp-lang/nupp/releases/download/${NUPP_VERSION}/nupp-linux-x86_64.tar.gz"
-                  sudo mkdir -p /opt/nupp
-                  sudo tar xzf nupp.tar.gz -C /opt/nupp
-                  echo /opt/nupp >> "$GITHUB_PATH"
-            - run: nupp fmt --check
-            - run: nupp check --strict
-            # The benchmarks are Nupp programs under an include root, so the two
-            # checks above already cover them. Compiling one proves it still
-            # runs, which a type check does not: a benchmark that raises during
-            # setup type-checks fine.
-            - run: nupp run -O2 bench/nupp/signature.nupp
+                  ./bin/nupp build --target bootstrapCompiler
+                  echo "$PWD/bin" >> "$GITHUB_PATH"
+            - working-directory: tecs
+              run: nupp fmt --check
+            - working-directory: tecs
+              run: nupp check --strict
             # The native service tests skip when their library is absent, so
-            # building them is what makes the two Nupp-to-Rust bindings
+            # building them is what makes the three Nupp-to-Rust bindings
             # covered rather than reported as skipped. The loader finds the
             # Cargo target directory itself; nothing has to be staged.
-            - run: cargo build -p tecs-audio -p tecs-physics -p tecs-gamepad
-            - run: nupp test
-            - run: nupp build --target headless
-            - run: nupp build --target host
-            - run: nupp build --target flatcolor
-            # The Nupp reference is generated from the docblocks the checker
-            # already reads, so rendering it is what proves a docblock the
-            # generator cannot read. Tealdoc resolves a module only through
-            # `src/<name>.tl` and covers no Nupp module, so the `docs` job says
-            # nothing about this half.
-            - run: cargo run -p tecs-xtask -- nupp docs-check
+            - working-directory: tecs
+              run: cargo build -p tecs-audio -p tecs-physics -p tecs-gamepad
+            - working-directory: tecs
+              run: nupp test
+            - working-directory: tecs
+              run: nupp build --target headless
+            - working-directory: tecs
+              run: nupp build --target host
+            - working-directory: tecs
+              run: nupp build --target flatcolor
 
     nupp-host:
         needs: nupp
         runs-on: macos-15
         env:
-            NUPP_VERSION: v0.0.1
+            NUPP_REF: f1cce05523f5cee9b70951d1760f0e08ebfc8ff6
         steps:
             # Two checkouts side by side. The Nupp compiler release installed by
             # Homebrew ships no `libnupp.a`, so it cannot satisfy
@@ -132,16 +131,18 @@ jobs:
             - uses: actions/checkout@v4
               with:
                   repository: nupp-lang/nupp
-                  ref: ${{ env.NUPP_VERSION }}
+                  ref: ${{ env.NUPP_REF }}
                   path: nupp
-            - run: brew install nupp-lang/tap/nupp
+            - name: Build the Nupp compiler
+              working-directory: nupp
+              run: |
+                  ./bin/nupp build --target bootstrapCompiler
+                  echo "$PWD/bin" >> "$GITHUB_PATH"
             - name: Stage the Nupp embedding SDK
               working-directory: tecs
               run: echo "NUPP_SDK=$(../nupp/scripts/toolchain host-library base,native-files,native-net | tail -1)" >> "$GITHUB_ENV"
             - working-directory: tecs
               run: nupp build --target host
-            - working-directory: tecs
-              run: nupp build --target flatcolor
             - working-directory: tecs
               run: cargo fmt -p tecs-winit-host -- --check
             - working-directory: tecs
@@ -154,8 +155,16 @@ jobs:
               run: cargo test -p tecs-winit-host
             - working-directory: tecs
               run: cargo run -p tecs-winit-host -- --headless --frames 1
+            # Every component, not just the smallest. A module that only the
+            # richer examples reach is exactly where the last regression hid:
+            # the suites run in the full Nupp runtime and never load a
+            # component, so this is the only step that reads the reduced one.
             - working-directory: tecs
-              run: cargo run -p tecs-winit-host -- --component out/nupp/flatcolor.nuppc --entry flatcolor.create --headless --frames 2
+              run: cargo xtask nupp run flatcolor -- --headless --frames 2
+            - working-directory: tecs
+              run: cargo xtask nupp run sprites -- --headless --frames 3
+            - working-directory: tecs
+              run: cargo xtask nupp run lighting -- --headless --frames 5
 
     docs:
         runs-on: macos-15
