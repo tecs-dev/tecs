@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 
 use gilrs::ff::{BaseEffect, BaseEffectType, Effect, EffectBuilder, Repeat, Replay, Ticks};
-use gilrs::{Axis, Button, EventType, Gilrs, GilrsBuilder, PowerInfo};
+use gilrs::{EventType, Gilrs, GilrsBuilder, PowerInfo};
 
 use crate::codes::{self, GamepadEvent, HatState, Signal};
 
@@ -36,14 +36,10 @@ pub const POWER_CHARGED: u32 = 4;
 /// The layout matches `cdef struct tecsGamepadInfo` in
 /// `src/tecs/platform/gamepadnative.nupp`.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GamepadInfo {
     /// Nonzero while the device is attached.
     pub connected: i32,
-    /// One bit per present button code, at `1 << (code - 1)`.
-    pub buttons: u32,
-    /// One bit per present axis code, at `1 << (code - 1)`.
-    pub axes: u32,
     /// Nonzero when the device accepts rumble.
     pub force_feedback: i32,
     /// One of the `POWER_` constants.
@@ -51,6 +47,27 @@ pub struct GamepadInfo {
     /// The battery percentage, and -1 when the device will not say.
     pub power_percent: i32,
 }
+
+impl GamepadInfo {
+    /// Returns what a device Tecs cannot find reports about itself.
+    ///
+    /// Not `Default`, because the percentage a device will not say is -1 rather
+    /// than zero, and a zeroed struct would read as a flat battery.
+    pub fn missing() -> Self {
+        Self {
+            connected: 0,
+            force_feedback: 0,
+            power_state: POWER_UNKNOWN,
+            power_percent: -1,
+        }
+    }
+}
+
+/// Asks `Context::has` about a positional button.
+pub const HAS_BUTTON: u32 = 0;
+
+/// Asks `Context::has` about an axis.
+pub const HAS_AXIS: u32 = 1;
 
 /// Selects which string `Context::string` returns.
 pub const STRING_NAME: u32 = 0;
@@ -244,35 +261,12 @@ impl Context {
     /// Reports what one device says about itself.
     pub fn info(&self, device: u32) -> GamepadInfo {
         let Some(gilrs) = self.gilrs.as_ref() else {
-            return GamepadInfo::default();
+            return GamepadInfo::missing();
         };
         let Some(id) = self.identities.get(&device) else {
-            return GamepadInfo::default();
+            return GamepadInfo::missing();
         };
         let pad = gilrs.gamepad(*id);
-        let mut buttons = 0u32;
-        for button in EVERY_BUTTON {
-            let code = codes::button_code(button);
-            if code != 0 && pad.button_code(button).is_some() {
-                buttons |= 1 << (code - 1);
-            }
-        }
-        let mut axes = 0u32;
-        for axis in EVERY_AXIS {
-            let code = codes::axis_code(axis);
-            if code != 0 && pad.axis_code(axis).is_some() {
-                axes |= 1 << (code - 1);
-            }
-        }
-        // A trigger reaches a game as an axis, so a pad reporting it as a
-        // button still has to declare the axis or `hasAxis` denies what
-        // `axis` then answers.
-        for button in [Button::LeftTrigger2, Button::RightTrigger2] {
-            let code = codes::trigger_axis(button);
-            if code != 0 && pad.button_code(button).is_some() {
-                axes |= 1 << (code - 1);
-            }
-        }
         let (state, percent) = match pad.power_info() {
             PowerInfo::Unknown => (POWER_UNKNOWN, -1),
             PowerInfo::Wired => (POWER_NO_BATTERY, -1),
@@ -282,12 +276,40 @@ impl Context {
         };
         GamepadInfo {
             connected: i32::from(pad.is_connected()),
-            buttons,
-            axes,
             force_feedback: i32::from(pad.is_ff_supported()),
             power_state: state,
             power_percent: percent,
         }
+    }
+
+    /// Reports whether one device has the control a code names.
+    ///
+    /// A trigger asks twice, because a pad reporting its triggers as buttons
+    /// still answers a game reading `axis("leftTrigger")`, and denying the
+    /// capability while answering the reading would be worse than either.
+    pub fn has(&self, device: u32, kind: u32, code: u32) -> bool {
+        let Some(gilrs) = self.gilrs.as_ref() else {
+            return false;
+        };
+        let Some(id) = self.identities.get(&device) else {
+            return false;
+        };
+        let pad = gilrs.gamepad(*id);
+        if kind == HAS_BUTTON {
+            return codes::button_for_code(code)
+                .and_then(|button| pad.button_code(button))
+                .is_some();
+        }
+        if kind != HAS_AXIS {
+            return false;
+        }
+        let stick = codes::axis_for_code(code)
+            .and_then(|axis| pad.axis_code(axis))
+            .is_some();
+        stick
+            || codes::trigger_button_for_code(code)
+                .and_then(|button| pad.button_code(button))
+                .is_some()
     }
 
     /// Returns one of a device's strings, valid until the next such call.
@@ -367,35 +389,6 @@ impl Context {
     }
 }
 
-/// Every button a device can report, for the capability mask.
-const EVERY_BUTTON: [Button; 15] = [
-    Button::South,
-    Button::East,
-    Button::West,
-    Button::North,
-    Button::Select,
-    Button::Mode,
-    Button::Start,
-    Button::LeftThumb,
-    Button::RightThumb,
-    Button::LeftTrigger,
-    Button::RightTrigger,
-    Button::DPadUp,
-    Button::DPadDown,
-    Button::DPadLeft,
-    Button::DPadRight,
-];
-
-/// Every axis a device can report, for the capability mask.
-const EVERY_AXIS: [Axis; 6] = [
-    Axis::LeftStickX,
-    Axis::LeftStickY,
-    Axis::RightStickX,
-    Axis::RightStickY,
-    Axis::LeftZ,
-    Axis::RightZ,
-];
-
 /// Formats a device identity the way a saved binding stores it.
 ///
 /// Lowercase hexadecimal with no separators, because the value is matched
@@ -433,7 +426,7 @@ mod tests {
         let mut out = [GamepadEvent::new_device(0, 0); 4];
         assert_eq!(context.drain(&mut out), 0);
         assert!(context.attached().is_empty());
-        assert_eq!(context.info(0), GamepadInfo::default());
+        assert_eq!(context.info(0), GamepadInfo::missing());
         assert!(context.string(0, STRING_NAME).is_none());
         assert!(!context.rumble(0, 1.0, 1.0, 0.5));
     }

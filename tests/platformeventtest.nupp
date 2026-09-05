@@ -126,4 +126,116 @@ function suite.rejectsInvalidTranslatedValues(): nil
     )
 end
 
+function suite.namesEveryKindItDeclaresIncludingTouchAndGamepad(): nil
+    local kinds = platformevents.kinds()
+    local seen: {[string]: boolean} = {}
+    for index = 1, #kinds do
+        test.assert(not seen[kinds[index]], "kind listed twice: " .. kinds[index])
+        seen[kinds[index]] = true
+    end
+    test.equal(#kinds, 22)
+    local expected: {
+        string
+    } = {
+        "fingerDown",
+        "fingerUp",
+        "fingerMotion",
+        "fingerCanceled",
+        "gamepadAdded",
+        "gamepadRemoved",
+        "gamepadButtonDown",
+        "gamepadButtonUp",
+        "gamepadAxis",
+    }
+    for index = 1, #expected do
+        test.assert(seen[expected[index]], "kind missing: " .. expected[index])
+    end
+end
+
+function suite.constructsTouchAndGamepadEvents(): nil
+    local touch = platformevents.touch("fingerMotion", "screen", "3", 40, 60, 0.4, 0.6, 0.5, 2, -1, 5, 1.5, 8)
+    test.equal(touch.kind, "fingerMotion")
+    test.equal(touch.touchDevice, "screen")
+    test.equal(touch.finger, "3")
+    test.equal(touch.dx, 2)
+    test.equal(touch.dy, -1)
+    test.equal(touch.window, 5)
+    test.assert(touch.down)
+
+    local gone = platformevents.touch("fingerUp", "screen", "3", 40, 60)
+    test.assert(not gone.down)
+
+    local added = platformevents.gamepadDevice(true, 2)
+    test.equal(added.kind, "gamepadAdded")
+    test.equal(added.which, 2)
+    -- A gamepad belongs to no window, which is what lets the window fold pass
+    -- it through untouched.
+    test.equal(added.window, 0)
+
+    local pressed = platformevents.gamepadButton(true, 2, 1)
+    test.equal(pressed.kind, "gamepadButtonDown")
+    test.equal(pressed.button, 1)
+    test.assert(pressed.down)
+
+    local moved = platformevents.gamepadAxis(2, 5, 0.5)
+    test.equal(moved.kind, "gamepadAxis")
+    test.equal(moved.axis, 5)
+    test.equal(moved.value, 0.5)
+
+    test.raises(
+        function(): nil
+            local _ = platformevents.gamepadButton(true, 2, 0)
+        end,
+        "button must be positive"
+    )
+    test.raises(
+        function(): nil
+            local _ = platformevents.gamepadAxis(2, 0, 0)
+        end,
+        "axis must be positive"
+    )
+end
+
+function suite.dispatchesTouchAndGamepadToTheirOwnObservers(): nil
+    local world = ecs.newWorld()
+    local seen: {string} = {}
+    world:observe(0, platformevents.on.fingerDown, function(
+        event: platformevents.TouchEvent,
+        exclusive _running: ecs.World
+    ): nil
+        seen[#seen + 1] = event.kind
+    end)
+    world:observe(0, platformevents.on.fingerCanceled, function(
+        event: platformevents.TouchEvent,
+        exclusive _running: ecs.World
+    ): nil
+        seen[#seen + 1] = event.kind
+    end)
+    world:observe(0, platformevents.on.gamepadRemoved, function(
+        event: platformevents.GamepadDeviceEvent,
+        exclusive _running: ecs.World
+    ): nil
+        seen[#seen + 1] = event.kind
+    end)
+    world:observe(0, platformevents.on.gamepadAxis, function(
+        event: platformevents.GamepadAxisEvent,
+        exclusive _running: ecs.World
+    ): nil
+        seen[#seen + 1] = event.kind
+    end)
+
+    platformevents.dispatch(world, platformevents.touch("fingerDown", "screen", "1", 0, 0))
+    platformevents.dispatch(world, platformevents.touch("fingerMotion", "screen", "1", 1, 1))
+    platformevents.dispatch(world, platformevents.touch("fingerCanceled", "screen", "1", 1, 1))
+    platformevents.dispatch(world, platformevents.gamepadDevice(false, 1))
+    platformevents.dispatch(world, platformevents.gamepadAxis(1, 2, 0.25))
+    world:update(0)
+
+    test.equal(#seen, 4)
+    test.equal(seen[1], "fingerDown")
+    test.equal(seen[2], "fingerCanceled")
+    test.equal(seen[3], "gamepadRemoved")
+    test.equal(seen[4], "gamepadAxis")
+end
+
 return suite

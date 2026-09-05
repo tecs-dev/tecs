@@ -1,0 +1,190 @@
+module tecs.platform.gamepadbackend
+
+--[[
+The observation contract between Tecs input policy and a gamepad source.
+
+Tecs owns the policy: the layer stack, frame and fixed-step edges, deadzones,
+and the positional vocabulary a game names a control by. A backend owns device
+enumeration, hot plug and the platform's own event stream, and reports what it
+saw as one array of plain observations per poll. Nothing crosses the seam
+except that array, the capability and identity answers a device is asked for
+directly, and the one outbound command, which is rumble.
+
+Every field is a plain function rather than a method, so a test double is a
+record of closures. That is what makes the whole of `tecs.input` testable with
+no gamepad attached: `none` is the device-free backend a headless build gets,
+and a test that wants to drive a device supplies its own.
+
+```nupp
+local gamepadbackend <const> = require("tecs.platform.gamepadbackend")
+
+local backend <const> = gamepadbackend.none()
+local buffer <const> = {gamepadbackend.newEvent()}
+print(backend.drain(buffer))
+```
+]]
+
+--- Reports that a device appeared.
+export const KIND_ADDED: integer = 1
+
+--- Reports that a device went away.
+export const KIND_REMOVED: integer = 2
+
+--- Reports a button transition to held.
+export const KIND_BUTTON_DOWN: integer = 3
+
+--- Reports a button transition to released.
+export const KIND_BUTTON_UP: integer = 4
+
+--- Reports one axis's new value.
+export const KIND_AXIS: integer = 5
+
+--- Names what a device says about its power source.
+---
+--- Compatibility surface: these are the strings the Teal implementation
+--- returned from `Gamepad:power`, and a game branching on one of them keeps
+--- working across the move. `"error"` is not among them because no source Tecs
+--- reads now distinguishes a failed read from an unknown one.
+export type PowerState = "unknown" | "noBattery" | "onBattery" | "charging" | "charged"
+
+--- One observation a backend produces.
+---
+--- One record covers every kind, because the array crossing the seam has to be
+--- one contiguous run of identical elements. A field a kind does not name
+--- carries whatever the previous use of that record left behind, so a reader
+--- reads only the fields its `kind` claims.
+export record Event
+    --- Read-only. Selects the observation from this module's kind constants.
+    kind: integer
+
+    --- Read-only. Names the device the observation is about.
+    device: integer
+
+    --- Read-only. Carries the button or axis code, and zero for a device
+    --- appearing or going away.
+    code: integer
+
+    --- Read-only. Carries the axis value from -1 to 1, and zero for every
+    --- other kind.
+    value: number
+end
+
+--- What one device reports about itself.
+export record Info
+    --- Read-only. Reports whether the device is still attached.
+    connected: boolean
+
+    --- Read-only. Reports whether the device accepts rumble on this platform.
+    forceFeedback: boolean
+
+    --- Read-only. Reports what the device says about its power source.
+    power: PowerState
+
+    --- Read-only. Reports the battery percentage, and -1 when the device will
+    --- not say.
+    percent: integer
+end
+
+--- Reads one platform's gamepads.
+export record Backend
+    --- Read-only. Reports whether a real device source opened. A false here
+    --- still answers every call; no device ever appears.
+    available: boolean
+
+    --- Read-only. Reads everything the platform produced since the previous
+    --- call and returns how many observations are waiting. Runs on the frame
+    --- thread, because that is the only thread allowed to move platform work
+    --- into Tecs.
+    poll: function(): integer
+
+    --- Read-only. Fills `out` with waiting observations in order and returns
+    --- how many it wrote. Writes at most `#out`, and the rest wait for the
+    --- next call rather than being lost.
+    drain: function(out: {Event}): integer
+
+    --- Read-only. Returns a fresh list of every attached device's identifier.
+    attached: function(): {integer}
+
+    --- Read-only. Returns what one device says about itself. A device that is
+    --- gone answers with `connected` false.
+    info: function(device: integer): Info
+
+    --- Read-only. Reports whether one device has the button a code names.
+    hasButton: function(device: integer, code: integer): boolean
+
+    --- Read-only. Reports whether one device has the axis a code names.
+    hasAxis: function(device: integer, code: integer): boolean
+
+    --- Read-only. Returns the device's display name, and an empty string when
+    --- the platform reports none.
+    name: function(device: integer): string
+
+    --- Read-only. Returns the stable identity a saved binding matches on, and
+    --- an empty string when the platform reports none.
+    guid: function(device: integer): string
+
+    --- Read-only. Plays one rumble effect for `seconds`, replacing whatever
+    --- the device was playing, and reports whether it started. A zero or
+    --- negative duration stops the device instead.
+    rumble: function(device: integer, low: number, high: number, seconds: number): boolean
+
+    --- Read-only. Releases the platform source. Calling anything afterwards is
+    --- a mistake in the caller.
+    close: function(): nil
+end
+
+--- Returns one zeroed observation record.
+---
+--- A caller preallocates a drain buffer of these once and reuses it, because
+--- the seam is crossed every frame and allocating per observation on a path
+--- that exists to avoid per-device calls gives the saving straight back.
+--- @return a fresh caller-owned observation record
+export function newEvent(): Event
+    return new Event(kind = 0, device = 0, code = 0, value = 0)
+end
+
+--- Returns the info a device that is not there reports.
+--- @return a fresh caller-owned info record describing nothing
+export function missing(): Info
+    return new Info(connected = false, forceFeedback = false, power = "unknown", percent = -1)
+end
+
+--- Returns a backend with no devices and no platform source.
+---
+--- This is what a headless build and a device-free test get. Every call
+--- answers, nothing is ever attached, and rumble reports that it did not run.
+--- @return a fresh backend that observes nothing
+export function none(): Backend
+    return new Backend(
+        available = false,
+        poll = function(): integer
+            return 0
+        end,
+        drain = function(_out: {Event}): integer
+            return 0
+        end,
+        attached = function(): {integer}
+            return {}
+        end,
+        info = function(_device: integer): Info
+            return missing()
+        end,
+        hasButton = function(_device: integer, _code: integer): boolean
+            return false
+        end,
+        hasAxis = function(_device: integer, _code: integer): boolean
+            return false
+        end,
+        name = function(_device: integer): string
+            return ""
+        end,
+        guid = function(_device: integer): string
+            return ""
+        end,
+        rumble = function(_device: integer, _low: number, _high: number, _seconds: number): boolean
+            return false
+        end,
+        close = function(): nil
+        end
+    )
+end

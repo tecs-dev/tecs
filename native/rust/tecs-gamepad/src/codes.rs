@@ -178,6 +178,54 @@ pub fn axis_code(value: Axis) -> u32 {
     }
 }
 
+/// Returns the `gilrs` button one Tecs button code names, or `None`.
+pub fn button_for_code(code: u32) -> Option<Button> {
+    match code {
+        button::SOUTH => Some(Button::South),
+        button::EAST => Some(Button::East),
+        button::WEST => Some(Button::West),
+        button::NORTH => Some(Button::North),
+        button::BACK => Some(Button::Select),
+        button::GUIDE => Some(Button::Mode),
+        button::START => Some(Button::Start),
+        button::LEFT_STICK => Some(Button::LeftThumb),
+        button::RIGHT_STICK => Some(Button::RightThumb),
+        button::LEFT_SHOULDER => Some(Button::LeftTrigger),
+        button::RIGHT_SHOULDER => Some(Button::RightTrigger),
+        button::DPAD_UP => Some(Button::DPadUp),
+        button::DPAD_DOWN => Some(Button::DPadDown),
+        button::DPAD_LEFT => Some(Button::DPadLeft),
+        button::DPAD_RIGHT => Some(Button::DPadRight),
+        _ => None,
+    }
+}
+
+/// Returns the `gilrs` axis one Tecs axis code names, or `None`.
+///
+/// A trigger answers with the stick-style axis. A pad that reports its triggers
+/// as buttons instead is covered by [`trigger_button_for_code`], and a
+/// capability query has to ask both.
+pub fn axis_for_code(code: u32) -> Option<Axis> {
+    match code {
+        axis::LEFT_X => Some(Axis::LeftStickX),
+        axis::LEFT_Y => Some(Axis::LeftStickY),
+        axis::RIGHT_X => Some(Axis::RightStickX),
+        axis::RIGHT_Y => Some(Axis::RightStickY),
+        axis::LEFT_TRIGGER => Some(Axis::LeftZ),
+        axis::RIGHT_TRIGGER => Some(Axis::RightZ),
+        _ => None,
+    }
+}
+
+/// Returns the `gilrs` button a trigger axis code can also arrive as.
+pub fn trigger_button_for_code(code: u32) -> Option<Button> {
+    match code {
+        axis::LEFT_TRIGGER => Some(Button::LeftTrigger2),
+        axis::RIGHT_TRIGGER => Some(Button::RightTrigger2),
+        _ => None,
+    }
+}
+
 /// Reports whether an axis code points down the screen rather than up it.
 ///
 /// `gilrs` reports a stick pushed away from the player as positive. Tecs has
@@ -309,6 +357,26 @@ mod tests {
             translate(7, *signal, &mut hat, &mut out);
         }
         out
+    }
+
+    #[test]
+    fn every_code_maps_back_to_the_control_it_came_from() {
+        for code in 1..=button::LAST {
+            let button = button_for_code(code).expect("a button for every code");
+            assert_eq!(button_code(button), code);
+        }
+        for code in 1..=axis::LAST {
+            let axis = axis_for_code(code).expect("an axis for every code");
+            assert_eq!(axis_code(axis), code);
+        }
+        for code in [axis::LEFT_TRIGGER, axis::RIGHT_TRIGGER] {
+            let button = trigger_button_for_code(code).expect("a trigger button");
+            assert_eq!(trigger_axis(button), code);
+        }
+        assert!(button_for_code(0).is_none());
+        assert!(button_for_code(button::LAST + 1).is_none());
+        assert!(axis_for_code(axis::LAST + 1).is_none());
+        assert!(trigger_button_for_code(axis::LEFT_X).is_none());
     }
 
     #[test]

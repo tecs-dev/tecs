@@ -47,6 +47,21 @@ const LAYOUT_EVENT: u32 = 0;
 /// Selects the info struct in `tecs_gamepad_layout`.
 const LAYOUT_INFO: u32 = 1;
 
+/// Selects the device-identifier struct in `tecs_gamepad_layout`.
+const LAYOUT_DEVICE: u32 = 2;
+
+/// One attached device's identifier.
+///
+/// A struct around one number rather than a bare number, because the managed
+/// binding's array allocator takes a struct type. The layout matches
+/// `cdef struct tecsGamepadDevice` in `src/tecs/platform/gamepadnative.nupp`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GamepadDevice {
+    /// The identifier a `GamepadEvent` names the same device by.
+    pub id: u32,
+}
+
 /// The reason a call with no context reports.
 ///
 /// A null context has no place to keep a failure, so the one message it can
@@ -171,7 +186,7 @@ pub unsafe extern "C" fn tecs_gamepad_drain(
 #[no_mangle]
 pub unsafe extern "C" fn tecs_gamepad_attached(
     context: *mut Context,
-    devices: *mut u32,
+    devices: *mut GamepadDevice,
     capacity: u32,
 ) -> u32 {
     let Some(context) = (unsafe { borrow(context) }) else {
@@ -183,7 +198,9 @@ pub unsafe extern "C" fn tecs_gamepad_attached(
     }
     let out = unsafe { std::slice::from_raw_parts_mut(devices, capacity as usize) };
     let written = found.len().min(out.len());
-    out[..written].copy_from_slice(&found[..written]);
+    for (slot, id) in out.iter_mut().zip(found.iter().copied()).take(written) {
+        *slot = GamepadDevice { id };
+    }
     written as u32
 }
 
@@ -207,6 +224,28 @@ pub unsafe extern "C" fn tecs_gamepad_info(
     };
     unsafe { *info = context.info(device) };
     STATUS_OK
+}
+
+/// Reports whether one device has the control a code names.
+///
+/// `kind` is zero for a positional button and one for an axis. Returns zero
+/// when the device is gone, when the code names nothing, or when the device
+/// does not have it.
+///
+/// # Safety
+///
+/// The pointer must be a live context or null.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_gamepad_has(
+    context: *mut Context,
+    device: u32,
+    kind: u32,
+    code: u32,
+) -> i32 {
+    match unsafe { borrow(context) } {
+        Some(context) => i32::from(context.has(device, kind, code)),
+        None => 0,
+    }
 }
 
 /// Returns one of a device's strings, or null when it has none.
@@ -296,6 +335,7 @@ pub extern "C" fn tecs_gamepad_layout(kind: u32) -> u32 {
     match kind {
         LAYOUT_EVENT => std::mem::size_of::<GamepadEvent>() as u32,
         LAYOUT_INFO => std::mem::size_of::<GamepadInfo>() as u32,
+        LAYOUT_DEVICE => std::mem::size_of::<GamepadDevice>() as u32,
         _ => 0,
     }
 }
@@ -313,6 +353,38 @@ fn set_no_context() {
 mod tests {
     use super::*;
 
+    /// The smoke test that touches the real platform source.
+    ///
+    /// Ignored by default and run with `cargo test -p tecs-gamepad -- --ignored`
+    /// on a machine somebody is watching. Opening the real source starts device
+    /// enumeration, and on macOS that means a run loop on a thread of its own,
+    /// which the ordinary suite has no business starting. What it proves is
+    /// that opening, polling, draining and closing survive a round trip on this
+    /// platform, with or without a controller plugged in.
+    #[test]
+    #[ignore = "opens the platform's real gamepad source"]
+    fn opens_polls_and_closes_the_real_source() {
+        let context = tecs_gamepad_open();
+        assert!(!context.is_null());
+        let mut events = [GamepadEvent::new_device(0, 0); 16];
+        let mut devices = [GamepadDevice::default(); 16];
+        unsafe {
+            let attached = tecs_gamepad_attached(context, devices.as_mut_ptr(), 16);
+            for slot in devices.iter().take(attached as usize) {
+                let mut info = GamepadInfo::missing();
+                assert_eq!(tecs_gamepad_info(context, slot.id, &mut info), STATUS_OK);
+                assert!(!tecs_gamepad_string(context, slot.id, 1).is_null());
+            }
+            for _ in 0..8 {
+                let waiting = tecs_gamepad_poll(context);
+                let drained = tecs_gamepad_drain(context, events.as_mut_ptr(), 16);
+                assert!(drained <= waiting.min(16));
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            tecs_gamepad_close(context);
+        }
+    }
+
     #[test]
     fn a_null_context_answers_every_call() {
         let null = std::ptr::null_mut();
@@ -321,6 +393,7 @@ mod tests {
             assert_eq!(tecs_gamepad_poll(null), 0);
             assert_eq!(tecs_gamepad_drain(null, std::ptr::null_mut(), 0), 0);
             assert_eq!(tecs_gamepad_attached(null, std::ptr::null_mut(), 0), 0);
+            assert_eq!(tecs_gamepad_has(null, 0, 0, 1), 0);
             assert_eq!(tecs_gamepad_string(null, 0, 0), std::ptr::null());
             assert_eq!(tecs_gamepad_rumble(null, 0, 1.0, 1.0, 1.0), STATUS_FAILED);
             assert!(!tecs_gamepad_last_error(null).is_null());
@@ -337,9 +410,10 @@ mod tests {
             assert_eq!(tecs_gamepad_available(context), 0);
             assert_eq!(tecs_gamepad_poll(context), 0);
             assert_eq!(tecs_gamepad_drain(context, events.as_mut_ptr(), 4), 0);
-            let mut info = GamepadInfo::default();
+            let mut info = GamepadInfo::missing();
             assert_eq!(tecs_gamepad_info(context, 0, &mut info), STATUS_OK);
-            assert_eq!(info, GamepadInfo::default());
+            assert_eq!(info, GamepadInfo::missing());
+            assert_eq!(tecs_gamepad_has(context, 0, 0, 1), 0);
             assert_eq!(tecs_gamepad_last_error(context), std::ptr::null());
             tecs_gamepad_close(context);
         }
@@ -349,7 +423,8 @@ mod tests {
     #[test]
     fn layout_is_what_the_binding_declares() {
         assert_eq!(tecs_gamepad_layout(LAYOUT_EVENT), 16);
-        assert_eq!(tecs_gamepad_layout(LAYOUT_INFO), 24);
+        assert_eq!(tecs_gamepad_layout(LAYOUT_INFO), 16);
+        assert_eq!(tecs_gamepad_layout(LAYOUT_DEVICE), 4);
         assert_eq!(tecs_gamepad_layout(99), 0);
         assert_eq!(std::mem::align_of::<GamepadEvent>(), 4);
         assert_eq!(std::mem::align_of::<GamepadInfo>(), 4);

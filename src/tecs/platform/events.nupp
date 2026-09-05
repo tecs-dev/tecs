@@ -26,6 +26,15 @@ export type Kind = "quit"
     | "mouseUp"
     | "mouseWheel"
     | "textInput"
+    | "fingerDown"
+    | "fingerUp"
+    | "fingerMotion"
+    | "fingerCanceled"
+    | "gamepadAdded"
+    | "gamepadRemoved"
+    | "gamepadButtonDown"
+    | "gamepadButtonUp"
+    | "gamepadAxis"
 
 --- Returns every platform event kind, in the union's declared order.
 ---
@@ -34,7 +43,7 @@ export type Kind = "quit"
 --- `Kind` declares and must not change with a module move. The union is a
 --- type and cannot be read at run time, so a caller that needs the kinds as
 --- data reads them here rather than keeping a second copy that drifts.
---- @return a fresh caller-owned list of the thirteen kind strings
+--- @return a fresh caller-owned list of the twenty-two kind strings
 export function kinds(): {string}
     return {
         "quit",
@@ -50,6 +59,15 @@ export function kinds(): {string}
         "mouseUp",
         "mouseWheel",
         "textInput",
+        "fingerDown",
+        "fingerUp",
+        "fingerMotion",
+        "fingerCanceled",
+        "gamepadAdded",
+        "gamepadRemoved",
+        "gamepadButtonDown",
+        "gamepadButtonUp",
+        "gamepadAxis",
     }
 end
 
@@ -145,6 +163,63 @@ export record TextEvent
     text: string
 end
 
+--- One finger on a touch surface.
+---
+--- Compatibility surface: `touchDevice` and `finger` are the field names the
+--- Teal implementation published, and both stay strings because a device and a
+--- finger are 64-bit identities that a Lua number would round together.
+export record TouchEvent
+    kind: "fingerDown" | "fingerUp" | "fingerMotion" | "fingerCanceled"
+    timestamp: number
+    sequence: integer
+    window: integer
+    touchDevice: string
+    finger: string
+    x: number
+    y: number
+    dx: number
+    dy: number
+    normalX: number
+    normalY: number
+    pressure: number
+    down: boolean
+end
+
+--- A gamepad appearing or going away.
+---
+--- Compatibility surface: `which` names the device rather than the window,
+--- which is what the Teal implementation put in that field for every gamepad
+--- event. `window` is zero, because a gamepad belongs to no window.
+export record GamepadDeviceEvent
+    kind: "gamepadAdded" | "gamepadRemoved"
+    timestamp: number
+    sequence: integer
+    window: integer
+    which: integer
+end
+
+--- A gamepad button transition.
+export record GamepadButtonEvent
+    kind: "gamepadButtonDown" | "gamepadButtonUp"
+    timestamp: number
+    sequence: integer
+    window: integer
+    which: integer
+    button: integer
+    down: boolean
+end
+
+--- A gamepad axis reading.
+export record GamepadAxisEvent
+    kind: "gamepadAxis"
+    timestamp: number
+    sequence: integer
+    window: integer
+    which: integer
+    axis: integer
+    value: number
+end
+
 --- An event in one sealed host batch.
 export type Event = QuitEvent
     | ResizeEvent
@@ -154,6 +229,10 @@ export type Event = QuitEvent
     | PointerButtonEvent
     | WheelEvent
     | TextEvent
+    | TouchEvent
+    | GamepadDeviceEvent
+    | GamepadButtonEvent
+    | GamepadAxisEvent
 
 local function sameQuit(value: QuitEvent): QuitEvent
     return value
@@ -187,6 +266,22 @@ local function sameText(value: TextEvent): TextEvent
     return value
 end
 
+local function sameTouch(value: TouchEvent): TouchEvent
+    return value
+end
+
+local function sameGamepadDevice(value: GamepadDeviceEvent): GamepadDeviceEvent
+    return value
+end
+
+local function sameGamepadButton(value: GamepadButtonEvent): GamepadButtonEvent
+    return value
+end
+
+local function sameGamepadAxis(value: GamepadAxisEvent): GamepadAxisEvent
+    return value
+end
+
 --- Typed ECS event definitions observed at address zero.
 export record EventTypes
     quit: events.Event<QuitEvent>
@@ -202,6 +297,15 @@ export record EventTypes
     mouseUp: events.Event<PointerButtonEvent>
     mouseWheel: events.Event<WheelEvent>
     textInput: events.Event<TextEvent>
+    fingerDown: events.Event<TouchEvent>
+    fingerUp: events.Event<TouchEvent>
+    fingerMotion: events.Event<TouchEvent>
+    fingerCanceled: events.Event<TouchEvent>
+    gamepadAdded: events.Event<GamepadDeviceEvent>
+    gamepadRemoved: events.Event<GamepadDeviceEvent>
+    gamepadButtonDown: events.Event<GamepadButtonEvent>
+    gamepadButtonUp: events.Event<GamepadButtonEvent>
+    gamepadAxis: events.Event<GamepadAxisEvent>
 end
 
 export const on = new EventTypes(
@@ -223,7 +327,19 @@ export const on = new EventTypes(
     mouseDown = events.newEvent({name = "tecs.platform.events.mouseDown", construct = samePointerButton}),
     mouseUp = events.newEvent({name = "tecs.platform.events.mouseUp", construct = samePointerButton}),
     mouseWheel = events.newEvent({name = "tecs.platform.events.mouseWheel", construct = sameWheel}),
-    textInput = events.newEvent({name = "tecs.platform.events.textInput", construct = sameText})
+    textInput = events.newEvent({name = "tecs.platform.events.textInput", construct = sameText}),
+    fingerDown = events.newEvent({name = "tecs.platform.events.fingerDown", construct = sameTouch}),
+    fingerUp = events.newEvent({name = "tecs.platform.events.fingerUp", construct = sameTouch}),
+    fingerMotion = events.newEvent({name = "tecs.platform.events.fingerMotion", construct = sameTouch}),
+    fingerCanceled = events.newEvent({name = "tecs.platform.events.fingerCanceled", construct = sameTouch}),
+    gamepadAdded = events.newEvent({name = "tecs.platform.events.gamepadAdded", construct = sameGamepadDevice}),
+    gamepadRemoved = events.newEvent({name = "tecs.platform.events.gamepadRemoved", construct = sameGamepadDevice}),
+    gamepadButtonDown = events.newEvent({
+        name = "tecs.platform.events.gamepadButtonDown",
+        construct = sameGamepadButton
+    }),
+    gamepadButtonUp = events.newEvent({name = "tecs.platform.events.gamepadButtonUp", construct = sameGamepadButton}),
+    gamepadAxis = events.newEvent({name = "tecs.platform.events.gamepadAxis", construct = sameGamepadAxis})
 )
 
 --- Constructs a process or window close request.
@@ -421,6 +537,144 @@ export function text(text: string, window: integer?, timestamp: number?, sequenc
     )
 end
 
+--- Constructs one finger's transition or movement.
+---
+--- `x` and `y` are in the window's logical coordinates, `normalX` and `normalY`
+--- run from zero to one across the touch surface, and `pressure` runs from zero
+--- to one where the surface reports it and is one where it does not.
+--- @param phase the finger's transition, spelled as the event kind
+--- @param touchDevice the touch surface's opaque identity
+--- @param finger the finger's opaque identity on that surface
+--- @param x the position in logical window coordinates
+--- @param y the position in logical window coordinates
+--- @param normalX the position across the surface, from zero to one
+--- @param normalY the position down the surface, from zero to one
+--- @param pressure the reported pressure from zero to one
+--- @param dx the movement since the previous event, in logical coordinates
+--- @param dy the movement since the previous event, in logical coordinates
+--- @param window the window the touch is over
+--- @param timestamp the host time the platform reported
+--- @param sequence the host's ordering number for the batch
+--- @return the constructed touch event
+--- @raises when the finger identity is empty
+export function touch(
+    phase: "fingerDown" | "fingerUp" | "fingerMotion" | "fingerCanceled",
+    touchDevice: string,
+    finger: string,
+    x: number,
+    y: number,
+    normalX: number?,
+    normalY: number?,
+    pressure: number?,
+    dx: number?,
+    dy: number?,
+    window: integer?,
+    timestamp: number?,
+    sequence: integer?
+): TouchEvent
+    if finger == "" then
+        error("platform.events.touch: finger must not be empty", 2)
+    end
+
+    return new TouchEvent(
+        kind = phase,
+        timestamp = timestamp or 0,
+        sequence = sequence or 0,
+        window = window or 0,
+        touchDevice = touchDevice,
+        finger = finger,
+        x = x,
+        y = y,
+        dx = dx or 0,
+        dy = dy or 0,
+        normalX = normalX or 0,
+        normalY = normalY or 0,
+        pressure = pressure or 0,
+        down = phase == "fingerDown" or phase == "fingerMotion"
+    )
+end
+
+--- Constructs a gamepad appearing or going away.
+--- @param added whether the device appeared rather than went away
+--- @param which the device identifier the backend issued
+--- @param timestamp the host time the platform reported
+--- @param sequence the host's ordering number for the batch
+--- @return the constructed device event
+export function gamepadDevice(
+    added: boolean,
+    which: integer,
+    timestamp: number?,
+    sequence: integer?
+): GamepadDeviceEvent
+    return new GamepadDeviceEvent(
+        kind = added and "gamepadAdded" or "gamepadRemoved",
+        timestamp = timestamp or 0,
+        sequence = sequence or 0,
+        window = 0,
+        which = which
+    )
+end
+
+--- Constructs a gamepad button transition.
+--- @param down whether the button went down rather than came up
+--- @param which the device identifier the backend issued
+--- @param button the positional button code `tecs.input` resolves a name to
+--- @param timestamp the host time the platform reported
+--- @param sequence the host's ordering number for the batch
+--- @return the constructed button event
+--- @raises when the button code is not positive
+export function gamepadButton(
+    down: boolean,
+    which: integer,
+    button: integer,
+    timestamp: number?,
+    sequence: integer?
+): GamepadButtonEvent
+    if button < 1 then
+        error("platform.events.gamepadButton: button must be positive", 2)
+    end
+
+    return new GamepadButtonEvent(
+        kind = down and "gamepadButtonDown" or "gamepadButtonUp",
+        timestamp = timestamp or 0,
+        sequence = sequence or 0,
+        window = 0,
+        which = which,
+        button = button,
+        down = down
+    )
+end
+
+--- Constructs a gamepad axis reading.
+--- @param which the device identifier the backend issued
+--- @param axis the axis code `tecs.input` resolves a name to
+--- @param value the reading from -1 to 1, with a trigger running zero to one
+--- @param timestamp the host time the platform reported
+--- @param sequence the host's ordering number for the batch
+--- @return the constructed axis event
+--- @raises when the axis code is not positive
+export function gamepadAxis(
+    which: integer,
+    axis: integer,
+    value: number,
+    timestamp: number?,
+    sequence: integer?
+): GamepadAxisEvent
+    if axis < 1 then
+        error("platform.events.gamepadAxis: axis must be positive", 2)
+    end
+
+    return new GamepadAxisEvent(
+        kind = "gamepadAxis",
+        timestamp = timestamp or 0,
+        sequence = sequence or 0,
+        window = 0,
+        which = which,
+        axis = axis,
+        value = value
+    )
+end
+
 --- Emits one translated event through the world's typed event bus.
 --- @param world the receiving world
 --- @param event the translated platform event
@@ -461,5 +715,29 @@ export function dispatch(exclusive world: ecs.World, event: Event): nil
         world:emit(0, on.mouseWheel(event))
     elseif event is TextEvent then
         world:emit(0, on.textInput(event))
+    elseif event is TouchEvent then
+        if event.kind == "fingerDown" then
+            world:emit(0, on.fingerDown(event))
+        elseif event.kind == "fingerMotion" then
+            world:emit(0, on.fingerMotion(event))
+        elseif event.kind == "fingerUp" then
+            world:emit(0, on.fingerUp(event))
+        else
+            world:emit(0, on.fingerCanceled(event))
+        end
+    elseif event is GamepadDeviceEvent then
+        if event.kind == "gamepadAdded" then
+            world:emit(0, on.gamepadAdded(event))
+        else
+            world:emit(0, on.gamepadRemoved(event))
+        end
+    elseif event is GamepadButtonEvent then
+        if event.down then
+            world:emit(0, on.gamepadButtonDown(event))
+        else
+            world:emit(0, on.gamepadButtonUp(event))
+        end
+    elseif event is GamepadAxisEvent then
+        world:emit(0, on.gamepadAxis(event))
     end
 end

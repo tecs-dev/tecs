@@ -11,16 +11,21 @@ mod pipelinetests;
 mod sdk;
 mod shaderpack;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
-use bridge::{Bridge, FrameState, ImageCommand, SessionOptions, WindowCommand, WindowState};
+use bridge::{
+    Bridge, FrameState, ImageCommand, SessionOptions, TouchEvent, WindowCommand, WindowState,
+};
 use graphics::Graphics;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
-use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{
+    ElementState, Ime, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, ModifiersState, PhysicalKey};
 use winit::window::{CursorGrabMode, Fullscreen, Window, WindowAttributes, WindowId};
@@ -51,6 +56,9 @@ struct App {
     start: Instant,
     last_frame: Instant,
     cursor: (f64, f64),
+    /// Each live finger's last logical position, for the movement winit does
+    /// not report.
+    touches: HashMap<u64, (f64, f64)>,
     modifiers: ModifiersState,
     sequence: u64,
     shutdown: bool,
@@ -82,6 +90,7 @@ impl App {
             start: now,
             last_frame: now,
             cursor: (0.0, 0.0),
+            touches: HashMap::new(),
             modifiers: ModifiersState::empty(),
             sequence: 0,
             shutdown: false,
@@ -177,6 +186,59 @@ impl App {
             timestamp,
             sequence,
         )
+    }
+
+    /// Translates one `winit` touch into the engine's finger events.
+    ///
+    /// `winit` reports a position and a phase and nothing else, so the movement
+    /// and the normalized position are computed here: the movement against this
+    /// finger's previous position, and the normalized pair against the window's
+    /// physical size, which is the space the position arrived in. A finger with
+    /// no previous position reports no movement rather than movement from the
+    /// origin.
+    fn push_touch(&mut self, touch: Touch) -> Result<()> {
+        let scale = self.state.as_ref().map_or(1.0, |state| state.scale_factor);
+        let logical = touch.location.to_logical::<f64>(scale);
+        let previous = self.touches.get(&touch.id).copied();
+        let (dx, dy) = previous.map_or((0.0, 0.0), |(x, y)| (logical.x - x, logical.y - y));
+        let (width, height) = self
+            .state
+            .as_ref()
+            .map_or((0, 0), |state| (state.pixel_width, state.pixel_height));
+        let normal_x = normalized(touch.location.x, width);
+        let normal_y = normalized(touch.location.y, height);
+        let phase = match touch.phase {
+            TouchPhase::Started => "fingerDown",
+            TouchPhase::Moved => "fingerMotion",
+            TouchPhase::Ended => "fingerUp",
+            TouchPhase::Cancelled => "fingerCanceled",
+        };
+        match touch.phase {
+            TouchPhase::Started | TouchPhase::Moved => {
+                self.touches.insert(touch.id, (logical.x, logical.y));
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                self.touches.remove(&touch.id);
+            }
+        }
+        let device = format!("{:?}", touch.device_id);
+        let finger = touch.id.to_string();
+        let timestamp = self.timestamp();
+        let sequence = self.next_sequence();
+        self.bridge.push_touch(&TouchEvent {
+            phase,
+            device: &device,
+            finger: &finger,
+            x: logical.x,
+            y: logical.y,
+            normal_x,
+            normal_y,
+            pressure: touch.force.map_or(0.0, |force| force.normalized()),
+            dx,
+            dy,
+            timestamp,
+            sequence,
+        })
     }
 
     fn apply_commands(&mut self) -> Result<()> {
@@ -456,6 +518,7 @@ impl ApplicationHandler for App {
                     sequence,
                 )
             }
+            WindowEvent::Touch(touch) => self.push_touch(touch),
             WindowEvent::Ime(Ime::Commit(text)) => {
                 let timestamp = self.timestamp();
                 let sequence = self.next_sequence();
@@ -515,6 +578,14 @@ fn apply_image_command(graphics: &mut Graphics, command: &ImageCommand) -> Resul
         "releaseImage" => graphics.release_image(command.image),
         kind => Err(anyhow!("unknown image command {kind}")),
     }
+}
+
+/// Returns a position as a fraction of one dimension, and zero for no extent.
+fn normalized(value: f64, extent: u32) -> f64 {
+    if extent == 0 {
+        return 0.0;
+    }
+    value / f64::from(extent)
 }
 
 fn physical_key_name(key: PhysicalKey) -> String {
