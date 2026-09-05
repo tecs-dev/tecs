@@ -1,0 +1,157 @@
+module lighting
+
+--[[
+Deferred lighting, both shadow mechanisms, and bloom, as a complete game entry.
+
+A dark floor under four colored lights that circle it, a ring of pillars that
+block them, a ring of crates that throw ground shadows instead, and a lamp that
+glows without being lit. That is one of each thing the lighting lane draws:
+
+- `PointLight2D` is the light entity itself, and the lights differ in reach and
+  strength so the tile binning has something to sort out.
+- `Occluder2D` on a pillar puts its silhouette into the mask every light marches
+  against, so one pillar blocks four lights for the cost of drawing itself once.
+- `DropShadow2D` on a crate throws a stretched copy along the ground away from
+  the lights nearest it, which darkens the ambient a pillar cannot reach.
+- A material with emission on the lamp survives the darkness and the shadows
+  both, and passes the bloom threshold so it blooms.
+
+The floor takes the ambient and the lights; the pillars and crates are lit by
+the same pass they cast into.
+
+`create` matches the Rust host's managed entry contract, so the host selects it
+with `--entry lighting.create`.
+]]
+
+local application = require("tecs.application")
+local ecs = require("tecs.ecs")
+local gfx = require("tecs.gfx")
+local host = require("tecs.host")
+local lighting = require("tecs.gfx.lighting")
+local materials = require("tecs.gpu.materials")
+
+--- The world the camera looks at, in world units.
+const FIELD = 1200.0
+
+--- How many pillars and crates ring the middle of it.
+const PILLARS = 12
+
+const CRATES = 8
+
+--- Lights that circle the field, as reach, strength, and color.
+const LIGHTS: {
+    {number}
+} = {
+    {420.0, 2.2, 1.0, 0.72, 0.42},
+    {360.0, 1.8, 0.42, 0.66, 1.0},
+    {300.0, 1.6, 0.5, 1.0, 0.55},
+    {480.0, 1.2, 1.0, 0.45, 0.7},
+}
+
+--- Fills the floor, the pillars, the crates, and the lamp.
+local function spawnScene(exclusive world: ecs.World): nil
+    const middle = FIELD * 0.5
+    -- One large quad under everything, on the farthest layer, so the lights and
+    -- the shadows have something to land on.
+    world:spawn(ecs.Transform2D(middle, middle, 0, 4, 0, FIELD, FIELD), gfx.Tint(0.62, 0.6, 0.58, 1), gfx.Renderable2D)
+
+    for index = 1, PILLARS do
+        const angle = index / PILLARS * math.pi * 2.0
+        world:spawn(
+            ecs.Transform2D(middle + math.cos(angle) * 320.0, middle + math.sin(angle) * 320.0, 0, 2, 0, 56, 56),
+            gfx.Tint(0.28, 0.3, 0.36, 1),
+            gfx.Material(materials.id("rounded"), 0.25),
+            -- A full-height occluder blocks every light at every angle, and
+            -- blocks none of the ambient: that is what the crates below are for.
+            gfx.Occluder2D(1.0),
+            gfx.Renderable2D
+        )
+    end
+
+    for index = 1, CRATES do
+        const angle = (index + 0.5) / CRATES * math.pi * 2.0
+        world:spawn(
+            ecs.Transform2D(middle + math.cos(angle) * 150.0, middle + math.sin(angle) * 150.0, 0, 2, 0, 44, 44),
+            gfx.Tint(0.7, 0.52, 0.34, 1),
+            -- Half height, so the copy each light throws is short enough to read
+            -- as a contact shadow rather than as a wall.
+            gfx.DropShadow2D(0.5),
+            gfx.Renderable2D
+        )
+    end
+
+    -- A lamp: unlit by choice would be a material decision, but this one is lit
+    -- and glowing at once, which is what emission is for. The glow survives the
+    -- darkness and the drop shadows both, and passes the bloom threshold.
+    world:spawn(
+        ecs.Transform2D(middle, middle, 0, 1, 0, 90, 90),
+        gfx.Tint(1.0, 0.95, 0.8, 1),
+        -- `emissive` is the one material that writes the emission attachment, and
+        -- `param` is how much of its own color it gives off.
+        gfx.Material(materials.id("emissive"), 0.9),
+        gfx.Renderable2D
+    )
+
+    for index = 1, #LIGHTS do
+        const held = LIGHTS[index]
+        world:spawn(
+            ecs.Transform2D(middle, middle),
+            gfx.PointLight2D(96.0, held[1], held[3], held[4], held[5], held[2])
+        )
+    end
+end
+
+local function install(exclusive app: application.Application): nil
+    -- Dim enough that a light is the thing you see, and not so dim that an
+    -- unlit corner is black: the drop shadows darken this term and the occluder
+    -- mask cannot reach it, which is the whole difference between them.
+    lighting.setAmbient(0.14, 0.15, 0.2)
+    lighting.setShadows({steps = 24, margin = 200, height = 96, dropOpacity = 0.55, dropLength = 420})
+    lighting.setBloom({threshold = 0.85, knee = 0.2, intensity = 0.8})
+
+    app.world:spawn(gfx.Camera2D(FIELD * 0.5, FIELD * 0.5, 1, 0), gfx.ActiveCamera)
+    spawnScene(app.world)
+
+    const lights = app.world:newQuery({include = {ecs.Transform2D, gfx.PointLight2D}})
+    local elapsed = 0.0
+    app.world:addSystem({
+        -- This system name reaches the debug server and is a compatibility
+        -- surface.
+        name = "example.lighting.circle",
+        phase = ecs.phases.Update,
+        run = function(dt: number): nil
+            elapsed = elapsed + dt
+            const middle = FIELD * 0.5
+            local slot = 0
+            for candidate, count in lights:iter() do
+                const transforms: {ecs.Transform2D} = assert(candidate:getMut(ecs.Transform2D))
+                for index = 1, count as integer do
+                    slot = slot + 1
+                    -- Each light circles at its own rate and its own radius, so
+                    -- the shadows sweep rather than turning together.
+                    const turn = elapsed * (0.22 + slot * 0.07) + slot * 1.9
+                    const reach = 180.0 + slot * 45.0
+                    transforms[index].x = middle + math.cos(turn) * reach
+                    transforms[index].y = middle + math.sin(turn) * reach
+                end
+            end
+        end,
+    })
+end
+
+--- Creates the example's host session through its statically linked plugin.
+--- @param title the desktop title
+--- @param width the initial logical width
+--- @param height the initial logical height
+--- @param debug whether guarded application failures may be cleared
+--- @param maxFrames an optional positive frame limit
+--- @return the session retained by the Rust host
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): host.Session
+    return host.createWithPlugin(install, title or "Tecs lighting", width or 1280, height or 720, debug, maxFrames)
+end

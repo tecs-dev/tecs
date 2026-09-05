@@ -5,11 +5,15 @@ mod culltests;
 mod drawtests;
 mod graph;
 mod graphics;
+#[cfg(test)]
+mod lightingtests;
 mod packet;
 #[cfg(test)]
 mod pipelinetests;
 mod sdk;
 mod shaderpack;
+#[cfg(test)]
+mod shadowtests;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

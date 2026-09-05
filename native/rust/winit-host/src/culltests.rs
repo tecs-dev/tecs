@@ -21,11 +21,52 @@ use wgpu::{
     Queue, ShaderModuleDescriptor, ShaderSource, ShaderStages,
 };
 
-use crate::packet::{INSTANCE_STRIDE, LANE_BLEND, LANE_COUNT, LANE_OPAQUE};
+use crate::packet::{
+    CAST_FANOUT, INSTANCE_STRIDE, LANE_BLEND, LANE_CAST, LANE_COUNT, LANE_OPAQUE, LIGHT_STRIDE,
+};
 
 const CULL_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/cull.wgsl");
 const WORKGROUP: u32 = 256;
 const ARGS_WORKGROUP: u32 = 64;
+
+/// The storage binding offset alignment, in words. The shadow lane's list and
+/// its bases ride inside the two buffers the drawing lanes already bind, so both
+/// offsets land on this.
+const ALIGNMENT_WORDS: u32 = 64;
+
+fn align_words(words: u32) -> u32 {
+    words.div_ceil(ALIGNMENT_WORDS) * ALIGNMENT_WORDS
+}
+
+/// One light, as the packet lays it out.
+#[derive(Clone, Copy, Debug)]
+pub struct TestLight {
+    pub x: f32,
+    pub y: f32,
+    pub height: f32,
+    pub radius: f32,
+    pub intensity: f32,
+}
+
+impl TestLight {
+    fn bytes(&self) -> [u8; LIGHT_STRIDE] {
+        let words = [
+            self.x,
+            self.y,
+            self.height,
+            self.radius,
+            1.0,
+            1.0,
+            1.0,
+            self.intensity,
+        ];
+        let mut bytes = [0_u8; LIGHT_STRIDE];
+        for (index, value) in words.iter().enumerate() {
+            bytes[index * 4..index * 4 + 4].copy_from_slice(&value.to_ne_bytes());
+        }
+        bytes
+    }
+}
 
 /// One instance as the packet lays it out.
 #[derive(Clone, Copy, Debug)]
@@ -38,6 +79,9 @@ pub struct TestInstance {
     pub color: [f32; 4],
     pub material: u32,
     pub param: f32,
+    /// Bit 1 marks an occluder and bit 2 a drop-shadow caster.
+    pub cast: u32,
+    pub cast_height: f32,
 }
 
 impl TestInstance {
@@ -51,6 +95,17 @@ impl TestInstance {
             color: [1.0, 1.0, 1.0, 1.0],
             material: 0,
             param: 0.25,
+            cast: 0,
+            cast_height: 0.0,
+        }
+    }
+
+    /// The same quad, marked as a caster of the given flag.
+    pub fn casting(x: f32, y: f32, flag: u32, height: f32) -> Self {
+        Self {
+            cast: flag,
+            cast_height: height,
+            ..Self::opaque(x, y)
         }
     }
 
@@ -72,8 +127,9 @@ impl TestInstance {
             words[12 + lane] = channel.to_bits();
         }
         words[6] = self.param.to_bits();
+        words[7] = self.cast_height.to_bits();
         words[16] = self.material;
-        words[17] = self.lane;
+        words[17] = self.lane | self.cast;
         let mut bytes = [0_u8; INSTANCE_STRIDE];
         for (index, word) in words.iter().enumerate() {
             bytes[index * 4..index * 4 + 4].copy_from_slice(&word.to_ne_bytes());
@@ -97,9 +153,18 @@ impl TestInstance {
 /// The buffers one cull leaves behind, for a caller that draws from them.
 pub struct Culled {
     pub instances: wgpu::Buffer,
+    /// The three lanes' visible lists, then the cast list at
+    /// `cast_list_offset` words in.
     pub visible: wgpu::Buffer,
+    /// The drawing lanes' indirect arguments, then the shadow lane's, one set
+    /// per batch each.
     pub draw_args: wgpu::Buffer,
+    /// The drawing lanes' bases, then the shadow lane's at `cast_base_offset`
+    /// words in.
     pub batch_base: wgpu::Buffer,
+    pub lights: wgpu::Buffer,
+    pub cast_list_offset: u32,
+    pub cast_base_offset: u32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -128,6 +193,9 @@ fn reference(
     for (index, instance) in instances.iter().enumerate() {
         if instance.kept(view) {
             visible[instance.lane as usize].push(index as u32);
+            if instance.cast != 0 {
+                visible[LANE_CAST as usize].push(index as u32);
+            }
         }
     }
 
@@ -138,7 +206,14 @@ fn reference(
             .iter()
             .enumerate()
             .take(at as usize)
-            .filter(|(_, instance)| instance.lane == lane && instance.kept(view))
+            .filter(|(_, instance)| {
+                instance.kept(view)
+                    && if lane == LANE_CAST {
+                        instance.cast != 0
+                    } else {
+                        instance.lane == lane
+                    }
+            })
             .count() as u32
     };
 
@@ -217,6 +292,19 @@ impl Harness {
         view: [f32; 4],
         capacity: u32,
     ) -> Culled {
+        self.dispatch_with(instances, batches, view, capacity, &[], 0.0)
+    }
+
+    /// Submits the five cull dispatches and hands back what they filled.
+    pub fn dispatch_with(
+        &self,
+        instances: &[TestInstance],
+        batches: &[TestBatch],
+        view: [f32; 4],
+        capacity: u32,
+        lights: &[TestLight],
+        margin: f32,
+    ) -> Culled {
         let device = &self.device;
         let instance_count = instances.len() as u32;
         let blocks = instance_count.div_ceil(WORKGROUP).max(1);
@@ -231,7 +319,11 @@ impl Harness {
                 batch_bytes.extend_from_slice(&word.to_ne_bytes());
             }
         }
-        let uniform: [u32; 8] = [
+        let casters = instances.iter().filter(|held| held.cast != 0).count() as u32;
+        let cast_capacity = casters.max(1);
+        let cast_list_offset = align_words(capacity * LANE_COUNT);
+        let cast_base_offset = align_words(batches.len().max(1) as u32);
+        let uniform: [u32; 16] = [
             view[0].to_bits(),
             view[1].to_bits(),
             view[2].to_bits(),
@@ -240,7 +332,22 @@ impl Harness {
             blocks,
             capacity,
             batches.len() as u32,
+            lights.len() as u32,
+            cast_capacity,
+            cast_list_offset,
+            cast_base_offset,
+            margin.to_bits(),
+            0,
+            0,
+            0,
         ];
+        let mut light_bytes = Vec::new();
+        for light in lights {
+            light_bytes.extend_from_slice(&light.bytes());
+        }
+        if light_bytes.is_empty() {
+            light_bytes.extend_from_slice(&[0_u8; LIGHT_STRIDE]);
+        }
 
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("instances"),
@@ -257,11 +364,22 @@ impl Harness {
             contents: bytemuck::cast_slice(&uniform),
             usage: BufferUsages::UNIFORM,
         });
+        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("lights"),
+            contents: &light_bytes,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+        });
         let slots = scratch(device, u64::from(instance_count) * 4);
         let block_counts = scratch(device, u64::from(blocks + 1) * u64::from(LANE_COUNT) * 4);
-        let visible = scratch(device, u64::from(capacity) * u64::from(LANE_COUNT) * 4);
-        let draw_args = scratch(device, batches.len() as u64 * 16);
-        let batch_base = scratch(device, batches.len() as u64 * 4);
+        let visible = scratch(
+            device,
+            (u64::from(cast_list_offset) + u64::from(cast_capacity) * u64::from(CAST_FANOUT)) * 4,
+        );
+        let draw_args = scratch(device, batches.len() as u64 * 32);
+        let batch_base = scratch(
+            device,
+            (u64::from(cast_base_offset) + batches.len().max(1) as u64) * 4,
+        );
 
         let layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("cull layout"),
@@ -283,6 +401,7 @@ impl Harness {
                     },
                     count: None,
                 },
+                entry(8, true),
             ],
         });
         let group = device.create_bind_group(&BindGroupDescriptor {
@@ -321,6 +440,10 @@ impl Harness {
                     binding: 7,
                     resource: uniform_buffer.as_entire_binding(),
                 },
+                BindGroupEntry {
+                    binding: 8,
+                    resource: light_buffer.as_entire_binding(),
+                },
             ],
         });
 
@@ -333,7 +456,14 @@ impl Harness {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipelines = ["markMain", "scanMain", "compactMain", "argsMain"].map(|name| {
+        let pipelines = [
+            "markMain",
+            "scanMain",
+            "compactMain",
+            "argsMain",
+            "castMain",
+        ]
+        .map(|name| {
             device.create_compute_pipeline(&ComputePipelineDescriptor {
                 label: Some(name),
                 layout: Some(&pipeline_layout),
@@ -361,6 +491,8 @@ impl Harness {
             pass.dispatch_workgroups(blocks, 1, 1);
             pass.set_pipeline(&pipelines[3]);
             pass.dispatch_workgroups((batches.len() as u32).div_ceil(ARGS_WORKGROUP), 1, 1);
+            pass.set_pipeline(&pipelines[4]);
+            pass.dispatch_workgroups(blocks, 1, 1);
         }
 
         self.queue.submit([encoder.finish()]);
@@ -370,7 +502,16 @@ impl Harness {
             visible,
             draw_args,
             batch_base,
+            lights: light_buffer,
+            cast_list_offset,
+            cast_base_offset,
         }
+    }
+
+    /// Copies one storage buffer out and reads it, for a caller outside this
+    /// module.
+    pub fn read_back(&self, buffer: &wgpu::Buffer) -> Vec<u32> {
+        self.copy_back(buffer)
     }
 
     fn read(&self, buffer: &wgpu::Buffer) -> Vec<u32> {

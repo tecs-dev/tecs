@@ -49,6 +49,8 @@ function suite.drawsACameraAndTwoImagesThroughItsEntry(): nil
     test.notEqual(cameraX, 400)
     reader:skip(4)
     test.assert(reader:readFloat32() > 0, "the zoom projects")
+    reader:skip(4)
+    test.equal(reader:readUint32(), framepacket.LIGHT_STRIDE)
     reader:drop()
 
     -- Both images are resident and the field alternates between them, so the

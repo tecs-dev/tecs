@@ -2,6 +2,7 @@ local ecs = require("tecs.ecs")
 local framepacket = require("tecs.internal.framepacket")
 local gfx = require("tecs.gfx")
 local images = require("tecs.gfx.images")
+local lighting = require("tecs.gfx.lighting")
 local materials = require("tecs.gpu.materials")
 local passes = require("tecs.gpu.passes")
 local test = require("nupp.test")
@@ -9,6 +10,7 @@ local test = require("nupp.test")
 local suite = {}
 
 local record Header
+    flags: integer
     graphBytes: integer
     graphRevision: integer
     batches: integer
@@ -19,6 +21,30 @@ local record Header
     cameraY: number
     zoom: number
     rotation: number
+    lights: integer
+    casters: integer
+    ambientR: number
+    ambientG: number
+    ambientB: number
+    shadowSteps: number
+    shadowHeight: number
+    shadowMargin: number
+    dropOpacity: number
+    dropLength: number
+    bloomThreshold: number
+    bloomKnee: number
+    bloomIntensity: number
+end
+
+local record Light
+    x: number
+    y: number
+    height: number
+    radius: number
+    r: number
+    g: number
+    b: number
+    intensity: number
 end
 
 local record Batch
@@ -29,35 +55,73 @@ local record Batch
     count: integer
 end
 
---- Reads the fixed v3 header, holds the packet to every constant in it, and
---- steps past the graph section so the batch table is next.
+--- Reads the fixed v4 header, holds the packet to every constant in it, and
+--- steps past the graph section so the light table is next.
 local function header(borrows reader: nupp.io.ScalarReader): Header
     test.equal(reader:readUint32(), framepacket.MAGIC)
     test.equal(reader:readUint32(), framepacket.VERSION)
     test.equal(reader:readUint32(), framepacket.HEADER_SIZE)
-    test.equal(reader:readUint32(), 0)
+    local flags = reader:readUint32()
     local revision = reader:readUint32()
     local graphBytes = reader:readUint32()
     test.equal(reader:readUint32(), framepacket.BATCH_STRIDE)
     local batches = reader:readUint32()
     test.equal(reader:readUint32(), framepacket.INSTANCE_STRIDE)
     local instances = reader:readUint32()
+    local targetWidth = reader:readFloat32()
+    local targetHeight = reader:readFloat32()
+    local cameraX = reader:readFloat32()
+    local cameraY = reader:readFloat32()
+    local zoom = reader:readFloat32()
+    local rotation = reader:readFloat32()
+    test.equal(reader:readUint32(), framepacket.LIGHT_STRIDE)
+    local lights = reader:readUint32()
+    local casters = reader:readUint32()
+    test.equal(reader:readUint32(), 0)
 
     local read = new Header(
+        flags = flags as integer,
         graphBytes = graphBytes as integer,
         graphRevision = revision as integer,
         batches = batches as integer,
         instances = instances as integer,
-        targetWidth = reader:readFloat32(),
-        targetHeight = reader:readFloat32(),
-        cameraX = reader:readFloat32(),
-        cameraY = reader:readFloat32(),
-        zoom = reader:readFloat32(),
-        rotation = reader:readFloat32()
+        targetWidth = targetWidth,
+        targetHeight = targetHeight,
+        cameraX = cameraX,
+        cameraY = cameraY,
+        zoom = zoom,
+        rotation = rotation,
+        lights = lights as integer,
+        casters = casters as integer,
+        ambientR = reader:readFloat32(),
+        ambientG = reader:readFloat32(),
+        ambientB = reader:readFloat32(),
+        shadowSteps = reader:readFloat32(),
+        shadowHeight = reader:readFloat32(),
+        shadowMargin = reader:readFloat32(),
+        dropOpacity = reader:readFloat32(),
+        dropLength = reader:readFloat32(),
+        bloomThreshold = reader:readFloat32(),
+        bloomKnee = reader:readFloat32(),
+        bloomIntensity = reader:readFloat32()
     )
+    test.equal(reader:readUint32(), 0)
     reader:skip(read.graphBytes)
 
     return read
+end
+
+local function light(borrows reader: nupp.io.ScalarReader): Light
+    return new Light(
+        x = reader:readFloat32(),
+        y = reader:readFloat32(),
+        height = reader:readFloat32(),
+        radius = reader:readFloat32(),
+        r = reader:readFloat32(),
+        g = reader:readFloat32(),
+        b = reader:readFloat32(),
+        intensity = reader:readFloat32()
+    )
 end
 
 local function batch(borrows reader: nupp.io.ScalarReader): Batch
@@ -79,6 +143,17 @@ local function instance(borrows reader: nupp.io.ScalarReader): number, number, n
     reader:skip(64)
 
     return x, y, depth
+end
+
+--- Reads one instance's cast height and flags, which sit at the far end of it.
+local function castOf(borrows reader: nupp.io.ScalarReader): number, integer
+    reader:skip(28)
+    local height = reader:readFloat32()
+    reader:skip(36)
+    local flags = reader:readUint32() as integer
+    reader:skip(8)
+
+    return height, flags
 end
 
 --- Makes one image resident without a host, so extraction sees a live id.
@@ -531,6 +606,138 @@ function suite.encodesAnEmptyScene(): nil
     test.equal(read.instances, 0)
     test.assert(reader:atEnd())
     reader:drop()
+end
+
+function suite.carriesLightsInAscendingEntityOrder(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    local extractor = framepacket.new(world)
+    -- Spawned out of order, and the light table has to come out in entity order
+    -- so a tile accumulates the same lights in the same order every frame.
+    -- Two archetypes, so the two lights sit in different columns and the query
+    -- reaches them in whatever order the world lays those out. The table still
+    -- has to come out in entity order, which here is spawn order.
+    const first = world:spawn(ecs.Transform2D(10, 20), gfx.PointLight2D(32, 128, 1, 0.5, 0.25, 3))
+    const second = world:spawn(ecs.Transform2D(30, 40), gfx.PointLight2D(10, 20, 0.25, 0.5, 0.75, 2), gfx.Renderable2D)
+    world:commit()
+    test.assert(first < second, "an earlier spawn takes a lower id")
+
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
+    local read = header(reader)
+    test.equal(read.lights, 2)
+    local leading = light(reader)
+    local trailing = light(reader)
+    test.equal(leading.x, 10)
+    test.equal(leading.y, 20)
+    test.equal(leading.height, 32)
+    test.equal(leading.radius, 128)
+    test.equal(leading.intensity, 3)
+    test.equal(trailing.x, 30)
+    test.equal(trailing.radius, 20)
+    reader:drop()
+end
+
+function suite.carriesTheTuningEveryFrameAndFlagsWhatIsOn(): nil
+    lighting.reset()
+    local world = ecs.newWorld({maxEntities = 2})
+    local extractor = framepacket.new(world)
+    world:commit()
+
+    local reader = nupp.io.newScalarReader(extractor:packet(64, 64))
+    local off = header(reader)
+    test.equal(off.flags, 0)
+    test.equal(off.ambientR, 1)
+    -- The tuning is written whether or not its flag is set, so a backend reads
+    -- one layout and the flag alone decides.
+    test.equal(off.shadowSteps, 24)
+    test.assert(off.bloomThreshold > 0.79 and off.bloomThreshold < 0.81, "the default threshold rides too")
+    reader:drop()
+
+    lighting.setAmbient(0.25, 0.5, 0.75)
+    lighting.setShadows({steps = 8, margin = 12, height = 50, dropOpacity = 0.5, dropLength = 64})
+    lighting.setBloom({threshold = 1.5, knee = 0.25, intensity = 0.5})
+    local second = nupp.io.newScalarReader(extractor:packet(64, 64))
+    local on = header(second)
+    test.equal(on.flags, (framepacket.FRAME_SHADOWS as integer) + (framepacket.FRAME_BLOOM as integer))
+    test.equal(on.ambientG, 0.5)
+    test.equal(on.shadowSteps, 8)
+    test.equal(on.shadowMargin, 12)
+    test.equal(on.shadowHeight, 50)
+    test.equal(on.dropOpacity, 0.5)
+    test.equal(on.dropLength, 64)
+    test.equal(on.bloomThreshold, 1.5)
+    test.equal(on.bloomKnee, 0.25)
+    test.equal(on.bloomIntensity, 0.5)
+    second:drop()
+    lighting.reset()
+end
+
+function suite.marksACasterAndLeavesATranslucentOneAlone(): nil
+    local world = ecs.newWorld({maxEntities = 8})
+    local extractor = framepacket.new(world)
+    -- One layer and one position band, so every depth ties and the packet falls
+    -- back to ascending entity id, which is spawn order.
+    world:spawn(ecs.Transform2D(1, 1, 0, 1, 0, 1, 1), gfx.Tint(), gfx.Occluder2D(0.75), gfx.Renderable2D)
+    world:spawn(ecs.Transform2D(2, 1, 0, 1, 0, 1, 1), gfx.Tint(), gfx.DropShadow2D(0.5), gfx.Renderable2D)
+    -- Both components on one entity is an occluder, because dropping that half
+    -- would silently unblock a light.
+    world:spawn(
+        ecs.Transform2D(3, 1, 0, 1, 0, 1, 1),
+        gfx.Tint(),
+        gfx.Occluder2D(0.25),
+        gfx.DropShadow2D(1),
+        gfx.Renderable2D
+    )
+    -- Translucent, so it casts nothing at all: it never reaches the G-buffer.
+    world:spawn(ecs.Transform2D(4, 1, 0, 1, 0, 1, 1), gfx.Tint(1, 1, 1, 0.5), gfx.Occluder2D(1), gfx.Renderable2D)
+    world:commit()
+
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
+    local read = header(reader)
+    test.equal(read.instances, 4)
+    test.equal(read.casters, 3)
+    for index = 1, read.batches do
+        batch(reader)
+    end
+    local firstHeight, firstFlags = castOf(reader)
+    test.equal(firstFlags, framepacket.FLAG_OCCLUDER)
+    test.equal(firstHeight, 0.75)
+    local secondHeight, secondFlags = castOf(reader)
+    test.equal(secondFlags, framepacket.FLAG_DROP_SHADOW)
+    test.equal(secondHeight, 0.5)
+    local thirdHeight, thirdFlags = castOf(reader)
+    test.equal(thirdFlags, framepacket.FLAG_OCCLUDER)
+    test.equal(thirdHeight, 0.25)
+    local fourthHeight, fourthFlags = castOf(reader)
+    test.equal(fourthFlags, framepacket.FLAG_BLENDED)
+    test.equal(fourthHeight, 0)
+    reader:drop()
+end
+
+function suite.dropsTheLightsPastTheCeiling(): nil
+    local world = ecs.newWorld({maxEntities = lighting.MAX_LIGHTS + 4})
+    local extractor = framepacket.new(world)
+    for index = 1, lighting.MAX_LIGHTS + 3 do
+        world:spawn(ecs.Transform2D(index, 0), gfx.PointLight2D())
+    end
+    world:commit()
+
+    local reader = nupp.io.newScalarReader(extractor:packet(64, 64))
+    test.equal(header(reader).lights, lighting.MAX_LIGHTS)
+    reader:drop()
+end
+
+function suite.refusesALightThatCannotProject(): nil
+    local world = ecs.newWorld({maxEntities = 2})
+    local extractor = framepacket.new(world)
+    world:spawn(ecs.Transform2D(0, 0), gfx.PointLight2D(64, 0))
+    world:commit()
+
+    test.raises(
+        function(): nil
+            extractor:packet(64, 64)
+        end,
+        "radius must be greater than zero"
+    )
 end
 
 return suite

@@ -36,6 +36,7 @@ follows:
 - `capsule` uses a height fraction.
 - `pie` uses a full-turn sweep fraction.
 - `star` uses valley depth.
+- `emissive` uses how much of its own color the surface gives off.
 - `glyph` uses the distance-field range.
 - `textured`, `circle`, `glyphalpha`, and `triangle` ignore it.
 
@@ -99,6 +100,7 @@ const BUILTINS: {
     "capsule",
     "circle",
     "ellipse",
+    "emissive",
     "frame",
     "glyph",
     "glyphalpha",

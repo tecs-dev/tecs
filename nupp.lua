@@ -37,6 +37,12 @@ for index = 1, #hostExports do
 end
 spritesExports[#spritesExports + 1] = "sprites.create"
 
+local lightingExports = {}
+for index = 1, #hostExports do
+    lightingExports[index] = hostExports[index]
+end
+lightingExports[#lightingExports + 1] = "lighting.create"
+
 return {
     -- `tests` is included because leaving it out meant `nupp check --strict`
     -- never read a test file. Two suites called `suspension.gather` and
@@ -66,6 +72,7 @@ return {
                     "tecs.gfx.fonts",
                     "tecs.gfx.images",
                     "tecs.gfx.layers",
+                    "tecs.gfx.lighting",
                     "tecs.gfx.sheet",
                     "tecs.gfx.text",
                     "tecs.gfx.truetype",
@@ -135,6 +142,12 @@ return {
                 description = "Build the camera and textured sprite Nupp example",
                 entries = {"tecs.host", "sprites"},
                 exports = spritesExports,
+            },
+            lighting = {
+                kind = "component",
+                description = "Build the deferred lighting, shadow and bloom Nupp example",
+                entries = {"tecs.host", "lighting"},
+                exports = lightingExports,
             },
             -- The Nupp half of the documentation. Tealdoc renders the Teal
             -- half and cannot render this one: it resolves a module only

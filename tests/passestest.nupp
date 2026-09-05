@@ -117,8 +117,20 @@ function suite.declaresTheDeferredGraphInOrder(): nil
     end
     -- Every one of these strings is a compatibility surface: a game names a
     -- target to place a pass of its own beside it.
-    test.equal(table.concat(names, ","), "albedo,normal,orm,emission,lit,scene")
-    test.equal(table.concat(passNames(), ","), "geometry,lighting,composite,forward,present")
+    test.equal(
+        table.concat(names, ","),
+        "albedo,normal,orm,emission,lit,scene,occluders,occludersTemp,dropShadowAO,bloomA,bloomB"
+    )
+    -- The shadow and bloom passes are declared whether or not the frame runs
+    -- them, so a game that inserted a pass beside one keeps it when the tuning
+    -- changes.
+    test.equal(
+        table.concat(passNames(), ","),
+        "geometry,occluders,occluderBlurH,occluderBlurV,dropShadowAO,lighting,"
+        .. "bloomExtract,bloomBlurX,bloomBlurY,composite,forward,present"
+    )
+    test.equal(passes.formatOf("dropShadowAO"), "r8")
+    test.equal(passes.formatOf("bloomA"), "rgba16f")
     test.equal(passes.formatOf("lit"), "rgba16f")
     test.equal(passes.formatOf("albedo"), "rgba8")
     test.equal(passes.formatOf("nothing"), nil)
@@ -127,8 +139,8 @@ end
 function suite.encodesTheGraphForTheBackend(): nil
     passes.reset()
     local graph = decode(passes.section())
-    test.equal(#graph.targets, 6)
-    test.equal(#graph.passes, 5)
+    test.equal(#graph.targets, 11)
+    test.equal(#graph.passes, 12)
 
     local scene = graph.targets[6]
     test.equal(scene.name, "scene")
@@ -150,16 +162,30 @@ function suite.encodesTheGraphForTheBackend(): nil
     test.equal(#geometry.inputs, 0)
     test.equal(table.concat(geometry.outputs, ","), "albedo,normal,orm,emission")
 
-    local lighting = graph.passes[2]
-    test.equal(table.concat(lighting.inputs, ","), "albedo,normal,orm,emission")
+    local lighting = graph.passes[6]
+    test.equal(lighting.name, "lighting")
+    -- Declaration order is binding order: the G-buffer's four first, then the
+    -- two the shadow lane fills.
+    test.equal(table.concat(lighting.inputs, ","), "albedo,normal,orm,emission,occluders,dropShadowAO")
 
-    local forward = graph.passes[4]
+    local mask = graph.targets[7]
+    test.equal(mask.name, "occluders")
+    -- Half the frame, because a nine-tap separable blur runs over it at once.
+    test.equal(mask.scale, 0.5)
+
+    local ao = graph.targets[9]
+    test.equal(ao.name, "dropShadowAO")
+    -- White, because a pixel no shadow lands on multiplies its light by one.
+    test.equal(ao.r, 1)
+
+    local forward = graph.passes[11]
+    test.equal(forward.name, "forward")
     test.equal(forward.depth, 2)
     test.equal(forward.hasDepthClear, 0)
     -- The forward pass loads what composite wrote rather than clearing it.
     test.equal(forward.clearMode, 1)
 
-    local present = graph.passes[5]
+    local present = graph.passes[12]
     test.equal(#present.outputs, 0, "an empty output list is the swapchain")
     test.equal(table.concat(present.inputs, ","), "scene")
 end
@@ -174,7 +200,7 @@ function suite.cachesTheSectionUntilADeclarationChangesIt(): nil
     test.assert(passes.revision() > before, "a declaration raises the revision")
     local second = passes.section()
     test.notEqual(second, first)
-    test.equal(#decode(second).targets, 7)
+    test.equal(#decode(second).targets, 12)
     passes.reset()
 end
 
@@ -186,13 +212,16 @@ function suite.insertsAPassAtANamedSeam(): nil
         inputs = {"scene"},
         outputs = {"passestest.overlay"},
     })
-    test.equal(table.concat(passNames(), ","), "geometry,lighting,composite,forward,passestest.overlay,present")
+    local names = passNames()
+    test.equal(names[#names], "present")
+    test.equal(names[#names - 1], "passestest.overlay")
 
     -- A pass and a target may share a name, which the deferred graph already
     -- relies on, so the insertion above is not a collision.
     local graph = decode(passes.section())
-    test.equal(graph.passes[5].name, "passestest.overlay")
-    test.equal(table.concat(graph.passes[5].outputs, ","), "passestest.overlay")
+    const at = #graph.passes - 1
+    test.equal(graph.passes[at].name, "passestest.overlay")
+    test.equal(table.concat(graph.passes[at].outputs, ","), "passestest.overlay")
     passes.reset()
 end
 
@@ -276,7 +305,13 @@ function suite.readsTheSharedDepthAttachmentByName(): nil
         outputs = {"passestest.ao"},
     })
     local graph = decode(passes.section())
-    test.equal(table.concat(graph.passes[2].inputs, ","), "normal,depth")
+    local found = ""
+    for index = 1, #graph.passes do
+        if graph.passes[index].name == "passestest.ao" then
+            found = table.concat(graph.passes[index].inputs, ",")
+        end
+    end
+    test.equal(found, "normal,depth")
     passes.reset()
 
     -- Nothing writes depth before the first pass, so reading it there is the

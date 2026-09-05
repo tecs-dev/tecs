@@ -558,6 +558,10 @@ pub mod tests {
     }
 
     /// The deferred graph as `tecs.gpu.passes` declares it.
+    ///
+    /// The shadow and bloom passes are here whether or not a frame runs them,
+    /// because the declaration is one graph for the life of the process and the
+    /// packet's flags are what decide each frame.
     pub fn deferred() -> Vec<u8> {
         GraphBuilder::new()
             .target("albedo", 0, 1.0, Some(0.0))
@@ -566,6 +570,11 @@ pub mod tests {
             .target("emission", 0, 1.0, Some(0.0))
             .target("lit", 1, 1.0, Some(0.0))
             .target("scene", 0, 1.0, None)
+            .target("occluders", 0, 0.5, Some(0.0))
+            .target("occludersTemp", 0, 0.5, Some(0.0))
+            .target("dropShadowAO", 2, 0.5, Some(1.0))
+            .target("bloomA", 1, 0.5, Some(0.0))
+            .target("bloomB", 1, 0.5, Some(0.0))
             .pass(
                 "geometry",
                 &[],
@@ -573,17 +582,42 @@ pub mod tests {
                 1,
                 0,
             )
+            .pass("occluders", &[], &["occluders"], 0, 0)
+            .pass("occluderBlurH", &["occluders"], &["occludersTemp"], 0, 0)
+            .pass("occluderBlurV", &["occludersTemp"], &["occluders"], 0, 0)
+            .pass("dropShadowAO", &[], &["dropShadowAO"], 0, 0)
             .pass(
                 "lighting",
-                &["albedo", "normal", "orm", "emission"],
+                &[
+                    "albedo",
+                    "normal",
+                    "orm",
+                    "emission",
+                    "occluders",
+                    "dropShadowAO",
+                ],
                 &["lit"],
                 0,
                 0,
             )
-            .pass("composite", &["lit"], &["scene"], 0, 0)
+            .pass("bloomExtract", &["lit"], &["bloomA"], 0, 0)
+            .pass("bloomBlurX", &["bloomA"], &["bloomB"], 0, 0)
+            .pass("bloomBlurY", &["bloomB"], &["bloomA"], 0, 0)
+            .pass("composite", &["lit", "bloomA"], &["scene"], 0, 0)
             .pass("forward", &[], &["scene"], 2, 1)
             .pass("present", &["scene"], &[], 0, 2)
             .build()
+    }
+
+    /// How many passes the deferred graph declares, so a test that indexes into
+    /// it says which pass it means rather than a number.
+    pub fn pass_at(name: &str) -> usize {
+        let graph = parse_graph(&deferred()).expect("valid graph");
+        graph
+            .passes()
+            .iter()
+            .position(|pass| pass.name == name)
+            .expect("the deferred graph declares it")
     }
 
     #[derive(Default)]
@@ -622,7 +656,19 @@ pub mod tests {
             .collect();
         assert_eq!(
             names,
-            ["albedo", "normal", "orm", "emission", "lit", "scene"]
+            [
+                "albedo",
+                "normal",
+                "orm",
+                "emission",
+                "lit",
+                "scene",
+                "occluders",
+                "occludersTemp",
+                "dropShadowAO",
+                "bloomA",
+                "bloomB"
+            ]
         );
         let passes: Vec<&str> = graph
             .passes()
@@ -631,26 +677,50 @@ pub mod tests {
             .collect();
         assert_eq!(
             passes,
-            ["geometry", "lighting", "composite", "forward", "present"]
+            [
+                "geometry",
+                "occluders",
+                "occluderBlurH",
+                "occluderBlurV",
+                "dropShadowAO",
+                "lighting",
+                "bloomExtract",
+                "bloomBlurX",
+                "bloomBlurY",
+                "composite",
+                "forward",
+                "present"
+            ]
         );
         assert_eq!(graph.targets()[4].format, TargetFormat::Rgba16Float);
         assert_eq!(graph.targets()[5].clear, None);
+        assert_eq!(graph.targets()[8].format, TargetFormat::R8);
+        assert_eq!(graph.targets()[8].scale, 0.5);
         assert_eq!(graph.passes()[0].depth, DepthMode::TestWrite);
         assert_eq!(graph.passes()[0].depth_clear, Some(1.0));
-        assert_eq!(graph.passes()[3].depth, DepthMode::Test);
-        assert_eq!(graph.passes()[3].clear, ClearMode::Load);
-        assert!(matches!(graph.passes()[4].clear, ClearMode::Override(_)));
+        let forward = pass_at("forward");
+        assert_eq!(graph.passes()[forward].depth, DepthMode::Test);
+        assert_eq!(graph.passes()[forward].clear, ClearMode::Load);
+        let present = pass_at("present");
+        assert!(matches!(
+            graph.passes()[present].clear,
+            ClearMode::Override(_)
+        ));
         assert!(
-            graph.passes()[4].outputs.is_empty(),
+            graph.passes()[present].outputs.is_empty(),
             "present writes the swapchain"
         );
+        // Declaration order is binding order: the G-buffer's four first, then
+        // the two the shadow lane fills.
         assert_eq!(
-            graph.passes()[1].inputs,
+            graph.passes()[pass_at("lighting")].inputs,
             [
                 Input::Target(0),
                 Input::Target(1),
                 Input::Target(2),
-                Input::Target(3)
+                Input::Target(3),
+                Input::Target(6),
+                Input::Target(8)
             ]
         );
         assert!(graph.needs_depth());
@@ -760,33 +830,36 @@ pub mod tests {
         let mut allocator = CountingAllocator::default();
         let mut store = TargetStore::default();
 
+        let count = graph.targets().len();
         store.ensure(&graph, 1, 800, 600, &mut allocator);
-        assert_eq!(allocator.created.len(), 6);
+        assert_eq!(allocator.created.len(), count);
         assert_eq!(allocator.depths, 1);
         assert_eq!(store.target(0), "albedo@800x600");
         assert_eq!(store.depth().map(String::as_str), Some("depth@800x600"));
+        // A half-scale target is allocated at half the frame on both axes.
+        assert_eq!(store.target(6), "occluders@400x300");
 
         store.ensure(&graph, 1, 800, 600, &mut allocator);
         assert_eq!(
             allocator.created.len(),
-            6,
+            count,
             "a steady frame allocates nothing"
         );
 
         store.ensure(&graph, 1, 1024, 768, &mut allocator);
-        assert_eq!(allocator.created.len(), 12);
+        assert_eq!(allocator.created.len(), count * 2);
         assert_eq!(store.size(), (1024, 768));
 
         // A replaced graph may have renamed, reformatted or rescaled any target
         // while keeping the count, so a new generation reallocates.
         store.ensure(&graph, 2, 1024, 768, &mut allocator);
-        assert_eq!(allocator.created.len(), 18);
+        assert_eq!(allocator.created.len(), count * 3);
 
         store.clear();
         store.ensure(&graph, 2, 1024, 768, &mut allocator);
         assert_eq!(
             allocator.created.len(),
-            24,
+            count * 4,
             "a lost device drops every texture"
         );
     }

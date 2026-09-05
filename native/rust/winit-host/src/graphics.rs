@@ -18,16 +18,17 @@ use std::sync::{Arc, Mutex};
 use anyhow::{bail, Context, Result};
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
-    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType, BlendState,
-    Buffer, BufferBindingType, BufferDescriptor, BufferUsages, Color, ColorTargetState,
-    ColorWrites, CommandEncoderDescriptor, ComputePassDescriptor, ComputePipeline,
-    ComputePipelineDescriptor, CurrentSurfaceTexture, DepthBiasState, DepthStencilState, Device,
-    DeviceDescriptor, Extent3d, FilterMode, FragmentState, Instance, InstanceDescriptor, LoadOp,
-    MipmapFilterMode, Operations, Origin3d, PipelineCompilationOptions, PipelineLayoutDescriptor,
-    Queue, RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor,
-    RenderPipeline, RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
-    ShaderModule, ShaderModuleDescriptor, ShaderSource, ShaderStages, StencilState, StoreOp,
-    Surface, SurfaceConfiguration, TexelCopyBufferLayout, TexelCopyTextureInfo, TextureAspect,
+    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType, BlendComponent,
+    BlendFactor, BlendOperation, BlendState, Buffer, BufferBindingType, BufferDescriptor,
+    BufferUsages, Color, ColorTargetState, ColorWrites, CommandEncoderDescriptor,
+    ComputePassDescriptor, ComputePipeline, ComputePipelineDescriptor, CurrentSurfaceTexture,
+    DepthBiasState, DepthStencilState, Device, DeviceDescriptor, Extent3d, FilterMode,
+    FragmentState, Instance, InstanceDescriptor, LoadOp, MipmapFilterMode, Operations, Origin3d,
+    PipelineCompilationOptions, PipelineLayoutDescriptor, Queue, RenderPassColorAttachment,
+    RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipeline,
+    RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, ShaderModule,
+    ShaderModuleDescriptor, ShaderSource, ShaderStages, StencilState, StoreOp, Surface,
+    SurfaceConfiguration, TexelCopyBufferLayout, TexelCopyTextureInfo, TextureAspect,
     TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
     TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
 };
@@ -39,7 +40,8 @@ use crate::graph::{
     MAX_OUTPUTS,
 };
 use crate::packet::{
-    parse_packet, Batch, INSTANCE_STRIDE, LANE_BLEND, LANE_COUNT, LANE_OPAQUE, SAMPLER_COUNT,
+    parse_packet, Batch, CAST_FANOUT, INSTANCE_STRIDE, LANE_BLEND, LANE_COUNT, LANE_OPAQUE,
+    LIGHT_STRIDE, MAX_LIGHTS, SAMPLER_COUNT, SCENE_FLOATS,
 };
 use crate::shaderpack::ShaderPack;
 
@@ -60,6 +62,22 @@ const DRAW_ARGS_WORDS: u64 = 4;
 /// The depth attachment every depth pass shares.
 const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
+/// Tiles the view is divided into on each axis, and the lights one holds. The
+/// same two numbers live in `tecs.gfx.lighting`, `lightbin.wgsl` and
+/// `lighting.wgsl`, and the four only work while they agree.
+const LIGHT_TILES: u32 = 32;
+const LIGHT_TILE_SLOTS: u32 = 64;
+const LIGHT_TILE_COUNT: u32 = LIGHT_TILES * LIGHT_TILES;
+
+/// The workgroup size the tile binning is written against.
+const BIN_WORKGROUP: u32 = 64;
+
+/// Which of the three shadow draws a cast pipeline is running. The numbering is
+/// shared with `cast.wgsl`.
+const CAST_MODE_MASK: u32 = 0;
+const CAST_MODE_SHADOW: u32 = 1;
+const CAST_MODE_STAMP: u32 = 2;
+
 const MATERIAL_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/material.wgsl");
 const INSTANCE_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/instance.wgsl");
 const CULL_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/cull.wgsl");
@@ -67,6 +85,9 @@ const RESOLVE_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/resolve
 const LIGHTING_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/lighting.wgsl");
 const COMPOSITE_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/composite.wgsl");
 const PRESENT_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/present.wgsl");
+const POSTPROCESS_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/postprocess.wgsl");
+const LIGHTBIN_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/lightbin.wgsl");
+const CAST_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/cast.wgsl");
 
 /// What this backend does when it reaches a pass of a given name.
 ///
@@ -79,15 +100,52 @@ pub enum Body {
     Instanced { lane: u32 },
     /// Covers the target once, reading the pass's declared inputs.
     Fullscreen,
+    /// Covers the target once, and binds the light buffer and the tile lists
+    /// beside the pass's declared inputs.
+    Lighting,
+    /// Draws every occluder's silhouette into the light mask, at the mask's own
+    /// widened projection, resolving overlap with a maximum so the tallest
+    /// occluder wins.
+    Occluders,
+    /// Draws the stretched copies into the drop-shadow target with a minimum so
+    /// the darkest wins, then stamps each caster back over the shadow it threw
+    /// across its own feet with a maximum.
+    DropShadows,
     /// Begins the pass, applies its clears, and draws nothing. This is what a
     /// pass whose name this backend does not implement does, and it is also a
     /// useful pass in its own right: it clears a target.
     Empty,
 }
 
+/// What has to be true of a frame for a pass to run at all.
+///
+/// A gated pass is skipped entirely rather than begun and left empty, so a game
+/// with no shadows and no bloom pays nothing at all for their being declared.
+/// The graph still holds them, which is what keeps a game's own pass placed
+/// beside one of them valid when the tuning changes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Gate {
+    Always,
+    Shadows,
+    Bloom,
+}
+
+impl Gate {
+    pub fn open(self, shadows: bool, bloom: bool) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Shadows => shadows,
+            Self::Bloom => bloom,
+        }
+    }
+}
+
 pub struct PassRuntime {
     pub body: Body,
+    pub gate: Gate,
     pub pipeline: Option<RenderPipeline>,
+    /// The second pipeline of a two-draw pass, which is the drop shadow's stamp.
+    pub second: Option<RenderPipeline>,
     /// Rebuilt whenever the targets are reallocated, because a bind group holds
     /// the views it was made from.
     inputs: Option<BindGroup>,
@@ -180,10 +238,13 @@ struct Scratch {
     batch_index: Buffer,
     cull_group: BindGroup,
     draw_group: BindGroup,
+    cast_group: BindGroup,
     instance_capacity: u32,
     batch_capacity: u32,
     block_capacity: u32,
+    cast_capacity: u32,
     batch_stride: u32,
+    mode_stride: u32,
 }
 
 /// The bind group layouts every pipeline in this backend is built against.
@@ -195,6 +256,9 @@ pub struct Layouts {
     pub image: BindGroupLayout,
     pub cull: BindGroupLayout,
     pub draw: BindGroupLayout,
+    pub cast: BindGroupLayout,
+    pub lighting: BindGroupLayout,
+    pub bin: BindGroupLayout,
 }
 
 impl Layouts {
@@ -253,6 +317,7 @@ impl Layouts {
                     },
                     count: None,
                 },
+                storage_entry(8, true),
             ],
         });
         let draw = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -273,11 +338,54 @@ impl Layouts {
                 },
             ],
         });
+        // The shadow draws read the same instance buffer the drawing lanes do,
+        // plus the cast list, the light buffer, and two dynamic offsets: which
+        // batch this draw is, and which of the three draws.
+        let cast = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("tecs cast layout"),
+            entries: &[
+                vertex_storage_entry(0),
+                vertex_storage_entry(1),
+                vertex_storage_entry(2),
+                dynamic_uniform_entry(3, ShaderStages::VERTEX),
+                vertex_storage_entry(4),
+                dynamic_uniform_entry(5, ShaderStages::VERTEX),
+            ],
+        });
+        let lighting = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("tecs lighting layout"),
+            entries: &[
+                fragment_storage_entry(0),
+                fragment_storage_entry(1),
+                fragment_storage_entry(2),
+            ],
+        });
+        let bin = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("tecs light bin layout"),
+            entries: &[
+                storage_entry(0, true),
+                storage_entry(1, false),
+                storage_entry(2, false),
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
         Self {
             scene,
             image,
             cull,
             draw,
+            cast,
+            lighting,
+            bin,
         }
     }
 }
@@ -299,8 +407,27 @@ pub struct Graphics {
     bind_groups: HashMap<(u32, u32), BindGroup>,
 
     pass_sampler: Sampler,
-    cull_pipelines: [ComputePipeline; 4],
+    cull_pipelines: [ComputePipeline; 5],
+    bin_pipeline: ComputePipeline,
     instance_module: ShaderModule,
+    cast_module: ShaderModule,
+
+    /// The light table, the tile lists, and the uniform the binning reads. All
+    /// three are a fixed size, so they are made once and never replaced while a
+    /// frame in flight is reading them.
+    lights: Buffer,
+    // Read and written only by the shaders. They are held because a bind group
+    // borrows the buffers it was made from rather than owning them, so dropping
+    // one here would leave the group pointing at nothing.
+    #[allow(dead_code)]
+    tile_counts: Buffer,
+    #[allow(dead_code)]
+    tile_lights: Buffer,
+    bin_uniform: Buffer,
+    bin_group: BindGroup,
+    lighting_group: BindGroup,
+    /// The three cast modes, written once, selected by a dynamic offset.
+    cast_modes: Buffer,
 
     graph: Option<Graph>,
     graph_generation: u64,
@@ -386,7 +513,12 @@ impl Graphics {
             }));
         }
 
-        let scene = [1.0_f32, 1.0, 0.5, 0.5, 1.0, 0.0, 0.0, 0.0];
+        let mut scene = [0.0_f32; SCENE_FLOATS];
+        scene[0] = 1.0;
+        scene[1] = 1.0;
+        scene[2] = 0.5;
+        scene[3] = 0.5;
+        scene[4] = 1.0;
         let scene_buffer = device.create_buffer(&BufferDescriptor {
             label: Some("tecs scene"),
             size: std::mem::size_of_val(&scene) as u64,
@@ -413,7 +545,14 @@ impl Graphics {
             bind_group_layouts: &[Some(&layouts.cull)],
             immediate_size: 0,
         });
-        let cull_pipelines = ["markMain", "scanMain", "compactMain", "argsMain"].map(|entry| {
+        let cull_pipelines = [
+            "markMain",
+            "scanMain",
+            "compactMain",
+            "argsMain",
+            "castMain",
+        ]
+        .map(|entry| {
             device.create_compute_pipeline(&ComputePipelineDescriptor {
                 label: Some(entry),
                 layout: Some(&cull_pipeline_layout),
@@ -428,6 +567,112 @@ impl Graphics {
             label: Some("tecs instance"),
             source: ShaderSource::Wgsl(Cow::Owned(instance_source(&pack))),
         });
+        let cast_module = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("tecs cast"),
+            source: ShaderSource::Wgsl(Cow::Owned(cast_source(&pack))),
+        });
+
+        // Fixed sizes, so these are made once and never replaced while a frame
+        // in flight is reading them. A grid that grew with the window would have
+        // to be reallocated under a frame that had already been submitted.
+        let lights = device.create_buffer(&BufferDescriptor {
+            label: Some("tecs lights"),
+            size: u64::from(MAX_LIGHTS) * LIGHT_STRIDE as u64,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let tile_counts = device.create_buffer(&BufferDescriptor {
+            label: Some("tecs light tile counts"),
+            size: u64::from(LIGHT_TILE_COUNT) * 4,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let tile_lights = device.create_buffer(&BufferDescriptor {
+            label: Some("tecs light tile lists"),
+            size: u64::from(LIGHT_TILE_COUNT) * u64::from(LIGHT_TILE_SLOTS) * 4,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let bin_uniform = device.create_buffer(&BufferDescriptor {
+            label: Some("tecs light bin uniform"),
+            size: 32,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bin_module = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("tecs light bin"),
+            source: ShaderSource::Wgsl(Cow::Borrowed(LIGHTBIN_WGSL)),
+        });
+        let bin_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("tecs light bin pipeline layout"),
+            bind_group_layouts: &[Some(&layouts.bin)],
+            immediate_size: 0,
+        });
+        let bin_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("tecs light bin"),
+            layout: Some(&bin_pipeline_layout),
+            module: &bin_module,
+            entry_point: Some("binMain"),
+            compilation_options: PipelineCompilationOptions::default(),
+            cache: None,
+        });
+        let bin_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("tecs light bin bind group"),
+            layout: &layouts.bin,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: lights.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: tile_counts.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: tile_lights.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: bin_uniform.as_entire_binding(),
+                },
+            ],
+        });
+        let lighting_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("tecs lighting bind group"),
+            layout: &layouts.lighting,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: lights.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: tile_counts.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: tile_lights.as_entire_binding(),
+                },
+            ],
+        });
+
+        // Three values, written once, one per shadow draw. A dynamic offset
+        // selects which, so the three draws share one pipeline layout and one
+        // bind group.
+        let mode_stride = device.limits().min_uniform_buffer_offset_alignment.max(4);
+        let cast_modes = device.create_buffer(&BufferDescriptor {
+            label: Some("tecs cast modes"),
+            size: u64::from(mode_stride) * 3,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut modes = vec![0_u8; (mode_stride * 3) as usize];
+        for mode in [CAST_MODE_MASK, CAST_MODE_SHADOW, CAST_MODE_STAMP] {
+            let at = (mode * mode_stride) as usize;
+            modes[at..at + 4].copy_from_slice(&mode.to_ne_bytes());
+        }
+        queue.write_buffer(&cast_modes, 0, &modes);
 
         let samplers = create_samplers(&device);
         // Nearest and clamped, because a graph target is read at the resolution
@@ -461,7 +706,16 @@ impl Graphics {
             bind_groups: HashMap::new(),
             pass_sampler,
             cull_pipelines,
+            bin_pipeline,
             instance_module,
+            cast_module,
+            lights,
+            tile_counts,
+            tile_lights,
+            bin_uniform,
+            bin_group,
+            lighting_group,
+            cast_modes,
             graph: None,
             graph_generation: 0,
             graph_revision: None,
@@ -579,15 +833,17 @@ impl Graphics {
     ///
     /// Capacities only ever grow and round to a power of two, so a scene that
     /// oscillates in size does not reallocate every frame.
-    fn ensure_scratch(&mut self, instance_count: u32, batch_count: u32) {
+    fn ensure_scratch(&mut self, instance_count: u32, batch_count: u32, caster_count: u32) {
         let instance_capacity = capacity(instance_count.max(1));
         let batch_capacity = capacity(batch_count.max(1));
         let blocks = instance_count.div_ceil(WORKGROUP).max(1);
         let block_capacity = capacity(blocks + 1);
+        let cast_capacity = capacity(caster_count.max(1));
         if let Some(scratch) = self.scratch.as_ref() {
             if scratch.instance_capacity >= instance_capacity
                 && scratch.batch_capacity >= batch_capacity
                 && scratch.block_capacity >= block_capacity
+                && scratch.cast_capacity >= cast_capacity
             {
                 return;
             }
@@ -602,6 +858,8 @@ impl Graphics {
             batch_capacity.max(self.scratch.as_ref().map_or(0, |held| held.batch_capacity));
         let block_capacity =
             block_capacity.max(self.scratch.as_ref().map_or(0, |held| held.block_capacity));
+        let cast_capacity =
+            cast_capacity.max(self.scratch.as_ref().map_or(0, |held| held.cast_capacity));
 
         let device = &self.device;
         let instances = device.create_buffer(&BufferDescriptor {
@@ -628,27 +886,38 @@ impl Graphics {
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
+        // The shadow lane's list rides at the end of the visible buffer and its
+        // bases at the end of the batch bases, rather than in two bindings of
+        // their own: WebGPU guarantees eight storage buffers per stage and the
+        // cull would otherwise want eleven. Each offset is rounded up to the
+        // storage binding alignment, because the shadow draws bind the same
+        // buffer from there.
+        let cast_words = cast_list_offset(instance_capacity);
         let visible = device.create_buffer(&BufferDescriptor {
             label: Some("tecs visible lists"),
-            size: u64::from(instance_capacity) * u64::from(LANE_COUNT) * 4,
+            size: (u64::from(cast_words) + u64::from(cast_capacity) * u64::from(CAST_FANOUT)) * 4,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
+        // Twice over, because the shadow lane's arguments follow the drawing
+        // lanes' in the same buffer. An indirect draw takes a byte offset, so
+        // that half needs no alignment of its own.
         let draw_args = device.create_buffer(&BufferDescriptor {
             label: Some("tecs draw arguments"),
-            size: u64::from(batch_capacity) * DRAW_ARGS_WORDS * 4,
+            size: u64::from(batch_capacity) * 2 * DRAW_ARGS_WORDS * 4,
             usage: BufferUsages::STORAGE | BufferUsages::INDIRECT | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
+        let cast_base_words = cast_base_offset(batch_capacity);
         let batch_base = device.create_buffer(&BufferDescriptor {
             label: Some("tecs batch bases"),
-            size: u64::from(batch_capacity) * 4,
+            size: (u64::from(cast_base_words) + u64::from(batch_capacity)) * 4,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         let cull_uniform = device.create_buffer(&BufferDescriptor {
             label: Some("tecs cull uniform"),
-            size: 32,
+            size: 64,
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -707,6 +976,10 @@ impl Graphics {
                     binding: 7,
                     resource: cull_uniform.as_entire_binding(),
                 },
+                BindGroupEntry {
+                    binding: 8,
+                    resource: self.lights.as_entire_binding(),
+                },
             ],
         });
         let draw_group = device.create_bind_group(&BindGroupDescriptor {
@@ -736,6 +1009,58 @@ impl Graphics {
             ],
         });
 
+        let cast_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("tecs cast bind group"),
+            layout: &self.layouts.cast,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: instances.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &visible,
+                        offset: u64::from(cast_words) * 4,
+                        size: None,
+                    }),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &batch_base,
+                        offset: u64::from(cast_base_words) * 4,
+                        size: None,
+                    }),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &batch_index,
+                        offset: 0,
+                        size: std::num::NonZeroU64::new(4),
+                    }),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: self.lights.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &self.cast_modes,
+                        offset: 0,
+                        size: std::num::NonZeroU64::new(4),
+                    }),
+                },
+            ],
+        });
+
+        let mode_stride = self
+            .device
+            .limits()
+            .min_uniform_buffer_offset_alignment
+            .max(4);
         self.scratch = Some(Scratch {
             instances,
             batches,
@@ -748,10 +1073,13 @@ impl Graphics {
             batch_index,
             cull_group,
             draw_group,
+            cast_group,
             instance_capacity,
             batch_capacity,
             block_capacity,
+            cast_capacity,
             batch_stride,
+            mode_stride,
         });
     }
 
@@ -794,6 +1122,7 @@ impl Graphics {
                 &self.device,
                 &self.layouts,
                 &self.instance_module,
+                &self.cast_module,
                 &graph,
                 self.config.format,
             )?;
@@ -811,6 +1140,45 @@ impl Graphics {
         let outcome = self.draw(&graph, &packet, batches);
         self.graph = Some(graph);
         outcome
+    }
+
+    /// Draws one shadow mode over every batch's run of the cast list.
+    ///
+    /// A batch's casters are a contiguous run of the shadow lane for the same
+    /// reason its drawn instances are a contiguous run of its own lane, so each
+    /// batch binds its own image and draws only its entries, and a caster's
+    /// silhouette is cut by the artwork it draws with.
+    fn cast_draw(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        pipeline: &RenderPipeline,
+        scratch: &Scratch,
+        batches: &[Batch],
+        mode: u32,
+    ) {
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &self.scene_bind_group, &[]);
+        for (slot, batch) in batches.iter().enumerate() {
+            let image = self
+                .bind_groups
+                .get(&(batch.image, batch.sampler))
+                .expect("resolved before the encoder");
+            pass.set_bind_group(1, image, &[]);
+            pass.set_bind_group(
+                2,
+                &scratch.cast_group,
+                &[
+                    slot as u32 * scratch.batch_stride,
+                    mode * scratch.mode_stride,
+                ],
+            );
+            // The shadow lane's arguments follow the drawing lanes' in the
+            // same buffer, one set per batch each.
+            pass.draw_indirect(
+                &scratch.draw_args,
+                (batches.len() as u64 + slot as u64) * DRAW_ARGS_WORDS * 4,
+            );
+        }
     }
 
     fn draw(
@@ -837,12 +1205,38 @@ impl Graphics {
             self.bound_generation = self.binding_generation;
         }
 
+        let header = packet.header;
+        let shadows = header.shadows();
+        let bloom = header.bloom_enabled();
+        let view = header.world_view();
         self.queue.write_buffer(
             &self.scene_buffer,
             0,
-            bytemuck::cast_slice(&packet.header.scene),
+            bytemuck::cast_slice(&header.scene(packet.light_count)),
         );
-        self.ensure_scratch(packet.instance_count, batches.len() as u32);
+        if !packet.light_bytes.is_empty() {
+            self.queue.write_buffer(&self.lights, 0, packet.light_bytes);
+        }
+        // The same rectangle the resolve maps its fragments into, because a grid
+        // the two passes disagree about puts a light in a tile nothing looks in.
+        let bin: [u32; 8] = [
+            view[0].to_bits(),
+            view[1].to_bits(),
+            view[2].to_bits(),
+            view[3].to_bits(),
+            packet.light_count,
+            0,
+            0,
+            0,
+        ];
+        self.queue
+            .write_buffer(&self.bin_uniform, 0, bytemuck::cast_slice(&bin));
+
+        self.ensure_scratch(
+            packet.instance_count,
+            batches.len() as u32,
+            packet.caster_count,
+        );
         let scratch = self.scratch.as_ref().expect("just ensured");
         if !packet.instances.is_empty() {
             self.queue
@@ -853,8 +1247,12 @@ impl Graphics {
                 .write_buffer(&scratch.batches, 0, packet.batch_bytes);
         }
         let blocks = packet.instance_count.div_ceil(WORKGROUP);
-        let view = packet.header.world_view();
-        let uniform: [u32; 8] = [
+        // A frame with the shadow lane off keeps no caster at all, so the cast
+        // dispatch runs over an empty list rather than being skipped: it is the
+        // only thing that writes the list, and skipping it would leave the
+        // previous frame's entries standing.
+        let cast_capacity = if shadows { scratch.cast_capacity } else { 0 };
+        let uniform: [u32; 16] = [
             view[0].to_bits(),
             view[1].to_bits(),
             view[2].to_bits(),
@@ -863,6 +1261,14 @@ impl Graphics {
             blocks,
             scratch.instance_capacity,
             batches.len() as u32,
+            packet.light_count,
+            cast_capacity,
+            cast_list_offset(scratch.instance_capacity),
+            cast_base_offset(scratch.batch_capacity),
+            header.shadow_margin.to_bits(),
+            0,
+            0,
+            0,
         ];
         self.queue
             .write_buffer(&scratch.cull_uniform, 0, bytemuck::cast_slice(&uniform));
@@ -896,6 +1302,19 @@ impl Graphics {
             });
 
         let scratch = self.scratch.as_ref().expect("ensured above");
+        {
+            // Dispatched every frame, including one with no lights at all. It is
+            // the only thing that writes the tile counts, so skipping it would
+            // leave the previous frame's lists standing and light a scene by
+            // lights that are gone.
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("tecs light bin"),
+                timestamp_writes: None,
+            });
+            pass.set_bind_group(0, &self.bin_group, &[]);
+            pass.set_pipeline(&self.bin_pipeline);
+            pass.dispatch_workgroups(LIGHT_TILE_COUNT.div_ceil(BIN_WORKGROUP), 1, 1);
+        }
         if packet.instance_count > 0 && !batches.is_empty() {
             let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                 label: Some("tecs cull"),
@@ -912,12 +1331,22 @@ impl Graphics {
             pass.set_pipeline(&self.cull_pipelines[2]);
             pass.dispatch_workgroups(blocks, 1, 1);
             // Not a fourth pass of the scan: this reads what the scan produced
-            // and turns it into one indirect draw per batch.
+            // and turns it into one indirect draw per batch, for the drawing
+            // lanes and the shadow lane both.
             pass.set_pipeline(&self.cull_pipelines[3]);
             pass.dispatch_workgroups((batches.len() as u32).div_ceil(ARGS_WORKGROUP), 1, 1);
+            // The shadow lane's own expansion, after the compaction it reads.
+            pass.set_pipeline(&self.cull_pipelines[4]);
+            pass.dispatch_workgroups(blocks, 1, 1);
         }
 
         for (index, spec) in graph.passes().iter().enumerate() {
+            // A pass whose lane the frame turned off is skipped entirely rather
+            // than begun and left empty, so a game with no shadows and no bloom
+            // pays nothing at all for their being declared.
+            if !self.passes[index].gate.open(shadows, bloom) {
+                continue;
+            }
             // On the stack rather than in a vector, because a frame walks
             // every pass and a per-pass allocation is a per-frame allocation.
             // An attachment borrows a target view, so the array cannot be kept
@@ -979,7 +1408,7 @@ impl Graphics {
             });
             match runtime.body {
                 Body::Empty => {}
-                Body::Fullscreen => {
+                Body::Fullscreen | Body::Lighting => {
                     let pipeline = runtime
                         .pipeline
                         .as_ref()
@@ -989,7 +1418,29 @@ impl Graphics {
                     if let Some(inputs) = runtime.inputs.as_ref() {
                         pass.set_bind_group(1, inputs, &[]);
                     }
+                    if matches!(runtime.body, Body::Lighting) {
+                        pass.set_bind_group(2, &self.lighting_group, &[]);
+                    }
                     pass.draw(0..3, 0..1);
+                }
+                Body::Occluders => {
+                    if packet.instance_count == 0 {
+                        continue;
+                    }
+                    let pipeline = runtime.pipeline.as_ref().expect("the mask draw has one");
+                    self.cast_draw(&mut pass, pipeline, scratch, batches, CAST_MODE_MASK);
+                }
+                Body::DropShadows => {
+                    if packet.instance_count == 0 {
+                        continue;
+                    }
+                    let stretched = runtime.pipeline.as_ref().expect("the shadow draw has one");
+                    self.cast_draw(&mut pass, stretched, scratch, batches, CAST_MODE_SHADOW);
+                    // The stamp goes second and takes the maximum, which is what
+                    // puts a caster back at full brightness over the shadow it
+                    // threw across its own feet.
+                    let stamp = runtime.second.as_ref().expect("the stamp draw has one");
+                    self.cast_draw(&mut pass, stamp, scratch, batches, CAST_MODE_STAMP);
                 }
                 Body::Instanced { lane } => {
                     if packet.instance_count == 0 {
@@ -1040,12 +1491,14 @@ pub fn build_passes(
     device: &Device,
     layouts: &Layouts,
     instance_module: &ShaderModule,
+    cast_module: &ShaderModule,
     graph: &Graph,
     surface_format: TextureFormat,
 ) -> Result<Vec<PassRuntime>> {
     let mut passes = Vec::with_capacity(graph.passes().len());
     for pass in graph.passes() {
         let body = body_for(&pass.name);
+        let gate = gate_for(&pass.name);
         let color_formats: Vec<TextureFormat> = if pass.outputs.is_empty() {
             vec![surface_format]
         } else {
@@ -1056,8 +1509,49 @@ pub fn build_passes(
         };
         let depth = depth_state(pass.depth);
 
+        let mut second: Option<RenderPipeline> = None;
         let (pipeline, input_layout) = match body {
             Body::Empty => (None, None),
+            Body::Occluders | Body::DropShadows => {
+                let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+                    label: Some("tecs cast pipeline layout"),
+                    bind_group_layouts: &[
+                        Some(&layouts.scene),
+                        Some(&layouts.image),
+                        Some(&layouts.cast),
+                    ],
+                    immediate_size: 0,
+                });
+                // The blend is what resolves overlap between casters: a maximum
+                // for the mask, so the tallest occluder wins, and a minimum for
+                // the stretched copies, so the darkest does. Neither is order
+                // dependent, which is what lets the shadow draws ignore the
+                // sorting the drawing lanes need.
+                let first_blend = if matches!(body, Body::Occluders) {
+                    channel_blend(BlendOperation::Max)
+                } else {
+                    channel_blend(BlendOperation::Min)
+                };
+                let pipeline = cast_pipeline(
+                    device,
+                    cast_module,
+                    &layout,
+                    &pass.name,
+                    &color_formats,
+                    first_blend,
+                );
+                if matches!(body, Body::DropShadows) {
+                    second = Some(cast_pipeline(
+                        device,
+                        cast_module,
+                        &layout,
+                        "dropShadowStamp",
+                        &color_formats,
+                        channel_blend(BlendOperation::Max),
+                    ));
+                }
+                (Some(pipeline), None)
+            }
             Body::Instanced { lane } => {
                 let entry = if lane == LANE_OPAQUE {
                     "geometryMain"
@@ -1111,7 +1605,7 @@ pub fn build_passes(
                 });
                 (Some(pipeline), None)
             }
-            Body::Fullscreen => {
+            Body::Fullscreen | Body::Lighting => {
                 let entry = fullscreen_entry(&pass.name)
                     .with_context(|| format!("pass '{}' has no fullscreen body", pass.name))?;
                 let module = device.create_shader_module(ShaderModuleDescriptor {
@@ -1122,9 +1616,13 @@ pub fn build_passes(
                     ))),
                 });
                 let input_layout = input_layout(device, pass.inputs.len());
+                let mut groups = vec![Some(&layouts.scene), Some(&input_layout)];
+                if matches!(body, Body::Lighting) {
+                    groups.push(Some(&layouts.lighting));
+                }
                 let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
                     label: Some("tecs fullscreen pipeline layout"),
-                    bind_group_layouts: &[Some(&layouts.scene), Some(&input_layout)],
+                    bind_group_layouts: &groups,
                     immediate_size: 0,
                 });
                 let targets: Vec<Option<ColorTargetState>> = color_formats
@@ -1164,12 +1662,72 @@ pub fn build_passes(
 
         passes.push(PassRuntime {
             body,
+            gate,
             pipeline,
+            second,
             inputs: None,
             input_layout,
         });
     }
     Ok(passes)
+}
+
+/// Builds one of the three shadow draws.
+fn cast_pipeline(
+    device: &Device,
+    module: &ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    label: &str,
+    formats: &[TextureFormat],
+    blend: BlendState,
+) -> RenderPipeline {
+    let targets: Vec<Option<ColorTargetState>> = formats
+        .iter()
+        .map(|format| {
+            Some(ColorTargetState {
+                format: *format,
+                blend: Some(blend),
+                write_mask: ColorWrites::ALL,
+            })
+        })
+        .collect();
+    device.create_render_pipeline(&RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: VertexState {
+            module,
+            entry_point: Some("castVertexMain"),
+            compilation_options: PipelineCompilationOptions::default(),
+            buffers: &[],
+        },
+        fragment: Some(FragmentState {
+            module,
+            entry_point: Some("castFragmentMain"),
+            compilation_options: PipelineCompilationOptions::default(),
+            targets: &targets,
+        }),
+        primitive: Default::default(),
+        // Nothing in the shadow lane tests depth. An occluder blocks light in
+        // the world rather than standing in front of something.
+        depth_stencil: None,
+        multisample: Default::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// A blend that folds a fragment into what is already there by one operation on
+/// every channel, which is what makes the shadow draws order independent.
+fn channel_blend(operation: BlendOperation) -> BlendState {
+    let component = BlendComponent {
+        src_factor: BlendFactor::One,
+        dst_factor: BlendFactor::One,
+        operation,
+    };
+    BlendState {
+        color: component,
+        alpha: component,
+    }
 }
 
 /// Builds the layout a fullscreen pass with `count` declared inputs binds.
@@ -1205,6 +1763,16 @@ pub fn instance_source(pack: &ShaderPack) -> String {
     format!("{MATERIAL_WGSL}\n{}\n{INSTANCE_WGSL}", pack.dispatch())
 }
 
+/// The module the three shadow draws go through.
+///
+/// The same material contract and the same assembled dispatch as the drawing
+/// lanes, because a caster's silhouette is the coverage its own material
+/// decided: a circle, a rounded box or a glyph casts for nothing, and a caster
+/// needs no alpha threshold of its own.
+pub fn cast_source(pack: &ShaderPack) -> String {
+    format!("{MATERIAL_WGSL}\n{}\n{CAST_WGSL}", pack.dispatch())
+}
+
 /// Returns what this backend does for a pass of a given name.
 ///
 /// Every name here is a compatibility surface. A name this backend does not
@@ -1215,8 +1783,24 @@ fn body_for(name: &str) -> Body {
     match name {
         "geometry" => Body::Instanced { lane: LANE_OPAQUE },
         "forward" => Body::Instanced { lane: LANE_BLEND },
-        "lighting" | "composite" | "present" => Body::Fullscreen,
+        "lighting" => Body::Lighting,
+        "occluders" => Body::Occluders,
+        "dropShadowAO" => Body::DropShadows,
+        "occluderBlurH" | "occluderBlurV" | "bloomExtract" | "bloomBlurX" | "bloomBlurY"
+        | "composite" | "present" => Body::Fullscreen,
         _ => Body::Empty,
+    }
+}
+
+/// Returns what a frame has to have turned on for a pass of a given name to run.
+///
+/// Only the passes the engine declares are gated. A pass a game adds runs every
+/// frame, because nothing here knows what would make it unnecessary.
+fn gate_for(name: &str) -> Gate {
+    match name {
+        "occluders" | "occluderBlurH" | "occluderBlurV" | "dropShadowAO" => Gate::Shadows,
+        "bloomExtract" | "bloomBlurX" | "bloomBlurY" => Gate::Bloom,
+        _ => Gate::Always,
     }
 }
 
@@ -1225,6 +1809,11 @@ fn body_for(name: &str) -> Body {
 fn fullscreen_entry(name: &str) -> Option<(&'static str, &'static str, Option<BlendState>)> {
     match name {
         "lighting" => Some(("lightingMain", LIGHTING_WGSL, None)),
+        "occluderBlurH" => Some(("occluderBlurXMain", POSTPROCESS_WGSL, None)),
+        "occluderBlurV" => Some(("occluderBlurYMain", POSTPROCESS_WGSL, None)),
+        "bloomExtract" => Some(("bloomExtractMain", POSTPROCESS_WGSL, None)),
+        "bloomBlurX" => Some(("bloomBlurXMain", POSTPROCESS_WGSL, None)),
+        "bloomBlurY" => Some(("bloomBlurYMain", POSTPROCESS_WGSL, None)),
         "composite" => Some(("compositeMain", COMPOSITE_WGSL, None)),
         // The scene is blended over the clear this pass declares, so a pixel
         // nothing drew shows the window's background.
@@ -1331,10 +1920,56 @@ fn vertex_storage_entry(binding: u32) -> BindGroupLayoutEntry {
     }
 }
 
+fn fragment_storage_entry(binding: u32) -> BindGroupLayoutEntry {
+    BindGroupLayoutEntry {
+        binding,
+        visibility: ShaderStages::FRAGMENT,
+        ty: BindingType::Buffer {
+            ty: BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+fn dynamic_uniform_entry(binding: u32, visibility: ShaderStages) -> BindGroupLayoutEntry {
+    BindGroupLayoutEntry {
+        binding,
+        visibility,
+        ty: BindingType::Buffer {
+            ty: BufferBindingType::Uniform,
+            has_dynamic_offset: true,
+            min_binding_size: std::num::NonZeroU64::new(4),
+        },
+        count: None,
+    }
+}
+
 /// Rounds a count up to the next power of two, so a scene that oscillates in
 /// size does not reallocate every frame.
 fn capacity(count: u32) -> u32 {
     count.next_power_of_two()
+}
+
+/// The storage binding offset alignment WebGPU guarantees, in words.
+///
+/// The shadow lane's list and its bases are bound as offsets into buffers the
+/// drawing lanes already hold, and a bound offset has to land on this.
+const BINDING_ALIGNMENT_WORDS: u32 = 64;
+
+fn align_words(words: u32) -> u32 {
+    words.div_ceil(BINDING_ALIGNMENT_WORDS) * BINDING_ALIGNMENT_WORDS
+}
+
+/// The word the cast list begins at inside the visible buffer.
+fn cast_list_offset(instance_capacity: u32) -> u32 {
+    align_words(instance_capacity * LANE_COUNT)
+}
+
+/// The word the shadow lane's bases begin at inside the batch bases.
+fn cast_base_offset(batch_capacity: u32) -> u32 {
+    align_words(batch_capacity)
 }
 
 /// Finds the shader pack, or assembles one from the material directory.
@@ -1455,6 +2090,18 @@ mod tests {
     }
 
     #[test]
+    fn puts_the_shadow_lane_where_a_bind_group_can_reach_it() {
+        // Every offset lands on the storage binding alignment WebGPU
+        // guarantees, because the shadow draws bind the same buffers from there.
+        for capacity in [1_u32, 3, 64, 100, 1024] {
+            assert_eq!(cast_list_offset(capacity) % BINDING_ALIGNMENT_WORDS, 0);
+            assert_eq!(cast_base_offset(capacity) % BINDING_ALIGNMENT_WORDS, 0);
+            assert!(cast_list_offset(capacity) >= capacity * LANE_COUNT);
+            assert!(cast_base_offset(capacity) >= capacity);
+        }
+    }
+
+    #[test]
     fn maps_every_pass_name_this_backend_implements() {
         assert!(matches!(
             body_for("geometry"),
@@ -1464,12 +2111,34 @@ mod tests {
             body_for("forward"),
             Body::Instanced { lane: LANE_BLEND }
         ));
-        assert!(matches!(body_for("lighting"), Body::Fullscreen));
+        assert!(matches!(body_for("lighting"), Body::Lighting));
+        assert!(matches!(body_for("occluders"), Body::Occluders));
+        assert!(matches!(body_for("dropShadowAO"), Body::DropShadows));
+        assert!(matches!(body_for("occluderBlurH"), Body::Fullscreen));
+        assert!(matches!(body_for("bloomExtract"), Body::Fullscreen));
         assert!(matches!(body_for("composite"), Body::Fullscreen));
         assert!(matches!(body_for("present"), Body::Fullscreen));
         // A pass this backend has no body for still runs: it begins with its
         // attachments and its clears and draws nothing.
         assert!(matches!(body_for("game.overlay"), Body::Empty));
+    }
+
+    #[test]
+    fn runs_a_gated_pass_only_where_its_lane_is_on() {
+        assert_eq!(gate_for("occluders"), Gate::Shadows);
+        assert_eq!(gate_for("occluderBlurV"), Gate::Shadows);
+        assert_eq!(gate_for("dropShadowAO"), Gate::Shadows);
+        assert_eq!(gate_for("bloomBlurY"), Gate::Bloom);
+        assert_eq!(gate_for("lighting"), Gate::Always);
+        // A pass a game adds runs every frame, because nothing here knows what
+        // would make it unnecessary.
+        assert_eq!(gate_for("game.overlay"), Gate::Always);
+
+        assert!(Gate::Always.open(false, false));
+        assert!(!Gate::Shadows.open(false, true));
+        assert!(Gate::Shadows.open(true, false));
+        assert!(!Gate::Bloom.open(true, false));
+        assert!(Gate::Bloom.open(false, true));
     }
 
     #[test]
