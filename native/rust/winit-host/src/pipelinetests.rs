@@ -55,7 +55,7 @@ fn builds_every_deferred_pipeline_from_the_engine_material_set() {
         return;
     };
     let pack = engine_pack();
-    assert_eq!(pack.material_count(), 13);
+    assert_eq!(pack.material_count(), 14);
 
     let scope = device.push_error_scope(ErrorFilter::Validation);
     let layouts = Layouts::new(&device);

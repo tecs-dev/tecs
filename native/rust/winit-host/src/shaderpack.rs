@@ -396,6 +396,7 @@ mod tests {
                 "capsule",
                 "circle",
                 "ellipse",
+                "emissive",
                 "frame",
                 "glyph",
                 "glyphalpha",
