@@ -52,8 +52,12 @@ const DEFAULT_ENTRY: &str = "tecs.host.create";
 
 /// Locates the Nupp compiler.
 ///
-/// `NUPP` wins, then a `nupp` on `PATH`, then a sibling checkout beside this
-/// one. The sibling is searched upward rather than counted, for the reason
+/// `NUPP` wins, then a compiler checkout beside this one, then a `nupp` on
+/// `PATH`. The sibling beats the installed release because the compiler and
+/// this tree move together during the migration, and the tree is developed
+/// against a compiler newer than the published one.
+///
+/// The sibling is searched upward rather than counted, for the reason
 /// `native/rust/winit-host/build.rs` gives: a git worktree sits deeper than the
 /// primary checkout, so a fixed number of hops resolves in one layout and not
 /// the other.
