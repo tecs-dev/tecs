@@ -1,0 +1,169 @@
+local disk = require("nupp.io.files")
+local files = require("tecs.files")
+local paths = require("nupp.io.path")
+local test = require("nupp.test")
+
+local suite = {}
+
+local SEPARATOR = paths.separator()
+
+--- Puts the module back the way the suite found it.
+---
+--- Every root is process-wide module state, so a case that moves one and leaves
+--- it moved would decide what the next case sees.
+local function restore(): nil
+    files.setPreferenceIdentity("tecs", "tecs")
+    files.reset()
+end
+
+--- Resolves a writable root, or skips when this machine has no home directory.
+---
+--- A build container with no `HOME` and no `APPDATA` is not a broken engine, so
+--- the two cases that need a real directory step aside rather than fail.
+local function writableRoot(): string
+    local ok, answer = pcall(files.preferencePath)
+    if not ok then
+        test.skip("this platform has no writable root: " .. tostring(answer))
+    end
+
+    return answer as string
+end
+
+function suite.startsWithTheDefaultIdentityAndCarriesANewOne(): nil
+    restore()
+    local organization, application = files.preferenceIdentity()
+    test.equal(organization, "tecs")
+    test.equal(application, "tecs")
+
+    files.setPreferenceIdentity("Ex Nihilo", "Starfarer")
+    organization, application = files.preferenceIdentity()
+    test.equal(organization, "Ex Nihilo")
+    test.equal(application, "Starfarer")
+    restore()
+end
+
+function suite.refusesAnEmptyPublisherOrGameName(): nil
+    restore()
+    test.assert(not pcall(files.setPreferenceIdentity, "", "Starfarer"))
+    test.assert(not pcall(files.setPreferenceIdentity, "Ex Nihilo", ""))
+    local organization, application = files.preferenceIdentity()
+    test.equal(organization, "tecs")
+    test.equal(application, "tecs")
+end
+
+function suite.resolvesTheAssetRootFromAnOverrideAndJoinsWithoutChecking(): nil
+    restore()
+    files.setAssetRoot("/tmp/tecs-assets")
+    test.equal(files.assetRoot(), "/tmp/tecs-assets/")
+    test.equal(files.assetPath("levels/one.json"), "/tmp/tecs-assets/levels/one.json")
+
+    -- A root that already ends in a separator does not collect a second one.
+    files.setAssetRoot("/tmp/tecs-assets/")
+    test.equal(files.assetRoot(), "/tmp/tecs-assets/")
+    restore()
+end
+
+function suite.refusesAnEmptyRelativePath(): nil
+    restore()
+    files.setAssetRoot("/tmp/tecs-assets")
+    test.assert(not pcall(files.assetPath, ""))
+    test.assert(not pcall(files.writablePath, ""))
+    test.assert(not pcall(files.setAssetRoot, ""))
+    restore()
+end
+
+function suite.forgetsEveryCachedRootOnReset(): nil
+    restore()
+    files.setAssetRoot("/tmp/first")
+    test.equal(files.assetRoot(), "/tmp/first/")
+    files.reset()
+
+    -- Nothing set the override back, so the root falls through to the base
+    -- path, which is empty in a test process that no host started.
+    test.assert(files.assetRoot() ~= "/tmp/first/")
+    restore()
+end
+
+function suite.answersAnEmptyBasePathWhenNoHostSaidWhereItIs(): nil
+    restore()
+    local base = files.basePath()
+
+    -- `arg[0]` is the test runner when there is one, so the only fact that
+    -- holds on every host is that an answer terminates like a directory.
+    if base ~= "" then
+        local last = base:sub(-1)
+        test.assert(last == "/" or last == "\\")
+    end
+    restore()
+end
+
+function suite.namesTheWritableRootFromTheIdentity(): nil
+    restore()
+    files.setPreferenceIdentity("tecs", "pathpolicytest")
+    local root = writableRoot()
+    test.assert(root:sub(-1) == SEPARATOR)
+    test.assert(root:find("pathpolicytest", 1, true) ~= nil)
+    test.assert(disk.isDirectory(root))
+
+    -- The join is textual and checks nothing, which is what lets a caller name
+    -- a file it is about to create.
+    test.equal(files.writablePath("saves/slot1.json"), root .. "saves/slot1.json")
+
+    disk.remove(root, true)
+    restore()
+end
+
+function suite.namesTheCacheRootFromTheIdentityAndKeepsItApart(): nil
+    restore()
+    files.setPreferenceIdentity("tecs", "pathpolicytest")
+    local ok, cache = pcall(files.cachePath)
+    if not ok then
+        restore()
+        test.skip("this platform has no cache root: " .. tostring(cache))
+    end
+    local directory = cache as string
+    test.assert(directory:sub(-1) == SEPARATOR)
+    test.assert(directory:find("pathpolicytest", 1, true) ~= nil)
+    test.assert(disk.isDirectory(directory))
+    test.assert(directory ~= writableRoot())
+
+    disk.remove(directory, true)
+    disk.remove(writableRoot(), true)
+    restore()
+end
+
+function suite.rewritesAnIdentityAPathCannotCarry(): nil
+    restore()
+    files.setPreferenceIdentity("../escape", "pathpolicy/test")
+    local ok, root = pcall(files.preferencePath)
+    if not ok then
+        restore()
+        test.skip("this platform has no writable root: " .. tostring(root))
+    end
+    local directory = root as string
+    test.assert(directory:find("..", 1, true) == nil)
+    test.assert(directory:find("_escape", 1, true) ~= nil)
+    test.assert(directory:find("pathpolicy_test", 1, true) ~= nil)
+
+    -- The whole organization level was created by this case, so it goes too.
+    local organization = paths.newPath(directory):parent()
+    disk.remove(organization ~= nil and organization:toString() or directory, true)
+    restore()
+end
+
+function suite.resolvesEachRootOnceUntilTheIdentityMoves(): nil
+    restore()
+    files.setPreferenceIdentity("tecs", "pathpolicytest")
+    local first = writableRoot()
+    test.equal(files.preferencePath(), first)
+
+    files.setPreferenceIdentity("tecs", "pathpolicyother")
+    local second = writableRoot()
+    test.assert(second ~= first)
+
+    disk.remove(first, true)
+    disk.remove(second, true)
+    restore()
+end
+
+return suite

@@ -1,0 +1,434 @@
+module tecs.files
+
+--[[
+Where a game reads content from and where it is allowed to write.
+
+`nupp.io.files` owns every filesystem operation: reading, writing, atomic
+commits, directory streams, temporaries and metadata. This module keeps the one
+thing Nupp cannot supply, because it is a property of the product rather than of
+the platform: which directories belong to *this* game.
+
+```nupp
+local files <const> = require("tecs.files")
+local disk <const> = require("nupp.io.files")
+
+files.setPreferenceIdentity("Ex Nihilo", "Starfarer")
+
+local slot <const> = files.writablePath("saves/slot1.json")
+disk.createDirectory(files.writablePath("saves"))
+local ok, reason = disk.writeAtomic(slot, bytes)
+```
+
+## The three roots
+
+`assetRoot` is where shipped content lives and is never a place a build may
+write. `preferencePath` and `cachePath` are the two writable roots, and they
+differ in durability: saves and settings go under `preferencePath`, and anything
+the game can rebuild goes under `cachePath`, which the operating system may
+empty between any two runs.
+
+`assetPath` and `writablePath` resolve a relative path against the first and the
+second. Both join without checking existence, because a path that is about to be
+created is as valid a request as one that is about to be read.
+
+## Identity
+
+`setPreferenceIdentity` names the publisher and the game, and the two writable
+roots are named from that pair. Set it before the first writable path resolves.
+The defaults are `"tecs"` and `"tecs"`, which are what an engine test and an
+unnamed tool write under.
+
+## Caching
+
+Each root is resolved once and remembered, because resolving one asks the
+platform and may create a directory. `reset` forgets them, which a test that
+moves `HOME` between cases needs and nothing else does.
+]]
+
+local ffi = require("ffi")
+local disk = require("nupp.io.files")
+local paths = require("nupp.io.path")
+
+--- The platform's own separator, which is what a resolved root ends with.
+local SEPARATOR: string = paths.separator()
+
+--- Whether this build runs on Windows, where the writable roots are named from
+--- `APPDATA` and `LOCALAPPDATA` rather than from the home directory.
+local WINDOWS: boolean = ffi.os == "Windows"
+
+--- Whether this build runs on an Apple platform, where both writable roots sit
+--- under `~/Library`.
+local APPLE: boolean = ffi.os == "OSX" or ffi.os == "iOS"
+
+-- Compatibility surface. `TECS_ASSETS` is what a developer exports to run a
+-- build straight out of a source tree, and `__tecsContent` is the global a host
+-- sets to the root it installed content under. Both are typed outside this tree
+-- and neither follows this module if the module moves.
+
+--- Read-only. Names the environment variable that overrides the asset root.
+export const ASSET_ROOT_VARIABLE = "TECS_ASSETS"
+
+--- Read-only. Names the global a host sets to the content root it installed.
+export const CONTENT_GLOBAL = "__tecsContent"
+
+--- Read-only. Names the global a host sets to the directory its executable
+--- was loaded from. Nupp has no portable executable path, so a host that knows
+--- where it is says so here and `basePath` answers an empty string otherwise.
+export const BASE_GLOBAL = "__tecsBase"
+
+-- Compatibility surface. The default identity names the directory an engine
+-- test and an unnamed tool already write under, so a build that never calls
+-- `setPreferenceIdentity` keeps finding the state it wrote last time.
+local DEFAULT_ORGANIZATION: string = "tecs"
+local DEFAULT_APPLICATION: string = "tecs"
+
+local preferenceOrganization: string = DEFAULT_ORGANIZATION
+local preferenceApplication: string = DEFAULT_APPLICATION
+
+local baseCache: string? = nil
+local assetsCache: string? = nil
+local preferenceCache: string? = nil
+local preferenceCachedFor: string? = nil
+local cacheCache: string? = nil
+local cacheCachedFor: string? = nil
+
+--- Returns `text` with exactly one trailing separator.
+---
+--- Roots are concatenated with a relative path rather than joined, so the
+--- separator has to be there before the concatenation rather than after it.
+--- @param text the directory text to terminate
+--- @return the same directory with one trailing separator
+local function terminated(text: string): string
+    local last = text:sub(-1)
+    if last == "/" or last == "\\" then
+        return text
+    end
+
+    return text .. SEPARATOR
+end
+
+--- Raises when a caller passes something that is not a usable path fragment.
+--- @param value the argument to check
+--- @param label the function name to name in the message
+--- @return the same string
+--- @raises when value is not a non-empty string
+local function required(value: string, label: string): string
+    if value == "" then
+        error("tecs.files." .. label .. ": a path is required", 3)
+    end
+
+    return value
+end
+
+--- Returns one path component with everything a filesystem refuses removed.
+---
+--- A publisher name is a display string a game chooses, so it may hold a
+--- separator, a colon or a control character that would either escape the root
+--- or refuse to be created. Each becomes an underscore, and a component that
+--- reduces to nothing becomes one underscore rather than an empty level that
+--- would silently collapse the two roots together.
+--- @param value the display name to make safe
+--- @return one filesystem-safe path component
+local function component(value: string): string
+    local safe = value:gsub("[%c/\\:%*%?\"<>|]", "_")
+    safe = safe:gsub("^[%s%.]+", ""):gsub("[%s%.]+$", "")
+    if safe == "" then
+        return "_"
+    end
+
+    return safe
+end
+
+--- Returns an environment variable's value, or nil when it is unset or empty.
+--- @param name the variable to read
+--- @return the value, or nil
+local function environment(name: string): string?
+    local value = os.getenv(name)
+    if value == nil or value == "" then
+        return nil
+    end
+
+    return value
+end
+
+--- Returns the home directory, or nil when the platform will not say.
+--- @return the home directory without a trailing separator, or nil
+local function home(): string?
+    local found = disk.userFolder("home")
+    if found ~= nil and found ~= "" then
+        return found
+    end
+
+    return environment("HOME")
+end
+
+--- Returns the root that per-user application state is created under.
+---
+--- The conventions are the platform's own: `APPDATA` on Windows,
+--- `~/Library/Application Support` on Apple platforms, and `XDG_DATA_HOME` or
+--- `~/.local/share` elsewhere.
+--- @return the directory, or nil and a reason when the platform has none
+local function preferenceBase(): (string?, string?)
+    if WINDOWS then
+        local roaming = environment("APPDATA")
+        if roaming == nil then
+            return nil, "APPDATA is not available"
+        end
+
+        return roaming
+    end
+    local house = home()
+    if APPLE then
+        if house == nil then
+            return nil, "HOME is not available"
+        end
+
+        return terminated(house) .. "Library" .. SEPARATOR .. "Application Support"
+    end
+    local shared = environment("XDG_DATA_HOME")
+    if shared ~= nil and shared:sub(1, 1) == "/" then
+        return shared
+    end
+    if house == nil then
+        return nil, "HOME is not available"
+    end
+
+    return terminated(house) .. ".local" .. SEPARATOR .. "share"
+end
+
+--- Returns the root that disposable per-user data is created under.
+---
+--- `LOCALAPPDATA` on Windows, `~/Library/Caches` on Apple platforms, and
+--- `XDG_CACHE_HOME` or `~/.cache` elsewhere. These are the same directories the
+--- SDL build's Rust cache resolver chose, so a build that upgrades keeps
+--- reading the artifacts it wrote.
+--- @return the directory, or nil and a reason when the platform has none
+local function cacheBase(): (string?, string?)
+    if WINDOWS then
+        local local_ = environment("LOCALAPPDATA")
+        if local_ == nil then
+            return nil, "LOCALAPPDATA is not available"
+        end
+
+        return local_
+    end
+    local house = home()
+    if APPLE then
+        if house == nil then
+            return nil, "HOME is not available"
+        end
+
+        return terminated(house) .. "Library" .. SEPARATOR .. "Caches"
+    end
+    local shared = environment("XDG_CACHE_HOME")
+    if shared ~= nil and shared:sub(1, 1) == "/" then
+        return shared
+    end
+    if house == nil then
+        return nil, "HOME is not available"
+    end
+
+    return terminated(house) .. ".cache"
+end
+
+--- Returns `base/<organization>/<application>/`, created if it is not there.
+--- @param base the platform root the identity is named under
+--- @param label the function name to name in a raised message
+--- @return the directory with a trailing separator
+--- @raises when the directory cannot be created
+local function identityDirectory(base: string, label: string): string
+    local directory = terminated(
+        terminated(base) .. component(preferenceOrganization) .. SEPARATOR .. component(preferenceApplication)
+    )
+    local made, reason = disk.createDirectory(directory)
+    if not made then
+        error("tecs.files." .. label .. ": cannot create " .. directory .. ": " .. tostring(reason), 3)
+    end
+
+    return directory
+end
+
+--- Returns the identity pair as one cache key.
+--- @return the two names with a separator no name can contain
+local function identityKey(): string
+    return preferenceOrganization .. "\0" .. preferenceApplication
+end
+
+--- Reads a string global a host may have set, or nil when it did not.
+--- @param name the global to read
+--- @return the value, or nil
+local function hostGlobal(name: string): string?
+    local value = rawget(_G as {[string]: any}, name)
+    if type(value) ~= "string" or value == "" then
+        return nil
+    end
+
+    return value as string
+end
+
+--- Returns the directory the running executable was loaded from.
+---
+--- Nupp has no portable executable path, so this answers what the host said
+--- through the `__tecsBase` global, then the directory of `arg[0]`, and then an
+--- empty string. An empty answer is not a failure: it means the platform
+--- declined to say, and a caller falls back to a relative path, which is what
+--- the SDL implementation documented as well.
+--- @return the directory with a trailing separator, or an empty string
+export function basePath(): string
+    local held = baseCache
+    if held ~= nil then
+        return held
+    end
+    local given = hostGlobal(BASE_GLOBAL)
+    if given == nil then
+        local argv = rawget(_G as {[string]: any}, "arg") as {[integer]: string}?
+        local zeroth = argv ~= nil and argv[0] or nil
+        if zeroth ~= nil and zeroth ~= "" then
+            local parent = paths.newPath(zeroth):parent()
+            given = parent ~= nil and parent:toString() or nil
+        end
+    end
+    local answer = given == nil and "" or terminated(given as string)
+    baseCache = answer
+
+    return answer
+end
+
+--- Sets the publisher and game names the writable roots are named from.
+---
+--- Call this before the first `preferencePath`, `writablePath` or `cachePath`,
+--- because each root is resolved once and remembered. A later call changes
+--- which directory the next resolution answers.
+--- @param organization the publisher, studio or organization name
+--- @param application the game or application name
+--- @raises when either name is empty
+export function setPreferenceIdentity(organization: string, application: string): nil
+    if organization == "" then
+        error("tecs.files.setPreferenceIdentity: a preference organization is required", 2)
+    end
+    if application == "" then
+        error("tecs.files.setPreferenceIdentity: a preference application is required", 2)
+    end
+    preferenceOrganization = organization
+    preferenceApplication = application
+end
+
+--- Returns the publisher and game names the writable roots are named from.
+---
+--- The pair starts as `"tecs", "tecs"` and changes when
+--- `setPreferenceIdentity` succeeds.
+--- @return the current publisher, studio or organization name
+--- @return the current game or application name
+export function preferenceIdentity(): (string, string)
+    return preferenceOrganization, preferenceApplication
+end
+
+--- Returns the writable directory for this game, creating it if it is absent.
+---
+--- This is where a build writes durable state. `cachePath` is the other
+--- writable root and holds only data the game can rebuild.
+--- @return the directory with a trailing separator, named from the identity
+--- @raises when the platform has no writable root or the directory cannot be
+---     created
+export function preferencePath(): string
+    local key = identityKey()
+    local held = preferenceCache
+    if held ~= nil and preferenceCachedFor == key then
+        return held
+    end
+    local base, reason = preferenceBase()
+    if base == nil then
+        error("tecs.files.preferencePath: no writable directory: " .. tostring(reason), 2)
+    end
+    local answer = identityDirectory(base as string, "preferencePath")
+    preferenceCache = answer
+    preferenceCachedFor = key
+
+    return answer
+end
+
+--- Returns the system cache directory for this game, creating it if absent.
+---
+--- The operating system may empty this directory between any two runs, so only
+--- downloads, compiled artifacts, thumbnails and similar derived data belong
+--- here. Saves and settings belong under `preferencePath`.
+--- @return the directory with a trailing separator, named from the identity
+--- @raises when the platform has no cache root or the directory cannot be
+---     created
+export function cachePath(): string
+    local key = identityKey()
+    local held = cacheCache
+    if held ~= nil and cacheCachedFor == key then
+        return held
+    end
+    local base, reason = cacheBase()
+    if base == nil then
+        error("tecs.files.cachePath: no system cache directory: " .. tostring(reason), 2)
+    end
+    local answer = identityDirectory(base as string, "cachePath")
+    cacheCache = answer
+    cacheCachedFor = key
+
+    return answer
+end
+
+--- Returns the root the engine reads shipped content from.
+---
+--- `TECS_ASSETS` wins, which is how a development run reads straight out of a
+--- build tree instead of a staged copy. Then the `__tecsContent` global, since
+--- a host knows the layout it installed and this is not something to sniff for.
+--- Then `basePath`, which is where a single-directory build puts everything.
+--- @return the root with a trailing separator
+export function assetRoot(): string
+    local held = assetsCache
+    if held ~= nil then
+        return held
+    end
+    local override = environment(ASSET_ROOT_VARIABLE) or hostGlobal(CONTENT_GLOBAL)
+    local answer = override ~= nil and terminated(override as string) or basePath()
+    assetsCache = answer
+
+    return answer
+end
+
+--- Resolves `relative` against the asset root.
+--- @param relative a path under the content root, with `/` separators
+--- @return the joined path, without checking that anything is there
+--- @raises when relative is empty
+export function assetPath(relative: string): string
+    local suffix = required(relative, "assetPath")
+
+    return assetRoot() .. suffix
+end
+
+--- Resolves `relative` against the writable root.
+--- @param relative a path under the preference directory
+--- @return the joined path, without checking that anything is there
+--- @raises when relative is empty, or when the writable root cannot be resolved
+export function writablePath(relative: string): string
+    local suffix = required(relative, "writablePath")
+
+    return preferencePath() .. suffix
+end
+
+--- Overrides the asset root, for a test or a tool.
+--- @param root the content directory to read from, with or without a trailing
+---     separator
+--- @raises when root is empty
+export function setAssetRoot(root: string): nil
+    assetsCache = terminated(required(root, "setAssetRoot"))
+end
+
+--- Forgets every cached root so the next call resolves again.
+---
+--- A test that moves `HOME` or `TECS_ASSETS` between cases needs this. A game
+--- does not: nothing under a running process changes where these directories
+--- are.
+export function reset(): nil
+    baseCache = nil
+    assetsCache = nil
+    preferenceCache = nil
+    preferenceCachedFor = nil
+    cacheCache = nil
+    cacheCachedFor = nil
+end
