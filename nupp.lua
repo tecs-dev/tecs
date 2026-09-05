@@ -37,7 +37,7 @@ end
 spritesExports[#spritesExports + 1] = "sprites.create"
 
 return {
-    include = {"src", "examples/nupp"},
+    include = {"src", "examples/nupp", "bench/nupp"},
 
     build = {
         outDir = "out/nupp",

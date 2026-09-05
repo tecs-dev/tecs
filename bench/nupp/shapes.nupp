@@ -1,0 +1,153 @@
+--- Steady-state shape field, simulated and extracted.
+---
+--- The scene is copied from `bench/shapes.tl` so the two are talking about the
+--- same work: a 4000x2400 field seeded at 42, viewed through a 1280x720 target,
+--- with a translation-only drift system moving every transform. Circles and
+--- rectangles are spawned separately so each lands in its own archetype and
+--- stays contiguous, which is what the Teal scene relies on as well.
+---
+--- What is measured is narrower than the Teal benchmark, and the difference is
+--- the point rather than an omission. `bench/shapes.tl` runs a window: its
+--- `frame` row is a presented frame and includes acquire, record and submit
+--- against a live GPU. Nothing in the Nupp tree can present a frame from a
+--- headless process, so this measures the two stages that do exist and names
+--- them after the Teal stages they correspond to:
+---
+---   update   `world:update(dt)`, which is the Teal `simulate` stage.
+---   extract  `extractor:packet(width, height)`, which produces the bytes the
+---            Rust host uploads, and is the Teal `extract` stage.
+---   frame    Both, back to back. It is NOT the Teal `frame` row: it carries no
+---            swapchain acquire, no command recording, and no submission.
+---
+--- Two movement modes, as in Teal. `fixed` moves in `FixedUpdate`, so most
+--- frames move nothing; `frame` moves every frame, so every instance is
+--- rewritten every frame. The default is `frame`, which is the honest steady
+--- state for a comparison of per-frame work.
+---
+---   BENCH_SHAPES  Shapes of each kind. Defaults to 100000, so 200000 total.
+---   BENCH_AREA_W  Field width in pixels. Defaults to 4000.
+---   BENCH_AREA_H  Field height in pixels. Defaults to 2400.
+---   BENCH_MODE    `fixed` or `frame`. Defaults to `frame`.
+---   BENCH_WARMUP  Untimed frames. Defaults to 120.
+---   BENCH_FRAMES  Timed frames. Defaults to 300.
+
+local ecs = require("tecs.ecs")
+
+local framepacket = require("tecs.internal.framepacket")
+local gfx = require("tecs.gfx")
+local harness = require("tecsbench.harness")
+local time = require("nupp.time")
+
+const PER_KIND = harness.count("BENCH_SHAPES", 100000)
+const COUNT = PER_KIND * 2
+const AREA_W = harness.amount("BENCH_AREA_W", 4000.0)
+const AREA_H = harness.amount("BENCH_AREA_H", 2400.0)
+const MODE = harness.text("BENCH_MODE", "frame")
+const WARMUP = harness.optionalCount("BENCH_WARMUP", 120)
+const FRAMES = harness.count("BENCH_FRAMES", 300)
+if MODE ~= "fixed" and MODE ~= "frame" then
+    error("bench: BENCH_MODE must be 'fixed' or 'frame'", 0)
+end
+
+const WIDTH = 1280
+const HEIGHT = 720
+const STEP = 1.0 / 60.0
+
+--- Marks the round half of the field, so it occupies its own archetype.
+---
+--- The Teal scene separates the two kinds with `Material`, which selects the
+--- branch its fragment shader takes. No material dispatch is ported, so this
+--- carries only the archetype split, which is what the CPU side of the scene
+--- depends on.
+const Circle = ecs.newTagComponent({name = "bench.ShapesCircle"})
+
+--- Marks the rectangular half of the field.
+const Rounded = ecs.newTagComponent({name = "bench.ShapesRounded"})
+
+const world = ecs.newWorld({maxEntities = COUNT + 1024})
+
+--- Fills the area, centered on the viewport so the visible fraction matches
+--- the Teal scene's.
+local function fill(exclusive value: ecs.World, kind: ecs.Component, base: number, spread: number): nil
+    const originX = (WIDTH - AREA_W) * 0.5
+    const originY = (HEIGHT - AREA_H) * 0.5
+    for _ = 1, PER_KIND do
+        value:spawn(
+            ecs.Transform2D(
+                originX + math.random() * AREA_W,
+                originY + math.random() * AREA_H,
+                0.0,
+                1,
+                0.0,
+                base + math.random() * spread,
+                base + math.random() * spread
+            ),
+            gfx.Tint(math.random(), math.random(), math.random(), 1.0),
+            gfx.Renderable2D,
+            kind
+        )
+    end
+end
+
+-- Seeded exactly as the Teal scene is, so the field is uniform and identical on
+-- every run rather than a lattice.
+math.randomseed(42)
+const spawnStarted = time.now()
+fill(world, Circle, 6.0, 10.0)
+fill(world, Rounded, 10.0, 20.0)
+world:update(0)
+const spawnMilliseconds = time.now() - spawnStarted
+
+const moving = world:newQuery({include = {ecs.Transform2D, gfx.Renderable2D}})
+world:addSystem({
+    name = "bench.Drift",
+    phase = MODE == "fixed" and ecs.phases.FixedUpdate or ecs.phases.Update,
+    run = function(dt: number): nil
+        const step = dt * 40.0
+        for candidate, count in moving:iter() do
+            const transforms: {ecs.Transform2D} = assert(candidate:getMut(ecs.Transform2D))
+            for row = 1, count as integer do
+                const transform = transforms[row]
+                local x = transform.x + step
+                -- Wrap rather than branch on a bound per axis, so the field
+                -- stays put and the work per frame is constant.
+                if x > AREA_W then
+                    x = x - AREA_W
+                end
+                transform.x = x
+            end
+        end
+    end,
+})
+
+const extractor = framepacket.new(world)
+const update = harness.newStage("update")
+const extract = harness.newStage("extract")
+const frame = harness.newStage("frame")
+
+local bytes = 0
+for index = 1, WARMUP + FRAMES do
+    const started = time.now()
+    world:update(STEP)
+    const simulated = time.now()
+    bytes = #extractor:packet(WIDTH, HEIGHT)
+    const extracted = time.now()
+    if index > WARMUP then
+        harness.mark(update, simulated - started)
+        harness.mark(extract, extracted - simulated)
+        harness.mark(frame, extracted - started)
+    end
+end
+
+const instances = (bytes - framepacket.HEADER_SIZE - framepacket.BATCH_STRIDE) // framepacket.INSTANCE_STRIDE
+print(
+    (
+        "shapes: %d circles + %d rects over %.0fx%.0f, target %dx%d, mode %s"
+    ):format(PER_KIND, PER_KIND, AREA_W, AREA_H, WIDTH, HEIGHT, MODE)
+)
+print(
+    (
+        "spawned %d entities in %.0f ms; %d frames after %d warmup, %d instances in a %d byte packet"
+    ):format(COUNT, spawnMilliseconds, FRAMES, WARMUP, instances, bytes)
+)
+print(harness.format({update, extract, frame}))

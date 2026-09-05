@@ -1,0 +1,310 @@
+module tecsbench.harness
+
+--[[
+Warmup, sampling, and percentile reporting shared by the Nupp benchmarks.
+
+The Teal benchmarks report through `tecs.timing`, which allocates its sample
+arrays through the LuaJIT FFI and is registered from inside the engine. Nothing
+in the Nupp tree marks a stage, so a Nupp benchmark measures its own windows
+instead, and this module is the one place that decides how. The report keeps
+`tecs.timing.format`'s column layout on purpose: a Nupp row and a Teal row for
+the same subject are then read against each other without arithmetic.
+
+Every duration crossing this module's boundary is milliseconds, which is what
+`nupp.time.now` already returns. Samples are held in one table per stage that
+is reused across runs, so a measured window allocates nothing but the closure
+the caller passed in.
+
+Warmup exists because the first repetitions build the fixture and compile the
+loop. They are run and discarded, so the distribution describes the steady
+state rather than the run.
+
+```nupp
+local harness = require("tecsbench.harness")
+
+const stage = harness.newStage("update")
+harness.measure(stage, 20, 100, function(): nil
+    world:update(1 / 60)
+end)
+print(harness.format({stage}))
+```
+]]
+
+local time = require("nupp.time")
+
+local ceil = math.ceil
+local floor = math.floor
+local sort = table.sort
+
+--- One named subject and the milliseconds recorded for it.
+---
+--- Held by the caller across a whole run and handed back to `measure`, so a
+--- benchmark with several windows reports them as one table.
+export record Stage
+    --- Read-only. Reports the name the report labels this row with.
+    name: string
+
+    --- Engine-owned. Holds the recorded milliseconds in observation order,
+    --- unsorted until `report` reads them. Ordinary benchmark code appends
+    --- through `mark` rather than writing here.
+    samples: {number}
+end
+
+--- One stage's distribution over the samples it recorded.
+---
+--- Every duration is milliseconds. Percentiles are nearest-rank over the
+--- sorted samples, so each is a value that was actually observed and none is
+--- interpolated, which is what `tecs.timing` reports as well.
+export record Report
+    --- Read-only. Reports the stage's name.
+    name: string
+
+    --- Read-only. Reports the median in milliseconds.
+    p50: number
+
+    --- Read-only. Reports the ninety-fifth percentile in milliseconds.
+    p95: number
+
+    --- Read-only. Reports the ninety-ninth percentile in milliseconds.
+    p99: number
+
+    --- Read-only. Reports the arithmetic mean in milliseconds.
+    mean: number
+
+    --- Read-only. Reports the slowest sample in milliseconds, which is not a
+    --- percentile.
+    max: number
+
+    --- Read-only. Reports how many samples the row is computed from.
+    samples: integer
+end
+
+--- Creates an empty stage.
+--- @param name the label the report row carries
+--- @return the stage, which the caller keeps for the whole run
+--- @raises when the name is empty
+export function newStage(name: string): Stage
+    if name == "" then
+        error("harness.newStage: name must not be empty", 2)
+    end
+
+    return new Stage(name = name, samples = {})
+end
+
+--- Discards a stage's samples while retaining its table.
+--- @param stage the stage to clear
+export function reset(stage: Stage): nil
+    local samples = stage.samples
+    for index = 1, #samples do
+        samples[index] = nil
+    end
+end
+
+--- Records one observed duration.
+--- @param stage the stage to append to
+--- @param milliseconds the observed duration
+export function mark(stage: Stage, milliseconds: number): nil
+    stage.samples[#stage.samples + 1] = milliseconds
+end
+
+--- Runs one repetition untimed, then repeatedly times it.
+---
+--- `prepare` runs outside every timed window, so restoring whatever the
+--- measured call consumed is not charged to the operation. Warmup repetitions
+--- are run and dropped rather than recorded.
+--- @param stage the stage the timed repetitions are recorded on
+--- @param warmup the untimed repetitions, which may be zero
+--- @param samples the timed repetitions, which must be positive
+--- @param run the operation being measured
+--- @param prepare an optional per-repetition setup, or nil when there is none
+--- @raises when the sample count is not positive
+export function measure(
+    stage: Stage,
+    warmup: integer,
+    samples: integer,
+    run: function(): nil,
+    prepare: (function(): nil)?
+): nil
+    if samples < 1 then
+        error("harness.measure: samples must be positive", 2)
+    end
+    for _ = 1, warmup do
+        if prepare ~= nil then
+            prepare()
+        end
+        run()
+    end
+    for _ = 1, samples do
+        if prepare ~= nil then
+            prepare()
+        end
+        const started = time.now()
+        run()
+        mark(stage, time.now() - started)
+    end
+end
+
+--- Reads a percentile from an already sorted list.
+local function percentile(sorted: {number}, fraction: number): number
+    local at = ceil(#sorted * fraction) as integer
+    if at < 1 then
+        at = 1
+    end
+    if at > #sorted then
+        at = #sorted
+    end
+
+    return sorted[at]
+end
+
+--- Summarizes one stage.
+--- @param stage the stage to summarize
+--- @return the distribution, or nil when the stage recorded nothing
+export function report(stage: Stage): Report?
+    const count = #stage.samples
+    if count == 0 then
+        return nil
+    end
+    local sorted: {number} = {}
+    local total = 0.0
+    for index = 1, count do
+        const value = stage.samples[index]
+        sorted[index] = value
+        total = total + value
+    end
+    sort(sorted)
+
+    return new Report(
+        name = stage.name,
+        p50 = percentile(sorted, 0.50),
+        p95 = percentile(sorted, 0.95),
+        p99 = percentile(sorted, 0.99),
+        mean = total / count,
+        max = sorted[count],
+        samples = count
+    )
+end
+
+--- Formats stages as fixed-width milliseconds columns.
+---
+--- The layout matches `tecs.timing.format` so a Nupp block and a Teal block
+--- for the same subject are compared by reading down the column. A stage that
+--- recorded nothing is left out rather than reported as zeroes.
+--- @param stages the stages to report, in the order the rows should appear
+--- @return the header, a rule, and one row per recorded stage, with no
+---     trailing newline, or the empty string when nothing was recorded
+export function format(stages: {Stage}): string
+    local rows: {Report} = {}
+    for index = 1, #stages do
+        const row = report(stages[index])
+        if row ~= nil then
+            rows[#rows + 1] = row
+        end
+    end
+    if #rows == 0 then
+        return ""
+    end
+
+    local lines: {
+        string
+    } = {
+        string.format("%-12s %8s %8s %8s %8s %8s %7s", "stage", "p50", "p95", "p99", "mean", "max", "samples"),
+        string.format(
+            "%s %s %s %s %s %s %s",
+            ("-"):rep(12),
+            ("-"):rep(8),
+            ("-"):rep(8),
+            ("-"):rep(8),
+            ("-"):rep(8),
+            ("-"):rep(8),
+            ("-"):rep(7)
+        ),
+    }
+    for index = 1, #rows do
+        const row = rows[index]
+        lines[
+            #lines + 1
+        ] = string.format(
+            "%-12s %8.3f %8.3f %8.3f %8.3f %8.3f %7d",
+            row.name,
+            row.p50,
+            row.p95,
+            row.p99,
+            row.mean,
+            row.max,
+            row.samples
+        )
+    end
+
+    return table.concat(lines, "\n")
+end
+
+--- Reads a positive integer from the environment.
+--- @param name the environment variable to read
+--- @param fallback the value used when the variable is unset
+--- @return the configured count
+--- @raises when the variable is set to anything but a positive integer
+export function count(name: string, fallback: integer): integer
+    const text = os.getenv(name)
+    if text == nil then
+        return fallback
+    end
+    const value = tonumber(text)
+    if value == nil or value ~= floor(value) or value < 1 then
+        error(string.format("bench: %s must be a positive integer", name), 2)
+    end
+
+    return floor(value) as integer
+end
+
+--- Reads a non-negative integer from the environment.
+---
+--- Separate from `count` because a warmup of zero is a legitimate request and
+--- a fixture size of zero is not.
+--- @param name the environment variable to read
+--- @param fallback the value used when the variable is unset
+--- @return the configured count
+--- @raises when the variable is set to anything but a non-negative integer
+export function optionalCount(name: string, fallback: integer): integer
+    const text = os.getenv(name)
+    if text == nil then
+        return fallback
+    end
+    const value = tonumber(text)
+    if value == nil or value ~= floor(value) or value < 0 then
+        error(string.format("bench: %s must be a non-negative integer", name), 2)
+    end
+
+    return floor(value) as integer
+end
+
+--- Reads a number from the environment.
+--- @param name the environment variable to read
+--- @param fallback the value used when the variable is unset
+--- @return the configured value
+--- @raises when the variable is set to anything but a number
+export function amount(name: string, fallback: number): number
+    const text = os.getenv(name)
+    if text == nil then
+        return fallback
+    end
+    const value = tonumber(text)
+    if value == nil then
+        error(string.format("bench: %s must be a number", name), 2)
+    end
+
+    return value
+end
+
+--- Reads a string from the environment.
+--- @param name the environment variable to read
+--- @param fallback the value used when the variable is unset or empty
+--- @return the configured value
+export function text(name: string, fallback: string): string
+    const value = os.getenv(name)
+    if value == nil or value == "" then
+        return fallback
+    end
+
+    return value
+end
