@@ -21,10 +21,12 @@
 //! engine.render(&mut buffer);
 //! ```
 
+pub mod capture;
 pub mod command;
 pub mod decode;
 pub mod device;
 pub mod engine;
+pub mod enumerate;
 pub mod mixer;
 pub mod source;
 pub mod stream;
@@ -32,8 +34,10 @@ pub mod stream;
 use std::ffi::{c_char, CStr, CString};
 use std::sync::Mutex;
 
+use capture::Capture;
 use command::{Command, Event};
 use engine::Engine;
+use enumerate::DeviceList;
 
 /// What a call answers when it worked.
 const STATUS_OK: i32 = 0;
@@ -47,6 +51,21 @@ const STATUS_FAILED: i32 = 1;
 /// Built once and kept, because the binding reads it as a borrowed C string and
 /// the answer cannot change while the process runs.
 static DECODERS: Mutex<Option<CString>> = Mutex::new(None);
+
+/// The reason the most recent failing enumeration or microphone open gave.
+///
+/// Those two calls answer with a pointer rather than with a device, so there is
+/// nothing for a reason to hang off the way `tecs_audio_last_error` hangs off an
+/// engine. One process-wide slot is what is left, and the binding reads it
+/// immediately after the call that failed.
+static OPEN_ERROR: Mutex<Option<CString>> = Mutex::new(None);
+
+/// Records the reason an enumeration or a microphone open is about to report.
+fn set_open_error(reason: &str) {
+    if let Ok(mut slot) = OPEN_ERROR.lock() {
+        *slot = CString::new(reason).ok();
+    }
+}
 
 /// What a load settled on.
 ///
@@ -376,6 +395,403 @@ pub unsafe extern "C" fn tecs_audio_last_error(device: *mut Engine) -> *const c_
     value.last_error_cstr()
 }
 
+/// Returns the reason the most recent failing enumeration or microphone open
+/// gave.
+///
+/// # Safety
+///
+/// The returned string stays valid until the next enumeration or microphone
+/// open fails, so a caller reads it immediately after the call that failed.
+#[no_mangle]
+pub extern "C" fn tecs_audio_open_error() -> *const c_char {
+    match OPEN_ERROR.lock() {
+        Err(_) => std::ptr::null(),
+        Ok(slot) => match slot.as_ref() {
+            None => std::ptr::null(),
+            Some(value) => value.as_ptr(),
+        },
+    }
+}
+
+/// Names every playback or recording device attached now.
+///
+/// The listing is a snapshot rather than a subscription: devices come and go
+/// while a game runs, so an id held across a hotplug may name nothing.
+///
+/// # Safety
+///
+/// The returned pointer is owned by the caller and freed by
+/// `tecs_audio_devices_free`. A null return leaves the reason for
+/// `tecs_audio_open_error`.
+///
+/// @return the listing, or null when the host produced none
+#[no_mangle]
+pub extern "C" fn tecs_audio_devices(recording: u32) -> *mut DeviceList {
+    match enumerate::list(recording != 0) {
+        Err(reason) => {
+            set_open_error(&reason);
+            std::ptr::null_mut()
+        }
+        Ok(listing) => Box::into_raw(Box::new(listing)),
+    }
+}
+
+/// Borrows the listing a pointer names.
+///
+/// # Safety
+///
+/// The pointer must be one `tecs_audio_devices` returned and not yet freed.
+unsafe fn listing<'a>(list: *mut DeviceList) -> Option<&'a DeviceList> {
+    if list.is_null() {
+        None
+    } else {
+        Some(unsafe { &*list })
+    }
+}
+
+/// Reports how many devices a listing holds.
+///
+/// # Safety
+///
+/// The pointer must name a live listing.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_devices_count(list: *mut DeviceList) -> u32 {
+    match unsafe { listing(list) } {
+        None => 0,
+        Some(value) => value.entries.len() as u32,
+    }
+}
+
+/// Reports the id of the device at `index`, counting from zero.
+///
+/// # Safety
+///
+/// The pointer must name a live listing.
+///
+/// @return the id, and zero for an index the listing does not hold
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_devices_id(list: *mut DeviceList, index: u32) -> u32 {
+    match unsafe { listing(list) }.and_then(|value| value.entries.get(index as usize)) {
+        None => 0,
+        Some(entry) => entry.id,
+    }
+}
+
+/// Returns the display name of the device at `index`, counting from zero.
+///
+/// # Safety
+///
+/// The pointer must name a live listing, and the returned string stays valid
+/// until that listing is freed.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_devices_name(
+    list: *mut DeviceList,
+    index: u32,
+) -> *const c_char {
+    match unsafe { listing(list) }.and_then(|value| value.entries.get(index as usize)) {
+        None => std::ptr::null(),
+        Some(entry) => entry.name.as_ptr(),
+    }
+}
+
+/// Reports the preferred frames per second of the device at `index`.
+///
+/// # Safety
+///
+/// The pointer must name a live listing.
+///
+/// @return the frequency, and zero when the device would not say
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_devices_frequency(list: *mut DeviceList, index: u32) -> u32 {
+    match unsafe { listing(list) }.and_then(|value| value.entries.get(index as usize)) {
+        None => 0,
+        Some(entry) => entry.frequency,
+    }
+}
+
+/// Reports the preferred channels per frame of the device at `index`.
+///
+/// # Safety
+///
+/// The pointer must name a live listing.
+///
+/// @return the channels, and zero when the device would not say
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_devices_channels(list: *mut DeviceList, index: u32) -> u32 {
+    match unsafe { listing(list) }.and_then(|value| value.entries.get(index as usize)) {
+        None => 0,
+        Some(entry) => u32::from(entry.channels),
+    }
+}
+
+/// Frees a listing and every name in it.
+///
+/// # Safety
+///
+/// The pointer must come from `tecs_audio_devices` and must not be used again.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_devices_free(list: *mut DeviceList) {
+    if list.is_null() {
+        return;
+    }
+    drop(unsafe { Box::from_raw(list) });
+}
+
+/// Opens a recording device and starts it.
+///
+/// A non-empty `name` selects a device from the current listing and wins over
+/// `id`, because a name survives a run and an id is only meaningful for the
+/// listing that produced it. Neither given takes the platform's default.
+///
+/// # Safety
+///
+/// `name` must be null or a NUL-terminated string. The returned pointer is
+/// owned by the caller and freed by `tecs_audio_microphone_close`. A null
+/// return leaves the reason for `tecs_audio_open_error`.
+///
+/// @return the open capture, or null when nothing opened
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_open_microphone(
+    id: u32,
+    name: *const c_char,
+    frequency: u32,
+    channels: u32,
+    buffer_frames: u32,
+) -> *mut Capture {
+    let wanted = if name.is_null() {
+        None
+    } else {
+        match unsafe { CStr::from_ptr(name) }.to_str() {
+            Err(_) => {
+                set_open_error("the device name is not valid UTF-8");
+                return std::ptr::null_mut();
+            }
+            Ok(text) => Some(text),
+        }
+    };
+    match Capture::open(id, wanted, frequency, channels as u16, buffer_frames) {
+        Err(reason) => {
+            set_open_error(&reason);
+            std::ptr::null_mut()
+        }
+        Ok(opened) => Box::into_raw(Box::new(opened)),
+    }
+}
+
+/// Opens a capture with no device, whose frames the caller supplies.
+///
+/// This is what a test takes. Opening a real recording device reaches the same
+/// platform machinery an output open does, and on macOS that can block without
+/// bound inside the audio daemon, so no headless suite may take the device
+/// path.
+///
+/// # Safety
+///
+/// The returned pointer is owned by the caller and freed by
+/// `tecs_audio_microphone_close`.
+#[no_mangle]
+pub extern "C" fn tecs_audio_open_microphone_offline(
+    frequency: u32,
+    channels: u32,
+    buffer_frames: u32,
+) -> *mut Capture {
+    let opened = Capture::open_offline(frequency, channels as u16, buffer_frames);
+    Box::into_raw(Box::new(opened))
+}
+
+/// Borrows the capture a pointer names.
+///
+/// # Safety
+///
+/// The pointer must be one of the microphone open calls returned and
+/// `tecs_audio_microphone_close` has not yet been given.
+unsafe fn capture<'a>(microphone: *mut Capture) -> Option<&'a mut Capture> {
+    if microphone.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *microphone })
+    }
+}
+
+/// Stops capture, discards what was not read, and frees the microphone.
+///
+/// # Safety
+///
+/// The pointer must come from one of the microphone open calls and must not be
+/// used again.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_microphone_close(microphone: *mut Capture) {
+    if microphone.is_null() {
+        return;
+    }
+    let mut owned = unsafe { Box::from_raw(microphone) };
+    owned.close();
+}
+
+/// Reports the frames per second a read answers in.
+///
+/// # Safety
+///
+/// The pointer must name a live microphone.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_microphone_frequency(microphone: *mut Capture) -> u32 {
+    match unsafe { capture(microphone) } {
+        None => 0,
+        Some(value) => value.frequency(),
+    }
+}
+
+/// Reports the interleaved channels per frame a read answers with.
+///
+/// # Safety
+///
+/// The pointer must name a live microphone.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_microphone_channels(microphone: *mut Capture) -> u32 {
+    match unsafe { capture(microphone) } {
+        None => 0,
+        Some(value) => u32::from(value.channels()),
+    }
+}
+
+/// Reports the complete frames ready to read without waiting.
+///
+/// # Safety
+///
+/// The pointer must name a live microphone.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_microphone_available(microphone: *mut Capture) -> u32 {
+    match unsafe { capture(microphone) } {
+        None => 0,
+        Some(value) => value.available_frames() as u32,
+    }
+}
+
+/// Reports the frames dropped to overrun since the microphone opened.
+///
+/// A capture holds a bounded number of frames, so a game that stops reading
+/// loses the oldest rather than growing without limit. This counts what it
+/// lost, saturating rather than wrapping.
+///
+/// # Safety
+///
+/// The pointer must name a live microphone.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_microphone_overruns(microphone: *mut Capture) -> u32 {
+    match unsafe { capture(microphone) } {
+        None => 0,
+        Some(value) => u32::try_from(value.overruns()).unwrap_or(u32::MAX),
+    }
+}
+
+/// Moves up to `max_frames` captured frames into `out`.
+///
+/// # Safety
+///
+/// `out` must point at `max_frames` times the channel count writable floats,
+/// and the microphone must be live.
+///
+/// @return the frames written, and a negative number with the reason left for
+///     `tecs_audio_microphone_last_error` when nothing could be read
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_microphone_read(
+    microphone: *mut Capture,
+    out: *mut f32,
+    max_frames: u32,
+) -> i32 {
+    let value = match unsafe { capture(microphone) } {
+        None => return -1,
+        Some(value) => value,
+    };
+    if max_frames == 0 {
+        return 0;
+    }
+    if out.is_null() {
+        return -1;
+    }
+    let samples = max_frames as usize * value.channels().max(1) as usize;
+    let span = unsafe { std::slice::from_raw_parts_mut(out, samples) };
+    match value.read(span, max_frames as usize) {
+        Err(_) => -1,
+        Ok(frames) => frames as i32,
+    }
+}
+
+/// Puts frames in where a device callback would, for an offline capture.
+///
+/// # Safety
+///
+/// `samples` must point at `frames` times the channel count readable floats,
+/// and the microphone must be live.
+///
+/// @return the frames accepted, and zero while the capture is paused
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_microphone_write(
+    microphone: *mut Capture,
+    samples: *const f32,
+    frames: u32,
+) -> u32 {
+    let value = match unsafe { capture(microphone) } {
+        None => return 0,
+        Some(value) => value,
+    };
+    if samples.is_null() || frames == 0 {
+        return 0;
+    }
+    let count = frames as usize * value.channels().max(1) as usize;
+    let span = unsafe { std::slice::from_raw_parts(samples, count) };
+
+    value.write(span) as u32
+}
+
+/// Stops the device filling the buffer, keeping what is already in it.
+///
+/// # Safety
+///
+/// The pointer must name a live microphone.
+///
+/// @return nonzero when the capture stopped, and zero with the reason left for
+///     `tecs_audio_microphone_last_error`
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_microphone_pause(microphone: *mut Capture) -> i32 {
+    match unsafe { capture(microphone) } {
+        None => 0,
+        Some(value) => i32::from(value.pause()),
+    }
+}
+
+/// Starts the device filling the buffer again.
+///
+/// # Safety
+///
+/// The pointer must name a live microphone.
+///
+/// @return nonzero when the capture started, and zero with the reason left for
+///     `tecs_audio_microphone_last_error`
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_microphone_resume(microphone: *mut Capture) -> i32 {
+    match unsafe { capture(microphone) } {
+        None => 0,
+        Some(value) => i32::from(value.resume()),
+    }
+}
+
+/// Returns the reason the most recent failing microphone call gave.
+///
+/// # Safety
+///
+/// The pointer must name a live microphone, and the returned string stays valid
+/// until the next call on it.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_microphone_last_error(
+    microphone: *mut Capture,
+) -> *const c_char {
+    match unsafe { capture(microphone) } {
+        None => std::ptr::null(),
+        Some(value) => value.last_error_cstr(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,6 +879,94 @@ mod tests {
         assert_eq!(tecs_audio_layout(LAYOUT_EVENT), 8);
         assert_eq!(tecs_audio_layout(LAYOUT_CLIP_INFO), 8);
         assert_eq!(tecs_audio_layout(99), 0);
+    }
+
+    #[test]
+    fn crosses_a_capture_over_the_offline_microphone() {
+        let microphone = tecs_audio_open_microphone_offline(48_000, 1, 4);
+        assert!(!microphone.is_null());
+        unsafe {
+            assert_eq!(tecs_audio_microphone_frequency(microphone), 48_000);
+            assert_eq!(tecs_audio_microphone_channels(microphone), 1);
+            assert_eq!(tecs_audio_microphone_available(microphone), 0);
+
+            let fed = [0.5f32, -0.5];
+            assert_eq!(tecs_audio_microphone_write(microphone, fed.as_ptr(), 2), 2);
+            assert_eq!(tecs_audio_microphone_available(microphone), 2);
+
+            let mut out = [0.0f32; 4];
+            assert_eq!(
+                tecs_audio_microphone_read(microphone, out.as_mut_ptr(), 4),
+                2
+            );
+            assert_eq!(&out[..2], &[0.5, -0.5]);
+            assert_eq!(tecs_audio_microphone_overruns(microphone), 0);
+
+            assert_ne!(tecs_audio_microphone_pause(microphone), 0);
+            assert_eq!(tecs_audio_microphone_write(microphone, fed.as_ptr(), 2), 0);
+            assert_ne!(tecs_audio_microphone_resume(microphone), 0);
+            assert_eq!(tecs_audio_microphone_write(microphone, fed.as_ptr(), 2), 2);
+
+            tecs_audio_microphone_close(microphone);
+        }
+    }
+
+    #[test]
+    fn counts_what_an_unread_capture_overran() {
+        let microphone = tecs_audio_open_microphone_offline(48_000, 1, 2);
+        unsafe {
+            let fed = [1.0f32, 2.0, 3.0, 4.0];
+            tecs_audio_microphone_write(microphone, fed.as_ptr(), 4);
+            assert_eq!(tecs_audio_microphone_available(microphone), 2);
+            assert_eq!(tecs_audio_microphone_overruns(microphone), 2);
+            tecs_audio_microphone_close(microphone);
+        }
+    }
+
+    #[test]
+    fn tolerates_a_null_microphone_and_a_null_listing() {
+        let absent_microphone: *mut Capture = std::ptr::null_mut();
+        let absent_listing: *mut DeviceList = std::ptr::null_mut();
+        unsafe {
+            assert_eq!(tecs_audio_microphone_frequency(absent_microphone), 0);
+            assert_eq!(tecs_audio_microphone_channels(absent_microphone), 0);
+            assert_eq!(tecs_audio_microphone_available(absent_microphone), 0);
+            assert_eq!(tecs_audio_microphone_overruns(absent_microphone), 0);
+            assert_eq!(
+                tecs_audio_microphone_read(absent_microphone, std::ptr::null_mut(), 4),
+                -1
+            );
+            assert_eq!(
+                tecs_audio_microphone_write(absent_microphone, std::ptr::null(), 4),
+                0
+            );
+            assert_eq!(tecs_audio_microphone_pause(absent_microphone), 0);
+            assert_eq!(tecs_audio_microphone_resume(absent_microphone), 0);
+            assert!(tecs_audio_microphone_last_error(absent_microphone).is_null());
+            tecs_audio_microphone_close(absent_microphone);
+
+            assert_eq!(tecs_audio_devices_count(absent_listing), 0);
+            assert_eq!(tecs_audio_devices_id(absent_listing, 0), 0);
+            assert!(tecs_audio_devices_name(absent_listing, 0).is_null());
+            assert_eq!(tecs_audio_devices_frequency(absent_listing, 0), 0);
+            assert_eq!(tecs_audio_devices_channels(absent_listing, 0), 0);
+            tecs_audio_devices_free(absent_listing);
+        }
+    }
+
+    #[test]
+    fn reports_an_open_reason_after_a_failing_open() {
+        // No device is touched: a channel count past what the capture path
+        // carries is refused before anything reaches the platform.
+        let microphone =
+            unsafe { tecs_audio_open_microphone(0, std::ptr::null(), 48_000, 64, 1_024) };
+        assert!(microphone.is_null());
+        let reason = tecs_audio_open_error();
+        assert!(!reason.is_null());
+        let text = unsafe { CStr::from_ptr(reason) }
+            .to_str()
+            .expect("the reason is UTF-8");
+        assert!(text.contains("channels"), "got {text}");
     }
 
     #[test]
