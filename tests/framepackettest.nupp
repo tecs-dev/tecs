@@ -341,9 +341,12 @@ function suite.rejectsAMaterialTheBuildDoesNotCarry(): nil
     world:spawn(ecs.Transform2D(1, 1, 0, 1, 0, 1, 1), gfx.Tint(), gfx.Material(9999, 0.5), gfx.Renderable2D)
     world:commit()
 
-    test.raises(function(): nil
-        extractor:packet(640, 360)
-    end, "is not one this build carries")
+    test.raises(
+        function(): nil
+            extractor:packet(640, 360)
+        end,
+        "is not one this build carries"
+    )
 end
 
 function suite.carriesTheDeclaredGraphInEveryPacket(): nil

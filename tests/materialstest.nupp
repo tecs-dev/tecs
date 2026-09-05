@@ -24,15 +24,24 @@ end
 
 function suite.raisesOnANameTheBuildHasNot(): nil
     materials.reset()
-    test.raises(function(): nil
-        materials.id("nothing")
-    end, "no material named 'nothing'")
-    test.raises(function(): nil
-        materials.addRoot("")
-    end, "root path cannot be empty")
-    test.raises(function(): nil
-        materials.define("")
-    end, "material name cannot be empty")
+    test.raises(
+        function(): nil
+            materials.id("nothing")
+        end,
+        "no material named 'nothing'"
+    )
+    test.raises(
+        function(): nil
+            materials.addRoot("")
+        end,
+        "root path cannot be empty"
+    )
+    test.raises(
+        function(): nil
+            materials.define("")
+        end,
+        "material name cannot be empty"
+    )
 end
 
 function suite.renumbersWhenADefinitionJoinsTheSet(): nil

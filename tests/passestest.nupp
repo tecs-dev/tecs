@@ -48,7 +48,9 @@ local function decode(section: string): Graph
 
     local targets: {Target} = {}
     for index = 1, reader:readUint32() as integer do
-        targets[index] = new Target(
+        targets[
+            index
+        ] = new Target(
             name = names[(reader:readUint32() as integer) + 1],
             format = reader:readUint32() as integer,
             scale = reader:readFloat32(),
@@ -78,7 +80,9 @@ local function decode(section: string): Graph
         for slot = 1, outputCount do
             outputs[slot] = names[(reader:readUint32() as integer) + 1]
         end
-        decoded[index] = new Pass(
+        decoded[
+            index
+        ] = new Pass(
             name = name,
             depth = depth,
             hasDepthClear = hasDepthClear,
@@ -182,10 +186,7 @@ function suite.insertsAPassAtANamedSeam(): nil
         inputs = {"scene"},
         outputs = {"passestest.overlay"},
     })
-    test.equal(
-        table.concat(passNames(), ","),
-        "geometry,lighting,composite,forward,passestest.overlay,present"
-    )
+    test.equal(table.concat(passNames(), ","), "geometry,lighting,composite,forward,passestest.overlay,present")
 
     -- A pass and a target may share a name, which the deferred graph already
     -- relies on, so the insertion above is not a collision.
@@ -197,34 +198,58 @@ end
 
 function suite.refusesAGraphThatCannotRun(): nil
     passes.reset()
-    test.raises(function(): nil
-        passes.declareTarget({name = "albedo"})
-    end, "already declared")
-    test.raises(function(): nil
-        passes.declareTarget({name = "depth"})
-    end, "reserved for the shared depth attachment")
-    test.raises(function(): nil
-        passes.declareTarget({name = "passestest.bad", scale = 0})
-    end, "scale above zero and at most one")
-    test.raises(function(): nil
-        passes.declarePass({name = "geometry"})
-    end, "already declared")
-    test.raises(function(): nil
-        passes.declarePass({name = "passestest.reader", inputs = {"passestest.absent"}})
-    end, "reads undeclared target")
-    test.raises(function(): nil
-        passes.declarePass({name = "passestest.writer", outputs = {"passestest.absent"}})
-    end, "writes undeclared target")
-    test.raises(function(): nil
-        passes.insertPassBefore("passestest.nowhere", {name = "passestest.early"})
-    end, "no pass named")
+    test.raises(
+        function(): nil
+            passes.declareTarget({name = "albedo"})
+        end,
+        "already declared"
+    )
+    test.raises(
+        function(): nil
+            passes.declareTarget({name = "depth"})
+        end,
+        "reserved for the shared depth attachment"
+    )
+    test.raises(
+        function(): nil
+            passes.declareTarget({name = "passestest.bad", scale = 0})
+        end,
+        "scale above zero and at most one"
+    )
+    test.raises(
+        function(): nil
+            passes.declarePass({name = "geometry"})
+        end,
+        "already declared"
+    )
+    test.raises(
+        function(): nil
+            passes.declarePass({name = "passestest.reader", inputs = {"passestest.absent"}})
+        end,
+        "reads undeclared target"
+    )
+    test.raises(
+        function(): nil
+            passes.declarePass({name = "passestest.writer", outputs = {"passestest.absent"}})
+        end,
+        "writes undeclared target"
+    )
+    test.raises(
+        function(): nil
+            passes.insertPassBefore("passestest.nowhere", {name = "passestest.early"})
+        end,
+        "no pass named"
+    )
 
     -- Reading a target only a later pass writes is the ordering mistake the
     -- graph exists to refuse, and inserting the reader before its producer is
     -- the same mistake with the declarations in the other order.
-    test.raises(function(): nil
-        passes.insertPassBefore("geometry", {name = "passestest.tooEarly", inputs = {"albedo"}})
-    end, "before any pass writes it")
+    test.raises(
+        function(): nil
+            passes.insertPassBefore("geometry", {name = "passestest.tooEarly", inputs = {"albedo"}})
+        end,
+        "before any pass writes it"
+    )
     passes.reset()
 end
 
@@ -233,9 +258,12 @@ function suite.refusesDepthOnAScaledTarget(): nil
     passes.declareTarget({name = "passestest.half", scale = 0.5})
     -- One depth attachment at frame size serves every depth pass, so a pass
     -- drawing into a scaled target cannot share it.
-    test.raises(function(): nil
-        passes.declarePass({name = "passestest.small", outputs = {"passestest.half"}, depth = "testWrite"})
-    end, "depth attachment is frame sized")
+    test.raises(
+        function(): nil
+            passes.declarePass({name = "passestest.small", outputs = {"passestest.half"}, depth = "testWrite"})
+        end,
+        "depth attachment is frame sized"
+    )
     passes.reset()
 end
 
@@ -253,9 +281,12 @@ function suite.readsTheSharedDepthAttachmentByName(): nil
 
     -- Nothing writes depth before the first pass, so reading it there is the
     -- same refusal as reading a target nothing has written.
-    test.raises(function(): nil
-        passes.insertPassBefore("geometry", {name = "passestest.tooEarly", inputs = {passes.DEPTH}})
-    end, "reads depth before any pass writes it")
+    test.raises(
+        function(): nil
+            passes.insertPassBefore("geometry", {name = "passestest.tooEarly", inputs = {passes.DEPTH}})
+        end,
+        "reads depth before any pass writes it"
+    )
     passes.reset()
 end
 

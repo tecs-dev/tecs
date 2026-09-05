@@ -96,7 +96,6 @@ return {
                     "tecs.internal.mcptools",
                     "tecs.internal.mcptransport",
                     "tecs.internal.mcpworld",
-                    "tecs.internal.netadapter",
                     "tecs.internal.phases",
                     "tecs.internal.query",
                     "tecs.internal.rendercomponents",

@@ -1,7 +1,7 @@
 local ecs = require("tecs.ecs")
 local json = require("nupp.data.json")
 local mcp = require("tecs.mcp")
-local netadapter = require("tecs.internal.netadapter")
+local net = require("nupp.io.net")
 local tasks = require("nupp.tasks")
 local test = require("nupp.test")
 local time = require("nupp.time")
@@ -14,7 +14,7 @@ local suite = {}
 --- is the server this test is driving in the same process and a client that
 --- owns a runtime of its own would need a second thing pumping it.
 local function exchange(port: integer, method: string, target: string, body: string?): (integer, string)
-    local stream = assert(netadapter.connect({host = "127.0.0.1", port = port}))
+    local stream = assert(net.connect({host = "127.0.0.1", port = port}))
     local payload = body or ""
     local request = `${method} ${target} HTTP/1.1\r\nHost: 127.0.0.1\r\n`
         .. "Accept: application/json, text/event-stream\r\n"
@@ -231,7 +231,7 @@ function suite.keepsOneConnectionOpenAcrossSeveralCalls(): nil
     mcp.bind(world, nil)
 
     local answers = withServer(function(port: integer): {string}
-        local stream = assert(netadapter.connect({host = "127.0.0.1", port = port}))
+        local stream = assert(net.connect({host = "127.0.0.1", port = port}))
         local collected: {string} = {}
         for index = 1, 3 do
             local payload = `{"jsonrpc":"2.0","id":${tostring(

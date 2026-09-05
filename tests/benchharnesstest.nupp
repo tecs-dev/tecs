@@ -13,9 +13,12 @@ local function stageOf(name: string, samples: {number}): harness.Stage
 end
 
 function suite.rejectsAnEmptyStageName(): nil
-    test.raises(function(): nil
-        harness.newStage("")
-    end, "must not be empty")
+    test.raises(
+        function(): nil
+            harness.newStage("")
+        end,
+        "must not be empty"
+    )
 end
 
 function suite.reportsNothingForAStageWithNoSamples(): nil
@@ -54,7 +57,15 @@ end
 
 function suite.formatsOneRowPerRecordedStage(): nil
     const lines: {string} = {}
-    for line in harness.format({stageOf("first", {1}), harness.newStage("silent"), stageOf("last", {2})}):gmatch("[^\n]+") do
+    for line in harness.format({
+        stageOf("first", {
+            1
+        }),
+        harness.newStage("silent"),
+        stageOf("last", {
+            2
+        })
+    }):gmatch("[^\n]+") do
         lines[#lines + 1] = line
     end
     test.equal(#lines, 4)
@@ -76,16 +87,27 @@ end
 function suite.runsPrepareOutsideEveryTimedWindow(): nil
     local prepared = 0
     const stage = harness.newStage("prepared")
-    harness.measure(stage, 2, 4, function(): nil end, function(): nil
-        prepared = prepared + 1
-    end)
+    harness.measure(
+        stage,
+        2,
+        4,
+        function(): nil
+        end,
+        function(): nil
+            prepared = prepared + 1
+        end
+    )
     test.equal(prepared, 6)
 end
 
 function suite.rejectsANonPositiveSampleCount(): nil
-    test.raises(function(): nil
-        harness.measure(harness.newStage("none"), 0, 0, function(): nil end)
-    end, "samples must be positive")
+    test.raises(
+        function(): nil
+            harness.measure(harness.newStage("none"), 0, 0, function(): nil
+            end)
+        end,
+        "samples must be positive"
+    )
 end
 
 function suite.readsFixtureSizesFromTheEnvironment(): nil

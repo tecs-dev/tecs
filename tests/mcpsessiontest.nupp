@@ -2,7 +2,7 @@ local application = require("tecs.application")
 local ecs = require("tecs.ecs")
 local json = require("nupp.data.json")
 local mcp = require("tecs.mcp")
-local netadapter = require("tecs.internal.netadapter")
+local net = require("nupp.io.net")
 local tasks = require("nupp.tasks")
 local test = require("nupp.test")
 local time = require("nupp.time")
@@ -60,7 +60,7 @@ end
 
 --- One HTTP tool call against the loopback endpoint.
 local function callOverHTTP(port: integer, name: string, arguments: {[string]: any}?): {[string]: any}
-    local stream = assert(netadapter.connect({host = "127.0.0.1", port = port}))
+    local stream = assert(net.connect({host = "127.0.0.1", port = port}))
     local payload = json.encode({
         jsonrpc = "2.0",
         id = 1,

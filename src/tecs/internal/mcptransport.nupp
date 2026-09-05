@@ -17,15 +17,17 @@ turn. That is the same shape `tecs.internal.framepump` gives the application,
 written again here because a server runs several connections at once and a
 pump built for one parked operation cannot.
 
-The listener and the connections reach `nupp.io.net` through
-`tecs.internal.netadapter`, which is where the one cast that module currently
-needs is written down.
+The listener and the connections are `nupp.io.net`'s own owners, and each one
+belongs to the coroutine that uses it: the accept coroutine holds the listener
+and every connection coroutine holds its stream, so both close as their
+coroutine unwinds. The server record holds neither, which is what keeps a
+server value ordinary rather than affine out through `tecs.mcp`.
 ]]
 
 local json = require("nupp.data.json")
 local log = require("nupp.log")
 local suspension = require("nupp.suspension")
-local netadapter = require("tecs.internal.netadapter")
+local net = require("nupp.io.net")
 local registry = require("tecs.internal.mcpregistry")
 
 -- The externally typed logger name is `tecs.mcp`, independent of the module
@@ -65,7 +67,6 @@ export record Server
     --- the caller asked for unless it asked for zero.
     port: integer
 
-    private listener: netadapter.Listener
     private toolsJSON: string
     private tasks: {thread}
     private runnable: {thread}
@@ -157,7 +158,7 @@ end
 ---
 --- Returns nil when the peer closed before sending one, which is an ordinary
 --- end of connection rather than a failure.
-local function readHead(stream: netadapter.Stream): (string?, string?)
+local function readHead(borrows stream: net.Stream): (string?, string?)
     local head = ""
     while true do
         if head:find("\r\n\r\n", 1, true) ~= nil then
@@ -177,7 +178,7 @@ local function readHead(stream: netadapter.Stream): (string?, string?)
 end
 
 --- Reads exactly `length` further bytes, given what the head read overshot by.
-local function readBody(stream: netadapter.Stream, already: string, length: integer): (string?, string?)
+local function readBody(borrows stream: net.Stream, already: string, length: integer): (string?, string?)
     local body = already
     while #body < length do
         local chunk, why = stream:read(length - #body)
@@ -207,7 +208,7 @@ local function contentLength(head: string): integer
     return 0
 end
 
-local function respondHTTP(stream: netadapter.Stream, status: string, contentType: string?, body: string): nil
+local function respondHTTP(borrows stream: net.Stream, status: string, contentType: string?, body: string): nil
     local head = `HTTP/1.1 ${status}\r\nConnection: keep-alive\r\nContent-Length: ${tostring(#body)}\r\n`
     if contentType ~= nil then
         head = head .. `Content-Type: ${contentType}\r\n`
@@ -279,7 +280,7 @@ local function answer(exclusive self: Server, body: string): string?
 end
 
 --- Serves one connection until the peer closes it or the server stops.
-local function serve(exclusive self: Server, stream: netadapter.Stream): nil
+local function serve(exclusive self: Server, takes stream: net.Stream): nil
     stream:setNoDelay(true)
     while not self.destroyed do
         local head, why = readHead(stream)
@@ -321,40 +322,53 @@ end
 
 -- Forward declared: the coroutine body below dispatches to it, and it starts
 -- connection coroutines through `spawn`.
-local acceptLoop: function(exclusive self: Server): nil
+local acceptLoop: function(exclusive self: Server, takes listener: net.Listener): nil
 
---- Starts one server coroutine, accepting when `stream` is nil and serving
---- that connection otherwise.
+--- Starts one server coroutine, accepting through `listener` when `stream` is
+--- nil and serving that connection otherwise.
 ---
---- The server and the connection are passed through the first resume rather
---- than captured, because a coroutine outlives the call that created it and a
---- closure over a borrowed owner cannot.
-local function spawn(exclusive self: Server, stream: netadapter.Stream?): nil
-    local task = coroutine.create(function(server: Server, connection: netadapter.Stream?): nil
+--- The server and the owner it is to hold are passed through the first resume
+--- rather than captured, because a coroutine outlives the call that created it
+--- and a closure over a borrowed owner cannot. Exactly one of `stream` and
+--- `listener` is given: the coroutine owns it and closes it as it unwinds.
+local function spawn(exclusive self: Server, takes stream: net.Stream?, takes listener: net.Listener?): nil
+    local task = coroutine.create(function(
+        server: Server,
+        takes connection: net.Stream?,
+        takes accepting: net.Listener?
+    ): nil
         handle suspension with server.handler do
             if connection == nil then
-                acceptLoop(server)
+                acceptLoop(server, assert(accepting))
             else
                 serve(server, connection)
             end
         end
     end)
     self.tasks[#self.tasks + 1] = task
-    coroutine.resume(task, self, stream)
+    coroutine.resume(task, self, stream, listener)
 end
 
 --- Accepts connections for as long as the server lives.
-acceptLoop = function(exclusive self: Server): nil
+---
+--- The listener lives here rather than on the server record. A record holding
+--- it would be a declared owning record, which would make every server value
+--- affine all the way out through `tecs.mcp`, and the server cannot travel
+--- that way: this coroutine holds the record, so moving it would leave this
+--- addressing the old one. Owning the listener here also puts its close on the
+--- path that already unwinds, which is what `destroy` resumes.
+acceptLoop = function(exclusive self: Server, takes listener: net.Listener): nil
     while not self.destroyed do
-        local stream, why = self.listener:accept()
+        local stream, why = listener:accept()
         if stream == nil then
             if why ~= nil and not self.destroyed then
                 logger:warn("accept failed: %s", why)
             end
             break
         end
-        spawn(self, stream)
+        spawn(self, stream, nil)
     end
+    listener:close()
 end
 
 -------------------------------------------------------------------------------
@@ -371,14 +385,13 @@ end
 --- @return the listening server, which answers nothing until something calls `poll`
 --- @return why it could not bind, when unsuccessful
 export function listen(port: integer, toolsJSON: string): (Server?, string?)
-    local listener, why = netadapter.listen({host = "127.0.0.1", port = port})
+    local listener, why = net.listen({host = "127.0.0.1", port = port})
     if listener == nil then
         return nil, why ?? "the listener could not bind"
     end
 
     local self = new Server(
         port = listener:port(),
-        listener = listener,
         toolsJSON = toolsJSON,
         tasks = {},
         runnable = {},
@@ -388,7 +401,7 @@ export function listen(port: integer, toolsJSON: string): (Server?, string?)
         handler = nil as suspension.Handler
     )
     self.handler = newHandler(self)
-    spawn(self, nil)
+    spawn(self, nil, listener)
     logger:info("listening at http://127.0.0.1:%d/mcp", self.port)
 
     return self
@@ -424,7 +437,7 @@ function Server.pump(exclusive self: Server): nil
     end
     -- The reactor first, so a connection whose bytes arrived between frames is
     -- runnable before anything is resumed.
-    netadapter.pump(0)
+    net.pump(0)
     suspension.poll()
 
     local pass = self.runnable
@@ -489,7 +502,8 @@ function Server.destroy(exclusive self: Server): nil
         return
     end
     self.destroyed = true
-    self.listener:close()
+    -- The accept coroutine owns the listener and closes it as it unwinds, so
+    -- resuming every parked task below is what gives the port up.
     for index = 1, #self.tasks do
         local task = self.tasks[index]
         if coroutine.status(task) == "suspended" then
