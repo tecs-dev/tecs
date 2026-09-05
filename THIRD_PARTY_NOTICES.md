@@ -1,414 +1,91 @@
 # Third-Party Notices
 
-Tecs includes and links third-party material under licences other than the
-repository's MIT-or-Apache-2.0 code licence. Everything named here is
-permissive.
-
-Licences below were read from each project's own files at the revision the
-Cargo build-support crate pins, not from what a project is commonly said to be
-under. Two of those are worth naming because the common answer is wrong:
-**libxmp is MIT**, not the LGPL it is usually called, and **SPIRV-Headers is
-MIT**, not the Apache-2.0 that the rest of shaderc's tree is.
+Tecs links third-party material under licences other than the repository's
+MIT-or-Apache-2.0 code licence. This file installs to `share/tecs` beside the
+binaries it describes, with `LICENSE-MIT` and `LICENSE-APACHE`, and the Nupp
+runtime's own notices install to `share/tecs/notices`. A package that carried
+the code and not the notice is the one compliance failure this engine could
+commit on its own.
 
 ## The rule
 
-**No LGPL, ever.** Not as a preference and not per release: a game built on this
-engine is one statically linked file per platform, and the LGPL's relinking
-obligation cannot be met by one. The same reasoning rules out the GPL and
-anything that reaches one, so a dependency whose licence is not permissive is
-not adopted, however convenient it is.
+**No LGPL, and no GPL.** Not as a preference and not per release: a game built
+on this engine ships as a small set of binaries per platform, and the LGPL's
+relinking obligation is not a thing that arrangement can offer. A dependency
+under either is not adopted, however convenient it is.
 
-That is not left to this document. Three things enforce it, and each is honest
-about what it does not cover:
+**MPL-2.0 is accepted, and it is not permissive.** It is file-level copyleft:
+distributing a Larger Work under other terms is explicitly allowed, and what it
+asks in return is that the source of the covered files stays available to
+whoever receives the binary. That obligation is met by taking those crates
+unmodified from crates.io, where their source is public, and by naming them
+below. It would stop being met the moment one of them was patched in place, so
+do not do that without reading section 3.2 of the licence first.
 
-- The Cargo native dependency builder names every decoder option that would
-  fetch an LGPL codec instead of accepting a version's defaults. SDL_mixer's
-  defaults are on for the LGPL paths, so an unconfigured build is encumbered;
-  this is the code that makes it not.
-- `spec/licenses_spec.lua` holds those options to their values, fails on an
-  option it does not recognise, and fails when a dependency is pinned without
-  being named below. It asks the reverse too, so a section here for something
-  the build stopped pinning fails, and so does an exception that excuses a
-  package the runtime crate reaches. It reads a declaration, so it cannot tell
-  an option that works from one upstream renamed.
-- The Cargo package checker holds the libraries an installed tree actually
-  links against a list carrying a licence and a reason for each, and fails an
-  install missing this file. It reads link tables, so it cannot see a static
-  archive and it cannot read a licence out of a binary, because nothing can.
+## What ships
 
-This file installs to `share/tecs` beside the binaries it describes, with
-`LICENSE-MIT` and `LICENSE-APACHE`. A package that carried the code and not the
-notice is the one compliance failure this engine could commit on its own.
+An installed package contains the host executable, the Nupp runtime library,
+three native service libraries, a shader pack and the game components. The
+inventory beside this file is generated rather than written:
 
-## What actually has to be reproduced
+- `cargo-dependencies.txt` names every Rust package in the built graph,
+  target- and feature-resolved.
+- `cargo-licenses.txt` gives the SPDX expression for each, one line per entry.
 
-Most of what follows is zlib licensed or public domain and asks nothing of a
-binary distribution. These are the ones that do, so a distribution that is short
-of time gets these right first:
+`check-package` gates that inventory against what an installed tree actually
+links. It reads link tables, so it cannot see inside a static archive and it
+cannot read a licence out of a binary, because nothing can.
 
-- **MIT**: lua-cjson, LuaJIT and the PUC-Rio Lua notice inside it,
-  SPIRV-Headers, and stb_vorbis if MIT is the arm elected. MIT's "in all
-  copies or substantial portions" has no source-only carve-out.
-- **BSD-3-Clause**: libogg, Opus, opusfile, WavPack, and SDL3's vendored
-  yuv2rgb. Each requires the copyright notice, the list of conditions and the
-  disclaimer to appear in the documentation or other materials of a binary
-  distribution, which is what this file is.
-- **Apache-2.0**: SPIRV-Cross, shaderc, SPIRV-Tools. A distribution carries a
-  copy of the licence and keeps the notices; nothing here modifies them.
-- **Apache-2.0 and MIT**: the Rust standard library and Cargo graph described
-  below. This distribution elects one arm for each dual-licensed crate and
-  carries both licence texts.
-- **David Gay's notice**, below, which asks for the entire notice rather than a
-  line of it.
+### The Rust graph
 
-## Included in this repository
+151 packages at the revisions `Cargo.lock` pins. By licence expression:
 
-### lua-cjson
+| Expression | Packages |
+| --- | --- |
+| MIT OR Apache-2.0, and its spellings | 90 |
+| MIT | 18 |
+| Zlib OR Apache-2.0 OR MIT | 12 |
+| MPL-2.0 | 12 |
+| Apache-2.0 | 9 |
+| Others: `MIT OR Apache-2.0 OR Zlib`, `BSD-2-Clause OR Apache-2.0 OR MIT`, `Zlib`, `ISC` | 10 |
 
-`vendor/cjson` carries Mark Pulford's lua-cjson, built both into the engine and
-as a loadable module. MIT licensed; `vendor/cjson/LICENSE` is the text, and a
-binary distribution has to carry it.
+Everything outside the MPL-2.0 row is permissive and asks only that its notice
+travel with a distribution, which `cargo-licenses.txt` and this file do.
 
-### David Gay's floating-point conversion
+### Symphonia, and the only copyleft here
 
-`vendor/cjson/dtoa.c` and `vendor/cjson/g_fmt.c` are not lua-cjson's and are not
-MIT. They are David M. Gay's, copyright Lucent Technologies 1991, 1996, 2000 and
-2001, under a permission notice of their own that asks for something specific:
-that the entire notice be included in all copies of any software which is or
-includes a copy of it. Both files are compiled into the engine and into the
-loadable cjson module, so a shipped binary is such a copy. The notices are
-`vendor/cjson/dtoa.c:5-22` and `vendor/cjson/g_fmt.c:1-17`, reproduced here:
+The twelve MPL-2.0 packages are one project: `symphonia` and its bundles,
+codecs, formats and metadata crates, which decode audio for the Rust audio
+service. They are taken unmodified from crates.io. Their source is at
+<https://github.com/pdeljanov/Symphonia>, and that availability is what
+satisfies the licence for a binary distribution of a Larger Work.
 
-> The author of this software is David M. Gay.
->
-> Copyright (c) 1991, 1996, 2000, 2001 by Lucent Technologies.
->
-> Permission to use, copy, modify, and distribute this software for any purpose
-> without fee is hereby granted, provided that this entire notice is included in
-> all copies of any software which is or includes a copy or modification of this
-> software and in all copies of the supporting documentation for such software.
->
-> THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR IMPLIED
-> WARRANTY. IN PARTICULAR, NEITHER THE AUTHOR NOR LUCENT MAKES ANY
-> REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE MERCHANTABILITY OF THIS
-> SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR PURPOSE.
+The audio service chose Symphonia for decoding after measuring what the engine
+needs; the licence was not part of that comparison and should have been. It is
+recorded here rather than quietly: replacing it is a real option if a
+file-level copyleft obligation is not wanted, and the decision belongs to
+whoever ships.
+
+### The Nupp runtime
+
+`libnupp` carries LuaJIT, LPeg and lunajson. Each is permissive and each asks
+for its copyright notice to travel with a distribution, so packaging copies the
+Nupp distribution's own notices to `share/tecs/notices` rather than restating
+them here, where they would go stale against the compiler this tree pins.
+
+## In this repository but not in a package
 
 ### JetBrains Mono
 
-`assets/fonts/JetBrainsMono-ExtraBold.ttf` is JetBrains Mono ExtraBold 2.304
-and is the source font used by the demo and text benchmark. Font Software under
-the SIL Open Font License 1.1: the licence is
-`assets/fonts/JetBrainsMono-OFL.txt` and the provenance, including how the font
-was sourced, is `assets/fonts/JetBrainsMono-NOTICE.md`. The sprite benchmark
-also retains a derived atlas under `assets/bench/sprites.png`. These are
-installed with the assets, so a package carries them.
+`assets/fonts/JetBrainsMono-ExtraBold.ttf` is JetBrains Mono, under the SIL
+Open Font License 1.1. The tests read it. It is not installed by a package
+today; a package that starts shipping a font has to carry the OFL text with it.
 
-### Animated low-poly hero
+## What this file is not
 
-`assets/models/hero.glb` is adapted from Robin Lamb's "Animated Low Poly Hero
-with Sword and Shield" pack. The model, rig, and animation clips are dedicated
-to the public domain under CC0 1.0 Universal. The source, original archive
-checksum, and exact compatibility edit are recorded in
-`assets/models/hero-NOTICE.md`.
-
-### Jersey 15
-
-`docs/public/fonts/jersey-15` carries the Latin and Latin-extended WOFF2
-subsets used by the documentation site. Jersey 15 is copyright 2023 The Soft
-Type Project Authors and is Font Software under the SIL Open Font License 1.1.
-The copyright notice and complete licence are
-`docs/public/fonts/jersey-15/OFL.txt`, published beside the font files.
-
-## Linked by a build
-
-These are fetched at configure time rather than checked in, so a source checkout
-carries none of them and a packaged build carries all of them. A release
-therefore has to ship their notices even though this repository does not contain
-their code.
-
-### SDL
-
-**SDL3**, **SDL3_mixer**, and **SDL3_ttf**, all zlib licensed,
-copyright Sam Lantinga. The zlib licence binds source distribution rather than
-binary, so strictly it asks nothing of a shipped game; the notice is reproduced
-anyway.
-
-SDL3_ttf builds its vendored **FreeType** and **HarfBuzz**. FreeType is offered
-under the FreeType License or GPL-2.0-only; this engine elects the FreeType
-License. HarfBuzz is MIT licensed. PlutoSVG is disabled, so SDL3_ttf adds no SVG
-rasterizer or its dependencies.
-
-SDL3 vendors code it did not write, and two entries need a decision rather than
-a mention:
-
-- **HIDAPI** (`src/hidapi/`) is offered under GPL-3.0, BSD-3-Clause, or its
-  original licence, at the user's choice. **This engine elects BSD-3-Clause**
-  (`src/hidapi/LICENSE-bsd.txt`, copyright 2010 Alan Ott, Signal 11 Software).
-  That is an election rather than an obligation, and it is the only GPL text
-  anywhere in SDL3. Note that HIDAPI's libusb backend is loaded by name rather
-  than linked; static-linking libusb would import LGPL-2.1 and is not done.
-- **yuv2rgb** (`src/video/yuv2rgb/LICENSE`) is BSD-3-Clause, so its notice,
-  conditions and disclaimer travel with a binary.
-
-The rest ask nothing but are named: **fdlibm** from SunPro under its own
-preserve-this-notice terms, **dlmalloc** by Doug Lea and a public-domain
-`qsort`, and the **Khronos** OpenGL, OpenGL ES and EGL headers (MIT) with the
-Vulkan headers (Apache-2.0).
-
-### Rust native build foundation
-
-The static native archive includes `clap` for CLI parsing and `clap_complete`
-for shell completion generation, FastNoise Lite for procedural fields, `gltf`
-for glTF parsing and validation, `glam` for importer transform math,
-`bevy_mikktspace` for MikkTSpace tangent generation, `image` for PNG and JPEG
-decoding and PNG encoding, `ktx2` for KTX2 parsing and validation, `meshopt`
-for import-time vertex-cache and vertex-fetch optimization, `resvg` for static
-SVG rasterization, `reqwest`
-with Rustls for HTTP, `rmcp` for the official MCP protocol and Streamable HTTP
-server, `rapier2d` for physics, `regex` for compiled regular expressions, and
-`taffy` for UI layout. `bevy_mikktspace` retains Morten S. Mikkelsen's zlib
-notice and offers its Rust implementation under MIT or Apache-2.0. The
-`meshopt` crate embeds meshoptimizer 0.25 under Arseny Kapoulkine's MIT
-license; the Rust wrapper is used under MIT.
-The pure-Rust `ktx2` parser is Apache-2.0 and adds no native runtime library.
-It also owns the host lifecycle, worker channels, logging, dialogs, Lua module
-registration, LuaJIT's machine-code arena, and the single-file payload loader.
-SDL still owns the application loop and LuaJIT still owns game execution.
-
-The exact versions and declared SPDX expressions are pinned in
-the root `Cargo.lock` and Cargo metadata. The graph is permissive: MIT,
-Apache-2.0, ISC, BSD-3-Clause, Zlib, Unicode-3.0, CDLA-Permissive-2.0,
-Unlicense, and 0BSD. The build selects Ring as Rustls' crypto provider; it does
-not compile AWS-LC or OpenSSL. `LICENSE-APACHE` and `LICENSE-MIT` travel with
-the embedded payload and with an installed package. Crates whose selected
-licence has an additional notice retain it below or in their packaged source
-metadata.
-
-The complete native-runtime Cargo package inventory is below. It is generated
-from the lock file as part of the notice audit; target-specific entries are
-named because a release for that target compiles them. Every product also
-installs its exact feature- and target-resolved `cargo-dependencies.txt`, and
-the package check holds every entry in that file to this notice:
-
-`adler2`, `aho-corasick`, `allocator-api2`, `anstyle`, `approx`, `arrayref`,
-`arrayvec`,
-`async-compression`, `atomic-waker`, `autocfg`, `base64`, `bevy_mikktspace`, `bincode`,
-`bitflags`, `block-buffer`, `bumpalo`, `bytemuck`, `byteorder-lite`, `bytes`,
-`camino`, `cc`, `cfg-if`,
-`clap`, `clap_builder`, `clap_complete`, `clap_derive`, `clap_lex`, `cmake`, `combine`,
-`compression-codecs`, `compression-core`, `core-foundation`,
-`core-foundation-sys`, `core_maths`, `crc32fast`, `crossbeam-deque`,
-`crossbeam-epoch`, `crossbeam-utils`, `crypto-common`, `data-url`, `digest`,
-`displaydoc`, `downcast-rs`, `either`, `ena`, `equivalent`, `errno`, `euclid`,
-`fastnoise-lite`, `fdeflate`, `find-msvc-tools`, `flate2`, `float-cmp`,
-`foldhash`, `fontdb`, `form_urlencoded`,
-`futures-channel`, `futures-core`, `futures-io`, `futures-macro`,
-`futures-sink`, `futures-task`, `futures-util`, `generic-array`, `getrandom`,
-`glam`, `glamx`, `gltf`, `gltf-derive`, `gltf-json`, `grid`,
-`hashbrown`, `heck`, `http`, `http-body`, `http-body-util`, `httparse`,
-`hyper`, `hyper-rustls`, `hyper-util`, `icu_collections`, `icu_locale_core`,
-`icu_normalizer`, `icu_normalizer_data`, `icu_properties`,
-`icu_properties_data`, `icu_provider`, `idna`, `idna_adapter`, `image`,
-`imagesize`, `indexmap`, `inflections`, `ipnet`, `itoa`, `jni`, `jni-macros`,
-`jni-sys`, `jni-sys-macros`, `jobserver`, `js-sys`, `ktx2`, `kurbo`,
-`lazy_static`,
-`libc`, `libm`, `litemap`, `log`,
-`matrixmultiply`, `memchr`, `meshopt`, `miniz_oxide`, `mio`, `moxcms`, `nalgebra`,
-`nalgebra-macros`, `num-bigint`, `num-complex`, `num-derive`, `num-integer`,
-`num-rational`, `num-traits`, `once_cell`, `openssl-probe`, `ordered-float`,
-`parry2d`, `path-clean`, `pathdiff`, `percent-encoding`, `pico-args`,
-`pin-project-lite`, `pkg-config`, `png`,
-`polycool`, `potential_utf`,
-`proc-macro2`, `profiling`, `profiling-procmacros`, `pxfm`, `quote`,
-`rapier2d`, `rawpointer`, `rayon`, `rayon-core`, `regex`, `regex-automata`,
-`regex-syntax`, `reqwest`, `resvg`, `rgb`, `ring`, `robust`, `roxmltree`,
-`rustc_version`, `rustls`, `rustls-native-certs`, `rustls-pki-types`,
-`rustls-platform-verifier`, `rustls-platform-verifier-android`,
-`rustls-webpki`, `rustversion`, `rustybuzz`, `safe_arch`, `same-file`, `schannel`,
-`sdl3-sys`, `security-framework`, `security-framework-sys`, `semver`, `serde`,
-`serde_arrays`, `serde_core`, `serde_derive`, `sha2`, `shaderc`, `shaderc-sys`,
-`shlex`, `signal-hook`,
-`signal-hook-registry`, `simba`,
-`simd-adler32`, `simd_cesu8`, `simdutf8`, `simplecss`, `siphasher`,
-`slab`, `slotmap`, `smallvec`, `socket2`, `spade`, `spirv`, `spirv-cross2`,
-`spirv-cross2-derive`, `spirv-cross-sys`, `stable_deref_trait`,
-`static_assertions`, `strict-num`, `subtle`, `svgtypes`, `syn`, `sync_wrapper`,
-`taffy`,
-`synstructure`, `thiserror`, `thiserror-impl`, `tiny-skia`, `tiny-skia-path`,
-`tinystr`, `tinyvec`, `tinyvec_macros`,
-`tokio`, `tokio-rustls`, `tokio-util`, `tower`, `tower-http`, `tower-layer`,
-`tower-service`, `tracing`, `tracing-core`, `try-lock`, `ttf-parser`, `typenum`,
-`unicode-bidi`, `unicode-bidi-mirroring`, `unicode-ccc`, `unicode-ident`,
-`unicode-properties`, `unicode-script`, `unicode-vo`, `untrusted`, `url`, `urlencoding`,
-`usvg`, `utf8_iter`, `version_check`, `walkdir`, `want`, `wasi`,
-`wasm-bindgen`, `wasm-bindgen-futures`, `wasm-bindgen-macro`,
-`wasm-bindgen-macro-support`, `wasm-bindgen-shared`, `wasm-streams`, `web-sys`,
-`webpki-root-certs`, `wide`, `winapi-util`, `windows-link`, `windows-sys`,
-`windows-targets`, `windows_aarch64_gnullvm`, `windows_aarch64_msvc`,
-`windows_i686_gnu`, `windows_i686_gnullvm`, `windows_i686_msvc`,
-`windows_x86_64_gnu`, `windows_x86_64_gnullvm`, `windows_x86_64_msvc`,
-`writeable`, `xmlwriter`, `yoke`, `yoke-derive`, `zerofrom`, `zerofrom-derive`,
-`zeroize`, `zerotrie`, `zerovec`, `zerovec-derive`, `zune-core`, and
-`zune-jpeg`.
-
-The opt-in Bistro importer adds the MIT-or-Apache-2.0 `draco_decoder` crate,
-which builds the Apache-2.0 reference Draco codec, and the MIT `image_dds`,
-`ddsfile`, and `bcdec_rs` crates. Their build and decoding graph also adds
-`bytemuck_derive`, `byteorder`, `codespan-reporting`, `crunchy`, `cxx`,
-`cxx-build`, `cxxbridge-cmd`, `cxxbridge-flags`, `cxxbridge-macro`,
-`enum-primitive-derive`, `half`, `link-cplusplus`, `scratch`, `strsim`,
-`termcolor`, `unicode-width`, `zerocopy`, and `zerocopy-derive`. Every entry is
-MIT, Apache-2.0, or dual licensed under both, and the installed package carries
-both complete licence texts.
-
-The official MCP SDK and Streamable HTTP server add `android_system_properties`,
-`async-trait`, `axum`, `axum-core`, `chacha20`, `chrono`, `cpufeatures`,
-`dyn-clone`, `futures`, `futures-executor`, `httpdate`, `iana-time-zone`,
-`iana-time-zone-haiku`, `matchit`, `mime`, `pastey`, `r-efi`, `rand`,
-`rand_core`, `ref-cast`, `ref-cast-impl`, `rmcp`, `schemars`,
-`schemars_derive`, `serde_derive_internals`, `serde_json`, `sse-stream`,
-`tokio-macros`, `tokio-stream`, `tracing-attributes`, `uuid`, `windows-core`,
-`windows-implement`, `windows-interface`, `windows-result`, `windows-strings`
-and `zmij`.
-
-`unicode-ident` is also under the Unicode License v3, so that notice is required
-in addition to the Apache-2.0 arm elected above:
-
-> UNICODE LICENSE V3
->
-> COPYRIGHT AND PERMISSION NOTICE
->
-> Copyright © 1991-2023 Unicode, Inc.
->
-> NOTICE TO USER: Carefully read the following legal agreement. BY DOWNLOADING,
-> INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR SOFTWARE, YOU
-> UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE TERMS AND
-> CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT DOWNLOAD, INSTALL,
-> COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
->
-> Permission is hereby granted, free of charge, to any person obtaining a copy
-> of data files and any associated documentation (the "Data Files") or software
-> and any associated documentation (the "Software") to deal in the Data Files
-> or Software without restriction, including without limitation the rights to
-> use, copy, modify, merge, publish, distribute, and/or sell copies of the Data
-> Files or Software, and to permit persons to whom the Data Files or Software
-> are furnished to do so, provided that either (a) this copyright and permission
-> notice appear with all copies of the Data Files or Software, or (b) this
-> copyright and permission notice appear in associated Documentation.
->
-> THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
-> KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-> MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF THIRD
-> PARTY RIGHTS.
->
-> IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE BE
-> LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES, OR ANY
-> DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-> ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
-> CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA FILES OR SOFTWARE.
->
-> Except as contained in this notice, the name of a copyright holder shall not
-> be used in advertising or otherwise to promote the sale, use or other dealings
-> in these Data Files or Software without prior written authorization of the
-> copyright holder.
-
-### What SDL3_mixer decodes
-
-Chosen rather than defaulted, for the licence rather than for the bytes.
-Enabled:
-
-- the WAV, AIFF, VOC and AU readers SDL_mixer implements itself, zlib licensed
-  with it
-- **stb_vorbis** for Ogg Vorbis, MIT or public domain
-- **dr_flac** and **dr_mp3**, public domain or MIT-0. dr_mp3 carries a second
-  notice of its own, for the upstream minimp3 it derives from, dedicated under
-  CC0-1.0.
-- **Opus** with **opusfile** and **libogg**, BSD-3-Clause. Opus's notice also
-  reproduces the royalty-free patent grants from Xiph, Microsoft and Broadcom;
-  they impose no distribution condition, and the paragraph travels with the
-  text.
-- **WavPack**, BSD-3-Clause
-
-Those four BSD-3-Clause entries are the only hard reproduction obligations among
-the decoders.
-
-Disabled: **game-music-emu**, LGPL-2.1-or-later and GPL-2.0-or-later if built
-with the MAME YM2612 emulator; **FluidSynth**, LGPL-2.1-or-later, and with it
-SDL_mixer's bundled **TiMidity**, which is Artistic-1.0; and **mpg123**,
-LGPL-2.1-only with no "or later", for which dr_mp3 stands in. **libxmp** is off
-too, but not for its licence: it is MIT, contrary to how it is usually
-described, and it is off only because nothing here plays a module.
-
-`SDLMIXER_STRICT` makes a dependency that cannot be found fail the configure
-rather than silently drop its format, and `Audio.decoders()` reports what a
-running build actually has, which is the answer to check against this list.
-
-### Development shader compiler
-
-**SPIRV-Cross**, dual licensed **Apache-2.0 OR MIT** at the recipient's option.
-Its `LICENSE` file is Apache-2.0 alone and understates that; the election is
-stated per file, in every one of the library sources. Its embedded `spirv.h`,
-`spirv.hpp` and `GLSL.std.450.h` are Khronos Free Use, which is MIT-like and
-wants its notice in all copies.
-
-**shaderc**, Apache-2.0, and only in a build that compiles shaders at runtime. A
-release consumes a prebuilt shader pack and links no compiler, which
-`cargo xtask check-package` enforces. Cargo pins and builds shaderc,
-SPIRV-Cross, glslang, SPIRV-Tools and SPIRV-Headers through the `shaderc`,
-`shaderc-sys`, `spirv-cross2` and `spirv-cross-sys` crates, so this section
-applies to a development build and to any tool that ships one, not to a
-shipped game.
-
-The sys crates vendor the upstream source revisions they build. shaderc's
-source graph contributes:
-
-- **SPIRV-Tools**, Apache-2.0
-- **SPIRV-Headers**, MIT
-- **glslang**, which is not one licence. Its `LICENSE.txt` collects six:
-  BSD-3-Clause on the core 3Dlabs and Khronos code, BSD-2-Clause on the C
-  interface, MIT on test data, Apache-2.0 on two SPIR-V helpers, an NVIDIA
-  licence on the preprocessor, and GPL-3.0-or-later WITH Bison-exception-2.2 on
-  the generated parser.
-- googletest, abseil, re2 and effcee are shaderc's test dependencies and reach
-  no object code in a build with tests skipped.
-
-The GPL entry is the one to read twice, so it is written down rather than
-remembered. Two files carry it, `glslang_tab.cpp` and `glslang_tab.cpp.h`, and
-they are compiled into libglslang. The Bison exception in their own headers
-permits distributing a larger work containing the parser skeleton under terms of
-your choice, so long as that work is not itself a parser generator. glslang is
-not, so no copyleft propagates; what is required is retaining the FSF notice and
-the exception, which shipping glslang's `LICENSE.txt` does. Note also that
-shaderc's snapshot copy at `third_party/LICENSE.glslang` is out of date and
-describes files the pinned glslang does not have. Reproduce glslang's own
-`LICENSE.txt`.
-
-### LuaJIT
-
-**LuaJIT** carries three notices in one `COPYRIGHT` file, and reproducing only
-the first is not compliance:
-
-- LuaJIT itself, MIT, copyright 2005-2026 Mike Pall.
-- **Lua 5.1/5.2**, MIT, copyright 1994-2012 Lua.org, PUC-Rio, under its own
-  grant. This is not decorative: forty-odd LuaJIT sources carry the PUC-Rio
-  header and `lua.h` bakes the string into the binary. MIT's "in all copies"
-  makes reproducing it mandatory.
-- **dlmalloc** by Doug Lea, public domain. No obligation; named for completeness.
-
-### zlib
-
-Compression, under the zlib licence. Reached through the FFI for DEFLATE and
-for the Adler-32 a zlib stream carries in its trailer. Nothing is strictly
-required of a binary; the notice ships anyway.
-
-    Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler
-
-    This software is provided 'as-is', without any express or implied warranty.
-
-## Where the list comes from
-
-`native/rust/build-support/src/product.rs` carries each native revision and
-how it is obtained and configured. That is what to work from when assembling
-notices for a distribution; this file is checked against it by
-`spec/licenses_spec.lua`. Rust dependencies are pinned in the root
-`Cargo.lock` and checked by the same spec.
+It is not a legal review, and the enforcement it once described is gone: the
+spec that held the native build's decoder options to their values went with the
+Teal engine, along with the options it was holding. What remains is the
+generated inventory and `check-package`. A dependency added under an
+unacceptable licence would not be caught by anything here, which is worth
+knowing before adding one.

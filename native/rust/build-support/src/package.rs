@@ -347,6 +347,7 @@ pub fn install(root: &Path, preset: Preset, components: &[String]) -> Result<Pat
     for notice in ["THIRD_PARTY_NOTICES.md", "LICENSE-MIT", "LICENSE-APACHE"] {
         copy_file(&root.join(notice), &prefix.join("share/tecs").join(notice))?;
     }
+    copy_runtime_notices(&sdk, &prefix)?;
 
     if preset.platform() == Platform::Macos {
         relocate_install_names(&libraries)?;
@@ -723,6 +724,43 @@ fn format_list(names: &[&str]) -> String {
 /// these features rather than read off a manifest. The license file says what
 /// each of those packages is licensed under, and `check` refuses an install
 /// where an entry has no answer.
+/// Copies the Nupp distribution's own third-party notices beside ours.
+///
+/// The package ships `libnupp`, and that library carries LuaJIT, LPeg and
+/// lunajson inside it. Each is permissive and each asks for its copyright
+/// notice to travel with a distribution, so a package holding the code and not
+/// the notice is exactly the compliance failure `THIRD_PARTY_NOTICES.md` says
+/// this engine could commit on its own.
+///
+/// The notices sit beside the staged SDK in the Nupp checkout rather than in
+/// the SDK directory itself, so this walks up to find them and reports rather
+/// than guessing when it cannot.
+fn copy_runtime_notices(sdk: &Path, prefix: &Path) -> Result<()> {
+    let mut directory = sdk;
+    let source = loop {
+        let candidate = directory.join("host/notices");
+        if candidate.is_dir() {
+            break candidate;
+        }
+        directory = directory.parent().context(
+            "no host/notices above the staged Nupp SDK; the runtime ships without its notices",
+        )?;
+    };
+    let target = prefix.join("share/tecs/notices");
+    std::fs::create_dir_all(&target).with_context(|| format!("create {}", target.display()))?;
+    for entry in std::fs::read_dir(&source)
+        .with_context(|| format!("read {}", source.display()))?
+        .flatten()
+    {
+        let path = entry.path();
+        if path.is_file() {
+            let name = path.file_name().context("a notice has no file name")?;
+            copy_file(&path, &target.join(name))?;
+        }
+    }
+    Ok(())
+}
+
 fn write_inventory(root: &Path, preset: Preset, prefix: &Path) -> Result<()> {
     let mut tree = Command::new("cargo");
     tree.args([
