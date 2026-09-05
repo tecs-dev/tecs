@@ -22,10 +22,13 @@ world:spawn(
 )
 ```
 
-`tecs.gfx.layers` decides the order those entities draw in, and
-`tecs.gfx.images` owns image identity and residency.
+`tecs.gfx.layers` decides the order those entities draw in, `tecs.gfx.images`
+owns image identity and residency, `tecs.gfx.materials` numbers the materials a
+`Material` selects, and `tecs.gfx.passes` declares the render passes and render
+targets a frame is drawn through.
 ]]
 
+local materials = require("tecs.gpu.materials")
 local rendercomponents = require("tecs.internal.rendercomponents")
 
 --- A four-channel color stored on a renderable entity.
@@ -56,3 +59,10 @@ export const ActiveCamera = rendercomponents.ActiveCamera
 
 --- Marks an entity as contributing geometry to the two-dimensional scene.
 export const Renderable2D = rendercomponents.Renderable2D
+
+--- A material selection stored on a renderable entity.
+export type Material = materials.Material
+
+--- Constructs a material selection, defaulting to `textured` at parameter
+--- one quarter.
+export const Material = materials.MaterialComponent

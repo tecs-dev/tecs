@@ -4,69 +4,97 @@ module tecs.internal.framepacket
 Extraction for the Rust-owned GPU lane.
 
 One host-endian packet crosses the managed ABI per completed frame. Nupp owns
-world queries, camera selection, depth, and draw ordering; Rust validates the
-packet and owns upload, textures, pipelines, submission, and presentation.
-Image pixels never ride in a packet. They cross once through the residency
-commands `tecs.gfx.images` queues, so a frame carries only the id a batch
-binds.
+world queries, camera selection, depth, draw ordering, material numbering, and
+the render graph's declaration; Rust validates the packet and owns targets,
+pipelines, culling, compaction, submission, and presentation. Image pixels
+never ride in a packet. They cross once through the residency commands
+`tecs.gfx.images` queues, so a frame carries only the id a batch binds.
 
-# Packet version 2
+# Packet version 3
 
 Every field is little or big endian to match the host, every integer is
 unsigned, and every real is a 32-bit float. Offsets are in bytes from the start
 of the packet.
 
-## Header, 56 bytes
+## Header, 64 bytes
 
 | Offset | Type  | Field            | Contract                                            |
 | ------ | ----- | ---------------- | --------------------------------------------------- |
 | 0      | `u32` | `magic`          | `0x54454353`, and nothing else is a Tecs packet.     |
-| 4      | `u32` | `version`        | `2`. A reader rejects every other value.             |
-| 8      | `u32` | `headerSize`     | `56`. Instances and batches start after it.          |
-| 12     | `u32` | `batchStride`    | `16`.                                                |
-| 16     | `u32` | `batchCount`     | Zero only when `instanceCount` is zero.              |
-| 20     | `u32` | `instanceStride` | `56`.                                                |
-| 24     | `u32` | `instanceCount`  | How many instances follow the batch table.           |
-| 28     | `u32` | `flags`          | `0`. Reserved, and a reader rejects any other value. |
-| 32     | `f32` | `targetWidth`    | Render target width in pixels, greater than zero.    |
-| 36     | `f32` | `targetHeight`   | Render target height in pixels, greater than zero.   |
-| 40     | `f32` | `cameraX`        | View center x in world units.                        |
-| 44     | `f32` | `cameraY`        | View center y in world units, increasing downward.   |
-| 48     | `f32` | `cameraZoom`     | Greater than zero.                                   |
-| 52     | `f32` | `cameraRotation` | Radians, turning the scene counter-clockwise.        |
+| 4      | `u32` | `version`        | `3`. A reader rejects every other value.             |
+| 8      | `u32` | `headerSize`     | `64`. The graph section starts after it.             |
+| 12     | `u32` | `flags`          | `0`. Reserved, and a reader rejects any other value. |
+| 16     | `u32` | `graphRevision`  | A reader rebuilds its graph when this changes.       |
+| 20     | `u32` | `graphBytes`     | Byte length of the graph section.                    |
+| 24     | `u32` | `batchStride`    | `20`.                                                |
+| 28     | `u32` | `batchCount`     | Zero only when `instanceCount` is zero.              |
+| 32     | `u32` | `instanceStride` | `80`.                                                |
+| 36     | `u32` | `instanceCount`  | How many instances follow the batch table.           |
+| 40     | `f32` | `targetWidth`    | Render target width in pixels, greater than zero.    |
+| 44     | `f32` | `targetHeight`   | Render target height in pixels, greater than zero.   |
+| 48     | `f32` | `cameraX`        | View center x in world units.                        |
+| 52     | `f32` | `cameraY`        | View center y in world units, increasing downward.   |
+| 56     | `f32` | `cameraZoom`     | Greater than zero.                                   |
+| 60     | `f32` | `cameraRotation` | Radians, turning the scene counter-clockwise.        |
 
-## Batch table, `batchCount` entries of 16 bytes at offset 56
+## Graph section, `graphBytes` bytes at offset 64
+
+The pass and target declaration, as `tecs.gpu.passes.section` encodes it. It
+rides in every packet rather than being sent once, so a backend that lost its
+device, its surface, or its whole graphics object rebuilds from the next frame
+instead of holding state the sender cannot see. `graphRevision` is what keeps
+that cheap: a reader parses the section only when the revision differs from the
+one it built its graph from.
+
+## Batch table, `batchCount` entries of 20 bytes after the graph section
 
 | Offset | Type  | Field           | Contract                                                |
 | ------ | ----- | --------------- | ------------------------------------------------------- |
 | 0      | `u32` | `image`         | A `tecs.gfx.images` id, or `0` for the white fallback.   |
 | 4      | `u32` | `sampler`       | Below `tecs.gfx.images.SAMPLER_COUNT`.                   |
-| 8      | `u32` | `firstInstance` | Zero-based index of the batch's first instance.          |
-| 12     | `u32` | `instanceCount` | At least one.                                            |
+| 8      | `u32` | `lane`          | `0` opaque, `1` blended.                                 |
+| 12     | `u32` | `firstInstance` | Zero-based index of the batch's first instance.          |
+| 16     | `u32` | `instanceCount` | At least one.                                            |
 
 Batches partition the instances exactly: the first starts at zero, each one
 starts where the previous ended, and their counts sum to `instanceCount`. They
 are runs in draw order rather than a grouping, because the scene is drawn back
-to front with no depth test and reordering by image would reorder the picture.
+to front and reordering by image would reorder the picture.
 
-## Instances, `instanceCount` entries of 56 bytes at offset 56 plus the batch table
+A run breaks on the lane as well as on the image and the sampler, so every
+batch belongs to one lane. That is what lets a backend cull and compact the
+instances and still draw a batch: compaction preserves packet order, so the
+survivors of a single-lane batch are a contiguous run of that lane's visible
+list and one indirect draw covers them.
+
+## Instances, `instanceCount` entries of 80 bytes after the batch table
 
 | Offset | Type  | Field      | Contract                                                     |
 | ------ | ----- | ---------- | ------------------------------------------------------------ |
 | 0      | `f32` | `x`        | Center x in world units.                                      |
 | 4      | `f32` | `y`        | Center y in world units.                                      |
 | 8      | `f32` | `rotation` | Radians, turning the quad clockwise on screen.                |
-| 12     | `f32` | `scaleX`   | Full width in world units, not a half extent.                 |
-| 16     | `f32` | `scaleY`   | Full height in world units.                                   |
-| 20     | `f32` | `depth`    | Zero nearest to one farthest, from `tecs.gfx.layers.depthOf`. |
-| 24     | `f32` | `u0`       | Left edge of the sampled region.                              |
-| 28     | `f32` | `v0`       | Top edge of the sampled region.                               |
-| 32     | `f32` | `u1`       | Right edge of the sampled region.                             |
-| 36     | `f32` | `v1`       | Bottom edge of the sampled region.                            |
-| 40     | `f32` | `r`        | Red, multiplied into the sampled color.                       |
-| 44     | `f32` | `g`        | Green.                                                        |
-| 48     | `f32` | `b`        | Blue.                                                         |
-| 52     | `f32` | `a`        | Alpha, multiplied into the sampled alpha.                     |
+| 12     | `f32` | `depth`    | Zero nearest to one farthest, from `tecs.gfx.layers.depthOf`. |
+| 16     | `f32` | `scaleX`   | Full width in world units, not a half extent.                 |
+| 20     | `f32` | `scaleY`   | Full height in world units.                                   |
+| 24     | `f32` | `param`    | The material's own scalar, zero to one.                       |
+| 28     | `f32` | reserved   | Zero.                                                         |
+| 32     | `f32` | `u0`       | Left edge of the sampled region.                              |
+| 36     | `f32` | `v0`       | Top edge of the sampled region.                               |
+| 40     | `f32` | `u1`       | Right edge of the sampled region.                             |
+| 44     | `f32` | `v1`       | Bottom edge of the sampled region.                            |
+| 48     | `f32` | `r`        | Red, multiplied into the sampled color.                       |
+| 52     | `f32` | `g`        | Green.                                                        |
+| 56     | `f32` | `b`        | Blue.                                                         |
+| 60     | `f32` | `a`        | Alpha, multiplied into the sampled alpha.                     |
+| 64     | `u32` | `material` | A `tecs.gfx.materials` id, below the build's material count.  |
+| 68     | `u32` | `flags`    | Bit 0 set marks the blended lane, and equals the batch's.     |
+| 72     | `u32` | reserved   | Zero.                                                         |
+| 76     | `u32` | reserved   | Zero.                                                         |
+
+The four sixteen-byte groups are what a backend binds as a storage buffer, so
+the layout is a `vec4` quadruple followed by four words rather than the field
+order a reader would pick.
 
 Instances run in draw order: farthest depth first, and entity id ascending
 between equal depths. A backend draws them in that order and the later one
@@ -75,12 +103,15 @@ without a tie-breaker of its own.
 
 Every real in the packet is finite. A backend rejects a packet whose length
 does not match its declared counts, whose strides differ from the constants
-above, or whose batches do not partition its instances.
+above, whose batches do not partition its instances, whose instance lane
+disagrees with its batch's, or whose material id its dispatch does not carry.
 ]]
 
 local archetype = require("tecs.internal.archetype")
 local images = require("tecs.gfx.images")
 local layers = require("tecs.gfx.layers")
+local materials = require("tecs.gpu.materials")
+local passes = require("tecs.gpu.passes")
 local query = require("tecs.internal.query")
 local rendercomponents = require("tecs.internal.rendercomponents")
 local world = require("tecs.internal.world")
@@ -89,16 +120,28 @@ local world = require("tecs.internal.world")
 export const MAGIC: uint32 = 0x54454353
 
 --- The packet layout this module writes.
-export const VERSION: uint32 = 2
+export const VERSION: uint32 = 3
 
 --- The byte length of the packet header.
-export const HEADER_SIZE: uint32 = 56
+export const HEADER_SIZE: uint32 = 64
 
 --- The byte length of one batch table entry.
-export const BATCH_STRIDE: uint32 = 16
+export const BATCH_STRIDE: uint32 = 20
 
 --- The byte length of one instance.
-export const INSTANCE_STRIDE: uint32 = 56
+export const INSTANCE_STRIDE: uint32 = 80
+
+--- Names the lane that rasterizes into the G-buffer.
+---
+--- The lane numbering is a compatibility surface shared with the backend's
+--- compaction, which fills one lane per dispatch.
+export const LANE_OPAQUE: integer = 0
+
+--- Names the lane the forward pass blends over the composited image.
+export const LANE_BLEND: integer = 1
+
+--- Marks an instance as belonging to the blended lane.
+export const FLAG_BLENDED: integer = 1
 
 const narrow = nupp.math.f32.narrow
 const wrap = nupp.math.u32.wrap
@@ -123,6 +166,9 @@ export record Extractor
     private tints: {rendercomponents.Tint}
     private imageIds: {integer}
     private samplers: {integer}
+    private lanes: {integer}
+    private materialIds: {integer}
+    private params: {number}
     private u0: {number}
     private v0: {number}
     private u1: {number}
@@ -170,6 +216,9 @@ export function new(exclusive value: world.World): Extractor
         tints = {},
         imageIds = {},
         samplers = {},
+        lanes = {},
+        materialIds = {},
+        params = {},
         u0 = {},
         v0 = {},
         u1 = {},
@@ -225,6 +274,7 @@ local function view(borrows self: Extractor, width: number, height: number): num
 end
 
 --- Reads every renderable row into the extractor's reused arrays.
+--- @raises when an entity selects a material id this build does not carry
 local function collect(exclusive self: Extractor): nil
     const entities = self.entities
     const depths = self.depths
@@ -232,23 +282,46 @@ local function collect(exclusive self: Extractor): nil
     const tints = self.tints
     const imageIds = self.imageIds
     const samplers = self.samplers
+    const lanes = self.lanes
+    const materialIds = self.materialIds
+    const params = self.params
     const u0 = self.u0
     const v0 = self.v0
     const u1 = self.u1
     const v1 = self.v1
+    const materialCount = materials.count()
     local rows: integer = 0
     for candidate, count in self.drawables:iter() do
         local active = candidate as archetype.Archetype
         local rowTransforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
         local rowTints: {rendercomponents.Tint} = assert(active:get(rendercomponents.TintComponent))
         local rowSprites = active:get(rendercomponents.SpriteComponent) as {rendercomponents.Sprite}?
+        local rowMaterials = active:get(materials.MaterialComponent) as {materials.Material}?
         for index = 1, count as integer do
             const transform = rowTransforms[index]
+            const tint = rowTints[index]
             rows = rows + 1
             entities[rows] = active.entities[index]
             transforms[rows] = transform
-            tints[rows] = rowTints[index]
+            tints[rows] = tint
             depths[rows] = layers.depthOf(transform.layer, transform.z, transform.x, transform.y)
+            -- The lane is the tint's alpha and nothing else. The G-buffer pass
+            -- writes with replace and has nowhere to put partial coverage, so
+            -- an entity that is not fully opaque leaves for the forward pass,
+            -- where the depth it already sorted by decides it against the
+            -- opaque geometry in front of it.
+            lanes[rows] = tint.a < 1.0 and LANE_BLEND or LANE_OPAQUE
+            if rowMaterials == nil then
+                materialIds[rows] = 0
+                params[rows] = 0.25
+            else
+                const material = rowMaterials[index]
+                if material.id < 0 or material.id >= materialCount then
+                    error("framepacket: material id " .. tostring(material.id) .. " is not one this build carries", 3)
+                end
+                materialIds[rows] = material.id
+                params[rows] = material.param
+            end
             if rowSprites == nil then
                 imageIds[rows] = 0
                 samplers[rows] = 0
@@ -297,8 +370,9 @@ end
 --- @param width the positive render target width in pixels
 --- @param height the positive render target height in pixels
 --- @return a host-endian versioned packet owned by the caller
---- @raises when a viewport dimension is not positive, or when the active
----     camera holds a zoom that is not greater than zero
+--- @raises when a viewport dimension is not positive, when the active camera
+---     holds a zoom that is not greater than zero, or when an entity selects a
+---     material this build does not carry
 function Extractor.packet(exclusive self: Extractor, width: integer, height: integer): string
     if width < 1 or height < 1 then
         error("framepacket: viewport dimensions must be positive", 2)
@@ -310,6 +384,7 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
     const order = self.order
     const imageIds = self.imageIds
     const samplers = self.samplers
+    const lanes = self.lanes
     const rows = self.rowCount
 
     -- The batch table is written before the instances, so the runs are counted
@@ -317,47 +392,56 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
     local batches: integer = 0
     local runImage: integer = -1
     local runSampler: integer = -1
+    local runLane: integer = -1
     for index = 1, rows do
         const row = order[index]
-        if imageIds[row] ~= runImage or samplers[row] ~= runSampler then
+        if imageIds[row] ~= runImage or samplers[row] ~= runSampler or lanes[row] ~= runLane then
             batches = batches + 1
             runImage = imageIds[row]
             runSampler = samplers[row]
+            runLane = lanes[row]
         end
     end
 
+    const graph = passes.section()
     local buffer = nupp.io.newBuffer()
     local writer = nupp.io.newScalarWriter(buffer)
     writer:writeUint32(MAGIC)
         :writeUint32(VERSION)
         :writeUint32(HEADER_SIZE)
+        :writeUint32(0)
+        :writeUint32(wrap(passes.revision()))
+        :writeUint32(wrap(#graph))
         :writeUint32(BATCH_STRIDE)
         :writeUint32(wrap(batches))
         :writeUint32(INSTANCE_STRIDE)
         :writeUint32(wrap(rows))
-        :writeUint32(0)
         :writeFloat32(narrow(width))
         :writeFloat32(narrow(height))
         :writeFloat32(narrow(cameraX))
         :writeFloat32(narrow(cameraY))
         :writeFloat32(narrow(zoom))
         :writeFloat32(narrow(rotation))
+    writer:writeBytes(graph)
 
     runImage = -1
     runSampler = -1
+    runLane = -1
     local runFirst: integer = 0
     local runLength: integer = 0
     for index = 1, rows do
         const row = order[index]
-        if imageIds[row] ~= runImage or samplers[row] ~= runSampler then
+        if imageIds[row] ~= runImage or samplers[row] ~= runSampler or lanes[row] ~= runLane then
             if runLength > 0 then
                 writer:writeUint32(wrap(runImage))
                     :writeUint32(wrap(runSampler))
+                    :writeUint32(wrap(runLane))
                     :writeUint32(wrap(runFirst))
                     :writeUint32(wrap(runLength))
             end
             runImage = imageIds[row]
             runSampler = samplers[row]
+            runLane = lanes[row]
             runFirst = index - 1
             runLength = 0
         end
@@ -366,6 +450,7 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
     if runLength > 0 then
         writer:writeUint32(wrap(runImage))
             :writeUint32(wrap(runSampler))
+            :writeUint32(wrap(runLane))
             :writeUint32(wrap(runFirst))
             :writeUint32(wrap(runLength))
     end
@@ -373,6 +458,8 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
     const depths = self.depths
     const transforms = self.transforms
     const tints = self.tints
+    const materialIds = self.materialIds
+    const params = self.params
     const u0 = self.u0
     const v0 = self.v0
     const u1 = self.u1
@@ -384,9 +471,11 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
         writer:writeFloat32(narrow(transform.x))
             :writeFloat32(narrow(transform.y))
             :writeFloat32(narrow(transform.rotation))
+            :writeFloat32(narrow(depths[row]))
             :writeFloat32(narrow(transform.scaleX))
             :writeFloat32(narrow(transform.scaleY))
-            :writeFloat32(narrow(depths[row]))
+            :writeFloat32(narrow(params[row]))
+            :writeFloat32(0.0)
             :writeFloat32(narrow(u0[row]))
             :writeFloat32(narrow(v0[row]))
             :writeFloat32(narrow(u1[row]))
@@ -395,6 +484,10 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
             :writeFloat32(narrow(tint.g))
             :writeFloat32(narrow(tint.b))
             :writeFloat32(narrow(tint.a))
+            :writeUint32(wrap(materialIds[row]))
+            :writeUint32(wrap(lanes[row] == LANE_BLEND and FLAG_BLENDED or 0))
+            :writeUint32(0)
+            :writeUint32(0)
     end
     writer:drop()
     local packed = buffer:getString()

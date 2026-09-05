@@ -14,11 +14,17 @@ function suite.installsACompleteGameThroughItsEntry(): nil
     test.equal(reader:readUint32(), framepacket.MAGIC)
     test.equal(reader:readUint32(), framepacket.VERSION)
     test.equal(reader:readUint32(), framepacket.HEADER_SIZE)
+    test.equal(reader:readUint32(), 0)
+    -- The graph revision, then the section's byte length, which the batch table
+    -- sits behind.
+    reader:skip(4)
+    local graphBytes = reader:readUint32() as integer
     test.equal(reader:readUint32(), framepacket.BATCH_STRIDE)
-    test.equal(reader:readUint32(), 1)
+    -- Two of the three quads carry an alpha below one, so the scene splits into
+    -- an opaque run and a blended one.
+    test.equal(reader:readUint32(), 2)
     test.equal(reader:readUint32(), framepacket.INSTANCE_STRIDE)
     test.equal(reader:readUint32(), 3)
-    test.equal(reader:readUint32(), 0)
     test.equal(reader:readFloat32(), 800)
     test.equal(reader:readFloat32(), 450)
     -- No camera entity, so the view centers on the target and the example's
@@ -27,7 +33,7 @@ function suite.installsACompleteGameThroughItsEntry(): nil
     test.equal(reader:readFloat32(), 225)
     test.equal(reader:readFloat32(), 1)
     test.equal(reader:readFloat32(), 0)
-    reader:skip(16)
+    reader:skip(graphBytes + 2 * (framepacket.BATCH_STRIDE as integer))
     test.equal(reader:readFloat32(), 240)
     test.equal(reader:readFloat32(), 225)
     reader:drop()

@@ -1,0 +1,606 @@
+module tecs.gpu.passes
+
+--[[
+The render passes and render targets a frame is drawn through.
+
+A pass names the targets it reads and the targets it writes. This module owns
+the declaration; the Rust backend owns the textures, the pipelines and the
+submission. The declaration crosses in the frame packet, so there is one copy
+of every pass and target name rather than one on each side of the boundary.
+
+Passes run in declaration order rather than in a topological order. The order
+of a deferred pipeline is a design decision, and a graph that quietly reorders
+itself is harder to reason about than one that refuses to run, so a pass that
+reads a target no earlier pass writes is rejected where it is declared.
+
+```nupp
+const passes = tecs.gfx.passes
+
+passes.declareTarget({name = "gameOverlay", format = "rgba8"})
+passes.insertPassBefore("present", {
+    name = "gameOverlay",
+    inputs = {"scene"},
+    outputs = {"gameOverlay"},
+})
+```
+
+The built-in deferred graph is declared when this module loads. Its target and
+pass names are a compatibility surface: a game names one to place a pass of its
+own beside it, so they keep their established spelling wherever the code that
+declares them lives.
+
+Targets are sized with the frame. A `scale` below one halves or quarters both
+axes, which is what a target holding nothing sharp asks for. The backend owns
+allocation and reuse: it reallocates a target only when the frame size or the
+declaration changes, and a target no pass reads or writes is still allocated,
+because a pass may be declared for it later.
+
+One depth attachment at frame size is shared by every pass that asks for depth.
+`depth` is reserved as an input name and reads that attachment; it is not a
+declarable target.
+]]
+
+--- Names the shared depth attachment, which is not a declarable target.
+---
+--- A pass naming this as an input samples what an earlier depth-writing pass
+--- produced. This string is a compatibility surface.
+export const DEPTH: string = "depth"
+
+--- Selects the pixel format the backend allocates a target in.
+---
+--- These identifiers reach the wire and a game's own declarations, so they are
+--- a compatibility surface.
+export type Format = "rgba8" | "rgba16f" | "r8" | "r16f"
+
+--- Says how a pass uses the shared depth attachment.
+---
+--- `none` attaches no depth, so nothing rejects a fragment and nothing is
+--- written. `testWrite` is what geometry asks for. `test` rejects a fragment
+--- against what geometry already wrote without writing itself, which is what
+--- blended content that must sort against opaque geometry asks for.
+export type DepthMode = "none" | "testWrite" | "test"
+
+--- A color a target or a pass clears to.
+---
+--- Every channel runs zero to one and must be finite.
+export type Clear = {
+    r: number,
+    g: number,
+    b: number,
+    a: number
+}
+
+--- A target the backend allocates, sizes with the frame, and owns.
+export record Target
+    --- Read-only. Names the target for `inputs`, `outputs`, and `formatOf`.
+    name: string
+
+    --- Read-only. Reports the pixel format the backend allocates.
+    format: Format
+
+    --- Read-only. Reports the size relative to the frame, above zero and at
+    --- most one. A half halves each axis.
+    scale: number
+
+    --- Read-only. Reports the color a pass writing this target clears it to,
+    --- or nil when a pass loads what is already there.
+    clear: Clear?
+end
+
+--- What a caller passes to `declareTarget`.
+---
+--- The module copies every field, so the table a caller builds is theirs to
+--- reuse. `format` defaults to `"rgba8"` and `scale` to one, and an omitted
+--- `clear` loads what is already in the target.
+export type TargetSpec = {
+    name: string,
+    format: Format?,
+    scale: number?,
+    clear: Clear?
+}
+
+--- One render pass, as the graph holds it.
+export record Pass
+    --- Read-only. Names the pass, unique within the graph.
+    name: string
+
+    --- Read-only. Lists the targets this pass samples, in binding order. The
+    --- list is the graph's and a caller must not write to it.
+    inputs: {string}
+
+    --- Read-only. Lists the targets this pass writes. An empty list renders to
+    --- the swapchain, which is how the final composite reaches the screen.
+    outputs: {string}
+
+    --- Read-only. Reports how the pass uses the shared depth attachment.
+    depth: DepthMode
+
+    --- Read-only. Reports the value the depth attachment is cleared to when
+    --- the pass begins, or nil to load what is already there. One is the far
+    --- plane.
+    depthClear: number?
+
+    --- Read-only. Reports true when the pass loads every output rather than
+    --- clearing it, whatever the targets themselves declare.
+    load: boolean
+
+    --- Read-only. Reports the color this pass clears every output to, winning
+    --- over what the targets declare. Nil takes each target's own clear.
+    clear: Clear?
+end
+
+--- What a caller passes to `declarePass` or `insertPassBefore`.
+---
+--- The module copies every field and every list, so the tables a caller builds
+--- are theirs to reuse. `inputs` names the targets the pass samples, in
+--- binding order, and `tecs.gfx.passes.DEPTH` among them reads the shared
+--- depth attachment. `outputs` names the targets it writes, and an omitted or
+--- empty list renders to the swapchain. `depth` defaults to `"none"` and
+--- `depthClear` omitted loads what is already there. `load` makes the pass
+--- load every output rather than clear it, and `clear` overrides every
+--- output's own clear with one color.
+export type PassSpec = {
+    name: string,
+    inputs: {string}?,
+    outputs: {string}?,
+    depth: DepthMode?,
+    depthClear: number?,
+    load: boolean?,
+    clear: Clear?
+}
+
+--- Encodes a format for the wire. The values are a compatibility surface.
+const FORMAT_CODES: {[string]: integer} = {rgba8 = 0, rgba16f = 1, r8 = 2, r16f = 3,}
+
+--- Encodes a depth mode for the wire. The values are a compatibility surface.
+const DEPTH_CODES: {[string]: integer} = {none = 0, testWrite = 1, test = 2,}
+
+--- Takes each output target's own clear.
+const CLEAR_TARGET: integer = 0
+
+--- Loads every output rather than clearing it.
+const CLEAR_LOAD: integer = 1
+
+--- Clears every output to the color the pass declares.
+const CLEAR_OVERRIDE: integer = 2
+
+const wrap = nupp.math.u32.wrap
+const narrow = nupp.math.f32.narrow
+const huge = math.huge
+
+local targetList: {Target} = {}
+local targetByName: {[string]: Target} = {}
+local passList: {Pass} = {}
+local passNames: {[string]: boolean} = {}
+local revisionValue: integer = 0
+local cachedSection: string? = nil
+
+local function finite(value: number): boolean
+    return value == value and value ~= huge and value ~= -huge
+end
+
+--- Copies a clear so a caller's table cannot be rewritten under the graph.
+--- @raises when a channel is not finite
+local function copyClear(value: Clear?, where: string): Clear?
+    if value == nil then
+        return nil
+    end
+    if not finite(value.r) or not finite(value.g) or not finite(value.b) or not finite(value.a) then
+        error("passes: " .. where .. " holds a clear channel that is not finite", 3)
+    end
+
+    return {r = value.r, g = value.g, b = value.b, a = value.a}
+end
+
+--- Copies a name list and rejects anything that is not a string.
+local function copyNames(value: {string}?): {string}
+    local copied: {string} = {}
+    if value == nil then
+        return copied
+    end
+    for index = 1, #value do
+        copied[index] = value[index]
+    end
+
+    return copied
+end
+
+--- Declares a target the backend allocates and owns.
+---
+--- Nothing is allocated here. The backend sizes the target on the first frame
+--- after the declaration reaches it.
+--- @param spec the target to declare, copied rather than retained
+--- @raises when the name is already declared, when it is the reserved depth
+---     name, when the format is unknown, or when the scale is outside zero
+---     exclusive to one inclusive
+export function declareTarget(spec: TargetSpec): nil
+    const name = spec.name
+    if name == DEPTH then
+        error("passes: target name 'depth' is reserved for the shared depth attachment", 2)
+    end
+    if targetByName[name] ~= nil then
+        error("passes: target '" .. name .. "' is already declared", 2)
+    end
+    const format = spec.format or "rgba8"
+    if FORMAT_CODES[format as string] == nil then
+        error("passes: target '" .. name .. "' asks for unknown format '" .. (format as string) .. "'", 2)
+    end
+    const scale = spec.scale or 1.0
+    if not finite(scale) or scale <= 0.0 or scale > 1.0 then
+        error("passes: target '" .. name .. "' needs a scale above zero and at most one", 2)
+    end
+
+    const target = new Target(
+        name = name,
+        format = format,
+        scale = scale,
+        clear = copyClear(spec.clear, "target '" .. name .. "'")
+    )
+    targetList[#targetList + 1] = target
+    targetByName[name] = target
+    revisionValue = revisionValue + 1
+    cachedSection = nil
+end
+
+--- Holds a pass against what the passes before it produce.
+--- @raises when the name is already declared, when an input is undeclared or
+---     no earlier pass writes it, when an output is undeclared, when the depth
+---     mode is unknown, or when a pass using depth writes a scaled target
+local function validate(spec: PassSpec, position: integer, level: integer): nil
+    const name = spec.name
+    if passNames[name] then
+        error("passes: pass '" .. name .. "' is already declared", level)
+    end
+
+    local produced: {[string]: boolean} = {}
+    local producedDepth = false
+    for index = 1, position - 1 do
+        const earlier = passList[index]
+        const outputs = earlier.outputs
+        for slot = 1, #outputs do
+            produced[outputs[slot]] = true
+        end
+        if earlier.depth == "testWrite" then
+            producedDepth = true
+        end
+    end
+
+    const inputs = spec.inputs
+    if inputs ~= nil then
+        for slot = 1, #inputs do
+            const input = inputs[slot]
+            if input == DEPTH then
+                if not producedDepth then
+                    error("passes: pass '" .. name .. "' reads depth before any pass writes it", level)
+                end
+            elseif targetByName[input] == nil then
+                error("passes: pass '" .. name .. "' reads undeclared target '" .. input .. "'", level)
+            elseif not produced[input] then
+                error("passes: pass '" .. name .. "' reads '" .. input .. "' before any pass writes it", level)
+            end
+        end
+    end
+
+    const outputs = spec.outputs
+    const depth = spec.depth or "none"
+    if DEPTH_CODES[depth as string] == nil then
+        error("passes: pass '" .. name .. "' asks for unknown depth mode '" .. (depth as string) .. "'", level)
+    end
+    if outputs ~= nil then
+        for slot = 1, #outputs do
+            const output = outputs[slot]
+            const target = targetByName[output]
+            if target == nil then
+                error("passes: pass '" .. name .. "' writes undeclared target '" .. output .. "'", level)
+            end
+            -- One depth attachment at frame size serves every depth pass, so a
+            -- pass drawing into a scaled target cannot share it.
+            if depth ~= "none" and target.scale ~= 1.0 then
+                error(
+                    "passes: pass '"
+                    .. name
+                    .. "' uses depth but writes '"
+                    .. output
+                    .. "' at a scale below one, and the depth attachment is frame sized",
+                    level
+                )
+            end
+        end
+    end
+end
+
+--- Builds the held pass from a caller's spec.
+local function build(spec: PassSpec): Pass
+    return new Pass(
+        name = spec.name,
+        inputs = copyNames(spec.inputs),
+        outputs = copyNames(spec.outputs),
+        depth = spec.depth or "none",
+        depthClear = spec.depthClear,
+        load = spec.load == true,
+        clear = copyClear(spec.clear, "pass '" .. spec.name .. "'")
+    )
+end
+
+--- Declares a pass that runs after every pass declared so far.
+--- @param spec the pass to declare, copied rather than retained
+--- @raises when the name is already declared, when an input is undeclared or
+---     is not written by an earlier pass, when an output is undeclared, or
+---     when a pass using depth writes a target below frame scale
+export function declarePass(spec: PassSpec): nil
+    validate(spec, #passList + 1, 3)
+    passList[#passList + 1] = build(spec)
+    passNames[spec.name] = true
+    revisionValue = revisionValue + 1
+    cachedSection = nil
+end
+
+--- Declares a pass that runs immediately before an already declared one.
+---
+--- This is how a game places a pass of its own at a named seam without knowing
+--- what else the graph holds.
+--- @param before the name of the declared pass this one runs before
+--- @param spec the pass to declare, copied rather than retained
+--- @raises when no pass carries the `before` name, and for every reason
+---     `declarePass` raises
+export function insertPassBefore(before: string, spec: PassSpec): nil
+    local position: integer = 0
+    for index = 1, #passList do
+        if passList[index].name == before then
+            position = index
+            break
+        end
+    end
+    if position == 0 then
+        error("passes: no pass named '" .. before .. "'", 2)
+    end
+
+    validate(spec, position, 3)
+    table.insert(passList, position, build(spec))
+    passNames[spec.name] = true
+    revisionValue = revisionValue + 1
+    cachedSection = nil
+end
+
+--- Returns the declared targets in declaration order.
+--- @return the graph's own list, which a caller reads and must not write
+export function targets(): {Target}
+    return targetList
+end
+
+--- Returns the declared passes in execution order.
+--- @return the graph's own list, which a caller reads and must not write
+export function passes(): {Pass}
+    return passList
+end
+
+--- Returns the format a target was declared with.
+--- @param name a declared target's name
+--- @return the format, or nil when nothing carries that name
+export function formatOf(name: string): Format?
+    const target = targetByName[name]
+    if target == nil then
+        return nil
+    end
+
+    return target.format
+end
+
+--- Returns how many declarations have been made.
+---
+--- The backend rebuilds its graph when this changes, so it counts every
+--- declaration rather than describing the graph's contents.
+--- @return a value that only ever increases within one process
+export function revision(): integer
+    return revisionValue
+end
+
+--- Encodes the graph for the frame packet.
+---
+--- The encoding is cached and rebuilt only when a declaration changes it, so a
+--- steady graph costs one string for the life of the process.
+---
+--- The section holds a name table, then the targets, then the passes. Names
+--- appear once and every record indexes into the table, because a target name
+--- appears once as a declaration and again in every pass that reads or writes
+--- it.
+---
+--- | Offset | Type  | Field                                                |
+--- | ------ | ----- | ---------------------------------------------------- |
+--- | 0      | `u32` | `nameCount`                                          |
+--- | 4      | `u32` | `nameBytes`, the padded length of the name blob       |
+--- | 8      | bytes | `nameCount` NUL-terminated names, padded to four      |
+--- | ...    | `u32` | `targetCount`                                        |
+--- | ...    | ...   | `targetCount` records of 32 bytes                    |
+--- | ...    | `u32` | `passCount`                                          |
+--- | ...    | ...   | `passCount` variable-length records                  |
+---
+--- A target record is `nameIndex`, `format`, `scale`, `clearPresent`, and four
+--- clear channels. A pass record is `nameIndex`, `depthMode`,
+--- `depthClearPresent`, `depthClear`, `clearMode`, four clear channels,
+--- `inputCount`, `outputCount`, then that many name indices of each. Name
+--- indices count from zero.
+--- @return a host-endian section the caller owns
+export function section(): string
+    const cached = cachedSection
+    if cached ~= nil then
+        return cached
+    end
+
+    local names: {string} = {}
+    local nameIndex: {[string]: integer} = {}
+    local function intern(value: string): integer
+        const existing = nameIndex[value]
+        if existing ~= nil then
+            return existing
+        end
+        const index = #names
+        names[index + 1] = value
+        nameIndex[value] = index
+
+        return index
+    end
+
+    for index = 1, #targetList do
+        intern(targetList[index].name)
+    end
+    for index = 1, #passList do
+        const pass = passList[index]
+        intern(pass.name)
+        for slot = 1, #pass.inputs do
+            intern(pass.inputs[slot])
+        end
+        for slot = 1, #pass.outputs do
+            intern(pass.outputs[slot])
+        end
+    end
+
+    local blobParts: {string} = {}
+    local blobLength: integer = 0
+    for index = 1, #names do
+        const encoded = names[index] .. "\0"
+        blobParts[index] = encoded
+        blobLength = blobLength + #encoded
+    end
+    const padding = (4 - blobLength % 4) % 4
+    if padding > 0 then
+        blobParts[#blobParts + 1] = string.rep("\0", padding)
+        blobLength = blobLength + padding
+    end
+
+    local buffer = nupp.io.newBuffer()
+    local writer = nupp.io.newScalarWriter(buffer)
+    writer:writeUint32(wrap(#names)):writeUint32(wrap(blobLength))
+    writer:writeBytes(table.concat(blobParts))
+
+    writer:writeUint32(wrap(#targetList))
+    for index = 1, #targetList do
+        const target = targetList[index]
+        const clear = target.clear
+        local r, g, b, a = 0.0, 0.0, 0.0, 0.0
+        if clear ~= nil then
+            r, g, b, a = clear.r, clear.g, clear.b, clear.a
+        end
+        writer:writeUint32(wrap(nameIndex[target.name] as integer))
+            :writeUint32(wrap(FORMAT_CODES[target.format as string] as integer))
+            :writeFloat32(narrow(target.scale))
+            :writeUint32(wrap(clear ~= nil and 1 or 0))
+            :writeFloat32(narrow(r))
+            :writeFloat32(narrow(g))
+            :writeFloat32(narrow(b))
+            :writeFloat32(narrow(a))
+    end
+
+    writer:writeUint32(wrap(#passList))
+    for index = 1, #passList do
+        const pass = passList[index]
+        const clear = pass.clear
+        local clearMode = CLEAR_TARGET
+        if pass.load then
+            clearMode = CLEAR_LOAD
+        elseif clear ~= nil then
+            clearMode = CLEAR_OVERRIDE
+        end
+        const depthClear = pass.depthClear
+        local r, g, b, a = 0.0, 0.0, 0.0, 0.0
+        if clear ~= nil then
+            r, g, b, a = clear.r, clear.g, clear.b, clear.a
+        end
+        writer:writeUint32(wrap(nameIndex[pass.name] as integer))
+            :writeUint32(wrap(DEPTH_CODES[pass.depth as string] as integer))
+            :writeUint32(wrap(depthClear ~= nil and 1 or 0))
+            :writeFloat32(narrow(depthClear or 0.0))
+            :writeUint32(wrap(clearMode))
+            :writeFloat32(narrow(r))
+            :writeFloat32(narrow(g))
+            :writeFloat32(narrow(b))
+            :writeFloat32(narrow(a))
+            :writeUint32(wrap(#pass.inputs))
+            :writeUint32(wrap(#pass.outputs))
+        for slot = 1, #pass.inputs do
+            writer:writeUint32(wrap(nameIndex[pass.inputs[slot]] as integer))
+        end
+        for slot = 1, #pass.outputs do
+            writer:writeUint32(wrap(nameIndex[pass.outputs[slot]] as integer))
+        end
+    end
+
+    writer:drop()
+    const encoded = buffer:getString()
+    buffer:drop()
+    cachedSection = encoded
+
+    return encoded
+end
+
+--- Declares the deferred graph the engine draws through.
+---
+--- Every name here is a compatibility surface. A game places a pass beside one
+--- of them by name, so the strings keep their established spelling.
+local function declareBuiltins(): nil
+    -- Base color and coverage. The alpha is passed through the resolve.
+    declareTarget({name = "albedo", format = "rgba8", clear = {r = 0, g = 0, b = 0, a = 0}})
+    -- The alpha is what carries: zero marks a pixel as unlit, so anything
+    -- nothing drew over resolves as the albedo clear rather than picking up
+    -- ambient over a normal it never wrote. The rgb encodes a surface facing
+    -- the viewer, which is what geometry writes.
+    declareTarget({name = "normal", format = "rgba8", clear = {r = 0.5, g = 0.5, b = 1.0, a = 0}})
+    -- Surface properties in the established ORM order: ambient occlusion,
+    -- roughness, and metallic in RGB, with alpha reserved. Fully unoccluded,
+    -- medium roughness, and non-metallic is the neutral material default and
+    -- the attachment clear both.
+    declareTarget({name = "orm", format = "rgba8", clear = {r = 1, g = 0.5, b = 0, a = 1}})
+    -- What each surface gives off, as a color and how much of it. Its own
+    -- attachment rather than a channel borrowed from the two above, because
+    -- both of those are spent and a glow's color is not its albedo.
+    declareTarget({name = "emission", format = "rgba8", clear = {r = 0, g = 0, b = 0, a = 0}})
+    -- The resolved scene before anything is composited over it, in a wider
+    -- format so a bright surface survives the resolve without clipping.
+    declareTarget({name = "lit", format = "rgba16f", clear = {r = 0, g = 0, b = 0, a = 1}})
+    -- No clear: this is what anything running between composite and present
+    -- writes into, and a clear here would be applied by each of those passes
+    -- in turn. Composite covers every pixel and goes first, so there is
+    -- nothing undefined for a later pass to load.
+    declareTarget({name = "scene", format = "rgba8"})
+
+    -- Opaque geometry into the G-buffer. Cleared to the far plane every frame,
+    -- and compared less-or-equal so equal depths still resolve to whatever
+    -- drew last: draw order is deterministic and means something here.
+    declarePass({
+        name = "geometry",
+        outputs = {"albedo", "normal", "orm", "emission"},
+        depth = "testWrite",
+        depthClear = 1.0,
+    })
+    -- Resolves the G-buffer. Declaration order is binding order, and the
+    -- fragment shader numbers its samplers to match.
+    declarePass({name = "lighting", inputs = {"albedo", "normal", "orm", "emission"}, outputs = {"lit"}})
+    declarePass({name = "composite", inputs = {"lit"}, outputs = {"scene"}})
+    -- Blended content over the composited image. Depth is attached without a
+    -- clear, so what it loads is what geometry wrote, and without a write, so
+    -- a blended fragment is rejected by the opaque geometry in front of it and
+    -- rejects nothing itself. That is why blended content has to arrive
+    -- sorted: depth decides it against the G-buffer and cannot decide it
+    -- against itself.
+    declarePass({name = "forward", outputs = {"scene"}, depth = "test", load = true})
+    -- Declared last and executed last, since passes run in declaration order
+    -- and this is the one that writes the swapchain. Anything added to the
+    -- seam is declared above this, not after it.
+    declarePass({name = "present", inputs = {"scene"}, outputs = {}})
+end
+
+--- Forgets every declaration and declares the built-in graph again.
+---
+--- A test uses this to start from the engine's own graph. It raises the
+--- revision, so a backend rebuilds rather than keeping what it held.
+export function reset(): nil
+    targetList = {}
+    targetByName = {}
+    passList = {}
+    passNames = {}
+    cachedSection = nil
+    revisionValue = revisionValue + 1
+    declareBuiltins()
+end
+
+declareBuiltins()

@@ -1,0 +1,262 @@
+local passes = require("tecs.gpu.passes")
+local test = require("nupp.test")
+
+local suite = {}
+
+local record Target
+    name: string
+    format: integer
+    scale: number
+    hasClear: integer
+    r: number
+    g: number
+    b: number
+    a: number
+end
+
+local record Pass
+    name: string
+    depth: integer
+    hasDepthClear: integer
+    depthClear: number
+    clearMode: integer
+    inputs: {string}
+    outputs: {string}
+end
+
+local record Graph
+    targets: {Target}
+    passes: {Pass}
+end
+
+--- Decodes the wire section the backend parses, so the two readers of this
+--- layout are held to the same bytes.
+local function decode(section: string): Graph
+    local reader = nupp.io.newScalarReader(section)
+    local nameCount = reader:readUint32() as integer
+    local nameBytes = reader:readUint32() as integer
+    local blob = reader:readBytes(nameBytes)
+
+    local names: {string} = {}
+    local at = 1
+    for index = 1, nameCount do
+        local stop = blob:find("\0", at, true)
+        test.assert(stop ~= nil, "every name is terminated")
+        names[index] = blob:sub(at, (stop as integer) - 1)
+        at = (stop as integer) + 1
+    end
+
+    local targets: {Target} = {}
+    for index = 1, reader:readUint32() as integer do
+        targets[index] = new Target(
+            name = names[(reader:readUint32() as integer) + 1],
+            format = reader:readUint32() as integer,
+            scale = reader:readFloat32(),
+            hasClear = reader:readUint32() as integer,
+            r = reader:readFloat32(),
+            g = reader:readFloat32(),
+            b = reader:readFloat32(),
+            a = reader:readFloat32()
+        )
+    end
+
+    local decoded: {Pass} = {}
+    for index = 1, reader:readUint32() as integer do
+        local name = names[(reader:readUint32() as integer) + 1]
+        local depth = reader:readUint32() as integer
+        local hasDepthClear = reader:readUint32() as integer
+        local depthClear = reader:readFloat32()
+        local clearMode = reader:readUint32() as integer
+        reader:skip(16)
+        local inputCount = reader:readUint32() as integer
+        local outputCount = reader:readUint32() as integer
+        local inputs: {string} = {}
+        for slot = 1, inputCount do
+            inputs[slot] = names[(reader:readUint32() as integer) + 1]
+        end
+        local outputs: {string} = {}
+        for slot = 1, outputCount do
+            outputs[slot] = names[(reader:readUint32() as integer) + 1]
+        end
+        decoded[index] = new Pass(
+            name = name,
+            depth = depth,
+            hasDepthClear = hasDepthClear,
+            depthClear = depthClear,
+            clearMode = clearMode,
+            inputs = inputs,
+            outputs = outputs
+        )
+    end
+    test.assert(reader:atEnd(), "the section holds nothing the decoder did not read")
+    reader:drop()
+
+    return new Graph(targets = targets, passes = decoded)
+end
+
+local function passNames(): {string}
+    local list = passes.passes()
+    local names: {string} = {}
+    for index = 1, #list do
+        names[index] = list[index].name
+    end
+
+    return names
+end
+
+function suite.declaresTheDeferredGraphInOrder(): nil
+    passes.reset()
+    local targets = passes.targets()
+    local names: {string} = {}
+    for index = 1, #targets do
+        names[index] = targets[index].name
+    end
+    -- Every one of these strings is a compatibility surface: a game names a
+    -- target to place a pass of its own beside it.
+    test.equal(table.concat(names, ","), "albedo,normal,orm,emission,lit,scene")
+    test.equal(table.concat(passNames(), ","), "geometry,lighting,composite,forward,present")
+    test.equal(passes.formatOf("lit"), "rgba16f")
+    test.equal(passes.formatOf("albedo"), "rgba8")
+    test.equal(passes.formatOf("nothing"), nil)
+end
+
+function suite.encodesTheGraphForTheBackend(): nil
+    passes.reset()
+    local graph = decode(passes.section())
+    test.equal(#graph.targets, 6)
+    test.equal(#graph.passes, 5)
+
+    local scene = graph.targets[6]
+    test.equal(scene.name, "scene")
+    test.equal(scene.scale, 1)
+    -- `scene` declares no clear, because composite covers every pixel of it and
+    -- every later pass loads what composite left.
+    test.equal(scene.hasClear, 0)
+
+    local normal = graph.targets[2]
+    test.equal(normal.hasClear, 1)
+    test.equal(normal.r, 0.5)
+    test.equal(normal.a, 0)
+
+    local geometry = graph.passes[1]
+    test.equal(geometry.name, "geometry")
+    test.equal(geometry.depth, 1)
+    test.equal(geometry.hasDepthClear, 1)
+    test.equal(geometry.depthClear, 1)
+    test.equal(#geometry.inputs, 0)
+    test.equal(table.concat(geometry.outputs, ","), "albedo,normal,orm,emission")
+
+    local lighting = graph.passes[2]
+    test.equal(table.concat(lighting.inputs, ","), "albedo,normal,orm,emission")
+
+    local forward = graph.passes[4]
+    test.equal(forward.depth, 2)
+    test.equal(forward.hasDepthClear, 0)
+    -- The forward pass loads what composite wrote rather than clearing it.
+    test.equal(forward.clearMode, 1)
+
+    local present = graph.passes[5]
+    test.equal(#present.outputs, 0, "an empty output list is the swapchain")
+    test.equal(table.concat(present.inputs, ","), "scene")
+end
+
+function suite.cachesTheSectionUntilADeclarationChangesIt(): nil
+    passes.reset()
+    local first = passes.section()
+    test.equal(passes.section(), first, "a steady graph encodes once")
+
+    local before = passes.revision()
+    passes.declareTarget({name = "passestest.overlay"})
+    test.assert(passes.revision() > before, "a declaration raises the revision")
+    local second = passes.section()
+    test.notEqual(second, first)
+    test.equal(#decode(second).targets, 7)
+    passes.reset()
+end
+
+function suite.insertsAPassAtANamedSeam(): nil
+    passes.reset()
+    passes.declareTarget({name = "passestest.overlay", format = "rgba8"})
+    passes.insertPassBefore("present", {
+        name = "passestest.overlay",
+        inputs = {"scene"},
+        outputs = {"passestest.overlay"},
+    })
+    test.equal(
+        table.concat(passNames(), ","),
+        "geometry,lighting,composite,forward,passestest.overlay,present"
+    )
+
+    -- A pass and a target may share a name, which the deferred graph already
+    -- relies on, so the insertion above is not a collision.
+    local graph = decode(passes.section())
+    test.equal(graph.passes[5].name, "passestest.overlay")
+    test.equal(table.concat(graph.passes[5].outputs, ","), "passestest.overlay")
+    passes.reset()
+end
+
+function suite.refusesAGraphThatCannotRun(): nil
+    passes.reset()
+    test.raises(function(): nil
+        passes.declareTarget({name = "albedo"})
+    end, "already declared")
+    test.raises(function(): nil
+        passes.declareTarget({name = "depth"})
+    end, "reserved for the shared depth attachment")
+    test.raises(function(): nil
+        passes.declareTarget({name = "passestest.bad", scale = 0})
+    end, "scale above zero and at most one")
+    test.raises(function(): nil
+        passes.declarePass({name = "geometry"})
+    end, "already declared")
+    test.raises(function(): nil
+        passes.declarePass({name = "passestest.reader", inputs = {"passestest.absent"}})
+    end, "reads undeclared target")
+    test.raises(function(): nil
+        passes.declarePass({name = "passestest.writer", outputs = {"passestest.absent"}})
+    end, "writes undeclared target")
+    test.raises(function(): nil
+        passes.insertPassBefore("passestest.nowhere", {name = "passestest.early"})
+    end, "no pass named")
+
+    -- Reading a target only a later pass writes is the ordering mistake the
+    -- graph exists to refuse, and inserting the reader before its producer is
+    -- the same mistake with the declarations in the other order.
+    test.raises(function(): nil
+        passes.insertPassBefore("geometry", {name = "passestest.tooEarly", inputs = {"albedo"}})
+    end, "before any pass writes it")
+    passes.reset()
+end
+
+function suite.refusesDepthOnAScaledTarget(): nil
+    passes.reset()
+    passes.declareTarget({name = "passestest.half", scale = 0.5})
+    -- One depth attachment at frame size serves every depth pass, so a pass
+    -- drawing into a scaled target cannot share it.
+    test.raises(function(): nil
+        passes.declarePass({name = "passestest.small", outputs = {"passestest.half"}, depth = "testWrite"})
+    end, "depth attachment is frame sized")
+    passes.reset()
+end
+
+function suite.readsTheSharedDepthAttachmentByName(): nil
+    passes.reset()
+    passes.declareTarget({name = "passestest.ao", format = "r8", scale = 0.5})
+    passes.insertPassBefore("lighting", {
+        name = "passestest.ao",
+        inputs = {"normal", passes.DEPTH},
+        outputs = {"passestest.ao"},
+    })
+    local graph = decode(passes.section())
+    test.equal(table.concat(graph.passes[2].inputs, ","), "normal,depth")
+    passes.reset()
+
+    -- Nothing writes depth before the first pass, so reading it there is the
+    -- same refusal as reading a target nothing has written.
+    test.raises(function(): nil
+        passes.insertPassBefore("geometry", {name = "passestest.tooEarly", inputs = {passes.DEPTH}})
+    end, "reads depth before any pass writes it")
+    passes.reset()
+end
+
+return suite

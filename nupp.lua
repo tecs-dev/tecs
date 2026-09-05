@@ -55,6 +55,8 @@ return {
                     "tecs.gfx",
                     "tecs.gfx.images",
                     "tecs.gfx.layers",
+                    "tecs.gpu.materials",
+                    "tecs.gpu.passes",
                     "tecs.host",
                     "tecs.input",
                     "tecs.mcp",
