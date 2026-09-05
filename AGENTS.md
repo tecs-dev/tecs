@@ -73,7 +73,45 @@ cargo xtask nupp run flatcolor -- --frames 120
 cargo xtask nupp docs         # Render the Nupp reference into out/nupp-docs
 cargo xtask nupp docs-check   # Render it into a scratch directory and gate it
 cargo xtask nupp verify       # Everything above, plus the Rust host
+cargo xtask nupp presets      # List the Nupp release matrix
+cargo xtask nupp package --preset macos-arm64
+cargo xtask nupp check-package                 # Gate out/nupp-package
+cargo xtask nupp test-package --preset macos-arm64
 ```
+
+`cargo xtask nupp package` installs a relocatable release into
+`out/nupp-package`, and it is the Nupp counterpart of `cargo xtask package`
+rather than a variant of it: the two write different prefixes and neither
+overwrites the other. A release carries `bin/tecs-host`, the prebuilt
+`bin/shaders.tecspack` and its manifest, `lib/` holding the Nupp runtime
+library beside `tecsaudio`, `tecsgamepad` and `tecs_physics`, the compiled
+components under `share/tecs/components`, and the notices, licenses and Cargo
+inventory under `share/tecs`. A Windows package puts every library in `bin/`,
+where that loader looks.
+
+`cargo xtask nupp check-package` is the gate on the difference between a
+development preset and a release one, the way `cargo xtask check-package` is
+on the Teal path. A release records a loader-relative run path
+(`@executable_path/../lib`, or `$ORIGIN/../lib`) and ships compiled shaders; a
+development preset links the staged SDK where it sits and ships none, and the
+check reports it rather than passing it. `cargo xtask nupp test-package`
+installs a clean release, checks it, copies it somewhere unrelated, and runs
+the native smoke component and the showcase from there with every Tecs
+environment override removed, which is the only way to find out whether an
+install is relocatable rather than merely tidy.
+
+Packaging is native only. The Nupp toolchain stages an embedding library for
+the machine it runs on, so a Windows release is built on Windows.
+
+Two things a packager learns the hard way. The three service libraries resolve
+in a release through the *executable's* run path, not through the ancestor
+walk in `tecs.internal.nativelibrary`: that walk starts at the module's source
+directory, which a compiled component no longer has, so what actually finds
+them is `ffi.load` by bare name reaching the loader's search of `lib/`. And a
+guarded plugin failure is invisible to `--headless`, because `run_headless` in
+the Rust host never calls `tecs.host.crashed`, so the smoke component prints a
+line on success and the packaging test matches that line rather than trusting
+the exit status.
 
 `cargo xtask nupp run` builds a component target and runs it through the Rust
 `winit` host. That host is selectable and is not the default: the Teal

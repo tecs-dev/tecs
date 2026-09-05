@@ -166,6 +166,73 @@ jobs:
             - working-directory: tecs
               run: cargo xtask nupp run lighting -- --headless --frames 5
 
+    # The release half of the Nupp path. It is separate from `nupp-host`
+    # because it proves a different thing: that half builds and runs out of a
+    # checkout, and this half builds an install that carries no path back to
+    # the checkout and still runs after it moves.
+    #
+    # Both supported Unix platforms are covered, because the run path a release
+    # records is spelled differently on each and only the platform can say
+    # whether its loader honours it for a library opened by name at run time.
+    # Windows is not here: no runner in this workflow stages a Nupp SDK for
+    # MSVC yet, so `windows-x64` is configured and unproven.
+    nupp-package:
+        needs: nupp
+        strategy:
+            matrix:
+                include:
+                    - os: macos-15
+                      preset: macos-arm64
+                    - os: ubuntu-latest
+                      preset: linux-x64
+        runs-on: ${{ matrix.os }}
+        env:
+            NUPP_REF: f1cce05523f5cee9b70951d1760f0e08ebfc8ff6
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  path: tecs
+            - uses: actions/checkout@v4
+              with:
+                  repository: nupp-lang/nupp
+                  ref: ${{ env.NUPP_REF }}
+                  path: nupp
+            # `winit`, `wgpu`, `cpal` and `gilrs` each want a development
+            # package on Linux, and the host links all four. macOS reaches the
+            # same services through frameworks that are already installed.
+            - if: runner.os == 'Linux'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y \
+                    libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
+                    libx11-dev libxcursor-dev libxi-dev libxrandr-dev
+            - name: Build the Nupp compiler
+              working-directory: nupp
+              run: |
+                  ./bin/nupp build --target bootstrapCompiler
+                  echo "$PWD/bin" >> "$GITHUB_PATH"
+            - name: Stage the Nupp embedding SDK
+              working-directory: tecs
+              run: echo "NUPP_SDK=$(../nupp/scripts/toolchain host-library base,native-files,native-net | tail -1)" >> "$GITHUB_ENV"
+            # One command: it installs a clean release, holds it to
+            # `check-package`, copies it somewhere unrelated, and runs the
+            # native smoke component and the showcase from there with every
+            # Tecs override removed from the environment.
+            - working-directory: tecs
+              run: cargo xtask nupp test-package --preset ${{ matrix.preset }}
+            # The development preset exists to be told apart from a release.
+            # Packaging one and checking it is what keeps that distinction
+            # working, since a release passing the gate proves nothing if the
+            # gate passes everything. One platform is enough: what it exercises
+            # is the preset kind, not the loader, and it pays for a whole debug
+            # build of the graphics stack.
+            - if: runner.os == 'macOS'
+              working-directory: tecs
+              run: cargo xtask nupp package --preset ${{ matrix.preset }}-dev
+            - if: runner.os == 'macOS'
+              working-directory: tecs
+              run: cargo xtask nupp check-package
+
     docs:
         runs-on: macos-15
         permissions:
