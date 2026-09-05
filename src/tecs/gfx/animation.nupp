@@ -1,0 +1,578 @@
+module tecs.gfx.animation
+
+--[[
+Fixed-step sprite-sheet playback.
+
+A [`Sheet`](tealdoc:tecs.gfx.sheet.Sheet) divides one image into frames and
+names frame spans with tags. An `Animation` selects a sheet and a tag and
+carries the speed, the loop flag, and where the cycle has got to. Playback
+advances on the fixed clock and writes the frame it resolves into the entity's
+[`Sprite`](tealdoc:tecs.gfx.Sprite), so two machines fed the same fixed steps
+select the same frames.
+
+```nupp
+const animation = tecs.gfx.animation
+const sheet = tecs.gfx.sheet
+
+const hero = sheet.grid({
+    name = "hero",
+    imageWidth = 256,
+    imageHeight = 32,
+    frameWidth = 32,
+    frameHeight = 32,
+    tags = {idle = {from = 1, to = 4}, run = {from = 5, to = 8}},
+})
+
+hero:bind(tecs.gfx.images.id("sprites/hero"))
+animation.plugin(world)
+
+world:spawn(
+    tecs.ecs.Transform2D(64, 64, 0, 1, 0, 32, 32),
+    tecs.gfx.Tint(1, 1, 1, 1),
+    hero:sprite(),
+    animation.of(hero, "run"),
+    tecs.gfx.Renderable2D
+)
+```
+
+An entity needs a [`Sprite`](tealdoc:tecs.gfx.Sprite) as well, because that is
+what playback writes and what extraction reads. An `Animation` on its own draws
+nothing.
+
+# Events
+
+`Completed` fires once when a one-shot passes its last frame, and `Looped` fires
+when a looping tag wraps. Both reach only entities carrying `AnimationEvents`,
+so a game watches a handful of animations without walking the rest of an
+animated crowd. `Completed` also stops playback and holds the last frame,
+whether or not anything is listening.
+
+# Reloads
+
+Re-exporting a sheet under the same name and folding it in with
+`tecs.gfx.sheet.replace` keeps every entity's sheet id, tag, and phase, so
+playback carries on and shows the new frames from its next step.
+]]
+
+local ecs = require("tecs.ecs")
+local events = require("tecs.events")
+local archetype = require("tecs.internal.archetype")
+local components = require("tecs.internal.components")
+local rendercomponents = require("tecs.internal.rendercomponents")
+local sheet = require("tecs.gfx.sheet")
+
+const SpriteComponent = rendercomponents.SpriteComponent
+
+--- The rate an animation runs at when nothing says otherwise, which is the
+--- timing the sheet's frames were authored with.
+export const DEFAULT_SPEED: number = 1.0
+
+--- What `Animation.crossed` holds when the last step ended a cycle that
+--- repeats.
+const CROSSED_LOOPED: integer = 1
+
+--- What `Animation.crossed` holds when the last step ended a cycle that does
+--- not.
+const CROSSED_COMPLETED: integer = 2
+
+--- Stores playback state for one entity.
+---
+--- `time` is where the cycle has got to, in seconds, and stays inside the
+--- cycle, so it neither grows without bound nor loses precision to its own age.
+--- The cycle's duration is the sum of the durations of the frames the tag
+--- visits, which `tecs.gfx.sheet.Sheet.cycle` reports.
+export record Animation
+    --- Caller-writable. Selects a sheet by its registration index. Zero plays
+    --- nothing.
+    sheet: integer
+
+    --- Caller-writable. Selects a tag by its `Sheet.tagId` index. Zero plays
+    --- the whole sheet in order.
+    tag: integer
+
+    --- Caller-writable. Multiplies the timing the sheet carries. One is the
+    --- timing as authored and two is twice as fast. Zero or less holds the
+    --- current frame and stops time advancing, which is a pause that leaves
+    --- `playing` alone.
+    ---
+    --- How long each frame is held is the sheet's answer rather than an
+    --- entity's, because that is where an artist sets it: a hold frame is a
+    --- frame with a long duration, which no single rate can express.
+    speed: number
+
+    --- Caller-writable. Carries the seconds into the cycle. Writing it seeks,
+    --- and the next fixed step resolves the frame from wherever it now points.
+    time: number
+
+    --- Engine-owned. Reports the sheet frame the entity's `Sprite` was last
+    --- written from, and zero before playback has written one. Ordinary game
+    --- code should call `frameOf`, which answers for an entity carrying no
+    --- `Animation` too. Writing zero asks playback to rewrite the `Sprite`,
+    --- which is what `play`, `restart`, `of`, and a restored snapshot do.
+    frame: integer
+
+    --- Caller-writable. Controls whether the tag restarts after its last frame.
+    loop: boolean
+
+    --- Caller-writable. Controls whether time advances.
+    playing: boolean
+
+    --- Engine-owned. Records whether the last fixed step ended a cycle, so the
+    --- reporting system can emit without advancing anything a second time.
+    --- Ordinary game code should observe `Completed` and `Looped` instead. The
+    --- reporting system clears it, and a snapshot drops it.
+    crossed: integer
+end
+
+--- The process-wide `Animation` component definition.
+export const AnimationComponent: ecs.TableComponent<Animation> = ecs.newComponent({
+    -- This persisted component name is a compatibility surface.
+    name = "Animation",
+    construct = function(
+        sheetId: integer?,
+        tag: integer?,
+        speed: number?,
+        time: number?,
+        frame: integer?,
+        loop: boolean?,
+        playing: boolean?
+    ): Animation
+        return new Animation(
+            sheet = sheetId ?? 0,
+            tag = tag ?? 0,
+            speed = speed ?? DEFAULT_SPEED,
+            time = time ?? 0.0,
+            frame = frame ?? 0,
+            loop = loop ?? true,
+            playing = playing ?? true,
+            crossed = 0
+        )
+    end,
+    default = function(): Animation
+        return new Animation(
+            sheet = 0,
+            tag = 0,
+            speed = DEFAULT_SPEED,
+            time = 0.0,
+            frame = 0,
+            loop = true,
+            playing = true,
+            crossed = 0
+        )
+    end,
+    -- A sheet id and a tag id are this process's answers, decided by the order
+    -- sheets were built in. What crosses a save is the pair of names, resolved
+    -- again on the way back in; a tag the sheet has since lost resolves to zero
+    -- and the sheet reports it. The frame is deliberately dropped: zero makes
+    -- the first step rewrite the Sprite, so a restored entity does not depend
+    -- on the region its Sprite was saved holding.
+    save = function(value: Animation): any
+        -- These saved keys are a compatibility surface: a file written by an
+        -- earlier build names them, so they do not move when their module does.
+        const source = sheet.byId(value.sheet)
+
+        return {
+            sheet = source ~= nil and source.name or nil,
+            tag = source ~= nil and source:tagName(value.tag) or nil,
+            speed = value.speed,
+            time = value.time,
+            loop = value.loop,
+            playing = value.playing,
+        }
+    end,
+    load = function(value: any): Animation
+        const stored = value as {[string]: any}
+        const name = stored.sheet as string?
+        local id: integer = 0
+        local tag: integer = 0
+        if name ~= nil then
+            const source = sheet.byName(name)
+            if source ~= nil then
+                id = source.id
+                tag = source:tagId(stored.tag as string?)
+            end
+        end
+
+        return new Animation(
+            sheet = id,
+            tag = tag,
+            speed = (stored.speed as number?) ?? DEFAULT_SPEED,
+            time = (stored.time as number?) ?? 0.0,
+            frame = 0,
+            loop = (stored.loop as boolean?) ?? true,
+            playing = (stored.playing as boolean?) ?? true,
+            crossed = 0
+        )
+    end,
+})
+
+--- Requests `Completed` and `Looped` events for one entity.
+---
+--- The reporting query visits only entities carrying this tag, so a game asks
+--- for events on a handful of entities without walking the rest of its animated
+--- crowd. Adding the tag costs one archetype move and nothing per step.
+-- This persisted component name is a compatibility surface.
+export const AnimationEvents: ecs.Component = ecs.newTagComponent({name = "AnimationEvents"})
+
+--- Reports one entity's animation reaching the end of its cycle.
+export record CycleEnd
+    --- Read-only. Identifies the entity whose animation ended a cycle.
+    entity: integer
+
+    --- Read-only. Reports the sheet that was playing.
+    sheet: sheet.Sheet
+
+    --- Read-only. Reports the tag that ended, or the empty string for a whole
+    --- sheet.
+    tag: string
+end
+
+local function cycleEnd(entity: integer, source: sheet.Sheet, tag: string): CycleEnd
+    return new CycleEnd(entity = entity, sheet = source, tag = tag)
+end
+
+--- Fires when a non-looping tag runs past its last frame.
+---
+--- Playback stops and holds that frame, so this fires once per playthrough and
+--- never again until something restarts it.
+-- This event name is a compatibility surface.
+export const Completed: events.Event<CycleEnd> = events.newEvent({name = "Completed", construct = cycleEnd})
+
+--- Fires when a looping tag passes its last frame and restarts.
+---
+--- Once per fixed step at most rather than once per cycle: a step long enough
+--- to cover several cycles wraps the time once and reports one loop, so
+--- counting these is not a way to count playthroughs.
+-- This event name is a compatibility surface.
+export const Looped: events.Event<CycleEnd> = events.newEvent({name = "Looped", construct = cycleEnd})
+
+--- Configures how an animation plays.
+---
+--- `speed` defaults to one, and `loop` and `playing` both default to true.
+export type PlayOptions = {
+    speed: number?,
+    loop: boolean?,
+    playing: boolean?
+}
+
+-------------------------------------------------------------------------------
+-- Authoring
+-------------------------------------------------------------------------------
+
+local function tagIdFor(source: sheet.Sheet, tag: string?, level: integer): integer
+    if tag == nil then
+        return 0
+    end
+    if not source:hasTag(tag) then
+        error("gfx.animation: sheet '" .. source.name .. "' has no tag '" .. tag .. "'", level)
+    end
+
+    return source:tagId(tag)
+end
+
+--- Creates an animation that plays a named sheet tag, ready to spawn.
+---
+--- Omit the tag to play the whole sheet in order.
+--- @param source the sheet to play
+--- @param tag a tag the sheet names, or nil for the whole sheet
+--- @param options the speed, loop, and playing overrides, or nil for the sheet's
+---     own timing, looping, and playing
+--- @return a component value ready for `world:spawn` or `world:set`, not an
+---     entity
+--- @raises when the sheet does not carry the named tag, because an author naming
+---     a tag here has one in mind and the sheet is already in hand to check
+export function of(source: sheet.Sheet, tag: string?, options: PlayOptions?): components.TableInstance<Animation>
+    const id = tagIdFor(source, tag, 3)
+
+    return AnimationComponent(
+        source.id,
+        id,
+        options ~= nil and options.speed or DEFAULT_SPEED,
+        0.0,
+        0,
+        options == nil or options.loop ~= false,
+        options == nil or options.playing ~= false
+    )
+end
+
+--- Points a live entity at a tag and restarts it there.
+---
+--- Restarting is the point: the time and the frame both reset, so the next
+--- fixed step writes the tag's first frame whatever the entity was showing. An
+--- entity carrying no `Animation` is given one.
+--- @param world the world the entity lives in
+--- @param entity a live entity carrying a [`Sprite`](tealdoc:tecs.gfx.Sprite)
+--- @param source the sheet to play
+--- @param tag a tag the sheet names, or nil for the whole sheet
+--- @param options the speed, loop, and playing overrides, or nil for the
+---     defaults
+--- @raises when the sheet does not carry the named tag
+export function play(
+    exclusive world: ecs.World,
+    entity: integer,
+    source: sheet.Sheet,
+    tag: string?,
+    options: PlayOptions?
+): nil
+    const built = of(source, tag, options)
+    if not world:has(entity, AnimationComponent) then
+        world:set(entity, built)
+        return
+    end
+    const current = assert(world:getMut(entity, AnimationComponent))
+    const value = built.value
+    current.sheet = value.sheet
+    current.tag = value.tag
+    current.speed = value.speed
+    current.time = 0.0
+    current.frame = 0
+    current.loop = value.loop
+    current.playing = value.playing
+    current.crossed = 0
+end
+
+--- Plays an entity's animation again from the start of its tag.
+---
+--- The sheet, tag, speed, and loop flag are left alone; what resets is where in
+--- the cycle playback has got to and whether it is running. For replaying a
+--- one-shot that has finished, and for rewinding one that has not.
+--- @param world the world the entity lives in
+--- @param entity a live entity
+--- @return whether there was an animation to restart; false leaves the entity
+---     untouched, since nothing there says what it would play
+export function restart(exclusive world: ecs.World, entity: integer): boolean
+    const current = world:getMut(entity, AnimationComponent)
+    if current == nil then
+        return false
+    end
+    current.time = 0.0
+    -- Zero is no frame written yet, so the next step writes the tag's first one
+    -- whatever the entity was showing.
+    current.frame = 0
+    current.playing = true
+    current.crossed = 0
+
+    return true
+end
+
+-------------------------------------------------------------------------------
+-- Playback
+-------------------------------------------------------------------------------
+
+--- Writes one frame's region into a sprite.
+local function showFrame(target: rendercomponents.Sprite, source: sheet.Sheet, frame: integer): nil
+    const u0, v0, u1, v1 = source:uv(frame)
+    target.image = source:boundImage()
+    target.u0 = u0
+    target.v0 = v0
+    target.u1 = u1
+    target.v1 = v1
+end
+
+--- Advances every playing animation by one fixed step and shows its frame.
+---
+--- The `Sprite` column is marked dirty once for the archetype and only when a
+--- frame actually changed, because a crowd holding one frame writes nothing and
+--- a dirty-gated consumer should not have to find that out per row.
+local function advance(query: ecs.Query, dt: number): nil
+    for candidate, count in query:iter() do
+        const active = candidate as archetype.Archetype
+        const animations: {Animation} = assert(active:get(AnimationComponent))
+        const sprites: {rendercomponents.Sprite} = assert(active:get(SpriteComponent))
+        local movedAnimation = false
+        local movedSprite = false
+        -- A crowd playing one cycle shares its sheet, and neighbouring rows
+        -- tend to as well.
+        local cachedId: integer = 0
+        local cached: sheet.Sheet? = nil
+
+        for row = 1, count as integer do
+            const instance = animations[row]
+            const sheetId = instance.sheet
+            if sheetId ~= cachedId then
+                cached = sheet.byId(sheetId)
+                cachedId = sheetId
+            end
+            const source = cached
+            if source ~= nil then
+                const cycle = source:cycle(instance.tag)
+                if instance.playing and instance.speed > 0.0 and cycle > 0.0 then
+                    if not movedAnimation then
+                        active:markComponentDirty(AnimationComponent)
+                        movedAnimation = true
+                    end
+                    local time = instance.time + dt * instance.speed
+                    if time >= cycle then
+                        if instance.loop then
+                            time = time % cycle
+                            instance.crossed = CROSSED_LOOPED
+                        else
+                            -- Held at the cycle's end, which is the last frame,
+                            -- rather than wrapped: a one-shot that finished
+                            -- shows what it finished on until something
+                            -- restarts it.
+                            time = cycle
+                            instance.playing = false
+                            instance.crossed = CROSSED_COMPLETED
+                        end
+                    end
+                    instance.time = time
+                end
+
+                const frame = source:frameAt(instance.tag, instance.time)
+                if frame ~= instance.frame then
+                    if not movedAnimation then
+                        active:markComponentDirty(AnimationComponent)
+                        movedAnimation = true
+                    end
+                    if not movedSprite then
+                        active:markComponentDirty(SpriteComponent)
+                        movedSprite = true
+                    end
+                    instance.frame = frame
+                    showFrame(sprites[row], source, frame)
+                end
+            end
+        end
+    end
+end
+
+--- Emits `Completed` and `Looped` for the entities that asked for them.
+---
+--- Reads what the advance above already decided rather than recomputing it, so
+--- an entity crossing its cycle costs one field per step and an entity that did
+--- not costs a comparison.
+---
+--- The one write is clearing that record, which is declared once per archetype
+--- rather than per row because a crowd that crossed nothing writes nothing.
+--- Stopping a finished one-shot is the advance's, whether or not anything
+--- observes, so `Completed` reports a stop that has already happened rather
+--- than causing one.
+local function report(exclusive world: ecs.World, query: ecs.Query): nil
+    for candidate, count in query:iter() do
+        const active = candidate as archetype.Archetype
+        const animations: {Animation} = assert(active:get(AnimationComponent))
+        const entities = active.entities
+        local moved = false
+
+        for row = 1, count as integer do
+            const instance = animations[row]
+            const crossed = instance.crossed
+            if crossed ~= 0 then
+                if not moved then
+                    active:markComponentDirty(AnimationComponent)
+                    moved = true
+                end
+                instance.crossed = 0
+                const source = sheet.byId(instance.sheet)
+                if source ~= nil then
+                    const name = source:tagName(instance.tag)
+                    if crossed == CROSSED_COMPLETED then
+                        if world:hasObservers(0, Completed) then
+                            world:emit(0, Completed(entities[row], source, name))
+                        end
+                    elseif world:hasObservers(0, Looped) then
+                        world:emit(0, Looped(entities[row], source, name))
+                    end
+                end
+            end
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Asking what an entity is showing
+-------------------------------------------------------------------------------
+
+--- Returns an animation's position in its tag cycle.
+--- @param world the world the entity lives in
+--- @param entity a live entity
+--- @return the seconds into the cycle, which is zero for an entity carrying no
+---     `Animation`
+export function timeOf(borrows world: ecs.World, entity: integer): number
+    const instance = world:get(entity, AnimationComponent)
+    if instance == nil then
+        return 0.0
+    end
+
+    return instance.time
+end
+
+--- Returns the sheet frame an entity's animation shows.
+---
+--- The same frame the entity's [`Sprite`](tealdoc:tecs.gfx.Sprite) is sampling,
+--- because playback writes both together. What a hitbox on frame five, a
+--- footstep on frame three, or a muzzle on an animated hand asks for.
+--- @param world the world the entity lives in
+--- @param entity a live entity
+--- @return a frame index into the whole sheet, counting from one, or zero for an
+---     entity with nothing to play; an entity spawned this frame answers the
+---     frame its phase names rather than waiting for the next fixed step
+export function frameOf(borrows world: ecs.World, entity: integer): integer
+    const instance = world:get(entity, AnimationComponent)
+    if instance == nil then
+        return 0
+    end
+    if instance.frame ~= 0 then
+        return instance.frame
+    end
+    const source = sheet.byId(instance.sheet)
+    if source == nil then
+        return 0
+    end
+
+    return source:frameAt(instance.tag, instance.time)
+end
+
+-------------------------------------------------------------------------------
+-- Plugin
+-------------------------------------------------------------------------------
+
+local installed: {[ecs.World]: boolean} = setmetatable({}, {__mode = "k"}) as {[ecs.World]: boolean}
+
+--- Adds the systems that drive playback.
+---
+--- Installing twice on the same world does nothing, so a world that animates
+--- may install this itself rather than relying on the application having done
+--- it.
+---
+--- Both systems run in `FixedPostUpdate`, which is what makes playback
+--- deterministic: a frame runs the fixed phases zero times or several, and an
+--- animation advances once per step either way, so two machines fed the same
+--- steps show the same frames. `tecs.EncodeAnimation` advances every playing
+--- animation and writes the frame it resolves into the entity's
+--- [`Sprite`](tealdoc:tecs.gfx.Sprite). `tecs.ReportAnimation` then emits
+--- `Completed` and `Looped` for the entities carrying `AnimationEvents`.
+--- @param world the world receiving the playback systems
+export function plugin(exclusive world: ecs.World): nil
+    if installed[world] then
+        return
+    end
+    installed[world] = true
+
+    -- A paused entity holds its frame, so it is left out rather than tested per
+    -- row: moving in and out of `Paused` is an archetype move, which is what
+    -- decides the query.
+    const playing = world:newQuery({include = {AnimationComponent, SpriteComponent}, exclude = {ecs.Paused},})
+    const subscribed = world:newQuery({include = {AnimationComponent, SpriteComponent, AnimationEvents}})
+
+    -- These two system names are a compatibility surface: the debug server
+    -- reports them and an agent selects on them.
+    world:addSystem({
+        name = "tecs.EncodeAnimation",
+        phase = ecs.phases.FixedPostUpdate,
+        run = function(dt: number, exclusive _running: ecs.World): nil
+            advance(playing, dt)
+        end,
+    })
+    -- After the advance, and declared here rather than left to a game's
+    -- registration order, because what says an entity crossed its cycle is what
+    -- the advance just wrote.
+    world:addSystem({
+        name = "tecs.ReportAnimation",
+        phase = ecs.phases.FixedPostUpdate,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            report(running, subscribed)
+        end,
+    })
+end
