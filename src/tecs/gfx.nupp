@@ -22,7 +22,10 @@ world:spawn(
 )
 ```
 
-`tecs.gfx.layers` decides the order and placement of those entities,
+`tecs.gfx.lighting` owns the deferred lighting resolve, the two shadow
+mechanisms, and optional bloom, and it is where `PointLight2D`, `Occluder2D`,
+and `DropShadow2D` are documented. `tecs.gfx.layers` decides the order and
+placement of those entities,
 `tecs.gfx.images` owns image identity and residency, `tecs.gfx.clips` owns the
 target-pixel regions `Clip` selects, `tecs.gfx.sheet` and `tecs.gfx.animation`
 cut an image into frames and play them, `tecs.gfx.fonts` owns font identity and
@@ -34,6 +37,7 @@ and render targets a frame is drawn through.
 
 local animation = require("tecs.gfx.animation")
 local clips = require("tecs.gfx.clips")
+local lighting = require("tecs.gfx.lighting")
 local materials = require("tecs.gpu.materials")
 local rendercomponents = require("tecs.internal.rendercomponents")
 local fonts = require("tecs.gfx.fonts")
@@ -103,6 +107,25 @@ export const newText = text.newText
 
 --- Marks an entity as one glyph `tecs.gfx.text` placed for a `Text`.
 export const TextGlyph = text.TextGlyph
+
+--- A light the deferred resolve accumulates.
+export type PointLight2D = lighting.PointLight2D
+
+--- Constructs a light at height sixty-four, reaching two hundred and fifty-six
+--- world units, in white at full strength.
+export const PointLight2D = lighting.PointLight2DComponent
+
+--- A silhouette that blocks light, stored on a renderable entity.
+export type Occluder2D = lighting.Occluder2D
+
+--- Constructs an occluder at full height.
+export const Occluder2D = lighting.Occluder2DComponent
+
+--- A stretched ground shadow, stored on a renderable entity.
+export type DropShadow2D = lighting.DropShadow2D
+
+--- Constructs a drop-shadow caster at full height.
+export const DropShadow2D = lighting.DropShadow2DComponent
 
 --- A material selection stored on a renderable entity.
 export type Material = materials.Material

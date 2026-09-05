@@ -65,6 +65,7 @@ return {
                     "tecs.gfx.fonts",
                     "tecs.gfx.images",
                     "tecs.gfx.layers",
+                    "tecs.gfx.lighting",
                     "tecs.gfx.sheet",
                     "tecs.gfx.text",
                     "tecs.gfx.truetype",

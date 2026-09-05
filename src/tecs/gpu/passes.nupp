@@ -38,6 +38,14 @@ because a pass may be declared for it later.
 One depth attachment at frame size is shared by every pass that asks for depth.
 `depth` is reserved as an input name and reads that attachment; it is not a
 declarable target.
+
+The built-in graph declares the shadow and bloom passes whether or not
+`tecs.gfx.lighting` has them switched on, and the frame packet's own flags are
+what decide each frame. Declaring them conditionally would mean tearing the
+graph down and rebuilding it when a game changes its tuning, which would take
+every pass a game inserted with it; a backend skipping a pass whose flag is
+clear costs nothing and keeps every name a game placed something beside valid
+for the life of the process.
 ]]
 
 --- Names the shared depth attachment, which is not a declarable target.
@@ -562,6 +570,30 @@ local function declareBuiltins(): nil
     -- in turn. Composite covers every pixel and goes first, so there is
     -- nothing undefined for a later pass to load.
     declareTarget({name = "scene", format = "rgba8"})
+    -- One mask for every light, rather than a pass per light. Red carries how
+    -- tall the occluder covering a pixel is and green marks that an occluder
+    -- really covers it, so a march can tell a silhouette from the halo the blur
+    -- spreads around one. Both clear to zero, which reads as no occluder
+    -- anywhere.
+    --
+    -- Half the frame on both axes because a nine-tap separable blur runs over
+    -- it immediately: a full-resolution mask would spend four times the
+    -- bandwidth on detail that blur discards.
+    declareTarget({name = "occluders", format = "rgba8", scale = 0.5, clear = {r = 0, g = 0, b = 0, a = 0}})
+    -- Where the first blur pass puts its result so the second can read it.
+    -- Nothing outside the two touches it.
+    declareTarget({name = "occludersTemp", format = "rgba8", scale = 0.5, clear = {r = 0, g = 0, b = 0, a = 0}})
+    -- One channel: how much of all lighting reaches a pixel after every drop
+    -- shadow thrown across it. Cleared to white, because a pixel no shadow
+    -- lands on multiplies the light it receives by one, and half sized because
+    -- it holds nothing sharp.
+    declareTarget({name = "dropShadowAO", format = "r8", scale = 0.5, clear = {r = 1, g = 1, b = 1, a = 1}})
+    -- The two halves of the bloom blur, which alternate: extract writes A, the
+    -- horizontal blur writes B, the vertical blur writes A again, and the
+    -- composite reads A. Wide format, so a value above white survives the
+    -- extraction it was selected by.
+    declareTarget({name = "bloomA", format = "rgba16f", scale = 0.5, clear = {r = 0, g = 0, b = 0, a = 1}})
+    declareTarget({name = "bloomB", format = "rgba16f", scale = 0.5, clear = {r = 0, g = 0, b = 0, a = 1}})
 
     -- Opaque geometry into the G-buffer. Cleared to the far plane every frame,
     -- and compared less-or-equal so equal depths still resolve to whatever
@@ -572,10 +604,31 @@ local function declareBuiltins(): nil
         depth = "testWrite",
         depthClear = 1.0,
     })
+    -- Before lighting rather than after, because the mask is what lighting
+    -- reads. This is the seam shadows want, and it is a different one from the
+    -- seam a post-process wants: a shadow is not something done to a finished
+    -- image.
+    declarePass({name = "occluders", outputs = {"occluders"}})
+    declarePass({name = "occluderBlurH", inputs = {"occluders"}, outputs = {"occludersTemp"}})
+    -- Back into the mask, which a target may be written twice for. This covers
+    -- every pixel of it, so there is nothing of the first write left to keep.
+    declarePass({name = "occluderBlurV", inputs = {"occludersTemp"}, outputs = {"occluders"}})
+    -- Reads no G-buffer target, so it introduces no dependency the graph has to
+    -- resolve and could sit anywhere before lighting. It is here because that
+    -- is where a reader looks for it.
+    declarePass({name = "dropShadowAO", outputs = {"dropShadowAO"}})
     -- Resolves the G-buffer. Declaration order is binding order, and the
-    -- fragment shader numbers its samplers to match.
-    declarePass({name = "lighting", inputs = {"albedo", "normal", "orm", "emission"}, outputs = {"lit"}})
-    declarePass({name = "composite", inputs = {"lit"}, outputs = {"scene"}})
+    -- fragment shader numbers its samplers to match: the G-buffer's four
+    -- first, then the two the shadow lane fills.
+    declarePass({
+        name = "lighting",
+        inputs = {"albedo", "normal", "orm", "emission", "occluders", "dropShadowAO"},
+        outputs = {"lit"},
+    })
+    declarePass({name = "bloomExtract", inputs = {"lit"}, outputs = {"bloomA"}})
+    declarePass({name = "bloomBlurX", inputs = {"bloomA"}, outputs = {"bloomB"}})
+    declarePass({name = "bloomBlurY", inputs = {"bloomB"}, outputs = {"bloomA"}})
+    declarePass({name = "composite", inputs = {"lit", "bloomA"}, outputs = {"scene"}})
     -- Blended content over the composited image. Depth is attached without a
     -- clear, so what it loads is what geometry wrote, and without a write, so
     -- a blended fragment is rejected by the opaque geometry in front of it and

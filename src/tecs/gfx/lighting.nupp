@@ -1,0 +1,371 @@
+module tecs.gfx.lighting
+
+--[[
+Deferred two-dimensional lighting, the shadows it casts, and optional bloom.
+
+The lighting resolve reads the G-buffer the geometry pass wrote and adds one
+contribution per light that reaches a pixel, over an ambient term. A light is an
+entity: `tecs.ecs.Transform2D` places it and `PointLight2D` gives it a height, a
+reach, a color, and a strength.
+
+```nupp
+const ecs = tecs.ecs
+const gfx = tecs.gfx
+
+gfx.lighting.setAmbient(0.12, 0.14, 0.2)
+world:spawn(ecs.Transform2D(320, 180), gfx.PointLight2D(64, 220, 1.0, 0.85, 0.6, 1.4))
+world:spawn(
+    ecs.Transform2D(280, 200, 0, 1, 0, 48, 48),
+    gfx.Tint(0.7, 0.7, 0.75, 1),
+    gfx.Occluder2D(1.0),
+    gfx.Renderable2D
+)
+```
+
+Two shadow mechanisms, and they answer different questions. `Occluder2D` adds
+the entity's silhouette to one mask every light marches against, so one entity
+blocks every light for the cost of drawing itself once rather than once per
+light. It blocks each light's own contribution and cannot touch the ambient
+term. `DropShadow2D` throws a stretched copy of the entity along the ground away
+from the few nearest lights and darkens everything under it, ambient included,
+while blocking no light at all. An entity carrying both is an occluder, because
+dropping that half would silently unblock a light.
+
+A translucent entity casts nothing. It never reaches the G-buffer, so a hard
+silhouette of it would be a lie.
+
+`setShadows(nil)` and `setBloom(nil)` turn the two lanes off, and the frame then
+runs neither their passes nor their draws. Their render targets stay declared
+either way: `tecs.gpu.passes` declares one graph for the life of the process, so
+a game that placed a pass of its own beside `bloomExtract` keeps it across a
+change of tuning.
+
+The target scales are fixed by that declaration and are not tuning. The occluder
+mask is drawn at half the frame on both axes because a nine-tap separable blur
+runs over it immediately, so a full-resolution mask would spend four times the
+bandwidth on detail the blur discards. A game that wants other scales declares
+its own targets and passes rather than reconfiguring these.
+]]
+
+local components = require("tecs.internal.components")
+
+--- Lights one frame resolves. Past this the remainder is dropped rather than
+--- reported, because the alternative is a frame that raises over a light nobody
+--- would have picked out of the image.
+export const MAX_LIGHTS: integer = 256
+
+--- Floats one light occupies on the wire: position and radius, then color and
+--- intensity.
+export const LIGHT_FLOATS: integer = 8
+
+--- Bytes one light occupies on the wire.
+export const LIGHT_STRIDE: integer = 32
+
+--- Tiles the view is divided into on each axis, so a fragment consults the
+--- lights that reach its tile rather than every light in the scene.
+---
+--- A count rather than a size in pixels, so the two tile buffers are allocated
+--- once and never replaced while a frame in flight is reading them. The same
+--- number appears in `assets/shaders/wgsl/lighting.wgsl` and the pair only
+--- works while they agree.
+export const TILES: integer = 32
+
+--- Lights one tile holds. A tile reached by more than this keeps the ones
+--- earliest in the light buffer, which is a stated choice rather than whichever
+--- the device happened to write first.
+export const TILE_SLOTS: integer = 64
+
+--- Cast-list entries one caster occupies, whether or not that many lights reach
+--- it.
+---
+--- One per light a drop shadow is thrown by: four lights is more than any one
+--- character stands in, and the fourth is already fainter than a viewer picks
+--- out. It is uniform across casters, including the occluders that throw no
+--- copy at all, which is what makes an entry's rank its position modulo this
+--- and saves carrying one.
+export const CAST_FANOUT: integer = 4
+
+--- Represents a light the deferred resolve accumulates.
+export record PointLight2D
+    --- Caller-writable. Sets the height above the surface plane in world
+    --- units. At zero the Lambert term vanishes and the light contributes
+    --- nothing.
+    height: number
+
+    --- Caller-writable. Sets the light's reach in world units. Falloff is
+    --- smooth and reaches exactly zero at the radius.
+    radius: number
+
+    --- Caller-writable. Sets the red channel from zero to one.
+    r: number
+
+    --- Caller-writable. Sets the green channel from zero to one.
+    g: number
+
+    --- Caller-writable. Sets the blue channel from zero to one.
+    b: number
+
+    --- Caller-writable. Scales the light's contribution. Values above one are
+    --- meaningful, because the resolve writes a wider-than-eight-bit target.
+    intensity: number
+end
+
+--- The process-wide `PointLight2D` component definition.
+export const PointLight2DComponent: components.TableComponent<PointLight2D> = components.newComponent({
+    -- This persisted component name is a compatibility surface carried across
+    -- from the Teal implementation, and so are its six field names.
+    name = "PointLight2D",
+    construct = function(
+        height: number?,
+        radius: number?,
+        r: number?,
+        g: number?,
+        b: number?,
+        intensity: number?
+    ): PointLight2D
+        return new PointLight2D(
+            height = height or 64,
+            radius = radius or 256,
+            r = r or 1,
+            g = g or 1,
+            b = b or 1,
+            intensity = intensity or 1
+        )
+    end,
+    default = function(): PointLight2D
+        return new PointLight2D(height = 64, radius = 256, r = 1, g = 1, b = 1, intensity = 1)
+    end,
+})
+
+--- Blocks light from reaching what lies behind the entity.
+---
+--- The renderer adds the silhouette to the occluder mask every light samples,
+--- so one entity blocks every light at the cost of one drawing of itself rather
+--- than one per light. It blocks each light's contribution, not ambient light.
+--- `DropShadow2D` handles ambient darkening.
+---
+--- Coverage is the silhouette the material already decided, so a circle, a
+--- rounded box, or a glyph casts the shape it draws with no threshold of its
+--- own to set.
+export record Occluder2D
+    --- Caller-writable. Sets the occluder height from zero to one of the
+    --- world's configured shadow height.
+    height: number
+end
+
+--- The process-wide `Occluder2D` component definition.
+export const Occluder2DComponent: components.TableComponent<Occluder2D> = components.newComponent({
+    -- This persisted component name is a compatibility surface carried across
+    -- from the Teal implementation, and so is its `height` field name.
+    name = "Occluder2D",
+    construct = function(height: number?): Occluder2D
+        return new Occluder2D(height = height or 1.0)
+    end,
+    default = function(): Occluder2D
+        return new Occluder2D(height = 1.0)
+    end,
+})
+
+--- Casts a stretched copy of the entity along the ground, away from light.
+---
+--- This darkens everything a light left, including ambient light, which
+--- `Occluder2D` cannot do. It blocks no light in return: a crowd of
+--- light-blocking silhouettes merges under the mask into one flat mat of
+--- darkness, so the thing that wants a contact shadow is exactly the thing that
+--- must not be an occluder. An entity carrying both is an occluder.
+---
+--- The nearest few lights by weight throw the copy. Adding a distant light does
+--- not move an established shadow.
+export record DropShadow2D
+    --- Caller-writable. Sets how far lights throw the shadow, from zero to one
+    --- of the world's configured shadow height.
+    height: number
+end
+
+--- The process-wide `DropShadow2D` component definition.
+export const DropShadow2DComponent: components.TableComponent<DropShadow2D> = components.newComponent({
+    -- This persisted component name is a compatibility surface carried across
+    -- from the Teal implementation, and so is its `height` field name.
+    name = "DropShadow2D",
+    construct = function(height: number?): DropShadow2D
+        return new DropShadow2D(height = height or 1.0)
+    end,
+    default = function(): DropShadow2D
+        return new DropShadow2D(height = 1.0)
+    end,
+})
+
+--- What a caller passes to `setShadows`. Every field is optional.
+export type ShadowSpec = {
+    steps: number?,
+    margin: number?,
+    height: number?,
+    dropOpacity: number?,
+    dropLength: number?
+}
+
+--- The shadow tuning a frame is drawn with.
+export record Shadows
+    --- Read-only. Reports the samples a shadow march takes at full attenuation,
+    --- which is also the ceiling the adaptive count is clamped to.
+    steps: number
+
+    --- Read-only. Reports how far outside the view, in world units, a caster is
+    --- still kept. A wall just off the left edge throws a shadow that falls on
+    --- screen, and this is what stops the cull dropping it. It also widens the
+    --- occluder mask's projection by the same amount, so what is kept lands
+    --- inside the mask rather than off its edge.
+    margin: number
+
+    --- Read-only. Reports the world height a caster at height one stands, which
+    --- is the one number that puts a light's world height and a caster's
+    --- zero-to-one height in the same space.
+    height: number
+
+    --- Read-only. Reports how dark a drop shadow is where the light throwing it
+    --- is at full strength, from zero to one.
+    dropOpacity: number
+
+    --- Read-only. Reports the longest a drop shadow may be, in world units. The
+    --- projection that places the tip divides by the light's height above the
+    --- caster's, so a light barely clearing a tall caster would otherwise throw
+    --- a shadow to the horizon.
+    dropLength: number
+end
+
+--- What a caller passes to `setBloom`. Every field is optional.
+export type BloomSpec = {
+    threshold: number?,
+    knee: number?,
+    intensity: number?
+}
+
+--- The bloom tuning a frame is drawn with.
+export record Bloom
+    --- Read-only. Reports the non-negative brightness a pixel passes to be
+    --- extracted. The lit target is wider than eight bits, so a value above one
+    --- is meaningful here.
+    threshold: number
+
+    --- Read-only. Reports the positive width of the threshold's soft knee,
+    --- which is what keeps a surface crossing the threshold from popping.
+    knee: number
+
+    --- Read-only. Scales the blurred contribution the composite adds.
+    intensity: number
+end
+
+const huge = math.huge
+
+local ambientR: number = 1.0
+local ambientG: number = 1.0
+local ambientB: number = 1.0
+local shadowSettings: Shadows? = nil
+local bloomSettings: Bloom? = nil
+
+local function finite(value: number): boolean
+    return value == value and value ~= huge and value ~= -huge
+end
+
+--- Reads one optional tuning number and holds it to a range.
+--- @raises when the value is not finite or falls outside the range
+local function reading(value: number?, fallback: number, low: number, high: number, name: string): number
+    if value == nil then
+        return fallback
+    end
+    if not finite(value) or value < low or value > high then
+        error("lighting: " .. name .. " must be between " .. tostring(low) .. " and " .. tostring(high), 3)
+    end
+
+    return value
+end
+
+--- Sets the light every surface receives before any light entity is counted.
+---
+--- Authored ambient occlusion reaches this term and nothing else: a point light
+--- is a directionally known contribution and is not hidden by a baked ambient
+--- value.
+--- @param r the red channel, at or above zero
+--- @param g the green channel, at or above zero
+--- @param b the blue channel, at or above zero
+--- @raises when a channel is negative or not finite
+export function setAmbient(r: number, g: number, b: number): nil
+    if not finite(r) or not finite(g) or not finite(b) or r < 0.0 or g < 0.0 or b < 0.0 then
+        error("lighting: every ambient channel must be finite and at or above zero", 2)
+    end
+    ambientR, ambientG, ambientB = r, g, b
+end
+
+--- Returns the ambient light every surface receives.
+--- @return the red channel, then the green, then the blue
+export function ambient(): number, number, number
+    return ambientR, ambientG, ambientB
+end
+
+--- Enables shadows and sets their tuning, or disables them.
+---
+--- Passing nil turns off the occluder mask, its blur, and the drop-shadow
+--- target, and the frame then runs neither those passes nor the draws that fill
+--- them.
+--- @param spec the tuning, whose omitted fields take the defaults documented on
+---     `Shadows`, or nil to disable shadows
+--- @raises when a field is not finite or falls outside its range
+export function setShadows(spec: ShadowSpec?): nil
+    if spec == nil then
+        shadowSettings = nil
+
+        return
+    end
+
+    shadowSettings = new Shadows(
+        steps = reading(spec.steps, 24, 4, 256, "shadow steps"),
+        margin = reading(spec.margin, 200, 0, huge / 2, "shadow margin"),
+        -- The default matches `PointLight2D`'s own default height, so an
+        -- occluder at height one and a light at its default are level and the
+        -- shadow runs to the horizon.
+        height = reading(spec.height, 64, 0.001, huge / 2, "shadow height"),
+        dropOpacity = reading(spec.dropOpacity, 0.4, 0, 1, "drop shadow opacity"),
+        dropLength = reading(spec.dropLength, 512, 0, huge / 2, "drop shadow length")
+    )
+end
+
+--- Returns the shadow tuning a frame is drawn with.
+--- @return the module's own record, which a caller reads and must not write, or
+---     nil when shadows are disabled
+export function shadows(): Shadows?
+    return shadowSettings
+end
+
+--- Enables bloom and sets its tuning, or disables it.
+--- @param spec the tuning, whose omitted fields take the defaults documented on
+---     `Bloom`, or nil to disable bloom
+--- @raises when a field is not finite or falls outside its range
+export function setBloom(spec: BloomSpec?): nil
+    if spec == nil then
+        bloomSettings = nil
+
+        return
+    end
+
+    bloomSettings = new Bloom(
+        threshold = reading(spec.threshold, 0.8, 0, huge / 2, "bloom threshold"),
+        knee = reading(spec.knee, 0.1, 0.0001, huge / 2, "bloom knee"),
+        intensity = reading(spec.intensity, 0.7, 0, huge / 2, "bloom intensity")
+    )
+end
+
+--- Returns the bloom tuning a frame is drawn with.
+--- @return the module's own record, which a caller reads and must not write, or
+---     nil when bloom is disabled
+export function bloom(): Bloom?
+    return bloomSettings
+end
+
+--- Forgets every setting and returns to the engine's own defaults.
+---
+--- A test uses this so one suite's tuning does not reach the next.
+export function reset(): nil
+    ambientR, ambientG, ambientB = 1.0, 1.0, 1.0
+    shadowSettings = nil
+    bloomSettings = nil
+end

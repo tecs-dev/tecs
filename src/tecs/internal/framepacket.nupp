@@ -10,34 +10,54 @@ pipelines, culling, compaction, submission, and presentation. Image pixels
 never ride in a packet. They cross once through the residency commands
 `tecs.gfx.images` queues, so a frame carries only the id a batch binds.
 
-# Packet version 3
+# Packet version 4
 
 Every field is little or big endian to match the host, every integer is
 unsigned, and every real is a 32-bit float. Offsets are in bytes from the start
 of the packet.
 
-## Header, 64 bytes
+## Header, 128 bytes
 
-| Offset | Type  | Field            | Contract                                            |
-| ------ | ----- | ---------------- | --------------------------------------------------- |
-| 0      | `u32` | `magic`          | `0x54454353`, and nothing else is a Tecs packet.     |
-| 4      | `u32` | `version`        | `3`. A reader rejects every other value.             |
-| 8      | `u32` | `headerSize`     | `64`. The graph section starts after it.             |
-| 12     | `u32` | `flags`          | `0`. Reserved, and a reader rejects any other value. |
-| 16     | `u32` | `graphRevision`  | A reader rebuilds its graph when this changes.       |
-| 20     | `u32` | `graphBytes`     | Byte length of the graph section.                    |
-| 24     | `u32` | `batchStride`    | `20`.                                                |
-| 28     | `u32` | `batchCount`     | Zero only when `instanceCount` is zero.              |
-| 32     | `u32` | `instanceStride` | `80`.                                                |
-| 36     | `u32` | `instanceCount`  | How many instances follow the batch table.           |
-| 40     | `f32` | `targetWidth`    | Render target width in pixels, greater than zero.    |
-| 44     | `f32` | `targetHeight`   | Render target height in pixels, greater than zero.   |
-| 48     | `f32` | `cameraX`        | View center x in world units.                        |
-| 52     | `f32` | `cameraY`        | View center y in world units, increasing downward.   |
-| 56     | `f32` | `cameraZoom`     | Greater than zero.                                   |
-| 60     | `f32` | `cameraRotation` | Radians, turning the scene counter-clockwise.        |
+| Offset | Type  | Field             | Contract                                             |
+| ------ | ----- | ----------------- | ---------------------------------------------------- |
+| 0      | `u32` | `magic`           | `0x54454353`, and nothing else is a Tecs packet.      |
+| 4      | `u32` | `version`         | `4`. A reader rejects every other value.              |
+| 8      | `u32` | `headerSize`      | `128`. The graph section starts after it.             |
+| 12     | `u32` | `flags`           | Bit 0 enables the shadow lane, bit 1 bloom.           |
+| 16     | `u32` | `graphRevision`   | A reader rebuilds its graph when this changes.        |
+| 20     | `u32` | `graphBytes`      | Byte length of the graph section.                     |
+| 24     | `u32` | `batchStride`     | `20`.                                                 |
+| 28     | `u32` | `batchCount`      | Zero only when `instanceCount` is zero.               |
+| 32     | `u32` | `instanceStride`  | `80`.                                                 |
+| 36     | `u32` | `instanceCount`   | How many instances follow the batch table.            |
+| 40     | `f32` | `targetWidth`     | Render target width in pixels, greater than zero.     |
+| 44     | `f32` | `targetHeight`    | Render target height in pixels, greater than zero.    |
+| 48     | `f32` | `cameraX`         | View center x in world units.                         |
+| 52     | `f32` | `cameraY`         | View center y in world units, increasing downward.    |
+| 56     | `f32` | `cameraZoom`      | Greater than zero.                                    |
+| 60     | `f32` | `cameraRotation`  | Radians, turning the scene counter-clockwise.         |
+| 64     | `u32` | `lightStride`     | `32`.                                                 |
+| 68     | `u32` | `lightCount`      | At most 256, the ceiling one frame resolves.          |
+| 72     | `u32` | `casterCount`     | Instances carrying a cast flag, which sizes the list. |
+| 76     | `u32` | reserved          | Zero.                                                 |
+| 80     | `f32` | `ambientR`        | Ambient red, at or above zero.                        |
+| 84     | `f32` | `ambientG`        | Ambient green.                                        |
+| 88     | `f32` | `ambientB`        | Ambient blue.                                         |
+| 92     | `f32` | `shadowSteps`     | March samples at full attenuation, four or more.      |
+| 96     | `f32` | `shadowHeight`    | World height a caster at height one stands.           |
+| 100    | `f32` | `shadowMargin`    | World units outside the view a caster is kept.        |
+| 104    | `f32` | `dropOpacity`     | Drop-shadow darkness at full weight, zero to one.     |
+| 108    | `f32` | `dropLength`      | Longest a drop shadow may be, in world units.         |
+| 112    | `f32` | `bloomThreshold`  | Brightness a pixel passes to be extracted.            |
+| 116    | `f32` | `bloomKnee`       | Width of the threshold's soft knee, above zero.       |
+| 120    | `f32` | `bloomIntensity`  | Scales the blurred contribution.                      |
+| 124    | `u32` | reserved          | Zero.                                                 |
 
-## Graph section, `graphBytes` bytes at offset 64
+The shadow and bloom fields are written whether or not their flag is set, so a
+backend reads one layout and the flag alone decides. A reader validates them
+only when the flag they belong to is set.
+
+## Graph section, `graphBytes` bytes at offset 128
 
 The pass and target declaration, as `tecs.gpu.passes.section` encodes it. It
 rides in every packet rather than being sent once, so a backend that lost its
@@ -46,7 +66,24 @@ instead of holding state the sender cannot see. `graphRevision` is what keeps
 that cheap: a reader parses the section only when the revision differs from the
 one it built its graph from.
 
-## Batch table, `batchCount` entries of 20 bytes after the graph section
+## Light table, `lightCount` entries of 32 bytes after the graph section
+
+| Offset | Type  | Field       | Contract                                        |
+| ------ | ----- | ----------- | ----------------------------------------------- |
+| 0      | `f32` | `x`         | World x of the light.                           |
+| 4      | `f32` | `y`         | World y, increasing downward.                   |
+| 8      | `f32` | `height`    | Height above the surface plane in world units.  |
+| 12     | `f32` | `radius`    | Reach in world units, greater than zero.        |
+| 16     | `f32` | `r`         | Red.                                            |
+| 20     | `f32` | `g`         | Green.                                          |
+| 24     | `f32` | `b`         | Blue.                                           |
+| 28     | `f32` | `intensity` | Scales the contribution, at or above zero.      |
+
+Lights are ordered by ascending entity id, so the same scene bins and casts the
+same way every frame however the archetypes are laid out. A world holding more
+than the ceiling keeps the lowest ids and drops the rest.
+
+## Batch table, `batchCount` entries of 20 bytes after the light table
 
 | Offset | Type  | Field           | Contract                                                |
 | ------ | ----- | --------------- | ------------------------------------------------------- |
@@ -78,7 +115,7 @@ list and one indirect draw covers them.
 | 16     | `f32` | `scaleX`   | Full width in world units, not a half extent.                 |
 | 20     | `f32` | `scaleY`   | Full height in world units.                                   |
 | 24     | `f32` | `param`    | The material's own scalar, zero to one.                       |
-| 28     | `f32` | reserved   | Zero.                                                         |
+| 28     | `f32` | `castHeight` | Caster height, zero to one of the shadow height. Zero otherwise. |
 | 32     | `f32` | `u0`       | Left edge of the sampled region.                              |
 | 36     | `f32` | `v0`       | Top edge of the sampled region.                               |
 | 40     | `f32` | `u1`       | Right edge of the sampled region.                             |
@@ -88,9 +125,15 @@ list and one indirect draw covers them.
 | 56     | `f32` | `b`        | Blue.                                                         |
 | 60     | `f32` | `a`        | Alpha, multiplied into the sampled alpha.                     |
 | 64     | `u32` | `material` | A `tecs.gpu.materials` id, below the build's material count.  |
-| 68     | `u32` | `flags`    | Bit 0 set marks the blended lane, and equals the batch's.     |
+| 68     | `u32` | `flags`    | Bit 0 marks the blended lane and equals the batch's; bit 1 an occluder; bit 2 a drop-shadow caster. |
 | 72     | `u32` | reserved   | Zero.                                                         |
 | 76     | `u32` | reserved   | Zero.                                                         |
+
+Bits 1 and 2 are exclusive of each other and neither is ever set with bit 0. An
+entity carrying both `Occluder2D` and `DropShadow2D` is an occluder, because
+dropping that half would silently unblock a light, and a blended entity casts
+nothing at all: it never reaches the G-buffer, so a hard silhouette of it would
+be a lie.
 
 The four sixteen-byte groups are what a backend binds as a storage buffer, so
 the layout is a `vec4` quadruple followed by four words rather than the field
@@ -110,6 +153,7 @@ disagrees with its batch's, or whose material id its dispatch does not carry.
 local archetype = require("tecs.internal.archetype")
 local images = require("tecs.gfx.images")
 local layers = require("tecs.gfx.layers")
+local lighting = require("tecs.gfx.lighting")
 local materials = require("tecs.gpu.materials")
 local passes = require("tecs.gpu.passes")
 local query = require("tecs.internal.query")
@@ -120,16 +164,19 @@ local world = require("tecs.internal.world")
 export const MAGIC: uint32 = 0x54454353
 
 --- The packet layout this module writes.
-export const VERSION: uint32 = 3
+export const VERSION: uint32 = 4
 
 --- The byte length of the packet header.
-export const HEADER_SIZE: uint32 = 64
+export const HEADER_SIZE: uint32 = 128
 
 --- The byte length of one batch table entry.
 export const BATCH_STRIDE: uint32 = 20
 
 --- The byte length of one instance.
 export const INSTANCE_STRIDE: uint32 = 80
+
+--- The byte length of one light table entry.
+export const LIGHT_STRIDE: uint32 = 32
 
 --- Names the lane that rasterizes into the G-buffer.
 ---
@@ -142,6 +189,18 @@ export const LANE_BLEND: integer = 1
 
 --- Marks an instance as belonging to the blended lane.
 export const FLAG_BLENDED: integer = 1
+
+--- Marks an instance as an occluder, whose silhouette enters the light mask.
+export const FLAG_OCCLUDER: integer = 2
+
+--- Marks an instance as a drop-shadow caster.
+export const FLAG_DROP_SHADOW: integer = 4
+
+--- Set in the header when the frame draws the shadow lane.
+export const FRAME_SHADOWS: integer = 1
+
+--- Set in the header when the frame draws the bloom chain.
+export const FRAME_BLOOM: integer = 2
 
 const narrow = nupp.math.f32.narrow
 const wrap = nupp.math.u32.wrap
@@ -159,6 +218,7 @@ export record Extractor
     private drawables: query.Query
     private activeCameras: query.Query
     private cameras: query.Query
+    private lights: query.Query
     private order: {integer}
     private entities: {integer}
     private depths: {number}
@@ -167,6 +227,8 @@ export record Extractor
     private imageIds: {integer}
     private samplers: {integer}
     private lanes: {integer}
+    private castFlags: {integer}
+    private castHeights: {number}
     private materialIds: {integer}
     private params: {number}
     private u0: {number}
@@ -176,6 +238,13 @@ export record Extractor
     private rowCount: integer
     private sorted: integer
     private before: function(left: integer, right: integer): boolean
+    private lightOrder: {integer}
+    private lightEntities: {integer}
+    private lightTransforms: {rendercomponents.Transform2D}
+    private lightValues: {lighting.PointLight2D}
+    private lightCount: integer
+    private lightsSorted: integer
+    private beforeLight: function(left: integer, right: integer): boolean
 
     packet: function(exclusive self: Extractor, width: integer, height: integer): string
 end
@@ -196,6 +265,12 @@ export function new(exclusive value: world.World): Extractor
 
         return entities[left] < entities[right]
     end
+    local lightEntities: {integer} = {}
+    -- Ascending entity id, so which lights survive the ceiling and which order
+    -- a tile accumulates them in are the same for the same scene every frame.
+    local beforeLight = function(left: integer, right: integer): boolean
+        return lightEntities[left] < lightEntities[right]
+    end
 
     return new Extractor(
         drawables = value:newQuery({
@@ -209,6 +284,7 @@ export function new(exclusive value: world.World): Extractor
             include = {rendercomponents.Camera2DComponent, rendercomponents.ActiveCamera},
         }),
         cameras = value:newQuery({include = {rendercomponents.Camera2DComponent}}),
+        lights = value:newQuery({include = {rendercomponents.Transform2DComponent, lighting.PointLight2DComponent},}),
         order = {},
         entities = entities,
         depths = depths,
@@ -217,6 +293,8 @@ export function new(exclusive value: world.World): Extractor
         imageIds = {},
         samplers = {},
         lanes = {},
+        castFlags = {},
+        castHeights = {},
         materialIds = {},
         params = {},
         u0 = {},
@@ -225,7 +303,14 @@ export function new(exclusive value: world.World): Extractor
         v1 = {},
         rowCount = 0,
         sorted = 0,
-        before = before
+        before = before,
+        lightOrder = {},
+        lightEntities = lightEntities,
+        lightTransforms = {},
+        lightValues = {},
+        lightCount = 0,
+        lightsSorted = 0,
+        beforeLight = beforeLight
     )
 end
 
@@ -283,6 +368,8 @@ local function collect(exclusive self: Extractor): nil
     const imageIds = self.imageIds
     const samplers = self.samplers
     const lanes = self.lanes
+    const castFlags = self.castFlags
+    const castHeights = self.castHeights
     const materialIds = self.materialIds
     const params = self.params
     const u0 = self.u0
@@ -297,6 +384,8 @@ local function collect(exclusive self: Extractor): nil
         local rowTints: {rendercomponents.Tint} = assert(active:get(rendercomponents.TintComponent))
         local rowSprites = active:get(rendercomponents.SpriteComponent) as {rendercomponents.Sprite}?
         local rowMaterials = active:get(materials.MaterialComponent) as {materials.Material}?
+        local rowOccluders = active:get(lighting.Occluder2DComponent) as {lighting.Occluder2D}?
+        local rowDropShadows = active:get(lighting.DropShadow2DComponent) as {lighting.DropShadow2D}?
         for index = 1, count as integer do
             const transform = rowTransforms[index]
             const tint = rowTints[index]
@@ -310,7 +399,25 @@ local function collect(exclusive self: Extractor): nil
             -- an entity that is not fully opaque leaves for the forward pass,
             -- where the depth it already sorted by decides it against the
             -- opaque geometry in front of it.
-            lanes[rows] = tint.a < 1.0 and LANE_BLEND or LANE_OPAQUE
+            const blended = tint.a < 1.0
+            lanes[rows] = blended and LANE_BLEND or LANE_OPAQUE
+            -- A blended entity casts nothing: it never reaches the G-buffer, so
+            -- a hard silhouette of it would be a lie. An entity carrying both
+            -- cast components is an occluder, because dropping that half would
+            -- silently unblock a light.
+            local flag: integer = 0
+            local height: number = 0.0
+            if not blended then
+                if rowOccluders ~= nil then
+                    flag = FLAG_OCCLUDER
+                    height = rowOccluders[index].height
+                elseif rowDropShadows ~= nil then
+                    flag = FLAG_DROP_SHADOW
+                    height = rowDropShadows[index].height
+                end
+            end
+            castFlags[rows] = flag
+            castHeights[rows] = flag == 0 and 0.0 or height
             if rowMaterials == nil then
                 materialIds[rows] = 0
                 params[rows] = 0.25
@@ -351,6 +458,54 @@ local function collect(exclusive self: Extractor): nil
     self.rowCount = rows
 end
 
+--- Reads every light entity into the extractor's reused arrays.
+--- @raises when a light holds a radius that is not greater than zero, or any
+---     value that is not finite
+local function collectLights(exclusive self: Extractor): nil
+    const lightEntities = self.lightEntities
+    const lightTransforms = self.lightTransforms
+    const lightValues = self.lightValues
+    local found: integer = 0
+    for candidate, count in self.lights:iter() do
+        local active = candidate as archetype.Archetype
+        local rowTransforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
+        local rowLights: {lighting.PointLight2D} = assert(active:get(lighting.PointLight2DComponent))
+        for index = 1, count as integer do
+            const light = rowLights[index]
+            if not (light.radius > 0.0) or not finite(light.radius) then
+                error("framepacket: a PointLight2D radius must be greater than zero", 3)
+            end
+            if not finite(
+                light.height
+            ) or not finite(light.r) or not finite(light.g) or not finite(light.b) or not finite(light.intensity) then
+                error("framepacket: a PointLight2D holds a value that is not finite", 3)
+            end
+            found = found + 1
+            lightEntities[found] = active.entities[index]
+            lightTransforms[found] = rowTransforms[index]
+            lightValues[found] = light
+        end
+    end
+    self.lightCount = found
+end
+
+--- Orders the collected lights by ascending entity id and applies the ceiling.
+local function sortLights(exclusive self: Extractor): nil
+    const order = self.lightOrder
+    const found = self.lightCount
+    for index = 1, found do
+        order[index] = index
+    end
+    for index = found + 1, self.lightsSorted do
+        order[index] = nil
+    end
+    self.lightsSorted = found
+    table.sort(order, self.beforeLight)
+    if found > lighting.MAX_LIGHTS then
+        self.lightCount = lighting.MAX_LIGHTS
+    end
+end
+
 --- Orders the collected rows farthest first, breaking ties by entity id.
 local function sortRows(exclusive self: Extractor): nil
     const order = self.order
@@ -380,11 +535,14 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
     const cameraX, cameraY, zoom, rotation = view(self, width, height)
     collect(self)
     sortRows(self)
+    collectLights(self)
+    sortLights(self)
 
     const order = self.order
     const imageIds = self.imageIds
     const samplers = self.samplers
     const lanes = self.lanes
+    const castFlags = self.castFlags
     const rows = self.rowCount
 
     -- The batch table is written before the instances, so the runs are counted
@@ -403,13 +561,35 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
         end
     end
 
+    local casters: integer = 0
+    for index = 1, rows do
+        if castFlags[index] ~= 0 then
+            casters = casters + 1
+        end
+    end
+
+    const shadowTuning = lighting.shadows()
+    const bloomTuning = lighting.bloom()
+    -- A frame with no caster and no light runs the shadow lane over an empty
+    -- list, so the flag is the tuning alone and the backend does not have to
+    -- learn a second reason a pass might be skipped.
+    local frameFlags: integer = 0
+    if shadowTuning ~= nil then
+        frameFlags = frameFlags + FRAME_SHADOWS
+    end
+    if bloomTuning ~= nil then
+        frameFlags = frameFlags + FRAME_BLOOM
+    end
+    const ambientR, ambientG, ambientB = lighting.ambient()
+    const lightCount = self.lightCount
+
     const graph = passes.section()
     local buffer = nupp.io.newBuffer()
     local writer = nupp.io.newScalarWriter(buffer)
     writer:writeUint32(MAGIC)
         :writeUint32(VERSION)
         :writeUint32(HEADER_SIZE)
-        :writeUint32(0)
+        :writeUint32(wrap(frameFlags))
         :writeUint32(wrap(passes.revision()))
         :writeUint32(wrap(#graph))
         :writeUint32(BATCH_STRIDE)
@@ -422,7 +602,40 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
         :writeFloat32(narrow(cameraY))
         :writeFloat32(narrow(zoom))
         :writeFloat32(narrow(rotation))
+        :writeUint32(LIGHT_STRIDE)
+        :writeUint32(wrap(lightCount))
+        :writeUint32(wrap(casters))
+        :writeUint32(0)
+        :writeFloat32(narrow(ambientR))
+        :writeFloat32(narrow(ambientG))
+        :writeFloat32(narrow(ambientB))
+        :writeFloat32(narrow(shadowTuning ~= nil and shadowTuning.steps or 24.0))
+        :writeFloat32(narrow(shadowTuning ~= nil and shadowTuning.height or 64.0))
+        :writeFloat32(narrow(shadowTuning ~= nil and shadowTuning.margin or 200.0))
+        :writeFloat32(narrow(shadowTuning ~= nil and shadowTuning.dropOpacity or 0.4))
+        :writeFloat32(narrow(shadowTuning ~= nil and shadowTuning.dropLength or 512.0))
+        :writeFloat32(narrow(bloomTuning ~= nil and bloomTuning.threshold or 0.8))
+        :writeFloat32(narrow(bloomTuning ~= nil and bloomTuning.knee or 0.1))
+        :writeFloat32(narrow(bloomTuning ~= nil and bloomTuning.intensity or 0.7))
+        :writeUint32(0)
     writer:writeBytes(graph)
+
+    const lightOrder = self.lightOrder
+    const lightTransforms = self.lightTransforms
+    const lightValues = self.lightValues
+    for index = 1, lightCount do
+        const slot = lightOrder[index]
+        const transform = lightTransforms[slot]
+        const light = lightValues[slot]
+        writer:writeFloat32(narrow(transform.x))
+            :writeFloat32(narrow(transform.y))
+            :writeFloat32(narrow(light.height))
+            :writeFloat32(narrow(light.radius))
+            :writeFloat32(narrow(light.r))
+            :writeFloat32(narrow(light.g))
+            :writeFloat32(narrow(light.b))
+            :writeFloat32(narrow(light.intensity))
+    end
 
     runImage = -1
     runSampler = -1
@@ -458,6 +671,7 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
     const depths = self.depths
     const transforms = self.transforms
     const tints = self.tints
+    const castHeights = self.castHeights
     const materialIds = self.materialIds
     const params = self.params
     const u0 = self.u0
@@ -475,7 +689,7 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
             :writeFloat32(narrow(transform.scaleX))
             :writeFloat32(narrow(transform.scaleY))
             :writeFloat32(narrow(params[row]))
-            :writeFloat32(0.0)
+            :writeFloat32(narrow(castHeights[row]))
             :writeFloat32(narrow(u0[row]))
             :writeFloat32(narrow(v0[row]))
             :writeFloat32(narrow(u1[row]))
@@ -485,7 +699,7 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
             :writeFloat32(narrow(tint.b))
             :writeFloat32(narrow(tint.a))
             :writeUint32(wrap(materialIds[row]))
-            :writeUint32(wrap(lanes[row] == LANE_BLEND and FLAG_BLENDED or 0))
+            :writeUint32(wrap((lanes[row] == LANE_BLEND and FLAG_BLENDED or 0) + castFlags[row]))
             :writeUint32(0)
             :writeUint32(0)
     end
