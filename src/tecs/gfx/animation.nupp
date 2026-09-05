@@ -3,11 +3,11 @@ module tecs.gfx.animation
 --[[
 Fixed-step sprite-sheet playback.
 
-A [`Sheet`](tealdoc:tecs.gfx.sheet.Sheet) divides one image into frames and
+A [`Sheet`](tecs.gfx.sheet.Sheet) divides one image into frames and
 names frame spans with tags. An `Animation` selects a sheet and a tag and
 carries the speed, the loop flag, and where the cycle has got to. Playback
 advances on the fixed clock and writes the frame it resolves into the entity's
-[`Sprite`](tealdoc:tecs.gfx.Sprite), so two machines fed the same fixed steps
+[`Sprite`](tecs.gfx.Sprite), so two machines fed the same fixed steps
 select the same frames.
 
 ```nupp
@@ -35,7 +35,7 @@ world:spawn(
 )
 ```
 
-An entity needs a [`Sprite`](tealdoc:tecs.gfx.Sprite) as well, because that is
+An entity needs a [`Sprite`](tecs.gfx.Sprite) as well, because that is
 what playback writes and what extraction reads. An `Animation` on its own draws
 nothing.
 
@@ -301,7 +301,7 @@ end
 --- fixed step writes the tag's first frame whatever the entity was showing. An
 --- entity carrying no `Animation` is given one.
 --- @param world the world the entity lives in
---- @param entity a live entity carrying a [`Sprite`](tealdoc:tecs.gfx.Sprite)
+--- @param entity a live entity carrying a [`Sprite`](tecs.gfx.Sprite)
 --- @param source the sheet to play
 --- @param tag a tag the sheet names, or nil for the whole sheet
 --- @param options the speed, loop, and playing overrides, or nil for the
@@ -500,7 +500,7 @@ end
 
 --- Returns the sheet frame an entity's animation shows.
 ---
---- The same frame the entity's [`Sprite`](tealdoc:tecs.gfx.Sprite) is sampling,
+--- The same frame the entity's [`Sprite`](tecs.gfx.Sprite) is sampling,
 --- because playback writes both together. What a hitbox on frame five, a
 --- footstep on frame three, or a muzzle on an animated hand asks for.
 --- @param world the world the entity lives in
@@ -541,7 +541,7 @@ local installed: {[ecs.World]: boolean} = setmetatable({}, {__mode = "k"}) as {[
 --- animation advances once per step either way, so two machines fed the same
 --- steps show the same frames. `tecs.EncodeAnimation` advances every playing
 --- animation and writes the frame it resolves into the entity's
---- [`Sprite`](tealdoc:tecs.gfx.Sprite). `tecs.ReportAnimation` then emits
+--- [`Sprite`](tecs.gfx.Sprite). `tecs.ReportAnimation` then emits
 --- `Completed` and `Looped` for the entities carrying `AnimationEvents`.
 --- @param world the world receiving the playback systems
 export function plugin(exclusive world: ecs.World): nil
