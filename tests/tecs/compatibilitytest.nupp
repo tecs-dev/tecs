@@ -1,0 +1,1047 @@
+--[[
+Pins every externally typed string the ported tree declares.
+
+A save file written last year, a filter a developer types into a shell, a JSON
+payload an agent sends, and a pass a game inserts by name all reach these
+strings from outside the tree. Nothing here can see those call sites, so nothing
+here may move them: `AGENTS.md` states the rule, and this suite is what holds
+the tree to it.
+
+Every assertion compares a literal against the value a module publishes, never
+against another identifier. `test.equal(ecs.EntityKey.componentName, "Key")`
+fails when someone tidies the spelling and passes when someone renames the Lua
+binding, which is the only shape that distinguishes the two.
+
+Read this file as the specification of the compatibility surface. A name that
+belongs to a subsystem the rewrite has not ported yet is absent here and
+recorded in the migration plan instead, so the set below is what the tree
+actually carries rather than what it eventually should.
+]]
+
+local test = require("nupp.test")
+
+local assets = require("tecs.assets")
+local audio = require("tecs.audio")
+local audiobackend = require("tecs.platform.audiobackend")
+local ecs = require("tecs.ecs")
+local animation = require("tecs.gfx.animation")
+local gamepadbackend = require("tecs.platform.gamepadbackend")
+local gfx = require("tecs.gfx")
+local input = require("tecs.input")
+local layers = require("tecs.gfx.layers")
+local log = require("tecs.log")
+local materials = require("tecs.gpu.materials")
+local mcp = require("tecs.mcp")
+local passes = require("tecs.gpu.passes")
+local physics = require("tecs.physics")
+local physicscontract = require("tecs.physics.contract")
+local platformevents = require("tecs.platform.events")
+local sequence = require("tecs.sequence")
+local text = require("tecs.gfx.text")
+
+-- Internal modules carry three surfaces no public name reaches: the sequence
+-- bytecode's opcode numbering, the tween evaluator's registered name, and the
+-- tween target vocabulary. That is why the suite lives under `tests/tecs`.
+local components = require("tecs.internal.components")
+local phases = require("tecs.internal.phases")
+local sequenceprogram = require("tecs.internal.sequenceprogram")
+local tweeneval = require("tecs.internal.tweeneval")
+local tweenrun = require("tecs.internal.tweenrun")
+
+-- The reference simulation, so installing physics names its snapshot handler
+-- and its systems with no native solver present.
+local physicsreference = require("physicsreference")
+
+local suite = {}
+
+-------------------------------------------------------------------------------
+-- Helpers
+-------------------------------------------------------------------------------
+
+--- Asserts that `values` holds exactly `expected`, in order.
+local function equalList(values: {string}, expected: {string}): nil
+    test.equal(#values, #expected, "the list has " .. tostring(#values) .. " entries")
+    for index = 1, #expected do
+        test.equal(values[index], expected[index])
+    end
+end
+
+--- Asserts that every name in `expected` appears in `values`.
+---
+--- Used where a process-wide registry may legitimately hold more than the
+--- engine's own entries, so exact equality would fail on a game's additions
+--- rather than on a rename.
+local function containsAll(values: {string}, expected: {string}): nil
+    local present: {[string]: boolean} = {}
+    for index = 1, #values do
+        present[values[index]] = true
+    end
+    for index = 1, #expected do
+        test.assert(present[expected[index]] == true, "missing '" .. expected[index] .. "'")
+    end
+end
+
+--- Asserts that a component registered under `name` carries that exact name.
+---
+--- Reaching the registry by the literal proves the string is what a snapshot
+--- would write, and reading `componentName` back proves the registry is not
+--- answering under an alias.
+local function registeredAs(name: string): nil
+    local component = components.findByName(name)
+    test.assert(component ~= nil, "no component registered as '" .. name .. "'")
+    test.equal(assert(component).componentName, name)
+end
+
+--- A device-free audio backend, so installing a mixer names its systems and its
+--- snapshot handler without opening an output.
+local function silentBackend(): audiobackend.Backend
+    return new audiobackend.Backend(
+        available = false,
+        frequency = 48000,
+        channels = 2,
+        submit = function(_commands: {audiobackend.Command}, _count: integer): nil
+        end,
+        drain = function(_out: {integer}): integer
+            return 0
+        end,
+        loadClip = function(
+            _path: string,
+            _clip: integer,
+            _mode: audiobackend.LoadMode,
+            _streamSeconds: number
+        ): (audiobackend.ClipInfo?, string?)
+            return nil, "the compatibility suite loads no clips"
+        end,
+        releaseClip = function(_clip: integer): nil
+        end,
+        position = function(_handle: integer): number?
+            return nil
+        end,
+        seek = function(_handle: integer, _seconds: number): boolean
+            return false
+        end,
+        decoders = function(): {string}
+            return {}
+        end,
+        close = function(): nil
+        end
+    )
+end
+
+-------------------------------------------------------------------------------
+-- Component, relationship, and event names
+--
+-- A snapshot names components by string, so these are the strings a save file
+-- from an earlier build holds.
+-------------------------------------------------------------------------------
+
+function suite.ecsBuiltinComponentNames(): nil
+    -- `EntityKey` is the public binding and `Key` is the registered name. The
+    -- two differ deliberately, and the registered one is what persists.
+    test.equal(ecs.EntityKey.componentName, "Key")
+    test.equal(ecs.Paused.componentName, "Paused")
+    test.equal(ecs.Disabled.componentName, "Disabled")
+    test.equal(ecs.Transform2D.componentName, "Transform2D")
+end
+
+function suite.stateComponentsTakeTheStateSuffix(): nil
+    local world = ecs.newWorld()
+    local component = world:createState("compatibilitySuiteMenu")
+    test.equal(component.componentName, "compatibilitySuiteMenuState")
+end
+
+function suite.renderComponentNames(): nil
+    test.equal(gfx.Tint.componentName, "Tint")
+    test.equal(gfx.Sprite.componentName, "Sprite")
+    test.equal(gfx.Camera2D.componentName, "Camera2D")
+    test.equal(gfx.ActiveCamera.componentName, "ActiveCamera")
+    test.equal(gfx.Renderable2D.componentName, "Renderable2D")
+    test.equal(gfx.Clip.componentName, "Clip")
+    test.equal(gfx.Material.componentName, "Material")
+end
+
+function suite.graphicsComponentNames(): nil
+    test.equal(gfx.Animation.componentName, "Animation")
+    test.equal(gfx.AnimationEvents.componentName, "AnimationEvents")
+    test.equal(gfx.Text.componentName, "Text")
+    test.equal(gfx.TextGlyph.componentName, "TextGlyph")
+    test.equal(gfx.PointLight2D.componentName, "PointLight2D")
+    test.equal(gfx.Occluder2D.componentName, "Occluder2D")
+    test.equal(gfx.DropShadow2D.componentName, "DropShadow2D")
+end
+
+function suite.audioComponentName(): nil
+    test.equal(audio.SoundComponent.componentName, "Sound")
+end
+
+function suite.sequenceComponentName(): nil
+    test.equal(sequence.TrackingTarget.componentName, "TweenTrackingTarget")
+end
+
+function suite.physicsComponentNames(): nil
+    test.equal(physics.Body.componentName, "Body")
+    test.equal(physics.Collider.componentName, "Collider")
+    test.equal(physics.Motion.componentName, "Motion")
+    test.equal(physics.RigidBody.componentName, "RigidBody")
+    test.equal(physics.ColliderShape.componentName, "ColliderShape")
+    test.equal(physics.PhysicsHeld.componentName, "PhysicsHeld")
+    test.equal(physics.PhysicsDisabled.componentName, "PhysicsDisabled")
+    -- Joints have no Teal counterpart. They are new compatibility surfaces,
+    -- pinned here from the build that introduced them.
+    test.equal(physics.Joint.componentName, "Joint")
+    test.equal(physics.JointLink.componentName, "JointLink")
+end
+
+function suite.relationshipNames(): nil
+    test.equal(physics.ColliderOf.componentName, "ColliderOf")
+    test.equal(physics.JointBodyA.componentName, "JointBodyA")
+    test.equal(physics.JointBodyB.componentName, "JointBodyB")
+end
+
+function suite.everyEngineComponentIsRegisteredUnderItsName(): nil
+    local names: {
+        string
+    } = {
+        "ActiveCamera",
+        "Animation",
+        "AnimationEvents",
+        "Body",
+        "Camera2D",
+        "Clip",
+        "Collider",
+        "ColliderOf",
+        "ColliderShape",
+        "Disabled",
+        "DropShadow2D",
+        "Joint",
+        "JointBodyA",
+        "JointBodyB",
+        "JointLink",
+        "Key",
+        "Material",
+        "Motion",
+        "Occluder2D",
+        "Paused",
+        "PhysicsDisabled",
+        "PhysicsHeld",
+        "PointLight2D",
+        "Renderable2D",
+        "RigidBody",
+        "Sound",
+        "Sprite",
+        "Text",
+        "TextGlyph",
+        "Tint",
+        "Transform2D",
+        "TweenTrackingTarget",
+    }
+    for index = 1, #names do
+        registeredAs(names[index])
+    end
+end
+
+function suite.ecsEventNames(): nil
+    test.equal(ecs.OnSpawn.eventName, "OnSpawn")
+    test.equal(ecs.OnDespawn.eventName, "OnDespawn")
+    test.equal(ecs.StateEnter.eventName, "StateEnter")
+    test.equal(ecs.StateExit.eventName, "StateExit")
+    test.equal(ecs.StateBlur.eventName, "StateBlur")
+    test.equal(ecs.StateFocus.eventName, "StateFocus")
+end
+
+-------------------------------------------------------------------------------
+-- Platform event kinds
+--
+-- A kind is what the debug server's `send_event` takes and what an event
+-- payload carries in its `kind` field.
+-------------------------------------------------------------------------------
+
+function suite.platformEventNames(): nil
+    local on = platformevents.on
+    test.equal(on.quit.eventName, "tecs.platform.events.quit")
+    test.equal(on.windowCloseRequested.eventName, "tecs.platform.events.windowCloseRequested")
+    test.equal(on.windowResized.eventName, "tecs.platform.events.windowResized")
+    test.equal(on.windowScaleChanged.eventName, "tecs.platform.events.windowScaleChanged")
+    test.equal(on.windowFocusGained.eventName, "tecs.platform.events.windowFocusGained")
+    test.equal(on.windowFocusLost.eventName, "tecs.platform.events.windowFocusLost")
+    test.equal(on.keyDown.eventName, "tecs.platform.events.keyDown")
+    test.equal(on.keyUp.eventName, "tecs.platform.events.keyUp")
+    test.equal(on.mouseMotion.eventName, "tecs.platform.events.mouseMotion")
+    test.equal(on.mouseDown.eventName, "tecs.platform.events.mouseDown")
+    test.equal(on.mouseUp.eventName, "tecs.platform.events.mouseUp")
+    test.equal(on.mouseWheel.eventName, "tecs.platform.events.mouseWheel")
+    test.equal(on.textInput.eventName, "tecs.platform.events.textInput")
+    test.equal(on.fingerDown.eventName, "tecs.platform.events.fingerDown")
+    test.equal(on.fingerUp.eventName, "tecs.platform.events.fingerUp")
+    test.equal(on.fingerMotion.eventName, "tecs.platform.events.fingerMotion")
+    test.equal(on.fingerCanceled.eventName, "tecs.platform.events.fingerCanceled")
+    test.equal(on.gamepadAdded.eventName, "tecs.platform.events.gamepadAdded")
+    test.equal(on.gamepadRemoved.eventName, "tecs.platform.events.gamepadRemoved")
+    test.equal(on.gamepadButtonDown.eventName, "tecs.platform.events.gamepadButtonDown")
+    test.equal(on.gamepadButtonUp.eventName, "tecs.platform.events.gamepadButtonUp")
+    test.equal(on.gamepadAxis.eventName, "tecs.platform.events.gamepadAxis")
+end
+
+function suite.platformEventKinds(): nil
+    test.equal(platformevents.quit().kind, "quit")
+    test.equal(platformevents.closeRequested().kind, "windowCloseRequested")
+    test.equal(platformevents.resized(64, 48).kind, "windowResized")
+    test.equal(platformevents.scaleChanged(2.0, 64, 48).kind, "windowScaleChanged")
+    test.equal(platformevents.focused(true).kind, "windowFocusGained")
+    test.equal(platformevents.focused(false).kind, "windowFocusLost")
+    test.equal(platformevents.key(true, "KeyA").kind, "keyDown")
+    test.equal(platformevents.key(false, "KeyA").kind, "keyUp")
+    test.equal(platformevents.pointerMoved(1.0, 2.0).kind, "mouseMotion")
+    test.equal(platformevents.pointerButton(true, 1, 1.0, 2.0).kind, "mouseDown")
+    test.equal(platformevents.pointerButton(false, 1, 1.0, 2.0).kind, "mouseUp")
+    test.equal(platformevents.wheel(0.0, 1.0).kind, "mouseWheel")
+    test.equal(platformevents.text("a").kind, "textInput")
+end
+
+-------------------------------------------------------------------------------
+-- Logger names
+--
+-- The unit a developer types into a filter, so it is configuration rather than
+-- an identifier.
+-------------------------------------------------------------------------------
+
+function suite.loggerNames(): nil
+    test.equal(log.APP, "tecs.app")
+    test.equal(log.ASSETS, "tecs.assets")
+    test.equal(log.AUDIO, "tecs.audio")
+    test.equal(log.GFX, "tecs.gfx")
+    test.equal(log.GPU, "tecs.gpu")
+    test.equal(log.HTTP, "tecs.http")
+    test.equal(log.MCP, "tecs.mcp")
+    test.equal(log.PROFILE, "tecs.profile")
+    test.equal(log.SEQUENCE, "tecs.sequence")
+    test.equal(log.WATCH, "tecs.watch")
+    test.equal(log.WORLD, "tecs.world")
+end
+
+-------------------------------------------------------------------------------
+-- Phase names
+--
+-- The debug server reports a system's phase and an agent narrows on it, so a
+-- phase name leaves the process the way a system name does.
+-------------------------------------------------------------------------------
+
+function suite.phaseNames(): nil
+    equalList(
+        {
+            phases.PreStartup,
+            phases.Startup,
+            phases.PostStartup,
+            phases.Ingress,
+            phases.First,
+            phases.PreUpdate,
+            phases.FixedFirst,
+            phases.FixedPreUpdate,
+            phases.FixedUpdate,
+            phases.FixedPostUpdate,
+            phases.FixedLast,
+            phases.Update,
+            phases.PostUpdate,
+            phases.RenderFirst,
+            phases.PreRender,
+            phases.Render,
+            phases.PostRender,
+            phases.RenderLast,
+            phases.Last,
+            phases.PreShutdown,
+            phases.Shutdown,
+            phases.PostShutdown,
+        },
+        {
+            "PreStartup",
+            "Startup",
+            "PostStartup",
+            "Ingress",
+            "First",
+            "PreUpdate",
+            "FixedFirst",
+            "FixedPreUpdate",
+            "FixedUpdate",
+            "FixedPostUpdate",
+            "FixedLast",
+            "Update",
+            "PostUpdate",
+            "RenderFirst",
+            "PreRender",
+            "Render",
+            "PostRender",
+            "RenderLast",
+            "Last",
+            "PreShutdown",
+            "Shutdown",
+            "PostShutdown",
+        }
+    )
+end
+
+function suite.phaseGroupNames(): nil
+    equalList(
+        {
+            phases.StartupGroup,
+            phases.FixedUpdateGroup,
+            phases.RenderGroup,
+            phases.MainGroup,
+            phases.ShutdownGroup,
+            phases.AllGroups,
+        },
+        {"StartupGroup", "FixedUpdateGroup", "RenderGroup", "MainGroup", "ShutdownGroup", "AllGroups"}
+    )
+end
+
+-------------------------------------------------------------------------------
+-- System names
+--
+-- The debug server reports these and an agent selects on one, so a rename is a
+-- broken tool call rather than a refactor.
+-------------------------------------------------------------------------------
+
+--- Returns every registered system name in the world, in execution order.
+local function systemNames(world: ecs.World): {string}
+    local reported = world:listSystems()
+    local names: {string} = {}
+    for index = 1, #reported do
+        names[index] = reported[index].name
+    end
+
+    return names
+end
+
+function suite.audioSystemNames(): nil
+    local world = ecs.newWorld()
+    audio.install(world, {backend = silentBackend()})
+    containsAll(systemNames(world), {"tecs.PlaySounds"})
+end
+
+function suite.sequenceSystemNames(): nil
+    local world = ecs.newWorld()
+    sequence.plugin(world)
+    containsAll(systemNames(world), {"sequence.Advance", "sequence.AdvanceFrame", "sequence.AdvancePresentation"})
+end
+
+function suite.animationSystemNames(): nil
+    local world = ecs.newWorld()
+    animation.plugin(world)
+    containsAll(systemNames(world), {"tecs.EncodeAnimation", "tecs.ReportAnimation"})
+end
+
+function suite.textSystemNames(): nil
+    local world = ecs.newWorld()
+    text.install(world)
+    containsAll(systemNames(world), {"tecs.TextLayout"})
+end
+
+function suite.inputSystemNames(): nil
+    local world = ecs.newWorld()
+    input.install(world, gamepadbackend.none())
+    containsAll(systemNames(world), {"tecs.PollGamepads", "tecs.EnterFixedInput", "tecs.ExitFixedInput"})
+end
+
+-------------------------------------------------------------------------------
+-- Snapshot handler keys
+--
+-- `random.tl`'s restore falls through to reseeding when it finds no state, and
+-- a handler whose key changed spelling loads that way rather than erroring.
+-- That is what makes these absolute rather than preferred.
+-------------------------------------------------------------------------------
+
+--- Returns every snapshot data key the world writes, sorted.
+local function snapshotKeys(world: ecs.World): {string}
+    local snapshot = world:saveSnapshot()
+    local keys: {string} = {}
+    for index = 1, #snapshot.data do
+        keys[index] = snapshot.data[index].key
+    end
+    table.sort(keys)
+
+    return keys
+end
+
+function suite.audioSnapshotHandlerKey(): nil
+    local world = ecs.newWorld()
+    audio.install(world, {backend = silentBackend()})
+    equalList(snapshotKeys(world), {"tecs.audio"})
+end
+
+function suite.sequenceSnapshotHandlerKey(): nil
+    local world = ecs.newWorld()
+    sequence.plugin(world)
+    equalList(snapshotKeys(world), {"tecs.sequence"})
+end
+
+function suite.physicsSnapshotHandlerKey(): nil
+    local world = ecs.newWorld()
+    physics.install(world, {simulation = physicsreference.create().simulation})
+    equalList(snapshotKeys(world), {"tecs.physics"})
+end
+
+-------------------------------------------------------------------------------
+-- Snapshot payload keys
+--
+-- A component that writes something other than its own fields names the keys
+-- it writes, and those travel in the file beside the component name.
+-------------------------------------------------------------------------------
+
+--- Returns the keys of one component's saved payload, sorted.
+--- @param component the registered component whose codec to run
+--- @param value the component value to save
+--- @return the payload's keys, sorted
+local function savedKeys(component: ecs.Component, value: any): {string}
+    local saved = (component as {[string]: any}).snapshotSave as function(any): any
+    local payload = saved(value) as {[string]: any}
+    local keys: {string} = {}
+    for key in pairs(payload) do
+        keys[#keys + 1] = key
+    end
+    table.sort(keys)
+
+    return keys
+end
+
+--- Loads `payload` back through a component's snapshot codec.
+---
+--- The payload is written with literal keys, so this is the half of the pin
+--- that a save file actually exercises: a renamed key stops arriving and the
+--- restored value falls back to its default.
+--- @param component the registered component whose codec to run
+--- @param payload the saved form, keyed exactly as a file holds it
+--- @return the restored component value
+local function loadPayload(component: ecs.Component, payload: {[string]: any}): {[string]: any}
+    local load = (component as {[string]: any}).snapshotLoad as function(any): any
+
+    return load(payload) as {[string]: any}
+end
+
+--- Asserts that every key in `values` appears in `allowed`.
+---
+--- A saved payload omits a key whose value is nil, which is how a sprite with
+--- no resolvable image or a sound with no group is written, so the save side
+--- is pinned as a subset and `loadPayload` pins the rest.
+local function subsetOf(values: {string}, allowed: {string}): nil
+    local permitted: {[string]: boolean} = {}
+    for index = 1, #allowed do
+        permitted[allowed[index]] = true
+    end
+    for index = 1, #values do
+        test.assert(permitted[values[index]] == true, "unexpected saved key '" .. values[index] .. "'")
+    end
+end
+
+function suite.spriteSnapshotKeys(): nil
+    local keys: {string} = {"image", "u0", "u1", "v0", "v1"}
+    subsetOf(savedKeys(gfx.Sprite, gfx.Sprite(0, 0.0, 0.0, 1.0, 1.0).value), keys)
+    local restored = loadPayload(gfx.Sprite, {image = "", u0 = 0.125, v0 = 0.25, u1 = 0.5, v1 = 0.75})
+    test.equal(restored.u0, 0.125)
+    test.equal(restored.v0, 0.25)
+    test.equal(restored.u1, 0.5)
+    test.equal(restored.v1, 0.75)
+end
+
+function suite.materialSnapshotKeys(): nil
+    materials.reset()
+    equalList(savedKeys(gfx.Material, gfx.Material(0, 0.25).value), {"material", "param"})
+    local restored = loadPayload(gfx.Material, {material = "circle", param = 0.5})
+    test.equal(restored.id, materials.id("circle"))
+    test.equal(restored.param, 0.5)
+end
+
+function suite.soundSnapshotKeys(): nil
+    local keys: {string} = {"clip", "gain", "group", "loop", "pitch", "playing", "spatial", "x", "y", "z"}
+    subsetOf(savedKeys(audio.SoundComponent, audio.SoundComponent().value), keys)
+    local restored = loadPayload(audio.SoundComponent, {
+        clip = "",
+        playing = false,
+        gain = 0.5,
+        loop = true,
+        pitch = 1.5,
+        spatial = true,
+        x = 1.0,
+        y = 2.0,
+        z = 3.0,
+        group = "",
+    })
+    test.equal(restored.playing, false)
+    test.equal(restored.gain, 0.5)
+    test.equal(restored.loop, true)
+    test.equal(restored.pitch, 1.5)
+    test.equal(restored.spatial, true)
+    test.equal(restored.x, 1.0)
+    test.equal(restored.y, 2.0)
+    test.equal(restored.z, 3.0)
+end
+
+function suite.animationSnapshotKeys(): nil
+    local keys: {string} = {"loop", "playing", "sheet", "speed", "tag", "time"}
+    subsetOf(savedKeys(gfx.Animation, gfx.Animation().value), keys)
+    local restored = loadPayload(gfx.Animation, {
+        sheet = "",
+        tag = "",
+        speed = 2.0,
+        time = 0.5,
+        loop = false,
+        playing = false
+    })
+    test.equal(restored.speed, 2.0)
+    test.equal(restored.time, 0.5)
+    test.equal(restored.loop, false)
+    test.equal(restored.playing, false)
+end
+
+function suite.textSnapshotKeys(): nil
+    local keys: {string} = {"align", "font", "size", "text", "wrapWidth"}
+    subsetOf(savedKeys(gfx.Text, gfx.Text("hello").value), keys)
+    local restored = loadPayload(gfx.Text, {
+        text = "hello",
+        font = nil,
+        size = 24.0,
+        align = "center",
+        wrapWidth = 80.0
+    })
+    test.equal(restored.text, "hello")
+    test.equal(restored.size, 24.0)
+    test.equal(restored.align, "center")
+    test.equal(restored.wrapWidth, 80.0)
+end
+
+-------------------------------------------------------------------------------
+-- MCP tool names and argument keys
+--
+-- An agent sends these in a JSON payload written against a build this tree
+-- cannot see.
+-------------------------------------------------------------------------------
+
+function suite.mcpToolNames(): nil
+    local tools = mcp.listTools()
+    local names: {string} = {}
+    for index = 1, #tools do
+        names[index] = tools[index].name
+    end
+    table.sort(names)
+    equalList(names, {
+        "clear_crash",
+        "components_info",
+        "context",
+        "despawn",
+        "get_logs",
+        "info",
+        "modify",
+        "ping",
+        "query",
+        "remove",
+        "run_lua",
+        "send_event",
+        "set",
+        "spawn",
+        "states_info",
+        "states_pop",
+        "states_push",
+        "stats",
+        "systems_info",
+        "systems_list",
+        "systems_start",
+        "systems_stop",
+    })
+end
+
+--- Returns the property keys of one tool's input schema, sorted.
+--- @param name the tool's registered name
+--- @return the argument keys, sorted
+--- @raises when no tool carries that name, because a missing tool is the
+---     failure this suite exists to report
+local function argumentKeys(name: string): {string}
+    local tools = mcp.listTools()
+    local keys: {string} = {}
+    for index = 1, #tools do
+        if tools[index].name == name then
+            local schema = tools[index].inputSchema
+            local properties = schema ~= nil and schema.properties as {[string]: any}? or nil
+            if properties ~= nil then
+                for key in pairs(properties) do
+                    keys[#keys + 1] = key
+                end
+            end
+            table.sort(keys)
+
+            return keys
+        end
+    end
+
+    error("no MCP tool named '" .. name .. "'", 2)
+end
+
+function suite.mcpArgumentKeys(): nil
+    equalList(argumentKeys("get_logs"), {"after", "contains"})
+    equalList(argumentKeys("run_lua"), {"code"})
+    equalList(argumentKeys("components_info"), {})
+    equalList(argumentKeys("query"), {"include", "limit", "values"})
+    equalList(argumentKeys("info"), {"entity"})
+    equalList(argumentKeys("spawn"), {"components"})
+    equalList(argumentKeys("set"), {"component", "entity", "values"})
+    equalList(argumentKeys("modify"), {"component", "entity", "values"})
+    equalList(argumentKeys("remove"), {"component", "entity"})
+    equalList(argumentKeys("despawn"), {"entity"})
+    equalList(argumentKeys("systems_list"), {"disabled", "phase"})
+    equalList(argumentKeys("systems_info"), {"name"})
+    equalList(argumentKeys("systems_start"), {"name"})
+    equalList(argumentKeys("systems_stop"), {"name"})
+    equalList(argumentKeys("states_push"), {"name"})
+end
+
+function suite.sendEventArgumentKeys(): nil
+    -- `kind`, `button`, `x`, `y`, `clicks`, `wheelX`, `wheelY`, `wheelTicksX`,
+    -- `wheelTicksY`, `flipped`, `repeated` and `which` carry across from the
+    -- SDL implementation. The rest are new with the `winit` boundary, and the
+    -- SDL keys `scancode`, `penState`, `scale`, `recording`, `data1` and
+    -- `data2` are gone with the events they described.
+    equalList(argumentKeys("send_event"), {
+        "axis",
+        "button",
+        "clicks",
+        "dx",
+        "dy",
+        "finger",
+        "flipped",
+        "height",
+        "kind",
+        "logicalKey",
+        "modifiers",
+        "normalX",
+        "normalY",
+        "physicalKey",
+        "pressure",
+        "repeated",
+        "scaleFactor",
+        "text",
+        "touchDevice",
+        "value",
+        "wheelTicksX",
+        "wheelTicksY",
+        "wheelX",
+        "wheelY",
+        "which",
+        "width",
+        "window",
+        "x",
+        "y",
+    })
+end
+
+-------------------------------------------------------------------------------
+-- Render pass and target names
+--
+-- A game places a pass of its own beside one of these by name.
+-------------------------------------------------------------------------------
+
+function suite.deferredTargetNames(): nil
+    passes.reset()
+    local declared = passes.targets()
+    local names: {string} = {}
+    for index = 1, #declared do
+        names[index] = declared[index].name
+    end
+    equalList(names, {
+        "albedo",
+        "normal",
+        "orm",
+        "emission",
+        "lit",
+        "scene",
+        "occluders",
+        "occludersTemp",
+        "dropShadowAO",
+        "bloomA",
+        "bloomB",
+    })
+end
+
+function suite.deferredPassNames(): nil
+    passes.reset()
+    local declared = passes.passes()
+    local names: {string} = {}
+    for index = 1, #declared do
+        names[index] = declared[index].name
+    end
+    equalList(names, {
+        "geometry",
+        "occluders",
+        "occluderBlurH",
+        "occluderBlurV",
+        "dropShadowAO",
+        "lighting",
+        "bloomExtract",
+        "bloomBlurX",
+        "bloomBlurY",
+        "composite",
+        "forward",
+        "present",
+    })
+end
+
+function suite.depthTargetNameIsReserved(): nil
+    passes.reset()
+    -- Not a declared target, and the graph refuses to let one take the name.
+    test.raises(
+        function(): nil
+            passes.declareTarget({name = "depth", format = "rgba8"})
+        end,
+        "depth"
+    )
+end
+
+-------------------------------------------------------------------------------
+-- Material names
+--
+-- A snapshot writes a material by name, because an id holds only for the file
+-- set one build was made from.
+-------------------------------------------------------------------------------
+
+function suite.builtinMaterialNames(): nil
+    materials.reset()
+    test.equal(materials.DEFAULT, "textured")
+    test.equal(materials.id("textured"), 0)
+    equalList(materials.names(), {
+        "textured",
+        "capsule",
+        "circle",
+        "ellipse",
+        "emissive",
+        "frame",
+        "glyph",
+        "glyphalpha",
+        "line",
+        "pie",
+        "ring",
+        "rounded",
+        "star",
+        "triangle",
+    })
+end
+
+-------------------------------------------------------------------------------
+-- Layer configuration
+--
+-- A sort mode is a string a game writes into a layer's configuration.
+-------------------------------------------------------------------------------
+
+function suite.layerSortNames(): nil
+    layers.configure(1, {sort = "topdown"})
+    layers.configure(2, {sort = "z"})
+    layers.configure(3, {sort = "isometric"})
+    test.equal(layers.SORT_TOPDOWN, 0)
+    test.equal(layers.SORT_Z, 1)
+    test.equal(layers.SORT_ISOMETRIC, 2)
+    test.raises(
+        function(): nil
+            layers.configure(4, {sort = "topDown" as layers.Sort})
+        end,
+        "sort mode"
+    )
+end
+
+-------------------------------------------------------------------------------
+-- Asset content kinds
+--
+-- A file-watching filter and the debug tools name a kind.
+-------------------------------------------------------------------------------
+
+function suite.contentKindNames(): nil
+    test.equal(assets.DOCUMENT, "document")
+    test.equal(assets.IMAGE, "image")
+    test.equal(assets.SOUND, "sound")
+    test.equal(assets.MODEL, "model")
+    -- New with the rewrite: the SDL tree noted no font or shader content.
+    test.equal(assets.FONT, "font")
+    test.equal(assets.SHADER, "shader")
+end
+
+-------------------------------------------------------------------------------
+-- Input vocabulary
+--
+-- A game persists a binding by name, so a button name is a save-file string
+-- rather than an identifier.
+-------------------------------------------------------------------------------
+
+--- Returns `value`, so a literal the union no longer admits fails
+--- `nupp check --strict` at this call rather than passing through as a string.
+--- @param value one gamepad button name
+--- @return the same name
+local function gamepadButton(value: input.GamepadButton): string
+    return value as string
+end
+
+--- Returns `value`, pinning one gamepad axis name the same way.
+--- @param value one gamepad axis name
+--- @return the same name
+local function gamepadAxis(value: input.GamepadAxis): string
+    return value as string
+end
+
+function suite.gamepadButtonNames(): nil
+    equalList(
+        {
+            gamepadButton("south"),
+            gamepadButton("east"),
+            gamepadButton("west"),
+            gamepadButton("north"),
+            gamepadButton("back"),
+            gamepadButton("guide"),
+            gamepadButton("start"),
+            gamepadButton("leftStick"),
+            gamepadButton("rightStick"),
+            gamepadButton("leftShoulder"),
+            gamepadButton("rightShoulder"),
+            gamepadButton("dpadUp"),
+            gamepadButton("dpadDown"),
+            gamepadButton("dpadLeft"),
+            gamepadButton("dpadRight"),
+        },
+        {
+            "south",
+            "east",
+            "west",
+            "north",
+            "back",
+            "guide",
+            "start",
+            "leftStick",
+            "rightStick",
+            "leftShoulder",
+            "rightShoulder",
+            "dpadUp",
+            "dpadDown",
+            "dpadLeft",
+            "dpadRight",
+        }
+    )
+end
+
+function suite.gamepadAxisNames(): nil
+    equalList(
+        {
+            gamepadAxis("leftX"),
+            gamepadAxis("leftY"),
+            gamepadAxis("rightX"),
+            gamepadAxis("rightY"),
+            gamepadAxis("leftTrigger"),
+            gamepadAxis("rightTrigger"),
+        },
+        {"leftX", "leftY", "rightX", "rightY", "leftTrigger", "rightTrigger"}
+    )
+end
+
+function suite.mouseButtonNames(): nil
+    local state = input.newInput(gamepadbackend.none())
+    test.equal(state:mouseDown("left"), false)
+    test.equal(state:mouseDown("middle"), false)
+    test.equal(state:mouseDown("right"), false)
+    -- The SDL implementation spelled these two `x1` and `x2`. The rewrite
+    -- renamed them; the numeric codes four and five did not move.
+    test.equal(state:mouseDown("back"), false)
+    test.equal(state:mouseDown("forward"), false)
+    test.equal(state:mouseDown(4), false)
+    test.equal(state:mouseDown(5), false)
+end
+
+-------------------------------------------------------------------------------
+-- Physics vocabulary and wire numbering
+--
+-- The body kind and collider shape names reach the engine from a game, and the
+-- integers behind them are what a component column holds and a snapshot writes.
+-------------------------------------------------------------------------------
+
+function suite.physicsBodyAndShapeNumbering(): nil
+    test.equal(physicscontract.BODY_STATIC, 0)
+    test.equal(physicscontract.BODY_KINEMATIC, 1)
+    test.equal(physicscontract.BODY_DYNAMIC, 2)
+    test.equal(physicscontract.SHAPE_BOX, 0)
+    test.equal(physicscontract.SHAPE_CIRCLE, 1)
+    test.equal(physicscontract.SHAPE_CAPSULE, 2)
+end
+
+-------------------------------------------------------------------------------
+-- Sequencing
+--
+-- A program's bytecode travels in a save file, so the opcode numbers are as
+-- persisted as any string here. So is the evaluator name a suspended playback
+-- records, and the easing and target names a timeline's constant pool holds.
+-------------------------------------------------------------------------------
+
+function suite.sequenceOpcodeNumbering(): nil
+    test.equal(sequenceprogram.WAIT, 1)
+    test.equal(sequenceprogram.CALL, 2)
+    test.equal(sequenceprogram.EMIT, 3)
+    test.equal(sequenceprogram.JUMP, 4)
+    test.equal(sequenceprogram.END, 5)
+    test.equal(sequenceprogram.WAIT_SIGNAL, 6)
+    test.equal(sequenceprogram.FORK, 7)
+    test.equal(sequenceprogram.JOIN, 8)
+    test.equal(sequenceprogram.WAIT_QUERY, 9)
+    test.equal(sequenceprogram.PLAY_TWEEN, 10)
+    test.equal(sequenceprogram.WAIT_TWEEN, 11)
+    test.equal(sequenceprogram.EVAL, 12)
+    test.equal(sequenceprogram.AWAIT, 13)
+    test.equal(sequenceprogram.STRIDE, 3)
+end
+
+function suite.tweenEvaluatorName(): nil
+    test.equal(tweenrun.EVALUATOR, "tecs.tween")
+end
+
+function suite.easingNames(): nil
+    test.assert(sequence.easing("linear") ~= nil)
+    test.assert(sequence.easing("quadIn") ~= nil)
+    test.assert(sequence.easing("quadOut") ~= nil)
+    test.assert(sequence.easing("quadInOut") ~= nil)
+    test.assert(sequence.easing("quadOutIn") ~= nil)
+    test.assert(sequence.easing("cubicIn") ~= nil)
+    test.assert(sequence.easing("cubicOut") ~= nil)
+    test.assert(sequence.easing("cubicInOut") ~= nil)
+    test.assert(sequence.easing("cubicOutIn") ~= nil)
+    test.assert(sequence.easing("quartIn") ~= nil)
+    test.assert(sequence.easing("quartOut") ~= nil)
+    test.assert(sequence.easing("quartInOut") ~= nil)
+    test.assert(sequence.easing("quartOutIn") ~= nil)
+    test.assert(sequence.easing("quintIn") ~= nil)
+    test.assert(sequence.easing("quintOut") ~= nil)
+    test.assert(sequence.easing("quintInOut") ~= nil)
+    test.assert(sequence.easing("quintOutIn") ~= nil)
+    test.assert(sequence.easing("sineIn") ~= nil)
+    test.assert(sequence.easing("sineOut") ~= nil)
+    test.assert(sequence.easing("sineInOut") ~= nil)
+    test.assert(sequence.easing("sineOutIn") ~= nil)
+    test.assert(sequence.easing("expoIn") ~= nil)
+    test.assert(sequence.easing("expoOut") ~= nil)
+    test.assert(sequence.easing("expoInOut") ~= nil)
+    test.assert(sequence.easing("expoOutIn") ~= nil)
+    test.assert(sequence.easing("backIn") ~= nil)
+    test.assert(sequence.easing("backOut") ~= nil)
+    test.assert(sequence.easing("backInOut") ~= nil)
+    test.assert(sequence.easing("backOutIn") ~= nil)
+    test.assert(sequence.easing("elasticIn") ~= nil)
+    test.assert(sequence.easing("elasticOut") ~= nil)
+    test.assert(sequence.easing("elasticInOut") ~= nil)
+    test.assert(sequence.easing("elasticOutIn") ~= nil)
+    test.assert(sequence.easing("bounceIn") ~= nil)
+    test.assert(sequence.easing("bounceOut") ~= nil)
+    test.assert(sequence.easing("bounceInOut") ~= nil)
+    test.assert(sequence.easing("bounceOutIn") ~= nil)
+end
+
+function suite.tweenTargetNames(): nil
+    test.assert(tweeneval.resolveTarget("transform.x") ~= nil)
+    test.assert(tweeneval.resolveTarget("transform.y") ~= nil)
+    test.assert(tweeneval.resolveTarget("transform.xy") ~= nil)
+    test.assert(tweeneval.resolveTarget("transform.rotation") ~= nil)
+    test.assert(tweeneval.resolveTarget("transform.rotationShortest") ~= nil)
+    test.assert(tweeneval.resolveTarget("transform.scaleX") ~= nil)
+    test.assert(tweeneval.resolveTarget("transform.scaleY") ~= nil)
+    test.assert(tweeneval.resolveTarget("transform.scaleXY") ~= nil)
+    test.assert(tweeneval.resolveTarget("color.rgba") ~= nil)
+    test.assert(tweeneval.resolveTarget("color.a") ~= nil)
+end
+
+return suite
