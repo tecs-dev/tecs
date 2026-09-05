@@ -390,6 +390,7 @@ pub fn check(prefix: &Path) -> Result<()> {
     let mut problems = Vec::new();
     check_contents(&prefix, platform, development, &mut problems)?;
     check_license_position(&prefix, &mut problems)?;
+    check_manifest_paths(&prefix, &mut problems)?;
     check_binaries(&prefix, platform, &mut problems)?;
 
     println!("checked {}", prefix.display());
@@ -639,9 +640,12 @@ fn pack_shaders(root: &Path, prefix: &Path, executable: &Path) -> Result<()> {
     let summary =
         String::from_utf8(output.stdout).context("the shader pack summary is not UTF-8")?;
     let summary = summary.trim();
+    // The source is named relative to the repository, not as the absolute path
+    // this build read. The manifest ships, and a shipped file that names the
+    // desk it was assembled on is the thing `check` refuses everywhere else.
     fs::write(
         prefix.join("bin").join(format!("{SHADER_PACK}.txt")),
-        format!("{}\n{summary}\n", materials.display()),
+        format!("{MATERIALS}\n{summary}\n"),
     )?;
     check_material_parity(root, summary)?;
     println!("{summary}");
@@ -1005,6 +1009,48 @@ fn shader_pack_problem(pack: &Path) -> Option<String> {
         return Some(format!("{name}: carries no materials at all"));
     }
     None
+}
+
+/// Reports a shipped manifest that names the machine the release was built on.
+///
+/// The binaries are held to this by their run paths and their links, and the
+/// text files beside them were not held to anything until a shader-pack
+/// manifest shipped naming a checkout in a home directory. None of these four
+/// files has a reason to carry an absolute path, so none of them may.
+fn check_manifest_paths(prefix: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let manifests = [
+        "share/tecs/build-info.txt",
+        "share/tecs/cargo-dependencies.txt",
+        "share/tecs/cargo-licenses.txt",
+        &format!("bin/{SHADER_PACK}.txt"),
+    ];
+    for relative in manifests {
+        let path = prefix.join(relative);
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for token in text.split_whitespace() {
+            if is_absolute_path(token) {
+                problems.push(format!("{relative}: names a build-machine path: {token}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Reports whether a token reads as an absolute path on any supported platform.
+///
+/// A lone `/` is not one. Some crates still spell a dual license the old way,
+/// as `Apache-2.0 / MIT`, and the separator arrives here as a token of its own.
+fn is_absolute_path(token: &str) -> bool {
+    if token.starts_with('/') {
+        return token.trim_matches('/').chars().next().is_some();
+    }
+    let bytes = token.as_bytes();
+    bytes.len() > 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
 }
 
 /// Reports a release that ships code without the notice that goes with it.
@@ -1375,6 +1421,49 @@ mod tests {
             Vec::<String>::new(),
             "a development install ships no shader pack and is not asked for one"
         );
+    }
+
+    #[test]
+    fn a_shipped_manifest_may_not_name_the_build_machine() {
+        let scratch = tempfile::tempdir().unwrap();
+        let prefix = scratch.path().join("prefix");
+        fs::create_dir_all(prefix.join("share/tecs")).unwrap();
+        fs::create_dir_all(prefix.join("bin")).unwrap();
+        fs::write(
+            prefix.join("share/tecs/cargo-licenses.txt"),
+            "anyhow v1.0.104 MIT OR Apache-2.0\nold-style v1.0.0 MIT/Apache-2.0\n",
+        )
+        .unwrap();
+        fs::write(
+            prefix.join("bin/shaders.tecspack.txt"),
+            "assets/materials\n14 materials: textured\n",
+        )
+        .unwrap();
+        let mut problems = Vec::new();
+        super::check_manifest_paths(&prefix, &mut problems).unwrap();
+        assert_eq!(problems, Vec::<String>::new());
+
+        fs::write(
+            prefix.join("bin/shaders.tecspack.txt"),
+            "/Users/somebody/tecs/assets/materials\n14 materials: textured\n",
+        )
+        .unwrap();
+        let mut problems = Vec::new();
+        super::check_manifest_paths(&prefix, &mut problems).unwrap();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("build-machine path"));
+    }
+
+    #[test]
+    fn a_windows_path_is_absolute_too() {
+        assert!(super::is_absolute_path("/home/somebody/tecs"));
+        assert!(super::is_absolute_path(r"C:\Users\somebody\tecs"));
+        assert!(super::is_absolute_path("C:/Users/somebody/tecs"));
+        assert!(!super::is_absolute_path("assets/materials"));
+        assert!(!super::is_absolute_path("MIT/Apache-2.0"));
+        // `fnv` still spells its dual license `Apache-2.0 / MIT`, so the
+        // separator reaches this as a token by itself.
+        assert!(!super::is_absolute_path("/"));
     }
 
     #[test]
