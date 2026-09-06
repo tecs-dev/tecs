@@ -7,17 +7,15 @@ Install physics, spawn an entity with a
 [`Transform2D`](tecs.ecs.Transform2D), and attach a body:
 
 ```nupp
-local physics = tecs.physics
+tecs.physics.install(world, {gravity = {0.0, 980.0}})
 
-physics.install(world, {gravity = {0.0, 980.0}})
+local ground = world:spawn(tecs.ecs.Transform2D(320, 460))
+tecs.physics.attach(world, ground, {kind = "static", halfWidth = 320, halfHeight = 20})
 
-local ground = world:spawn(ecs.Transform2D(320, 460))
-physics.attach(world, ground, {kind = "static", halfWidth = 320, halfHeight = 20})
+local crate = world:spawn(tecs.ecs.Transform2D(320, 100))
+tecs.physics.attach(world, crate, {halfWidth = 16, halfHeight = 16, friction = 0.4})
 
-local crate = world:spawn(ecs.Transform2D(320, 100))
-physics.attach(world, crate, {halfWidth = 16, halfHeight = 16, friction = 0.4})
-
-physics.applyImpulse(world, crate, 400.0, 0.0)
+tecs.physics.applyImpulse(world, crate, 400.0, 0.0)
 ```
 
 The solver writes each body's `Transform2D` back, so nothing else has to move

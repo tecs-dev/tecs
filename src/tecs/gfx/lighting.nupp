@@ -9,16 +9,13 @@ entity: `tecs.ecs.Transform2D` places it and `PointLight2D` gives it a height, a
 reach, a color, and a strength.
 
 ```nupp
-const ecs = tecs.ecs
-const gfx = tecs.gfx
-
-gfx.lighting.setAmbient(0.12, 0.14, 0.2)
-world:spawn(ecs.Transform2D(320, 180), gfx.PointLight2D(64, 220, 1.0, 0.85, 0.6, 1.4))
+tecs.gfx.lighting.setAmbient(0.12, 0.14, 0.2)
+world:spawn(tecs.ecs.Transform2D(320, 180), tecs.gfx.PointLight2D(64, 220, 1.0, 0.85, 0.6, 1.4))
 world:spawn(
-    ecs.Transform2D(280, 200, 0, 1, 0, 48, 48),
-    gfx.Tint(0.7, 0.7, 0.75, 1),
-    gfx.Occluder2D(1.0),
-    gfx.Renderable2D
+    tecs.ecs.Transform2D(280, 200, 0, 1, 0, 48, 48),
+    tecs.gfx.Tint(0.7, 0.7, 0.75, 1),
+    tecs.gfx.Occluder2D(1.0),
+    tecs.gfx.Renderable2D
 )
 ```
 

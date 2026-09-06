@@ -18,9 +18,7 @@ the library drains on the frame thread instead. This binding therefore declares
 no function pointer anywhere.
 
 ```nupp
-local gamepadnative <const> = require("tecs.platform.gamepadnative")
-
-local backend <const> = assert(gamepadnative.open())
+local backend <const> = assert(tecs.platform.gamepadnative.open())
 ```
 ]]
 

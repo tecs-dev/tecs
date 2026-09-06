@@ -55,24 +55,38 @@ Rust formatting/Clippy/tests, and five headless component smokes. Benchmarks
 and relocated release-package checks remain separate commands; `verify` does
 not claim performance or platform acceptance.
 
+## The Tecs namespace
+
+With Tecs sources in your Nupp project, `tecs` is always available for typed
+qualified access. Write `tecs.ecs.newWorld()` or `tecs.gfx.images.upload(...)`
+directly. You do not need to require a module, declare a global, or run a setup
+function. The same paths name types, such as `tecs.ecs.World`.
+
+Nupp checks the module and member at compile time. It emits one direct import
+for each referenced module when the caller loads; dotted calls in a frame loop
+do not repeatedly look up or load modules. Only referenced modules load, so an
+ECS-only program does not initialize the host or native physics. Type-only
+references do not load a module.
+
+This is a compiler-resolved namespace, not a mutable Lua `_G.tecs` table.
+Use the full path for type annotations. A local variable named `tecs` shadows
+the namespace, so reserve that name for the engine.
+
 ## A world without a host
 
 The ECS runs on its own. Nothing below needs a window, a device, or the host.
 
 ```nupp
-local ecs = require("tecs.ecs")
-local gfx = require("tecs.gfx")
+const world = tecs.ecs.newWorld()
+const moving = world:newQuery({include = {tecs.ecs.Transform2D}})
 
-const world = ecs.newWorld()
-const moving = world:newQuery({include = {ecs.Transform2D}})
-
-world:spawn(ecs.Transform2D(120, 90, 0, 1, 0, 64, 64), gfx.Tint(1, 0.4, 0.2, 1), gfx.Renderable2D)
+world:spawn(tecs.ecs.Transform2D(120, 90, 0, 1, 0, 64, 64), tecs.gfx.Tint(1, 0.4, 0.2, 1), tecs.gfx.Renderable2D)
 world:addSystem({
     name = "example.drift",
-    phase = ecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     run = function(dt: number): nil
         for candidate, count in moving:iter() do
-            local transforms: {ecs.Transform2D} = assert(candidate:getMut(ecs.Transform2D))
+            local transforms: {tecs.ecs.Transform2D} = assert(candidate:getMut(tecs.ecs.Transform2D))
             for index = 1, count as integer do
                 transforms[index].x = transforms[index].x + dt * 30
             end
@@ -89,6 +103,39 @@ dirty for every consumer downstream, the GPU included. And a system's name is
 an externally typed string: the debug server reports it and an agent selects on
 it, so it does not move because a module did.
 
+## Squares, circles and other shapes
+
+A drawable entity needs a transform, tint and `Renderable2D`. The transform's
+last two arguments set its width and height; equal values produce a square.
+Add a material to select another shape:
+
+```nupp
+const world = tecs.ecs.newWorld()
+world:spawn(
+    tecs.ecs.Transform2D(80, 80, 0, 1, 0, 64, 64),
+    tecs.gfx.Tint(1, 0.4, 0.2, 1),
+    tecs.gfx.Renderable2D
+)
+world:spawn(
+    tecs.ecs.Transform2D(180, 80, 0, 1, 0, 64, 64),
+    tecs.gfx.Tint(0.2, 0.6, 1, 1),
+    tecs.gfx.Material(tecs.gpu.materials.id("circle")),
+    tecs.gfx.Renderable2D
+)
+```
+
+[`tecs.gpu.materials`](tecs.gpu.materials) describes the other built-in shapes
+and their parameters. These are rendered shapes; attach a body through
+[`tecs.physics`](tecs.physics) when they also need collision and motion.
+Physics uses Rapier. Its batched native interface sends the world's changes
+and reads the resulting poses once per fixed step; games need only
+`tecs.physics.install`, `attach`, and the other entity-facing operations.
+
+Tiled map import and the retained UI are not implemented in this version.
+Sprite sheets are supported, but do not read Tiled map files. Taffy was the
+layout solver for the earlier UI; it is not a physics solver and the current
+engine has no Taffy-backed UI layer.
+
 ## A component of your own
 
 A game is one compiled component exporting a session constructor. The Rust host
@@ -102,17 +149,12 @@ module mygame
 The smallest complete game entry.
 ]]
 
-local application = require("tecs.application")
-local ecs = require("tecs.ecs")
-local gfx = require("tecs.gfx")
-local host = require("tecs.host")
-
-local function install(exclusive app: application.Application): nil
+local function install(exclusive app: tecs.application.Application): nil
     local width, height = app.window:getSize()
     app.world:spawn(
-        ecs.Transform2D(width * 0.5, height * 0.5, 0, 1, 0, 160, 160),
-        gfx.Tint(0.15, 0.65, 1, 1),
-        gfx.Renderable2D
+        tecs.ecs.Transform2D(width * 0.5, height * 0.5, 0, 1, 0, 160, 160),
+        tecs.gfx.Tint(0.15, 0.65, 1, 1),
+        tecs.gfx.Renderable2D
     )
 end
 
@@ -129,8 +171,8 @@ export function create(
     height: integer?,
     debug: boolean?,
     maxFrames: integer?
-): host.Session
-    return host.createWithPlugin(install, title or "My game", width, height, debug, maxFrames)
+): tecs.host.Session
+    return tecs.host.createWithPlugin(install, title or "My game", width, height, debug, maxFrames)
 end
 ```
 

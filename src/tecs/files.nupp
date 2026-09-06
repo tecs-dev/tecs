@@ -9,13 +9,12 @@ thing Nupp cannot supply, because it is a property of the product rather than of
 the platform: which directories belong to *this* game.
 
 ```nupp
-local files <const> = require("tecs.files")
 local disk <const> = require("nupp.io.files")
 
-files.setPreferenceIdentity("Ex Nihilo", "Starfarer")
+tecs.files.setPreferenceIdentity("Ex Nihilo", "Starfarer")
 
-local slot <const> = files.writablePath("saves/slot1.json")
-disk.createDirectory(files.writablePath("saves"))
+local slot <const> = tecs.files.writablePath("saves/slot1.json")
+disk.createDirectory(tecs.files.writablePath("saves"))
 local ok, reason = disk.writeAtomic(slot, bytes)
 ```
 

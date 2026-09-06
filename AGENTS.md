@@ -153,14 +153,17 @@ What survives the crossing is what is Tecs-specific, and a module that only forw
 
 ### The module graph
 
-A game requires the module it needs: `tecs.ecs`, `tecs.gfx`, `tecs.application`. There is no aggregator, so
-there is no cycle to design around and no lazy resolver to keep honest. Public names are
-`tecs.<module>.<thing>`, and one level deeper where a module has children, so `tecs.gfx.layers.configure` is a
-public name and nothing goes past it.
+A game uses the always-available typed `tecs` namespace directly:
+`tecs.ecs.newWorld()`, `tecs.gfx.Tint(...)`, and `tecs.gfx.layers.configure(...)`.
+No import prelude or aggregator is needed. Nupp resolves the longest registered
+module path and emits one direct import per referenced module at caller load,
+so fully qualified calls are also the convention inside frame loops. Use full
+paths in type annotations and do not shadow `tecs` with a local binding.
 
-Engine modules require `tecs.ecs` rather than anything above it, and a module that needs only a type reaches
-for the module that declares it. `tecs.ecs` is one table for both readers: the ECS a game writes and the module
-engine code requires.
+Existing engine-local imports can retain their short bindings. A dynamic
+`require` is reserved for actual first-use loading, such as selecting Rapier
+only when a world installs native physics. Do not replace that with a qualified
+reference without preserving the native library's loading boundary.
 
 `tecs.internal.*` modules are implementation details with no stability guarantee, and the compiler enforces
 that: a module may statically import `tecs.internal.*` only if its own first namespace segment is `tecs`. That
@@ -202,7 +205,11 @@ MCP debug server.
 Deferred with a recorded contract: pen input, and audio device hotplug. `src/tecs/input.nupp` states what would
 have to come back.
 
-Intentionally removed: general post-processing, tiled maps, multi-camera, gamepad motion sensors and touchpads,
+Missing from the Nupp engine: Tiled map import, retained UI, 3D rendering,
+custom post-processing and multiple cameras. Earlier versions had Tiled support
+and a Taffy-backed UI; rendering sprites does not replace either subsystem.
+
+Intentionally removed: gamepad motion sensors and touchpads,
 trigger rumble, LED, player index, and standalone sensors. Each is recorded at its declaration or in the
 migration plan rather than silently absent.
 
@@ -353,8 +360,8 @@ Use active voice. Never use an em dash. Name sections for their subject, not as 
 `What this means`, `How it works` or `Why this exists`. Prefer one complete example to several paragraphs
 that narrate the same calls.
 
-An example that calls a Tecs module inside a frame or other hot loop binds that module to a local outside the
-loop, and calls through the local rather than resolving the module again on every iteration.
+Examples use fully qualified `tecs` paths, including in hot loops. Nupp hoists
+the module import; there is no per-iteration namespace resolver.
 
 A tag earns its place by saying what the signature cannot: units, the coordinate space, what nil
 means, what happens at a boundary, whether a returned table is the caller's to keep or a view

@@ -17,9 +17,7 @@ entering Nupp from there is undefined. Every observation is therefore pulled by
 function pointer anywhere.
 
 ```nupp
-local audionative <const> = require("tecs.platform.audionative")
-
-local backend <const> = assert(audionative.open(48000, 2, 32))
+local backend <const> = assert(tecs.platform.audionative.open(48000, 2, 32))
 ```
 ]]
 

@@ -14,10 +14,8 @@ itself is harder to reason about than one that refuses to run, so a pass that
 reads a target no earlier pass writes is rejected where it is declared.
 
 ```nupp
-const passes = tecs.gpu.passes
-
-passes.declareTarget({name = "gameOverlay", format = "rgba8"})
-passes.insertPassBefore("present", {
+tecs.gpu.passes.declareTarget({name = "gameOverlay", format = "rgba8"})
+tecs.gpu.passes.insertPassBefore("present", {
     name = "gameOverlay",
     inputs = {"scene"},
     outputs = {"gameOverlay"},
@@ -62,13 +60,13 @@ that carries WGSL, the section carrying it, and the backend compiling untrusted
 shader text, which is a contract worth designing rather than guessing. Until
 then a game's post-process is a clear.
 
-**Tiled maps are intentionally removed.** There was nothing to port: the Teal
-implementation had none either. A tile is already an entity with a transform and
-a sprite, consecutive tiles sharing an image already collapse into one indirect
-draw, and the ones off screen are already culled, so what a tile-map subsystem
-would add is a compressed authoring format and a chunked spatial index. Neither
-is a rendering concern, and inventing both to answer a feature nothing asked for
-would be inventing a format this engine then has to keep.
+**Tiled map support is absent from the current engine.** Earlier
+`tecs2d.tiled` read Tiled JSON maps and tilesets, animated tiles, handled
+parallax and image layers, updated tiles, and spawned objects through registered
+bundles. That implementation was removed during engine consolidation before
+the Nupp port. Instanced sprites can render tiles, but do not replace map
+parsing, tileset resolution, object metadata or tile editing. Those facilities
+belong to a map subsystem rather than this render-pass graph.
 
 **Multiple cameras are deferred with a stated contract.** The Teal renderer
 extracted once and then reculled, shaded, and composited per view through shared

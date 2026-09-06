@@ -9,10 +9,8 @@ through `nupp.suspension` and resumes with the answer, so the same call reads th
 same way inside a frame system and inside a startup script.
 
 ```nupp
-local assets <const> = require("tecs.assets")
-
 local loader = app.assets
-local handle, reason = loader:request(assets.bytes, "levels/one.json")
+local handle, reason = loader:request(tecs.assets.bytes, "levels/one.json")
 if handle == nil then
     return nil, reason
 end

@@ -55,11 +55,8 @@ components. The subsystem that cares for it finds it by query. Snapshots save
 world state, and the debug server inspects and edits it while the game runs.
 
 ```nupp
-local ecs = require("tecs.ecs")
-local gfx = require("tecs.gfx")
-
-const world = ecs.newWorld()
-world:spawn(ecs.Transform2D(120, 90, 0, 1, 0, 64, 64), gfx.Tint(1, 0.4, 0.2, 1), gfx.Renderable2D)
+const world = tecs.ecs.newWorld()
+world:spawn(tecs.ecs.Transform2D(120, 90, 0, 1, 0, 64, 64), tecs.gfx.Tint(1, 0.4, 0.2, 1), tecs.gfx.Renderable2D)
 world:update(1 / 60)
 ```
 

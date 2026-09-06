@@ -11,10 +11,7 @@ advances on the fixed clock and writes the frame it resolves into the entity's
 select the same frames.
 
 ```nupp
-const animation = tecs.gfx.animation
-const sheet = tecs.gfx.sheet
-
-const hero = sheet.grid({
+const hero = tecs.gfx.sheet.grid({
     name = "hero",
     imageWidth = 256,
     imageHeight = 32,
@@ -24,13 +21,13 @@ const hero = sheet.grid({
 })
 
 hero:bind(tecs.gfx.images.id("sprites/hero"))
-animation.plugin(world)
+tecs.gfx.animation.plugin(world)
 
 world:spawn(
     tecs.ecs.Transform2D(64, 64, 0, 1, 0, 32, 32),
     tecs.gfx.Tint(1, 1, 1, 1),
     hero:sprite(),
-    animation.of(hero, "run"),
+    tecs.gfx.animation.of(hero, "run"),
     tecs.gfx.Renderable2D
 )
 ```

@@ -1,0 +1,37 @@
+local suite = {}
+
+function suite.usesQualifiedValuesTypesAndNestedModulesWithoutImports(): nil
+    local world: tecs.ecs.World = tecs.ecs.newWorld({maxEntities = 4})
+    local square = world:spawn(
+        tecs.ecs.Transform2D(80, 80, 0, 1, 0, 64, 64),
+        tecs.gfx.Tint(1, 0.4, 0.2, 1),
+        tecs.gfx.Renderable2D
+    )
+    local circle = world:spawn(
+        tecs.ecs.Transform2D(180, 80, 0, 1, 0, 64, 64),
+        tecs.gfx.Tint(0.2, 0.6, 1, 1),
+        tecs.gfx.Material(tecs.gpu.materials.id("circle")),
+        tecs.gfx.Renderable2D
+    )
+    local query = world:newQuery({include = {tecs.ecs.Transform2D, tecs.gfx.Renderable2D}})
+    world:addSystem({
+        name = "namespace.move",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number): nil
+            for candidate, count in query:iter() do
+                local transforms: {tecs.ecs.Transform2D} = assert(candidate:getMut(tecs.ecs.Transform2D))
+                for index = 1, count as integer do
+                    transforms[index].x = transforms[index].x + 30 * dt
+                end
+            end
+        end,
+    })
+    world:update(0.1)
+    local pose: tecs.ecs.Transform2D = assert(world:get(square, tecs.ecs.Transform2D))
+    nupp.test.equal(pose.x, 83)
+    local material: tecs.gfx.Material = assert(world:get(circle, tecs.gfx.Material))
+    nupp.test.equal(tecs.gpu.materials.name(material.id), "circle")
+    nupp.test.equal(world.liveCount, 2)
+end
+
+return suite

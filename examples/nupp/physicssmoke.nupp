@@ -13,42 +13,42 @@ DYLD_LIBRARY_PATH=target/release nupp run examples/nupp/physicssmoke.nupp
 ```
 ]]
 
-local ecs = require("tecs.ecs")
-local physics = require("tecs.physics")
-
-local world = ecs.newWorld()
-local simulation = physics.install(world, {gravity = {0.0, 980.0}})
+local world = tecs.ecs.newWorld()
+local simulation = tecs.physics.install(world, {gravity = {0.0, 980.0}})
 print(("solver ready: substeps %d, workers %d"):format(simulation.subStepCount, simulation.workerCount))
 
-local floor = world:spawn(ecs.Transform2D(0, 400))
-physics.attach(world, floor, {kind = "static", halfWidth = 400, halfHeight = 16})
+local floor = world:spawn(tecs.ecs.Transform2D(0, 400))
+tecs.physics.attach(world, floor, {kind = "static", halfWidth = 400, halfHeight = 16})
 
-local box = world:spawn(ecs.Transform2D(0, 0))
-physics.attach(world, box, {halfWidth = 16, halfHeight = 16, restitution = 0.1})
+local box = world:spawn(tecs.ecs.Transform2D(0, 0))
+tecs.physics.attach(world, box, {halfWidth = 16, halfHeight = 16, restitution = 0.1})
 
 local pad = world:spawn()
-physics.attachCollider(world, pad, box, {radius = 6, offsetY = 20})
+tecs.physics.attachCollider(world, pad, box, {radius = 6, offsetY = 20})
 
-local wheel = world:spawn(ecs.Transform2D(120, 100))
-physics.attach(world, wheel, {radius = 12})
+local wheel = world:spawn(tecs.ecs.Transform2D(120, 100))
+tecs.physics.attach(world, wheel, {radius = 12})
 local joint = world:spawn()
-physics.attachJoint(world, joint, floor, wheel, {kind = "revolute", anchorAX = 120, anchorAY = -300})
+tecs.physics.attachJoint(world, joint, floor, wheel, {kind = "revolute", anchorAX = 120, anchorAY = -300})
 
 local contacts: integer = 0
-world:observe(0, physics.ContactBegin, function(_value: physics.ContactPair, exclusive _running: ecs.World): nil
+world:observe(0, tecs.physics.ContactBegin, function(
+    _value: tecs.physics.ContactPair,
+    exclusive _running: tecs.ecs.World
+): nil
     contacts = contacts + 1
 end)
 
 for frame = 1, 300 do
     if frame == 30 then
-        physics.applyImpulse(world, box, 400.0, 0.0)
+        tecs.physics.applyImpulse(world, box, 400.0, 0.0)
     end
     world:update(1 / 60)
 end
 
-local resting = assert(world:get(box, ecs.Transform2D)).y
-local hit = physics.raycast(world, 0, 0, 0, 500)
-local vx, vy = physics.velocity(world, box)
+local resting = assert(world:get(box, tecs.ecs.Transform2D)).y
+local hit = tecs.physics.raycast(world, 0, 0, 0, 500)
+local vx, vy = tecs.physics.velocity(world, box)
 print(
     (
         "box y %.2f, vx %.2f, vy %.2f, contacts %d, ray %s"
@@ -58,9 +58,9 @@ print(
     (
         "body live %s, shape live %s, joint live %s"
     ):format(
-        tostring(physics.hasBody(world, box)),
-        tostring(world:has(pad, physics.ColliderShape)),
-        tostring(world:has(joint, physics.JointLink))
+        tostring(tecs.physics.hasBody(world, box)),
+        tostring(world:has(pad, tecs.physics.ColliderShape)),
+        tostring(world:has(joint, tecs.physics.JointLink))
     )
 )
 
@@ -70,9 +70,9 @@ print(
     (
         "after reload, box y %.2f, body live %s, motion vx %.2f"
     ):format(
-        assert(world:get(box, ecs.Transform2D)).y,
-        tostring(physics.hasBody(world, box)),
-        assert(world:get(box, physics.Motion)).vx
+        assert(world:get(box, tecs.ecs.Transform2D)).y,
+        tostring(tecs.physics.hasBody(world, box)),
+        assert(world:get(box, tecs.physics.Motion)).vx
     )
 )
 

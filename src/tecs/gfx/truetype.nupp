@@ -10,13 +10,11 @@ an antialiased coverage bitmap and `distanceField` turns that bitmap into the
 field a distance-field text shader samples.
 
 ```nupp
-const truetype = require("tecs.gfx.truetype")
-
-const face, reason = truetype.parse(bytes)
+const face, reason = tecs.gfx.truetype.parse(bytes)
 assert(face, reason)
 
 const glyph = face:glyphIndex(0x41)
-const contours = truetype.outline(face, glyph, 48.0 / face.unitsPerEm)
+const contours = tecs.gfx.truetype.outline(face, glyph, 48.0 / face.unitsPerEm)
 ```
 
 Everything here works in font units until a scale is supplied. A font unit is

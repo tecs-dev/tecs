@@ -16,17 +16,14 @@ Physics seeds history automatically; an authored history should initially match
 the entity's creation pose.
 
 ```nupp
-const ecs = tecs.ecs
-const gfx = tecs.gfx
+const image = tecs.gfx.images.upload({name = "tiles/grass", width = 2, height = 2, pixels = grassRgba8})
 
-const image = gfx.images.upload({name = "tiles/grass", width = 2, height = 2, pixels = grassRgba8})
-
-world:spawn(gfx.Camera2D(320, 180, 1, 0), gfx.ActiveCamera)
+world:spawn(tecs.gfx.Camera2D(320, 180, 1, 0), tecs.gfx.ActiveCamera)
 world:spawn(
-    ecs.Transform2D(320, 180, 0, 1, 0, 64, 64),
-    gfx.Tint(1, 1, 1, 1),
-    gfx.Sprite(image),
-    gfx.Renderable2D
+    tecs.ecs.Transform2D(320, 180, 0, 1, 0, 64, 64),
+    tecs.gfx.Tint(1, 1, 1, 1),
+    tecs.gfx.Sprite(image),
+    tecs.gfx.Renderable2D
 )
 ```
 

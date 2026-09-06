@@ -10,9 +10,7 @@ window whether its contents are positioned by the camera, in screen pixels, or
 in virtual coordinates, and one rectangle is right for all three.
 
 ```nupp
-const clips = tecs.gfx.clips
-
-clips.setRegion(1, {x = 16, y = 16, width = 320, height = 180})
+tecs.gfx.clips.setRegion(1, {x = 16, y = 16, width = 320, height = 180})
 
 world:spawn(
     tecs.ecs.Transform2D(64, 64, 0, 1, 0, 32, 32),

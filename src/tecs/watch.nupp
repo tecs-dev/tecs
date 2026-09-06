@@ -4,14 +4,11 @@ module tecs.watch
 Watches content for changes and hands settled ones to reload handlers.
 
 ```nupp
-local files <const> = require("tecs.files")
-local watch <const> = require("tecs.watch")
-
-watch.on("shader", function(change: watch.Change): nil
+tecs.watch.on("shader", function(change: tecs.watch.Change): nil
     print("reload " .. change.path)
 end)
-watch.add(files.assetPath("shaders/lit.wgsl"))
-watch.install({intervalSeconds = 0.25})
+tecs.watch.add(tecs.files.assetPath("shaders/lit.wgsl"))
+tecs.watch.install({intervalSeconds = 0.25})
 ```
 
 A host advances the watcher by calling `poll` once per turn and `dispatch` once

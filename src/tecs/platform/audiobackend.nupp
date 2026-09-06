@@ -21,11 +21,9 @@ that has since been recycled is recognized as stale by the generation inside
 the handle rather than by anything the backend tracked.
 
 ```nupp
-local audiobackend <const> = require("tecs.platform.audiobackend")
-
-local backend <const> = audiobackend.silent()
-local buffer <const> = {audiobackend.newCommand()}
-buffer[1].kind = audiobackend.SET_MASTER_GAIN
+local backend <const> = tecs.platform.audiobackend.silent()
+local buffer <const> = {tecs.platform.audiobackend.newCommand()}
+buffer[1].kind = tecs.platform.audiobackend.SET_MASTER_GAIN
 buffer[1].gain = 0.5
 backend.submit(buffer, 1)
 ```

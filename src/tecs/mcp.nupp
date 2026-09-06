@@ -18,13 +18,11 @@ tool may opt in with `whenParked = true` only if it never touches the in-progres
 world. `readOnly` alone grants no such permission.
 
 ```nupp
-local mcp = require("tecs.mcp")
-
-local server = assert(mcp.listen(7100))
-mcp.bind(app.world, app)
+local server = assert(tecs.mcp.listen(7100))
+tecs.mcp.bind(app.world, app)
 
 -- once per frame
-mcp.poll(server)
+tecs.mcp.poll(server)
 ```
 
 ## Registering a tool

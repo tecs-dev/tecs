@@ -9,9 +9,7 @@ centers, and pivots that may move between frames. `fromAseprite` reads its JSON
 export into the same interface `grid`, `rects`, and `build` produce.
 
 ```nupp
-const sheet = tecs.gfx.sheet
-
-const hero = sheet.grid({
+const hero = tecs.gfx.sheet.grid({
     name = "game.hero",
     imageWidth = 256,
     imageHeight = 32,

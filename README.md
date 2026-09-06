@@ -10,15 +10,10 @@ selects that export by name and drives it one frame at a time:
 ```nupp
 module mygame
 
-local application = require("tecs.application")
-local ecs = require("tecs.ecs")
-local gfx = require("tecs.gfx")
-local host = require("tecs.host")
-
-local function install(exclusive app: application.Application): nil
+local function install(exclusive app: tecs.application.Application): nil
     app.world:addSystem({
         name = "game.Tick",
-        phase = ecs.phases.Update,
+        phase = tecs.ecs.phases.Update,
         run = function(dt: number): nil
             -- Update game state.
         end,
@@ -32,10 +27,15 @@ export function create(
     height: integer?,
     debug: boolean?,
     maxFrames: integer?
-): host.Session
-    return host.createWithPlugin(install, title or "My game", width, height, debug, maxFrames)
+): tecs.host.Session
+    return tecs.host.createWithPlugin(install, title or "My game", width, height, debug, maxFrames)
 end
 ```
+
+`tecs` is available as a typed namespace whenever Tecs is in the Nupp project.
+Use `tecs.ecs.newWorld()`, `tecs.gfx.Tint(...)`, and nested modules directly;
+no `require` or initialization call is needed. Nupp resolves these paths at
+compile time and loads each referenced module once when the caller loads.
 
 The ECS runs with no host at all, so simulation code, a headless tool and a
 test suite reach the same world without starting a graphics stack.
@@ -53,8 +53,11 @@ test suite reach the same world without starting a graphics stack.
   and device enumeration; physics over Rapier; sequencing with tweening; asset
   orchestration; file watching; and an MCP debug server.
 
-General post-processing, tiled maps and multi-camera rendering are
-intentionally absent rather than pending.
+Tiled map loading, retained UI, 3D rendering, custom post-processing and
+multi-camera rendering are absent from the current Nupp engine. Older Tecs
+versions had Tiled integration and a retained UI backed by Taffy; neither is
+available here. The 2D shape materials remain available, including rectangles,
+circles, rings, rounded rectangles, triangles and stars.
 
 ## Ownership boundaries
 

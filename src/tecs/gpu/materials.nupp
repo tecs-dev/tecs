@@ -10,11 +10,9 @@ the id an instance carries. This module owns the names and the numbering; the
 backend owns the compiled dispatch.
 
 ```nupp
-const materials = tecs.gpu.materials
-
 world:spawn(
     tecs.ecs.Transform2D(120, 80, 1, 0, 0, 64, 64),
-    tecs.gfx.Material(materials.id("rounded"), 0.25),
+    tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.25),
     tecs.gfx.Tint(0.2, 0.6, 1.0, 1.0),
     tecs.gfx.Renderable2D
 )

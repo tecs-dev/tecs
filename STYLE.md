@@ -7,6 +7,12 @@ opportunistically.
 
 ## Files and modules
 
+Game code and public examples use fully qualified `tecs` paths for values and
+types. Nupp resolves them without an import prelude and hoists their module
+loads, including calls inside hot loops. Keep `tecs` unshadowed. Existing
+engine-local bindings follow the naming rules below; use dynamic `require`
+only when loading on first use is part of the behavior.
+
 - One concern per file, and a file is a **module**: a namespace of functions,
   types and values. Types and component definitions live inside the module that
   owns them rather than in files of their own.
@@ -72,7 +78,7 @@ These are judgment, and they are what a review is for.
 ## Formatters
 
 `nupp task format` applies them and `nupp task format-check` reports
-without writing. The suffix table lives in the Cargo build-support crate.
+without writing. The suffix table lives in `tools/tecs/dev/format.nupp`.
 Every tool is configured to the two rules above, and none of them reflows a
 comment body.
 

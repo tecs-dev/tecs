@@ -9,18 +9,13 @@ entity per drawn character, each an ordinary textured quad sampling the font's
 atlas, so text moves, layers, and draws through exactly the path a sprite does.
 
 ```nupp
-local ecs = require("tecs.ecs")
-local gfx = require("tecs.gfx")
-local fonts = require("tecs.gfx.fonts")
-local text = require("tecs.gfx.text")
-
-const font = assert(fonts.newTTF({source = "assets/fonts/JetBrainsMono-ExtraBold.ttf"}))
-text.install(world)
+const font = assert(tecs.gfx.fonts.newTTF({source = "assets/fonts/JetBrainsMono-ExtraBold.ttf"}))
+tecs.gfx.text.install(world)
 
 world:spawn(
-    ecs.Transform2D(24, 24),
-    gfx.Tint(0.92, 0.96, 1.0, 1.0),
-    gfx.Text("tecs\n1200 entities", font, 28, "center")
+    tecs.ecs.Transform2D(24, 24),
+    tecs.gfx.Tint(0.92, 0.96, 1.0, 1.0),
+    tecs.gfx.Text("tecs\n1200 entities", font, 28, "center")
 )
 ```
 

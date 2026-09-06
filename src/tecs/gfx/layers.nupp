@@ -9,10 +9,8 @@ world on layer 1. Extraction turns a layer, a height, and a world position into
 one depth from zero to one, with zero nearest.
 
 ```nupp
-const layers = tecs.gfx.layers
-
-layers.configure(1, {sort = "topdown", parallax = 0.4})
-layers.configure(8, {sort = "z", screenSpace = true, unlit = true, overlay = true})
+tecs.gfx.layers.configure(1, {sort = "topdown", parallax = 0.4})
+tecs.gfx.layers.configure(8, {sort = "z", screenSpace = true, unlit = true, overlay = true})
 
 world:spawn(
     tecs.ecs.Transform2D(16, 16, 0, 8, 0, 96, 24),

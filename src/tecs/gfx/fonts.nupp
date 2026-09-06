@@ -9,13 +9,11 @@ rasterized and packed the first time something asks for it, and the atlas
 crosses to the backend as one ordinary `tecs.gfx.images` upload.
 
 ```nupp
-local fonts = require("tecs.gfx.fonts")
-
-const font, reason = fonts.newTTF({source = "assets/fonts/JetBrainsMono-ExtraBold.ttf"})
+const font, reason = tecs.gfx.fonts.newTTF({source = "assets/fonts/JetBrainsMono-ExtraBold.ttf"})
 assert(font, reason)
 
-const glyph = fonts.glyph(font, 0x41)
-const image = fonts.imageOf(font)
+const glyph = tecs.gfx.fonts.glyph(font, 0x41)
+const image = tecs.gfx.fonts.imageOf(font)
 ```
 
 Every metric this module returns is in em units, so multiplying one by a text's

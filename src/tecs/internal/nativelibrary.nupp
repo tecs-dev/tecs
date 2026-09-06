@@ -14,9 +14,7 @@ name a bare symbol, and lets one search cover both a packaged install and a
 development checkout. Call `open` above the declarations that need it.
 
 ```nupp
-local nativelibrary <const> = require("tecs.internal.nativelibrary")
-
-nativelibrary.open("tecs_physics", "TECS_PHYSICS_LIBRARY")
+tecs.internal.nativelibrary.open("tecs_physics", "TECS_PHYSICS_LIBRARY")
 
 cdef function tecsPhysicsStep(world: voidptr?, batch: voidptr?): uint32
 ```

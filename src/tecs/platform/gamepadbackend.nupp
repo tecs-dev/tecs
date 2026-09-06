@@ -16,10 +16,8 @@ no gamepad attached: `none` is the device-free backend a headless build gets,
 and a test that wants to drive a device supplies its own.
 
 ```nupp
-local gamepadbackend <const> = require("tecs.platform.gamepadbackend")
-
-local backend <const> = gamepadbackend.none()
-local buffer <const> = {gamepadbackend.newEvent()}
+local backend <const> = tecs.platform.gamepadbackend.none()
+local buffer <const> = {tecs.platform.gamepadbackend.newEvent()}
 print(backend.drain(buffer))
 ```
 ]]

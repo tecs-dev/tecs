@@ -8,9 +8,7 @@ a [`Sprite`](tecs.gfx.Sprite) stores. The backend owns the texture, the view,
 the sampler, and the bind group; nothing native reaches game code.
 
 ```nupp
-const images = tecs.gfx.images
-
-const id = images.upload({
+const id = tecs.gfx.images.upload({
     name = "tiles/grass",
     width = 2,
     height = 2,

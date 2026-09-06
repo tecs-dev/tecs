@@ -16,19 +16,17 @@ Register an action on the world, name it from a program, and bind each playback
 to the entities it acts on:
 
 ```nupp
-local sequence <const> = require("tecs.sequence")
-
-sequence.registerAction(world, "game.lockControls", function(_world, _context): nil
+tecs.sequence.registerAction(world, "game.lockControls", function(_world, _context): nil
     controlsLocked = true
 end)
 
-local intro <const> = sequence.define("game.bossIntro", {
-    sequence.call("game.lockControls"),
-    sequence.wait(1.5),
-    sequence.emit("boss.ready"),
+local intro <const> = tecs.sequence.define("game.bossIntro", {
+    tecs.sequence.call("game.lockControls"),
+    tecs.sequence.wait(1.5),
+    tecs.sequence.emit("boss.ready"),
 })
 
-local playback <const> = sequence.play(world, intro, {owner = encounter, bindings = {boss = bossEntity}})
+local playback <const> = tecs.sequence.play(world, intro, {owner = encounter, bindings = {boss = bossEntity}})
 ```
 
 Program names are a snapshot compatibility surface. Use stable qualified names.

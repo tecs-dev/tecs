@@ -18,9 +18,7 @@ longer clips stream separately for each voice. `LoadOptions.stream` overrides
 that choice.
 
 ```nupp
-local audio <const> = require("tecs.audio")
-
-local mixer <const> = audio.newAudio()
+local mixer <const> = tecs.audio.newAudio()
 local step <const> = assert(mixer:load("assets/sfx/step.ogg"))
 mixer:setLimit("footstep", {voices = 3, cooldown = 0.05})
 
@@ -70,13 +68,11 @@ thread and `read` empties it on the frame thread, so nothing a device thread
 runs ever enters Nupp.
 
 ```nupp
-local audio <const> = require("tecs.audio")
-
-for _, device in ipairs(audio.recordingDevices()) do
+for _, device in ipairs(tecs.audio.recordingDevices()) do
     print(device.id, device.name, device.frequency, device.channels)
 end
 
-local microphone <const> = assert(audio.openMicrophone({channels = 1}))
+local microphone <const> = assert(tecs.audio.openMicrophone({channels = 1}))
 local block <const> = assert(microphone:read())
 microphone:destroy()
 ```

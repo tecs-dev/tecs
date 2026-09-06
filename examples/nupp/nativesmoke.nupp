@@ -20,9 +20,6 @@ tecs-host --component nativesmoke.nuppc --entry nativesmoke.create \
 ```
 ]]
 
-local application = require("tecs.application")
-local host = require("tecs.host")
-
 --- The binding modules a release has to be able to load, with the library each
 --- one names.
 ---
@@ -39,7 +36,7 @@ const SERVICES: {
 
 --- Loads every native binding module and raises on the first that fails.
 --- @raises when a binding module cannot be loaded, naming its library
-local function install(exclusive _app: application.Application): nil
+local function install(exclusive _app: tecs.application.Application): nil
     for index = 1, #SERVICES do
         const entry = SERVICES[index]
         const loaded, failure = pcall(require, entry[1])
@@ -64,6 +61,6 @@ export function create(
     height: integer?,
     debug: boolean?,
     maxFrames: integer?
-): host.Session
-    return host.createWithPlugin(install, title or "Tecs native smoke", width, height, debug, maxFrames)
+): tecs.host.Session
+    return tecs.host.createWithPlugin(install, title or "Tecs native smoke", width, height, debug, maxFrames)
 end
