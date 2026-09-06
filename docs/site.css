@@ -27,7 +27,7 @@
     --nuppdoc-dark-accent-hover: #d0b6e9;
     --nuppdoc-dark-accent-soft: #86779529;
     --nuppdoc-home-width: 1200px;
-    --nuppdoc-hero-glow-size: 320px;
+    --nuppdoc-hero-glow-size: 760px;
     --nuppdoc-hero-glow-blur: 60px;
     --nuppdoc-hero-glow-opacity: 0.65;
 }
@@ -43,6 +43,14 @@
  * Tecs supplies its own entry points in the hero and documentation navigation. */
 .nuppdoc-top-nav {
     display: none;
+}
+
+/* The base theme fills a hovered sidebar link with a soft background. Tecs
+ * marks it with an underline instead, leaving the background untouched. */
+.nuppdoc-sidebar a:hover {
+    background: none;
+    text-decoration: underline;
+    text-underline-offset: 3px;
 }
 
 .nuppdoc-brand-name,
@@ -100,8 +108,13 @@
     border-radius: 4px;
 }
 
+/* The hero image is opaque edge to edge (no transparent margin around the TV
+ * for a glow to show through), so the starburst has to be sized past the
+ * image's own box to be visible at all, and its gradient has to fade to
+ * transparent before the disc's clipped edge, or that edge shows as a hard
+ * ring where it crosses outside the image. */
 .nuppdoc-hero-starburst {
-    background: linear-gradient(180deg, #110f0d, #372455, #dd2020, #867795, #9b8d75);
+    background: radial-gradient(circle, #dd2020 0%, #372455 30%, #867795 50%, #9b8d75 65%, transparent 80%);
 }
 
 .nuppdoc-hero-action.brand {
@@ -163,6 +176,7 @@
 @media (max-width: 760px) {
     :root {
         --nuppdoc-home-gutter: 1.25rem;
+        --nuppdoc-hero-glow-size: 480px;
     }
 
     .nuppdoc-home-content {
