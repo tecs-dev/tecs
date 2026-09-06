@@ -95,10 +95,10 @@ pub fn sdk(root: &Path) -> Option<PathBuf> {
     let script = search_upward(root, "nupp/scripts/toolchain")?;
     let mut command = Command::new(&script);
     // The Nupp toolchain builds its embedding library with its own Cargo, and
-    // that project's minimum compiler is newer than this tree's
-    // `rust-toolchain.toml` pin. Inheriting the pin makes the nested build fail
-    // on a version it never asked for. `native/rust/winit-host/build.rs` clears
-    // the same variables for the same reason.
+    // process-specific compiler overrides must not leak into that build.
+    // Keep this tree's Rust pin aligned with the SDK's pinned compiler, since
+    // libnupp.a carries Rust's standard library. `native/rust/winit-host/build.rs`
+    // clears the same variables for the same reason.
     for variable in ["RUSTUP_TOOLCHAIN", "RUSTC", "RUSTC_WRAPPER", "CARGO"] {
         command.env_remove(variable);
     }

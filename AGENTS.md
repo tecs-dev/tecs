@@ -86,9 +86,9 @@ this one. Set `NUPP_SDK` to a staged one to skip that.
 
 Two things about that SDK are worth knowing before they cost an afternoon. It is staged for a named feature
 set, and the runtime refuses to load a component whose declared features the library lacks, which reads as a
-load failure in a host that built cleanly. And staging it runs the Nupp project's own Cargo build, whose
-minimum compiler is newer than this tree's `rust-toolchain.toml` pin, so the staging call clears the Cargo
-environment it would otherwise inherit.
+load failure in a host that built cleanly. Staging runs Nupp's own Cargo build, so it clears inherited
+Cargo process overrides. Keep this tree's Rust pin aligned with the SDK's compiler: `libnupp.a` carries
+Rust's standard library, and mixing compiler versions can produce duplicate symbols on Linux.
 
 Benchmarks are in `bench/nupp`, and `signature` rather than `bitset` is the archetype-signature one, because
 this ECS has no bitset. `latency` has no counterpart: nothing in Nupp pushes an event into the host queue, and

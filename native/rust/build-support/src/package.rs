@@ -765,6 +765,10 @@ fn write_inventory(root: &Path, preset: Preset, prefix: &Path) -> Result<()> {
     let mut tree = Command::new("cargo");
     tree.args([
         "tree",
+        // CI enables color globally, but this output is a shipped inventory.
+        // Colored subtree notes otherwise survive inventory_entry's trimming.
+        "--color",
+        "never",
         "--locked",
         "--target",
         preset.rust_target,
@@ -1515,6 +1519,29 @@ mod tests {
             "a packaged service library is named by no module, or a module names one the package \
              does not install"
         );
+    }
+
+    #[test]
+    fn cargo_inventory_records_a_license_for_every_shipped_dependency() {
+        let scratch = tempfile::tempdir().unwrap();
+        let prefix = scratch.path();
+        for notice in super::REQUIRED_NOTICES {
+            let path = prefix.join(notice);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "notice").unwrap();
+        }
+        super::write_inventory(&root(), super::host_default().unwrap(), prefix).unwrap();
+        let inventory =
+            fs::read_to_string(prefix.join("share/tecs/cargo-dependencies.txt")).unwrap();
+        assert!(!inventory.is_empty());
+        assert!(
+            !inventory.contains('\u{1b}'),
+            "Cargo color escapes entered the inventory"
+        );
+        let mut problems = Vec::new();
+        super::check_license_position(prefix, &mut problems).unwrap();
+        super::check_manifest_paths(prefix, &mut problems).unwrap();
+        assert!(problems.is_empty(), "{problems:?}");
     }
 
     #[test]

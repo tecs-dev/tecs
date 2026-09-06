@@ -91,11 +91,10 @@ const PACKAGED_RUN_PATH: &str = "TECS_PACKAGED_RUN_PATH";
 /// not inherit.
 ///
 /// The Nupp toolchain script runs its own Cargo build of the embedding library,
-/// and that project has its own minimum compiler. Leaving these set makes the
-/// nested build run under this tree's `rust-toolchain.toml` pin, which is older
-/// than Nupp's minimum, so the SDK fails to stage with a version error about
-/// packages that are not in this workspace at all. The nested build resolves
-/// its own toolchain when these are gone.
+/// and that project selects its pinned compiler independently. Clear Cargo's
+/// process-specific overrides before staging. Keep this tree's Rust pin aligned
+/// with that SDK: linking two versions of Rust's standard library can fail in
+/// an optimized Linux build.
 const INHERITED_CARGO_VARIABLES: [&str; 5] = [
     "RUSTUP_TOOLCHAIN",
     "RUSTC",

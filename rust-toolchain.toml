@@ -1,4 +1,5 @@
 [toolchain]
-channel = "1.97.1"
+# Match the Nupp embedding SDK: libnupp.a carries the Rust standard library.
+channel = "1.98.0"
 components = ["clippy", "rustfmt"]
 profile = "minimal"

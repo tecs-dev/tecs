@@ -28,8 +28,8 @@ jobs:
             # `tecs-winit-host` is excluded from everything that builds it here.
             # Its build script links `libnupp.a` out of a Nupp embedding SDK,
             # and staging one needs the Nupp compiler's own checkout and a
-            # compiler newer than `rust-toolchain.toml` pins. Neither is present
-            # on this job, so the crate's build script fails before Clippy sees
+            # matching Rust compiler. Neither is provisioned from Nupp in this
+            # job, so the crate's build script fails before Clippy sees
             # a line of it. The `host` job installs both and covers the crate
             # there. `cargo fmt` needs no build, so it still covers the whole
             # workspace.
