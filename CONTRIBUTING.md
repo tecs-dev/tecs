@@ -6,19 +6,16 @@ Thanks for your interest in contributing!
 
 A checkout needs three things, and only one of them is installed for you.
 
-**The Nupp compiler.** `cargo xtask` looks for `NUPP`, then a `nupp` checkout
-beside this one, then a `nupp` on `PATH`, in that order. The sibling checkout
-wins over an installed release because this tree is developed against a
-compiler newer than the published one, so a source checkout beside this one is
-the supported layout.
+**The Nupp compiler on `PATH`.** Use the revision specified in
+[Getting started](docs/getting-started.md). With sibling checkouts, run
+`export PATH="$(cd ../nupp/bin && pwd):$PATH"` from the Tecs root.
 
 **The Rust toolchain** `rust-toolchain.toml` pins. `rustup` fetches it on the
 first build.
 
 **`stylua` and `prettier`**, which format the Lua manifest and the Markdown.
-That is what `cargo xtask deps` installs, and it finishes by saying where the
-Nupp compiler resolved rather than reporting a checkout ready that is missing
-the one tool every other command starts with.
+`nupp task deps` installs them on macOS. On other platforms, install both on
+`PATH`.
 
 Running the Rust host also needs a Nupp embedding SDK.
 `native/rust/winit-host/build.rs` stages one through the compiler's
@@ -28,7 +25,7 @@ the defect rather than the workaround.
 
 ## Mandatory requirements
 
-- **`cargo xtask verify` must pass.** It runs the type check, the format check,
+- **`nupp task verify` must pass.** It runs the type check, the format check,
   the Nupp suites, the documentation gate, the component builds, and then the
   Rust host's own format, Clippy and test gates. It is what to run before
   pushing, and it fails cheapest first.
@@ -43,8 +40,8 @@ the defect rather than the workaround.
   docblocks carry symbol contracts, and the generated reference is rendered
   from them. Markdown under `docs/` carries guides that span modules. A change
   a game can see is not done until the relevant source says so.
-  `cargo xtask docs-dev` serves the site while you write.
-- **`cargo xtask docs-check` must pass.** It requires a `description:` on every
+  `nupp task docs-dev` serves the site while you write.
+- **`nupp task docs-check` must pass.** It requires a `description:` on every
   page and refuses an em dash, then renders the site, which is where the rest
   of the gate is: the generator resolves every link and anchor over the output
   it just wrote, and a docblock it cannot read fails there.
@@ -56,7 +53,7 @@ the defect rather than the workaround.
 
 ## Code style
 
-`cargo xtask format` decides layout: indentation, line width, wrapping and
+`nupp task format` decides layout: indentation, line width, wrapping and
 alignment, per language. Run it rather than matching by eye, and do not argue
 with it in review.
 
@@ -75,16 +72,16 @@ back by Nupp draining a buffer Rust filled.
 
 The workspace gates are `cargo fmt --all -- --check`,
 `cargo clippy --workspace --all-targets -- -D warnings` and
-`cargo test --workspace`. `cargo xtask verify` runs the host's share of them
+`cargo test --workspace`. `nupp task verify` runs the host's share of them
 with the embedding SDK staged, which an ordinary `cargo clippy` over the whole
 workspace cannot do on a machine with no compiler checkout beside this one.
 
 ## Running the host
 
 ```bash
-cargo xtask run flatcolor              # A window
-cargo xtask run lighting -- --frames 5 # Five frames, then exit zero
-cargo xtask run nativesmoke -- --headless --frames 2
+nupp task flatcolor           # A window
+nupp task lighting --frames 5 # Five frames, then exit zero
+nupp task nativesmoke --headless --frames 2
 ```
 
 `--frames N` is what makes a graphical example usable as a smoke test, and it
@@ -98,9 +95,9 @@ require, so a host with nothing staged otherwise looks healthy.
 ## Packaging
 
 ```bash
-cargo xtask package --preset macos-arm64
-cargo xtask check-package
-cargo xtask test-package --preset macos-arm64
+nupp task package --preset macos-arm64
+nupp task check-package
+nupp task test-package --preset macos-arm64
 ```
 
 `check-package` is the gate on the difference between a development preset and

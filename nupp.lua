@@ -1,3 +1,53 @@
+-- Nupp owns the development workflow; Cargo only builds native artifacts.
+local developmentTasks = {}
+local descriptions = {
+    deps = "Install the development formatters",
+    run = "Build and run a game component through the native host",
+    bench = "Run an optimized benchmark or performance acceptance",
+    format = "Format Nupp, Rust, Lua and web sources",
+    ["format-check"] = "Check formatting across every source language",
+    ["docs-check"] = "Check page metadata and render every documentation link",
+    ["docs-dev"] = "Serve the documentation and rebuild on changes",
+    verify = "Check sources, tests, docs, Rust and component smokes",
+    ["test-tools"] = "Check the development tools and their regression tests",
+    clean = "Remove Nupp and native build outputs",
+}
+for name, description in pairs(descriptions) do
+    developmentTasks[name] = {
+        description = description,
+        argv = { "nupp", "run", "tools/run.nupp", name },
+    }
+end
+for _, name in ipairs({ "host", "flatcolor", "sprites", "lighting", "nativesmoke" }) do
+    developmentTasks[name] = {
+        description = "Build and run the " .. name .. " component",
+        build = name,
+        argv = { "nupp", "run", "tools/run.nupp", "host", name },
+    }
+end
+for name, description in pairs({
+    presets = "List native packaging presets",
+    package = "Build and install a relocatable native release",
+    ["check-package"] = "Validate an installed native package",
+    ["test-package"] = "Build and test a release after relocation",
+}) do
+    developmentTasks[name] = {
+        description = description,
+        argv = {
+            "cargo",
+            "run",
+            "--locked",
+            "--quiet",
+            "-p",
+            "tecs-build-support",
+            "--bin",
+            "tecs-package",
+            "--",
+            name,
+        },
+    }
+end
+
 local hostExports = {
     "tecs.host.create",
     "tecs.host.init",
@@ -160,7 +210,7 @@ return {
                 entries = { "tecs.host", "lighting" },
                 exports = lightingExports,
             },
-            -- The component `cargo xtask test-package` runs against an
+            -- The component `nupp task test-package` runs against an
             -- installed release. It is a component rather than a script
             -- because a package ships no Nupp compiler, so the only Nupp a
             -- release can execute is one already compiled into a component.
@@ -196,5 +246,7 @@ return {
         },
     },
 
-    test = { build = "headless", argv = { "nupp", "test-runner" } },
+    test = { build = "headless", argv = { "nupp", "run", "tools/run.nupp", "test" } },
+
+    tasks = developmentTasks,
 }

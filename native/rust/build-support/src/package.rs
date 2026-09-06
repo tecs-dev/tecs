@@ -230,7 +230,7 @@ impl FromStr for Preset {
             .iter()
             .copied()
             .find(|preset| preset.name == name)
-            .ok_or_else(|| anyhow::anyhow!("unknown preset {name:?}; run `cargo xtask presets`"))
+            .ok_or_else(|| anyhow::anyhow!("unknown preset {name:?}; run `nupp task presets`"))
     }
 }
 
@@ -390,7 +390,7 @@ pub fn check(prefix: &Path) -> Result<()> {
     println!("checked {}", prefix.display());
     if development {
         println!("\ndevelopment install: it is not relocatable and was not held to that.");
-        println!("Build a release with `cargo xtask package --preset <name>`.");
+        println!("Build a release with `nupp task package --preset <name>`.");
         if !problems.is_empty() {
             println!(
                 "\n{} references to the build machine, which a release would not have:",
@@ -1381,7 +1381,7 @@ mod tests {
     #[test]
     fn unknown_preset_is_actionable() {
         let error = "wat".parse::<Preset>().unwrap_err().to_string();
-        assert!(error.contains("cargo xtask presets"));
+        assert!(error.contains("nupp task presets"));
     }
 
     /// Writes a complete macOS release layout, minus whatever is named.

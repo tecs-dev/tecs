@@ -9,17 +9,15 @@ order: 20
 
 Three things, and only one of them is installed for you:
 
-- **The Nupp compiler.** `cargo xtask` looks for `NUPP`, then a `nupp` checkout
-  beside this one, then a `nupp` on `PATH`, in that order. The sibling checkout
-  wins over an installed release because this tree is developed against a
-  compiler newer than the published one. This revision needs the binary codec
-  at Nupp commit `e90e8d42d08a517ac12b70f1d50dd9c30d705d05` or a descendant;
-  Nupp 0.0.3 does not contain it. The exact pin also appears in the CI workflow.
+- **The Nupp compiler on `PATH`.** This revision needs the binary codec at
+  Nupp commit `e90e8d42d08a517ac12b70f1d50dd9c30d705d05` or a descendant;
+  Nupp 0.0.3 does not contain it. With sibling checkouts, run
+  `export PATH="$(cd ../nupp/bin && pwd):$PATH"` from the Tecs root to select
+  that compiler. The exact pin also appears in the CI workflow.
 - **The Rust toolchain** `rust-toolchain.toml` pins. `rustup` fetches it on the
   first build.
 - **`stylua` and `prettier`**, which format the Lua manifest and the Markdown.
-  `cargo xtask deps` installs them and reports where the Nupp compiler
-  resolved.
+  `nupp task deps` installs them on macOS. On other platforms, install both on `PATH`.
 
 Running the Rust host also needs a Nupp embedding SDK.
 `native/rust/winit-host/build.rs` stages one through the compiler's
@@ -31,26 +29,27 @@ load failure in a host that built cleanly.
 ## Check, test, run
 
 ```bash
-cargo xtask check              # Type-check every Nupp source, strictly
-cargo xtask test               # Build native services; require every test to pass
-cargo xtask run flatcolor      # Open a window and render the example
-cargo xtask run lighting -- --frames 120
+nupp check --strict           # Type-check every Nupp source, strictly
+nupp test                     # Build native services; require every test to pass
+nupp task flatcolor           # Open a window and render the example
+nupp task lighting --frames 120
 ```
 
-`cargo xtask targets` lists what the manifest configures. `flatcolor`,
-`sprites` and `lighting` are the examples; `host` is the blank host, which
+`nupp tasks` lists what the manifest configures. `flatcolor`,
+`sprites` and `lighting` are the example targets and tasks; `host` is the blank host, which
 opens a window and runs an empty world.
 
 `--frames N` stops after N frames and exits zero, which is what makes a
 graphical example usable as a smoke test. It needs at least two: the first
 completed frame renders, and the following turn observes the limit.
 
-`cargo xtask test` builds the three native services, selects their exact Cargo
+`nupp test` builds the three native services, selects their exact Cargo
 artifact paths, and requires every discovered test to pass with zero skips.
-The JSON report is saved to `out/validation/nupp-tests.json`. Direct `nupp test`
-is still available for focused development where native libraries are optional.
+The JSON report is saved to `out/validation/nupp-tests.json`. `nupp test <suite>` narrows the same gate to named suites; `--json` keeps
+its structured report. Native libraries remain mandatory. `nupp task test-tools` checks the development
+tools in their separate project; `nupp task verify` runs both.
 
-`cargo xtask verify` requires an embedding SDK. It runs strict checking,
+`nupp task verify` requires an embedding SDK. It runs strict checking,
 whole-tree formatting, the mandatory test gate, documentation checks, workspace
 Rust formatting/Clippy/tests, and five headless component smokes. Benchmarks
 and relocated release-package checks remain separate commands; `verify` does
@@ -148,7 +147,18 @@ mygame = {
 }
 ```
 
-Then `cargo xtask run mygame`. The entry defaults to `<target>.create`, so
+Then `nupp task run mygame`. To give the game a short command, add a task:
+
+```lua
+tasks = {
+    mygame = {
+        build = "mygame",
+        argv = {"nupp", "run", "tools/run.nupp", "host", "mygame"},
+    },
+}
+```
+
+`nupp task mygame` builds the component before starting its host. The entry defaults to `<target>.create`, so
 nothing else has to be named.
 
 ::: warning
@@ -195,10 +205,10 @@ that component render directly from their current transform.
 ## Packaging
 
 ```bash
-cargo xtask presets            # The packaging presets and what each produces
-cargo xtask package            # Install a relocatable release into out/package
-cargo xtask check-package      # Gate what it installed
-cargo xtask test-package       # Install, check, and run from a relocated copy
+nupp task presets             # The packaging presets and what each produces
+nupp task package             # Install a relocatable release into out/package
+nupp task check-package       # Gate what it installed
+nupp task test-package        # Install, check, and run from a relocated copy
 ```
 
 A development preset links against the staged SDK where it sits and ships no

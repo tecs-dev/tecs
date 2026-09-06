@@ -1,0 +1,168 @@
+module tecs.dev.bench
+
+local commands = require("tecs.dev.commands")
+local files = require("nupp.io.files")
+local gates = require("tecs.dev.gates")
+local json = require("nupp.data.json")
+local native = require("tecs.dev.native")
+local path = require("nupp.io.path")
+local ffi = require("ffi")
+
+local function source(name: string): string
+    assert(not name:find("[^%w%-]"), "invalid benchmark name")
+    const directory = commands.root .. "/bench/nupp/tecs/bench/programs/"
+    const candidate = directory .. name .. ".nupp"
+    if files.isFile(candidate) then
+        return candidate
+    end
+    local available: {string} = {}
+    for _, entry in ipairs(assert(files.list(directory))) do
+        const file = path.newPath(entry.name)
+        if file:extension() == "nupp" then
+            available[#available + 1] = assert(file:stem())
+        end
+    end
+    table.sort(available)
+    error("unknown benchmark " .. name .. "; expected " .. table.concat(available, ", ") .. ", acceptance")
+end
+
+local function acceptance(): nil
+    const libraries = native.libraries(true)
+    const directory = commands.root .. "/out/validation/performance"
+    assert(files.createDirectory(directory))
+    local workloads = {
+        {
+            label = "shapes-4000",
+            name = "shapes",
+            variable = "BENCH_SHAPES",
+            count = "2000",
+            warmup = "120",
+            budgets = {update = 1, extract = 3, frame = 4}
+        },
+        {
+            label = "physics-1000",
+            name = "physics",
+            variable = "BENCH_BODIES",
+            count = "1000",
+            warmup = "600",
+            budgets = {["commands+ecs"] = 2, ["native batch"] = 3, sync = 0.5, update = 5}
+        },
+        {
+            label = "physics-4000-stress",
+            name = "physics",
+            variable = "BENCH_BODIES",
+            count = "4000",
+            warmup = "600",
+            budgets = {["commands+ecs"] = 8, ["native batch"] = 20, sync = 1, update = 25}
+        },
+    }
+    local results: {any} = {}
+    local failed = false
+    for _, workload in ipairs(workloads) do
+        for repetition = 1, 3 do
+            -- Clear the environment so no inherited BENCH_* can change a fixture.
+            local env: {[string]: string} = {}
+            for _, name in ipairs({
+                "PATH",
+                "HOME",
+                "USER",
+                "TMPDIR",
+                "TMP",
+                "TEMP",
+                "SystemRoot",
+                "SYSTEMROOT",
+                "USERPROFILE",
+                "LOCALAPPDATA",
+                "NUPP_COMPILER_ROOT",
+                "NUPP_NATIVE_LIBRARY",
+                "NUPP_TOOLCHAIN_CACHE",
+                "NUPP_SDK",
+                "LUA_PATH",
+                "LUA_CPATH"
+            }) do
+                const value = os.getenv(name)
+                if value then
+                    env[name] = value
+                end
+            end
+            for name, value in pairs(libraries) do
+                env[name] = value
+            end
+            env[workload.variable] = workload.count
+            env.BENCH_JSON, env.BENCH_WARMUP, env.BENCH_FRAMES = "1", workload.warmup, "900"
+            env.BENCH_AREA_W, env.BENCH_AREA_H, env.BENCH_MODE, env.BENCH_WORKERS = "1280", "720", "frame", "0"
+            const result = commands.capture({commands.compiler(), "run", "-O2", source(workload.name)}, env, true)
+            const stem = workload.label .. "-" .. repetition
+            assert(files.write(directory .. "/" .. stem .. ".stdout", result.output))
+            assert(files.write(directory .. "/" .. stem .. ".stderr", result.errorOutput))
+            assert(result:succeeded(), stem .. " failed; see " .. directory)
+            const report = json.decode(
+                assert(result.output:match("TECS_BENCH_JSON ([^\r\n]+)"), "benchmark emitted no report")
+            )
+            if workload.name == "physics" then
+                assert(report.metadata.bodies == tonumber(workload.count), stem .. " did not spawn every body")
+                assert(
+                    report.metadata.effectiveWorkers == 1 and report.metadata.substeps == 4,
+                    stem .. " must use one solver worker and four substeps"
+                )
+            else
+                assert(report.metadata.instances == 4000, stem .. " must extract every instance")
+            end
+            const violations = gates.performance(report, workload.budgets)
+            print(stem .. ": " .. (#violations == 0 and "PASS" or "FAIL"))
+            for _, violation in ipairs(violations) do
+                io.stderr:write(violation .. "\n")
+            end
+            failed = failed or #violations > 0
+            local budgetPairs: {any} = {}
+            for name, limit in pairs(workload.budgets) do
+                budgetPairs[#budgetPairs + 1] = {name, limit}
+            end
+            results[
+                #results + 1
+            ] = {
+                workload = workload.label,
+                repetition = repetition,
+                p95BudgetsMs = budgetPairs,
+                violations = json.asArray(violations),
+                report = report
+            }
+        end
+    end
+    local libraryPairs: {any} = {}
+    for name, value in pairs(libraries) do
+        libraryPairs[#libraryPairs + 1] = {name, value}
+    end
+    const report = {
+        schemaVersion = 1,
+        os = ffi.os == "OSX" and "macos" or ffi.os:lower(),
+        architecture = ffi.arch == "arm64" and "aarch64" or ffi.arch == "x64" and "x86_64" or ffi.arch,
+        revision = commands.output({"git", "rev-parse", "HEAD"}):gsub("%s+$", ""),
+        dirty = commands.output({"git", "status", "--porcelain"}) ~= "",
+        compiler = commands.compiler(),
+        compilerVersion = commands.output({commands.compiler(), "--version"}):gsub("%s+$", ""),
+        nativeLibraries = libraryPairs,
+        nativeProfile = "release",
+        optimization = "O2",
+        frames = 900,
+        requestedWorkers = 0,
+        effectiveWorkers = 1,
+        results = results,
+        passed = not failed
+    }
+    assert(files.write(directory .. "/acceptance.json", json.encode(report)))
+    assert(not failed, "performance budgets exceeded; see " .. directory)
+end
+
+--- Runs an optimized benchmark, or the fixed three-repetition acceptance gate.
+export function run(args: {string}): nil
+    const name = assert(table.remove(args, 1), "usage: nupp task bench <name> [args...]")
+    if name == "acceptance" then
+        assert(#args == 0, "acceptance takes no benchmark overrides")
+        acceptance()
+        return
+    end
+    const program = source(name)
+    const env = name == "physics" and native.libraries(true) or nil
+    commands.run(commands.append({commands.compiler(), "run", "-O2", program}, args), env)
+end

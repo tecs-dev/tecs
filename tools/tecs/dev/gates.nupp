@@ -1,0 +1,55 @@
+module tecs.dev.gates
+
+--- Requires all expected suites, unique passing cases, and consistent counts.
+export function tests(value: unknown, expected: {string}): nil
+    const report = value as any
+    assert(type(report) == "table" and type(report.tests) == "table", "test report has no cases")
+    local discovered: {[string]: boolean} = {}
+    local cases: {[string]: boolean} = {}
+    for _, case in ipairs(report.tests) do
+        assert(type(case.suite) == "string" and type(case.name) == "string", "test case has no suite or name")
+        const key = case.suite .. "\0" .. case.name
+        assert(not cases[key], "duplicate test case " .. key)
+        cases[key] = true
+        discovered[case.suite] = true
+        assert(case.status == "passed", "test did not pass: " .. case.suite .. "." .. case.name)
+    end
+    assert(#expected > 0 and #report.tests > 0, "no tests were discovered")
+    for _, name in ipairs(expected) do
+        assert(discovered[name], "suite discovery missing " .. name)
+        discovered[name] = nil
+    end
+    assert(next(discovered) == nil, "unexpected test suite")
+    assert(
+        report.ok == true
+        and report.total == #report.tests
+        and report.passed == #report.tests
+        and report.failed == 0
+        and report.skipped == 0,
+        "test summary does not report every case as passed"
+    )
+end
+
+--- Requires one complete stage per budget and returns p95 violations.
+export function performance(value: unknown, budgets: {[string]: number}): {string}
+    const report = value as any
+    assert(type(report) == "table" and type(report.stages) == "table", "missing performance stages")
+    local violations: {string} = {}
+    for name, limit in pairs(budgets) do
+        local matching: {any} = {}
+        for _, stage in ipairs(report.stages) do
+            if stage.name == name then
+                matching[#matching + 1] = stage
+            end
+        end
+        assert(#matching == 1, "expected exactly one " .. name .. " stage")
+        const stage = matching[1]
+        assert(stage.samples == 900, name .. " must contain 900 samples")
+        assert(type(stage.p95) == "number" and stage.p95 >= 0 and stage.p95 < math.huge, "invalid " .. name .. " p95")
+        if stage.p95 > limit then
+            violations[#violations + 1] = string.format("%s p95 %.3f ms exceeds %.3f ms", name, stage.p95, limit)
+        end
+    end
+
+    return violations
+end

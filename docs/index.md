@@ -88,11 +88,11 @@ Every command runs from the repository root and needs a
 `rust-toolchain.toml` pins.
 
 ```bash
-cargo xtask check          # Type-check every Nupp source, strictly
-cargo xtask test           # Build and run the test suites
-cargo xtask run flatcolor  # Build a component and run it through the Rust host
-cargo xtask verify         # Every gate above, plus the Rust host
-cargo xtask docs           # Render this site into out/docs
+nupp check --strict           # Type-check every Nupp source, strictly
+nupp test                     # Build and run the test suites
+nupp task flatcolor           # Build a component and run it through the Rust host
+nupp task verify              # Every gate above, plus the Rust host
+nupp build --target docs      # Render this site into out/docs
 ```
 
 [Getting started](getting-started.md) walks through building the tree, running

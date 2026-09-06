@@ -2653,6 +2653,7 @@ name = "tecs-build-support"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
  "flate2",
  "regex",
  "serde_json",
@@ -2689,15 +2690,6 @@ dependencies = [
  "pollster",
  "wgpu",
  "winit",
-]
-
-[[package]]
-name = "tecs-xtask"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "tecs-build-support",
 ]
 
 [[package]]

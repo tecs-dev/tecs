@@ -30,7 +30,7 @@ opportunistically.
 
 ## Layout, which the formatter owns
 
-`cargo xtask format` decides all of this and `cargo xtask format-check` fails
+`nupp task format` decides all of this and `nupp task format-check` fails
 on it, so none of it is worth reading a diff for or asking about in review. It
 is written down because knowing what the tool will do is how you stop fighting
 it, not because anybody has to apply it.
@@ -71,7 +71,7 @@ These are judgment, and they are what a review is for.
 
 ## Formatters
 
-`cargo xtask format` applies them and `cargo xtask format-check` reports
+`nupp task format` applies them and `nupp task format-check` reports
 without writing. The suffix table lives in the Cargo build-support crate.
 Every tool is configured to the two rules above, and none of them reflows a
 comment body.
@@ -292,7 +292,7 @@ says.
   introducing reusable buffers or pools.
 - Prefer numeric `for` over `ipairs` in hot loops; prefer column iteration
   over per-entity component fetches.
-- Measure before and after with `cargo xtask bench` when touching storage,
+- Measure before and after with `nupp task bench` when touching storage,
   rendering or snapshot paths, and read p50 and p95 together.
 
 ## Tests
@@ -300,7 +300,7 @@ says.
 - Suites are Nupp under `tests/`, and discovery reads `tests/*test.nupp`
   without recursing. A suite importing `tecs.internal.*` lives at
   `tests/tecs/<name>test.nupp` with a one-line forwarder where discovery looks.
-- One `cargo xtask test` runs them all; `cargo xtask verify` adds the Rust half
+- One `nupp test` runs them all; `nupp task verify` adds the Rust half
   and the host.
 - Do not sleep and hope: drive a deterministic number of frames and assert
   on what they produced.

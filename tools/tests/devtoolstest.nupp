@@ -1,0 +1,126 @@
+local test = require("nupp.test")
+local gates = require("tecs.dev.gates")
+local docs = require("tecs.dev.docs")
+local files = require("nupp.io.files")
+local commands = require("tecs.dev.commands")
+local json = require("nupp.data.json")
+
+local suite = {}
+
+local function report(): table
+    return {
+        ok = true,
+        total = 1,
+        passed = 1,
+        failed = 0,
+        skipped = 0,
+        tests = {{suite = "audionativetest", name = "opensOffline", status = "passed"}}
+    }
+end
+
+function suite.requiresAllDiscoveredSuites(): nil
+    gates.tests(report(), {"audionativetest"})
+    test.equal(pcall(gates.tests, report(), {"audionativetest", "gamepadnativetest"}), false)
+    test.equal(pcall(gates.tests, report(), {}), false)
+end
+
+function suite.refusesInconsistentCountsAndDuplicateCases(): nil
+    local wrong = report()
+    wrong.total = 2
+    test.equal(pcall(gates.tests, wrong, {"audionativetest"}), false)
+    wrong = report()
+    wrong.tests[2] = wrong.tests[1]
+    wrong.total, wrong.passed = 2, 2
+    test.equal(pcall(gates.tests, wrong, {"audionativetest"}), false)
+end
+
+function suite.refusesSkipsEvenWhenTheRunnerSucceeds(): nil
+    local skipped = report()
+    skipped.tests[1].status = "skipped"
+    skipped.passed, skipped.skipped = 0, 1
+    test.equal(pcall(gates.tests, skipped, {"audionativetest"}), false)
+end
+
+function suite.refusesMissingAndInvalidReports(): nil
+    test.equal(pcall(gates.tests, "not a report", {"audionativetest"}), false)
+    local empty = report()
+    empty.tests = {}
+    test.equal(pcall(gates.tests, empty, {}), false)
+end
+
+function suite.performanceGateChecksCompleteTailSamples(): nil
+    const good = {stages = {{name = "extract", samples = 900, p95 = 3}}}
+    test.equal(#gates.performance(good, {extract = 3}), 0)
+    test.equal(#gates.performance(good, {extract = 2.9}), 1)
+    test.equal(pcall(gates.performance, good, {update = 3}), false)
+    test.equal(pcall(gates.performance, {stages = {{name = "extract", samples = 899, p95 = 1}}}, {extract = 3}), false)
+    test.equal(pcall(gates.performance, {stages = {good.stages[1], good.stages[1]}}, {extract = 3}), false)
+    test.equal(
+        pcall(gates.performance, {stages = {{name = "extract", samples = 900, p95 = math.huge}}}, {
+            extract = 3
+        }),
+        false
+    )
+end
+
+function suite.previewResolvesCleanRoutesAndRefusesTraversal(): nil
+    with scratch = assert(files.createTemporaryDirectory()) do
+        const root = scratch:toString()
+        assert(files.createDirectory(root .. "/nested"))
+        assert(files.write(root .. "/nested/index.html", "example"))
+        test.equal(docs.resolve(root, "/nested?query=yes"), root .. "/nested/index.html")
+        test.equal(docs.resolve(root, "/../nested"), nil)
+        test.equal(docs.resolve(root, "/%2e%2e/nested"), nil)
+        test.equal(docs.resolve(root, "/..\\nested"), nil)
+        test.equal(docs.resolve(root, "/missing"), nil)
+    end
+end
+
+function suite.benchmarkModulesCannotShadowRuntimeModules(): nil
+    for _, source in ipairs(assert(files.glob(commands.root .. "/bench/nupp/**/*.nupp"))) do
+        const relative = source:sub(#commands.root + #"/bench/nupp/" + 1)
+        test.equal(files.exists(commands.root .. "/src/" .. relative), false)
+        test.equal(files.exists(commands.root .. "/src/" .. relative:gsub("%.nupp$", "/init.nupp")), false)
+    end
+end
+
+function suite.taskLauncherPreservesArgumentsAndFailureStatus(): nil
+    with scratch = assert(files.createTemporaryDirectory(new files.TemporaryOptions(prefix = "tecs task args "))) do
+        const root = scratch:toString()
+        assert(files.createDirectory(root .. "/tools/tecs/dev"))
+        assert(files.copy(commands.root .. "/tools/run.nupp", root .. "/tools/run.nupp"))
+        assert(
+            files.write(
+                root .. "/nupp.lua",
+                [[
+return {tasks = {probe = {argv = {"nupp", "run", "tools/run.nupp", "first argument"}}}}
+]]
+            )
+        )
+        assert(files.write(root .. "/tools/nupp.lua", 'return {include = {"."}}'))
+        assert(
+            files.write(
+                root .. "/tools/tecs/dev/main.nupp",
+                [[
+local json = require("nupp.data.json")
+print(json.encode({...}))
+os.exit(7)
+]]
+            )
+        )
+        const literal = "spaces 'quotes' \"double\" $(literal); dollar$"
+        const result = commands.capture(
+            {commands.compiler(), "task", "probe", literal, "--flag=value with spaces"},
+            nil,
+            false,
+            root
+        )
+        test.equal(result.exit.exitCode, 7)
+        const args = json.decode(result.output)
+        test.equal(args[1], "first argument")
+        test.equal(args[2], literal)
+        test.equal(args[3], "--flag=value with spaces")
+    end
+end
+
+return suite

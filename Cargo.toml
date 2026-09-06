@@ -5,7 +5,6 @@ members = [
     "native/rust/tecs-audio",
     "native/rust/tecs-gamepad",
     "native/rust/winit-host",
-    "xtask",
 ]
 default-members = ["native/rust/winit-host"]
 resolver = "2"

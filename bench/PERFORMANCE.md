@@ -1,6 +1,6 @@
 # CPU performance acceptance
 
-Run `cargo xtask bench acceptance` on an otherwise idle reference machine.
+Run `nupp task bench acceptance` on an otherwise idle reference machine.
 The initial reference is an Apple M5 Pro, 48 GiB, macOS 26.6. Record power
 source and low-power mode with the results. These are local CPU budgets;
 Linux and Windows need their own recorded runs before claiming acceptance.
@@ -44,7 +44,7 @@ transform history and ECS phase bookkeeping. These durations partition each
 update, but the independently calculated percentiles cannot be added.
 
 For an extraction profile, set `BENCH_PROFILE=/absolute/path/profile.txt`
-when running `cargo xtask bench shapes`. Sampling starts after warmup; zones
+when running `nupp task bench shapes`. Sampling starts after warmup; zones
 separate collection, ordering, lights and encoding. Profiling changes timing,
 so use the profile to locate costs and unprofiled runs for acceptance.
 

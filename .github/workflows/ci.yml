@@ -75,12 +75,14 @@ jobs:
             # would only pay for Homebrew twice.
             - if: runner.os == 'macOS'
               working-directory: tecs
-              run: cargo xtask deps
+              run: nupp task deps
             - if: runner.os == 'macOS'
               working-directory: tecs
-              run: cargo xtask format-check
+              run: nupp task format-check
             - working-directory: tecs
               run: nupp check --strict
+            - working-directory: tecs
+              run: nupp task test-tools
             - if: runner.os == 'Linux'
               run: |
                   sudo apt-get update
@@ -91,7 +93,7 @@ jobs:
             # execute successfully. Missing bindings and offline-open failures
             # cannot turn this integration gate green through skipped tests.
             - working-directory: tecs
-              run: cargo xtask test
+              run: nupp test
             - uses: actions/upload-artifact@v4
               if: always()
               with:
@@ -159,17 +161,17 @@ jobs:
             # the suites run in the full Nupp runtime and never load a
             # component, so this is the only step that reads the reduced one.
             - working-directory: tecs
-              run: cargo xtask run flatcolor -- --headless --frames 2
+              run: nupp task flatcolor --headless --frames 2
             - working-directory: tecs
-              run: cargo xtask run sprites -- --headless --frames 3
+              run: nupp task sprites --headless --frames 3
             - working-directory: tecs
-              run: cargo xtask run lighting -- --headless --frames 5
+              run: nupp task lighting --headless --frames 5
             # Every real consumer reaches a native service through a guarded
             # require, so a host with no libraries staged looks healthy. This
             # component requires all three directly and raises on the first
             # that will not load.
             - working-directory: tecs
-              run: cargo xtask run nativesmoke -- --headless --frames 2
+              run: nupp task nativesmoke --headless --frames 2
 
     # The release half. It is separate from `host` because it proves a
     # different thing: that half builds and runs out of a checkout, and this
@@ -228,7 +230,7 @@ jobs:
             # native smoke component and the showcase from there with every
             # Tecs override removed from the environment.
             - working-directory: tecs
-              run: cargo xtask test-package --preset ${{ matrix.preset }}
+              run: nupp task test-package --preset ${{ matrix.preset }}
             # The development preset exists to be told apart from a release.
             # Packaging one and checking it is what keeps that distinction
             # working, since a release passing the gate proves nothing if the
@@ -237,10 +239,10 @@ jobs:
             # build of the graphics stack.
             - if: runner.os == 'macOS'
               working-directory: tecs
-              run: cargo xtask package --preset ${{ matrix.preset }}-dev
+              run: nupp task package --preset ${{ matrix.preset }}-dev
             - if: runner.os == 'macOS'
               working-directory: tecs
-              run: cargo xtask check-package
+              run: nupp task check-package
 
     # The site is the Nupp compiler's own render of the declarations it checks,
     # so this job needs the compiler and nothing else. It does not need the
@@ -275,10 +277,10 @@ jobs:
               working-directory: nupp
               run: ./bin/nupp build --target docs
             - working-directory: tecs
-              run: cargo xtask docs-check
+              run: nupp task docs-check
             - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
               working-directory: tecs
-              run: cargo xtask docs
+              run: nupp build --target docs
             - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
               uses: actions/upload-pages-artifact@v3
               with:

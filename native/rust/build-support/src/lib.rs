@@ -1,7 +1,5 @@
 pub mod binaries;
 pub mod command;
-pub mod docs;
-pub mod formatting;
 pub mod nupp;
 pub mod package;
 

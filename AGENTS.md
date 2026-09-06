@@ -21,52 +21,53 @@ Primary entry points:
 
 ## Key Commands
 
-Cargo owns the project build. `cargo xtask` finds the Nupp compiler and the embedding SDK, puts the two
-together, and runs the checks, benchmarks, packaging and release gates.
+Nupp owns the project workflow. `nupp.lua` names builds, the native integration
+test command and project tasks. Cargo compiles Rust artifacts inside those tasks.
+Use the Nupp compiler on `PATH`; for sibling checkouts, add the absolute
+`../nupp/bin` directory to `PATH` before starting.
 
 ```bash
-cargo xtask deps           # Install the formatters, and report the compiler
-cargo xtask targets        # List the targets nupp.lua configures
-cargo xtask check          # Type-check every Nupp source, strictly
-cargo xtask format         # Format every supported source language in place
-cargo xtask format-check   # Report sources that are not formatted
-cargo xtask test           # Build and run the test suites
-cargo xtask build --target flatcolor
-cargo xtask run flatcolor -- --frames 120
-cargo xtask bench shapes   # Run a benchmark from bench/nupp
-cargo xtask docs           # Render the site into out/docs
-cargo xtask docs-check     # Render it into a scratch directory and gate it
-cargo xtask docs-dev       # Serve it, rebuilding on a change
-cargo xtask verify         # Everything above, plus the Rust host
-cargo xtask presets        # List the release matrix
-cargo xtask package --preset macos-arm64
-cargo xtask check-package  # Gate out/package
-cargo xtask test-package --preset macos-arm64
-cargo xtask clean
+nupp task deps                # Install the development formatters
+nupp tasks                    # List the targets nupp.lua configures
+nupp check --strict           # Type-check every Nupp source, strictly
+nupp task format              # Format every supported source language in place
+nupp task format-check        # Report sources that are not formatted
+nupp test                     # Build and run the test suites
+nupp build --target flatcolor
+nupp task flatcolor --frames 120
+nupp task bench shapes        # Run a benchmark from bench/nupp
+nupp build --target docs      # Render the site into out/docs
+nupp task docs-check          # Render it into a scratch directory and gate it
+nupp task docs-dev            # Serve it, rebuilding on a change
+nupp task verify              # Everything above, plus the Rust host
+nupp task presets             # List the release matrix
+nupp task package --preset macos-arm64
+nupp task check-package       # Gate out/package
+nupp task test-package --preset macos-arm64
+nupp task clean
 ```
 
-There is one implementation, so there is no subcommand naming it. A command that reads as
-`cargo xtask nupp <task>` is from before the cutover.
+`nupp task test-tools` checks the separate `tools/nupp.lua` project and its
+regression tests. Tooling dependencies must stay outside the game source set,
+so they cannot add native process requirements to game components.
 
-`cargo xtask deps` is small on purpose. It installs `stylua` and `prettier`, which Homebrew carries and this
-tree does not pin, and then says where the Nupp compiler resolved. The Rust toolchain is `rust-toolchain.toml`
-plus `rustup`, and the Nupp compiler has no formula: `NUPP` wins, then a `nupp` checkout beside this one, then
-a `nupp` on `PATH`, and the sibling beats an installed release because this tree is developed against a
-compiler newer than the published one.
+`nupp task deps` installs `stylua` and `prettier` on macOS. Other platforms
+need both on `PATH`. Rust is pinned by `rust-toolchain.toml`; the compiler
+revision is specified in `docs/getting-started.md` and CI.
 
-`cargo xtask format` runs `cargo fmt`, `nupp fmt` and the suffix-dispatched formatters together. Naming paths
-narrows it to the last of those, because neither Cargo nor the Nupp compiler takes a file list.
+`nupp task format` runs `cargo fmt`, `nupp fmt` and the suffix-dispatched formatters together. Naming paths
+narrows it to those files, with Nupp and rustfmt handling their respective sources.
 
-`cargo xtask package` installs a relocatable release into `out/package`. A release carries `bin/tecs-host`, the
+`nupp task package` installs a relocatable release into `out/package`. A release carries `bin/tecs-host`, the
 prebuilt `bin/shaders.tecspack` and its manifest, `lib/` holding the Nupp runtime library beside `tecsaudio`,
 `tecsgamepad` and `tecs_physics`, the compiled components under `share/tecs/components`, and the notices,
 licenses and Cargo inventory under `share/tecs`. A Windows package puts every library in `bin/`, where that
 loader looks.
 
-`cargo xtask check-package` is the gate on the difference between a development preset and a release one. A
+`nupp task check-package` is the gate on the difference between a development preset and a release one. A
 release records a loader-relative run path (`@executable_path/../lib`, or `$ORIGIN/../lib`) and ships compiled
 shaders; a development preset links the staged SDK where it sits and ships none, and the check reports it
-rather than passing it. `cargo xtask test-package` installs a clean release, checks it, copies it somewhere
+rather than passing it. `nupp task test-package` installs a clean release, checks it, copies it somewhere
 unrelated, and runs the native smoke component and the showcase from there with every Tecs environment
 override removed, which is the only way to find out whether an install is relocatable rather than merely tidy.
 
@@ -80,7 +81,7 @@ by bare name reaching the loader's search of `lib/`. And a guarded plugin failur
 because `run_headless` in the Rust host never calls `tecs.host.crashed`, so the smoke component prints a line
 on success and the packaging test matches that line rather than trusting the exit status.
 
-Both `cargo xtask run` and the host's own `cargo build` need a Nupp embedding SDK, which
+Both `nupp task run` and the host's own `cargo build` need a Nupp embedding SDK, which
 `native/rust/winit-host/build.rs` stages through the Nupp compiler's `scripts/toolchain` in a checkout beside
 this one. Set `NUPP_SDK` to a staged one to skip that.
 
@@ -119,8 +120,8 @@ tecs/
 │   ├── tecs-audio/         # cpal output and capture behind a batched contract
 │   ├── tecs-gamepad/       # gilrs enumeration and observations
 │   ├── physics/            # Rapier storage and stepping
-│   └── build-support/      # The build commands xtask drives
-├── xtask/                  # Project build command
+│   └── build-support/      # Native packaging and binary inspection
+├── tools/                  # Isolated Nupp project for development commands and tests
 ├── assets/                 # shaders/ (WGSL) and materials/, read by the host
 ├── examples/nupp/          # Component entries: flatcolor, sprites, lighting, smoke
 ├── tests/                  # Suites; those reaching internals live in tests/tecs
@@ -293,7 +294,7 @@ file name and only resolves where the system loader already looks. Declare bare 
   there rather than changing what a save file means. Read it as the specification of that surface.
 - `nupp check --strict` covers `src`, `examples/nupp`, `tests` and `bench/nupp`, so a test calling a function
   that does not exist fails the gate rather than slipping through.
-- Rust tests run with `cargo test --workspace`. `cargo xtask verify` runs both halves plus the host.
+- Rust tests run with `cargo test --workspace`. `nupp task verify` runs both halves plus the host.
 - A `src/tecs/**.nupp` module absent from the `headless` target's `entries` in `nupp.lua` is neither built nor
   checked. A new module goes there.
 
@@ -315,8 +316,8 @@ Three places, and they hold different things:
   has no second copy to drift from. This is where almost every documentation change belongs.
 - **`docs/`** holds what a declaration cannot: a workflow that crosses modules, an architecture decision, a
   comparison. It does not restate a signature, and it carries no handwritten module catalog, because the
-  reference already has one. `cargo xtask docs-check` requires a one-line `description:` on every page and
-  refuses an em dash; `cargo xtask docs-dev` serves the site while you write.
+  reference already has one. `nupp task docs-check` requires a one-line `description:` on every page and
+  refuses an em dash; `nupp task docs-dev` serves the site while you write.
 - **`README.md`** is the design record. It holds why, not what: the decision, the alternative that
   lost, and the constraint that forced it. A change that only adds a function needs no entry; a
   change that settles a question does.
@@ -330,7 +331,7 @@ tests prose. The only defense is the person making the change, at the time they 
 - A page that cannot be verified against the code should not be written. A gap is honest; a
   confident wrong answer is not.
 
-`cargo xtask docs-check` is the gate, and it holds two things: the handwritten pages carry a description and
+`nupp task docs-check` is the gate, and it holds two things: the handwritten pages carry a description and
 no em dash, and the render resolves every link and anchor over the site it just wrote. A docblock the generator
 cannot read fails there too.
 
@@ -384,7 +385,7 @@ The rules that prevent the most common defect class:
 
 ### Code Style
 
-`STYLE.md` is the long form, and it separates what `cargo xtask format` decides from what it cannot. Layout is
+`STYLE.md` is the long form, and it separates what `nupp task format` decides from what it cannot. Layout is
 the formatter's: indentation, columns, wrapping, alignment. What is left to a person is `const` where the
 binding is strong, early returns over deep nesting, require grouping (the formatter deliberately does not sort
 them, because import order is meaningful), comments sparse and informational, and the naming rules below.
@@ -448,10 +449,10 @@ pinned by a test, because a bump can otherwise rename a key with nothing here fa
 - Avoid allocations in hot paths. Rendering and extraction are hot.
 - Prefer archetype/query iteration patterns that work with contiguous columns.
 - Be careful when changing rendering, storage and snapshot code paths; they are performance-sensitive.
-- Benchmarks are the argument. `cargo xtask bench shapes` is a uniform loop over transforms and
-  `cargo xtask bench physics` is lumpy and CPU-bound, and a frame-structure change has to be judged against
+- Benchmarks are the argument. `nupp task bench shapes` is a uniform loop over transforms and
+  `nupp task bench physics` is lumpy and CPU-bound, and a frame-structure change has to be judged against
   both, p50 and p95 together.
-- `cargo xtask bench signature` and `cargo xtask bench snapshot` isolate the two core paths those scene
+- `nupp task bench signature` and `nupp task bench snapshot` isolate the two core paths those scene
   benchmarks cannot: archetype signature and query matching, and binary save/load throughput.
 - A benchmark is compiled at `-O2`, because a measurement taken at a different optimization level than the one
   that ships answers a question nobody asked.

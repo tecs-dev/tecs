@@ -1,0 +1,112 @@
+module tecs.dev.commands
+
+local files = require("nupp.io.files")
+local path = require("nupp.io.path")
+local process = require("nupp.io.process")
+
+--- The engine checkout, independent of the tooling process's working directory.
+export const root: string = os.getenv("TECS_PROJECT_ROOT") or assert(path.newPath(".."):absolute()):toString()
+
+--- Runs an argv without a shell and preserves the child's exit status.
+export function run(args: {string}, env: {[string]: string}?, cwd: string?): nil
+    const options: process.Options = {
+        args = args,
+        cwd = cwd or root,
+        env = env,
+        stdin = "inherit",
+        stdout = "inherit",
+        stderr = "inherit"
+    }
+    with child = new process.Process(options) do
+        const status = child:wait()
+        if not status:succeeded() then
+            os.exit(status.exitCode == 0 and 1 or status.exitCode)
+        end
+    end
+end
+
+--- Captures both streams, draining them together until the child exits.
+export function capture(args: {string}, env: {[string]: string}?, clearEnv: boolean?, cwd: string?): process.Result
+    const options: process.Options = {args = args, cwd = cwd or root, env = env, clearEnv = clearEnv}
+    with child = new process.Process(options) do
+        return assert(child:communicate())
+    end
+end
+
+--- Returns successful command output, reporting failures on stderr.
+export function output(args: {string}, env: {[string]: string}?): string
+    const result = capture(args, env)
+    io.stderr:write(result.errorOutput)
+    if not result:succeeded() then
+        io.stderr:write(result.output)
+        os.exit(result.exit.exitCode == 0 and 1 or result.exit.exitCode)
+    end
+
+    return result.output
+end
+
+--- Uses the compiler that launched this tool when running from a checkout.
+export function compiler(): string
+    const compilerRoot = os.getenv("NUPP_COMPILER_ROOT")
+    return compilerRoot and compilerRoot .. "/bin/nupp" or os.getenv("NUPP") or "nupp"
+end
+
+--- Appends the caller's arguments without interpreting flags or quoting.
+export function append(args: {string}, extra: {string}): {string}
+    for _, value in ipairs(extra) do
+        args[#args + 1] = value
+    end
+    return args
+end
+
+--- Returns the tracked and unignored files, including paths containing spaces.
+export function sources(paths: {string}?): {string}
+    const listing = output(
+        append({"git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}, paths or {})
+    )
+    local result: {string} = {}
+    local seen: {[string]: boolean} = {}
+    for name in listing:gmatch("[^%z]+") do
+        if not seen[name] and files.isFile(root .. "/" .. name) then
+            seen[name] = true
+            result[#result + 1] = name
+        end
+    end
+    table.sort(result)
+
+    return result
+end
+
+--- Returns a process-local SDK override, staging it from the active compiler.
+export function sdk(): {[string]: string}
+    const configured = os.getenv("NUPP_SDK")
+    if configured then
+        assert(files.isFile(path.newPath(configured, "libnupp.a")), "NUPP_SDK has no libnupp.a")
+        return {NUPP_SDK = configured}
+    end
+    const compilerRoot = os.getenv("NUPP_COMPILER_ROOT")
+    assert(
+        compilerRoot and files.isFile(compilerRoot .. "/scripts/toolchain"),
+        "set NUPP_SDK to a staged Nupp embedding SDK"
+    )
+    const text = output({
+        "env",
+        "-u",
+        "RUSTUP_TOOLCHAIN",
+        "-u",
+        "RUSTC",
+        "-u",
+        "RUSTC_WRAPPER",
+        "-u",
+        "CARGO",
+        "-u",
+        "CARGO_ENCODED_RUSTFLAGS",
+        compilerRoot .. "/scripts/toolchain",
+        "host-library",
+        "base,native-files,native-net"
+    })
+    const directory = assert(text:match("([^\r\n]+)%s*$"), "the SDK staging command returned no path")
+    assert(files.isFile(path.newPath(directory, "libnupp.a")), "the staged SDK has no libnupp.a")
+
+    return {NUPP_SDK = directory}
+end

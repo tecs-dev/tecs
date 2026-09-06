@@ -8,9 +8,9 @@ rendering concern to `tecs.host`. The fifth is a script.
 Run one from the repository root:
 
 ```bash
-cargo xtask run flatcolor
-cargo xtask run sprites
-cargo xtask run lighting -- --frames 120
+nupp task flatcolor
+nupp task sprites
+nupp task lighting --frames 120
 ```
 
 `--frames N` stops after N frames and exits zero, which is what makes a
@@ -28,7 +28,7 @@ the asset pipeline.
 
 `lighting.nupp` is the showcase. It combines deferred lighting, occluder masks,
 drop shadows and bloom, and it is what a release installs and
-`cargo xtask test-package` runs from a relocated copy.
+`nupp task test-package` runs from a relocated copy.
 
 `nativesmoke.nupp` requires the audio, gamepad and physics service libraries
 directly and raises on the first that will not load. Every other consumer

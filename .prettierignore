@@ -1,4 +1,4 @@
-# `cargo xtask format` passes an explicit file list, so this is for prettier
+# `nupp task format` passes an explicit file list, so this is for prettier
 # run by hand or by an editor. It mirrors EXCLUDED in
 # `native/rust/build-support/src/formatting.rs`: build output, and data a tool
 # emits.

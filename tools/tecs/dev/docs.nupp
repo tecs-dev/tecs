@@ -1,0 +1,176 @@
+module tecs.dev.docs
+
+local commands = require("tecs.dev.commands")
+local files = require("nupp.io.files")
+local net = require("nupp.io.net")
+local tasks = require("nupp.tasks")
+local time = require("nupp.time")
+
+--- Checks metadata and house style before Nupp validates the generated links.
+export function pages(): nil
+    for _, name in ipairs(assert(files.glob(commands.root .. "/docs/**/*.md"))) do
+        const text = assert(files.read(name))
+        const front = text:match("^%-%-%-\r?\n(.-)\r?\n%-%-%-")
+        const description = front and ("\n" .. front):match("\ndescription:%s*([^\r\n]+)")
+        assert(description and description:gsub("[\"'%s]", "") ~= "", name .. " has no non-empty description")
+        assert(not text:find("—", 1, true), name .. " uses an em dash")
+    end
+end
+
+--- Renders a site with Nupp's own link and anchor validation.
+export function build(destination: string): nil
+    commands.run({commands.compiler(), "build", "--target", "docs", "--out-dir", destination})
+end
+
+--- Validates the documentation in a temporary directory.
+export function check(): nil
+    pages()
+    with scratch = assert(files.createTemporaryDirectory()) do
+        build(scratch:toString() .. "/site")
+    end
+    print("OK: documentation metadata, build, links and anchors")
+end
+
+--- Resolves only safe, local paths in a generated site.
+export function resolve(output: string, target: string): string?
+    const route = target:match("^[^?#]*") or ""
+    if route:sub(1, 1) ~= "/" or route:find("[%%\\%z]") then
+        return nil
+    end
+    for part in route:gmatch("[^/]+") do
+        if part == "." or part == ".." then
+            return nil
+        end
+    end
+    const candidate = output .. route
+    if files.isFile(candidate) then
+        return candidate
+    end
+    if files.isFile(candidate .. "/index.html") then
+        return candidate .. "/index.html"
+    end
+
+    return nil
+end
+
+local function fingerprint(): string
+    local parts: {string} = {}
+    for _, pattern in ipairs({"docs/**/*", "src/**/*.nupp", "nupp.lua"}) do
+        for _, name in ipairs(assert(files.glob(commands.root .. "/" .. pattern))) do
+            const info = assert(files.info(name))
+            if info.kind == "file" then
+                parts[#parts + 1] = name .. ":" .. tostring(info.modified) .. ":" .. tostring(info.size)
+            end
+        end
+    end
+    table.sort(parts)
+
+    return table.concat(parts, "\n")
+end
+
+local function respond(borrows connection: net.Stream, output: string): nil
+    local request = ""
+    while not request:find("\r\n\r\n", 1, true) and #request < 8192 do
+        const chunk = connection:read(1024)
+        if not chunk or chunk == "" then
+            return
+        end
+        request = request .. chunk
+    end
+    local method, target = request:match("^(%u+) ([^ ]+) HTTP/")
+    local code = "404 Not Found"
+    local body = "not found"
+    local kind = "text/plain; charset=utf-8"
+    if method ~= "GET" and method ~= "HEAD" then
+        code, body = "405 Method Not Allowed", "method not allowed"
+    else
+        const resolved = target and resolve(output, target)
+        if resolved then
+            body = assert(files.read(resolved))
+            code = "200 OK"
+            const types: {
+                [string]: string
+            } = {
+                html = "text/html; charset=utf-8",
+                css = "text/css; charset=utf-8",
+                js = "text/javascript",
+                json = "application/json",
+                svg = "image/svg+xml",
+                png = "image/png",
+                jpg = "image/jpeg",
+                jpeg = "image/jpeg",
+                webp = "image/webp",
+                woff2 = "font/woff2",
+                ico = "image/x-icon"
+            }
+            kind = types[resolved:match("%.([^%.]+)$") or ""] or "application/octet-stream"
+        end
+    end
+    assert(
+        connection:write(
+            "HTTP/1.1 "
+            .. code
+            .. "\r\nContent-Type: "
+            .. kind
+            .. "\r\nContent-Length: "
+            .. #body
+            .. "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+            .. (
+                method == "HEAD" and "" or body
+            )
+        )
+    )
+    assert(connection:flush())
+
+end
+
+--- Serves a local preview and keeps the last successful render on build failure.
+export function serve(port: integer): nil
+    const output = commands.root .. "/out/docs"
+    build(output)
+    io.stdout:setvbuf("line")
+    print("Serving http://localhost:" .. port .. "/; rebuilding docs and source changes. Ctrl-C to stop.")
+    with scope = tasks.open() do
+        scope:spawn(function(): nil
+            local previous = fingerprint()
+            while true do
+                time.sleep(1000)
+                const current = fingerprint()
+                if current == previous then
+                    continue
+                end
+                previous = current
+                with
+                    scratch = assert(
+                        files.createTemporaryDirectory(new files.TemporaryOptions(directory = commands.root .. "/out"))
+                    )
+                do
+                    const fresh = scratch:toString() .. "/site"
+                    const result = commands.capture({
+                        commands.compiler(),
+                        "build",
+                        "--target",
+                        "docs",
+                        "--out-dir",
+                        fresh
+                    })
+                    io.stderr:write(result.errorOutput)
+                    if result:succeeded() then
+                        assert(files.remove(output, true))
+                        assert(files.rename(fresh, output))
+                        print("Rebuilt documentation")
+                    else
+                        io.stderr:write(result.output .. "\nKeeping the last successful site\n")
+                    end
+                end
+            end
+        end)
+        with listener = assert(net.listen({host = "127.0.0.1", port = port})) do
+            while true do
+                with connection = assert(listener:accept()) do
+                    respond(connection, output)
+                end
+            end
+        end
+    end
+end

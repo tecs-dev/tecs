@@ -36,7 +36,7 @@ fn main() {
     // work in a tree that exports nothing. A package gets the relative path
     // its own layout puts the library at, and gets it *instead*, because an
     // absolute path into a build cache is exactly what
-    // `cargo xtask check-package` refuses: a release that carries one
+    // `nupp task check-package` refuses: a release that carries one
     // runs on the machine that built it and nowhere else.
     //
     // Relinking a packaged binary afterwards would need `install_name_tool` on
@@ -80,7 +80,7 @@ fn target_os() -> String {
 /// built cleanly.
 ///
 /// `native/rust/build-support/src/nupp.rs` stages the same set for
-/// `cargo xtask run`. Keep the two lists together.
+/// `nupp task run`. Keep the two lists together.
 // Every Tecs component needs both beyond `base`. `native-files` is what
 // `tecs.gpu.materials` reaches for, globbing a material root so the ids it
 // assigns and the ids the prebuilt dispatch answers to come from one rule over

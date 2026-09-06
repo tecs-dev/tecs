@@ -1,0 +1,137 @@
+local commands = require("tecs.dev.commands")
+local files = require("nupp.io.files")
+local gates = require("tecs.dev.gates")
+local json = require("nupp.data.json")
+local native = require("tecs.dev.native")
+local path = require("nupp.io.path")
+local ffi = require("ffi")
+
+local function host(args: {string}, build: boolean): nil
+    if build and (args[1] == "--help" or args[1] == "-h") then
+        print(
+            "Usage: nupp task run [target] [--entry MODULE.create] [host arguments...]\nExamples: nupp task lighting; nupp task run mygame --headless --frames 5"
+        )
+        return
+    end
+    const target = table.remove(args, 1) or "host"
+    local entry = target == "host" and "tecs.host.create" or target .. ".create"
+    if args[1] == "--entry" then
+        table.remove(args, 1)
+        entry = assert(table.remove(args, 1), "--entry needs an exported constructor")
+    end
+    if args[1] == "--" then
+        table.remove(args, 1)
+    end
+    if build then
+        commands.run({commands.compiler(), "build", "--target", target})
+    end
+    const component = "out/nupp/" .. target .. ".nuppc"
+    assert(files.isFile(commands.root .. "/" .. component), "target " .. target .. " did not produce a component")
+    local env = commands.sdk()
+    for name, value in pairs(native.libraries()) do
+        env[name] = value
+    end
+    commands.run(
+        commands.append(
+            {"cargo", "run", "--locked", "-p", "tecs-winit-host", "--", "--component", component, "--entry", entry},
+            args
+        ),
+        env
+    )
+end
+
+local function test(args: {string}): nil
+    if args[1] == "--help" or args[1] == "-h" then
+        commands.run({commands.compiler(), "test-runner", "--help"})
+        return
+    end
+    local expected: {string} = {}
+    local structured = false
+    for _, name in ipairs(args) do
+        if name == "--json" then
+            structured = true
+        elseif name:sub(1, 1) ~= "-" then
+            expected[#expected + 1] = name
+        end
+    end
+    if #expected == 0 then
+        for _, entry in ipairs(assert(files.list(commands.root .. "/tests"))) do
+            if entry.kind == "file" and entry.name:match("test%.nupp$") then
+                expected[#expected + 1] = assert(path.newPath(entry.name):stem())
+            end
+        end
+    end
+    const env = native.libraries()
+    const result = commands.capture(commands.append({commands.compiler(), "test-runner", "--json"}, args), env)
+    io.stderr:write(result.errorOutput)
+    assert(files.createDirectory(commands.root .. "/out/validation"))
+    assert(files.write(commands.root .. "/out/validation/nupp-tests.json", result.output))
+    if structured then
+        io.stdout:write(result.output)
+    end
+    if not result:succeeded() then
+        if not structured then
+            io.stderr:write(result.output)
+        end
+        os.exit(result.exit.exitCode == 0 and 1 or result.exit.exitCode)
+    end
+    const report = json.decode(result.output)
+    gates.tests(report, expected)
+    if not structured then
+        print(report.total .. " tests passed in " .. #expected .. " suites; zero skipped")
+    end
+end
+
+local function verify(): nil
+    commands.run({commands.compiler(), "check", "--strict"})
+    commands.run({commands.compiler(), "task", "format-check"})
+    commands.run({commands.compiler(), "test"})
+    commands.run({commands.compiler(), "task", "test-tools"})
+    commands.run({commands.compiler(), "task", "docs-check"})
+    const env = commands.sdk()
+    commands.run({"cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"}, env)
+    commands.run({"cargo", "test", "--locked", "--workspace", "--all-targets"}, env)
+    for _, target in ipairs({"host", "flatcolor", "sprites", "lighting", "nativesmoke"}) do
+        commands.run({commands.compiler(), "task", target, "--headless", "--frames", "5"}, env)
+    end
+end
+
+local args: {string} = {...}
+const task = assert(table.remove(args, 1), "use nupp tasks to list the development commands")
+if task == "test" then
+    test(args)
+elseif task == "host" or task == "run" then
+    host(args, task == "run")
+elseif task == "bench" then
+    require("tecs.dev.bench").run(args)
+elseif task == "format" or task == "format-check" then
+    require("tecs.dev.format").apply(args, task == "format-check")
+elseif task == "docs-check" then
+    assert(#args == 0, "docs-check takes no arguments")
+    require("tecs.dev.docs").check()
+elseif task == "docs-dev" then
+    assert(#args == 0 or (#args == 2 and args[1] == "--port"), "usage: nupp task docs-dev [--port PORT]")
+    const port = #args == 0 and 5173 or assert(tonumber(args[2]), "port must be a number")
+    assert(port == math.floor(port) and port > 0 and port <= 65535, "port must be 1 through 65535")
+    require("tecs.dev.docs").serve(port as integer)
+elseif task == "test-tools" then
+    assert(#args == 0, "test-tools takes no arguments")
+    commands.run({commands.compiler(), "check", "--strict"}, nil, commands.root .. "/tools")
+    commands.run({commands.compiler(), "test"}, nil, commands.root .. "/tools")
+elseif task == "deps" then
+    assert(#args == 0, "deps takes no arguments")
+    assert(ffi.os == "OSX", "automatic formatter installation is macOS-only; install stylua and prettier on PATH")
+    commands.run({"brew", "install", "stylua", "prettier"})
+elseif task == "verify" then
+    assert(#args == 0, "verify takes no arguments")
+    verify()
+elseif task == "clean" then
+    assert(#args == 0, "clean takes no arguments")
+    commands.run({commands.compiler(), "clean"})
+    commands.run({"cargo", "clean"})
+    if files.exists(commands.root .. "/out") then
+        assert(files.remove(commands.root .. "/out", true))
+    end
+else
+    error("unknown development task " .. task)
+end

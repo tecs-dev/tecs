@@ -270,26 +270,30 @@ means.
 
 ## Build
 
-Cargo and `xtask` own the build, tests, documentation and packaging. A checkout
-needs the Rust toolchain `rust-toolchain.toml` pins and a
-[Nupp compiler](https://github.com/nupp-lang/nupp); `cargo xtask deps` installs
-the two formatters and reports where the compiler resolved.
+Nupp owns the development workflow through `nupp.lua`: build targets,
+project tasks and the test command share one entry point. Cargo compiles the
+Rust host and services underneath those tasks; the Rust packaging helper owns
+binary inspection, relocation and native release assembly.
+
+A checkout needs the Rust toolchain `rust-toolchain.toml` pins and a current
+[Nupp compiler](https://github.com/nupp-lang/nupp) on `PATH`.
+`nupp task deps` installs the two formatters on macOS.
 
 ```bash
-cargo xtask check              # Type-check every Nupp source, strictly
-cargo xtask test               # Build native services; require every test to pass
-cargo xtask run flatcolor      # Open a window and render the example
-cargo xtask run lighting -- --frames 120
-cargo xtask bench shapes       # Run a benchmark from bench/nupp
-cargo xtask bench acceptance   # Three repetitions of fixed CPU workloads
-cargo xtask format             # Format every supported source language
-cargo xtask docs-check         # Validate the documentation site
-cargo xtask verify             # Checks, tests, docs, Rust and headless smokes
-cargo xtask package --preset macos-arm64
-cargo xtask check-package
+nupp check --strict           # Type-check every Nupp source, strictly
+nupp test                     # Build native services; require every test to pass
+nupp task flatcolor           # Open a window and render the example
+nupp task lighting --frames 120
+nupp task bench shapes        # Run a benchmark from bench/nupp
+nupp task bench acceptance    # Three repetitions of fixed CPU workloads
+nupp task format              # Format every supported source language
+nupp task docs-check          # Validate the documentation site
+nupp task verify              # Checks, tests, docs, Rust and headless smokes
+nupp task package --preset macos-arm64
+nupp task check-package
 ```
 
-`cargo xtask presets` lists the release matrix: macOS arm64, Linux x64 and
+`nupp task presets` lists the release matrix: macOS arm64, Linux x64 and
 Windows x64, each with a development preset and a release preset. Windows is
 experimental until its Nupp, host and relocated-package gates execute.
 
@@ -337,7 +341,7 @@ against on a Mac, and each platform builds its own.
 ## Documentation
 
 The guides and the generated API reference live in [`docs/`](docs/). Serve them
-locally with `cargo xtask docs-dev`. API contracts live on their declarations
+locally with `nupp task docs-dev`. API contracts live on their declarations
 under [`src/tecs/`](src/tecs/), and the reference is rendered from those, so a
 signature has no second copy to drift from.
 

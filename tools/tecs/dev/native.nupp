@@ -1,0 +1,48 @@
+module tecs.dev.native
+
+local commands = require("tecs.dev.commands")
+local json = require("nupp.data.json")
+local path = require("nupp.io.path")
+
+--- Builds native services and selects exactly the artifacts Cargo produced.
+export function libraries(release: boolean?): {[string]: string}
+    local args = {
+        "cargo",
+        "build",
+        "--locked",
+        "-p",
+        "tecs-audio",
+        "-p",
+        "tecs-gamepad",
+        "-p",
+        "tecs-physics",
+        "--message-format=json-render-diagnostics"
+    }
+    if release then
+        args[#args + 1] = "--release"
+    end
+    const output = commands.output(args)
+    const names: {
+        [string]: string
+    } = {tecsaudio = "TECS_AUDIO_LIBRARY", tecsgamepad = "TECS_GAMEPAD_LIBRARY", tecs_physics = "TECS_PHYSICS_LIBRARY"}
+    local result: {[string]: string} = {}
+    for line in output:gmatch("[^\r\n]+") do
+        const event = json.decode(line)
+        if event.reason == "compiler-artifact" and event.target then
+            const variable = names[event.target.name]
+            if variable then
+                for _, filename in ipairs(event.filenames or {}) do
+                    const extension = path.newPath(filename):extension()
+                    if extension == "so" or extension == "dylib" or extension == "dll" then
+                        result[variable] = filename
+                    end
+                end
+            end
+        end
+    end
+    for name, variable in pairs(names) do
+        assert(result[variable], "Cargo produced no native library for " .. name)
+    end
+
+    return result
+end
