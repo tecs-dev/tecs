@@ -63,6 +63,9 @@ jobs:
               run: |
                   ./scripts/toolchain --all
                   ./bin/nupp build --target bootstrapCompiler
+                  # The launcher runs the compiler target; bootstrapCompiler
+                  # alone leaves a fresh checkout using the older stage zero.
+                  ./bin/nupp build --target compiler
                   echo "$PWD/bin" >> "$GITHUB_PATH"
             - working-directory: tecs
               run: nupp fmt --check
@@ -128,6 +131,9 @@ jobs:
               run: |
                   ./scripts/toolchain --all
                   ./bin/nupp build --target bootstrapCompiler
+                  # The launcher runs the compiler target; bootstrapCompiler
+                  # alone leaves a fresh checkout using the older stage zero.
+                  ./bin/nupp build --target compiler
                   echo "$PWD/bin" >> "$GITHUB_PATH"
             - name: Stage the Nupp embedding SDK
               working-directory: tecs
@@ -210,6 +216,9 @@ jobs:
               run: |
                   ./scripts/toolchain --all
                   ./bin/nupp build --target bootstrapCompiler
+                  # The launcher runs the compiler target; bootstrapCompiler
+                  # alone leaves a fresh checkout using the older stage zero.
+                  ./bin/nupp build --target compiler
                   echo "$PWD/bin" >> "$GITHUB_PATH"
             - name: Stage the Nupp embedding SDK
               working-directory: tecs
@@ -258,6 +267,9 @@ jobs:
               run: |
                   ./scripts/toolchain --all
                   ./bin/nupp build --target bootstrapCompiler
+                  # The launcher runs the compiler target; bootstrapCompiler
+                  # alone leaves a fresh checkout using the older stage zero.
+                  ./bin/nupp build --target compiler
                   echo "$PWD/bin" >> "$GITHUB_PATH"
             - name: Install the Nupp documentation dependencies
               working-directory: nupp
