@@ -4,8 +4,8 @@ module tecs.internal.framepump
 Runs one host operation at a time under Nupp's suspension handler.
 
 The embedding call that starts or polls an operation never yields. A wait parks
-the operation coroutine here, its readiness callback only queues that
-coroutine, and a later host turn polls sources and drains the queue.
+the operation coroutine here. A later polling turn resumes it when readiness
+is reported, releasing the one-shot source before another driver can poll it.
 ]]
 
 local suspension = require("nupp.suspension")
@@ -18,23 +18,12 @@ export type State = "parked" | "continue" | "stopped"
 export record Pump
     handler: suspension.Handler
 
-    private runnable: {thread}
-    private queued: {[thread]: boolean}
     private active: thread?
     private result: boolean?
     private failure: any?
 end
 
-local function enqueue(exclusive pump: Pump, task: thread): nil
-    if pump.queued[task] or coroutine.status(task) ~= "suspended" then
-        return
-    end
-    pump.queued[task] = true
-    pump.runnable[#pump.runnable + 1] = task
-end
-
 local function resumeTask(exclusive pump: Pump, task: thread, keepRunning: boolean?): nil
-    pump.queued[task] = nil
     if coroutine.status(task) ~= "suspended" then
         return
     end
@@ -44,30 +33,18 @@ local function resumeTask(exclusive pump: Pump, task: thread, keepRunning: boole
     end
 end
 
-local function runReady(exclusive pump: Pump): nil
-    local pass = pump.runnable
-    pump.runnable = {}
-    for index = 1, #pass do
-        resumeTask(pump, pass[index])
-    end
-end
-
 --- Creates an idle frame pump.
 --- @return a pump whose handler permits application waits
 export function newPump(): Pump
-    local pump = new Pump(
-        handler = nil as suspension.Handler,
-        runnable = {},
-        queued = {},
-        active = nil,
-        result = nil,
-        failure = nil
-    )
+    local pump = new Pump(handler = nil as suspension.Handler, active = nil, result = nil, failure = nil)
     pump.handler = new suspension.Handler(
         park = function(_: suspension.Handler, waiting: suspension.Waiting, _: function(): nil): nil
             local task = assert(coroutine.running())
             local function wake(): nil
-                enqueue(pump, task)
+                -- Other drivers, including MCP, poll the same readiness sources.
+                -- Resume now so the completed one-shot source is released before
+                -- another poll can try to resolve it a second time.
+                resumeTask(pump, task)
             end
 
             while not waiting:ready() do
@@ -84,9 +61,6 @@ export function newPump(): Pump
             return true
         end,
         shutdown = function(_: suspension.Handler): nil
-            while #pump.runnable > 0 do
-                runReady(pump)
-            end
         end
     )
 
@@ -143,7 +117,7 @@ export function start(exclusive pump: Pump, body: function(): boolean): State
     return state(pump)
 end
 
---- Polls readiness once and resumes every operation woken in that pass.
+--- Polls readiness once; callbacks resume the operation during that pass.
 --- @param pump the application pump
 --- @return whether the operation remains parked, completed, or stopped the application
 --- @raises when no operation is parked
@@ -152,7 +126,6 @@ export function poll(exclusive pump: Pump): State
         error("framepump.poll: no operation is parked", 2)
     end
     suspension.poll()
-    runReady(pump)
 
     return state(pump)
 end
@@ -178,6 +151,4 @@ export function cancel(exclusive pump: Pump): nil
     pump.active = nil
     pump.result = nil
     pump.failure = nil
-    pump.runnable = {}
-    pump.queued = {}
 end

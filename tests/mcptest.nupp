@@ -274,7 +274,7 @@ local function pushed(arguments: {[string]: any}): string
 end
 
 function suite.pushesTouchAndGamepadEventsThroughSendEvent(): nil
-    local app = application.newApplication({window = {title = "mcp send_event"}})
+    local app: application.Application = application.newApplication({window = {title = "mcp send_event"}})
     app:init()
     mcp.bind(app.world, app)
 

@@ -1,0 +1,497 @@
+local application = require("tecs.application")
+local assets = require("tecs.assets")
+local ecs = require("tecs.ecs")
+local framepacket = require("tecs.internal.framepacket")
+local framepump = require("tecs.internal.framepump")
+local gfx = require("tecs.gfx")
+local host = require("tecs.host")
+local json = require("nupp.data.json")
+local mcp = require("tecs.mcp")
+local net = require("nupp.io.net")
+local physics = require("tecs.physics")
+local reference = require("physicsreference")
+local sequence = require("tecs.sequence")
+local test = require("nupp.test")
+local time = require("nupp.time")
+local tweeneval = require("tecs.internal.tweeneval")
+
+local suite = {}
+
+local function near(actual: number, expected: number): nil
+    test.assert(math.abs(actual - expected) < 0.0001, actual, expected)
+end
+
+local function firstPose(packet: string): (number, number, number)
+    local reader = nupp.io.newScalarReader(packet)
+    reader:skip(20)
+    const graphBytes = reader:readUint32()
+    reader:skip(4)
+    const batches = reader:readUint32()
+    reader:skip(40)
+    const lights = reader:readUint32()
+    reader:skip(
+        framepacket.HEADER_SIZE
+        - 76
+        + graphBytes
+        + lights
+        * framepacket.LIGHT_STRIDE
+        + batches
+        * framepacket.BATCH_STRIDE
+    )
+    const x = reader:readFloat32()
+    const y = reader:readFloat32()
+    const rotation = reader:readFloat32()
+
+    return x, y, rotation
+end
+
+local function withSession(config: application.Config?, body: function(session: host.Session): nil): nil
+    const session = host.newSession(config)
+    const ok, reason = pcall(function(): nil
+        host.init(session)
+        body(session)
+    end)
+    host.shutdown(session)
+    if not ok then
+        error(reason, 0)
+    end
+end
+
+-- The client and game have separate pumps, like an external agent and a host.
+-- Driving host.iterate from inside tasks.gather would nest the world's scope.
+local function callOverHTTP(session: host.Session, name: string): {[string]: any}
+    const port = assert(session.app.debugServer).port
+    const pump = framepump.newPump()
+    local response: {[string]: any}? = nil
+    local state = framepump.start(pump, function(): boolean
+        local stream = assert(net.connect({host = "127.0.0.1", port = port}))
+        const body = json.encode({
+            jsonrpc = "2.0",
+            id = 1,
+            method = "tools/call",
+            params = {name = name, arguments = json.EMPTY_OBJECT}
+        })
+        assert(stream:write(`POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Length: ${#body}\r\n\r\n${body}`))
+        local received = ""
+        while true do
+            const split = received:find("\r\n\r\n", 1, true)
+            if split ~= nil then
+                const length = tonumber(received:match("[Cc]ontent%-[Ll]ength:%s*(%d+)"))
+                if length ~= nil and #received - split - 3 >= length then
+                    const decoded = json.decode(received:sub(split + 4), json.NULL) as {[string]: any}
+                    response = decoded.result as {[string]: any}
+                    break
+                end
+            end
+            const chunk = assert(stream:read(4096))
+            test.assert(chunk ~= "", "MCP closed without a response")
+            received = received .. chunk
+        end
+        stream:close()
+
+        return true
+    end)
+    const ok, reason = pcall(function(): nil
+        for _ = 1, 1000 do
+            if not framepump.parked(pump) then
+                break
+            end
+            host.iterate(session, 0)
+            state = framepump.poll(pump)
+            if state == "parked" then
+                time.sleep(1)
+            end
+        end
+        test.equal(state, "continue", "MCP did not answer within bounded host turns")
+    end)
+    framepump.cancel(pump)
+    if not ok then
+        error(reason, 0)
+    end
+
+    return assert(response)
+end
+
+function suite.servesDebuggingWhileSuspendedAndReleasesItsPortOnShutdown(): nil
+    withSession({mcpPort = 0, debug = true}, function(session: host.Session): nil
+        host.setSuspended(session, true)
+        const reply = callOverHTTP(session, "stats")
+        test.assert(reply.isError ~= true)
+        const port = assert(session.app.debugServer).port
+        host.shutdown(session)
+        test.equal(session.app.debugServer, nil)
+        const replacement = assert(mcp.listen(port))
+        mcp.destroy(replacement)
+    end)
+end
+
+function suite.keepsDiagnosticsAliveDuringAParkedUpdateWithoutMutatingTheWorld(): nil
+    const kind = new assets.Kind(name = "test.debug.parked", open = function(_path: string): (assets.Job?, string?)
+        return new assets.Job(
+            poll = function(): (assets.Status, any?, string?)
+                return "pending", nil, nil
+            end,
+            cancel = function(): nil
+            end
+        ), nil
+    end)
+    withSession(
+        {
+            mcpPort = 0,
+            debug = true,
+            plugin = function(exclusive app: application.Application): nil
+                const loader = app.assets
+                app.world:addSystem({
+                    phase = ecs.phases.Update,
+                    run = function(): nil
+                        loader:request(kind, "parked")
+                    end
+                })
+            end
+        },
+        function(session: host.Session): nil
+            test.equal(host.iterate(session, 0), "parked")
+            test.assert(callOverHTTP(session, "ping").isError ~= true)
+            const refused = callOverHTTP(session, "spawn")
+            test.equal(refused.isError, true)
+            const content = refused.content as {{[string]: any}}
+            test.assert((content[1].text as string):find("parked", 1, true) ~= nil)
+            test.equal(session.app.world.liveCount, 0)
+            test.equal(session.app.frame, 0)
+        end
+    )
+end
+
+function suite.reportsStartupCrashesAndAllowsExplicitRecoveryOverMCP(): nil
+    withSession(
+        {
+            mcpPort = 0,
+            debug = true,
+            plugin = function(): nil
+                error("debug startup regression")
+            end
+        },
+        function(session: host.Session): nil
+            const ping = callOverHTTP(session, "ping").structuredContent as {[string]: any}
+            test.equal(ping.ok, false)
+            test.assert((ping.crashed as string):find("debug startup regression", 1, true) ~= nil)
+            test.equal(callOverHTTP(session, "stats").isError, true)
+            test.assert(callOverHTTP(session, "clear_crash").isError ~= true)
+            test.equal(host.crashed(session), nil)
+        end
+    )
+end
+
+function suite.ownsAnIndependentLoaderAndClosesItAfterWorldShutdown(): nil
+    const first = application.newApplication()
+    const second = application.newApplication()
+    test.assert(first.assets ~= second.assets)
+    local loaderWasRunning = false
+    first.world:addSystem({
+        phase = ecs.phases.Shutdown,
+        run = function(): nil
+            loaderWasRunning = first.assets:running()
+            error("shutdown regression")
+        end
+    })
+    first:init()
+    test.assert(first:shutdown())
+    test.assert(loaderWasRunning)
+    test.assert(not first.assets:running())
+    test.assert(second.assets:running())
+    test.assert(first:shutdown())
+    test.assert(first:crashed():find("shutdown regression", 1, true) ~= nil)
+    second:shutdown()
+end
+
+function suite.shutsDownAssetsAfterAGuardedStartupFailure(): nil
+    withSession(
+        {
+            plugin = function(exclusive _app: application.Application): nil
+                error("startup regression")
+            end
+        },
+        function(session: host.Session): nil
+            test.assert(host.crashed(session):find("startup regression", 1, true) ~= nil)
+            host.shutdown(session)
+            test.assert(not session.app.assets:running())
+            test.assert(host.shutdown(session))
+        end
+    )
+end
+
+function suite.parksAssetLoadingDuringStartupAndResumesOnAHostTurn(): nil
+    local ready = false
+    local completed = false
+    local releases = 0
+    const kind = new assets.Kind(
+        name = "test.startup.asset",
+        open = function(_path: string): (assets.Job?, string?)
+            return new assets.Job(
+                poll = function(): (assets.Status, any?, string?)
+                    if ready then
+                        return "ready", "payload", nil
+                    end
+                    return "pending", nil, nil
+                end,
+                cancel = function(): nil
+                end
+            ), nil
+        end,
+        release = function(_payload: any): nil
+            releases = releases + 1
+        end
+    )
+    withSession(
+        {
+            plugin = function(exclusive app: application.Application): nil
+                const handle = assert(app.assets:request(kind, "startup"))
+                completed = true
+                handle:release()
+            end
+        },
+        function(session: host.Session): nil
+            test.assert(not completed)
+            test.equal(host.iterate(session, 0), "parked")
+            ready = true
+            test.equal(host.iterate(session, 0), "continue")
+            test.assert(completed)
+            test.equal(releases, 1)
+            test.equal(session.app.frame, 0)
+            test.equal(host.iterate(session, 0), "continue")
+            test.equal(session.app.frame, 1)
+        end
+    )
+end
+
+function suite.cancelsAPendingAssetBeforeClosingTheApplication(): nil
+    local cancels = 0
+    local escaped = false
+    const kind = new assets.Kind(name = "test.cancel.asset", open = function(_path: string): (assets.Job?, string?)
+        return new assets.Job(
+            poll = function(): (assets.Status, any?, string?)
+                return "pending", nil, nil
+            end,
+            cancel = function(): nil
+                cancels = cancels + 1
+            end
+        ), nil
+    end)
+    withSession(
+        {
+            plugin = function(exclusive app: application.Application): nil
+                const loader = app.assets
+                app.world:addSystem({
+                    phase = ecs.phases.Update,
+                    run = function(): nil
+                        loader:request(kind, "pending")
+                        escaped = true
+                    end
+                })
+            end
+        },
+        function(session: host.Session): nil
+            test.equal(host.iterate(session, 0), "parked")
+            host.shutdown(session)
+            test.assert(not escaped)
+            test.equal(cancels, 1)
+            test.equal(host.crashed(session), nil)
+            test.assert(not session.app.assets:running())
+            host.shutdown(session)
+            test.equal(cancels, 1)
+        end
+    )
+end
+
+function suite.resolvesKeyedSourcesAgainAfterDespawnAndSnapshotLoad(): nil
+    const world = ecs.newWorld()
+    const actor = world:spawn(ecs.Transform2D())
+    const target = world:spawn(ecs.Transform2D(40, 20), ecs.EntityKey("quarry"))
+    world:commit()
+    const source = sequence.sourceKey("quarry", ecs.Transform2D, {"x", "y"})
+    const serialized = assert(tweeneval.serializeSource(source))
+    test.equal(serialized.key, "quarry")
+    const restored = assert(tweeneval.deserializeSource(serialized))
+    near(tweeneval.valuesFromSource(world, actor, restored), 40)
+    world:despawn(target)
+    world:commit()
+    near(tweeneval.valuesFromSource(world, actor, restored), 0)
+    world:spawn(ecs.Transform2D(90, 30), ecs.EntityKey("quarry"))
+    world:commit()
+    near(tweeneval.valuesFromSource(world, actor, restored), 90)
+    const copy = ecs.newWorld()
+    copy:loadSnapshot(world:saveSnapshot())
+    near(tweeneval.valuesFromSource(copy, actor, restored), 90)
+    test.raises(
+        function(): nil
+            sequence.sourceKey("", ecs.Transform2D, {"x"})
+        end,
+        "must not be empty"
+    )
+end
+
+function suite.trackingTargetsUseKeysOnlyWhenNoExplicitEntityIsSet(): nil
+    const world = ecs.newWorld()
+    const target = world:spawn(ecs.Transform2D(50), ecs.EntityKey("tracked"))
+    const explicit = world:spawn(ecs.Transform2D(80))
+    const actor = world:spawn(ecs.Transform2D(), sequence.TrackingTarget(0, "tracked"))
+    world:commit()
+    const source = sequence.sourceTracking(ecs.Transform2D, {"x"})
+    near(tweeneval.valuesFromSource(world, actor, source), 50)
+    assert(world:getMut(actor, sequence.TrackingTarget)).entity = explicit
+    near(tweeneval.valuesFromSource(world, actor, source), 80)
+    world:despawn(explicit)
+    world:commit()
+    near(tweeneval.valuesFromSource(world, actor, source), 0)
+    test.assert(world:isAlive(target))
+end
+
+function suite.nominalFrameTimingIsWorldLocalAndDoesNotMoveExistingDeadlines(): nil
+    const first = ecs.newWorld({nominalFrameTime = 0.25})
+    const second = ecs.newWorld({nominalFrameTime = 0.5})
+    sequence.plugin(first)
+    sequence.plugin(second)
+    local firstDone = false
+    local secondDone = false
+    sequence.registerAction(first, "done", function(): nil
+        firstDone = true
+    end)
+    sequence.registerAction(second, "done", function(): nil
+        secondDone = true
+    end)
+    const program = sequence.define("test.stabilization.frameTiming", {sequence.wait(1), sequence.call("done")}, {
+        clock = "frame"
+    })
+    sequence.play(first, program)
+    sequence.play(second, program)
+    first:update(0)
+    second:update(0)
+    sequence.setNominalFrameTime(first, 0.01)
+    near(second:getNominalFrameTime(), 0.5)
+    first:update(0.2)
+    second:update(0.2)
+    test.assert(not firstDone and not secondDone)
+    first:update(0)
+    second:update(0)
+    test.assert(secondDone and not firstDone)
+    first:update(0)
+    test.assert(not firstDone)
+    first:update(0)
+    test.assert(firstDone)
+    test.raises(
+        function(): nil
+            first:setNominalFrameTime(math.huge)
+        end,
+        "positive and finite"
+    )
+    test.raises(
+        function(): nil
+            ecs.newWorld({nominalFrameTime = 0 / 0})
+        end,
+        "positive and finite"
+    )
+end
+
+function suite.seedsPhysicsHistoryBeforeTheFirstStepAndExtractsIt(): nil
+    const world = ecs.newWorld({timestep = 0.125})
+    const backend = reference.create(0)
+    physics.install(world, {simulation = backend.simulation})
+    const entity = world:spawn(ecs.Transform2D(100, 200), gfx.Tint(), gfx.Renderable2D)
+    physics.attach(world, entity, {halfWidth = 2, halfHeight = 2})
+    world:set(entity, physics.Motion(80, 0, 0))
+    const extractor = framepacket.new(world)
+    local changed = false
+    world:addSystem({
+        phase = ecs.phases.FixedPreUpdate,
+        run = function(): nil
+            if not changed then
+                assert(world:getMut(entity, ecs.Transform2D)).x = 300
+                changed = true
+            end
+        end
+    })
+    world:update(0.1875)
+    const previous = assert(world:get(entity, ecs.PreviousTransform2D))
+    const current = assert(world:get(entity, ecs.Transform2D))
+    near(previous.x, 100)
+    near(current.x, 110)
+    near(firstPose(extractor:packet(640, 480)), 105)
+    near(current.x, 110)
+    world:update(0.125)
+    near(assert(world:get(entity, ecs.PreviousTransform2D)).x, 110)
+    near(firstPose(extractor:packet(640, 480)), 115)
+    world:shutdown()
+end
+
+function suite.interpolatesRotationAcrossTheShortArcAndLeavesOtherEntitiesAlone(): nil
+    const world = ecs.newWorld({timestep = 1})
+    const entity = world:spawn(
+        ecs.Transform2D(10, 20, 0, 1, -math.pi + 0.1),
+        ecs.PreviousTransform2D(0, 10, math.pi - 0.1),
+        gfx.Tint(),
+        gfx.Renderable2D
+    )
+    world:commit()
+    world:update(0.5)
+    const extractor = framepacket.new(world)
+    local x, y, angle = firstPose(extractor:packet(640, 480))
+    near(x, 5)
+    near(y, 15)
+    near(angle, math.pi)
+    world:remove(entity, ecs.PreviousTransform2D)
+    world:commit()
+    x, y, angle = firstPose(extractor:packet(640, 480))
+    near(x, 10)
+    near(y, 20)
+    near(angle, -math.pi + 0.1)
+end
+
+function suite.keyedTweenContinuesThroughAWorldSnapshot(): nil
+    const world = ecs.newWorld({timestep = 1})
+    sequence.plugin(world)
+    const actor = world:spawn(ecs.Transform2D())
+    world:spawn(ecs.Transform2D(100), ecs.EntityKey("snapshot.target"))
+    world:commit()
+    const timeline = sequence.timeline("test.stabilization.keySnapshot", {
+        sequence.tweenTrack(1, "linear", "transform.x", sequence.sourceKey("snapshot.target", ecs.Transform2D, {"x"})),
+    })
+    sequence.play(world, timeline, {owner = actor})
+    world:update(0)
+    world:update(0.25)
+    near(assert(world:get(actor, ecs.Transform2D)).x, 25)
+    const copy = ecs.newWorld({timestep = 1})
+    sequence.plugin(copy)
+    copy:loadSnapshot(world:saveSnapshot())
+    assert(copy:getMut(copy:requireKey("snapshot.target"), ecs.Transform2D)).x = 200
+    copy:update(0.25)
+    near(assert(copy:get(actor, ecs.Transform2D)).x, 100)
+end
+
+function suite.interpolatesLightPositionsWithoutChangingTheirSimulationPose(): nil
+    const world = ecs.newWorld({timestep = 1})
+    const light = world:spawn(ecs.Transform2D(20, 40), ecs.PreviousTransform2D(0, 0), gfx.PointLight2D())
+    world:commit()
+    world:update(0.5)
+    const extractor = framepacket.new(world)
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 480))
+    reader:skip(20)
+    const graphBytes = reader:readUint32()
+    reader:skip(framepacket.HEADER_SIZE - 24 + graphBytes)
+    near(reader:readFloat32(), 10)
+    near(reader:readFloat32(), 20)
+    near(assert(world:get(light, ecs.Transform2D)).x, 20)
+end
+
+function suite.refusesASecondApplicationDebugListenerWithoutRebindingTheFirst(): nil
+    withSession({mcpPort = 0, debug = true}, function(first: host.Session): nil
+        withSession({mcpPort = 0, debug = true}, function(second: host.Session): nil
+            test.equal(second.app.debugServer, nil)
+            test.assert(host.crashed(second):find("another application", 1, true) ~= nil)
+            test.assert(callOverHTTP(first, "ping").isError ~= true)
+            test.equal(host.crashed(first), nil)
+        end)
+        test.assert(callOverHTTP(first, "stats").isError ~= true)
+    end)
+end
+
+return suite

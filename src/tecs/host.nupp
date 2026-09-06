@@ -81,7 +81,13 @@ local function hostState(
     )
 end
 
-local function sessionFor(app: application.Application): Session
+--- Creates a configurable session without starting the application.
+--- @param config the application settings, including world timing and optional MCP
+---     port.
+--- @return the session a component's constructor gives the Rust host.
+--- @raises when application configuration is invalid.
+export function newSession(config: application.Config?): Session
+    const app = application.newApplication(config)
     return new Session(
         app = app,
         events = {},
@@ -114,14 +120,12 @@ export function createWithPlugin(
     debug: boolean?,
     maxFrames: integer?
 ): Session
-    return sessionFor(
-        application.newApplication({
-            window = {title = title, width = width, height = height},
-            plugin = plugin,
-            debug = debug == true,
-            debugMaxFrames = maxFrames,
-        })
-    )
+    return newSession({
+        window = {title = title, width = width, height = height},
+        plugin = plugin,
+        debug = debug == true,
+        debugMaxFrames = maxFrames,
+    })
 end
 
 --- Creates one blank application session for the first Rust host slice.
@@ -132,23 +136,29 @@ end
 --- @param maxFrames an optional positive frame limit for host smoke runs
 --- @return the session the embedding host keeps as a managed handle
 export function create(title: string?, width: integer?, height: integer?, debug: boolean?, maxFrames: integer?): Session
-    return sessionFor(
-        application.newApplication({
-            window = {title = title, width = width, height = height},
-            debug = debug == true,
-            debugMaxFrames = maxFrames,
-        })
-    )
+    return newSession({
+        window = {title = title, width = width, height = height},
+        debug = debug == true,
+        debugMaxFrames = maxFrames,
+    })
 end
 
---- Initializes the application and runs startup phases.
+--- Starts initialization and parks asynchronous startup work between host turns.
+--- @param session the application session to initialize.
+--- @return true while the host may continue driving startup or diagnostics.
 export function init(exclusive session: Session): boolean
-    return session.app:init()
+    const app = session.app
+    framepump.start(session.pump, function(): boolean
+        return app:init()
+    end)
+
+    return true
 end
 
 --- Starts one frame or polls the frame already parked on asynchronous work.
 --- @return `parked`, `continue`, or `stopped`
 export function iterate(exclusive session: Session, dt: number): framepump.State
+    session.app:poll(framepump.parked(session.pump))
     if framepump.parked(session.pump) then
         return framepump.poll(session.pump)
     end

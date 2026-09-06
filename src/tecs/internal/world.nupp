@@ -230,6 +230,7 @@ export record World
     private eventEmitDepth: integer
     private deferredObserverStops: {DeferredObserverStop}
     private committing: boolean
+    private nominalFrameTime: number
     private fixedTimestep: number
     private fixedAccumulator: number
     private fixedStepTotal: integer
@@ -274,6 +275,13 @@ export record World
     enablePhase: function(exclusive self: World, phase: phases.Selection): nil
     disablePhase: function(exclusive self: World, phase: phases.Selection): nil
     isPhaseEnabled: function(borrows self: World, phase: phases.Phase): boolean
+
+    --- Returns the configured seconds per presentation tick.
+    getNominalFrameTime: function(borrows self: World): number
+
+    --- Changes conversion for future sequence waits; existing deadlines stay fixed.
+    setNominalFrameTime: function(exclusive self: World, seconds: number): nil
+
     getFixedTiming: function(borrows self: World): (number, number, number)
     fixedStepCount: function(borrows self: World): integer
     getStats: function(borrows self: World): WorldStats
@@ -311,13 +319,16 @@ export const DEFAULT_FIXED_OVERLOAD: FixedOverload = "drop"
 --- @param timestep the positive duration of one fixed step
 --- @param fixedMaxSteps the fixed steps one frame may run
 --- @param fixedOverload what happens to whole steps beyond the limit
+--- @param nominalFrameTime the positive finite seconds per presentation tick,
+---     defaulting to 1/60.
 --- @return the empty world
 --- @raises when a capacity or fixed-clock option is invalid
 export function new(
     maxEntities: integer?,
     timestep: number?,
     fixedMaxSteps: integer?,
-    fixedOverload: FixedOverload?
+    fixedOverload: FixedOverload?,
+    nominalFrameTime: number?
 ): World
     if timestep ~= nil and (timestep <= 0 or timestep ~= timestep) then
         error("world.new: timestep must be greater than zero", 2)
@@ -327,6 +338,9 @@ export function new(
     end
     if fixedOverload ~= nil and fixedOverload ~= "drop" and fixedOverload ~= "accumulate" then
         error("world.new: fixedOverload must be 'drop' or 'accumulate'", 2)
+    end
+    if nominalFrameTime ~= nil and (not (nominalFrameTime > 0) or nominalFrameTime == math.huge) then
+        error("world.new: nominalFrameTime must be positive and finite", 2)
     end
     local empty = archetype.new(1, {})
     local bySignature: {[string]: archetype.Archetype} = {}
@@ -361,6 +375,7 @@ export function new(
         eventEmitDepth = 0,
         deferredObserverStops = {},
         committing = false,
+        nominalFrameTime = nominalFrameTime or 1 / 60,
         fixedTimestep = timestep or DEFAULT_TIMESTEP,
         fixedAccumulator = 0,
         fixedStepTotal = 0,
@@ -2180,6 +2195,25 @@ function World.update(exclusive self: World, dt: number): nil
     for index = 1, self.archetypeCount do
         self.archetypes[index]:clearDirtyComponents()
     end
+end
+
+--- Returns the configured seconds per presentation tick.
+--- @param self the world to inspect.
+--- @return the positive nominal duration, independent of measured frame deltas.
+function World.getNominalFrameTime(borrows self: World): number
+    return self.nominalFrameTime
+end
+
+--- Changes how future frame and presentation waits convert seconds to ticks.
+--- Existing tick deadlines are unchanged. This setting is local to one world.
+--- @param self the world to configure.
+--- @param seconds the positive finite nominal duration in seconds.
+--- @raises when seconds is not positive and finite.
+function World.setNominalFrameTime(exclusive self: World, seconds: number): nil
+    if not (seconds > 0) or seconds == math.huge then
+        error("world.setNominalFrameTime: seconds must be positive and finite", 2)
+    end
+    self.nominalFrameTime = seconds
 end
 
 --- Returns fixed-step timing for interpolation consumers.

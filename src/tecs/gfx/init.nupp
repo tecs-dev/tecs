@@ -7,6 +7,14 @@ The public scene-rendering values a two-dimensional game spawns.
 drawable entity, and `Camera2D` with `ActiveCamera` selects the view every
 frame is projected through.
 
+[`PreviousTransform2D`](tecs.ecs.PreviousTransform2D) opts an entity into
+fixed-step presentation interpolation. The extractor blends position and the
+shortest rotation arc using the world's residual fixed time. Lights and shadow
+geometry use the same presented pose. Scale, depth and layer use current values,
+and entities without history render directly from their current transform.
+Physics seeds history automatically; an authored history should initially match
+the entity's creation pose.
+
 ```nupp
 const ecs = tecs.ecs
 const gfx = tecs.gfx

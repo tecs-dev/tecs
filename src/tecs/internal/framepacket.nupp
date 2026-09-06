@@ -215,6 +215,9 @@ end
 --- The row arrays grow to a scene's high-water mark and are then reused, so a
 --- steady scene extracts without allocating anything but the packet itself.
 export record Extractor
+    private world: world.World
+    private poses: {rendercomponents.Transform2D}
+    private lightPoses: {rendercomponents.Transform2D}
     private drawables: query.Query
     private activeCameras: query.Query
     private cameras: query.Query
@@ -273,6 +276,9 @@ export function new(exclusive value: world.World): Extractor
     end
 
     return new Extractor(
+        world = value,
+        poses = {},
+        lightPoses = {},
         drawables = value:newQuery({
             include = {
                 rendercomponents.Transform2DComponent,
@@ -358,6 +364,34 @@ local function view(borrows self: Extractor, width: number, height: number): num
     return camera.x, camera.y, camera.zoom, camera.rotation
 end
 
+--- Reuses a detached pose for interpolation, leaving the simulation value untouched.
+local function presented(
+    current: rendercomponents.Transform2D,
+    previous: rendercomponents.PreviousTransform2D?,
+    alpha: number,
+    poses: {rendercomponents.Transform2D},
+    row: integer
+): rendercomponents.Transform2D
+    if previous == nil then
+        return current
+    end
+    local pose = poses[row]
+    if pose == nil then
+        pose = rendercomponents.Transform2DComponent.defaultFactory()
+        poses[row] = pose
+    end
+    pose.x = previous.x + (current.x - previous.x) * alpha
+    pose.y = previous.y + (current.y - previous.y) * alpha
+    const angle = (current.rotation - previous.rotation + math.pi) % (2 * math.pi) - math.pi
+    pose.rotation = previous.rotation + angle * alpha
+    pose.z = current.z
+    pose.layer = current.layer
+    pose.scaleX = current.scaleX
+    pose.scaleY = current.scaleY
+
+    return pose
+end
+
 --- Reads every renderable row into the extractor's reused arrays.
 --- @raises when an entity selects a material id this build does not carry
 local function collect(exclusive self: Extractor): nil
@@ -377,19 +411,27 @@ local function collect(exclusive self: Extractor): nil
     const u1 = self.u1
     const v1 = self.v1
     const materialCount = materials.count()
+    local _, _, alpha = self.world:getFixedTiming()
     local rows: integer = 0
     for candidate, count in self.drawables:iter() do
         local active = candidate as archetype.Archetype
         local rowTransforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
+        const previous = active:get(rendercomponents.PreviousTransform2DComponent)
         local rowTints: {rendercomponents.Tint} = assert(active:get(rendercomponents.TintComponent))
         local rowSprites = active:get(rendercomponents.SpriteComponent) as {rendercomponents.Sprite}?
         local rowMaterials = active:get(materials.MaterialComponent) as {materials.Material}?
         local rowOccluders = active:get(lighting.Occluder2DComponent) as {lighting.Occluder2D}?
         local rowDropShadows = active:get(lighting.DropShadow2DComponent) as {lighting.DropShadow2D}?
         for index = 1, count as integer do
-            const transform = rowTransforms[index]
-            const tint = rowTints[index]
             rows = rows + 1
+            const transform = presented(
+                rowTransforms[index],
+                previous ~= nil and previous[index] or nil,
+                alpha,
+                self.poses,
+                rows
+            )
+            const tint = rowTints[index]
             entities[rows] = active.entities[index]
             transforms[rows] = transform
             tints[rows] = tint
@@ -465,10 +507,12 @@ local function collectLights(exclusive self: Extractor): nil
     const lightEntities = self.lightEntities
     const lightTransforms = self.lightTransforms
     const lightValues = self.lightValues
+    local _, _, alpha = self.world:getFixedTiming()
     local found: integer = 0
     for candidate, count in self.lights:iter() do
         local active = candidate as archetype.Archetype
         local rowTransforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
+        const previous = active:get(rendercomponents.PreviousTransform2DComponent)
         local rowLights: {lighting.PointLight2D} = assert(active:get(lighting.PointLight2DComponent))
         for index = 1, count as integer do
             const light = rowLights[index]
@@ -482,7 +526,15 @@ local function collectLights(exclusive self: Extractor): nil
             end
             found = found + 1
             lightEntities[found] = active.entities[index]
-            lightTransforms[found] = rowTransforms[index]
+            lightTransforms[
+                found
+            ] = presented(
+                rowTransforms[index],
+                previous ~= nil and previous[index] or nil,
+                alpha,
+                self.lightPoses,
+                found
+            )
             lightValues[found] = light
         end
     end

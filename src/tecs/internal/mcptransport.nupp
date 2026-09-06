@@ -281,43 +281,44 @@ end
 
 --- Serves one connection until the peer closes it or the server stops.
 local function serve(exclusive self: Server, takes stream: net.Stream): nil
-    stream:setNoDelay(true)
-    while not self.destroyed do
-        local head, why = readHead(stream)
-        if head == nil then
-            if why ~= nil then
-                logger:debug("connection ended: %s", why)
+    with stream = stream do
+        stream:setNoDelay(true)
+        while not self.destroyed do
+            local head, why = readHead(stream)
+            if head == nil then
+                if why ~= nil then
+                    logger:debug("connection ended: %s", why)
+                end
+                break
             end
-            break
-        end
-        local boundary = assert(head:find("\r\n\r\n", 1, true))
-        local overshoot = head:sub(boundary + 4)
-        local requestLine = head:match("^(.-)\r\n") or ""
-        local method, target = requestLine:match("^(%u+)%s+(%S+)")
-        local length = contentLength(head)
-        if length > MAX_BODY then
-            respondHTTP(stream, "413 Payload Too Large", "text/plain", "body too large")
-            break
-        end
-        local body = readBody(stream, overshoot, length) ?? ""
+            local boundary = assert(head:find("\r\n\r\n", 1, true))
+            local overshoot = head:sub(boundary + 4)
+            local requestLine = head:match("^(.-)\r\n") or ""
+            local method, target = requestLine:match("^(%u+)%s+(%S+)")
+            local length = contentLength(head)
+            if length > MAX_BODY then
+                respondHTTP(stream, "413 Payload Too Large", "text/plain", "body too large")
+                break
+            end
+            local body = readBody(stream, overshoot, length) ?? ""
 
-        local path = (target or ""):match("^[^?]*") or ""
-        if path ~= ENDPOINT then
-            respondHTTP(stream, "404 Not Found", "text/plain", "no endpoint here")
-        elseif method ~= "POST" then
-            -- This server offers no server-initiated stream, so the other
-            -- Streamable HTTP methods are refused rather than left hanging.
-            respondHTTP(stream, "405 Method Not Allowed", "text/plain", "POST only")
-        else
-            local response = answer(self, body)
-            if response == nil then
-                respondHTTP(stream, "202 Accepted", nil, "")
+            local path = (target or ""):match("^[^?]*") or ""
+            if path ~= ENDPOINT then
+                respondHTTP(stream, "404 Not Found", "text/plain", "no endpoint here")
+            elseif method ~= "POST" then
+                -- This server offers no server-initiated stream, so the other
+                -- Streamable HTTP methods are refused rather than left hanging.
+                respondHTTP(stream, "405 Method Not Allowed", "text/plain", "POST only")
             else
-                respondHTTP(stream, "200 OK", "application/json", response)
+                local response = answer(self, body)
+                if response == nil then
+                    respondHTTP(stream, "202 Accepted", nil, "")
+                else
+                    respondHTTP(stream, "200 OK", "application/json", response)
+                end
             end
         end
     end
-    stream:close()
 end
 
 -- Forward declared: the coroutine body below dispatches to it, and it starts
@@ -358,17 +359,18 @@ end
 --- addressing the old one. Owning the listener here also puts its close on the
 --- path that already unwinds, which is what `destroy` resumes.
 acceptLoop = function(exclusive self: Server, takes listener: net.Listener): nil
-    while not self.destroyed do
-        local stream, why = listener:accept()
-        if stream == nil then
-            if why ~= nil and not self.destroyed then
-                logger:warn("accept failed: %s", why)
+    with listener = listener do
+        while not self.destroyed do
+            local stream, why = listener:accept()
+            if stream == nil then
+                if why ~= nil and not self.destroyed then
+                    logger:warn("accept failed: %s", why)
+                end
+                break
             end
-            break
+            spawn(self, stream, nil)
         end
-        spawn(self, stream, nil)
     end
-    listener:close()
 end
 
 -------------------------------------------------------------------------------

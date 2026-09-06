@@ -146,6 +146,42 @@ A `src/tecs/**.nupp` module that is not listed in the `headless` target's
 `entries` is neither built nor checked. A new module has to be added there.
 :::
 
+## Application services
+
+Use `host.newSession` in your component constructor when it needs settings
+beyond the convenience constructor:
+
+```nupp
+return host.newSession({
+    plugin = install,
+    window = {title = title or "My game", width = width, height = height},
+    world = {nominalFrameTime = 1 / 60},
+    debug = debug == true,
+    debugMaxFrames = maxFrames,
+    mcpPort = debug == true and 7100 or nil,
+})
+```
+
+The application provides `app.assets`. A request can suspend startup or an
+update while the Rust host continues polling. Release settled asset handles in
+your shutdown systems; the application stops outstanding acquisitions after
+world shutdown and closes its optional MCP listener even after a game failure.
+
+Nil `mcpPort` disables the listener. Zero chooses a free port, reported by
+`app.debugServer.port` after initialization. The host keeps diagnostics available
+while gameplay is suspended, parked or crashed. World-touching tools refuse a
+parked operation rather than changing a world halfway through its update.
+
+`nominalFrameTime` controls how sequence frame and presentation waits convert
+seconds into ticks. It is local to the world and independent of measured frame
+deltas; changing it affects future waits only. Fixed waits continue to use the
+world's fixed timestep.
+
+Physics supplies `ecs.PreviousTransform2D` for presentation interpolation. It
+starts at the creation pose and is refreshed before later fixed steps, so the
+first rendered movement does not interpolate from the origin. Entities without
+that component render directly from their current transform.
+
 ## Packaging
 
 ```bash

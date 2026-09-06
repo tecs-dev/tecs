@@ -53,6 +53,20 @@ program's clock. Every positive duration waits at least one tick, and
 `waitSteps(0)` yields until the next tick and gives a loop a fresh instruction
 budget.
 
+`ecs.newWorld({nominalFrameTime = seconds})`, or `Application.Config.world`,
+sets the duration used to convert frame and presentation waits to ticks. It
+is positive and finite and defaults to 1/60 in both windowed and headless
+sessions. `setNominalFrameTime(world, seconds)` changes future conversions in
+that world only; already scheduled tick deadlines do not move. This replaces
+the old process-wide `setNominalFrameTime(seconds)` call. Restore a saved
+playback into a world configured for its intended cadence.
+
+`sourceKey(key, component, fields)` resolves a moving tween destination through
+`World.byKey` on each evaluation, including after snapshot load or a new entity
+claims the key. `TrackingTarget.key` does the same when its `entity` is zero.
+An explicit entity id takes precedence and a stale id does not fall back to the
+key. A missing source contributes zero, as other missing tracking sources do.
+
 ## Ownership
 
 `owner` ties a playback to an entity, and despawning that entity cancels the
@@ -545,6 +559,17 @@ end
 --- @return the source
 export function sourceOwn(component: ecs.Component, fields: {string}): TrackSource
     return tweeneval.sourceOwn(component, fields)
+end
+
+--- Reads a moving destination from the live entity holding a world key.
+--- Missing or despawned sources contribute zero until a live entity claims the key.
+--- @param key the non-empty key resolved on every evaluation.
+--- @param component the component to read from that entity.
+--- @param fields the fields aligned with the target's fields.
+--- @return the keyed tracking source.
+--- @raises when the key is empty.
+export function sourceKey(key: string, component: ecs.Component, fields: {string}): TrackSource
+    return tweeneval.sourceKey(key, component, fields)
 end
 
 --- Reads a moving destination from the entity named by the animated entity's
@@ -1181,11 +1206,11 @@ end
 ---
 --- The nominal duration is used rather than a frame's measured time because a
 --- wake is a tick number fixed when the wait runs and never revisited.
---- @param seconds the loop's nominal frame duration, defaulting to one sixtieth
----     of a second
---- @raises when the duration is not greater than zero
-export function setNominalFrameTime(seconds: number): nil
-    sequencevm.setNominalFrameTime(seconds)
+--- @param world the world whose future waits use this duration.
+--- @param seconds the positive finite nominal duration in seconds.
+--- @raises when the duration is not positive and finite.
+export function setNominalFrameTime(exclusive world: ecs.World, seconds: number): nil
+    world:setNominalFrameTime(seconds)
 end
 
 --- Returns the actions and emissions a playback will certainly perform next,

@@ -154,6 +154,7 @@ function suite.stateComponentsTakeTheStateSuffix(): nil
 end
 
 function suite.renderComponentNames(): nil
+    test.equal(ecs.PreviousTransform2D.componentName, "PreviousTransform2D")
     test.equal(gfx.Tint.componentName, "Tint")
     test.equal(gfx.Sprite.componentName, "Sprite")
     test.equal(gfx.Camera2D.componentName, "Camera2D")
@@ -428,11 +429,16 @@ local function systemNames(world: ecs.World): {string}
 end
 
 function suite.ecsBuiltinSystemNames(): nil
-    -- Every world carries these three, so no plugin call precedes the read.
+    -- Every world carries these four, so no plugin call precedes the read.
     -- `ttl` is lowercase because Teal spelled it that way, and a debug tool that
     -- stops it names it exactly.
     local world = ecs.newWorld()
-    containsAll(systemNames(world), {"ttl", "RelativeTransform2D", "RelativeTransformDirtySampler"})
+    containsAll(systemNames(world), {
+        "tecs.SnapshotTransforms",
+        "ttl",
+        "RelativeTransform2D",
+        "RelativeTransformDirtySampler"
+    })
 end
 
 function suite.audioSystemNames(): nil

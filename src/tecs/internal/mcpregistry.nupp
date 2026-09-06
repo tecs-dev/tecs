@@ -48,6 +48,10 @@ export type ToolHandler = function(arguments: {[string]: any}): {[string]: any}?
 --- the tool name. `outputSchema` is omitted from the listing when nil rather
 --- than advertised as an empty schema.
 ---
+--- `whenParked` permits diagnostics while a lifecycle coroutine is suspended.
+--- Such a handler must not access or mutate the in-progress world. It is false
+--- by default; `readOnly` alone is not sufficient to opt in.
+---
 --- `readOnly` and `destructive` are advisory hints the server reports and
 --- enforces neither. `whenCrashed` keeps a tool callable after a guarded game
 --- failure; it is false by default, because a crashed world cannot answer
@@ -60,7 +64,11 @@ export type Tool = {
     handler: ToolHandler,
     readOnly: boolean?,
     destructive: boolean?,
-    whenCrashed: boolean?
+    whenCrashed: boolean?,
+
+    --- Allows a tool to run during a parked lifecycle operation without touching the
+    --- world.
+    whenParked: boolean?
 }
 
 local tools: {[string]: Tool} = {}
@@ -180,8 +188,15 @@ end
 --- identical terms.
 --- @param tool the tool to call
 --- @param arguments the decoded call arguments
+--- @param parked whether only diagnostics independent of the world may run.
 --- @return the result object, carrying `isError` when the handler raised
-export function callTool(tool: Tool, arguments: {[string]: any}): {[string]: any}
+export function callTool(tool: Tool, arguments: {[string]: any}, parked: boolean?): {[string]: any}
+    if parked == true and tool.whenParked ~= true then
+        return {
+            isError = true,
+            content = {{type = "text", text = "the application operation is parked; retry after it completes"}}
+        }
+    end
     if crashedText ~= nil and tool.whenCrashed ~= true then
         return {isError = true, crashed = true, content = {{type = "text", text = crashedText}}}
     end

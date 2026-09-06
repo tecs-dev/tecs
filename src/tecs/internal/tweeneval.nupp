@@ -31,7 +31,7 @@ export type OperationKind = "to" | "adjust" | "track" | "wait" | "emit" | "run" 
 export type TargetMode = "field" | "field2" | "angle" | "color"
 
 --- Names where a `tweenTrack` operation reads its moving destination.
-export type TrackSourceKind = "self" | "trackingTarget" | "relationship"
+export type TrackSourceKind = "self" | "key" | "trackingTarget" | "relationship"
 
 --- Selects how a timeline repeats.
 export type PlaybackMode = "once" | "loop" | "pingPong"
@@ -126,6 +126,9 @@ end
 export record TrackSource
     --- Read-only. Selects which entity the source reads from.
     kind: TrackSourceKind
+
+    --- Read-only. Names the world key a keyed source resolves on every evaluation.
+    key: string?
 
     --- Read-only. Names the relationship traversed by a `related` source.
     relationshipName: string?
@@ -299,10 +302,9 @@ export record TrackingTarget
     --- Caller-writable. Names the source entity directly, or zero for none.
     entity: integer
 
-    --- Caller-writable. Names the source entity by world key. The Nupp
-    --- rewrite has no entity-key registry yet, so a non-empty key with no
-    --- `entity` reads as no source. The field survives because the
-    --- component's persisted value shape is a compatibility surface.
+    --- Caller-writable. Names the source entity by world key when `entity` is
+    --- zero. Resolution follows the current live claimant on every evaluation.
+    --- This persisted field name is a compatibility surface.
     key: string
 end
 
@@ -612,6 +614,25 @@ end
 export function sourceOwn(component: components.Component, fields: {string}): TrackSource
     return new TrackSource(
         kind = "self",
+        componentName = component.componentName,
+        component = component,
+        fields = fields
+    )
+end
+
+--- Reads a moving destination from the live entity holding a world key.
+--- @param key the non-empty entity key to resolve on each evaluation.
+--- @param component the component to read.
+--- @param fields the fields aligned with the target's fields.
+--- @return the keyed source.
+--- @raises when the key is empty.
+export function sourceKey(key: string, component: components.Component, fields: {string}): TrackSource
+    if key == "" then
+        error("tween.sourceKey: the key must not be empty", 2)
+    end
+    return new TrackSource(
+        kind = "key",
+        key = key,
         componentName = component.componentName,
         component = component,
         fields = fields
@@ -995,6 +1016,7 @@ export function serializeSource(value: TrackSource?): {[string]: any}?
 
     return {
         kind = value.kind,
+        key = value.key,
         relationship = value.relationshipName,
         component = value.componentName,
         fields = value.fields,
@@ -1018,6 +1040,7 @@ export function deserializeSource(data: {[string]: any}?): TrackSource?
 
     return new TrackSource(
         kind = data.kind as TrackSourceKind,
+        key = data.key as string?,
         relationshipName = relationshipName,
         relationship = relationship,
         componentName = componentName,
@@ -1197,12 +1220,17 @@ export function valuesFromSource(
         source.component = component
     end
     local sourceEntity = entity
-    if source.kind == "trackingTarget" then
+    if source.kind == "key" then
+        sourceEntity = world:byKey(assert(source.key)) or 0
+    elseif source.kind == "trackingTarget" then
         local tracking = world:get(entity, TrackingTargetComponent)
-        if tracking == nil or tracking.entity == 0 then
+        if tracking == nil then
             return 0, 0, 0, 0
         end
         sourceEntity = tracking.entity
+        if sourceEntity == 0 and tracking.key ~= "" then
+            sourceEntity = world:byKey(tracking.key) or 0
+        end
     elseif source.kind == "relationship" then
         local relationship = source.relationship
         if relationship == nil then

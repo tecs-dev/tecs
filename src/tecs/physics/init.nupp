@@ -22,7 +22,11 @@ physics.applyImpulse(world, crate, 400.0, 0.0)
 
 The solver writes each body's `Transform2D` back, so nothing else has to move
 the entity. `detach` takes a body out of the solve without despawning its
-entity.
+entity. On successful body creation, physics seeds
+[`PreviousTransform2D`](tecs.ecs.PreviousTransform2D) from the creation pose
+before publishing the solver's first result. The builtin snapshot system
+refreshes that history before subsequent fixed steps. Rendering interpolates
+position and the shortest rotation arc without changing simulation state.
 
 Public positions, extents, linear velocities, impulses, forces and gravity use
 pixels. Angles and angular velocities use radians. The solver works in meters
@@ -627,6 +631,13 @@ local record State
     --- Holds the entity behind each `queueCreateBody` order, ascending by
     --- entity so a same-batch owner can be found by binary search.
     createOrder: {integer}
+
+    --- Copies the pose sent to the solver, before another phase can change the
+    --- component.
+    createX: {number}
+
+    createY: {number}
+    createRotation: {number}
 
     createCount: integer
 
@@ -1236,6 +1247,9 @@ local function queueBody(state: State, borrows world: ecs.World, entity: integer
         )
     )
     state.createOrder[order] = entity
+    state.createX[order] = transform.x
+    state.createY[order] = transform.y
+    state.createRotation[order] = transform.rotation
     state.createCount = order
 end
 
@@ -1627,7 +1641,12 @@ local function publishHandles(state: State, exclusive world: ecs.World): nil
     for order = 1, state.createCount do
         local index1, generation = simulation.createdBody(order)
         if index1 ~= 0 then
-            world:set(state.createOrder[order], RigidBody(index1, simulation.id, generation))
+            const entity = state.createOrder[order]
+            world:set(
+                entity,
+                ecs.PreviousTransform2D(state.createX[order], state.createY[order], state.createRotation[order])
+            )
+            world:set(entity, RigidBody(index1, simulation.id, generation))
         end
     end
     for order = 1, state.colliderCount do
@@ -1842,6 +1861,9 @@ export function install(exclusive world: ecs.World, options: Options?): contract
         snapshotBodies = world:newQuery({include = {Motion, RigidBody}, exclude = {PhysicsHeld}}),
         gathered = {},
         createOrder = {},
+        createX = {},
+        createY = {},
+        createRotation = {},
         createCount = 0,
         colliderOrder = {},
         colliderCount = 0,

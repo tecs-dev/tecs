@@ -11,7 +11,7 @@ same way inside a frame system and inside a startup script.
 ```nupp
 local assets <const> = require("tecs.assets")
 
-local loader = assets.newAssets()
+local loader = app.assets
 local handle, reason = loader:request(assets.bytes, "levels/one.json")
 if handle == nil then
     return nil, reason
@@ -19,6 +19,11 @@ end
 local text <const> = handle:value() as string
 handle:release()
 ```
+
+[`Application`](tecs.application.Application) creates `app.assets` and shuts it
+down after world shutdown. Standalone tools may use `newAssets` and must call
+`shutdown` themselves. Settled handles remain valid until their owners release
+them; stopping the loader cancels acquisitions, not those existing holds.
 
 Inside a system the same two lines suspend the logical update rather than the
 thread, and the host renders the frames that pass while the file is read. Where

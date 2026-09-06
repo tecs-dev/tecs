@@ -70,6 +70,32 @@ export const Transform2DComponent: components.TableComponent<Transform2D> = comp
     end,
 })
 
+--- Stores the pose before the current fixed step for presentation interpolation.
+--- Presence opts an entity in. Scale, depth and layer use their current values.
+export record PreviousTransform2D
+    --- Engine-owned. Stores the previous horizontal position in world units.
+    x: number
+
+    --- Engine-owned. Stores the previous vertical position in world units.
+    y: number
+
+    --- Engine-owned. Stores the previous clockwise rotation in radians.
+    rotation: number
+end
+
+--- The process-wide transform-history component. Its name and fields are snapshot
+--- compatibility surfaces.
+export const PreviousTransform2DComponent: components.TableComponent<PreviousTransform2D> = components.newComponent({
+    name = "PreviousTransform2D",
+    requires = {Transform2DComponent},
+    construct = function(x: number?, y: number?, rotation: number?): PreviousTransform2D
+        return new PreviousTransform2D(x = x or 0, y = y or 0, rotation = rotation or 0)
+    end,
+    default = function(): PreviousTransform2D
+        return new PreviousTransform2D(x = 0, y = 0, rotation = 0)
+    end,
+})
+
 --- Controls a renderable entity's color and opacity.
 export record Tint
     --- Caller-writable. Sets the red channel from zero to one.

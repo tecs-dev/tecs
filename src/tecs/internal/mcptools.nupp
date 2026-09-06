@@ -21,7 +21,6 @@ keep that spelling even though the command registry itself has not crossed.
 Do not rename one.
 ]]
 
-local application = require("tecs.application")
 local ecs = require("tecs.ecs")
 local files = require("nupp.io.files")
 local json = require("nupp.data.json")
@@ -65,6 +64,7 @@ end
 registry.register({
     -- Compatibility surface: `ping`.
     name = "ping",
+    whenParked = true,
     description = "Confirms the game is running and answering. Reports a "
     .. "crash rather than refusing to answer after one.",
     readOnly = true,
@@ -113,6 +113,7 @@ end
 registry.register({
     -- Compatibility surface: `context`.
     name = "context",
+    whenParked = true,
     description = "What this build is, what it can do, and what the world it is running holds.",
     readOnly = true,
     whenCrashed = true,
@@ -143,6 +144,7 @@ local WINDOW: integer = 65536
 registry.register({
     -- Compatibility surface: `get_logs`, with the `after` and `contains` keys.
     name = "get_logs",
+    whenParked = true,
     description = "Reads the log file from a byte offset. Poll with the returned offset to follow it.",
     readOnly = true,
     whenCrashed = true,
@@ -743,5 +745,5 @@ registry.register({
 --- lint reporting the binding as unused.
 --- @return true, once the module has loaded
 export function installed(): boolean
-    return application ~= nil
+    return bindings ~= nil
 end

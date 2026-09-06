@@ -6,10 +6,16 @@ The MCP debug server, its tool registry, and the tools every build exposes.
 ## Serving a session
 
 `listen` binds a loopback Streamable HTTP endpoint at
-`http://127.0.0.1:<port>/mcp`. Call `Server:poll` once per frame and
-`Server:destroy` at teardown. Each poll answers at most one tool call. The
-handler sees a committed world, and the frame cannot end until it returns, so a
-tool answers quickly or holds the game up.
+`http://127.0.0.1:<port>/mcp`. An application configured with `mcpPort` owns the
+listener and `tecs.host` polls it once per host turn, outside world updates,
+including after a crash or while gameplay is suspended. For a standalone
+server, call `poll` outside the world update scope and `destroy` at teardown.
+Each poll answers at most one tool request; handlers must answer promptly.
+
+While a lifecycle operation is parked, `ping`, `context` and `get_logs` remain
+available. Other tools report that the operation must complete first. A custom
+tool may opt in with `whenParked = true` only if it never touches the in-progress
+world. `readOnly` alone grants no such permission.
 
 ```nupp
 local mcp = require("tecs.mcp")
@@ -70,7 +76,6 @@ published, including the snake_case names `run_lua`, `send_event`,
 Do not rename one.
 ]]
 
-local application = require("tecs.application")
 local ecs = require("tecs.ecs")
 local json = require("nupp.data.json")
 local bindings = require("tecs.internal.mcpbindings")
@@ -139,7 +144,7 @@ end
 --- so until this has run.
 --- @param world the world the world tools read and write, or nil to unbind
 --- @param app the application the lifecycle tools act on, or nil to unbind
-export function bind(world: ecs.World?, app: application.Application?): nil
+export function bind(world: ecs.World?, app: bindings.Application?): nil
     bindings.bindWorld(world)
     bindings.bindApplication(app)
 end
@@ -217,13 +222,15 @@ export function listen(port: integer?): (Server?, string?)
     )
 end
 
---- Answers at most one tool call. Call once per frame.
+--- Answers at most one tool call. Call once per host turn outside world updates.
 ---
 --- Protocol-only traffic, `initialize` and `tools/list` included, is answered
 --- without running a tool and therefore does not make this report true.
 --- @param self the running server
---- @return whether one tool handler ran
-export function poll(exclusive self: Server): boolean
+--- @param parked whether a lifecycle operation is suspended; only `whenParked` tools
+---     may run then.
+--- @return whether one tool request was answered.
+export function poll(exclusive self: Server, parked: boolean?): boolean
     if self.destroyed then
         return false
     end
@@ -256,7 +263,7 @@ export function poll(exclusive self: Server): boolean
         return true
     end
 
-    local result = registry.callTool(tool, arguments as {[string]: any})
+    local result = registry.callTool(tool, arguments as {[string]: any}, parked)
     if result.isError == true then
         local content = result.content as {{[string]: any}}
         self.endpoint:respond(request, content[1].text as string, true, result.crashed == true)

@@ -321,7 +321,8 @@ local installed: {[entityworld.World]: boolean} = setmetatable({}, {__mode = "k"
 --- twice on one world does nothing, which is what lets a world built through
 --- `tecs.internal.world` directly opt in later.
 ---
---- Three systems are registered. `ttl` decrements every lifetime once per fixed
+--- Four systems are registered. `tecs.SnapshotTransforms` copies opted-in poses
+--- before fixed-step systems move them. `ttl` decrements every lifetime once per fixed
 --- step and despawns what reaches zero. `RelativeTransform2D` recomposes the
 --- hierarchy in `PostUpdate`, but only when a transform, an offset or a parent
 --- link changed. `RelativeTransformDirtySampler` runs in `Last` and records
@@ -334,6 +335,29 @@ export function install(exclusive world: entityworld.World): nil
         return
     end
     installed[world] = true
+
+    const interpolated = world:newQuery({
+        include = {rendercomponents.Transform2DComponent, rendercomponents.PreviousTransform2DComponent,}
+    })
+    world:addSystem({
+        -- Compatibility surface retained from the original renderer.
+        name = "tecs.SnapshotTransforms",
+        phase = phases.FixedFirst,
+        run = function(): nil
+            for candidate, count in interpolated:iter() do
+                const active = candidate as archetype.Archetype
+                const current = assert(active:get(rendercomponents.Transform2DComponent))
+                const previous = assert(active:getMut(rendercomponents.PreviousTransform2DComponent))
+                for row = 1, count as integer do
+                    const source = current[row]
+                    const target = previous[row]
+                    target.x = source.x
+                    target.y = source.y
+                    target.rotation = source.rotation
+                end
+            end
+        end,
+    })
 
     -- A paused or disabled entity holds its lifetime rather than spending it.
     -- Teal spelled this `type = "logic"`; the port has no automatic exclusion,

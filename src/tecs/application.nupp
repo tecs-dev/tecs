@@ -9,9 +9,29 @@ startup, world updates, crash containment, suspension, quit requests, and
 shutdown. Windowing, rendering, audio, and platform event conversion remain
 Rust service boundaries rather than fields filled with SDL compatibility
 objects.
+
+Each application owns an asset loader. `Config.mcpPort` opts into one loopback
+MCP listener, opened before plugin installation so startup failures remain
+inspectable. Only one application per runtime may own that listener, because
+the tool registry names one world. Nil opens no listener; zero chooses a port.
+
+A host calls `poll` outside `iterate`, once per host turn, even while gameplay
+is suspended or a lifecycle operation is parked. `tecs.host` does this and
+parks asynchronous startup as well as updates. A custom host must follow the
+same ordering. Diagnostics remain available during a parked operation; tools
+that could touch its in-progress world report a retryable refusal.
+
+Shutdown first unwinds a parked host operation, then attempts world shutdown,
+stops the loader, and closes the debug listener. Later application cleanup
+still runs if world shutdown raises. Resident asset handles retain their
+existing release contract: game shutdown systems release the holds they own.
+Repeated application shutdown does nothing.
 ]]
 
+local assets = require("tecs.assets")
 local ecs = require("tecs.ecs")
+local mcp = require("tecs.mcp")
+local mcpbindings = require("tecs.internal.mcpbindings")
 local hostcancellation = require("tecs.internal.hostcancellation")
 local input = require("tecs.input")
 local platformevents = require("tecs.platform.events")
@@ -27,8 +47,16 @@ export type State = "created" | "running" | "stopped"
 export type Plugin = function(exclusive app: Application): nil
 
 --- A host-driven application and its world.
-export record Application
+export record Application is mcpbindings.Application
     world: ecs.World
+
+    --- Read-only. Holds this application's loader, which shuts down with the
+    --- application.
+    assets: assets.Assets
+
+    --- Read-only. Holds the optional loopback debug listener after initialization.
+    debugServer: mcp.Server?
+
     input: input.Input
     window: platformwindow.Window
     quitRequested: boolean
@@ -39,10 +67,18 @@ export record Application
     private state: State
     private plugin: Plugin?
     private onEvent: (function(event: platformevents.Event, exclusive app: Application): nil)?
+    private bindDebug: function(): nil
+    private mcpPort: integer?
     private debug: boolean
     private debugMaxFrames: integer?
     private failure: string?
     private shutdownDone: boolean
+
+    --- Polls optional debugging once per host turn, outside the world update scope.
+    --- @param self the application to serve.
+    --- @param parked whether its lifecycle coroutine remains suspended.
+    --- @return whether one debug request was answered.
+    poll: function(exclusive self: Application, parked: boolean?): boolean
 
     init: function(exclusive self: Application): boolean
     iterate: function(exclusive self: Application, dt: number, events: {platformevents.Event}?): boolean
@@ -60,9 +96,17 @@ export type Config = {
     window: platformwindow.Options?,
     plugin: Plugin?,
     onEvent: (function(event: platformevents.Event, exclusive app: Application): nil)?,
+
+    --- Caller-writable. Enables loopback debugging on this port; nil disables it and
+    --- zero chooses a free port.
+    mcpPort: integer?,
     debug: boolean?,
     debugMaxFrames: integer?
 }
+
+-- The tool registry names one application per runtime. A second listener must
+-- not silently redirect the first application's tools into another world.
+local debugOwner: Application? = nil
 
 local function captureFailure(exclusive app: Application, failure: any): nil
     if hostcancellation.is(failure) then
@@ -70,24 +114,36 @@ local function captureFailure(exclusive app: Application, failure: any): nil
     end
     if app.failure == nil then
         app.failure = tostring(failure)
+        if debugOwner == app then
+            mcp.setCrashed(app.failure)
+        end
     end
 end
 
 --- Builds an inert application without opening platform services.
 --- @param config the copied world and lifecycle settings
 --- @return an application waiting for `init`
---- @raises when the debug frame limit is not a positive integer
+--- @raises when the debug frame limit or MCP port is invalid
 export function newApplication(config: Config?): Application
     local maxFrames = config and config.debugMaxFrames or nil
     if maxFrames ~= nil and (maxFrames < 1 or maxFrames % 1 ~= 0) then
         error("application.newApplication: debugMaxFrames must be a positive integer", 2)
     end
+    const port = config and config.mcpPort
+    if port ~= nil and (port < 0 or port > 65535 or port % 1 ~= 0) then
+        error("application.newApplication: mcpPort must be an integer from zero to 65535", 2)
+    end
     local world = ecs.newWorld(config and config.world)
     local inputState = input.install(world)
     local windowState = platformwindow.newWindow(config and config.window)
 
-    return new Application(
+    const app = new Application(
         world = world,
+        assets = assets.newAssets(),
+        debugServer = nil,
+        bindDebug = function(): nil
+        end,
+        mcpPort = port,
         input = inputState,
         window = windowState,
         quitRequested = false,
@@ -102,6 +158,14 @@ export function newApplication(config: Config?): Application
         failure = nil,
         shutdownDone = false
     )
+    app.bindDebug = function(): nil
+        debugOwner = app
+        mcp.bind(app.world, app)
+        mcp.setCrashed(nil)
+        mcp.resetSandbox()
+    end
+
+    return app
 end
 
 --- Installs the game plugin and runs startup phases once.
@@ -113,6 +177,19 @@ function Application.init(exclusive self: Application): boolean
         self.state = "running"
     else
         error("application.init: application is already " .. self.state, 2)
+    end
+    if self.mcpPort ~= nil then
+        if debugOwner ~= nil then
+            captureFailure(self, "application.init: another application owns the debug listener")
+            return true
+        end
+        const server, reason = mcp.listen(self.mcpPort)
+        if server == nil then
+            captureFailure(self, reason or "the debug listener could not bind")
+            return true
+        end
+        self.debugServer = server
+        self.bindDebug()
     end
     local plugin = self.plugin
     if plugin ~= nil then
@@ -133,6 +210,15 @@ function Application.init(exclusive self: Application): boolean
     end
 
     return true
+end
+
+function Application.poll(exclusive self: Application, parked: boolean?): boolean
+    const server = self.debugServer
+    if server == nil or self.shutdownDone then
+        return false
+    end
+
+    return mcp.poll(server, parked)
 end
 
 --- Runs one host iteration and returns whether another is wanted.
@@ -229,6 +315,9 @@ function Application.clearCrash(exclusive self: Application): boolean, string?
         return false, "application debug mode is disabled"
     end
     self.failure = nil
+    if debugOwner == self then
+        mcp.setCrashed(nil)
+    end
 
     return true
 end
@@ -246,6 +335,28 @@ function Application.shutdown(exclusive self: Application): boolean
     end)
     if not succeeded then
         captureFailure(self, failure)
+    end
+    local assetsStopped, assetsFailure = pcall(function(): nil
+        self.assets:shutdown()
+    end)
+    if not assetsStopped then
+        captureFailure(self, assetsFailure)
+    end
+    const server = self.debugServer
+    self.debugServer = nil
+    if server ~= nil then
+        const stopped, reason = pcall(function(): nil
+            mcp.destroy(server)
+        end)
+        if not stopped then
+            captureFailure(self, reason)
+        end
+    end
+    if debugOwner == self then
+        debugOwner = nil
+        mcp.bind(nil, nil)
+        mcp.setCrashed(nil)
+        mcp.resetSandbox()
     end
     self.state = "stopped"
 

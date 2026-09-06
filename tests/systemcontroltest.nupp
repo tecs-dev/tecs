@@ -9,10 +9,10 @@ end
 -- Every world `ecs.newWorld` builds arrives carrying the builtin systems, so a
 -- suite about registration control counts and lists around them rather than
 -- assuming a fresh world runs nothing.
-local BUILTIN_SYSTEM_COUNT = 3
+local BUILTIN_SYSTEM_COUNT = 4
 local BUILTIN_SYSTEMS: {
     [string]: boolean
-} = {ttl = true, RelativeTransform2D = true, RelativeTransformDirtySampler = true,}
+} = {["tecs.SnapshotTransforms"] = true, ttl = true, RelativeTransform2D = true, RelativeTransformDirtySampler = true,}
 
 --- Returns the systems the suite registered, in execution order.
 local function ownSystems(borrows value: ecs.World): {ecs.SystemInfo}

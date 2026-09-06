@@ -24,33 +24,6 @@ local wakeheap = require("tecs.internal.wakeheap")
 
 local floor = math.floor
 
---- The frame duration a `frame` or `presentation` wait divides seconds by
---- when nothing has set one.
-export const DEFAULT_FRAME_TIME: number = 1 / 60
-
--- Nominal rather than the frame's measured time, because a wake is a tick
--- number fixed when the wait runs and never revisited: dividing by whatever
--- one frame happened to cost would make the same wait a different number of
--- ticks on every machine and every frame it started on.
-local nominalFrameTime: number = DEFAULT_FRAME_TIME
-
---- Sets the nominal frame duration seconds convert against on the `frame` and
---- `presentation` clocks.
---- @param seconds the loop's nominal frame duration in seconds
---- @raises when seconds is not greater than zero
-export function setNominalFrameTime(seconds: number): nil
-    if seconds <= 0 or seconds ~= seconds then
-        error("sequence: the nominal frame time must be greater than zero", 3)
-    end
-    nominalFrameTime = seconds
-end
-
---- Returns the nominal frame duration seconds convert against.
---- @return the duration in seconds
-export function getNominalFrameTime(): number
-    return nominalFrameTime
-end
-
 -- Arguments without a binding in them are handed over as the program stored
 -- them; the rest are resolved into the world's scratch list. Either way the
 -- list belongs to the sequencer, and an action must read it rather than keep
@@ -88,13 +61,13 @@ end
 -- Seconds are authored and a clock counts ticks. `fixed` is the only clock
 -- whose tick is a fixed step, so it is the only one converted with the world's
 -- timestep; `frame` and `presentation` both advance once per frame and convert
--- with the loop's nominal frame time. The same program then waits the same
--- wall-clock duration whichever clock it is on.
+-- with the world's configured nominal frame duration. Actual wall-clock time
+-- depends on the host's cadence; measured deltas never rewrite a tick deadline.
 local function secondsToSteps(borrows world: entityworld.World, clock: sequencetypes.ClockId, seconds: number): integer
     if seconds <= 0 then
         return 0
     end
-    local timestep = nominalFrameTime
+    local timestep = world:getNominalFrameTime()
     if clock == "fixed" then
         timestep = world:getFixedTiming()
     end

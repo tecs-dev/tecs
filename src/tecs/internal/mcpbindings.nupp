@@ -13,11 +13,26 @@ This module exists so `tecs.internal.mcptools` and `tecs.internal.mcpworld`
 share one binding without either requiring the other.
 ]]
 
-local application = require("tecs.application")
 local ecs = require("tecs.ecs")
 
+local input = require("tecs.input")
+local window = require("tecs.platform.window")
+
+--- The application surface debug tools use, independent of lifecycle ownership.
+export interface Application
+    world: ecs.World
+    input: input.Input
+    window: window.Window
+    frame: integer
+    elapsed: number
+    suspended: boolean
+    getState: function(borrows self: Application): string
+    requestQuit: function(exclusive self: Application): nil
+    clearCrash: function(exclusive self: Application): (boolean, string?)
+end
+
 local boundWorld: ecs.World? = nil
-local boundApplication: application.Application? = nil
+local boundApplication: Application? = nil
 
 --- Makes `world` the world the built-in tools read and write.
 --- @param world the world to bind, or nil to unbind
@@ -27,7 +42,7 @@ end
 
 --- Makes `app` the application the lifecycle tools act on.
 --- @param app the application to bind, or nil to unbind
-export function bindApplication(app: application.Application?): nil
+export function bindApplication(app: Application?): nil
     boundApplication = app
 end
 
@@ -39,7 +54,7 @@ end
 
 --- Returns the bound application without raising.
 --- @return the application, or nil when nothing is bound
-export function app(): application.Application?
+export function app(): Application?
     return boundApplication
 end
 
@@ -58,7 +73,7 @@ end
 --- Returns the bound application for a tool that cannot work without one.
 --- @return the bound application
 --- @raises when no application is bound
-export function requireApplication(): application.Application
+export function requireApplication(): Application
     local found = boundApplication
     if found == nil then
         error("no application is bound; the application has not started", 0)

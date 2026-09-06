@@ -20,6 +20,9 @@ local rendercomponents = require("tecs.internal.rendercomponents")
 
 --- The options accepted by `newWorld`.
 export type WorldConfig = {
+    --- Caller-writable. Sets seconds per presentation tick, defaulting to 1/60 even
+    --- headless.
+    nominalFrameTime: number?,
     maxEntities: integer?,
     timestep: number?,
     fixedMaxSteps: integer?,
@@ -172,6 +175,14 @@ export type Transform2D = rendercomponents.Transform2D
 --- Constructs the shared two-dimensional transform component.
 export const Transform2D = rendercomponents.Transform2DComponent
 
+--- Stores the position and rotation before the current fixed step.
+export type PreviousTransform2D = rendercomponents.PreviousTransform2D
+
+--- Opts an entity into fixed-step presentation interpolation.
+--- Physics seeds this with the body's creation pose. The builtin snapshot
+--- system refreshes it before each fixed step; rendering never mutates simulation.
+export const PreviousTransform2D = rendercomponents.PreviousTransform2DComponent
+
 --- Counts down an entity's remaining lifetime.
 export type TTL = builtins.TTL
 
@@ -220,7 +231,7 @@ export const DEFAULT_FIXED_MAX_STEPS: integer = entityworld.DEFAULT_FIXED_MAX_ST
 
 --- Creates an independent empty world carrying the builtin systems.
 ---
---- The world arrives with `ttl`, `RelativeTransform2D` and
+--- The world arrives with `tecs.SnapshotTransforms`, `ttl`, `RelativeTransform2D` and
 --- `RelativeTransformDirtySampler` already registered, which is what makes a
 --- `TTL` expire and a `RelativeTransform2D` move its entity without a game
 --- installing anything.
@@ -232,7 +243,8 @@ export function newWorld(config: WorldConfig?): World
         config and config.maxEntities,
         config and config.timestep,
         config and config.fixedMaxSteps,
-        config and config.fixedOverload
+        config and config.fixedOverload,
+        config and config.nominalFrameTime
     )
     builtins.install(value)
 

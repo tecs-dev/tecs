@@ -146,8 +146,10 @@ scheduler state across frames. Startup, shutdown, and calls made outside
 
 `tecs.internal.framepump` is what makes that work across the embedding
 boundary. The call that starts or polls a host operation never yields: a wait
-parks the operation's coroutine in the pump, a readiness callback only queues
-that coroutine, and a later host turn polls sources and drains the queue. So a
+parks the operation's coroutine in the pump, and a later polling turn resumes
+it when readiness is reported. Resuming during that notification releases the
+one-shot source before MCP or another driver polls it again. Deferring that
+resumption left completed network waits registered and fired them twice. So a
 parked update is one the host observes as `parked` and asks again, rather than
 a yield escaping into Rust.
 
@@ -166,6 +168,23 @@ dispatches observers from the scheduler-owned `Ingress` phase. If an observer
 suspends, later events wait for the next update. Watcher changes use the same
 boundary. The scheduler therefore commits a phase once and extraction never
 observes half of an external batch.
+
+### Application lifecycle and presentation timing
+
+The application owns asset orchestration and optional debugging because both
+must survive individual world updates and still stop after a guarded failure.
+The host pumps MCP outside the world's task scope; nesting the debugger there
+can deadlock. Parked operations permit diagnostics, while tools that touch the
+world wait for an operation boundary. Listener and connection owners live in
+exact lexical scopes so cancellation closes them, including on exceptional exit.
+
+Nominal presentation duration belongs to the world. A process-global value
+lets one game change another game's sequence waits, and a measured frame delta
+makes an authored duration depend on whichever frame happened to schedule it.
+World configuration controls future conversions; existing tick deadlines stay
+fixed. Physics history stores the creation pose before the first solver result,
+then snapshots before later fixed steps, keeping rendering between two real
+simulation poses without changing either.
 
 ## Platform services this tree does not carry
 
