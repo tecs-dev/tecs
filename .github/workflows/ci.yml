@@ -41,6 +41,7 @@ jobs:
 
     nupp:
         strategy:
+            fail-fast: false
             matrix:
                 os: [macos-15, ubuntu-latest]
         runs-on: ${{ matrix.os }}
@@ -63,6 +64,7 @@ jobs:
             - name: Build the Nupp compiler
               working-directory: nupp
               run: |
+                  ./scripts/toolchain --all
                   ./bin/nupp build --target bootstrapCompiler
                   echo "$PWD/bin" >> "$GITHUB_PATH"
             - working-directory: tecs
@@ -126,6 +128,7 @@ jobs:
             - name: Build the Nupp compiler
               working-directory: nupp
               run: |
+                  ./scripts/toolchain --all
                   ./bin/nupp build --target bootstrapCompiler
                   echo "$PWD/bin" >> "$GITHUB_PATH"
             - name: Stage the Nupp embedding SDK
@@ -141,6 +144,8 @@ jobs:
             # SDK as a run path, because the static library references the
             # embedding library beside it and a binary that linked cleanly
             # otherwise aborts at startup.
+            - working-directory: tecs
+              run: cargo build --locked -p tecs-audio -p tecs-gamepad -p tecs-physics
             - working-directory: tecs
               run: cargo test -p tecs-winit-host
             - working-directory: tecs
@@ -205,6 +210,7 @@ jobs:
             - name: Build the Nupp compiler
               working-directory: nupp
               run: |
+                  ./scripts/toolchain --all
                   ./bin/nupp build --target bootstrapCompiler
                   echo "$PWD/bin" >> "$GITHUB_PATH"
             - name: Stage the Nupp embedding SDK
@@ -252,8 +258,12 @@ jobs:
             - name: Build the Nupp compiler
               working-directory: nupp
               run: |
+                  ./scripts/toolchain --all
                   ./bin/nupp build --target bootstrapCompiler
                   echo "$PWD/bin" >> "$GITHUB_PATH"
+            - name: Install the Nupp documentation dependencies
+              working-directory: nupp
+              run: ./bin/nupp build --target docs
             - working-directory: tecs
               run: cargo xtask docs-check
             - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
