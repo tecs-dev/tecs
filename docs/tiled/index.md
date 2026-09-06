@@ -14,13 +14,13 @@ in the same relative directory structure.
 Run the complete example from the checkout:
 
 ```bash
-nupp task tiled
+nupp task ex-tiled
 ```
 
 Arrow keys pan the camera. Space replaces a wall tile with a path and restores
 it on the next press. The water animates from TSX frames, and the bouncing
 circles collide with the wall outlines authored in that tileset. Close the
-window to stop, or use `nupp task tiled --frames 120` for a bounded run.
+window to stop, or use `nupp task ex-tiled --frames 120` for a bounded run.
 The editable sources are `assets/maps/demo.tmx` and `assets/maps/terrain.tsx`.
 
 ## Load and display a map

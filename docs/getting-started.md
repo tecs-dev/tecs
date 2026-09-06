@@ -30,13 +30,14 @@ load failure in a host that built cleanly.
 ```bash
 nupp check --strict           # Type-check every Nupp source, strictly
 nupp test                     # Build native services; require every test to pass
-nupp task flatcolor           # Open a window and render the example
-nupp task lighting --frames 120
+nupp task ex-flatcolor           # Open a window and render the example
+nupp task ex-lighting --frames 120
 ```
 
-`nupp tasks` lists what the manifest configures. `flatcolor`,
-`sprites`, `lighting`, `tiled` and `ui` are the example targets and tasks; `host` is the blank host, which
-opens a window and runs an empty world.
+`nupp tasks` lists the configured commands. Example build and run tasks use the
+`ex-` prefix: `ex-flatcolor`, `ex-sprites`, `ex-lighting`, `ex-tiled`, `ex-ui`,
+`ex-uistandalone` and `ex-nativesmoke`. `ex-host` runs the blank host, and
+`ex-physicssmoke` runs the bounded native-physics script.
 
 `--frames N` stops after N frames and exits zero, which is what makes a
 graphical example usable as a smoke test. It needs at least two: the first
@@ -50,7 +51,7 @@ tools in their separate project; `nupp task verify` runs both.
 
 `nupp task verify` requires an embedding SDK. It runs strict checking,
 whole-tree formatting, the mandatory test gate, documentation checks, workspace
-Rust formatting/Clippy/tests, and seven headless component smokes. Benchmarks
+Rust formatting/Clippy/tests, and eight headless component smokes. Benchmarks
 and relocated release-package checks remain separate commands; `verify` does
 not claim performance or platform acceptance.
 
@@ -133,9 +134,9 @@ and reads the resulting poses once per fixed step; games need only
 ## Maps and interfaces
 
 ```bash
-nupp task tiled               # TMX map, animated tiles and collision
-nupp task ui                  # Compose, Flex, Overlay and Scroll over a lit gradient field
-nupp task uistandalone        # Centered panel with scrollable controls
+nupp task ex-tiled               # TMX map, animated tiles and collision
+nupp task ex-ui                  # Compose, Flex, Overlay and Scroll over a lit gradient field
+nupp task ex-uistandalone        # Centered panel with scrollable controls
 ```
 
 [The Tiled guide](tiled/index.md) covers TMX/TSX files, layers, tile edits,

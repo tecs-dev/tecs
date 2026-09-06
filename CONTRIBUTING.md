@@ -79,9 +79,9 @@ workspace cannot do on a machine with no compiler checkout beside this one.
 ## Running the host
 
 ```bash
-nupp task flatcolor           # A window
-nupp task lighting --frames 5 # Five frames, then exit zero
-nupp task nativesmoke --headless --frames 2
+nupp task ex-flatcolor           # A window
+nupp task ex-lighting --frames 5 # Five frames, then exit zero
+nupp task ex-nativesmoke --headless --frames 2
 ```
 
 `--frames N` is what makes a graphical example usable as a smoke test, and it

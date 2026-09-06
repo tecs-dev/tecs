@@ -40,7 +40,7 @@ instancing.
 Run the four-scene showcase from the repository root:
 
 ```bash
-nupp task ui
+nupp task ex-ui
 ```
 
 The animated sunflower field, colored lights, gradient badge and four tabs are
@@ -49,10 +49,10 @@ resize the window, click controls, or navigate with Tab and Enter. Close the
 window to stop. The full source is
 [examples/nupp/ui.nupp](https://github.com/tecs-dev/tecs/blob/main/examples/nupp/ui.nupp).
 
-For a smaller application, run `nupp task uistandalone`. The centered panel is
+For a smaller application, run `nupp task ex-uistandalone`. The centered panel is
 shown at the end of this guide. Both examples use the same layout, text and
 interaction APIs as a game. To open a particular showcase tab directly, use
-`TECS_UI_SCENE=flex nupp task ui`; the other names are `compose`, `overlay`
+`TECS_UI_SCENE=flex nupp task ex-ui`; the other names are `compose`, `overlay`
 and `scroll`.
 
 The following two blocks form one complete Nupp component module. The first
@@ -121,7 +121,7 @@ end
 ```
 
 [Getting started](/getting-started) explains how to register a game component
-in `nupp.lua`. The repository's `ui` and `uistandalone` targets are complete
+in `nupp.lua`. The repository's `ex-ui` and `ex-uistandalone` targets are complete
 manifest examples.
 
 `tecs.ui.plugin(app)` configures layer 16 as a screen-space, unlit overlay. The
@@ -999,13 +999,13 @@ materials, text, the gradient image, clipping, wheel scrolling, pointer capture,
 bubbling events and keyboard navigation over the animated, lit field:
 
 ```bash
-nupp task ui
+nupp task ex-ui
 ```
 
 The smaller centered-panel application is a complete starting point:
 
 ```bash
-nupp task uistandalone --width 960 --height 640
+nupp task ex-uistandalone --width 960 --height 640
 ```
 
 <img src="/images/ui-example.png" alt="The standalone retained UI example with a centered panel and scrollable controls" />

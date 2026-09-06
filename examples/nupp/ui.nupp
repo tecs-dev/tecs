@@ -1,6 +1,6 @@
 module ui
 
---[[Four retained UI scenes over an animated, lit sunflower field. Run `nupp task ui`.]]
+--[[Four retained UI scenes over an animated, lit sunflower field. Run `nupp task ex-ui`.]]
 
 local function fontAt(size: number, density: number): tecs.gfx.fonts.Font
     return assert(

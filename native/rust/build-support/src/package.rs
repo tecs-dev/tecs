@@ -296,11 +296,11 @@ pub fn install(root: &Path, preset: Preset, components: &[String]) -> Result<Pat
     )?;
     let selected: Vec<String> = if components.is_empty() {
         vec![
-            SHOWCASE.to_owned(),
-            SMOKE.to_owned(),
-            "tiled".to_owned(),
-            "ui".to_owned(),
-            "uistandalone".to_owned(),
+            format!("ex-{SHOWCASE}"),
+            format!("ex-{SMOKE}"),
+            "ex-tiled".to_owned(),
+            "ex-ui".to_owned(),
+            "ex-uistandalone".to_owned(),
         ]
     } else {
         components.to_vec()
@@ -309,7 +309,8 @@ pub fn install(root: &Path, preset: Preset, components: &[String]) -> Result<Pat
     let mut built = Vec::new();
     for component in &selected {
         nupp::build(root, component)?;
-        let path = root.join(nupp::OUTPUT).join(format!("{component}.nuppc"));
+        let name = component.strip_prefix("ex-").unwrap_or(component);
+        let path = root.join(nupp::OUTPUT).join(format!("{name}.nuppc"));
         if !path.is_file() {
             anyhow::bail!(
                 "target {component:?} produced no component at {}; only a \

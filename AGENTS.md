@@ -33,8 +33,8 @@ nupp check --strict           # Type-check every Nupp source, strictly
 nupp task format              # Format every supported source language in place
 nupp task format-check        # Report sources that are not formatted
 nupp test                     # Build and run the test suites
-nupp build --target flatcolor
-nupp task flatcolor --frames 120
+nupp build --target ex-flatcolor
+nupp task ex-flatcolor --frames 120
 nupp task bench shapes        # Run a benchmark from bench/nupp
 nupp build --target docs      # Render the site into out/docs
 nupp task docs-check          # Render it into a scratch directory and gate it
@@ -208,7 +208,7 @@ have to come back.
 Working too: Tiled TMX/TSX loading through the official Rust `tiled` crate,
 map rendering, animation, edits, object factories and collision outlines;
 retained UI with a native Taffy tree, text/image measurement, scrolling and interaction.
-See `docs/tiled/index.md` and `docs/ui/index.md`. Run `nupp task tiled` and `nupp task ui`.
+See `docs/tiled/index.md` and `docs/ui/index.md`. Run `nupp task ex-tiled` and `nupp task ex-ui`.
 
 Missing from the Nupp engine: 3D rendering, custom post-processing and multiple cameras.
 

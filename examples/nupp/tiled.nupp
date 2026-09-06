@@ -1,7 +1,7 @@
 module tiled
 
 --[[An editable TMX map with TSX animation, Rapier boundaries and a moving camera.
-Run with `nupp task tiled`. Arrow keys pan; Space toggles a wall tile.
+Run with `nupp task ex-tiled`. Arrow keys pan; Space toggles a wall tile.
 ]]
 
 local function install(exclusive app: tecs.application.Application): nil

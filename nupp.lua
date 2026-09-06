@@ -19,13 +19,13 @@ for name, description in pairs(descriptions) do
     }
 end
 for _, name in ipairs({ "host", "flatcolor", "sprites", "lighting", "nativesmoke", "tiled", "ui", "uistandalone" }) do
-    developmentTasks[name] = {
+    developmentTasks["ex-" .. name] = {
         description = "Build and run the " .. name .. " component",
-        build = name,
+        build = "ex-" .. name,
         argv = { "nupp", "run", "tools/run.nupp", "host", name },
     }
 end
-developmentTasks.uistandalone.argv = {
+developmentTasks["ex-uistandalone"].argv = {
     "nupp",
     "run",
     "tools/run.nupp",
@@ -35,6 +35,10 @@ developmentTasks.uistandalone.argv = {
     "960",
     "--height",
     "640",
+}
+developmentTasks["ex-physicssmoke"] = {
+    description = "Build native services and run the physics example",
+    argv = { "nupp", "run", "tools/run.nupp", "physicssmoke" },
 }
 for name, description in pairs({
     presets = "List native packaging presets",
@@ -216,44 +220,51 @@ return {
                     "tecs.internal.world",
                 },
             },
-            host = {
+            ["ex-host"] = {
                 kind = "component",
+                output = "out/nupp/host.nuppc",
                 description = "Build the Tecs component for the Rust winit host",
                 entries = { "tecs.host" },
                 exports = hostExports,
             },
-            flatcolor = {
+            ["ex-flatcolor"] = {
                 kind = "component",
+                output = "out/nupp/flatcolor.nuppc",
                 description = "Build the animated flat-color Nupp example",
                 entries = { "tecs.host", "flatcolor" },
                 exports = flatcolorExports,
             },
-            sprites = {
+            ["ex-sprites"] = {
                 kind = "component",
+                output = "out/nupp/sprites.nuppc",
                 description = "Build the camera and textured sprite Nupp example",
                 entries = { "tecs.host", "sprites" },
                 exports = spritesExports,
             },
-            lighting = {
+            ["ex-lighting"] = {
                 kind = "component",
+                output = "out/nupp/lighting.nuppc",
                 description = "Build the deferred lighting, shadow and bloom Nupp example",
                 entries = { "tecs.host", "lighting" },
                 exports = lightingExports,
             },
-            tiled = {
+            ["ex-tiled"] = {
                 kind = "component",
+                output = "out/nupp/tiled.nuppc",
                 description = "Build the TMX map example",
                 entries = { "tecs.host", "tiled" },
                 exports = tiledExports,
             },
-            uistandalone = {
+            ["ex-uistandalone"] = {
                 kind = "component",
+                output = "out/nupp/uistandalone.nuppc",
                 description = "Build the centered retained UI example",
                 entries = { "tecs.host", "uistandalone" },
                 exports = uistandaloneExports,
             },
-            ui = {
+            ["ex-ui"] = {
                 kind = "component",
+                output = "out/nupp/ui.nuppc",
                 description = "Build the retained Taffy UI example",
                 entries = { "tecs.host", "ui" },
                 exports = uiExports,
@@ -262,8 +273,9 @@ return {
             -- installed release. It is a component rather than a script
             -- because a package ships no Nupp compiler, so the only Nupp a
             -- release can execute is one already compiled into a component.
-            nativesmoke = {
+            ["ex-nativesmoke"] = {
                 kind = "component",
+                output = "out/nupp/nativesmoke.nuppc",
                 description = "Build the packaged native-service smoke component",
                 entries = { "tecs.host", "nativesmoke" },
                 exports = nativesmokeExports,

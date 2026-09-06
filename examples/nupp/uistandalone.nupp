@@ -1,6 +1,6 @@
 module uistandalone
 
---[[A complete centered retained interface. Run `nupp task uistandalone`.]]
+--[[A complete centered retained interface. Run `nupp task ex-uistandalone`.]]
 
 local function fontAt(size: number, density: number): tecs.gfx.fonts.Font
     return assert(

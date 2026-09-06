@@ -62,9 +62,9 @@ The 2D shape materials include rectangles, circles, rings, rounded rectangles,
 triangles and stars. 3D rendering, custom post-processing and multi-camera
 rendering are not available in the current engine.
 
-Run `nupp task tiled` for a map with animation and collision, or `nupp task ui`
+Run `nupp task ex-tiled` for a map with animation and collision, or `nupp task ex-ui`
 for the Compose, Flex, Overlay and Scroll showcase over the animated gradient
-field. `nupp task uistandalone --width 960 --height 640` runs the centered panel.
+field. `nupp task ex-uistandalone --width 960 --height 640` runs the centered panel.
 
 ## Ownership boundaries
 
@@ -292,8 +292,8 @@ A checkout needs the Rust toolchain `rust-toolchain.toml` pins and a current
 ```bash
 nupp check --strict           # Type-check every Nupp source, strictly
 nupp test                     # Build native services; require every test to pass
-nupp task flatcolor           # Open a window and render the example
-nupp task lighting --frames 120
+nupp task ex-flatcolor           # Open a window and render the example
+nupp task ex-lighting --frames 120
 nupp task bench shapes        # Run a benchmark from bench/nupp
 nupp task bench acceptance    # Three repetitions of fixed CPU workloads
 nupp task format              # Format every supported source language

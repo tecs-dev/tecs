@@ -102,9 +102,9 @@ jobs:
             - working-directory: tecs
               run: nupp build --target headless
             - working-directory: tecs
-              run: nupp build --target host
+              run: nupp build --target ex-host
             - working-directory: tecs
-              run: nupp build --target flatcolor
+              run: nupp build --target ex-flatcolor
 
     # Independent checkouts: start execution gates alongside the source tests.
     # The workflow still requires every job; no artifacts flow between them.
@@ -141,7 +141,7 @@ jobs:
               working-directory: tecs
               run: echo "NUPP_SDK=$(../nupp/scripts/toolchain host-library base,native-files,native-net | tail -1)" >> "$GITHUB_ENV"
             - working-directory: tecs
-              run: nupp build --target host
+              run: nupp build --target ex-host
             - working-directory: tecs
               run: cargo fmt -p tecs-winit-host -- --check
             - working-directory: tecs
@@ -161,17 +161,17 @@ jobs:
             # the suites run in the full Nupp runtime and never load a
             # component, so this is the only step that reads the reduced one.
             - working-directory: tecs
-              run: nupp task flatcolor --headless --frames 2
+              run: nupp task ex-flatcolor --headless --frames 2
             - working-directory: tecs
-              run: nupp task sprites --headless --frames 3
+              run: nupp task ex-sprites --headless --frames 3
             - working-directory: tecs
-              run: nupp task lighting --headless --frames 5
+              run: nupp task ex-lighting --headless --frames 5
             # Every real consumer reaches a native service through a guarded
             # require, so a host with no libraries staged looks healthy. This
             # component requires all three directly and raises on the first
             # that will not load.
             - working-directory: tecs
-              run: nupp task nativesmoke --headless --frames 2
+              run: nupp task ex-nativesmoke --headless --frames 2
 
     # The release half. It is separate from `host` because it proves a
     # different thing: that half builds and runs out of a checkout, and this

@@ -9,12 +9,13 @@ local ffi = require("ffi")
 local function host(args: {string}, build: boolean): nil
     if build and (args[1] == "--help" or args[1] == "-h") then
         print(
-            "Usage: nupp task run [target] [--entry MODULE.create] [host arguments...]\nExamples: nupp task lighting; nupp task run mygame --headless --frames 5"
+            "Usage: nupp task run [target] [--entry MODULE.create] [host arguments...]\nExamples: nupp task ex-lighting; nupp task run mygame --headless --frames 5"
         )
         return
     end
-    const target = table.remove(args, 1) or "host"
-    local entry = target == "host" and "tecs.host.create" or target .. ".create"
+    const target = table.remove(args, 1) or "ex-host"
+    const componentName = target:match("^ex%-(.+)$") or target
+    local entry = componentName == "host" and "tecs.host.create" or componentName .. ".create"
     if args[1] == "--entry" then
         table.remove(args, 1)
         entry = assert(table.remove(args, 1), "--entry needs an exported constructor")
@@ -25,7 +26,7 @@ local function host(args: {string}, build: boolean): nil
     if build then
         commands.run({commands.compiler(), "build", "--target", target})
     end
-    const component = "out/nupp/" .. target .. ".nuppc"
+    const component = "out/nupp/" .. componentName .. ".nuppc"
     assert(files.isFile(commands.root .. "/" .. component), "target " .. target .. " did not produce a component")
     local env = commands.sdk()
     for name, value in pairs(native.libraries()) do
@@ -101,7 +102,7 @@ local function verify(): nil
         "ui",
         "uistandalone"
     }) do
-        commands.run({commands.compiler(), "task", target, "--headless", "--frames", "5"}, env)
+        commands.run({commands.compiler(), "task", "ex-" .. target, "--headless", "--frames", "5"}, env)
     end
 end
 
@@ -111,6 +112,8 @@ if task == "test" then
     test(args)
 elseif task == "host" or task == "run" then
     host(args, task == "run")
+elseif task == "physicssmoke" then
+    commands.run({commands.compiler(), "run", "examples/nupp/physicssmoke.nupp"}, native.libraries())
 elseif task == "bench" then
     require("tecs.dev.bench").run(args)
 elseif task == "format" or task == "format-check" then

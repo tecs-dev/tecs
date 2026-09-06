@@ -8,8 +8,7 @@ the declarations, the layout self-check and real batched crossings are all
 exercised against the built `tecs_physics` library.
 
 ```sh
-cargo build -p tecs-physics --release
-DYLD_LIBRARY_PATH=target/release nupp run examples/nupp/physicssmoke.nupp
+nupp task ex-physicssmoke
 ```
 ]]
 

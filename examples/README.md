@@ -1,16 +1,21 @@
 # Tecs examples
 
-Four of the files under `nupp/` are complete game components. Each exports a
+Seven of the files under `nupp/` are complete game components. Each exports a
 `create` function matching the Rust host's managed entry contract, installs its
 entities and systems through a plugin, and delegates every platform and
-rendering concern to `tecs.host`. The fifth is a script.
+rendering concern to `tecs.host`. The eighth is a script.
 
-Run one from the repository root:
+All example tasks use the `ex-` prefix. Run one from the repository root:
 
 ```bash
-nupp task flatcolor
-nupp task sprites
-nupp task lighting --frames 120
+nupp task ex-flatcolor
+nupp task ex-sprites
+nupp task ex-lighting --frames 120
+nupp task ex-tiled
+nupp task ex-ui
+nupp task ex-uistandalone
+nupp task ex-nativesmoke --headless --frames 2
+nupp task ex-physicssmoke
 ```
 
 `--frames N` stops after N frames and exits zero, which is what makes a
@@ -43,5 +48,9 @@ it loads `tecs.physics.rapier`, drops a box onto a floor, and exercises the
 declarations, the layout self-check and real batched crossings against the
 built library. Its own docblock says how to run it.
 
+`nupp task ex-host` runs the basic host component.
+
 A new example needs a `kind = "component"` target in `nupp.lua` naming both
-`tecs.host` and the module, with `<name>.create` added to the host's exports.
+`tecs.host` and the module, with `<name>.create` added to the host's exports. Its run task is named
+`ex-<name>`, matching its build target. Set `output = "out/nupp/<name>.nuppc"`
+so the component filename and exported module retain `<name>`.
