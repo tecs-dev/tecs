@@ -784,4 +784,32 @@ function suite.bulkInstancesMatchScalarRoundingAndOwnTheirBytes(): nil
     retained:drop()
 end
 
+function suite.refreshesCachedOrderAfterChangesAndARefusedPacket(): nil
+    local world = ecs.newWorld({maxEntities = 2})
+    local extractor = framepacket.new(world)
+    local first = world:spawn(ecs.Transform2D(10, 20, 0, 1), gfx.Tint(), gfx.Material(), gfx.Renderable2D)
+    local second = world:spawn(ecs.Transform2D(30, 40, 0, 2), gfx.Tint(), gfx.Material(), gfx.Renderable2D)
+    world:commit()
+    local original = extractor:packet(640, 360)
+    test.equal(extractor:packet(640, 360), original)
+    assert(world:getMut(first, ecs.Transform2D)).layer = 3
+    assert(world:getMut(second, gfx.Material)).id = 9999
+    test.raises(
+        function(): nil
+            extractor:packet(640, 360)
+        end,
+        "is not one this build carries"
+    )
+    assert(world:getMut(second, gfx.Material)).id = 0
+    local reader = nupp.io.newScalarReader(extractor:packet(640, 360))
+    test.equal(header(reader).instances, 2)
+    test.equal(batch(reader).count, 2)
+    test.equal(select(1, instance(reader)), 30)
+    test.equal(select(1, instance(reader)), 10)
+    reader:drop()
+    -- Another depth edit invalidates the cached order without an error path.
+    assert(world:getMut(first, ecs.Transform2D)).layer = 1
+    test.equal(extractor:packet(640, 360), original)
+end
+
 return suite

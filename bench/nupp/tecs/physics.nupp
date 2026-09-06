@@ -147,8 +147,11 @@ local function dropWave(exclusive value: ecs.World, count: integer): integer
     for index = 1, count do
         const column = index % COLUMNS
         const row = index // COLUMNS
-        const x = minX + column * spacing + math.random() * spacing
-        const y = minY + row * SIZE * 2.5 + math.random() * SIZE
+        const x = minX + SIZE + column * spacing + math.random() * spacing * 0.5
+        const y = minY + SIZE + row * (SIZE * 2.4) + math.random() * 2.0
+        -- The original scene consumes three color draws before the next
+        -- body's position. Preserve its random stream without rendering.
+        const _r, _g, _b = math.random(), math.random(), math.random()
         const entity = value:spawn(ecs.Transform2D(x, y))
         -- Every third body is round, matching the Teal scene's mix.
         if index % 3 == 0 then
@@ -217,13 +220,6 @@ const step = harness.newStage("native batch")
 const sync = harness.newStage("sync")
 const setupStarted = time.now()
 for frame = 0, WARMUP + FRAMES - 1 do
-    if frame % WAVE_FRAMES == 0 and spawned < BODIES then
-        local remaining: integer = BODIES - spawned
-        if perWave < remaining then
-            remaining = perWave
-        end
-        spawned = spawned + dropWave(world, remaining)
-    end
     const started = time.now()
     world:update(timestep)
     if frame >= WARMUP then
@@ -232,6 +228,15 @@ for frame = 0, WARMUP + FRAMES - 1 do
         harness.mark(step, stepMilliseconds)
         harness.mark(sync, syncMilliseconds)
         harness.mark(commands, elapsed - stepMilliseconds - syncMilliseconds)
+    end
+    -- Teal drops in Update, after this frame's fixed step. Bodies enter
+    -- the following step on both sides of the comparison.
+    if frame % WAVE_FRAMES == 0 and spawned < BODIES then
+        local remaining: integer = BODIES - spawned
+        if perWave < remaining then
+            remaining = perWave
+        end
+        spawned = spawned + dropWave(world, remaining)
     end
 end
 const totalMilliseconds = time.now() - setupStarted

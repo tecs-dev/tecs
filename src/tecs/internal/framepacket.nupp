@@ -160,6 +160,8 @@ local query = require("tecs.internal.query")
 local rendercomponents = require("tecs.internal.rendercomponents")
 local world = require("tecs.internal.world")
 local zone = require("nupp.profile.zone")
+local array = require("nupp.mem.array")
+local ffi = require("ffi")
 
 --- Identifies a Tecs frame packet, and is a compatibility surface.
 export const MAGIC: uint32 = 0x54454353
@@ -239,6 +241,8 @@ export record Extractor
     private v0: {number}
     private u1: {number}
     private v1: {number}
+    private packetWords: array.Array<uint32>
+    private orderChanged: boolean
     private rowCount: integer
     private sorted: integer
     private before: function(left: integer, right: integer): boolean
@@ -308,6 +312,8 @@ export function new(exclusive value: world.World): Extractor
         v0 = {},
         u1 = {},
         v1 = {},
+        packetWords = array.scalar(array.uint32, 256),
+        orderChanged = true,
         rowCount = 0,
         sorted = 0,
         before = before,
@@ -414,6 +420,9 @@ local function collect(exclusive self: Extractor): nil
     const materialCount = materials.count()
     local _, _, alpha = self.world:getFixedTiming()
     local rows: integer = 0
+    local orderChanged = self.orderChanged
+    -- Keep an interrupted collection invalid until a complete sort succeeds.
+    self.orderChanged = true
     for candidate, count in self.drawables:iter() do
         local active = candidate as archetype.Archetype
         local rowTransforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
@@ -433,10 +442,14 @@ local function collect(exclusive self: Extractor): nil
                 rows
             )
             const tint = rowTints[index]
+            const depth = layers.depthOf(transform.layer, transform.z, transform.x, transform.y)
+            if entities[rows] ~= active.entities[index] or depths[rows] ~= depth then
+                orderChanged = true
+            end
             entities[rows] = active.entities[index]
             transforms[rows] = transform
             tints[rows] = tint
-            depths[rows] = layers.depthOf(transform.layer, transform.z, transform.x, transform.y)
+            depths[rows] = depth
             -- The lane is the tint's alpha and nothing else. The G-buffer pass
             -- writes with replace and has nowhere to put partial coverage, so
             -- an entity that is not fully opaque leaves for the forward pass,
@@ -498,6 +511,7 @@ local function collect(exclusive self: Extractor): nil
             end
         end
     end
+    self.orderChanged = orderChanged or rows ~= self.rowCount
     self.rowCount = rows
 end
 
@@ -561,6 +575,9 @@ end
 
 --- Orders the collected rows farthest first, breaking ties by entity id.
 local function sortRows(exclusive self: Extractor): nil
+    if not self.orderChanged then
+        return
+    end
     const order = self.order
     const rows = self.rowCount
     for index = 1, rows do
@@ -571,6 +588,7 @@ local function sortRows(exclusive self: Extractor): nil
     end
     self.sorted = rows
     table.sort(order, self.before)
+    self.orderChanged = false
 end
 
 --- Encodes one complete scene packet.
@@ -739,25 +757,37 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
     const u1 = self.u1
     const v1 = self.v1
     writer:drop()
-    -- One checked lease owns the entire instance region. The raw views stay
-    -- inside it; each row writes exactly twenty four-byte words. Both the
-    -- header/graph boundary and INSTANCE_STRIDE are multiples of four.
-    const instanceBytes = rows * (INSTANCE_STRIDE as integer)
-    local lease = buffer:reserveWrite(buffer:length(), instanceBytes)
+    const prefix = buffer:getString()
+    buffer:drop()
+    assert(#prefix % 4 == 0, "framepacket: instance region must be word aligned")
+    const prefixWords = #prefix // 4
+    const wordCount = prefixWords + rows * 20
+    if self.packetWords.count < wordCount then
+        local capacity = self.packetWords.count
+        while capacity < wordCount do
+            capacity = capacity * 2
+        end
+        self.packetWords = array.scalar(array.uint32, capacity)
+    end
+    local packed = ""
+    -- Nupp owns and retains the array. One checked writable view bounds all
+    -- stores; raw typed pointers stay in this scope, rooted back to that view.
+    -- Copying to a string gives the caller an independent immutable packet.
     do
-        local output = lease:span()
+        local output = self.packetWords:write()
         do
             local pointer, length = output:ref()
-            assert(length == instanceBytes)
+            assert(wordCount <= length)
             unsafe do
-                local raw = (pointer as uint8*) + 0
+                local raw = (pointer as uint32*) + 0
                 local floats = borrowFrom(ffi.cast<float[?]>(raw), output)
                 local words = borrowFrom(ffi.cast<uint32[?]>(raw), output)
+                ffi.copy(words, prefix, #prefix)
                 for index = 1, rows do
                     const row = order[index]
                     const transform = transforms[row]
                     const tint = tints[row]
-                    const base = (index - 1) * 20
+                    const base = prefixWords + (index - 1) * 20
                     floats[base + 0] = transform.x as float
                     floats[base + 1] = transform.y as float
                     floats[base + 2] = transform.rotation as float
@@ -779,13 +809,11 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
                     words[base + 18] = 0
                     words[base + 19] = 0
                 end
+                packed = ffi.string(words, wordCount * 4)
             end
         end
         output:drop()
     end
-    lease:commit(instanceBytes)
-    local packed = buffer:getString()
-    buffer:drop()
 
     zone.pop()
 

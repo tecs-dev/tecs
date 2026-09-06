@@ -19,10 +19,10 @@
 ---   frame    Both, back to back. It is NOT the Teal `frame` row: it carries no
 ---            swapchain acquire, no command recording, and no submission.
 ---
---- Two movement modes, as in Teal. `fixed` moves in `FixedUpdate`, so most
---- frames move nothing; `frame` moves every frame, so every instance is
---- rewritten every frame. The default is `frame`, which is the honest steady
---- state for a comparison of per-frame work.
+--- Two scheduling modes: `fixed` moves in FixedUpdate and `frame` in Update.
+--- This headless fixture supplies exactly one fixed step per frame, so both
+--- move every instance every frame. Teal's windowed `fixed` mode can skip
+--- updates between steps and is not directly comparable to this fixture.
 ---
 ---   BENCH_SHAPES  Shapes of each kind. Defaults to 100000, so 200000 total.
 ---   BENCH_AREA_W  Field width in pixels. Defaults to 4000.
