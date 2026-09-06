@@ -45,37 +45,22 @@ every pass a game inserted with it; a backend skipping a pass whose flag is
 clear costs nothing and keeps every name a game placed something beside valid
 for the life of the process.
 
-# Post-processing, tiled maps, and multiple cameras
+# Built-in scope
 
-These three were left for an explicit decision rather than carried across on
-sight, and this module is where two of the three are answered.
+General post-processing exposes target and pass declarations, but the backend
+executes fragment bodies only for built-in pass names. A custom pass can allocate
+and clear targets at a named seam; without a backend implementation for its name,
+it draws nothing.
 
-**General post-processing is retained as this declaration and nothing more.**
-A game adds a pass at a named seam, the backend allocates and clears its targets
-and runs it, and the engine's own bloom chain is three such passes. What a game
-cannot yet do is supply the fragment body: `insertPassBefore` places a pass and
-the backend has a body only for the names it implements, so a game's own pass
-begins, clears, and draws nothing. Closing that means `PassSpec` growing a field
-that carries WGSL, the section carrying it, and the backend compiling untrusted
-shader text, which is a contract worth designing rather than guessing. Until
-then a game's post-process is a clear.
+Tiled maps are not an engine subsystem. Instanced sprites can render tiles, but
+map parsing, tileset resolution, object metadata, tile editing, and chunked
+spatial indexes belong to game-specific content and spatial policy rather than
+this render-pass graph.
 
-**Tiled map support is absent from the current engine.** Earlier
-`tecs2d.tiled` read Tiled JSON maps and tilesets, animated tiles, handled
-parallax and image layers, updated tiles, and spawned objects through registered
-bundles. That implementation was removed during engine consolidation before
-the Nupp port. Instanced sprites can render tiles, but do not replace map
-parsing, tileset resolution, object metadata or tile editing. Those facilities
-belong to a map subsystem rather than this render-pass graph.
-
-**Multiple cameras are deferred with a stated contract.** The Teal renderer
-extracted once and then reculled, shaded, and composited per view through shared
-buffers. The ported path carries one view: the packet's header holds one camera
-and the cull tests one rectangle. Carrying the feature across means a view table
-in the packet, a view index in the cull's uniform, and a composite that sets a
-viewport per view, which is a packet version and a second cull dispatch rather
-than an addition. Nothing in the ported examples or tests needs it, so it is not
-built; `forwardView` is left undeclared as the target name it would take.
+Rendering uses one camera. The packet header carries one view and the cull tests
+one rectangle. Multi-view rendering would require a view table in the packet, a
+view index in the cull uniform, and a composite pass that sets a viewport per
+view. No `forwardView` target is declared.
 ]]
 
 --- Names the shared depth attachment, which is not a declarable target.

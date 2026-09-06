@@ -1,17 +1,13 @@
 module sprites
 
 --[[
-The camera and textured sprite vertical slice, as a complete game entry.
+A complete game entry for camera movement and textured sprites.
 
-The scene follows the one `bench/shapes.tl` measures on the Teal
-implementation, which is the tree's representative two-dimensional content:
-a 4000 by 2400 world field seen through a 1280 by 720 window, so roughly a
-tenth of it is on screen at once and the camera has somewhere to go. The field
-geometry is copied; the population is not, because an example wants to start
-instantly and the benchmark wants two hundred thousand entities.
+The scene uses a 4000 by 2400 world field seen through a 1280 by 720 window, so
+roughly a tenth of it is on screen at once and the camera has somewhere to go.
+Its small population keeps the example quick to start.
 
-Two images are built here rather than loaded, because asynchronous asset
-requests are the next milestone's work and a generated image keeps this example
+Two images are built in memory so the example remains self-contained and
 runnable from a clean checkout. The checker is opaque and the disc is not, so
 one frame exercises both an opaque and a blended batch.
 

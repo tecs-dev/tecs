@@ -33,13 +33,10 @@ nothing, because the bytes on disk are the bytes that were already there.
 
 ## What is watched
 
-Every watched path is registered by name through `add`. The SDL implementation
-instead adopted whatever the process had read, because its own `files.read`
-recorded each path and the watcher polled that set. The rewrite reads content
-through `nupp.io.files`, which records nothing and should not start, so the
-caller that loaded a file is the one that says it wants the file watched. That
-also removes the `root` bound the old configuration needed: a set nobody chose
-had to be fenced, and a set named one path at a time does not.
+Every watched path is registered explicitly through `add`. Content reads use
+`nupp.io.files`, which does not maintain a process-wide set of paths. The caller
+that loaded a file therefore decides whether to watch it. No root fence is
+needed because every watched path is named directly.
 
 ## The queue
 
@@ -53,17 +50,10 @@ waiting for the next save.
 ## Polling rather than platform notification
 
 This polls `nupp.io.files.info` and does not use a platform change-notification
-service. `notify`, wrapped as a fourth Rust service, was the alternative, and it
-loses on three counts. A notification says a write happened, not that the writer
-finished, so the settle policy above still has to stat the file and the service
-buys nothing the poll does not already pay for. The watched set is what a game
-has loaded, which is dozens to low hundreds of paths, and one
-`nupp.io.files.info` measures at 1.0 microseconds on the machine this was
-written on: a hundred paths at two polls a second costs 200 microseconds per
-second, which is 0.02 percent of one core. And a notification arrives on a
-thread the Lua virtual machine never created, so it would have to cross the same
-drain-a-buffer seam the gamepad and audio services cross, for an answer that
-still needs the stat.
+service. A notification says a write happened, not that the writer finished,
+so the settle policy would still have to stat the file. Polling also keeps
+platform notification threads outside the Lua virtual machine and fits the
+bounded set of paths a game explicitly registered.
 ]]
 
 local files = require("nupp.io.files")
@@ -136,9 +126,8 @@ export const SHADER = "shader"
 --- The load path decides every other kind, because something asked for an image
 --- as an image or for a document as a font's metrics. A registration that named
 --- no kind cannot know what wanted the file, so this is the one place a suffix
---- decides, and it decides only what nothing named. `glsl` is what the SDL
---- implementation mapped; `wgsl` is beside it because the rewrite's shaders are
---- WGSL and a shader has to reload as a shader under both.
+--- decides, and it decides only what nothing named. Both `glsl` and `wgsl`
+--- identify shader source and reload under the shader kind.
 local DOCUMENT_KINDS: {[string]: string} = {glsl = SHADER, wgsl = SHADER}
 
 --- One watched path, and how sure the watcher is about its current state.

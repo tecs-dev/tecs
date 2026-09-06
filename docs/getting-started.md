@@ -9,11 +9,10 @@ order: 20
 
 Three things, and only one of them is installed for you:
 
-- **The Nupp compiler on `PATH`.** This revision needs the binary codec at
-  Nupp commit `e90e8d42d08a517ac12b70f1d50dd9c30d705d05` or a descendant;
-  Nupp 0.0.3 does not contain it. With sibling checkouts, run
-  `export PATH="$(cd ../nupp/bin && pwd):$PATH"` from the Tecs root to select
-  that compiler. The exact pin also appears in the CI workflow.
+- **The Nupp compiler on `PATH`.** Use a build that provides
+  `nupp.data.binary`; the CI workflow pins a compatible revision. With sibling
+  checkouts, run `export PATH="$(cd ../nupp/bin && pwd):$PATH"` from the Tecs
+  root to select that compiler.
 - **The Rust toolchain** `rust-toolchain.toml` pins. `rustup` fetches it on the
   first build.
 - **`stylua` and `prettier`**, which format the Lua manifest and the Markdown.
@@ -131,10 +130,8 @@ Physics uses Rapier. Its batched native interface sends the world's changes
 and reads the resulting poses once per fixed step; games need only
 `tecs.physics.install`, `attach`, and the other entity-facing operations.
 
-Tiled map import and the retained UI are not implemented in this version.
-Sprite sheets are supported, but do not read Tiled map files. Taffy was the
-layout solver for the earlier UI; it is not a physics solver and the current
-engine has no Taffy-backed UI layer.
+Tiled map import and UI layout are not engine subsystems. Sprite sheets do not
+read Tiled map files.
 
 ## A component of your own
 

@@ -15,10 +15,9 @@ than with an opaque error.
 
 Every tool name here, and every argument key of every schema below, is a
 compatibility surface an agent reaches through JSON this tree cannot see. The
-`systems_*`, `states_*` and `stats` names are the ones the Teal debug command
-registry projected from its `systems`, `states` and `stats` commands, and they
-keep that spelling even though the command registry itself has not crossed.
-Do not rename one.
+`systems_*`, `states_*` and `stats` names are externally established and keep
+their spelling even where it differs from the house naming rules. Do not rename
+one.
 ]]
 
 local ecs = require("tecs.ecs")

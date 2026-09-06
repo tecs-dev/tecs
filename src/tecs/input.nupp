@@ -30,22 +30,16 @@ if pad ~= nil and pad.connected then
 end
 ```
 
-## Device features and where they went
+## Device support
 
-The SDL implementation exposed more of a controller than any portable Rust
-source does, so each of those is decided here rather than left to be
-rediscovered.
+Gamepads expose positional buttons, sticks, analog triggers, hot plug, power
+state, and rumble. Rumble is conditional: `gilrs` implements force feedback on
+`evdev` and XInput but not on `IOKit`, so `Gamepad.rumble` answers false on
+macOS and for devices without motors.
 
-Retained: positional buttons, sticks, analog triggers, hot plug, the power
-state, and rumble. Rumble is retained conditionally, which the contract already
-allowed for: `gilrs` implements force feedback on `evdev` and XInput and not on
-`IOKit`, so `Gamepad.rumble` answers false on macOS the way it always answered
-false for a device without motors.
-
-Retained on the platforms that have it: touch, which `winit` reports on
-Windows, Linux, Android and the web and documents as unsupported on macOS,
-where there is no touch screen to report. Touch pressure comes through where the
-surface measures it and reads zero where it does not.
+Touch is available on the platforms where `winit` reports it: Windows, Linux,
+Android, and the web. Touch pressure comes through where the surface measures it
+and reads zero where it does not.
 
 The pen is the pointer. `winit` declares no pen event, so a stylus arrives as
 the cursor moving and its buttons as mouse buttons, and Tecs reads it that way
@@ -53,19 +47,15 @@ rather than inventing a device the layer below does not report. A game that
 draws with a stylus reads `pointerX`, `pointerY` and the mouse buttons and gets
 what the platform sends.
 
-What that costs is what a tablet reports beyond position: pressure, tilt and
-which end of the pen is down. None of it reaches this tree, and recovering it
-means `NSEvent`, `WM_POINTER` and XInput2 tablet handling written three times
-for a surface nothing here consumes. It stays unwritten until something wants
-it, and until then a pen is a mouse that happens to be held differently.
+Pen pressure, tilt, and eraser state are not exposed because `winit` declares no
+pen event. Supporting them would require separate `NSEvent`, `WM_POINTER`, and
+XInput2 tablet handling.
 
-Removed: gamepad motion sensors, gamepad touchpads, trigger rumble, the light
-bar, the player-index slot, the hardware button label, the device family and
-device path, the remap event, and standalone motion sensors. Every one of them
-is vendor HID parsing that no cross-platform Rust crate does, and the
-positional vocabulary above is what a game actually binds against. A game that
-wants a `"cross"` glyph rather than a `"south"` name reads the pad's `name` and
-chooses its own art.
+Gamepad motion sensors, touchpads, trigger rumble, light bars, player indexes,
+hardware button labels, device families, device paths, remap events, and
+standalone motion sensors are not part of the input surface. A game that wants a
+`"cross"` glyph rather than a `"south"` name reads the pad's `name` and chooses
+its own art.
 ]]
 
 local data = require("tecs.data")
@@ -87,24 +77,15 @@ end
 
 --- A conventional pointer button name.
 ---
---- These are `winit`'s names, not SDL's, which spelled the last two `x1` and
---- `x2`. Device vocabularies follow the library that reports them: the numeric
---- codes never moved, so what changed is the spelling a binding uses, and a
---- binding saved by an SDL build does not survive the move. That is a
---- deliberate break rather than an oversight.
+--- These are `winit`'s names. `back` and `forward` identify the two auxiliary
+--- pointer buttons.
 export type MouseButton = "left" | "middle" | "right" | "back" | "forward"
 
 --- A positional gamepad button name.
 ---
 --- These are what `gilrs` reports, spelled as Tecs publishes them. They are
---- positional rather than Xbox-only on purpose: the hardware label is a
---- separate question, and one this engine no longer answers.
----
---- SDL published twelve more that no name here covers: `misc1` through
---- `misc6` and the four paddles. `gilrs` has no counterpart for any of them,
---- so a game cannot read them however they are spelled, and naming a button
---- nothing can report would be the same empty promise as naming a logger
---- nothing writes through.
+--- positional rather than Xbox-only because the hardware label is not part of
+--- the input contract. Names without a `gilrs` counterpart are not published.
 export type GamepadButton = "south"
     | "east"
     | "west"
@@ -123,9 +104,8 @@ export type GamepadButton = "south"
 
 --- A gamepad axis name.
 ---
---- Compatibility surface: these are the names the Teal implementation
---- published. A stick runs -1 to 1 with `leftY` and `rightY` growing downward,
---- and a trigger runs zero to one.
+--- Compatibility surface: these names are stable. A stick runs -1 to 1 with
+--- `leftY` and `rightY` growing downward, and a trigger runs zero to one.
 export type GamepadAxis = "leftX" | "leftY" | "rightX" | "rightY" | "leftTrigger" | "rightTrigger"
 
 --- One finger on a touch surface, from the most recent touch event.
@@ -302,8 +282,8 @@ local AXIS_CODES: {
 --- The magnitude below which a stick reads as centered.
 ---
 --- Hardware rests a little off center, so a game that did not subtract
---- something here would drift. The value is the one the Teal implementation
---- used, and `Gamepad.axis` takes an override for a game that wants its own.
+--- something here would drift. `Gamepad.axis` takes an override for a game that
+--- wants a different threshold.
 local DEFAULT_DEADZONE: number = 0.15
 
 --- The greatest number of observations one drain crossing carries.

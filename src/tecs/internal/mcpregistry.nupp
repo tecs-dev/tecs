@@ -10,9 +10,9 @@ failing handler to the agent instead of taking the frame down with it.
 
 Tool names, and the argument keys of their schemas, are a compatibility
 surface. An agent reaches them through JSON payloads this tree cannot see, so
-they keep the spelling the Teal engine published even where it disagrees with
-the house naming rules. `tecs.mcp` re-exports everything here; nothing else
-should require this module directly.
+their established spelling stays fixed even where it disagrees with the house
+naming rules. `tecs.mcp` re-exports everything here; nothing else should require
+this module directly.
 ]]
 
 local json = require("nupp.data.json")

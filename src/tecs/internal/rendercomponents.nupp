@@ -2,11 +2,10 @@ module tecs.internal.rendercomponents
 
 --[[
 The dependency-low component definitions shared by the ECS surface and the
-first Rust renderer slice.
+Rust renderer.
 
-These component names are snapshot compatibility surfaces. Their Nupp storage
-is record-backed for now; a later packed storage implementation must keep the
-names and public value shapes intact.
+These component names and public value shapes are snapshot compatibility
+surfaces. Their Nupp storage is record-backed.
 
 `Sprite` reaches `tecs.gfx.images` because a snapshot stores an image by name
 and a column stores it by id, and the registry is the only thing that maps one

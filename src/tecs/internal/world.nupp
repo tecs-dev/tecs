@@ -699,9 +699,8 @@ end
 --- A gate that recomputes derived state needs to know that something anywhere
 --- changed, not that a particular query matched, because the entity that moved
 --- may live in an archetype the derived query never sees. A parent carrying only
---- `Transform2D` is exactly that case. The walk covers every archetype, since
---- the port keeps dirty marks on the archetype rather than in a world-level
---- list.
+--- `Transform2D` is exactly that case. The walk covers every archetype because
+--- dirty marks live on archetypes rather than in a world-level list.
 --- @param world the world to inspect
 --- @param values the components whose changed columns open the gate
 --- @return whether at least one archetype reports one of them dirty

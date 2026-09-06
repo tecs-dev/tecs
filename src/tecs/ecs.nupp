@@ -3,9 +3,9 @@ module tecs.ecs
 --[[
 The entity component system shared by game code and engine systems.
 
-The Nupp rewrite exposes staged entity lifetime, tag and scalar components,
-dense archetype storage, and reusable queries. A spawn reserves its id
-immediately, and `commit` publishes structural changes.
+The ECS exposes staged entity lifetime, tag and scalar components, dense
+archetype storage, and reusable queries. A spawn reserves its id immediately,
+and `commit` publishes structural changes.
 ]]
 
 local idallocator = require("tecs.internal.idallocator")

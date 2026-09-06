@@ -55,8 +55,7 @@ budget.
 sets the duration used to convert frame and presentation waits to ticks. It
 is positive and finite and defaults to 1/60 in both windowed and headless
 sessions. `setNominalFrameTime(world, seconds)` changes future conversions in
-that world only; already scheduled tick deadlines do not move. This replaces
-the old process-wide `setNominalFrameTime(seconds)` call. Restore a saved
+that world only; already scheduled tick deadlines do not move. Restore a saved
 playback into a world configured for its intended cadence.
 
 `sourceKey(key, component, fields)` resolves a moving tween destination through
@@ -85,19 +84,11 @@ clock, channel, pause, and snapshot rules. Targets interpolate component
 fields. A parallel block shares a start time, and a sequential block starts
 after the one before it ends.
 
-## Authoring from data
+## Program construction
 
-A sequence is written by calling the node constructors. The Teal engine also
-took one as plain rows, `{op = "wait", seconds = 1.5}` and the like, through a
-`defineData` that decoded them and a `dataOps` that listed the accepted step
-names. That is deliberately not here.
-
-It existed so a sequence could come from a file or a tool rather than from
-code, and nothing ever sent it one: an audit of the Teal tree found no caller
-outside its own spec. Twelve op names and fifteen row keys is a compatibility
-surface to carry forever for a decoder with no producer. A game that wants
-sequences in data can decode its own rows into these constructors and knows its
-own schema, which is the part the engine could not have guessed anyway.
+A sequence is written by calling the node constructors. The API has no generic
+row decoder or shared data schema. A game that stores sequences as data decodes
+its own schema into these constructors.
 ]]
 
 local ecs = require("tecs.ecs")

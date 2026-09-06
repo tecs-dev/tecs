@@ -128,7 +128,7 @@ export function createWithPlugin(
     })
 end
 
---- Creates one blank application session for the first Rust host slice.
+--- Creates one blank application session for the Rust host.
 --- @param title the desktop title, defaulting to `tecs`
 --- @param width the positive initial logical width, defaulting to 1280
 --- @param height the positive initial logical height, defaulting to 720

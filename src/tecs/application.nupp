@@ -1,14 +1,13 @@
 module tecs.application
 
 --[[
-The host-neutral application lifecycle for the Nupp rewrite.
+The host-neutral application lifecycle.
 
 The Rust host owns polling and passes one sealed event batch and elapsed delta
 to `iterate`. This module owns only game lifecycle: plugin installation,
 startup, world updates, crash containment, suspension, quit requests, and
-shutdown. Windowing, rendering, audio, and platform event conversion remain
-Rust service boundaries rather than fields filled with SDL compatibility
-objects.
+shutdown. Windowing, rendering, audio, and platform event conversion are Rust
+service boundaries rather than application fields.
 
 Each application owns an asset loader. `Config.mcpPort` opts into one loopback
 MCP listener, opened before plugin installation so startup failures remain

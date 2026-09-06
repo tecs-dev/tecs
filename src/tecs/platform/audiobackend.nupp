@@ -156,9 +156,9 @@ end
 
 --- Names one physical audio device.
 ---
---- The field names are a compatibility surface: a game persists a chosen device
---- and reads it back, so `id`, `name`, `frequency` and `channels` keep the
---- spelling the SDL implementation gave them.
+--- The field names are a compatibility surface because a game may persist a
+--- chosen device. `id`, `name`, `frequency`, and `channels` therefore keep
+--- stable spellings.
 export record Device
     --- Read-only. Reports the device's position in the listing that produced
     --- it, from one up. Zero is never assigned and means "the platform's

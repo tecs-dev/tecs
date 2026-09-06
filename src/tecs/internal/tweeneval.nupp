@@ -148,9 +148,8 @@ end
 
 --- Represents one authored timeline operation.
 ---
---- Treat one as opaque. Unlike the Teal implementation this replaces,
---- compiling a spec reads its nodes rather than rewriting them, so the same
---- spec compiles more than once and gives the same timeline each time.
+--- Treat one as opaque. Compiling a spec reads its nodes without mutating them,
+--- so the same spec compiles repeatedly to the same timeline.
 export record TimelineNode
     --- Read-only. Names the operation.
     kind: OperationKind

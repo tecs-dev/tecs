@@ -39,10 +39,9 @@ export const KIND_AXIS: integer = 5
 
 --- Names what a device says about its power source.
 ---
---- Compatibility surface: these are the strings the Teal implementation
---- returned from `Gamepad:power`, and a game branching on one of them keeps
---- working across the move. `"error"` is not among them because no source Tecs
---- reads now distinguishes a failed read from an unknown one.
+--- Compatibility surface: these strings are stable for saved bindings and game
+--- branches. `"error"` is not among them because no source distinguishes a
+--- failed read from an unknown one.
 export type PowerState = "unknown" | "noBattery" | "onBattery" | "charging" | "charged"
 
 --- One observation a backend produces.

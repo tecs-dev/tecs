@@ -37,8 +37,8 @@ local logger = log.named("tecs.mcp")
 --- The sentinel a parked connection raises when `destroy` unwinds it.
 local SHUTDOWN = "tecs.mcp: the server stopped"
 
---- The path the endpoint answers on. The MCP Streamable HTTP transport names
---- one path per server, and this is the one the Teal server published.
+--- The path the endpoint answers on. It is an externally typed compatibility
+--- surface shared by every server.
 local ENDPOINT = "/mcp"
 
 --- The largest request body the endpoint accepts, so a malformed

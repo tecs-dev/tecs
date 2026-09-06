@@ -3,16 +3,16 @@ module tecs.platform.events
 --[[
 Typed platform events produced by the Rust host.
 
-Each record carries only fields meaningful for its kind. The kind strings stay
-compatible with the Teal engine because recordings and tools treat them as an
-external data surface. Rust translates `winit` events into these records and
-passes one ordered batch to `tecs.application.Application:iterate`.
+Each record carries only fields meaningful for its kind. Kind strings are a
+stable external data surface used by recordings and tools. Rust translates
+`winit` events into these records and passes one ordered batch to
+`tecs.application.Application:iterate`.
 ]]
 
 local ecs = require("tecs.ecs")
 local events = require("tecs.events")
 
---- A platform event kind supported by the first `winit` boundary.
+--- A platform event kind supported by the Rust host.
 export type Kind = "quit"
     | "windowCloseRequested"
     | "windowResized"
@@ -165,9 +165,9 @@ end
 
 --- One finger on a touch surface.
 ---
---- Compatibility surface: `touchDevice` and `finger` are the field names the
---- Teal implementation published, and both stay strings because a device and a
---- finger are 64-bit identities that a Lua number would round together.
+--- Compatibility surface: `touchDevice` and `finger` are stable field names,
+--- and both stay strings because a device and a finger are 64-bit identities
+--- that a Lua number would round together.
 export record TouchEvent
     kind: "fingerDown" | "fingerUp" | "fingerMotion" | "fingerCanceled"
     timestamp: number
@@ -187,9 +187,8 @@ end
 
 --- A gamepad appearing or going away.
 ---
---- Compatibility surface: `which` names the device rather than the window,
---- which is what the Teal implementation put in that field for every gamepad
---- event. `window` is zero, because a gamepad belongs to no window.
+--- Compatibility surface: `which` names the device rather than the window.
+--- `window` is zero because a gamepad belongs to no window.
 export record GamepadDeviceEvent
     kind: "gamepadAdded" | "gamepadRemoved"
     timestamp: number

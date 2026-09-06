@@ -8,9 +8,9 @@ exact in a Lua number. Slot zero is reserved as the null entity. Recycled slots
 come from a LIFO stack, while contiguous ranges deliberately use only the fresh
 suffix.
 
-Unlike the Teal implementation, no FFI storage or span provider is required.
 World code uses the placement operations below instead of retaining allocator
-storage, keeping the embedded component independent of a C-storage host feature.
+storage. The embedded component therefore has no dependency on a C-storage host
+feature.
 ]]
 
 local SLOT_BITS: integer = 22

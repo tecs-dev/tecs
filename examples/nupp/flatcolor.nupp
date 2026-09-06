@@ -1,7 +1,7 @@
 module flatcolor
 
 --[[
-A complete game entry for the first Nupp and Rust rendering vertical slice.
+A complete game entry for animated flat-color rendering.
 
 The exported `create` function matches the Rust host's managed entry contract.
 It installs three animated entities and delegates all platform and rendering

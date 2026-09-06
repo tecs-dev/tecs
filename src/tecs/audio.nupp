@@ -98,8 +98,9 @@ nil and the failure reason, while the value-only `readInto` raises that reason.
 stream; destroy it and open a new microphone. Native capture supports one to
 eight channels. The public argument range remains one to 32 for compatibility;
 a valid request above eight returns an operational refusal from the native
-opener. Full device-enumeration change notifications remain deferred. Listing
-current devices and observing failure of an active stream do not depend on them.
+opener. Device enumeration is snapshot-only and provides no change
+notifications. Listing devices and observing failure of an active stream do not
+depend on notifications.
 ]]
 
 local audiobackend = require("tecs.platform.audiobackend")
@@ -135,10 +136,8 @@ local DEFAULT_CAPTURE_FREQUENCY: integer = 48000
 --- microphone is one microphone and a game that wants a stereo pair asks.
 local DEFAULT_CAPTURE_CHANNELS: integer = 1
 
---- Channels a microphone may be asked for. The ceiling is the one the SDL
---- implementation published, and its refusal message is a compatibility
---- surface, so it stays where it was even though the capture path itself
---- carries fewer.
+--- Channels a microphone may be asked for. The public compatibility contract
+--- accepts up to 32 even though the native capture path carries fewer.
 local MAX_CAPTURE_CHANNELS: integer = 32
 
 --- Slots a voice handle reserves for its index. The rest of the handle is a
@@ -659,7 +658,7 @@ end
 --- Names one physical audio device.
 ---
 --- Re-exported from the backend contract so a game reaches it as
---- `tecs.audio.Device`, which is where the SDL implementation published it.
+--- `tecs.audio.Device`.
 export type Device = audiobackend.Device
 
 --- Configures `openMicrophone`.
@@ -706,11 +705,9 @@ export type MicrophoneConfig = {
 --- machine never created, so the frames cross by this side emptying a buffer
 --- rather than by anything calling in.
 ---
---- The buffer is bounded, which is the one behavior the SDL implementation had
---- and this does not. SDL grew its capture stream without limit, so a game that
---- stopped reading paid in memory and in latency forever. This drops the oldest
---- frames instead and counts them in `overruns`, because the recent second is
---- what a game that fell behind actually wants.
+--- The buffer is bounded. When a game stops reading, capture drops the oldest
+--- frames and counts them in `overruns`, preserving the most recent audio
+--- without unbounded memory or latency growth.
 export record Microphone
     --- Read-only. Reports the frames per second `read` answers in. This is the
     --- requested value, not the device's own.

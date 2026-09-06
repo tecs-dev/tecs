@@ -76,7 +76,7 @@ sampler; stop writes collapsed stacks under the writable root.
 sampler remain available while parked or crashed. The server does not provide
 GPU readback, shader or image reload, watcher orchestration, or physics debug
 overlay tools. Snapshot files use TECS framing over Nupp's binary codec and
-explicitly refuse legacy Teal/Box2D files.
+refuse unsupported framing or physics encodings.
 ]]
 
 local ecs = require("tecs.ecs")

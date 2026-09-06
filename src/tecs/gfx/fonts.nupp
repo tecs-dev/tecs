@@ -43,8 +43,8 @@ const concat = table.concat
 
 --- Selects how a font's glyph images are stored.
 ---
---- These identifiers reach a game's font configuration and match the raster
---- names the Teal implementation carried, so they are a compatibility surface.
+--- These identifiers reach a game's font configuration and are a compatibility
+--- surface.
 export type Raster = "sdf" | "alpha"
 
 --- The options `newTTF` accepts.

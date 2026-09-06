@@ -114,7 +114,7 @@ return {
         targets = {
             headless = {
                 kind = "modules",
-                description = "Build the headless Tecs rewrite",
+                description = "Build the headless Tecs modules",
                 entries = {
                     "tecs.application",
                     "tecs.assets",

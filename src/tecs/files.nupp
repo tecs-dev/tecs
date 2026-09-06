@@ -198,9 +198,8 @@ end
 --- Returns the root that disposable per-user data is created under.
 ---
 --- `LOCALAPPDATA` on Windows, `~/Library/Caches` on Apple platforms, and
---- `XDG_CACHE_HOME` or `~/.cache` elsewhere. These are the same directories the
---- SDL build's Rust cache resolver chose, so a build that upgrades keeps
---- reading the artifacts it wrote.
+--- `XDG_CACHE_HOME` or `~/.cache` elsewhere. Following the platform conventions
+--- keeps cache locations stable across host changes.
 --- @return the directory, or nil and a reason when the platform has none
 local function cacheBase(): (string?, string?)
     if WINDOWS then
@@ -270,8 +269,7 @@ end
 --- Nupp has no portable executable path, so this answers what the host said
 --- through the `__tecsBase` global, then the directory of `arg[0]`, and then an
 --- empty string. An empty answer is not a failure: it means the platform
---- declined to say, and a caller falls back to a relative path, which is what
---- the SDL implementation documented as well.
+--- declined to say, and a caller falls back to a relative path.
 --- @return the directory with a trailing separator, or an empty string
 export function basePath(): string
     local held = baseCache
