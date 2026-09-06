@@ -152,4 +152,4 @@ print(
         "spawned %d entities in %.0f ms; %d frames after %d warmup, %d instances in a %d byte packet"
     ):format(COUNT, spawnMilliseconds, FRAMES, WARMUP, instances, bytes)
 )
-harness.finish({update, extract, frame})
+harness.finish({update, extract, frame}, {instances = instances, bytes = bytes, width = WIDTH, height = HEIGHT})

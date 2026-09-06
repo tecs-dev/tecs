@@ -32,7 +32,8 @@ Shapes use seed 42, 2,000 circles and 2,000 rounded rectangles, actual material
 ids, a 1280x720 field and viewport, and translation every 1/60-second frame.
 All 4,000 instances must be present in the packet. Physics uses the same seed,
 a closed 1280x720 container, eight waves 45 frames apart, four blowers, the
-default body/contact parameters and zero solver workers. Every frame advances
+default body/contact parameters and requested worker count zero (the native
+solver clamps it to one actual worker). Every frame advances
 one fixed step. Spawn/setup and all waves finish before measured frames.
 
 `native batch` measures `Simulation.step`: preparing the batch, executing the
@@ -49,7 +50,7 @@ so use the profile to locate costs and unprofiled runs for acceptance.
 
 Historical benchmarks remain on TECS commit `70549c8e`. Build that checkout
 with its pinned Rust/Teal/SDL dependencies and run its `shapes` and `physics`
-benchmarks with the same counts, dimensions, warmup, sample count and workers.
+benchmarks with the same counts, dimensions, warmup, sample count and requested workers.
 Compare `simulate`, `extract`, `physics.step` and `physics.sync` as appropriate.
 Its `frame` includes a real presented window; Nupp's shapes `frame` includes
 only update and extraction. Physics solver versions and ECS/API boundaries

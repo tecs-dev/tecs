@@ -423,6 +423,25 @@ pub fn benchmark_acceptance(root: &Path) -> Result<()> {
                     .find_map(|line| line.strip_prefix("TECS_BENCH_JSON "))
                     .context("benchmark did not emit its structured report")?,
             )?;
+            if name == "physics" {
+                anyhow::ensure!(
+                    report["metadata"]["bodies"].as_u64() == Some(count.parse()?),
+                    "{stem} did not spawn every body"
+                );
+                anyhow::ensure!(
+                    report["metadata"]["effectiveWorkers"] == 1,
+                    "{stem} must use one actual solver worker"
+                );
+                anyhow::ensure!(
+                    report["metadata"]["substeps"] == 4,
+                    "{stem} must use four substeps"
+                );
+            } else {
+                anyhow::ensure!(
+                    report["metadata"]["instances"] == 4000,
+                    "{stem} must extract every instance"
+                );
+            }
             let violations = check_performance_budgets(&report, &budgets)?;
             println!(
                 "{stem}: {}",
@@ -459,7 +478,7 @@ pub fn benchmark_acceptance(root: &Path) -> Result<()> {
         "dirty": !dirty.stdout.is_empty(), "compiler": compiler,
         "compilerVersion": String::from_utf8_lossy(&version.stdout).trim(),
         "nativeLibraries": libraries, "nativeProfile": "release", "optimization": "O2",
-        "frames": 900, "workers": 0, "results": results, "passed": failures.is_empty()});
+        "frames": 900, "requestedWorkers": 0, "effectiveWorkers": 1, "results": results, "passed": failures.is_empty()});
     std::fs::write(
         directory.join("acceptance.json"),
         serde_json::to_vec_pretty(&report)?,

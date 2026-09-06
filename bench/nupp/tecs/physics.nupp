@@ -41,7 +41,7 @@
 ---   BENCH_BLOWER        Jet force. Defaults to 900.
 ---   BENCH_BLOWER_RADIUS Jet radius in pixels. Defaults to 220.
 ---   BENCH_SIZE          Body half-extent in pixels. Defaults to 3.
----   BENCH_WORKERS       Solver worker threads. Defaults to 0.
+---   BENCH_WORKERS       Requested solver width. Defaults to 0, clamped to one.
 ---   BENCH_WARMUP        Untimed frames. Defaults to waves * waveFrames + 240.
 ---   BENCH_FRAMES        Timed frames. Defaults to 900.
 
@@ -248,8 +248,14 @@ print(
 )
 print(
     (
-        "%d bodies spawned, %d workers, one %.4f s fixed step per frame, %.0f ms wall total"
-    ):format(spawned, WORKERS, timestep, totalMilliseconds)
+        "%d bodies spawned, %d requested workers, %d actual workers, one %.4f s fixed step per frame, %.0f ms wall total"
+    ):format(spawned, WORKERS, simulation.workerCount, timestep, totalMilliseconds)
 )
-harness.finish({commands, step, sync, update})
+harness.finish({commands, step, sync, update}, {
+    bodies = spawned,
+    requestedWorkers = WORKERS,
+    effectiveWorkers = simulation.workerCount,
+    substeps = simulation.subStepCount,
+    timestep = timestep
+})
 world:shutdown()

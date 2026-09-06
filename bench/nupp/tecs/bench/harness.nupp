@@ -312,13 +312,13 @@ end
 
 --- Prints the human report and, when BENCH_JSON=1, a machine-readable record.
 --- Samples retain observation order; each summary carries nearest-rank tails.
-export function finish(stages: {Stage}): nil
+export function finish(stages: {Stage}, metadata: {[string]: any}?): nil
     print(format(stages))
     if os.getenv("BENCH_JSON") == "1" then
         local summaries: {Report} = {}
         for index = 1, #stages do
             summaries[index] = assert(report(stages[index]))
         end
-        print("TECS_BENCH_JSON " .. json.encode({stages = summaries, samples = stages}))
+        print("TECS_BENCH_JSON " .. json.encode({stages = summaries, samples = stages, metadata = metadata or {}}))
     end
 end
