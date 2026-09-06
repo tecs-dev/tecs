@@ -118,6 +118,9 @@ function suite.sizesAndDragsScrollbarThumbs(): nil
     tecs.platform.events.dispatch(world, tecs.platform.events.pointerMoved(95, 40))
     world:update(0)
     nupp.test.assert(assert(world:get(root, tecs.ui.Scroll)).y > 80)
+    assert(world:getMut(root, tecs.ui.Style)).style.height = 400
+    world:update(0)
+    nupp.test.equal(assert(world:get(thumb, tecs.ui.Layout)).height, 0)
     world:shutdown()
 end
 
@@ -232,6 +235,84 @@ function suite.keepsNaturallySizedTextOnOneLine(): nil
     local _, naturalHeight = tecs.gfx.text.measureIntrinsic(text)
     local _, actualHeight = tecs.gfx.text.measureText(text)
     nupp.test.equal(actualHeight, naturalHeight)
+    world:shutdown()
+end
+
+function suite.alignsWrappedRowsToStart(): nil
+    local world = tecs.ecs.newWorld()
+    tecs.ui.install(world, {width = 100, height = 200})
+    local root = world:spawn(
+        tecs.ui.Root(),
+        tecs.ui.Style({
+            width = 100,
+            height = 200,
+            flexWrap = "wrap",
+            alignContent = "start",
+            alignItems = "start",
+            gap = 10
+        })
+    )
+    local first = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 60, height = 20}))
+    local second = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 60, height = 20}))
+    world:update(0)
+    nupp.test.equal(assert(world:get(first, tecs.ui.Layout)).y, 0)
+    nupp.test.equal(assert(world:get(second, tecs.ui.Layout)).y, 30)
+    world:shutdown()
+end
+
+function suite.handsUnusedWheelToParentAndHonorsConsumption(): nil
+    local world = tecs.ecs.newWorld()
+    tecs.ui.install(world, {width = 100, height = 100, wheelStep = 40})
+    local root = world:spawn(tecs.ui.Root(), tecs.ui.Style({width = 100, height = 100}), tecs.ui.Scroll())
+    local content = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 100, height = 300, flexShrink = 0}))
+    local inner = world:spawn(tecs.ecs.ChildOf(content), tecs.ui.Style({width = 80, height = 80}), tecs.ui.Scroll())
+    world:spawn(tecs.ecs.ChildOf(inner), tecs.ui.Style({width = 80, height = 100, flexShrink = 0}))
+    world:update(0)
+    tecs.platform.events.dispatch(world, tecs.platform.events.wheel(0, -1, nil, nil, 10, 10))
+    world:update(0)
+    nupp.test.equal(assert(world:get(inner, tecs.ui.Scroll)).y, 20)
+    nupp.test.equal(assert(world:get(root, tecs.ui.Scroll)).y, 20)
+    world:observe(root, tecs.ui.Event, function(event: tecs.ui.Event): nil
+        if event.kind == "wheel" then
+            event.consumed = true
+        end
+    end)
+    tecs.platform.events.dispatch(world, tecs.platform.events.wheel(0, -1, nil, nil, 10, 10))
+    world:update(0)
+    nupp.test.equal(assert(world:get(root, tecs.ui.Scroll)).y, 20)
+    world:shutdown()
+end
+
+function suite.hidesAndRestoresSceneGlyphs(): nil
+    local world = tecs.ecs.newWorld()
+    tecs.ui.install(world, {width = 200, height = 100})
+    tecs.gfx.text.install(world)
+    local font = assert(
+        tecs.gfx.fonts.newTTF({
+            source = "assets/fonts/JetBrainsMono-ExtraBold.ttf",
+            name = "uitest/scenes",
+            size = 16
+        })
+    )
+    local root = world:spawn(tecs.ui.Root(), tecs.ui.Style({width = 200, height = 100}))
+    local scene = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 100, height = 80}))
+    local label = world:spawn(
+        tecs.ecs.ChildOf(scene),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.gfx.Text("Scene", font, 16)
+    )
+    world:update(0)
+    nupp.test.equal(#tecs.gfx.text.glyphsOf(world, label), 5)
+    for cycle = 1, 3 do
+        assert(world:getMut(scene, tecs.ui.Style)).style.display = "none"
+        world:update(0)
+        nupp.test.equal(#tecs.gfx.text.glyphsOf(world, label), 0)
+        assert(world:getMut(scene, tecs.ui.Style)).style.display = "flex"
+        world:update(0)
+        nupp.test.equal(#tecs.gfx.text.glyphsOf(world, label), 5)
+    end
     world:shutdown()
 end
 

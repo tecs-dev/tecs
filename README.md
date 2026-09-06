@@ -63,7 +63,8 @@ triangles and stars. 3D rendering, custom post-processing and multi-camera
 rendering are not available in the current engine.
 
 Run `nupp task tiled` for a map with animation and collision, or `nupp task ui`
-for the resizable, interactive interface.
+for the Compose, Flex, Overlay and Scroll showcase over the animated gradient
+field. `nupp task uistandalone --width 960 --height 640` runs the centered panel.
 
 ## Ownership boundaries
 

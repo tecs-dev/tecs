@@ -300,6 +300,7 @@ pub fn install(root: &Path, preset: Preset, components: &[String]) -> Result<Pat
             SMOKE.to_owned(),
             "tiled".to_owned(),
             "ui".to_owned(),
+            "uistandalone".to_owned(),
         ]
     } else {
         components.to_vec()
@@ -356,7 +357,7 @@ pub fn install(root: &Path, preset: Preset, components: &[String]) -> Result<Pat
         copy_file(&root.join(notice), &prefix.join("share/tecs").join(notice))?;
     }
     copy_runtime_notices(&sdk, &prefix)?;
-    for directory in ["maps", "fonts"] {
+    for directory in ["maps", "fonts", "demo"] {
         copy_tree(
             &root.join("assets").join(directory),
             &prefix.join("share/tecs/assets").join(directory),
@@ -503,6 +504,10 @@ pub fn test(root: &Path, preset: Preset) -> Result<()> {
             "tiled: TMX, TSX, sprites, animation and collision ready",
         ),
         ("ui", "ui: retained Taffy layout and interaction ready"),
+        (
+            "uistandalone",
+            "uistandalone: centered retained interface ready",
+        ),
     ] {
         let component = moved
             .join("share/tecs/components")

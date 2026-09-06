@@ -41,8 +41,8 @@ export type StyleOptions = {
     flexDirection: ("row" | "rowReverse" | "column" | "columnReverse")?,
     flexWrap: ("nowrap" | "wrap")?,
     justifyContent: ("start" | "center" | "end" | "spaceBetween" | "spaceAround" | "spaceEvenly")?,
-    alignItems: ("stretch" | "center" | "end" | "baseline")?,
-    alignContent: ("stretch" | "center" | "end" | "spaceBetween" | "spaceAround" | "spaceEvenly")?,
+    alignItems: ("stretch" | "center" | "end" | "baseline" | "start")?,
+    alignContent: ("stretch" | "center" | "end" | "spaceBetween" | "spaceAround" | "spaceEvenly" | "start")?,
     flexGrow: number?,
     flexShrink: number?,
     flexBasis: Dimension?,
@@ -577,9 +577,9 @@ local function emit(
     source: string?,
     dx: number?,
     dy: number?
-): nil
+): boolean
     if entity == 0 then
-        return
+        return false
     end
     local value = new EventValue(
         kind = kind,
@@ -601,12 +601,14 @@ local function emit(
         value.currentTarget = entity
         world:emit(entity, Event(value))
         if value.consumed then
-            return
+            return true
         end
         entity = parentOf(world, entity)
     end
     value.currentTarget = 0
     world:emit(0, Event(value))
+
+    return value.consumed
 end
 
 local function inScope(borrows world: tecs.ecs.World, state: State, entity: integer): boolean
@@ -1096,10 +1098,10 @@ local function scrollbars(exclusive world: tecs.ecs.World, ids: {integer}): nil
                 local extent = horizontal and area.width or area.height
                 local content = horizontal and scroll.contentWidth or scroll.contentHeight
                 local track = math.max(0, extent - thumb.inset * 2)
-                local size = content > 0 and math.min(
+                local size = content > extent and math.min(
                     track,
                     math.max(thumb.minLength, track * extent / content)
-                ) or track
+                ) or 0
                 local offset = content > extent and (
                     horizontal and scroll.x or scroll.y
                 ) / (content - extent) * (track - size) or 0
@@ -1478,18 +1480,34 @@ local function inputs(exclusive world: tecs.ecs.World, state: State): nil
                         entity = parentOf(world, entity)
                     end
                     if entity ~= 0 then
-                        local scroll = assert(world:getMut(entity, Scroll))
-                        scroll.x = scroll.x - event.wheelX * state.wheelStep
-                        scroll.y = scroll.y - event.wheelY * state.wheelStep
-                        emit(
-                            world,
-                            "wheel",
-                            entity,
-                            pointerFor(state, "mouse", "mouse"),
-                            nil,
-                            event.wheelX,
-                            event.wheelY
-                        )
+                        local wheelX, wheelY = event.wheelX, event.wheelY
+                        if wheelX == 0 and input and (
+                            input:keyDown(
+                                "ShiftLeft",
+                                state.inputLayer
+                            ) or input:keyDown("ShiftRight", state.inputLayer)
+                        ) then
+                            wheelX, wheelY = wheelY, 0
+                        end
+                        local pointer = pointerFor(state, "mouse", "mouse")
+                        pointer.x, pointer.y = event.x * state.density, event.y * state.density
+                        if not emit(world, "wheel", entity, pointer, nil, wheelX, wheelY) then
+                            local dx, dy = -wheelX * state.wheelStep, -wheelY * state.wheelStep
+                            while entity ~= 0 and (dx ~= 0 or dy ~= 0) do
+                                local scroll = world:get(entity, Scroll)
+                                local box = world:get(entity, Layout)
+                                if scroll and box then
+                                    local x = math.max(0, math.min(scroll.x + dx, scroll.contentWidth - box.width))
+                                    local y = math.max(0, math.min(scroll.y + dy, scroll.contentHeight - box.height))
+                                    dx, dy = dx - (x - scroll.x), dy - (y - scroll.y)
+                                    if x ~= scroll.x or y ~= scroll.y then
+                                        local changed = assert(world:getMut(entity, Scroll))
+                                        changed.x, changed.y = x, y
+                                    end
+                                end
+                                entity = parentOf(world, entity)
+                            end
+                        end
                         break
                     end
                 end

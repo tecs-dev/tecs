@@ -167,6 +167,12 @@
     line-height: 1.65;
 }
 
+.nuppdoc-content img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+}
+
 @media (max-width: 1000px) {
     .tecs-features {
         grid-template-columns: repeat(3, minmax(0, 1fr));

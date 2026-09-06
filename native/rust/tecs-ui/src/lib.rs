@@ -261,6 +261,7 @@ fn style(value: &TecsUiStyle) -> Style {
             1 => Some(AlignItems::CENTER),
             2 => Some(AlignItems::FLEX_END),
             3 => Some(AlignItems::BASELINE),
+            4 => Some(AlignItems::FLEX_START),
             _ => Some(AlignItems::STRETCH),
         },
         align_content: match value.align_content {
@@ -269,6 +270,7 @@ fn style(value: &TecsUiStyle) -> Style {
             3 => Some(AlignContent::SPACE_BETWEEN),
             4 => Some(AlignContent::SPACE_AROUND),
             5 => Some(AlignContent::SPACE_EVENLY),
+            6 => Some(AlignContent::FLEX_START),
             _ => Some(AlignContent::STRETCH),
         },
         flex_grow: value.flex_grow,

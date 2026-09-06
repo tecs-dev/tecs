@@ -89,7 +89,8 @@ nupp check --strict           # Type-check every Nupp source, strictly
 nupp test                     # Build and run the test suites
 nupp task flatcolor           # Build a component and run it through the Rust host
 nupp task tiled               # TMX map with animated tiles and collision
-nupp task ui                  # Retained interface with Taffy layout
+nupp task ui                  # Compose, Flex, Overlay and Scroll over a lit gradient field
+nupp task uistandalone        # Centered panel with scrollable controls
 nupp task verify              # Every gate above, plus the Rust host
 nupp build --target docs      # Render this site into out/docs
 ```

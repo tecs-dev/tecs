@@ -1,0 +1,302 @@
+module uistandalone
+
+--[[A complete centered retained interface. Run `nupp task uistandalone`.]]
+
+local function fontAt(size: number, density: number): tecs.gfx.fonts.Font
+    return assert(
+        tecs.gfx.fonts.newTTF({
+            source = tecs.files.assetPath("fonts/JetBrainsMono-ExtraBold.ttf"),
+            name = "ui-demo-" .. size .. "-" .. density,
+            size = size * density,
+            raster = "alpha"
+        })
+    )
+end
+
+-- The original artwork specifies display RGB; the renderer consumes linear light.
+local function linear(value: number): number
+    return value <= 0.04045 and value / 12.92 or ((value + 0.055) / 1.055) ^ 2.4
+end
+
+local function displayTint(r: number, g: number, b: number, a: number): tecs.ecs.ComponentInput
+    return tecs.gfx.Tint(linear(r), linear(g), linear(b), a)
+end
+
+local function install(exclusive app: tecs.application.Application): nil
+    const world = app.world
+    tecs.gfx.lighting.setAmbient(1, 1, 1)
+    const width, height = app.window:getPixelSize()
+    world:spawn(
+        tecs.ecs.Transform2D(width * 0.5, height * 0.5, 0, 1, 0, width * 4, height * 4),
+        displayTint(0, 0, 0, 1),
+        tecs.gfx.Renderable2D
+    )
+    tecs.ui.plugin(app, {wheelStep = 36})
+    tecs.gfx.text.install(world)
+    const density = app.window:scaleFactor()
+    local controls: {{integer}} = {}
+    world:addSystem({
+        name = "example.SpawnUi",
+        phase = tecs.ecs.phases.Startup,
+        run = function(): nil
+            const headingFont = fontAt(24, density)
+            const font = fontAt(16, density)
+            const root = world:spawn(
+                tecs.ui.Style({
+                    width = "100%",
+                    height = "100%",
+                    justifyContent = "center",
+                    alignItems = "center",
+                    padding = "24px",
+                }),
+                tecs.ui.Root(),
+                tecs.ecs.Transform2D(0, 0, 0, 16)
+            )
+
+            const panel = world:spawn(
+                tecs.ui.Style({
+                    width = 420,
+                    height = 540,
+                    flexDirection = "column",
+                    padding = 20,
+                    gap = 12,
+                }),
+                tecs.ecs.RelativeTransform2D(),
+                tecs.ecs.ChildOf(root)
+            )
+            world:spawn(
+                tecs.ui.Style({
+                    position = "absolute",
+                    inset = 0
+                }),
+                tecs.ui.Paint(true),
+                tecs.ecs.RelativeTransform2D(0, 0, 0),
+                displayTint(0.035, 0.055, 0.09, 0.97),
+                tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.04),
+                tecs.gfx.Renderable2D,
+                tecs.ecs.ChildOf(panel)
+            )
+
+            const heading = world:spawn(
+                tecs.ui.Style({
+                    width = "100%",
+                    height = 54,
+                }),
+                tecs.ecs.RelativeTransform2D(),
+                tecs.ecs.ChildOf(panel)
+            )
+            world:spawn(
+                tecs.ui.Style({
+                    position = "absolute",
+                    width = 40,
+                    height = 40,
+                    inset = {left = 0, top = 5},
+                }),
+                tecs.ui.Paint(true),
+                tecs.ecs.RelativeTransform2D(0, 0, 1),
+                displayTint(0.32, 0.82, 1.0, 1.0),
+                tecs.gfx.Material(tecs.gpu.materials.id("circle"), 0),
+                tecs.gfx.Renderable2D,
+                tecs.ecs.ChildOf(heading)
+            )
+            world:spawn(
+                tecs.ui.Style({
+                    position = "absolute",
+                    inset = {left = 56, top = 0},
+                }),
+                tecs.ui.Intrinsic({
+                    source = "text"
+                }),
+                tecs.ecs.RelativeTransform2D(0, 0, 2),
+                displayTint(0.94, 0.97, 1.0, 1.0),
+                tecs.gfx.Text("Retained, composed UI", headingFont, 24),
+                tecs.ecs.ChildOf(heading)
+            )
+
+            const status = world:spawn(
+                tecs.ui.Style({
+                    width = "100%",
+                }),
+                tecs.ui.Intrinsic({
+                    source = "text"
+                }),
+                tecs.ecs.RelativeTransform2D(0, 0, 2),
+                displayTint(0.58, 0.7, 0.84, 1.0),
+                tecs.gfx.Text("Click, Tab, Return, or scroll", font, 16),
+                tecs.ecs.ChildOf(panel)
+            )
+
+            local function setStatus(message: string): nil
+                const value = assert(world:getMut(status, tecs.gfx.Text))
+                value.text = message
+            end
+
+            const viewport = world:spawn(
+                tecs.ui.Style({
+                    width = "100%",
+                    flexGrow = 1,
+                    minHeight = 120,
+                }),
+                tecs.ui.Scroll(),
+                tecs.ecs.RelativeTransform2D(),
+                tecs.ecs.ChildOf(panel)
+            )
+            const content = world:spawn(
+                tecs.ui.Style({
+                    width = "100%",
+                    height = 504,
+                    flexDirection = "column",
+                    gap = 8,
+                }),
+                tecs.ecs.RelativeTransform2D(),
+                tecs.ecs.ChildOf(viewport)
+            )
+            world:spawn(
+                tecs.ui.Scrollbar({
+                    axis = "vertical",
+                    thickness = 6,
+                    inset = 2,
+                    minLength = 18
+                }),
+                tecs.ui.Interaction({
+                    focusable = false,
+                    draggable = true,
+                    order = 100
+                }),
+                tecs.ecs.RelativeTransform2D(0, 0, 10),
+                displayTint(0.32, 0.82, 1.0, 0.85),
+                tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.5),
+                tecs.gfx.Renderable2D,
+                tecs.ecs.ChildOf(viewport)
+            )
+
+            local function spawnButton(label: string, tabIndex: integer): nil
+                const button = world:spawn(
+                    tecs.ui.Style({
+                        width = "100%",
+                        height = 48,
+                    }),
+                    tecs.ui.Interaction({
+                        tabIndex = tabIndex
+                    }),
+                    tecs.ecs.RelativeTransform2D(),
+                    tecs.ecs.ChildOf(content)
+                )
+                const visual = world:spawn(
+                    tecs.ui.Style({
+                        position = "absolute",
+                        inset = 0
+                    }),
+                    tecs.ui.Paint(true),
+                    tecs.ecs.RelativeTransform2D(0, 0, 1),
+                    displayTint(0.12, 0.20, 0.30, 1.0),
+                    tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.16),
+                    tecs.gfx.Renderable2D,
+                    tecs.ecs.ChildOf(button)
+                )
+                world:spawn(
+                    tecs.ui.Style({
+                        position = "absolute",
+                        inset = {left = 14, top = 13},
+                    }),
+                    tecs.ui.Intrinsic({
+                        source = "text"
+                    }),
+                    tecs.ecs.RelativeTransform2D(0, 0, 2),
+                    displayTint(0.9, 0.95, 1.0, 1.0),
+                    tecs.gfx.Text(label, font, 16),
+                    tecs.ecs.ChildOf(button)
+                )
+                controls[#controls + 1] = {button, visual}
+                world:observe(button, tecs.ui.Event, function(event: tecs.ui.Event): nil
+                    if event.kind == "activate" then
+                        setStatus(("%s via %s"):format(label, event.source))
+                    end
+                end)
+            end
+
+            spawnButton("Rectangle instance", 1)
+            spawnButton("Circle material", 2)
+            spawnButton("Alpha UI text", 3)
+            spawnButton("Nested clipping", 4)
+            spawnButton("Dirty transforms", 5)
+            spawnButton("Bubbling events", 6)
+            spawnButton("Keyboard focus", 7)
+            spawnButton("Pointer capture", 8)
+            spawnButton("GPU instancing", 9)
+        end,
+    })
+
+    world:addSystem({
+        name = "example.UiState",
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            for index = 1, #controls do
+                const pair = controls[index]
+                const state = assert(world:get(pair[1], tecs.ui.InteractionState))
+                const tint = assert(world:get(pair[2], tecs.gfx.Tint))
+                local r, g, b = 0.12, 0.20, 0.30
+                if state.pressed then
+                    r, g, b = 0.14, 0.47, 0.62
+                elseif state.hovered then
+                    r, g, b = 0.17, 0.34, 0.48
+                elseif state.focused then
+                    r, g, b = 0.18, 0.29, 0.46
+                end
+                r, g, b = linear(r), linear(g), linear(b)
+                if tint.r ~= r or tint.g ~= g or tint.b ~= b then
+                    const changed = assert(world:getMut(pair[2], tecs.gfx.Tint))
+                    changed.r, changed.g, changed.b = r, g, b
+                end
+            end
+        end,
+    })
+
+    -- The host attaches its window after installation; rasterize again when its density
+    -- arrives.
+    const window = app.window
+    local rasterDensity = window:scaleFactor()
+    const textNodes = world:newQuery({include = {tecs.gfx.Text}})
+    world:addSystem({
+        name = "example.UiRasterDensity",
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            const currentDensity = window:scaleFactor()
+            if currentDensity == rasterDensity then
+                return
+            end
+            rasterDensity = currentDensity
+            for candidate, count in textNodes:iter() do
+                const texts = assert(candidate:getMut(tecs.gfx.Text))
+                for row = 1, count as integer do
+                    texts[row].font = fontAt(texts[row].size, currentDensity)
+                end
+            end
+        end
+    })
+    print("uistandalone: centered retained interface ready")
+end
+
+--- Creates the UI demonstration session.
+--- @param title Sets the window title.
+--- @param width Sets the initial logical width.
+--- @param height Sets the initial logical height.
+--- @param debug Enables guarded failure recovery.
+--- @param maxFrames Sets an optional frame limit.
+--- @return Returns the host session.
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): tecs.host.Session
+    return tecs.host.createWithPlugin(
+        install,
+        title or "Tecs retained UI",
+        width or 960,
+        height or 640,
+        debug,
+        maxFrames
+    )
+end

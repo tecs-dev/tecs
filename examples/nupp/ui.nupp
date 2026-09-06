@@ -1,119 +1,1009 @@
 module ui
 
---[[A retained Taffy interface. Resize the window, scroll or drag the thumb,
-then click a row or navigate with Tab and Enter. Run with `nupp task ui`.
-]]
+--[[Four retained UI scenes over an animated, lit sunflower field. Run `nupp task ui`.]]
 
-local function label(
-    exclusive world: tecs.ecs.World,
-    parent: integer,
-    font: tecs.gfx.fonts.Font,
-    value: string,
-    size: number
-): integer
-    return world:spawn(
-        tecs.ecs.ChildOf(parent),
-        tecs.ui.Style({
-            flexShrink = 0
-        }),
-        tecs.ui.Intrinsic({
-            source = "text",
-            wrap = true
-        }),
-        tecs.gfx.Text(value, font, size),
-        tecs.gfx.Tint(0.9, 0.94, 1, 1)
+local function fontAt(size: number, density: number): tecs.gfx.fonts.Font
+    return assert(
+        tecs.gfx.fonts.newTTF({
+            source = tecs.files.assetPath("fonts/JetBrainsMono-ExtraBold.ttf"),
+            name = "ui-demo-" .. size .. "-" .. density,
+            size = size * density,
+            raster = "alpha"
+        })
     )
 end
 
-local function background(exclusive world: tecs.ecs.World, parent: integer, r: number, g: number, b: number): integer
-    return world:spawn(
-        tecs.ecs.ChildOf(parent),
+const COUNT = 4000
+const Field = tecs.ecs.newTagComponent({name = "UiDemoField"})
+local function backdrop(exclusive app: tecs.application.Application): nil
+    const world = app.world
+    const width, height = app.window:getPixelSize()
+    tecs.gfx.lighting.setAmbient(0.05, 0.05, 0.08)
+    const camera = world:spawn(tecs.gfx.Camera2D(width * 0.5, height * 0.5), tecs.gfx.ActiveCamera)
+    const window = app.window
+    -- A black far-plane quad preserves the showcase's black backdrop.
+    world:spawn(
+        tecs.ecs.Transform2D(width * 0.5, height * 0.5, 0, 1, 0, width * 4, height * 4),
+        tecs.gfx.Tint(0, 0, 0, 1),
+        tecs.gfx.Renderable2D
+    )
+    const extent = math.min(width, height) * 0.46
+    for index = 0, COUNT - 1 do
+        const angle = index * 2.39996
+        const radius = math.sqrt(index / COUNT) * extent
+        const size = 6 + 10 * (1 - radius / extent)
+        const hue = index / COUNT
+        world:spawn(
+            tecs.ecs.Transform2D(
+                width * 0.5 + math.cos(angle) * radius,
+                height * 0.5 + math.sin(angle) * radius,
+                0,
+                2,
+                angle,
+                size,
+                size
+            ),
+            tecs.gfx.Tint(
+                0.55 + 0.45 * math.cos(6.28318 * hue),
+                0.55 + 0.45 * math.cos(6.28318 * (hue + 0.33)),
+                0.55 + 0.45 * math.cos(6.28318 * (hue + 0.67)),
+                1
+            ),
+            tecs.gfx.Renderable2D,
+            Field
+        )
+    end
+    const palette = {{1.0, 0.42, 0.35}, {0.38, 1.0, 0.62}, {0.42, 0.58, 1.0}}
+    for index = 1, 3 do
+        const color = palette[index]
+        world:spawn(
+            tecs.ecs.Transform2D(width * 0.5, height * 0.5),
+            tecs.gfx.PointLight2D(120, math.min(width, height) * 0.7, color[1], color[2], color[3], 3)
+        )
+    end
+    local elapsed = 0.0
+    const spinning = world:newQuery({include = {tecs.ecs.Transform2D, Field}})
+    const orbiting = world:newQuery({include = {tecs.ecs.Transform2D, tecs.gfx.PointLight2D}})
+    world:addSystem({
+        name = "demo.Spin",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number): nil
+            elapsed = elapsed + dt
+            const view = assert(world:get(camera, tecs.gfx.Camera2D))
+            const density = window:scaleFactor()
+            if view.zoom ~= density then
+                assert(world:getMut(camera, tecs.gfx.Camera2D)).zoom = density
+            end
+            for candidate, count in spinning:iter() do
+                const transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
+                for row = 1, count as integer do
+                    transforms[row].rotation = transforms[row].rotation + dt * 1.5
+                end
+            end
+            local index = 0
+            for candidate, count in orbiting:iter() do
+                const transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
+                for row = 1, count as integer do
+                    const angle = elapsed * 0.6 + index * 2.094
+                    transforms[row].x = width * (0.5 + 0.3 * math.cos(angle))
+                    transforms[row].y = height * (0.5 + 0.3 * math.sin(angle))
+                    index = index + 1
+                end
+            end
+        end
+    })
+end
+
+-- The original artwork specifies display RGB; the renderer consumes linear light.
+local function linear(value: number): number
+    return value <= 0.04045 and value / 12.92 or ((value + 0.055) / 1.055) ^ 2.4
+end
+
+local function displayTint(r: number, g: number, b: number, a: number): tecs.ecs.ComponentInput
+    return tecs.gfx.Tint(linear(r), linear(g), linear(b), a)
+end
+
+local function install(exclusive app: tecs.application.Application): nil
+    const world = app.world
+    backdrop(app)
+    tecs.ui.plugin(app, {wheelStep = 36})
+    tecs.gfx.text.install(world)
+    const displayFont, font = fontAt(32, app.window:scaleFactor()), fontAt(16, app.window:scaleFactor())
+    const uiRoot = world:spawn(
+        tecs.ui.Style({
+            width = "100%",
+            height = "100%",
+            flexDirection = "row",
+            justifyContent = "end",
+            padding = 24,
+        }),
+        tecs.ui.Root(),
+        tecs.ecs.Transform2D(0, 0, 900, 16)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = {left = 24, top = 24}
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 100),
+        displayTint(0.92, 0.96, 1.0, 1.0),
+        tecs.gfx.Text(("tecs %s\n%d entities"):format("0.1.0", COUNT), displayFont, 32),
+        tecs.ecs.ChildOf(uiRoot)
+    )
+    const panel = world:spawn(
+        tecs.ui.Style({
+            width = 400,
+            height = "100%",
+            flexDirection = "column",
+            padding = 20,
+            gap = 12,
+        }),
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(uiRoot)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = 0
+        }),
+        tecs.ui.Paint(true),
+        tecs.ecs.RelativeTransform2D(0, 0, 0),
+        displayTint(0.035, 0.055, 0.09, 1.0),
+        tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.04),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(panel)
+    )
+
+    const header = world:spawn(
+        tecs.ui.Style({
+            height = 62,
+            width = "100%",
+            order = 1
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 100),
+        tecs.ecs.ChildOf(panel)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            width = 42,
+            height = 42,
+            inset = {left = 0, top = 4}
+        }),
+        tecs.ui.Paint(true),
+        tecs.ecs.RelativeTransform2D(0, 0, 2),
+        displayTint(0.32, 0.82, 1.0, 1.0),
+        tecs.gfx.Material(tecs.gpu.materials.id("circle"), 0),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(header)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = {left = 58, top = 0}
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 3),
+        displayTint(0.94, 0.97, 1.0, 1.0),
+        tecs.gfx.Text("Tecs UI", displayFont, 32),
+        tecs.ecs.ChildOf(header)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = {left = 58, top = 39}
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 3),
+        displayTint(0.54, 0.64, 0.76, 1.0),
+        tecs.gfx.Text("Retained ECS | GPU instanced", font, 16),
+        tecs.ecs.ChildOf(header)
+    )
+
+    const status = world:spawn(
+        tecs.ui.Style({
+            minHeight = 42,
+            width = "100%"
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 100),
+        displayTint(0.62, 0.75, 0.88, 1.0),
+        tecs.gfx.Text("Click, Tab, Return, or scroll", font, 16),
+        tecs.ecs.ChildOf(panel)
+    )
+
+    local controls: {{integer}} = {}
+    local function setStatus(message: string): nil
+        local text = world:getMut(status, tecs.gfx.Text)
+        if text ~= nil then
+            text.text = message
+        end
+    end
+
+    local function spawnButton(parent: integer, label: string, tabIndex: integer): integer
+        const control = world:spawn(
+            tecs.ui.Style({
+                width = "100%",
+                height = 44
+            }),
+            tecs.ui.Interaction({
+                tabIndex = tabIndex
+            }),
+            tecs.ecs.RelativeTransform2D(),
+            tecs.ecs.ChildOf(parent)
+        )
+        const visual = world:spawn(
+            tecs.ui.Style({
+                position = "absolute",
+                inset = 0
+            }),
+            tecs.ui.Paint(true),
+            tecs.ecs.RelativeTransform2D(0, 0, 1),
+            displayTint(0.12, 0.20, 0.30, 1.0),
+            tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.18),
+            tecs.gfx.Renderable2D,
+            tecs.ecs.ChildOf(control)
+        )
+        world:spawn(
+            tecs.ui.Style({
+                position = "absolute",
+                inset = {left = 14, top = 11}
+            }),
+            tecs.ui.Intrinsic({
+                source = "text"
+            }),
+            tecs.ecs.RelativeTransform2D(0, 0, 2),
+            displayTint(0.9, 0.95, 1.0, 1.0),
+            tecs.gfx.Text(label, font, 16),
+            tecs.ecs.ChildOf(control)
+        )
+        controls[#controls + 1] = {control, visual}
+        world:observe(control, tecs.ui.Event, function(event: tecs.ui.Event): nil
+            if event.kind == "activate" then
+                setStatus(("%s via %s"):format(label, event.source))
+            end
+        end)
+
+        return control
+    end
+
+    local activeScene = 1
+    local scenes: {integer} = {}
+    local sceneIndexByControl: {[integer]: integer} = {}
+    const sceneStatus = {
+        "Scene: composition + intrinsic",
+        "Scene: flex growth + wrapping",
+        "Scene: absolute anchors + depth",
+        "Scene: clipping + scrollbars",
+    }
+    local function selectScene(index: integer): nil
+        activeScene = index
+        for sceneIndex = 1, #scenes do
+            const visible = sceneIndex == activeScene
+            const style = assert(world:getMut(scenes[sceneIndex], tecs.ui.Style))
+            style.style.display = visible and "flex" or "none"
+        end
+        setStatus(sceneStatus[index])
+    end
+
+    const actions = world:spawn(
+        tecs.ui.Style({
+            width = "100%",
+            height = 44,
+            order = 2,
+            flexDirection = "row",
+            gap = 8,
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 100),
+        tecs.ecs.ChildOf(panel)
+    )
+    local function spawnSceneButton(label: string, tabIndex: integer): nil
+        const control = world:spawn(
+            tecs.ui.Style({
+                width = 84,
+                height = 44
+            }),
+            tecs.ui.Interaction({
+                tabIndex = tabIndex
+            }),
+            tecs.ecs.RelativeTransform2D(),
+            tecs.ecs.ChildOf(actions)
+        )
+        const visual = world:spawn(
+            tecs.ui.Style({
+                position = "absolute",
+                inset = 0
+            }),
+            tecs.ui.Paint(true),
+            tecs.ecs.RelativeTransform2D(0, 0, 1),
+            displayTint(0.12, 0.20, 0.30, 1.0),
+            tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.18),
+            tecs.gfx.Renderable2D,
+            tecs.ecs.ChildOf(control)
+        )
+        world:spawn(
+            tecs.ui.Style({
+                position = "absolute",
+                inset = {left = 8, top = 11}
+            }),
+            tecs.ui.Intrinsic({
+                source = "text"
+            }),
+            tecs.ecs.RelativeTransform2D(0, 0, 2),
+            displayTint(0.9, 0.95, 1.0, 1.0),
+            tecs.gfx.Text(label, font, 16),
+            tecs.ecs.ChildOf(control)
+        )
+        controls[#controls + 1] = {control, visual}
+        sceneIndexByControl[control] = tabIndex
+        world:observe(control, tecs.ui.Event, function(event: tecs.ui.Event): nil
+            if event.kind == "activate" then
+                selectScene(tabIndex)
+            end
+        end)
+    end
+
+    spawnSceneButton("Compose", 1)
+    spawnSceneButton("Flex", 2)
+    spawnSceneButton("Overlay", 3)
+    spawnSceneButton("Scroll", 4)
+
+    const sceneHost = world:spawn(
+        tecs.ui.Style({
+            width = "100%",
+            flexGrow = 1,
+            minHeight = 120,
+            order = 3
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 10),
+        tecs.ecs.ChildOf(panel)
+    )
+
+    const composeScene = world:spawn(
         tecs.ui.Style({
             position = "absolute",
             width = "100%",
             height = "100%",
+            inset = {left = 0, top = 0},
+            flexDirection = "column",
+            gap = 10,
+        }),
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(sceneHost)
+    )
+    scenes[1] = composeScene
+
+    const viewportFrame = world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            width = "100%",
+            height = "100%",
+            inset = {left = 0, top = 0},
+        }),
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(sceneHost)
+    )
+    scenes[4] = viewportFrame
+    const viewport = world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = 0
+        }),
+        tecs.ui.Scroll(),
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(viewportFrame)
+    )
+    const content = world:spawn(
+        tecs.ui.Style({
+            width = "100%",
+            height = 920,
+            flexDirection = "column",
+            padding = {right = 22},
+            gap = 8,
+        }),
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(viewport)
+    )
+
+    -- Taffy lays out the viewport and its content. The rail, end blocks,
+    -- and thumb remain ordinary composed rectangle instances, so their
+    -- appearance is entirely ours rather than a built-in widget skin.
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            width = 16,
+            inset = {right = 0, top = 0, bottom = 0}
+        }),
+        tecs.ui.Paint(true),
+        tecs.ecs.RelativeTransform2D(0, 0, 7),
+        displayTint(0.025, 0.045, 0.075, 1.0),
+        tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(viewportFrame)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            width = 4,
+            inset = {right = 6, top = 16, bottom = 16}
+        }),
+        tecs.ui.Paint(true),
+        tecs.ecs.RelativeTransform2D(0, 0, 8),
+        displayTint(0.08, 0.18, 0.25, 1.0),
+        tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(viewportFrame)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            width = 16,
+            height = 16,
+            inset = {right = 0, top = 0}
+        }),
+        tecs.ui.Paint(true),
+        tecs.ecs.RelativeTransform2D(0, 0, 11),
+        displayTint(0.22, 0.56, 0.68, 1.0),
+        tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(viewportFrame)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            width = 16,
+            height = 16,
+            inset = {right = 0, bottom = 0}
+        }),
+        tecs.ui.Paint(true),
+        tecs.ecs.RelativeTransform2D(0, 0, 11),
+        displayTint(0.22, 0.56, 0.68, 1.0),
+        tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(viewportFrame)
+    )
+    world:spawn(
+        tecs.ui.Scrollbar({
+            axis = "vertical",
+            thickness = 12,
+            inset = 2,
+            minLength = 28
+        }),
+        tecs.ui.Interaction({
+            focusable = false,
+            draggable = true,
+            order = 100
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 10),
+        displayTint(0.32, 0.82, 1.0, 1.0),
+        tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(viewport)
+    )
+
+    const imageCard = world:spawn(
+        tecs.ui.Style({
+            width = "100%",
+            height = 112,
+            order = 1
+        }),
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(composeScene)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
             inset = 0
         }),
         tecs.ui.Paint(true),
-        tecs.gfx.Tint(r, g, b, 1),
-        tecs.gfx.Renderable2D
+        tecs.ecs.RelativeTransform2D(0, 0, 1),
+        displayTint(0.08, 0.15, 0.23, 1.0),
+        tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.08),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(imageCard)
     )
-end
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = {left = 92, top = 20}
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 3),
+        displayTint(0.9, 0.95, 1.0, 1.0),
+        tecs.gfx.Text("Image leaf", font, 16),
+        tecs.ecs.ChildOf(imageCard)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = {left = 92, top = 49}
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 3),
+        displayTint(0.48, 0.66, 0.78, 1.0),
+        tecs.gfx.Text("Sprite + intrinsic ratio", font, 16),
+        tecs.ecs.ChildOf(imageCard)
+    )
 
-local function install(exclusive app: tecs.application.Application): nil
-    tecs.ui.plugin(app)
-    tecs.gfx.text.install(app.world)
-    local bytes = assert(nupp.io.files.read(tecs.files.assetPath("fonts/JetBrainsMono-ExtraBold.ttf")))
-    local font = assert(tecs.gfx.fonts.newTTF({bytes = bytes, name = "example/ui/mono", size = 32}))
-    local root = app.world:spawn(
-        tecs.ui.Root(),
+    const shapeRow = world:spawn(
         tecs.ui.Style({
             width = "100%",
-            height = "100%",
-            padding = 32,
-            gap = 16,
-            flexDirection = "column"
-        })
+            height = 128,
+            flexDirection = "row",
+            gap = 10,
+            order = 2
+        }),
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(composeScene)
     )
-    background(app.world, root, 0.045, 0.065, 0.11)
-    label(app.world, root, font, "TECS / RETAINED UI", 28)
-    label(app.world, root, font, "Taffy layout. Tecs entities. Nupp game code.", 16)
-    local status = label(app.world, root, font, "Click a row, or use Tab and Enter.", 16)
-    local list = app.world:spawn(
-        tecs.ecs.ChildOf(root),
+    const stretchCard = world:spawn(
+        tecs.ui.Style({
+            flexGrow = 1,
+            height = "100%"
+        }),
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(shapeRow)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = 0
+        }),
+        tecs.ui.Paint(true),
+        tecs.ecs.RelativeTransform2D(0, 0, 1),
+        displayTint(0.10, 0.24, 0.34, 1.0),
+        tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.08),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(stretchCard)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = {left = 14, top = 20}
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 2),
+        displayTint(0.9, 0.95, 1.0, 1.0),
+        tecs.gfx.Text("Paint(true)", font, 16),
+        tecs.ecs.ChildOf(stretchCard)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = {left = 14, top = 56}
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 2),
+        displayTint(0.48, 0.66, 0.78, 1.0),
+        tecs.gfx.Text("stretches a quad", font, 16),
+        tecs.ecs.ChildOf(stretchCard)
+    )
+    const circleCard = world:spawn(
+        tecs.ui.Style({
+            width = 128,
+            height = "100%"
+        }),
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(shapeRow)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = 0
+        }),
+        tecs.ui.Paint(true),
+        tecs.ecs.RelativeTransform2D(0, 0, 1),
+        displayTint(0.07, 0.12, 0.20, 1.0),
+        tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.08),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(circleCard)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            width = 48,
+            height = 48,
+            inset = {left = 40, top = 16}
+        }),
+        tecs.ui.Paint(true),
+        tecs.ecs.RelativeTransform2D(0, 0, 2),
+        displayTint(0.32, 0.82, 1.0, 1.0),
+        tecs.gfx.Material(tecs.gpu.materials.id("circle"), 0),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(circleCard)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = {left = 25, top = 82}
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 3),
+        displayTint(0.72, 0.84, 0.94, 1.0),
+        tecs.gfx.Text("Circle", font, 16),
+        tecs.ecs.ChildOf(circleCard)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            maxWidth = "100%",
+            order = 3
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 2),
+        displayTint(0.62, 0.75, 0.88, 1.0),
+        tecs.gfx.Text("Existing rectangle, circle, image,\nand text producers.", font, 16),
+        tecs.ecs.ChildOf(composeScene)
+    )
+
+    const flexScene = world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            width = "100%",
+            height = "100%",
+            inset = {left = 0, top = 0},
+            flexDirection = "column",
+            gap = 12,
+        }),
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(sceneHost)
+    )
+    scenes[2] = flexScene
+    world:spawn(
+        tecs.ui.Style({
+            maxWidth = "100%",
+            order = 1
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 2),
+        displayTint(0.72, 0.84, 0.94, 1.0),
+        tecs.gfx.Text("Fixed width + flexGrow", font, 16),
+        tecs.ecs.ChildOf(flexScene)
+    )
+    const growthRow = world:spawn(
+        tecs.ui.Style({
+            width = "100%",
+            height = 104,
+            flexDirection = "row",
+            gap = 8,
+            order = 2
+        }),
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(flexScene)
+    )
+    const growthLabels = {"88px", "grow 1", "grow 2"}
+    for index = 1, 3 do
+        local cellStyle: tecs.ui.StyleOptions = {height = "100%"}
+        if index == 1 then
+            cellStyle.width = 88
+        else
+            cellStyle.flexGrow = index - 1
+        end
+        const cell = world:spawn(tecs.ui.Style(cellStyle), tecs.ecs.RelativeTransform2D(), tecs.ecs.ChildOf(growthRow))
+        world:spawn(
+            tecs.ui.Style({
+                position = "absolute",
+                inset = 0
+            }),
+            tecs.ui.Paint(true),
+            tecs.ecs.RelativeTransform2D(0, 0, 1),
+            displayTint(0.08 + index * 0.04, 0.24 + index * 0.06, 0.38 + index * 0.07, 1.0),
+            tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.08),
+            tecs.gfx.Renderable2D,
+            tecs.ecs.ChildOf(cell)
+        )
+        world:spawn(
+            tecs.ui.Style({
+                position = "absolute",
+                inset = {left = 10, top = 38}
+            }),
+            tecs.ui.Intrinsic({
+                source = "text"
+            }),
+            tecs.ecs.RelativeTransform2D(0, 0, 2),
+            displayTint(0.9, 0.95, 1.0, 1.0),
+            tecs.gfx.Text(growthLabels[index], font, 16),
+            tecs.ecs.ChildOf(cell)
+        )
+    end
+    world:spawn(
+        tecs.ui.Style({
+            maxWidth = "100%",
+            order = 3
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 2),
+        displayTint(0.72, 0.84, 0.94, 1.0),
+        tecs.gfx.Text("flexWrap = wrap", font, 16),
+        tecs.ecs.ChildOf(flexScene)
+    )
+    const wrapGrid = world:spawn(
         tecs.ui.Style({
             width = "100%",
             flexGrow = 1,
-            minHeight = 0,
-            flexDirection = "column",
+            flexDirection = "row",
+            flexWrap = "wrap",
+            alignContent = "start",
             gap = 8,
-            padding = {right = 22}
+            order = 4,
         }),
-        tecs.ui.Scroll()
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(flexScene)
     )
-    for index = 1, 24 do
-        local button = app.world:spawn(
-            tecs.ecs.ChildOf(list),
+    for index = 1, 8 do
+        const chip = world:spawn(
             tecs.ui.Style({
-                width = "100%",
-                height = 48,
-                flexShrink = 0,
-                padding = 12
+                width = index % 3 == 0 and 128 or 96,
+                height = 54
             }),
-            tecs.ui.Interaction()
+            tecs.ecs.RelativeTransform2D(),
+            tecs.ecs.ChildOf(wrapGrid)
         )
-        local panel = background(app.world, button, 0.1, 0.16, 0.24)
-        label(app.world, button, font, ("%02d  Explore this world"):format(index), 16)
-        local row = index
-        app.world:observe(button, tecs.ui.Event, function(event: tecs.ui.Event, exclusive world: tecs.ecs.World): nil
-            if event.kind == "activate" then
-                assert(world:getMut(status, tecs.gfx.Text)).text = "Selected row " .. row
-            elseif event.kind == "pointerEnter" or event.kind == "focus" then
-                world:set(panel, tecs.gfx.Tint(0.15, 0.32, 0.48, 1))
-            elseif event.kind == "pointerLeave" or event.kind == "blur" then
-                world:set(panel, tecs.gfx.Tint(0.1, 0.16, 0.24, 1))
-            end
-        end)
+        world:spawn(
+            tecs.ui.Style({
+                position = "absolute",
+                inset = 0
+            }),
+            tecs.ui.Paint(true),
+            tecs.ecs.RelativeTransform2D(0, 0, 1),
+            displayTint(0.10, 0.18 + index * 0.018, 0.28 + index * 0.025, 1.0),
+            tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.12),
+            tecs.gfx.Renderable2D,
+            tecs.ecs.ChildOf(chip)
+        )
+        world:spawn(
+            tecs.ui.Style({
+                position = "absolute",
+                inset = {left = 12, top = 16}
+            }),
+            tecs.ui.Intrinsic({
+                source = "text"
+            }),
+            tecs.ecs.RelativeTransform2D(0, 0, 2),
+            displayTint(0.86, 0.93, 1.0, 1.0),
+            tecs.gfx.Text(("item %d"):format(index), font, 16),
+            tecs.ecs.ChildOf(chip)
+        )
     end
-    app.world:spawn(
-        tecs.ecs.ChildOf(list),
-        tecs.ui.Scrollbar({
-            thickness = 8
+
+    const overlayScene = world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            width = "100%",
+            height = "100%",
+            inset = {left = 0, top = 0},
         }),
-        tecs.gfx.Tint(0.2, 0.75, 0.85, 1),
-        tecs.gfx.Renderable2D
+        tecs.ecs.RelativeTransform2D(),
+        tecs.ecs.ChildOf(sceneHost)
     )
-    label(app.world, root, font, "Resize the window / scroll / drag the cyan thumb", 14)
+    scenes[3] = overlayScene
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = 0
+        }),
+        tecs.ui.Paint(true),
+        tecs.ecs.RelativeTransform2D(0, 0, 0),
+        displayTint(0.055, 0.10, 0.16, 1.0),
+        tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.04),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(overlayScene)
+    )
+    const anchorNames = {"top-left", "top-right", "bottom-left", "bottom-right"}
+    for index = 1, 4 do
+        local anchorInset: tecs.ui.Edges = {}
+        if index % 2 == 1 then
+            anchorInset.left = 14
+        else
+            anchorInset.right = 14
+        end
+        if index <= 2 then
+            anchorInset.top = 14
+        else
+            anchorInset.bottom = 14
+        end
+        const anchor = world:spawn(
+            tecs.ui.Style({
+                position = "absolute",
+                width = 142,
+                height = 54,
+                inset = anchorInset
+            }),
+            tecs.ecs.RelativeTransform2D(0, 0, index),
+            tecs.ecs.ChildOf(overlayScene)
+        )
+        world:spawn(
+            tecs.ui.Style({
+                position = "absolute",
+                inset = 0
+            }),
+            tecs.ui.Paint(true),
+            tecs.ecs.RelativeTransform2D(0, 0, 1),
+            displayTint(0.10, 0.26 + index * 0.035, 0.38 + index * 0.045, 1.0),
+            tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.1),
+            tecs.gfx.Renderable2D,
+            tecs.ecs.ChildOf(anchor)
+        )
+        world:spawn(
+            tecs.ui.Style({
+                position = "absolute",
+                inset = {left = 10, top = 16}
+            }),
+            tecs.ui.Intrinsic({
+                source = "text"
+            }),
+            tecs.ecs.RelativeTransform2D(0, 0, 2),
+            displayTint(0.9, 0.95, 1.0, 1.0),
+            tecs.gfx.Text(anchorNames[index], font, 16),
+            tecs.ecs.ChildOf(anchor)
+        )
+    end
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            width = 116,
+            height = 116,
+            inset = {left = "34%", top = "34%"},
+        }),
+        tecs.ui.Paint(true),
+        tecs.ecs.RelativeTransform2D(0, 0, 8),
+        displayTint(0.32, 0.82, 1.0, 0.92),
+        tecs.gfx.Material(tecs.gpu.materials.id("circle"), 0),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(overlayScene)
+    )
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            inset = {left = 94, top = "48%"}
+        }),
+        tecs.ui.Intrinsic({
+            source = "text"
+        }),
+        tecs.ecs.RelativeTransform2D(0, 0, 10),
+        displayTint(0.95, 0.98, 1.0, 1.0),
+        tecs.gfx.Text("absolute + z", font, 16),
+        tecs.ecs.ChildOf(overlayScene)
+    )
+    const labels = {
+        "Viewport stays fixed",
+        "Content is 920px tall",
+        "Descendants are clipped",
+        "Wheel moves content",
+        "Unused wheel reaches parent",
+        "Focus reveals descendants",
+        "Scrollbar thumb is composed",
+        "Nested clipping",
+        "Nested wheel handoff",
+        "Dirty offsets only",
+        "Pointer capture",
+        "Drag moves the thumb",
+        "Negative extents clamp",
+        "Absolute children count",
+        "Snapshot keeps offset",
+        "Clip indices stay GPU-side",
+    }
+    for index = 1, #labels do
+        spawnButton(content, ("%02d  %s"):format(index, labels[index]), index + 4)
+    end
+
+    const image = tecs.gfx.images.load(tecs.files.assetPath("demo/ui-badge.png"), "ui-demo-badge")
+    const sprite = tecs.gfx.Sprite(image)
+    world:spawn(
+        tecs.ui.Style({
+            position = "absolute",
+            height = 64,
+            inset = {left = 14, top = 16},
+        }),
+        tecs.ui.Intrinsic({
+            source = "image"
+        }),
+        tecs.ui.Paint(true),
+        tecs.ecs.RelativeTransform2D(0, 0, 3),
+        sprite,
+        displayTint(1, 1, 1, 1),
+        tecs.gfx.Renderable2D,
+        tecs.ecs.ChildOf(imageCard)
+    )
+
+    -- Plugin spawns remain staged until Startup begins, so select the
+    -- initial scene here rather than reading its Style before it exists.
+    world:addSystem({
+        name = "demo.SelectInitialScene",
+        phase = tecs.ecs.phases.Startup,
+        run = function(): nil
+            const requested = os.getenv("TECS_UI_SCENE") or "compose"
+            const choices: {[string]: integer} = {compose = 1, flex = 2, overlay = 3, scroll = 4}
+            selectScene(assert(choices[requested], "TECS_UI_SCENE must be compose, flex, overlay or scroll"))
+        end,
+    })
+
+    world:addSystem({
+        name = "demo.UiState",
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            for index = 1, #controls do
+                local pair = controls[index]
+                local state = world:get(pair[1], tecs.ui.InteractionState)
+                local tint = world:get(pair[2], tecs.gfx.Tint)
+                if state ~= nil and tint ~= nil then
+                    local r, g, b = 0.12, 0.20, 0.30
+                    if sceneIndexByControl[pair[1]] == activeScene then
+                        r, g, b = 0.12, 0.34, 0.48
+                    end
+                    if state.pressed then
+                        r, g, b = 0.14, 0.47, 0.62
+                    elseif state.hovered then
+                        r, g, b = 0.17, 0.34, 0.48
+                    elseif state.focused then
+                        r, g, b = 0.18, 0.29, 0.46
+                    end
+                    r, g, b = linear(r), linear(g), linear(b)
+                    if tint.r ~= r or tint.g ~= g or tint.b ~= b then
+                        const changed = assert(world:getMut(pair[2], tecs.gfx.Tint))
+                        changed.r, changed.g, changed.b = r, g, b
+                    end
+                end
+            end
+        end,
+    })
+
+    -- The host attaches its window after installation; rasterize again when its density
+    -- arrives.
+    const window = app.window
+    local rasterDensity = window:scaleFactor()
+    const textNodes = world:newQuery({include = {tecs.gfx.Text}})
+    world:addSystem({
+        name = "example.UiRasterDensity",
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            const currentDensity = window:scaleFactor()
+            if currentDensity == rasterDensity then
+                return
+            end
+            rasterDensity = currentDensity
+            for candidate, count in textNodes:iter() do
+                const texts = assert(candidate:getMut(tecs.gfx.Text))
+                for row = 1, count as integer do
+                    texts[row].font = fontAt(texts[row].size, currentDensity)
+                end
+            end
+        end
+    })
     print("ui: retained Taffy layout and interaction ready")
 end
 
---- Creates the retained UI demonstration session.
---- @param title the window title
---- @param width the initial logical width
---- @param height the initial logical height
---- @param debug whether guarded failures can be cleared
---- @param maxFrames an optional frame limit
---- @return the host session
+--- Creates the UI demonstration session.
+--- @param title Sets the window title.
+--- @param width Sets the initial logical width.
+--- @param height Sets the initial logical height.
+--- @param debug Enables guarded failure recovery.
+--- @param maxFrames Sets an optional frame limit.
+--- @return Returns the host session.
 export function create(
     title: string?,
     width: integer?,
@@ -121,12 +1011,5 @@ export function create(
     debug: boolean?,
     maxFrames: integer?
 ): tecs.host.Session
-    return tecs.host.createWithPlugin(
-        install,
-        title or "Tecs UI | Taffy layout",
-        width or 860,
-        height or 680,
-        debug,
-        maxFrames
-    )
+    return tecs.host.createWithPlugin(install, title or "Tecs UI", width or 1280, height or 720, debug, maxFrames)
 end

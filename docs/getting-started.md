@@ -134,7 +134,8 @@ and reads the resulting poses once per fixed step; games need only
 
 ```bash
 nupp task tiled               # TMX map, animated tiles and collision
-nupp task ui                  # Taffy layout, scrolling and interaction
+nupp task ui                  # Compose, Flex, Overlay and Scroll over a lit gradient field
+nupp task uistandalone        # Centered panel with scrollable controls
 ```
 
 [The Tiled guide](tiled/index.md) covers TMX/TSX files, layers, tile edits,

@@ -744,7 +744,9 @@ end
 local function sweep(exclusive world: ecs.World, state: Install, tagged: integer): nil
     const owned: {[integer]: boolean} = {}
     for entity, held in pairs(state.owned) do
-        if world:isAlive(entity) and world:get(entity, TextComponent) ~= nil then
+        if world:isAlive(
+            entity
+        ) and world:get(entity, TextComponent) ~= nil and not world:has(entity, ecs.Disabled) then
             for index = 1, #held do
                 owned[held[index]] = true
             end

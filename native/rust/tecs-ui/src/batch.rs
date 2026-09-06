@@ -83,7 +83,10 @@ fn read_style(v: &Value) -> Result<TecsUiStyle, String> {
                 "spaceEvenly",
             ],
         )?,
-        align_items: choice(&v["alignItems"], &["stretch", "center", "end", "baseline"])?,
+        align_items: choice(
+            &v["alignItems"],
+            &["stretch", "center", "end", "baseline", "start"],
+        )?,
         align_content: choice(
             &v["alignContent"],
             &[
@@ -93,6 +96,7 @@ fn read_style(v: &Value) -> Result<TecsUiStyle, String> {
                 "spaceBetween",
                 "spaceAround",
                 "spaceEvenly",
+                "start",
             ],
         )?,
         _padding0: 0,

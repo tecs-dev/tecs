@@ -18,13 +18,24 @@ for name, description in pairs(descriptions) do
         argv = { "nupp", "run", "tools/run.nupp", name },
     }
 end
-for _, name in ipairs({ "host", "flatcolor", "sprites", "lighting", "nativesmoke", "tiled", "ui" }) do
+for _, name in ipairs({ "host", "flatcolor", "sprites", "lighting", "nativesmoke", "tiled", "ui", "uistandalone" }) do
     developmentTasks[name] = {
         description = "Build and run the " .. name .. " component",
         build = name,
         argv = { "nupp", "run", "tools/run.nupp", "host", name },
     }
 end
+developmentTasks.uistandalone.argv = {
+    "nupp",
+    "run",
+    "tools/run.nupp",
+    "host",
+    "uistandalone",
+    "--width",
+    "960",
+    "--height",
+    "640",
+}
 for name, description in pairs({
     presets = "List native packaging presets",
     package = "Build and install a relocatable native release",
@@ -107,6 +118,12 @@ for index = 1, #hostExports do
 end
 tiledExports[#tiledExports + 1] = "tiled.create"
 uiExports[#uiExports + 1] = "ui.create"
+
+local uistandaloneExports = {}
+for index = 1, #hostExports do
+    uistandaloneExports[index] = hostExports[index]
+end
+uistandaloneExports[#uistandaloneExports + 1] = "uistandalone.create"
 
 return {
     -- `tests` is included because leaving it out meant `nupp check --strict`
@@ -228,6 +245,12 @@ return {
                 description = "Build the TMX map example",
                 entries = { "tecs.host", "tiled" },
                 exports = tiledExports,
+            },
+            uistandalone = {
+                kind = "component",
+                description = "Build the centered retained UI example",
+                entries = { "tecs.host", "uistandalone" },
+                exports = uistandaloneExports,
             },
             ui = {
                 kind = "component",

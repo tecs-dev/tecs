@@ -1,0 +1,88 @@
+local showcase = require("ui")
+local standalone = require("uistandalone")
+local suite = {}
+
+local function frame(exclusive session: tecs.host.Session): nil
+    local target = session.app.frame + 1
+    local started = os.clock()
+    while session.app.frame < target do
+        nupp.test.assert(os.clock() - started < 10, "demo startup did not complete")
+        tecs.host.iterate(session, 0)
+        nupp.test.equal(tecs.host.crashed(session), nil)
+    end
+end
+
+local function textEntity(world: tecs.ecs.World, value: string): integer
+    local texts = world:newQuery({include = {tecs.gfx.Text}})
+    for candidate, count in texts:iter() do
+        local column = assert(candidate:get(tecs.gfx.Text))
+        for row = 1, count as integer do
+            if column[row].text == value then
+                return (candidate as tecs.ecs.Archetype).entities[row]
+            end
+        end
+    end
+    error("missing demo label: " .. value)
+end
+
+function suite.switchesEveryOriginalSceneThroughPointerInput(): nil
+    tecs.files.setAssetRoot("assets")
+    local session = showcase.create(nil, 1280, 720, false, nil)
+    tecs.host.init(session)
+    frame(session)
+    local world = session.app.world
+    local scenes = {"Compose", "Flex", "Overlay", "Scroll", "Compose"}
+    local labels = {"Image leaf", "Fixed width + flexGrow", "absolute + z", "01  Viewport stays fixed", "Image leaf"}
+    for index = 1, #scenes do
+        local label = textEntity(world, scenes[index])
+        local control = assert(world:get(label, tecs.ecs.ChildOf)).target
+        local pose = assert(world:get(control, tecs.ecs.Transform2D))
+        local box = assert(world:get(control, tecs.ui.Layout))
+        local x, y = pose.x + box.width / 2, pose.y + box.height / 2
+        tecs.host.pushPointerButton(session, true, 1, x, y, index, index * 2 as integer)
+        tecs.host.pushPointerButton(session, false, 1, x, y, index, (index * 2 + 1) as integer)
+        frame(session)
+        frame(session)
+        nupp.test.equal(tecs.host.crashed(session), nil)
+        local shown = textEntity(world, labels[index])
+        nupp.test.assert(not world:has(shown, tecs.ecs.Disabled))
+        nupp.test.assert(#tecs.gfx.text.glyphsOf(world, shown) > 0)
+        for other = 1, 4 do
+            if labels[other] ~= labels[index] then
+                nupp.test.equal(#tecs.gfx.text.glyphsOf(world, textEntity(world, labels[other])), 0)
+            end
+        end
+    end
+    tecs.host.pushResize(session, false, 1280, 720, 2560, 1440, 2, 10, 20)
+    frame(session)
+    local cameras = world:newQuery({include = {tecs.gfx.Camera2D, tecs.gfx.ActiveCamera}})
+    for candidate, _ in cameras:iter() do
+        nupp.test.equal(assert(candidate:get(tecs.gfx.Camera2D))[1].zoom, 2)
+    end
+    local heading = assert(world:get(textEntity(world, "Tecs UI"), tecs.gfx.Text))
+    nupp.test.equal(assert(heading.font).size, 64)
+    tecs.host.shutdown(session)
+    tecs.files.reset()
+end
+
+function suite.keepsTheCenteredStandalonePanel(): nil
+    tecs.files.setAssetRoot("assets")
+    local session = standalone.create(nil, 960, 640, false, nil)
+    tecs.host.init(session)
+    frame(session)
+    nupp.test.equal(tecs.host.crashed(session), nil)
+    local world = session.app.world
+    local heading = textEntity(world, "Retained, composed UI")
+    local headingBox = assert(world:get(heading, tecs.ecs.ChildOf)).target
+    local panel = assert(world:get(headingBox, tecs.ecs.ChildOf)).target
+    local layout = assert(world:get(panel, tecs.ui.Layout))
+    nupp.test.equal(layout.x, 270)
+    nupp.test.equal(layout.y, 50)
+    nupp.test.equal(layout.width, 420)
+    nupp.test.equal(layout.height, 540)
+    nupp.test.assert(#tecs.gfx.text.glyphsOf(world, textEntity(world, "Rectangle instance")) > 0)
+    tecs.host.shutdown(session)
+    tecs.files.reset()
+end
+
+return suite
